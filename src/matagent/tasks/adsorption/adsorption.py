@@ -19,11 +19,6 @@ from schema import (
     SurfaceOutput,
 )
 
-def typed_dict_marker(cls):
-    cls._type_marker = cls.__name__  # Set marker to the class name
-    return cls
-
-
 # Task 1: Surface Generation
 class SurfaceGenerationTask(BaseTypedDict):
     material_id: str
