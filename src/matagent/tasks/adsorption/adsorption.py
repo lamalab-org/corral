@@ -3,10 +3,14 @@ from __future__ import annotations
 import json
 import subprocess
 from typing import Dict, List, TypedDict
+from typing import get_origin, get_args
 
 import numpy as np
 
-from matagent.base.schema import (
+from schema import (
+    BaseTypedDict,
+    create_typed_dict,
+    matches_typed_dict_type,
     AdsorbateOutput,
     AtomicStructure,
     DFTSettings,
@@ -15,9 +19,13 @@ from matagent.base.schema import (
     SurfaceOutput,
 )
 
+def typed_dict_marker(cls):
+    cls._type_marker = cls.__name__  # Set marker to the class name
+    return cls
+
 
 # Task 1: Surface Generation
-class SurfaceGenerationTask(TypedDict):
+class SurfaceGenerationTask(BaseTypedDict):
     material_id: str
     miller_indices: List[int]
     min_depth: float
@@ -27,7 +35,7 @@ class SurfaceGenerationTask(TypedDict):
 
 
 # Task 2: Adsorbate Placement
-class AdsorbatePlacementTask(TypedDict):
+class AdsorbatePlacementTask(BaseTypedDict):
     surface: AtomicStructure
     surface_atoms: List[int]
     molecule: str
@@ -36,7 +44,7 @@ class AdsorbatePlacementTask(TypedDict):
 
 
 # Task 3: Structure Relaxation
-class RelaxationTask(TypedDict):
+class RelaxationTask(BaseTypedDict):
     structure: AtomicStructure
     dft_settings: DFTSettings
     force_threshold: float
@@ -45,38 +53,51 @@ class RelaxationTask(TypedDict):
 
 
 # Task 4: Energy Calculation
-class EnergyCalculationTask(TypedDict):
+class EnergyCalculationTask(BaseTypedDict):
     combined_structure: AtomicStructure
     surface_structure: AtomicStructure
     adsorbate_reference: str
     reference_energies: Dict[str, float]
 
 
-class OCPAdsorptionWorkflowFamily:
+class TaskFamily:
     standard_version = "0.5.0"
 
     required_environment_variables = ["VASP_PSEUDO_DIR", "MATERIALS_API_KEY"]
 
     @staticmethod
+    def get_permissions(t: Task) -> list[str]:
+        return ["full_internet"]
+
+    @staticmethod
     def install() -> None:
         """Install required packages"""
+        import os
+        os.environ["SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL"] = "True"
+
         subprocess.check_call(
             [
                 "pip",
                 "install",
                 "pymatgen==2024.2.23",
                 "ase==3.22.1",
-                "catkit==0.5.4" "mp-contribs==0.1.0",
+                "catkit==0.5.4",
+                "mpcontribs-client",
             ]
         )
+
+    @staticmethod
+    def start(t: Task) -> None:
+        print("Starting task", t)
 
     # `get_tasks` returns a mapping from task names to arbitrary data that is specific to each task.
     # Tasks are not exposed to the agent. Agents only see the results of `get_instructions` below.
     @staticmethod
     def get_tasks() -> dict[str, Dict]:
         """Return all tasks in the workflow"""
+        print("Returning all defined tasks")
         return {
-            "surface_generation": SurfaceGenerationTask(
+            "surface_generation": create_typed_dict(SurfaceGenerationTask,
                 material_id="mp-30",
                 miller_indices=[1, 1, 1],
                 min_depth=7.0,
@@ -88,14 +109,14 @@ class OCPAdsorptionWorkflowFamily:
                     "kpts": [4, 4, 1],
                 },
             ),
-            "adsorbate_placement": AdsorbatePlacementTask(
+            "adsorbate_placement": create_typed_dict(AdsorbatePlacementTask,
                 surface={},  # To be filled from previous task "structure.json"
                 surface_atoms=[],
                 molecule="CO",
                 binding_atoms=[0],
                 site_types=["top", "bridge", "hollow"],
             ),
-            "relaxation": RelaxationTask(
+            "relaxation": create_typed_dict(RelaxationTask,
                 structure={},  # To be filled from previous task "combined.json"
                 dft_settings={
                     "xc": "PBE",
@@ -106,7 +127,7 @@ class OCPAdsorptionWorkflowFamily:
                 energy_threshold=1e-4,
                 max_steps=200,
             ),
-            "energy_calculation": EnergyCalculationTask(
+            "energy_calculation": create_typed_dict(EnergyCalculationTask,
                 combined_structure={},  # To be filled from previous task "combined.json"
                 surface_structure={},  # To be filled from previous task "surface.json"
                 adsorbate_reference="CO",
@@ -291,28 +312,28 @@ class OCPAdsorptionWorkflowFamily:
 
             # Score each task if present
             if "surface_generation" in results:
-                score = OCPAdsorptionWorkflowFamily.score_surface_generation(
+                score = TaskFamily.score_surface_generation(
                     t["surface_generation"], json.dumps(results["surface_generation"])
                 )
                 total_score += score * weights["surface_generation"]
                 completed_tasks += 1
 
             if "adsorbate_placement" in results:
-                score = OCPAdsorptionWorkflowFamily.score_adsorbate_placement(
+                score = TaskFamily.score_adsorbate_placement(
                     t["adsorbate_placement"], json.dumps(results["adsorbate_placement"])
                 )
                 total_score += score * weights["adsorbate_placement"]
                 completed_tasks += 1
 
             if "relaxation" in results:
-                score = OCPAdsorptionWorkflowFamily.score_relaxation(
+                score = TaskFamily.score_relaxation(
                     t["relaxation"], json.dumps(results["relaxation"])
                 )
                 total_score += score * weights["relaxation"]
                 completed_tasks += 1
 
             if "energy_calculation" in results:
-                score = OCPAdsorptionWorkflowFamily.score_energy_calculation(
+                score = TaskFamily.score_energy_calculation(
                     t["energy_calculation"], json.dumps(results["energy_calculation"])
                 )
                 total_score += score * weights["energy_calculation"]
@@ -335,7 +356,7 @@ class OCPAdsorptionWorkflowFamily:
     @staticmethod
     def get_task_specific_instructions(task_name: str, task: Dict) -> str:
         """Get instructions for a specific task"""
-        if task_name == "surface_generation":
+        if task_name == "SurfaceGenerationTask":
             return f"""
             Generate a surface structure from the bulk material following these steps:
 
@@ -368,7 +389,7 @@ class OCPAdsorptionWorkflowFamily:
             }}
             """
 
-        elif task_name == "adsorbate_placement":
+        elif task_name == "AdsorbatePlacementTask":
             return f"""
             Place the adsorbate molecule on the provided surface following these steps:
 
@@ -408,7 +429,7 @@ class OCPAdsorptionWorkflowFamily:
             }}
             """
 
-        elif task_name == "relaxation":
+        elif task_name == "RelaxationTask":
             return f"""
             Perform structure relaxation with these specifications:
 
@@ -440,7 +461,7 @@ class OCPAdsorptionWorkflowFamily:
             }}
             """
 
-        elif task_name == "energy_calculation":
+        elif task_name == "EnergyCalculationTask":
             return f"""
             Calculate adsorption energy using:
 
@@ -474,10 +495,10 @@ class OCPAdsorptionWorkflowFamily:
 
     # This method should return a string containing initial task instructions for the agent.
     @staticmethod
-    def get_instructions(t: Dict) -> str:
+    def get_instructions(t: TypedDict) -> str:
         """Main instruction method that handles both single and multiple tasks"""
         # Determine if this is a single task or multiple tasks
-        if isinstance(
+        if matches_typed_dict_type(
             t,
             (
                 SurfaceGenerationTask,
@@ -487,13 +508,12 @@ class OCPAdsorptionWorkflowFamily:
             ),
         ):
             # Single task case
-            task_name = next(
-                name for name, task_type in locals().items() if isinstance(t, task_type)
-            )
-            return OCPAdsorptionWorkflowFamily.get_task_specific_instructions(
+            task_name = t["_type_marker"]
+            print('Single task', task_name)
+            return TaskFamily.get_task_specific_instructions(
                 task_name, t
             )
-
+        print('All tasks!')
         # Multiple tasks case - create workflow instructions
         workflow_instructions = """
         Complete the following adsorption energy calculation workflow.
@@ -506,7 +526,7 @@ class OCPAdsorptionWorkflowFamily:
         for task_name, task_data in t.items():
             workflow_instructions += f"\n{task_name.upper()}:\n"
             workflow_instructions += (
-                OCPAdsorptionWorkflowFamily.get_task_specific_instructions(
+                TaskFamily.get_task_specific_instructions(
                     task_name, task_data
                 )
             )
