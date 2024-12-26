@@ -14,3 +14,18 @@ env.add_tool(tools)
 app = create_environment_server(env)
 
 ```
+
+## example
+
+```bash
+cd tasks/samplemath
+python -m env
+```
+
+```
+GET /tasks/{task_id}/guide - Get description related to the environment and tools
+GET /tasks/{task_id}/prompt - Get the task prompt
+GET /tasks/{task_id}/tools - List available tools
+GET /tasks/{task_id}/state - Get current state
+POST /tasks/{task_id}/tools/execute - Execute a tool
+```
