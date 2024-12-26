@@ -35,7 +35,7 @@ class ToolArgument:
 
 @dataclass
 class ToolCall:
-    """Enhanced record of a tool being called"""
+    """Record of a tool being called"""
 
     tool_name: str
     arguments: Dict[str, Any]
@@ -84,7 +84,11 @@ class TaskState:
 
 
 class Tool:
-    """Enhanced base class for all tools"""
+    """Base class for tools
+    Inherit from this class to create new tools.
+    Should have an execute method that performs the tool's functionality.
+    TODO: might need to take state
+    """
 
     def __init__(self, name: str, description: str, arguments: List[ToolArgument]):
         self.name = name
@@ -139,7 +143,7 @@ Arguments:
 
 
 class Environment(ABC):
-    """Enhanced base class for task environments"""
+    """Base class for task environments"""
 
     def __init__(self, task_id: str):
         self.tools: Dict[str, Tool] = {}
