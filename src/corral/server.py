@@ -10,13 +10,18 @@ from corral.base import Environment, ToolRequest
 def create_benchmark_server(environments: Dict[str, Environment]) -> FastAPI:
     app = FastAPI()
 
+    @app.get("/tasks")
+    def get_available_tasks():
+        """Get list of available task IDs"""
+        return list(environments.keys())
+
     @app.get("/tasks/{task_id}/prompt")
     def get_task_prompt(task_id: str):
         """Get the task prompt for the agent"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
         return {"prompt": environments[task_id].get_task_prompt()}
-    
+
     @app.get("/tasks/{task_id}/guide")
     def get_environment_guide(task_id: str):
         """Get the task prompt for the agent"""
@@ -52,6 +57,35 @@ def create_benchmark_server(environments: Dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Task not found")
         return environments[task_id].state
 
-    #add endpoint for scoring the task
+    @app.post("/tasks/{task_id}/submit")
+    def submit_answer(task_id: str, answer: dict):
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        env = environments[task_id]
+        score = env.submit_answer(answer["answer"])
+
+        state_dict = env.state.__dict__  # Get state as dict
+        state_dict["tool_statistics"] = (
+            env.state.get_tool_statistics()
+        )  # Add tool statistics
+
+        return {"score": score, "state": state_dict}
+
+    @app.get("/tasks/{task_id}/status")
+    def get_task_status(task_id: str):
+        """Get task completion status"""
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        env = environments[task_id]
+        return {
+            "is_completed": env.state.is_completed,
+            "score": env.state.score,
+            "submitted_answer": env.state.submitted_answer,
+            "tool_statistics": env.state.get_tool_statistics(),
+        }
+
+    # add endpoint for scoring the task
 
     return app
