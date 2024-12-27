@@ -43,16 +43,19 @@ class Agent(ABC):
         temperature: float = Temperature.ZERO.value,
         timeout: int = 60,
         caching: bool = True,
+        toolstore: list[Tool] | None = None,
         max_calls: int = 10,
         **model_kwargs,
     ):
+        if toolstore is None:
+            toolstore = []
         self.llm = {
             "model": model,
             "temperature": temperature,
             "timeout": timeout,
             "caching": caching,
         }
-        self.toolstore: list[Tool] = []
+        self.toolstore = toolstore
         self._scratchpad = ""
         self.max_calls = max_calls
         self.model_kwargs = model_kwargs
@@ -136,14 +139,18 @@ class ConstrainedAgent(ABC, Agent):
         temperature: float = Temperature.ZERO.value,
         timeout: int = 60,
         caching: bool = True,
+        toolstore: list[Tool] | None = None,
         max_calls: int = 10,
         **model_kwargs,
     ):
+        if toolstore is None:
+            toolstore = []
         super().__init__(
             model=model,
             temperature=temperature,
             timeout=timeout,
             caching=caching,
+            toolstore=toolstore,
             max_calls=max_calls,
             **model_kwargs,
         )
