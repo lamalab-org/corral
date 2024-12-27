@@ -30,6 +30,7 @@ class ToolArgument:
     description: str
     required: bool = True
     default: Any = None
+    choices: Optional[List[Any]] = None  # from transformers
 
 
 @dataclass
@@ -105,14 +106,23 @@ class Tool:
                 return False, f"Missing required argument: {arg.name}"
 
             if arg.name in provided_args:
+                value = provided_args[arg.name]
+
+                # Check choices if specified
+                if arg.choices is not None and value not in arg.choices:
+                    return (
+                        False,
+                        f"Invalid value for {arg.name}. Must be one of: {arg.choices}",
+                    )
+
                 try:
-                    # Basic type checking - could be enhanced
+                    # Basic type checking
                     if arg.type == "int":
-                        int(provided_args[arg.name])
+                        int(value)
                     elif arg.type == "float":
-                        float(provided_args[arg.name])
+                        float(value)
                     elif arg.type == "bool":
-                        isinstance(provided_args[arg.name], bool)
+                        isinstance(value, bool)
                 except ValueError:
                     return (
                         False,
