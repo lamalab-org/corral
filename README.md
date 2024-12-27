@@ -12,6 +12,27 @@ cd tasks/samplemath/samplemath
 python -m env # start corral server
 ```
 
+### Create tools with `tool` decorator
+
+```python
+from corral.utils import tool
+
+@tool
+def percentage_calculator(value: float, percentage: float = 100.0) -> float:
+    """Calculate percentage of a value.
+
+    Args:
+        value: The base value
+        percentage: The percentage to calculate (defaults to 100.0)
+
+    Returns:
+        float: The calculated result
+    """
+    return (value * percentage) / 100.0
+
+```
+
+
 ## 2. Create agent example:
 ```bash
 cd agents/baseline
