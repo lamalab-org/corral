@@ -6,7 +6,6 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-
 from pydantic import BaseModel, Field
 
 
@@ -60,6 +59,8 @@ class TaskState:
     tool_calls: List[ToolCall] = field(default_factory=list)
     is_completed: bool = False
     score: Optional[float] = None
+    submitted_answer: Optional[str] = None
+    feedback: Optional[str] = None
     start_time: datetime = field(default_factory=datetime.now)
     end_time: Optional[datetime] = None
 
@@ -246,3 +247,12 @@ Example tool call format:
 
         self.state.tool_calls.append(tool_call)
         return tool_call
+
+    def submit_answer(self, answer: str) -> float:
+        """Submit final answer and get score"""
+        self.state.submitted_answer = answer
+        score = self.score()  # Using existing abstract score method
+        self.state.score = score
+        self.state.is_completed = True
+        self.state.end_time = datetime.now()
+        return score
