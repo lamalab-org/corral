@@ -1,34 +1,70 @@
+from __future__ import annotations
+
 from corral.base import Tool, ToolArgument
+from corral.utils import tool
 
 
-class CalculatorTool(Tool):
-    def __init__(self):
-        super().__init__(
-            name="calculator",
-            description="Perform basic math operations",
-            arguments=[
-                ToolArgument(
-                    "operation",
-                    "str",
-                    "Operation to perform: add, subtract, multiply, divide",
-                ),
-                ToolArgument("x", "float", "First number"),
-                ToolArgument("y", "float", "Second number"),
-            ],
-        )
+@tool
+def calculator(operation: str, x: float, y: float) -> float:
+    """Perform basic math operations.
 
-    def execute(self, operation: str, x: float, y: float) -> str:
-        operations = {
-            "add": lambda: x + y,
-            "subtract": lambda: x - y,
-            "multiply": lambda: x * y,
-            "divide": lambda: x / y if y != 0 else "Error: Division by zero",
-        }
+    Args:
+        operation: Operation to perform (choices: ["add", "subtract", "multiply", "divide"])
+        x: First number
+        y: Second number
+    """
+    operations = {
+        "add": lambda: x + y,
+        "subtract": lambda: x - y,
+        "multiply": lambda: x * y,
+        "divide": lambda: x / y if y != 0 else "Error: Division by zero",
+    }
+    if operation not in operations:
+        raise ValueError(f"Invalid operation: {operation}")
+    return operations[operation]()
 
-        if operation not in operations:
-            raise ValueError(f"Invalid operation: {operation}")
 
-        return str(operations[operation]())
+@tool
+def percentage_calculator(value: float, percentage: float = 100.0) -> float:
+    """Calculate percentage of a value.
+
+    Args:
+        value: The base value
+        percentage: The percentage to calculate (defaults to 100.0)
+
+    Returns:
+        float: The calculated result
+    """
+    return (value * percentage) / 100.0
+
+# class CalculatorTool(Tool):
+#     def __init__(self):
+#         super().__init__(
+#             name="calculator",
+#             description="Perform basic math operations",
+#             arguments=[
+#                 ToolArgument(
+#                     "operation",
+#                     "str",
+#                     "Operation to perform: add, subtract, multiply, divide",
+#                 ),
+#                 ToolArgument("x", "float", "First number"),
+#                 ToolArgument("y", "float", "Second number"),
+#             ],
+#         )
+
+#     def execute(self, operation: str, x: float, y: float) -> str:
+#         operations = {
+#             "add": lambda: x + y,
+#             "subtract": lambda: x - y,
+#             "multiply": lambda: x * y,
+#             "divide": lambda: x / y if y != 0 else "Error: Division by zero",
+#         }
+
+#         if operation not in operations:
+#             raise ValueError(f"Invalid operation: {operation}")
+
+#         return str(operations[operation]())
 
 
 class UnitConverterTool(Tool):
