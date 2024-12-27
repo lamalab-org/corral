@@ -3,10 +3,18 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional
+from enum import Enum, StrEnum
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+
+class Role(StrEnum):
+    """Defines the role type of a component in the system."""
+
+    AGENT = "agent"
+    ENVIRONMENT = "environment"
+    TOOL = "tool"
 
 
 class ToolCallStatus(Enum):
@@ -18,7 +26,7 @@ class ToolCallStatus(Enum):
 
 class ToolRequest(BaseModel):
     tool_name: str
-    arguments: Dict[str, Any]
+    arguments: dict[str, Any]
 
 
 @dataclass
@@ -37,16 +45,16 @@ class ToolCall:
     """Record of a tool being called"""
 
     tool_name: str
-    arguments: Dict[str, Any]
-    result: Optional[str]
+    arguments: dict[str, Any]
+    result: str | None
     status: ToolCallStatus
-    error_message: Optional[str]
+    error_message: str | None
     timestamp: datetime = field(default_factory=datetime.now)
 
 
 @dataclass
 class LLMMessage:
-    role: str  # 'agent' or 'environment'
+    role: Role  # 'agent' or 'environment'
     content: str
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -55,18 +63,18 @@ class LLMMessage:
 class TaskState:
     task_id: str
     task_prompt: str
-    messages: List[LLMMessage] = field(default_factory=list)
-    tool_calls: List[ToolCall] = field(default_factory=list)
+    messages: list[LLMMessage] = field(default_factory=list)
+    tool_calls: list[ToolCall] = field(default_factory=list)
     is_completed: bool = False
-    score: Optional[float] = None
-    submitted_answer: Optional[str] = None
-    feedback: Optional[str] = None
+    score: float | None = None
+    submitted_answer: str | None = None
+    feedback: str | None = None
     start_time: datetime = field(default_factory=datetime.now)
-    end_time: Optional[datetime] = None
+    end_time: datetime | None = None
 
-    def get_tool_statistics(self) -> Dict[str, Any]:
+    def get_tool_statistics(self) -> dict[str, Any]:
         """Get statistics about tool usage"""
-        stats = {
+        return {
             "total_calls": len(self.tool_calls),
             "successful_calls": len(
                 [t for t in self.tool_calls if t.status == ToolCallStatus.SUCCESS]
@@ -74,14 +82,13 @@ class TaskState:
             "failed_calls": len(
                 [t for t in self.tool_calls if t.status != ToolCallStatus.SUCCESS]
             ),
-            "tools_used": set(t.tool_name for t in self.tool_calls),
+            "tools_used": {t.tool_name for t in self.tool_calls},
             "error_types": {
                 status: len([t for t in self.tool_calls if t.status == status])
                 for status in ToolCallStatus
                 if status != ToolCallStatus.SUCCESS
             },
         }
-        return stats
 
 
 class Tool:
@@ -91,14 +98,14 @@ class Tool:
     TODO: might need to take state
     """
 
-    def __init__(self, name: str, description: str, arguments: List[ToolArgument]):
+    def __init__(self, name: str, description: str, arguments: list[ToolArgument]):
         self.name = name
         self.description = description
         self.arguments = arguments
 
     def validate_arguments(
-        self, provided_args: Dict[str, Any]
-    ) -> tuple[bool, Optional[str]]:
+        self, provided_args: dict[str, Any]
+    ) -> tuple[bool, str | None]:
         """Validate that all required arguments are provided with correct types"""
         for arg in self.arguments:
             if arg.required and arg.name not in provided_args:
@@ -147,24 +154,22 @@ class Environment(ABC):
     """Base class for task environments"""
 
     def __init__(self, task_id: str):
-        self.tools: Dict[str, Tool] = {}
+        self.tools: dict[str, Tool] = {}
         self.state = TaskState(task_id=task_id, task_prompt=self.get_task_prompt())
 
     @abstractmethod
     def get_task_prompt(self) -> str:
         """Return the task prompt for the agent"""
-        pass
 
     @abstractmethod
     def score(self) -> float:
         """Evaluate the agent's solution and return a score"""
-        pass
 
     def add_tool(self, tool: Tool):
         """Add a tool to the environment"""
         self.tools[tool.name] = tool
 
-    def get_available_tools(self) -> List[Dict[str, str]]:
+    def get_available_tools(self) -> list[dict[str, str]]:
         """Get list of available tools and their descriptions"""
         return [
             {"name": t.name, "description": t.description} for t in self.tools.values()
@@ -197,7 +202,7 @@ Example tool call format:
 }}
 """
 
-    def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> ToolCall:
+    def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
         """Execute a tool and record the call with enhanced error handling"""
         # Check if tool exists
         if tool_name not in self.tools:
