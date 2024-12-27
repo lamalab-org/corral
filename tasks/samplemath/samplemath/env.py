@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import uvicorn
+from tools import CalculatorTool, UnitConverterTool
 
 from corral.base import Environment, ToolCallStatus
 from corral.server import create_benchmark_server
-
-from tools import CalculatorTool, UnitConverterTool
 
 
 class MathEnvironment(Environment):
@@ -22,15 +21,14 @@ class MathEnvironment(Environment):
         return f"Solve this math problem: {self.question}"
 
     def score(self) -> float:
-        # Find the last successful calculator result
-        for call in reversed(self.state.tool_calls):
-            if call.status == ToolCallStatus.SUCCESS:
-                try:
-                    result = float(call.result)
-                    return 1.0 if abs(result - self.correct_answer) < 0.001 else 0.0
-                except ValueError:
-                    continue
-        return 0.0
+        """Score based on submitted answer"""
+        if self.state.submitted_answer is None:
+            return 0.0
+        try:
+            submitted_result = float(self.state.submitted_answer)
+            return 1.0 if abs(submitted_result - self.correct_answer) < 0.001 else 0.0
+        except ValueError:
+            return 0.0
 
 
 if __name__ == "__main__":
@@ -38,6 +36,7 @@ if __name__ == "__main__":
     environments = {
         "math_1": MathEnvironment("math_1", "What is 23 + 45?", 68),
         "math_2": MathEnvironment("math_2", "What is 12 * 8?", 96),
+        "math_3": MathEnvironment("math_3", "What is 99 * 63 * 999 * 111?", 691614693),
     }
 
     # Create and run server
