@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uvicorn
-from tools import CalculatorTool, UnitConverterTool
+from tools import UnitConverterTool, calculator
 
 from corral.base import Environment, ToolCallStatus
 from corral.server import create_benchmark_server
@@ -14,7 +14,7 @@ class MathEnvironment(Environment):
         super().__init__(task_id)
 
         # Add multiple tools
-        self.add_tool(CalculatorTool())
+        self.add_tool(calculator)
         self.add_tool(UnitConverterTool())
 
     def get_task_prompt(self) -> str:
@@ -43,3 +43,4 @@ if __name__ == "__main__":
     app = create_benchmark_server(environments)
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+c
