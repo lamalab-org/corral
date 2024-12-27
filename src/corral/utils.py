@@ -172,9 +172,8 @@ def tool(func: Callable) -> Tool:
 
     # Validate all parameters have documentation
     signature_params = set(inspect.signature(func).parameters.keys())
-    documented_params = set(arg.name for arg in arguments)
-    missing_docs = signature_params - documented_params
-    if missing_docs:
+    documented_params = {arg.name for arg in arguments}
+    if missing_docs := signature_params - documented_params:
         raise ValueError(
             f"Missing documentation for parameters: {', '.join(missing_docs)}. "
             "All parameters must be documented in the Args section of the docstring."
