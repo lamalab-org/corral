@@ -6,7 +6,12 @@ from .agent import (
     ModelName,
     Temperature,
 )
-from .prompts import REACTFORMATPROMPT, REACTSYSTEMPROMPT, REACTTIME, REACTUSERPROMPT
+from .prompts import (
+    LLAMPPROMPT,
+    LLAMPPROMPTSYSTEM,
+    REACTFORMATPROMPT,
+    REACTSYSTEMPROMPT,
+)
 from .tools import ToolStore
 
 
@@ -28,8 +33,8 @@ class BaseReActAgent:
         self.caching = caching
         self.max_calls = max_calls
         self.model_kwargs = model_kwargs
-        self.sys_prompt = REACTSYSTEMPROMPT
-        self.user_prompt = REACTFORMATPROMPT + REACTUSERPROMPT
+        self.sys_prompt = REACTSYSTEMPROMPT + LLAMPPROMPTSYSTEM
+        self.user_prompt = REACTFORMATPROMPT + LLAMPPROMPT.format(chat_id="")
         self.toolstore = toolstore or ToolStore()
         self._scratchpad = ""
 
@@ -40,7 +45,7 @@ class BaseReActAgent:
             input=task,
             scratchpad=self._scratchpad,
         )
-        return system, user + REACTTIME.format(actions=calls_left)
+        return system, user
 
 
 class ReActAgent(BaseReActAgent, Agent):
