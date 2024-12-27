@@ -117,7 +117,7 @@ class Agent(ABC):
                     )
                 except Exception as e:
                     logger.error(e)
-                    observation = "Error in running tool: " + str(e)
+                    observation = f"Error in running tool: {str(e)}"
                     self._scratchpad += (
                         f"Observation (from running {action_name} with {action_input}): "
                         + observation
