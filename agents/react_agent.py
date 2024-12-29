@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from .agent import (
     Agent,
     ConstrainedAgent,
@@ -10,7 +8,7 @@ from .prompts import REACTFORMATPROMPT, REACTSYSTEMPROMPT, REACTTIME, REACTUSERP
 from .tools import ToolStore
 
 
-class BaseReActAgent:
+class _BaseReActAgent:
     def __init__(
         self,
         model: str = ModelName.CLAUDE_3_SONNET.value,

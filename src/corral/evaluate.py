@@ -25,14 +25,6 @@ class ToolResponse:
     error: str | None
 
 
-class Agent(Protocol):
-    """Protocol defining what an agent must implement"""
-
-    def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
-        """Solve a task and return the answer"""
-        ...
-
-
 class BenchmarkInterface:
     """General interface for interacting with benchmark server"""
 
@@ -88,12 +80,18 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()
 
+class Agent(Protocol):
+    """Protocol defining what an agent must implement"""
+
+    def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
+        """Solve a task and return the answer"""
+        ...
 
 @dataclass
 class BenchmarkResult:
     """Results from running benchmark"""
 
-    # TODO: thibk about the report
+    # TODO: think about the report
     task_results: Dict[str, TaskResult]
     average_score: float
     total_tasks: int
