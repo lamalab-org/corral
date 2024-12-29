@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import json
 import re
 from litellm import completion
+from corral.evaluate import BenchmarkInterface
 
 @dataclass
 class Thought:
@@ -24,7 +25,13 @@ class ReActAgent:
         """Get response from LLM using LiteLLM"""
         response = completion(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful AI assistant that solves tasks step by step."
+                },
+                {"role": "user", "content": prompt}
+            ],
             temperature=0.7,
             max_tokens=1000
         )
@@ -50,12 +57,10 @@ class ReActAgent:
 
     def create_prompt(self, task_guide: str, history: List[str]) -> str:
         """Create prompt for LLM including context and history"""
-        prompt = f"""You are a problem-solving agent. Use the available tools to complete the task.
-
-Task Guide: {task_guide}
+        return f"""Task Guide: {task_guide}
 
 Previous steps:
-{'\n'.join(history)}
+{chr(10).join(history)}
 
 Think about what to do next and respond in the following format:
 
@@ -65,9 +70,7 @@ Action Input: [tool arguments as JSON]
 
 If you have the final answer, respond with:
 Thought: [your reasoning]
-Final Answer: [answer]
-"""
-        return prompt
+Final Answer: [answer]"""
 
     def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
         """Main ReAct loop implementation"""
