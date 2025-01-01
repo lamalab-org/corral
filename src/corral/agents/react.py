@@ -17,9 +17,9 @@ class Action:
     arguments: Dict[str, Any]
 
 class ReActAgent:
-    def __init__(self, model: str = "gpt-4"):
+    def __init__(self, model: str = "gpt-4", max_iterations: int = 10):
         self.model = model
-        self.max_iterations = 10
+        self.max_iterations = max_iterations
 
     def get_llm_response(self, prompt: str) -> str:
         """Get response from LLM using LiteLLM"""
