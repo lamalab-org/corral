@@ -4,7 +4,7 @@ The system consists of three main components:
 
 - Environment Service (`corral`)- Hosts tasks and tools
 - Benchmark Interface (`MatAgentBenchmark`)- Communicates with the `corral` service, runs evaluations
-- Agent - Solves tasks using available tools
+- `Agent` - Solves tasks using available tools
 
 ## 1. Create environment and add tools example:
 
