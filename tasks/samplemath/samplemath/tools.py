@@ -1,7 +1,10 @@
-from __future__ import annotations
+import modal
+from modal import Image
 
 from corral.base import Tool, ToolArgument
-from corral.utils import tool
+from corral.utils import MODAL_TOOL_REGISTRY, modal_tool, tool
+
+app = modal.App("cooral-test")
 
 
 @tool
@@ -37,34 +40,27 @@ def percentage_calculator(value: float, percentage: float = 100.0) -> float:
     """
     return (value * percentage) / 100.0
 
-# class CalculatorTool(Tool):
-#     def __init__(self):
-#         super().__init__(
-#             name="calculator",
-#             description="Perform basic math operations",
-#             arguments=[
-#                 ToolArgument(
-#                     "operation",
-#                     "str",
-#                     "Operation to perform: add, subtract, multiply, divide",
-#                 ),
-#                 ToolArgument("x", "float", "First number"),
-#                 ToolArgument("y", "float", "Second number"),
-#             ],
-#         )
 
-#     def execute(self, operation: str, x: float, y: float) -> str:
-#         operations = {
-#             "add": lambda: x + y,
-#             "subtract": lambda: x - y,
-#             "multiply": lambda: x * y,
-#             "divide": lambda: x / y if y != 0 else "Error: Division by zero",
-#         }
+@modal_tool(app=app, image=Image.debian_slim().pip_install("numerizer"), memory=512)
+def number_convert(text: str, return_float: bool = False) -> str:
+    """
+    Convert number words to numeric representation.
 
-#         if operation not in operations:
-#             raise ValueError(f"Invalid operation: {operation}")
+    Args:
+        text: Text containing number words (e.g. 'forty two', 'one million')
+        return_float: Whether to return float for decimal values (choices: [True, False])
 
-#         return str(operations[operation]())
+    Returns:
+        String containing the numeric representation
+    """
+    from numerizer import numerize
+
+    result = numerize(text)
+    return str(float(result)) if return_float and "." in result else result
+
+
+# TODO: decorator could not return the tool instance
+number_converter = MODAL_TOOL_REGISTRY["number_convert"]
 
 
 class UnitConverterTool(Tool):

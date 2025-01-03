@@ -1,10 +1,11 @@
-from __future__ import annotations
-
 import inspect
-from functools import wraps
-from typing import Any, Callable, List, get_type_hints
+from typing import Callable, List, Optional, Sequence, Union, get_type_hints
 
-from corral.base import Tool, ToolArgument
+from modal import App, Image, Mount, Secret, Volume
+
+from corral.base import ModalTool, Tool, ToolArgument
+
+MODAL_TOOL_REGISTRY = {}
 
 
 def parse_docstring(func: Callable) -> tuple[str, List[ToolArgument]]:
@@ -28,7 +29,9 @@ def parse_docstring(func: Callable) -> tuple[str, List[ToolArgument]]:
         raise ValueError(f"Docstring must have an 'Args:' section")
 
     # Parse arguments section, skip the "Args:" line
-    args_lines = [line.strip() for line in args_section.splitlines()[1:] if line.strip()]
+    args_lines = [
+        line.strip() for line in args_section.splitlines()[1:] if line.strip()
+    ]
     arguments = []
 
     # Get type hints from function
@@ -189,3 +192,69 @@ def tool(func: Callable) -> Tool:
             return str(func(**kwargs))
 
     return FunctionTool()
+
+
+def modal_tool(
+    app: App,
+    image: Optional[Image] = None,
+    secrets: Optional[Sequence[Secret]] = None,
+    mounts: Optional[Sequence[Mount]] = None,
+    volumes: Optional[dict[Union[str, str], Volume]] = None,
+    memory: Optional[int] = None,
+    timeout: Optional[int] = None,
+    cpu: Optional[float] = None,
+    retries: Optional[int] = None,
+    gpu: Optional[str] = None,
+    keep_warm: Optional[int] = None,
+    block_network: bool = False,
+    **kwargs,
+):
+    """
+    Decorator that returns a ModalTool instance (which inherits from Tool)
+    that can be used both as a Tool and as a Modal function.
+    """
+    if app is None:
+        raise ValueError(
+            "The 'app' argument is required. This is the Modal App instance."
+        )
+
+    def decorator(func: Callable):
+        # Convert the function to a Modal function with explicit arguments
+        modal_kwargs = {
+            "image": image,
+            "secrets": secrets,
+            "mounts": mounts,
+            "volumes": volumes,
+            "memory": memory,
+            "timeout": timeout,
+            "cpu": cpu,
+            "retries": retries,
+            "gpu": gpu,
+            "keep_warm": keep_warm,
+            "block_network": block_network,
+            **kwargs,
+        }
+        name = func.__name__
+        # Remove None values from modal_kwargs
+        modal_kwargs = {k: v for k, v in modal_kwargs.items() if v is not None}
+
+        modal_func = app.function(**modal_kwargs)(func)
+
+        description, arguments = parse_docstring(func)
+        # Convert arguments to ToolArgument instances
+        # Create and return a ModalTool instance
+        tool_instance = ModalTool(
+            modal_func=modal_func,
+            name=name,
+            description=description,
+            arguments=arguments,
+        )
+
+        # Register the tool for later use
+        MODAL_TOOL_REGISTRY[name] = tool_instance
+        func.tool = tool_instance
+
+        # Return the modal function
+        return modal_func
+
+    return decorator
