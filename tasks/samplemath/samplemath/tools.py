@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from corral.base import Tool, ToolArgument
 from corral.utils import tool
 
@@ -36,36 +34,6 @@ def percentage_calculator(value: float, percentage: float = 100.0) -> float:
         float: The calculated result
     """
     return (value * percentage) / 100.0
-
-# class CalculatorTool(Tool):
-#     def __init__(self):
-#         super().__init__(
-#             name="calculator",
-#             description="Perform basic math operations",
-#             arguments=[
-#                 ToolArgument(
-#                     "operation",
-#                     "str",
-#                     "Operation to perform: add, subtract, multiply, divide",
-#                 ),
-#                 ToolArgument("x", "float", "First number"),
-#                 ToolArgument("y", "float", "Second number"),
-#             ],
-#         )
-
-#     def execute(self, operation: str, x: float, y: float) -> str:
-#         operations = {
-#             "add": lambda: x + y,
-#             "subtract": lambda: x - y,
-#             "multiply": lambda: x * y,
-#             "divide": lambda: x / y if y != 0 else "Error: Division by zero",
-#         }
-
-#         if operation not in operations:
-#             raise ValueError(f"Invalid operation: {operation}")
-
-#         return str(operations[operation]())
-
 
 class UnitConverterTool(Tool):
     def __init__(self):
