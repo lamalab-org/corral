@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import re
 from abc import ABC
 from enum import Enum
@@ -14,7 +12,7 @@ from .prompts import (
     BASELINESYSTEMPROMPT,
     BASELINEUSERPROMPT,
 )
-from .schemas import ReActOutput
+from schemas import ReActOutput
 
 if TYPE_CHECKING:
     from corral.base import Tool

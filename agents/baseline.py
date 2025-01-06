@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 
 import anthropic
@@ -7,7 +5,7 @@ from dotenv import load_dotenv
 
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 
-from .prompts import BASELINESYSTEMPROMPT, BASELINEUSERPROMPT
+from prompts import BASELINESYSTEMPROMPT, BASELINEUSERPROMPT
 
 load_dotenv("../.env", override=True)
 
