@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from time import sleep
-from typing import Optional
+from urllib.parse import quote
 
 import pubchempy as pcp
 import requests
@@ -37,10 +37,17 @@ def brave_search(query: str) -> list[dict]:
         query: The search query string
     Returns:
         A list of dictionaries containing search results with titles and snippets
+    Raises:
+        ValueError: If BRAVE_SEARCH_API_KEY environment variable is not set
     """
-    brave_search_tool = BraveSearch.from_api_key(
-        api_key=os.getenv("BRAVE_SEARCH_API_KEY")
-    )
+    api_key = os.getenv("BRAVE_SEARCH_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "BRAVE_SEARCH_API_KEY environment variable is required but not set"
+        )
+
+    brave_search_tool = BraveSearch.from_api_key(api_key=api_key)
+
     return brave_search_tool._run(query)
 
 
@@ -58,7 +65,7 @@ def wolfram_alpha(query: str) -> str:
 
 
 @tool
-def smiles_to_iupac_name(smiles: str) -> Optional[str]:
+def smiles_to_iupac_name(smiles: str) -> str | None:
     """Convert SMILES chemical notation to IUPAC name.
 
     Args:
@@ -68,7 +75,9 @@ def smiles_to_iupac_name(smiles: str) -> Optional[str]:
     """
     try:
         sleep(0.1)
-        url = f"https://cactus.nci.nih.gov/chemical/structure/{smiles}/iupac_name"
+        url = quote(
+            f"https://cactus.nci.nih.gov/chemical/structure/{smiles}/iupac_name"
+        )
         response = requests.get(url, allow_redirects=True, timeout=10)
         response.raise_for_status()
         name = response.text
@@ -84,7 +93,7 @@ def smiles_to_iupac_name(smiles: str) -> Optional[str]:
 
 
 @tool
-def iupac_to_smiles_name(iupac_name: str) -> Optional[str]:
+def iupac_to_smiles_name(iupac_name: str) -> str | None:
     """Convert IUPAC chemical name to SMILES notation.
 
     Args:
@@ -94,7 +103,9 @@ def iupac_to_smiles_name(iupac_name: str) -> Optional[str]:
     """
     try:
         sleep(0.1)
-        url = f"https://cactus.nci.nih.gov/chemical/structure/{iupac_name}/smiles"
+        url = quote(
+            f"https://cactus.nci.nih.gov/chemical/structure/{iupac_name}/smiles"
+        )
         response = requests.get(url, allow_redirects=True, timeout=10)
         response.raise_for_status()
         name = response.text
