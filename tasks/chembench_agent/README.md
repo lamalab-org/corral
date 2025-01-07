@@ -8,7 +8,7 @@ uv sync
 ```
 
 
-Run the environemnt
+Run the environment
 ```bash
 cd tasks/chembench_agent/chembench_agent
 python -m env
