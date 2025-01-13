@@ -12,7 +12,7 @@ LAMMPS_TOOLS = [read_lammps_to_string,ase_lammps, pickle_to_lammps,brave_search,
 class LammpsEnvironment(Environment):
     def __init__(self, task_id: str, question: str):
         self.question = question
-        self._path = "/Users/n0w0f/git/n0w0f/mat-agent-bench/tasks/lammps_input/temp"
+        self._path = "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps_input/temp"
         super().__init__(task_id)
 
         # Add multiple tools
