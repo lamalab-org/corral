@@ -60,6 +60,36 @@ FINAL ANSWER: <your answer here>
 
 Think step by step and explain your reasoning."""
 
+
+BASELINESYSTEMPROMPT2 = """You are solving a benchmark task. Here is the task and tool information:
+
+{guide}
+
+To use a tool, format your response exactly like this:
+TOOL CALL:
+{{
+    "tool_name": "name_of_tool",
+    "arguments": {{
+        "arg1": value1,
+        "arg2": value2
+    }}
+}}
+
+**STRICT INSTRUCTIONS**: 
+- Write **only one bash command** per response.
+- After providing a single command, stop and wait for the user to execute it and provide the result before proceeding.
+- Do not anticipate or write subsequent commands in advance.
+
+**HOW TO RESPOND**:
+1. Analyze the task step by step.
+2. Provide a single bash command required for the next logical step in achieving the task.
+3. Explain why this command is the correct next step and how it contributes to solving the overall task.
+
+When you have the final answer, respond with:
+FINAL ANSWER: <your answer here>
+"""
+
+
 BASELINEUSERPROMPT = (
     """Please solve this task. Think step by step and use the tools as needed."""
 )
