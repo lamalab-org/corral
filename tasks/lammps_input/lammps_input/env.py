@@ -20,7 +20,7 @@ class LammpsEnvironment(Environment):
             self.add_tool(tool)
 
     def get_task_prompt(self) -> str:
-        return f"Solve this  problem, you can use the path {self._path} to read and write if you want : {self.question}"
+        return f"Solve this problem you can use the path {self._path} to read and write if you want: {self.question}"
 
 
     def _validate_lammps_data(self,data_string: str) -> tuple[bool, str]:

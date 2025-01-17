@@ -71,6 +71,7 @@ def ase_lammps(output_path: str, elements: list, positions: list,
        positions: Array of atomic positions (N x 3)
        cell: Unit cell parameters (3 x 3)
        pbc: Periodic boundary conditions
+       
    Returns:
        Status message
    """
