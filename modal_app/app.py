@@ -23,7 +23,13 @@ app = App(f"simagent{simagent_name}")
 
 
 @app.function(image=_quantum_espresso_image, cpu=1.0, memory=5120)
-def run_quantum_espresso(pw_command, options, input) -> str:
+def run_quantum_espresso(
+    pw_command: str,
+    options: list[str],
+    input: str,
+    input_file: str = "input.in",
+    output_file: str = "output.out",
+) -> str:
     """
     Run Quantum Espresso calculation.
 
@@ -31,6 +37,8 @@ def run_quantum_espresso(pw_command, options, input) -> str:
         pw_command: Path to pw.x executable
         options: List of command line options
         input: Input file contents
+        input_file: Input file name
+        output_file: Output file name
 
     Returns:
         Output of the calculation
@@ -40,9 +48,9 @@ def run_quantum_espresso(pw_command, options, input) -> str:
 
     Examples:
         >>> run_quantum_espresso("pw.x", ["nk=4"], "...")
-        "..."
+            "..."
     """
-    return _run_quantum_espresso(pw_command, options, input)
+    return _run_quantum_espresso(pw_command, options, input, input_file, output_file)
 
 
 @app.function(image=pymatgen_image)
