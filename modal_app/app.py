@@ -9,8 +9,8 @@ from envs_tools.samplemat import (
     pymatgen_image,
 )
 from general_tools.quantum_espresso import (
+    _quantum_espresso_image,
     _run_quantum_espresso,
-    quantum_espresso_image,
 )
 from modal import App
 
@@ -22,7 +22,7 @@ if simagent_name and not simagent_name.startswith("-"):
 app = App(f"simagent{simagent_name}")
 
 
-@app.function(image=quantum_espresso_image, cpu=1.0, memory=5120)
+@app.function(image=_quantum_espresso_image, cpu=1.0, memory=5120)
 def run_quantum_espresso(pw_command, options, input) -> str:
     """
     Run Quantum Espresso calculation.

@@ -4,57 +4,16 @@ from modal import Image
 
 _quantum_espresso_image = (
     Image.debian_slim(python_version="3.12")
-    .apt_install(
-        "git",
-        "wget",
-        "build-essential",
-        "g++",
-        "gfortran",
-        "liblapack-dev",
-        "libfftw3-dev",
-        "libopenmpi-dev",
-    )
+    .apt_install("libfftw3-dev", "quantum-espresso")
     .pip_install("loguru")
+    .run_commands(
+        """echo 'export PATH="/root/q-e-qe-7.2/bin:$PATH"' >> ~/.bashrc && /bin/bash -c 'source ~/.bashrc'"""
+    )
 )
 with _quantum_espresso_image.imports():
-    import os
     import subprocess
 
     from loguru import logger
-
-
-def _install_quantum_espresso():
-    try:
-        logger.debug("Cloning Quantum Espresso repository...")
-        subprocess.run(["git", "clone", "https://github.com/QEF/q-e.git"], check=True)
-
-        logger.debug("Changing to q-e directory...")
-        os.chdir("q-e")
-
-        logger.debug("Running configure script...")
-        subprocess.run(["./configure"], check=True)
-
-        logger.debug("Compiling Quantum Espresso...")
-        subprocess.run(["make", "all"], check=True)
-
-        logger.debug("Adding Quantum Espresso to PATH...")
-        home = os.path.expanduser("~")
-        bashrc_path = os.path.join(home, ".bashrc")
-        with open(bashrc_path, "a") as f:
-            f.write("\nexport PATH=$PATH:$HOME/q-e/bin\n")
-
-        logger.debug("Updating shell environment...")
-        subprocess.run(f"bash -c 'source {bashrc_path}'", shell=True, check=True)
-
-        logger.debug("Quantum Espresso installation completed successfully")
-        return "Quantum Espresso installed successfully"
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Installation failed at step: {e.cmd}")
-        raise Exception(f"Installation failed at step: {e.cmd}")
-
-
-quantum_espresso_image = _quantum_espresso_image.run_function(_install_quantum_espresso)
 
 
 def _run_quantum_espresso(pw_command: str, options: list[str], input: str) -> str:
