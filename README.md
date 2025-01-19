@@ -2,19 +2,21 @@
 
 The system consists of three main components:
 
-- Environment Service (corral)- Hosts tasks and tools
-- Benchmark Interface (MatAgentBenchmark)- Communicates with the corral service, runs evaluations
-- Agent - Solves tasks using available tools
+- Environment Service (`corral`)- Hosts tasks and tools
+- Benchmark Interface (`MatAgentBenchmark`)- Communicates with the `corral` service, runs evaluations
+- `Agent` - Solves tasks using available tools
 
 ## 1. Create environment and add tools example:
 
 example of creating a tool and running the environment server
+
 ```bash
 cd tasks/samplemath/samplemath
 python -m env # start corral service
 ```
 
-Creating a simple evironment with a math task and a calculator tool
+Creating a simple environment with a math task and a calculator tool
+
 - Create a new environment class that inherits from `Environment` (this comes with tool calling and benchmark, tool instructions)
 - Implement the required methods
 - Add tools to the environment
@@ -110,6 +112,7 @@ Creating an agent
 - Create a new agent class that implements the `Agent` protocol
 - TODO: Toolcalling parsing final answer submission parsing from message to the server
 (see the example on how this is being done now.)
+
 ```python
 class Agent(Protocol):
     """Protocol defining what an agent must implement"""
@@ -127,7 +130,7 @@ class Agent(Protocol):
 ## 3. Benchmark Interface
 
 Setup benchmark interface
-- Start corral service and get the base url. See step 1. (This would start corral server, with 3 tasks and 2 tools)
+- Start `corral` service and get the base url. See step 1. (This would `start` corral server, with 3 tasks and 2 tools)
 
 ```python
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
@@ -137,5 +140,5 @@ agent = ClaudeAgent(api_key=os.getenv("ANTHROPIC_API_KEY")) # or any other agent
 runner = MatAgentBenchmark(interface, agent)
 
 result = runner.bench()
-
 ```
+

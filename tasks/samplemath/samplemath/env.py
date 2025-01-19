@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import uvicorn
 from tools import UnitConverterTool, app, calculator, number_converter
 
@@ -46,7 +44,6 @@ if __name__ == "__main__":
     }
 
     # Create and run server
-
     with app.run():
         app = create_benchmark_server(environments)
         uvicorn.run(app, host="0.0.0.0", port=8000)
