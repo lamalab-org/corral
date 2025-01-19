@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import modal
 from modal import Image
 
 from corral.base import Tool, ToolArgument
-from corral.utils import MODAL_TOOL_REGISTRY, modal_tool, tool
+from corral.utils import modal_tool, tool
 
-app = modal.App("cooral-test")
+app = modal.App("corral-test")
 
 
 @tool
@@ -59,8 +61,8 @@ def number_convert(text: str, return_float: bool = False) -> str:
     return str(float(result)) if return_float and "." in result else result
 
 
-# TODO: decorator could not return the tool instance
-number_converter = MODAL_TOOL_REGISTRY["number_convert"]
+# # TODO: decorator could not return the tool instance
+# number_converter = MODAL_TOOL_REGISTRY["number_convert"]
 
 
 class UnitConverterTool(Tool):

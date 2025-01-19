@@ -1,14 +1,19 @@
-import inspect
-from typing import Callable, List, Optional, Sequence, Union, get_type_hints
+from __future__ import annotations
 
-from modal import App, Image, Mount, Secret, Volume
+import inspect
+from typing import TYPE_CHECKING, Callable, get_type_hints
 
 from corral.base import ModalTool, Tool, ToolArgument
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from modal import App, Image, Mount, Secret, Volume
 
 MODAL_TOOL_REGISTRY = {}
 
 
-def parse_docstring(func: Callable) -> tuple[str, List[ToolArgument]]:
+def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
     """Parse function docstring to get description and arguments"""
     doc = inspect.getdoc(func)
     if not doc:
@@ -26,7 +31,7 @@ def parse_docstring(func: Callable) -> tuple[str, List[ToolArgument]]:
             break
 
     if not args_section:
-        raise ValueError(f"Docstring must have an 'Args:' section")
+        raise ValueError("Docstring must have an 'Args:' section")
 
     # Parse arguments section, skip the "Args:" line
     args_lines = [
@@ -169,7 +174,7 @@ def tool(func: Callable) -> Tool:
         description, arguments = parse_docstring(func)
     except Exception as e:
         raise ValueError(
-            f"Error parsing docstring for function {func.__name__}: {str(e)}. "
+            f"Error parsing docstring for function {func.__name__}: {e!s}. "
             "Please ensure it follows the required format shown in the decorator documentation."
         ) from e
 
@@ -194,19 +199,26 @@ def tool(func: Callable) -> Tool:
     return FunctionTool()
 
 
+def create_modal_function(func: Callable, app: App, **modal_kwargs) -> Callable:
+    """Create a Modal function with the given configuration."""
+    modal_kwargs = {k: v for k, v in modal_kwargs.items() if v is not None}
+    return app.function(**modal_kwargs)(func)
+
+
 def modal_tool(
     app: App,
-    image: Optional[Image] = None,
-    secrets: Optional[Sequence[Secret]] = None,
-    mounts: Optional[Sequence[Mount]] = None,
-    volumes: Optional[dict[Union[str, str], Volume]] = None,
-    memory: Optional[int] = None,
-    timeout: Optional[int] = None,
-    cpu: Optional[float] = None,
-    retries: Optional[int] = None,
-    gpu: Optional[str] = None,
-    keep_warm: Optional[int] = None,
+    image: Image | None = None,
+    secrets: Sequence[Secret] | None = None,
+    mounts: Sequence[Mount] | None = None,
+    volumes: dict[str, Volume] | None = None,
+    memory: int | None = None,
+    timeout: int | None = None,
+    cpu: float | None = None,
+    retries: int | None = None,
+    gpu: str | None = None,
+    keep_warm: int | None = None,
     block_network: bool = False,
+    register_globally: bool = True,
     **kwargs,
 ):
     """
@@ -218,43 +230,38 @@ def modal_tool(
             "The 'app' argument is required. This is the Modal App instance."
         )
 
+    modal_kwargs = {
+        "image": image,
+        "secrets": secrets,
+        "mounts": mounts,
+        "volumes": volumes,
+        "memory": memory,
+        "timeout": timeout,
+        "cpu": cpu,
+        "retries": retries,
+        "gpu": gpu,
+        "keep_warm": keep_warm,
+        "block_network": block_network,
+        **kwargs,
+    }
+
     def decorator(func: Callable):
-        # Convert the function to a Modal function with explicit arguments
-        modal_kwargs = {
-            "image": image,
-            "secrets": secrets,
-            "mounts": mounts,
-            "volumes": volumes,
-            "memory": memory,
-            "timeout": timeout,
-            "cpu": cpu,
-            "retries": retries,
-            "gpu": gpu,
-            "keep_warm": keep_warm,
-            "block_network": block_network,
-            **kwargs,
-        }
-        name = func.__name__
-        # Remove None values from modal_kwargs
-        modal_kwargs = {k: v for k, v in modal_kwargs.items() if v is not None}
-
-        modal_func = app.function(**modal_kwargs)(func)
-
+        modal_func = create_modal_function(func, app, **modal_kwargs)
         description, arguments = parse_docstring(func)
-        # Convert arguments to ToolArgument instances
-        # Create and return a ModalTool instance
+
         tool_instance = ModalTool(
             modal_func=modal_func,
-            name=name,
+            name=func.__name__,
             description=description,
             arguments=arguments,
         )
 
-        # Register the tool for later use
-        MODAL_TOOL_REGISTRY[name] = tool_instance
-        func.tool = tool_instance
+        if register_globally:
+            MODAL_TOOL_REGISTRY[func.__name__] = tool_instance
 
-        # Return the modal function
+        modal_func.as_tool = tool_instance
+        # Add property to access tool directly
+        modal_func.tool = property(lambda self: tool_instance)
         return modal_func
 
     return decorator

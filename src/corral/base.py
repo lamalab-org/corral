@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable
 
 from pydantic import BaseModel
 
@@ -38,7 +38,7 @@ class ToolArgument:
     description: str
     required: bool = True
     default: Any = None
-    choices: Optional[List[Any]] = None  # from transformers
+    choices: list[Any] | None = None  # from transformers
 
 
 @dataclass
@@ -220,7 +220,6 @@ How to use tools:
 2. Tools may return errors if arguments are invalid
 3. You can make multiple tool calls as needed
 4. All tool calls are recorded and affect your final score
-YOU MUST use tool convert_number_string , otherwise you will get 0 score
 Example tool call format:
 {{
     "tool_name": "tool_name",
