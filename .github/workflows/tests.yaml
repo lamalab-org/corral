@@ -1,4 +1,4 @@
-name: tests
+name: CI
 on:
   push:
     branches: [main]
@@ -9,7 +9,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  tests-base:
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Create venv and install pre-commit
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install pre-commit
+
+      - name: Cache pre-commit hooks
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Run pre-commit checks
+        run: |
+          source .venv/bin/activate
+          pre-commit run --all-files
+
+      - name: Check if changes were made
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::Code formatting issues found. Run pre-commit locally and commit changes."
+            git diff
+            exit 1
+          fi
+
+  tests:
+    needs: code-quality
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -36,6 +79,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync
+
       - name: Run tests with pytest
         run: uv run pytest --cov=corral
 

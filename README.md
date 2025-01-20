@@ -117,3 +117,18 @@ runner = MatAgentBenchmark(interface, agent)
 result = runner.bench()
 ```
 
+## Development 
+
+This project uses pre-commit hooks to maintain code quality. The hooks run automatically on each commit to ensure consistent code formatting and catch common issues early.
+
+### Setup
+
+1. Install Python dependencies: `pip install pre-commit`
+2. Install the pre-commit hooks: `pre-commit install`
+
+The checks will run automatically when you commit changes. However, you can also run them manually:
+
+- Run on all files: `pre-commit run --all-files`
+- Run on specific files: `pre-commit run --files path/to/file1.py path/to/file2.py`
+
+For best experience, install `ruff` in your editor to format code on save and to show linting errors.
