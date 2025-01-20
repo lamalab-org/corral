@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
+from importlib.util import find_spec
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -70,3 +72,29 @@ class HealthCheckMixin:
                 errors.append(f"Health check failed with error: {e!s}")
 
         return len(errors) == 0, errors
+
+
+class PackageHealthCheck(HealthCheck):
+    def __init__(self, packages: Sequence[str]):
+        self.packages = packages
+
+    def is_healthy(self) -> tuple[bool, str | None]:
+        missing = [pkg for pkg in self.packages if not find_spec(pkg)]
+        return (
+            (True, None)
+            if not missing
+            else (False, f"Missing packages: {', '.join(missing)}")
+        )
+
+
+class EnvVarHealthCheck(HealthCheck):
+    def __init__(self, _vars: Sequence[str]):
+        self.vars = _vars
+
+    def is_healthy(self) -> tuple[bool, str | None]:
+        missing = [var for var in self.vars if not os.getenv(var)]
+        return (
+            (True, None)
+            if not missing
+            else (False, f"Missing env vars: {', '.join(missing)}")
+        )
