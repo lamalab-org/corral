@@ -96,11 +96,11 @@ def ase_lammps(
 
 
 @tool
-def read_lammps_to_string(input_path: str) -> str:
-    """Read LAMMPS data file and return contents as string.
+def read_files(input_path: str) -> str:
+    """Read files and return contents as string.
 
     Args:
-        input_path: Path to LAMMPS data file
+        input_path: Path to the file
 
     Returns:
         File contents as string
