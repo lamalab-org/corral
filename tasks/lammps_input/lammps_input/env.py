@@ -29,6 +29,7 @@ class LammpsEnvironment(Environment):
 
        Args:
            data_string: String containing LAMMPS data file content
+           
        Returns:
            Tuple of (is_valid, message)
        """
