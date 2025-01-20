@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 import inspect
-from functools import wraps
-from typing import Any, Callable, List, get_type_hints
+from typing import Callable, List, get_type_hints
 
 from corral.base import Tool, ToolArgument
 
@@ -23,10 +24,12 @@ def parse_docstring(func: Callable) -> tuple[str, List[ToolArgument]]:
             break
 
     if not args_section:
-        raise ValueError(f"Docstring must have an 'Args:' section")
+        raise ValueError("Docstring must have an 'Args:' section")
 
     # Parse arguments section, skip the "Args:" line
-    args_lines = [line.strip() for line in args_section.splitlines()[1:] if line.strip()]
+    args_lines = [
+        line.strip() for line in args_section.splitlines()[1:] if line.strip()
+    ]
     arguments = []
 
     # Get type hints from function
@@ -101,7 +104,7 @@ def tool(func: Callable) -> Tool:
     ```python
     @tool
     def calculator(operation: str, x: float, y: float) -> float:
-        '''Perform basic math operations.
+        """Perform basic math operations.
 
         Args:
             operation: Operation to perform (choices: ["add", "subtract", "multiply", "divide"])
@@ -110,7 +113,7 @@ def tool(func: Callable) -> Tool:
 
         Returns:
             float: Result of the mathematical operation
-        '''
+        """
         operations = {
             "add": lambda: x + y,
             "subtract": lambda: x - y,
@@ -164,7 +167,7 @@ def tool(func: Callable) -> Tool:
         description, arguments = parse_docstring(func)
     except Exception as e:
         raise ValueError(
-            f"Error parsing docstring for function {func.__name__}: {str(e)}. "
+            f"Error parsing docstring for function {func.__name__}: {e!s}. "
             "Please ensure it follows the required format shown in the decorator documentation."
         ) from e
 

@@ -1,10 +1,10 @@
-import json
-from abc import ABC, abstractmethod
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Dict, List, Protocol
-from loguru import logger
 
 import requests
+from loguru import logger
 
 
 @dataclass
@@ -63,15 +63,14 @@ class BenchmarkInterface:
         """Submit final answer for a task"""
         logger.info(f"Agent submitting answer {answer} for task {task_id}")
         response = requests.post(
-            f"{self.base_url}/tasks/{task_id}/submit",
-            json={"answer": answer}
+            f"{self.base_url}/tasks/{task_id}/submit", json={"answer": answer}
         )
         response.raise_for_status()
         data = response.json()
         return TaskResult(
             score=data["score"],
             state=data["state"],
-            tool_statistics=data["state"]["tool_statistics"]
+            tool_statistics=data["state"]["tool_statistics"],
         )
 
     def get_task_status(self, task_id: str) -> Dict[str, Any]:
@@ -80,12 +79,14 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()
 
+
 class Agent(Protocol):
     """Protocol defining what an agent must implement"""
 
     def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
         """Solve a task and return the answer"""
         ...
+
 
 @dataclass
 class BenchmarkResult:

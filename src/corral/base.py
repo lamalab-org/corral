@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Any, Optional, List
+from typing import Any, List, Optional
 
 from pydantic import BaseModel
 

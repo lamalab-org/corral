@@ -3,21 +3,20 @@ from __future__ import annotations
 import json
 import subprocess
 from typing import Dict, List, TypedDict
-from typing import get_origin, get_args
 
 import numpy as np
-
 from schema import (
-    BaseTypedDict,
-    create_typed_dict,
-    matches_typed_dict_type,
     AdsorbateOutput,
     AtomicStructure,
+    BaseTypedDict,
     DFTSettings,
     EnergyOutput,
     RelaxationOutput,
     SurfaceOutput,
+    create_typed_dict,
+    matches_typed_dict_type,
 )
+
 
 # Task 1: Surface Generation
 class SurfaceGenerationTask(BaseTypedDict):
@@ -68,6 +67,7 @@ class TaskFamily:
     def install() -> None:
         """Install required packages"""
         import os
+
         os.environ["SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL"] = "True"
 
         subprocess.check_call(
@@ -92,7 +92,8 @@ class TaskFamily:
         """Return all tasks in the workflow"""
         print("Returning all defined tasks")
         return {
-            "surface_generation": create_typed_dict(SurfaceGenerationTask,
+            "surface_generation": create_typed_dict(
+                SurfaceGenerationTask,
                 material_id="mp-30",
                 miller_indices=[1, 1, 1],
                 min_depth=7.0,
@@ -104,14 +105,16 @@ class TaskFamily:
                     "kpts": [4, 4, 1],
                 },
             ),
-            "adsorbate_placement": create_typed_dict(AdsorbatePlacementTask,
+            "adsorbate_placement": create_typed_dict(
+                AdsorbatePlacementTask,
                 surface={},  # To be filled from previous task "structure.json"
                 surface_atoms=[],
                 molecule="CO",
                 binding_atoms=[0],
                 site_types=["top", "bridge", "hollow"],
             ),
-            "relaxation": create_typed_dict(RelaxationTask,
+            "relaxation": create_typed_dict(
+                RelaxationTask,
                 structure={},  # To be filled from previous task "combined.json"
                 dft_settings={
                     "xc": "PBE",
@@ -122,7 +125,8 @@ class TaskFamily:
                 energy_threshold=1e-4,
                 max_steps=200,
             ),
-            "energy_calculation": create_typed_dict(EnergyCalculationTask,
+            "energy_calculation": create_typed_dict(
+                EnergyCalculationTask,
                 combined_structure={},  # To be filled from previous task "combined.json"
                 surface_structure={},  # To be filled from previous task "surface.json"
                 adsorbate_reference="CO",
@@ -173,7 +177,7 @@ class TaskFamily:
             return score / 3.0
 
         except Exception as e:
-            print(f"Error scoring surface generation: {str(e)}")
+            print(f"Error scoring surface generation: {e!s}")
             return 0.0
 
     @staticmethod
@@ -206,7 +210,7 @@ class TaskFamily:
             return score / 2.0
 
         except Exception as e:
-            print(f"Error scoring adsorbate placement: {str(e)}")
+            print(f"Error scoring adsorbate placement: {e!s}")
             return 0.0
 
     @staticmethod
@@ -249,7 +253,7 @@ class TaskFamily:
             return score
 
         except Exception as e:
-            print(f"Error scoring relaxation: {str(e)}")
+            print(f"Error scoring relaxation: {e!s}")
             return 0.0
 
     @staticmethod
@@ -285,7 +289,7 @@ class TaskFamily:
             return score / 2.0
 
         except Exception as e:
-            print(f"Error scoring energy calculation: {str(e)}")
+            print(f"Error scoring energy calculation: {e!s}")
             return 0.0
 
     @staticmethod
@@ -345,7 +349,7 @@ class TaskFamily:
             return final_score
 
         except Exception as e:
-            print(f"Error in overall scoring: {str(e)}")
+            print(f"Error in overall scoring: {e!s}")
             return None
 
     @staticmethod
@@ -356,20 +360,20 @@ class TaskFamily:
             Generate a surface structure from the bulk material following these steps:
 
             1. Access the bulk structure with Materials Project ID: {task['material_id']}
-            
+
             2. Create a surface with Miller indices {task['miller_indices']} meeting these requirements:
                - Minimum depth: {task['min_depth']} Å
                - Minimum width: {task['min_width']} Å
                - Vacuum spacing: {task['vacuum']} Å
-            
+
             3. Identify surface atoms using these criteria:
                - Z-position within top 2 A of highest atom
                - Under-coordination relative to bulk
-            
+
             4. Perform initial DFT calculation with settings:
                {json.dumps(task['dft_settings'], indent=2)}
 
-            Submit your results as a JSON string with the following structure: 
+            Submit your results as a JSON string with the following structure:
             {{
                 "structure": {{
                     "atomic_numbers": [...],
@@ -504,26 +508,22 @@ class TaskFamily:
         ):
             # Single task case
             task_name = t["_type_marker"]
-            print('Single task', task_name)
-            return TaskFamily.get_task_specific_instructions(
-                task_name, t
-            )
-        print('All tasks!')
+            print("Single task", task_name)
+            return TaskFamily.get_task_specific_instructions(task_name, t)
+        print("All tasks!")
         # Multiple tasks case - create workflow instructions
         workflow_instructions = """
         Complete the following adsorption energy calculation workflow.
         Submit results for each completed task before proceeding to the next.
-        
+
         Overall Workflow:
         ----------------
         """
 
         for task_name, task_data in t.items():
             workflow_instructions += f"\n{task_name.upper()}:\n"
-            workflow_instructions += (
-                TaskFamily.get_task_specific_instructions(
-                    task_name, task_data
-                )
+            workflow_instructions += TaskFamily.get_task_specific_instructions(
+                task_name, task_data
             )
             workflow_instructions += "\n" + "-" * 80 + "\n"
 
@@ -535,7 +535,7 @@ class TaskFamily:
             "relaxation": { ... },          # Results from relaxation
             "energy_calculation": { ... }   # Results from energy calculation
         }
-        
+
         Each task's results should follow the format specified in its individual instructions.
         You may submit partial results if not all tasks are completed.
         """
