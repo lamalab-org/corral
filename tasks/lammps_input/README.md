@@ -17,7 +17,7 @@ python -m env
 
 ### Setting Up the API keys
 
-Some of the tools used in this environemtn require API keys.
+Some of the tools used in this environment require API keys.
 - `brave_search` needs BraveSearch API key
 
 #### How to set up the API keys
@@ -27,6 +27,7 @@ Some of the tools used in this environemtn require API keys.
 BRAVE_SEARCH_API_KEY=your_brave_search_api_key
 ```
 - load the keys in the tool module correctly
+
 ```python
 from dotenv import load_dotenv
 
@@ -58,6 +59,6 @@ def brave_search(query: str) -> list[dict]:
 Alternatively, you can set the keys directly in your environment
 
 - Export the keys directly in your environment
+
 ```bash
 export BRAVE_SEARCH_API_KEY=your_brave_search_api_key
-```
