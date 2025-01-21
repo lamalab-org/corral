@@ -88,7 +88,7 @@ if __name__ == "__main__":
     environments = {
         "lammps_1": LammpsEnvironment(
             "input_1",
-            "Write input file for LAMMPS. I want to simulate the FCC gold unitcell. Give me the lammps input file as string",
+            "Write input file for LAMMPS. I want to simulate the FCC gold unit. Give me the LAMMPS input file as a string.",
         ),
     }
 
