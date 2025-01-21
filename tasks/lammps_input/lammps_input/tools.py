@@ -74,7 +74,11 @@ def pickle_to_lammps(input_path: str, output_path: str) -> str:
 
 @tool
 def ase_lammps(
-    output_path: str, elements: list, positions: list, cell: list, pbc: list
+    output_path: str,
+    elements: list,
+    positions: list,
+    cell: list,
+    pbc: bool | tuple[bool, bool, bool],
 ) -> str:
     """Create ASE Atoms from parameters and write to LAMMPS data format.
 
@@ -83,7 +87,7 @@ def ase_lammps(
         elements: List of element symbols
         positions: Array of atomic positions (N x 3)
         cell: Unit cell parameters (3 x 3)
-        pbc: Periodic boundary conditions
+        pbc: Periodic boundary conditions. If True, all directions are periodic. If tuple, specify which directions are periodic.
 
     Returns:
         Status message
