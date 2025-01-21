@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Any, Optional, List
+from typing import Any, Callable
 
 from pydantic import BaseModel
 
@@ -36,7 +36,7 @@ class ToolArgument:
     description: str
     required: bool = True
     default: Any = None
-    choices: Optional[List[Any]] = None  # from transformers
+    choices: list[Any] | None = None  # from transformers
 
 
 @dataclass
@@ -158,6 +158,25 @@ Arguments:
 """
 
 
+class ModalTool(Tool):
+    def __init__(
+        self,
+        modal_func: Callable,
+        name: str,
+        description: str,
+        arguments: list[ToolArgument],
+    ):
+        super().__init__(
+            name=name,
+            description=description,
+            arguments=arguments,
+        )
+        self._modal_func = modal_func
+
+    def execute(self, **kwargs):
+        return self._modal_func.remote(**kwargs)
+
+
 class Environment(ABC):
     """Base class for task environments"""
 
@@ -199,7 +218,6 @@ How to use tools:
 2. Tools may return errors if arguments are invalid
 3. You can make multiple tool calls as needed
 4. All tool calls are recorded and affect your final score
-
 Example tool call format:
 {{
     "tool_name": "tool_name",
