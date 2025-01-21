@@ -42,6 +42,7 @@ def percentage_calculator(value: float, percentage: float = 100.0) -> float:
     """
     return (value * percentage) / 100.0
 
+
 @modal_tool(app=app, image=Image.debian_slim().pip_install("numerizer"), memory=512)
 def number_convert(text: str, return_float: bool = False) -> str:
     """
@@ -60,8 +61,9 @@ def number_convert(text: str, return_float: bool = False) -> str:
     return str(float(result)) if return_float and "." in result else result
 
 
-# # TODO: decorator could not return the tool instance
-# number_converter = MODAL_TOOL_REGISTRY["number_convert"]
+# TODO: decorator could not return the tool instance
+number_converter = MODAL_TOOL_REGISTRY["number_convert"]
+
 
 class UnitConverterTool(Tool):
     def __init__(self):

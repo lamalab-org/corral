@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import inspect
 from typing import TYPE_CHECKING, Callable, get_type_hints
 
@@ -7,6 +9,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from modal import App, Image, Mount, Secret, Volume
+
 
 MODAL_TOOL_REGISTRY = {}
 
@@ -109,7 +112,7 @@ def tool(func: Callable) -> Tool:
     ```python
     @tool
     def calculator(operation: str, x: float, y: float) -> float:
-        '''Perform basic math operations.
+        """Perform basic math operations.
 
         Args:
             operation: Operation to perform (choices: ["add", "subtract", "multiply", "divide"])
@@ -118,7 +121,7 @@ def tool(func: Callable) -> Tool:
 
         Returns:
             float: Result of the mathematical operation
-        '''
+        """
         operations = {
             "add": lambda: x + y,
             "subtract": lambda: x - y,
@@ -254,12 +257,11 @@ def modal_tool(
             arguments=arguments,
         )
 
-        if register_globally:
-            MODAL_TOOL_REGISTRY[func.__name__] = tool_instance
+        # Register the tool for later use
+        MODAL_TOOL_REGISTRY[name] = tool_instance
+        func.tool = tool_instance
 
-        modal_func.as_tool = tool_instance
-        # Add property to access tool directly
-        modal_func.tool = property(lambda self: tool_instance)
+        # Return the modal function
         return modal_func
 
     return decorator
