@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from corral.base import Environment, Tool
 import os
 
+from lammps_evaluate import parse_lammps_input, check_simulation_success
+
 @dataclass
 class TaskDefinition:
     """Definition of a task with its requirements and scoring"""
@@ -23,6 +25,7 @@ class TaskDefinition:
     tools: List[str]
     scoring_fn: Callable[[Dict], float]
     submission_format: Dict[str, str]
+    ground_truth: List[Dict[str, Any]] 
     # Either use output from another task or custom input
     input_from_task: Optional[str] = None
     initial_input: Optional[Dict[str, Any]] = None
@@ -136,7 +139,7 @@ Required submission format:
 
             # Store result in task group
             print(f"Parsed submission: {submission}")  # Debug print
-            score = self.current_task.scoring_fn(submission)
+            score = self.current_task.scoring_fn(submission, self.current_task.ground_truth)
             self.task_group.store_result(self.task_id, submission, score)
 
             return score
@@ -146,92 +149,118 @@ Required submission format:
             return 0.0
 
 def create_catalysis_environments() -> Dict[str, Environment]:
-    """Create environments for catalysis tasks"""
-
-    def score_addition(result: Dict) -> float:
-        score = 0.0
-        if "answer" in result:
-            try:
-                answer = float(result["answer"])
-                score = 1.0
-            except ValueError:
-                pass
-        return score
-
-    def check_structure(result)-> float:
+    def check_structure(result, ground_truth)-> float:
         return 0
 
-    data_path = "./generated_tasks/data/"
-    directories = os.listdir(data_path)
-    for directory in directories:
-        file_path = os.path.join(data_path, directory, f"{directory}.json")
-        with open(file_path, 'r') as file:
-            data = json.load(file)
-        subtasks = data['subtasks']
-        # Create task group
+    def check_directory(result, ground_truth)-> float:
+        directory_path = ground_truth[0]['data']['directory']
+        if result['answer'] == directory_path and os.path.exists(result['answer']):
+            return 1
+        else:
+            return 0
+        
+    def check_lattice_generation_lammps(result, ground_truth)-> float:
+        score = 0
+        total = 3
+        for gt in ground_truth:
+            if gt['type'] == 'generated_directory':
+                generated_path = gt['data']['directory']
+            elif gt['type'] == 'simulation_config':
+                orig_config = gt['data']
+                # print("generated_path", generated_path)
+        for gt in ground_truth:
+            if gt['type'] == 'file_path':
+                files = gt['data']
+                if 'input.in' in files and not os.path.exists(os.path.join(generated_path, 'input.in')):
+                    return 0
+                else:
+                    input_file_path = os.path.join(generated_path, 'input.in')
+                    generated_config = parse_lammps_input(input_file_path)
+                    if orig_config['lattice_type'] == str(generated_config['lattice_type']) and orig_config['simulation_box'] == str(generated_config['simulation_box']) and orig_config['pbc'] == str(generated_config['pbc']) and orig_config['units'] == generated_config['units']:
+                        score += 1
+                        if check_simulation_success(os.path.join(generated_path, "log.lammps")):
+                            score += 1
+                            if os.path.exists(os.path.join(generated_path, 'structure.xyz')):
+                                score += 1
+        return score/total
+                    
 
 
-        tasks = {}
-        for subtask in subtasks:
-            if subtask['initial_input'] is not None:
-                initial_input = {'directory' : subtask['initial_input']}
-            else:
-                initial_input = None
-            tasks[subtask['subtask_id']] = TaskDefinition(
-                name = subtask['name'],
-                description=subtask['Description'],
-                tools = subtask['tools'],
-                submission_format={"answer" : subtask['submission_format']},
-                initial_input=initial_input,
-                scoring_fn=subtask['scoring_fn'],
-                input_from_task=subtask['input_from_task']
-            )
+    # directory_path = "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/data/lattice_generation"
 
-        task_group = TaskGroup(group_id=data['task_id'], tasks = tasks)
+    # files = os.listdir(directory_path)
 
-    # # Create task group
+    file_path = "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/data/lattice_generation/task_2/task_2.json"
+
+    # Open the file and load the JSON data
+    with open(file_path, 'r') as file:
+        task = json.load(file)
+
+    subtasks = task['subtasks']
+
+    tasks = {}
+    for subtask in subtasks:
+        if subtask['input_from_task']:
+            input_from_task = subtask['input_from_task'][0]
+        else:
+            input_from_task = None
+        func = locals()[subtask['scoring_fn']]
+        tasks[subtask['subtask_id']] = TaskDefinition(
+            name = subtask['name'],
+            description = subtask['description'],
+            tools = subtask['tools'],
+            scoring_fn = func,
+            submission_format={'answer' : subtask['submission_format']},
+            ground_truth = subtask['ground_truth'],
+            input_from_task = input_from_task, 
+            initial_input=subtask['initial_input']
+        )
+    task_group = TaskGroup(group_id = task['task_id'], tasks = tasks)
+
+
+    # Create task group
     # task_group = TaskGroup(
     #     group_id="catalyst",
     #     tasks={
-    #         "task_1": TaskDefinition(
+    #         "subtask_1": TaskDefinition(
     #             name="Directory",
     #             description="Make a given directory. If it is done successfully print the absolute location of the directory as the final output.",
     #             tools=["run_bash_command"],
     #             scoring_fn=check_structure,
     #             submission_format={"answer": "/path/to/directory"},
-    #             initial_input={"directory" : "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/temp"}
+    #             initial_input={"directory" : "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/results/task_1"}
     #         ),
 
-    #         "task_2": TaskDefinition(
+    #         "subtask_2": TaskDefinition(
     #             name="LAMMPS Simulation",
     #             description="Your task is to generate a face centered cubic (FCC) lattice structure for Aluminum using LAMMPS with lattice constant of 4.05 angstrom. The simulation should use metal units, define a 5x5x5 simulation box, set periodic boundary conditions to True, and dump all the coordinates and lattice parameters in Al.xyz file. Save all the related files to the given directory.",
     #             tools=["run_bash_command", "run_lammps"],
     #             scoring_fn=check_structure,
     #             submission_format={"answer": None},
-    #             input_from_task="task_1"
+    #             input_from_task="subtask_1"
     #         ),
     #     }
     # )
 
-    # Print task dependencies for reference
-        print("\nTask Dependencies:")
-        for task_id, deps in task_group.get_task_dependencies().items():
-            print(f"- {task_id}: depends on {deps}")
+# Print task dependencies for reference
+    print("\nTask Dependencies:")
+    for task_id, deps in task_group.get_task_dependencies().items():
+        print(f"- {task_id}: depends on {deps}")
 
-        # Create environments for all tasks
-        available_tools = create_tools()
-        environments = {}
+    # Create environments for all tasks
+    available_tools = create_tools()
+    environments = {}
 
-        for task_id in task_group.tasks:
-            # All environments share the same task group instance
-            #task_id = f"{task_group.group_id}_{_id}"
-            environments[task_id] = TaskEnvironment(
-                task_id=task_id,
-                task_group=task_group,
-                available_tools=available_tools
-            )
+    for task_id in task_group.tasks:
+        # All environments share the same task group instance
+        #task_id = f"{task_group.group_id}_{_id}"
+        environments[task_id] = TaskEnvironment(
+            task_id=task_id,
+            task_group=task_group,
+            available_tools=available_tools
+        )
 
-        return environments
+    return environments
 
 if __name__ == "__main__":
     # Create all environments
