@@ -1,0 +1,40 @@
+# LAMMPS Input Script for Slab Energy Calculation
+
+units metal
+dimension 3
+boundary p p m  # Non-periodic in z-direction (two free surfaces)
+atom_style atomic
+
+# Read the bulk structure data from the previous run
+read_data ../../lattice_generation/task_1/structure.xyz  
+
+# ------------------------- Potential ---------------------------#
+pair_style eam/alloy  
+pair_coeff * * /Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/Al99.eam.alloy Al     
+
+neighbor 2.0 bin
+neigh_modify every 1 delay 0 check yes
+
+# ----------------------- Minimize for Slab --------------------------#
+# Expand z-direction to introduce vacuum
+change_box all z scale 1.5  # Expand z to create vacuum
+
+# Minimize energy for the slab (with two free surfaces)
+fix 1 all box/relax aniso 0.0 vmax 0.001
+thermo 10
+thermo_style custom step atoms temp pe ke etotal press
+
+min_style cg
+minimize 1e-25 1e-25 5000 10000 
+
+write_data slab.data  # Save slab structure after minimization
+variable E_slab equal pe  # Store slab energy
+
+# Compute surface area (A = lx * ly)
+variable A equal "lx*ly"
+
+# Calculate Surface Energy (convert eV/Å² to J/m²)
+
+# Output Results
+print "Slab Energy (eV) = ${E_slab}"
+print "Surface Energy (J/m^2) = ${E_surf}"

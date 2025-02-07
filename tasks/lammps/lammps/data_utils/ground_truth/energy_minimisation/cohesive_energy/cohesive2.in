@@ -1,0 +1,44 @@
+# Find minimum energy fcc configuration
+# Mark Tschopp, 2010
+
+# ---------- Initialize Simulation --------------------- 
+clear 
+units metal 
+dimension 3 
+boundary p p p 
+atom_style atomic 
+atom_modify map array
+
+read_data structure.xyz
+
+# ---------- Define Interatomic Potential --------------------- 
+pair_style eam/alloy 
+pair_coeff * * /Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/Al99.eam.alloy Al
+neighbor 2.0 bin 
+neigh_modify delay 10 check yes 
+ 
+# ---------- Define Settings --------------------- 
+compute eng all pe/atom 
+compute eatoms all reduce sum c_eng 
+
+# ---------- Run Minimization --------------------- 
+reset_timestep 0 
+#fix 1 all box/relax iso 0.0 vmax 0.001
+thermo 1000 
+thermo_style custom step pe lx ly lz press pxx pyy pzz c_eatoms 
+min_style cg 
+minimize 1e-50 1e-50 10000 10000 
+
+variable natoms equal "count(all)" 
+variable teng equal "c_eatoms"
+variable length equal "lx"
+variable ecoh equal "v_teng/v_natoms"
+
+print "Total energy (eV) = ${teng};"
+print "Number of atoms = ${natoms};"
+print "Lattice constant (Angstoms) = ${length};"
+print "Cohesive energy (eV) = ${ecoh};"
+
+print "All done!"
+
+write_data minimised_structure.xyz

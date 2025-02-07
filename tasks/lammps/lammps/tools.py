@@ -19,14 +19,15 @@ def run_lammps(input: str, output_files: list[str] = [], save_path: str = None) 
     """
     try:
         run_lammps_sim = modal.Function.lookup("simagent", "run_lammps")
-        output_dict = run_lammps_sim.remote(input, output_files)
-        # Save files to the specified path if provided
-        if save_path:
-            os.makedirs(save_path, exist_ok=True)
-            for file_name, content in output_dict.items():
-                file_path = os.path.join(save_path, file_name)
-                with open(file_path, "w") as file:
-                    file.write(content)
+        return run_lammps_sim.remote(input, output_files, save_path)
+        # output_dict = run_lammps_sim.remote(input, output_files)
+        # # Save files to the specified path if provided
+        # if save_path:
+        #     os.makedirs(save_path, exist_ok=True)
+        #     for file_name, content in output_dict.items():
+        #         file_path = os.path.join(save_path, file_name)
+        #         with open(file_path, "w") as file:
+        #             file.write(content)
     except ValueError as e:
         # Raise a ValueError with more context about the failure
         raise ValueError(f"The LAMMPS simulation failed with a ValueError: {str(e)}")
@@ -44,27 +45,14 @@ def run_bash_command(command: str, args: list[str] = []) -> str:
         command: The bash command to execute (e.g., 'mkdir', 'ls').
         args: A list of arguments for the bash command.
     """
+    run_bash_command_modal = modal.Function.lookup("simagent", "run_bash_command")
     try:
-        # Construct the full command with arguments
-        full_command = [command] + args
-
-        # Run the command
-        result = subprocess.run(
-            full_command,
-            shell=False,  # Avoid shell injection risks
-            check=True,  # Raise CalledProcessError on failure
-            capture_output=True,
-            text=True
-        )
-
-        # Return the standard output
-        return result.stdout
-
-    except subprocess.CalledProcessError as e:
-        raise ValueError(f"Bash command failed: {e.cmd}\n{e.stderr}")
-
+        output = run_bash_command_modal.remote(command, args)
+        return output
+    except ValueError as ve:
+        raise ValueError(f"Command Failed: {str(ve)}")
     except Exception as e:
-        raise ValueError(f"An unexpected error occurred: {str(e)}")
+        raise Exception(f"An unexpected error occured while running the command: {str(e)}")
 
 def create_tools() -> Dict[str, Tool]:
     """Create all available tools"""

@@ -1,0 +1,37 @@
+# LAMMPS Script to calculate elastic constants for Aluminum FCC structure
+
+units metal
+dimension 3
+boundary p p p  # Periodic in all directions
+atom_style atomic
+
+# Define the lattice and the potential
+lattice fcc 4.05  # Example lattice constant, adjust as necessary
+region box block 0 1 0 1 0 1
+create_box 1 box
+create_atoms 1 box
+
+pair_style eam/alloy
+pair_coeff * * /Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/Al99.eam.alloy Al
+
+# Energy minimization to get relaxed system
+minimize 1.0e-10 1.0e-10 1000 1000
+
+# Example for strain xx direction (adjust for others)
+variable strain_list index 0.98 1.00 1.02  # Example strain values
+variable strain_type equal "xx"  # You can change for other directions
+
+# Loop through strains
+variable strain_index loop 3
+label strain_loop
+    variable strain equal "v_strain_list[${strain_index}]"
+
+    # Apply strain in x-direction
+    change_box all x scale ${strain} remap
+
+    # Perform relaxation
+    fix 1 all box/relax iso 0.0 vmax 0.001
+    run 5000
+
+    next strain_index
+jump strain_loop

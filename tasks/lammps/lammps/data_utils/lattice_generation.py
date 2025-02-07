@@ -50,7 +50,7 @@ task_template = """
     {
       "subtask_id": "subtask_2",
       "name": "{{ software }} Simulation",
-      "description": "Your task is to generate a {{ lattice_type }} lattice structure for {{ element }} using {{ software }} with a lattice constant of {{ lattice_constant }} angstrom. The simulation should use {{ metal }} units, define a {{ simulation_box }} simulation box, set periodic boundary conditions to {{ True }}, and dump all the coordinates and lattice parameters in structure.xyz file. Save all the related files to the given directory.",
+      "description": "Your task is to generate a {{ lattice_type }} lattice structure for {{ element }} using {{ software }} with a lattice constant of {{ lattice_constant }} angstrom. The simulation should use {{ metal }} units, define a {{ simulation_box }} simulation box, set periodic boundary conditions to {{ True }}, and dump all the coordinates in structure.xyz file. Ensure that the xyz file also contains the information about the lattice parameters of the crystal as a comment. Save all the related files to the given directory.",
       "tools": [
         "run_{{ software }}",
         "run_bash_command"

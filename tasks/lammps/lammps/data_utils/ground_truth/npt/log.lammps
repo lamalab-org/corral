@@ -1,0 +1,89 @@
+LAMMPS (19 Nov 2024 - Development - patch_19Nov2024-56-ga78aee5731)
+# LAMMPS Input Script for FCC Lattice of Aluminum
+
+units metal
+dimension 3
+boundary p p p
+#atom_style should be consistent with all tasks
+atom_style atomic
+
+read_data      ../energy_minimisation/minimized_aluminum_structure.dat
+Reading data file ...
+  orthogonal box = (0 0 0) to (20.25 20.25 20.25)
+  1 by 1 by 1 MPI processor grid
+  reading atoms ...
+  500 atoms
+  reading velocities ...
+  500 velocities
+  read_data CPU = 0.008 seconds
+
+#-------------------------Potential---------------------------#
+
+# Define the potential for aluminum
+
+pair_style      eam/alloy  #ablation
+pair_coeff      * * /Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/Al99.eam.alloy Al
+
+neighbor        2.0 bin
+neigh_modify    every 1 delay 0 check yes
+
+#-------------------NPT Simulation for Density Calculation---#
+
+# Perform NPT simulation to equilibrate the system
+velocity all create 300.0 12345
+timestep        0.001
+fix             npt all npt temp 300.0 300.0 100.0 iso 0.0 0.0 1000.0
+dump            npt_dump all custom 2 npt_aluminum_density.lammpstrj id type x y z
+thermo          2
+thermo_style    custom step temp press density
+run             10
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 8.28721
+  ghost atom cutoff = 8.28721
+  binsize = 4.143605, bins = 5 5 5
+  1 neighbor lists, perpetual/occasional/extra = 1 0 0
+  (1) pair eam/alloy, perpetual
+      attributes: half, newton on
+      pair build: half/bin/atomonly/newton
+      stencil: half/bin/3d
+      bin: standard
+Per MPI rank memory allocation (min/avg/max) = 3.445 | 3.445 | 3.445 Mbytes
+   Step          Temp          Press         Density    
+         0   300            2491.7588      2.697852     
+         2   298.17799      2503.4339      2.697852     
+         4   292.77027      2539.0592      2.697852     
+         6   283.94899      2596.95        2.697852     
+         8   271.98843      2678.8591      2.697852     
+        10   257.24082      2797.3499      2.697852     
+Loop time of 0.0159521 on 1 procs for 10 steps with 500 atoms
+
+Performance: 54.162 ns/day, 0.443 hours/ns, 626.876 timesteps/s, 313.438 katom-step/s
+93.8% CPU use with 1 MPI tasks x no OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.011501   | 0.011501   | 0.011501   |   0.0 | 72.10
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.00016214 | 0.00016214 | 0.00016214 |   0.0 |  1.02
+Output  | 0.0039982  | 0.0039982  | 0.0039982  |   0.0 | 25.06
+Modify  | 0.00023534 | 0.00023534 | 0.00023534 |   0.0 |  1.48
+Other   |            | 5.552e-05  |            |       |  0.35
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2930 ave        2930 max        2930 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          35000 ave       35000 max       35000 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 35000
+Ave neighs/atom = 70
+Neighbor list builds = 0
+Dangerous builds = 0
+unfix           npt
+undump          npt_dump
+
+Total wall time: 0:00:00

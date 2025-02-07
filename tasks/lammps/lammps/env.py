@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from corral.base import Environment, Tool
 import os
 
-from lammps_evaluate import parse_lammps_input, check_simulation_success
+# from lammps_evaluate import parse_lammps_input, check_simulation_success, check_xyz
 
 @dataclass
 class TaskDefinition:
@@ -110,6 +110,7 @@ Required submission format:
             else:
                 prompt += f"Previous task result: {previous_result}\n"
 
+
         if self.current_task.initial_input:
             for key, value in self.current_task.initial_input.items():
                 prompt += f"- {key}: {value}\n"
@@ -117,6 +118,8 @@ Required submission format:
         if self.current_task.input_from_task:
             status = "available" if self.current_task.input_from_task in self.task_group.results else "not yet available"
             prompt += f"\nThis task uses output from task: {self.current_task.input_from_task} ({status})"
+
+        print("prompt", prompt)
 
         return prompt
 
@@ -149,47 +152,18 @@ Required submission format:
             return 0.0
 
 def create_catalysis_environments() -> Dict[str, Environment]:
-    def check_structure(result, ground_truth)-> float:
+
+    def check_energy_minimization_lammps(result, ground_truth)-> float:
         return 0
 
-    def check_directory(result, ground_truth)-> float:
-        directory_path = ground_truth[0]['data']['directory']
-        if result['answer'] == directory_path and os.path.exists(result['answer']):
-            return 1
-        else:
-            return 0
-        
-    def check_lattice_generation_lammps(result, ground_truth)-> float:
-        score = 0
-        total = 3
-        for gt in ground_truth:
-            if gt['type'] == 'generated_directory':
-                generated_path = gt['data']['directory']
-            elif gt['type'] == 'simulation_config':
-                orig_config = gt['data']
-                # print("generated_path", generated_path)
-        for gt in ground_truth:
-            if gt['type'] == 'file_path':
-                files = gt['data']
-                if 'input.in' in files and not os.path.exists(os.path.join(generated_path, 'input.in')):
-                    return 0
-                else:
-                    input_file_path = os.path.join(generated_path, 'input.in')
-                    generated_config = parse_lammps_input(input_file_path)
-                    if orig_config['lattice_type'] == str(generated_config['lattice_type']) and orig_config['simulation_box'] == str(generated_config['simulation_box']) and orig_config['pbc'] == str(generated_config['pbc']) and orig_config['units'] == generated_config['units']:
-                        score += 1
-                        if check_simulation_success(os.path.join(generated_path, "log.lammps")):
-                            score += 1
-                            if os.path.exists(os.path.join(generated_path, 'structure.xyz')):
-                                score += 1
-        return score/total
-                    
+    def check_structure(result, ground_truth)-> float:
+        return 0              
 
+    directory_path = "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/data/lattice_generation"
 
-    # directory_path = "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/data/lattice_generation"
+    files = os.listdir(directory_path)
 
-    # files = os.listdir(directory_path)
-
+    # file_path = "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/data/energy_minimization/task_1/task_1.json"
     file_path = "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/data/lattice_generation/task_2/task_2.json"
 
     # Open the file and load the JSON data
@@ -197,6 +171,7 @@ def create_catalysis_environments() -> Dict[str, Environment]:
         task = json.load(file)
 
     subtasks = task['subtasks']
+
 
     tasks = {}
     for subtask in subtasks:
@@ -218,29 +193,6 @@ def create_catalysis_environments() -> Dict[str, Environment]:
     task_group = TaskGroup(group_id = task['task_id'], tasks = tasks)
 
 
-    # Create task group
-    # task_group = TaskGroup(
-    #     group_id="catalyst",
-    #     tasks={
-    #         "subtask_1": TaskDefinition(
-    #             name="Directory",
-    #             description="Make a given directory. If it is done successfully print the absolute location of the directory as the final output.",
-    #             tools=["run_bash_command"],
-    #             scoring_fn=check_structure,
-    #             submission_format={"answer": "/path/to/directory"},
-    #             initial_input={"directory" : "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/results/task_1"}
-    #         ),
-
-    #         "subtask_2": TaskDefinition(
-    #             name="LAMMPS Simulation",
-    #             description="Your task is to generate a face centered cubic (FCC) lattice structure for Aluminum using LAMMPS with lattice constant of 4.05 angstrom. The simulation should use metal units, define a 5x5x5 simulation box, set periodic boundary conditions to True, and dump all the coordinates and lattice parameters in Al.xyz file. Save all the related files to the given directory.",
-    #             tools=["run_bash_command", "run_lammps"],
-    #             scoring_fn=check_structure,
-    #             submission_format={"answer": None},
-    #             input_from_task="subtask_1"
-    #         ),
-    #     }
-    # )
 
 # Print task dependencies for reference
     print("\nTask Dependencies:")

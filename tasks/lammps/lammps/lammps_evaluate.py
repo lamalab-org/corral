@@ -1,95 +1,101 @@
 import re
+import numpy as np
+from lammps_extract import extract_lattice_generation_configs, extract_lattice_coordinates
 
-def parse_lammps_input(file_path):
-    """
-    Parse a LAMMPS input file and extract key simulation parameters.
-    """
-    with open(file_path, "r") as file:
-        lines = file.readlines()
+def evaluate_lattice_config(agent_input, actual_input):
+    """Compares two extracted LAMMPS configurations and returns 1 if they match, otherwise 0."""
+    
+    agent_config = extract_lattice_generation_configs(agent_input)
+    actual_config = extract_lattice_generation_configs(actual_input)
 
-    # Initialize a dictionary to store extracted parameters
-    config = {
-        "units": None,
-        "lattice_type": None,
-        "lattice_constant": None,
-        "simulation_box": None,
-        "pbc": None,
-        "dump_file": None
-    }
+    return 1 if agent_config == actual_config else 0
 
-    # Regular expressions to extract values
-    units_pattern = re.compile(r"units\s+(\w+)")
-    lattice_pattern = re.compile(r"lattice\s+(\w+)\s+([\d.]+)")
-    region_pattern = re.compile(r"region\s+\w+\s+block\s+([\d.\s-]+)")
-    boundary_pattern = re.compile(r"boundary\s+(\w)\s+(\w)\s+(\w)")
-    dump_pattern = re.compile(r"dump\s+\d+\s+\w+\s+\w+\s+\d+\s+(\w+\.\w+)")
+def check_compilation_success(input_data):
+    """Checks if the LAMMPS compilation was successful by looking for error keywords in the log.lammps file."""
+    
+    error_keywords = ["ERROR", "FATAL", "Segmentation fault", "Nan"]  # Add more error patterns as needed
 
-    for line in lines:
-        # Extract units
-        if units_pattern.search(line):
-            config["units"] = units_pattern.search(line).group(1)
-
-        # Extract lattice type and constant
-        if lattice_pattern.search(line):
-            config["lattice_type"] = lattice_pattern.search(line).group(1)
-            config["lattice_constant"] = float(lattice_pattern.search(line).group(2))
-
-        # Extract simulation box dimensions
-        if region_pattern.search(line):
-            box_values = region_pattern.search(line).group(1).split()
-            # Calculate box dimensions: end - start for each axis
-            x_dim = float(box_values[1]) - float(box_values[0])
-            y_dim = float(box_values[3]) - float(box_values[2])
-            z_dim = float(box_values[5]) - float(box_values[4])
-            config["simulation_box"] = f"[{x_dim}, {y_dim}, {z_dim}]"
-
-        # Extract periodic boundary conditions
-        if boundary_pattern.search(line):
-            pbc_values = boundary_pattern.search(line).groups()
-            config["pbc"] = "True" if all(p == "p" for p in pbc_values) else "False"
-
-        # Extract dump file name
-        if dump_pattern.search(line):
-            config["dump_file"] = dump_pattern.search(line).group(1)
-
-    return config
-
-def check_simulation_success(log_file_path):
-    """
-    Check if a LAMMPS simulation completed successfully by analyzing the log file.
-    """
-    with open(log_file_path, "r") as file:
-        lines = file.readlines()
-
-    # Check for errors
-    errors = [line for line in lines if "ERROR:" in line]
-    if errors:
-        print("Simulation failed with the following errors:")
-        for error in errors:
-            print(error.strip())
-        return False
-
-    # Check for final timestep (successful completion)
-    final_timestep = [line for line in lines if "Loop time of" in line or "Total wall time" in line]
-    if not final_timestep:
-        print("Simulation did not complete successfully (no final timestep found).")
-        return False
-
-    # Check for warnings
-    warnings = [line for line in lines if "WARNING:" in line]
-    if warnings:
-        print("Simulation completed with warnings:")
-        for warning in warnings:
-            print(warning.strip())
+    # If input_data is bytes, decode it to string
+    if isinstance(input_data, bytes):
+        content = input_data.decode('utf-8', errors='ignore')
+    elif isinstance(input_data, str):
+        # If it's already a string (file path)
+        with open(input_data, 'r') as file:
+            content = file.read()
     else:
-        print("Simulation completed successfully with no errors or warnings.")
+        raise ValueError("Input data must be bytes or file path string")
 
-    return True
+    # Check for error keywords in the content
+    for keyword in error_keywords:
+        if re.search(rf"\b{re.escape(keyword)}\b", content):
+            return 0  # Compilation failed if any of the error keywords are found
+    
+    return 1  # Compilation successful if no error keywords are found
 
-# # Example usage
-# log_file_path = "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/results/lattice_generation/task_2/log.lammps"  # Replace with the path to your log.lammps file
-# success = check_simulation_success(log_file_path)
-# if success:
-#     print("The simulation was successful.")
-# else:
-#     print("The simulation failed.")
+def compare_initial_lattice(file1, file2):
+    """
+    Compare the atomic coordinates of two LAMMPS write_data files.
+
+    Args:
+        file1 (str): Path to the first LAMMPS data file.
+        file2 (str): Path to the second LAMMPS data file.
+
+    Returns:
+        int: 1 if all coordinates match exactly, 0 otherwise.
+    """
+
+    # Load coordinate data
+    coords1 = extract_lattice_coordinates(file1)
+    coords2 = extract_lattice_coordinates(file2)
+
+    # Check if all coordinates match exactly
+    return int(np.array_equal(coords1, coords2))
+
+from ase.io import read
+import numpy as np
+
+def extract_lattice_parameters(file_name):
+    """
+    Extracts the lattice parameters (a, b, c, alpha, beta, gamma) from an ASE-readable file
+    (either .xyz or .data format).
+    
+    Args:
+    file_name (str): Path to the ASE-readable file (e.g., .xyz or .data).
+    
+    Returns:
+    tuple: Lattice constants (a, b, c) and angles (alpha, beta, gamma) in degrees.
+    """
+    
+    # Read the structure from the file
+    atoms = read(file_name)
+
+    print(atoms)
+    
+    # Get the cell (lattice vectors)
+    lattice = atoms.get_cell()
+    
+    # Calculate the lattice constants a, b, c (the lengths of the unit cell vectors)
+    a = np.linalg.norm(lattice[0])  # Length of vector a
+    b = np.linalg.norm(lattice[1])  # Length of vector b
+    c = np.linalg.norm(lattice[2])  # Length of vector c
+    
+    # Calculate the angles alpha, beta, gamma (in degrees) between the lattice vectors
+    alpha = np.degrees(np.arccos(np.dot(lattice[1], lattice[2]) / (b * c)))
+    beta = np.degrees(np.arccos(np.dot(lattice[0], lattice[2]) / (a * c)))
+    gamma = np.degrees(np.arccos(np.dot(lattice[0], lattice[1]) / (a * b)))
+    
+    # Return lattice constants and angles
+    return a, b, c, alpha, beta, gamma
+
+
+if __name__ == "__main__":
+    file1 = "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/data_utils/ground_truth/lattice_generation/task_5/structure.xyz"
+    # file2 = "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/data_utils/ground_truth/lattice_generation/task_5/structure.xyz"
+    # score = compare_initial_lattice(file1, file2)
+    # print(score)
+
+    a, b, c, alpha, beta, gamma = extract_lattice_parameters(file1)
+
+    # Print the results
+    print(f"Lattice Constants: a = {a}, b = {b}, c = {c}")
+    print(f"Angles: alpha = {alpha}, beta = {beta}, gamma = {gamma}")
