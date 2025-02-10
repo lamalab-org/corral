@@ -2,6 +2,7 @@ import json
 
 import anthropic
 from dotenv import load_dotenv
+from prompts import BASELINESYSTEMPROMPT, BASELINEUSERPROMPT
 
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 
