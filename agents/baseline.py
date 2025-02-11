@@ -6,8 +6,6 @@ from prompts import BASELINESYSTEMPROMPT, BASELINEUSERPROMPT
 
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 
-from prompts import BASELINESYSTEMPROMPT, BASELINEUSERPROMPT
-
 load_dotenv("../.env", override=True)
 
 
