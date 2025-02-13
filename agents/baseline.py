@@ -9,11 +9,10 @@ from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 from prompts import BASELINESYSTEMPROMPT, BASELINEUSERPROMPT
 from openai import OpenAI
 
-from .tools import ToolStore
-
-
 
 load_dotenv("../.env", override=True)
+
+# from .tools import ToolStore
 
 
 class ClaudeAgent:
@@ -81,22 +80,22 @@ class VLLMAgent:
 
         # Initialize messages with a starter message
         messages = [{"role": "system", "content": system_prompt,
-                    "role": "user", "content": BASELINEUSERPROMPT}]
-
-        
+                    "role": "user", "content": BASELINEUSERPROMPT,
+                    "role": "task", "content": guide}]
 
         while True:
 
-            # import pdb; pdb.set_trace()
-
             response = self.client.chat.completions.create(
-                model=self.client.models.list().data[0].id,
+                # model=self.client.models.list().data[0].id,
+                model='vllm-llama3.3-70b',
                 max_tokens=1024,
                 messages=messages,
                 tools=self.tools)
                 # tool_choice="auto")
 
             message = response.choices[0].message.content
+
+            # import pdb; pdb.set_trace()
 
             # message = response.content[0].text
             messages.append({"role": "assistant", "content": message})
