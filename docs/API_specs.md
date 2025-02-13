@@ -57,3 +57,161 @@ if __name__ == "__main__":
         uvicorn.run(app, host="0.0.0.0", port=8000)
 
 ```
+
+
+## Tools API
+
+
+```
+from __future__ import annotations
+
+
+# import tool utilities
+from corral.base import Tool, ToolArgument
+from corral.utils import modal_tool, tool
+
+
+
+@tool
+def tool1(arg1: [str, float, int], arg2: [str, float, int]) -> [str, float, int]:
+    """Perform basic math operations.
+
+    Args:
+        Describe the arguments here
+    """
+    
+
+    result = function(arg1, arg2)
+
+
+    return result
+
+### Example percentage calculator
+
+@tool
+def percentage_calculator(value: float, percentage: float = 100.0) -> float:
+    """Calculate percentage of a value.
+
+    Args:
+        value: The base value
+        percentage: The percentage to calculate (defaults to 100.0)
+
+    Returns:
+        float: The calculated result
+    """
+    return (value * percentage) / 100.0
+
+
+
+```
+
+
+## Agent API - Basic Agent
+
+
+```
+
+import json
+
+from dotenv import load_dotenv
+from prompts import BASELINESYSTEMPROMPT, BASELINEUSERPROMPT
+
+from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
+
+from prompts import BASELINESYSTEMPROMPT, BASELINEUSERPROMPT
+from openai import OpenAI
+
+
+class Base_Agent:
+    """General agent implementation"""
+
+    def __init__(self, base_url: str, tools: list(str), args, **kwargs):
+
+        # Base Agent API implementation
+
+        self.client = OpenAI(base_url=base_url, api_key="dummy")
+
+        self.tools = tools
+
+    """ Solve Task function to solve task in the environment """
+
+    def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
+        guide = interface.get_task_guide(task_id)
+
+        system_prompt = BASELINESYSTEMPROMPT.format(guide=guide)
+
+        # Initialize messages with a starter message
+        messages = [{"role": "system", "content": system_prompt,
+                    "role": "user", "content": BASELINEUSERPROMPT,
+                    "role": "task", "content": guide}]
+
+        while True:
+
+            response = self.client.chat.completions.create(
+                model='model_name',
+                max_tokens=1024,
+                messages=messages,
+                tools=self.tools)
+
+            message = response.choices[0].message.content
+
+            messages.append({"role": "assistant", "content": message})
+
+            if "FINAL ANSWER:" in message:
+                print(f"Final answer: {message.split('FINAL ANSWER:')[1].strip()}")
+                return message.split("FINAL ANSWER:")[1].strip()
+
+            if "TOOL CALL:" in message:
+                try:
+                    print(f"Tool call: {message.split('TOOL CALL:')[1].strip()}")
+                    tool_json = message.split("TOOL CALL:")[1].strip()
+                    tool_request = json.loads(tool_json)
+                    result = interface.execute_tool(
+                        task_id, tool_request["tool_name"], tool_request["arguments"]
+                    )
+                    if result.success:
+                        messages.append(
+                            {"role": "user", "content": f"Tool result: {result.result}"}
+                        )
+                    else:
+                        messages.append(
+                            {"role": "user", "content": f"Error: {result.error}"}
+                        )
+                except Exception as e:
+                    messages.append({"role": "user", "content": f"Error: {e!s}"})
+
+
+```
+
+## Calling the Benchmark in Full
+
+```
+
+if __name__ == "__main__":
+    import os
+
+    # Create components
+    interface = BenchmarkInterface()
+
+    # Load Tools from Environment
+
+    
+
+    # Load Agent and Runner
+    agent = Base_Agent(base_url='agent_url')
+    runner = MatAgentBenchmark(interface, agent)
+
+    # Run benchmark
+    result = runner.bench()
+    print("Benchmark completed:")
+    print(f"Average score: {result.average_score}")
+    print(f"Tasks completed: {result.successful_tasks}/{result.total_tasks}")
+
+    # Print detailed results
+    for task_id, task_result in result.task_results.items():
+        print(f"\nTask {task_id}:")
+        print(f"Score: {task_result.score}")
+        print(f"Tool usage: {task_result.tool_statistics}")
+
+
+```

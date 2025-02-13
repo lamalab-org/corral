@@ -131,6 +131,7 @@ if __name__ == "__main__":
     # Create components
     interface = BenchmarkInterface()
 
+    # Load Tools from Environment
 
 
     # agent = ClaudeAgent(api_key=os.getenv("ANTHROPIC_API_KEY"))
