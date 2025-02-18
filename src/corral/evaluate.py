@@ -37,6 +37,12 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()
 
+    def get_available_tools_for_task(self, task_id: str) -> str:
+        """Get list of available tools for a task"""
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/tools")
+        response.raise_for_status()
+        return response.json()
+
     def get_task_guide(self, task_id: str) -> str:
         """Get complete guide for task including tools"""
         response = requests.get(f"{self.base_url}/tasks/{task_id}/guide")

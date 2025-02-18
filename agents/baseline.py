@@ -68,10 +68,9 @@ class ClaudeAgent:
 class VLLMAgent:
     """VLLM-based agent implementation"""
 
-    def __init__(self, base_url: str, tools=None):
+    def __init__(self, base_url: str):
 
         self.client = OpenAI(base_url=base_url, api_key="dummy")
-        self.tools = tools
 
     def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
         guide = interface.get_task_guide(task_id)
@@ -83,6 +82,19 @@ class VLLMAgent:
                     "role": "user", "content": BASELINEUSERPROMPT,
                     "role": "task", "content": guide}]
 
+        # Load Tools from Environment
+        tools_raw = interface.get_available_tools_for_task(task_id)['tools']
+
+        tools = list()
+
+        for tool in tools_raw:
+            tool_dict = dict()
+            tool_dict['type'] = "function"
+            tool_dict['function'] = tool
+
+            tools.append(tool_dict)
+
+
         while True:
 
             response = self.client.chat.completions.create(
@@ -90,12 +102,10 @@ class VLLMAgent:
                 model='vllm-llama3.3-70b',
                 max_tokens=1024,
                 messages=messages,
-                tools=self.tools)
-                # tool_choice="auto")
+                tools=tools, 
+                tool_choice="auto")
 
             message = response.choices[0].message.content
-
-            # import pdb; pdb.set_trace()
 
             # message = response.content[0].text
             messages.append({"role": "assistant", "content": message})
@@ -131,11 +141,8 @@ if __name__ == "__main__":
     # Create components
     interface = BenchmarkInterface()
 
-    # Load Tools from Environment
-
-
     # agent = ClaudeAgent(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    agent = VLLMAgent(base_url='http://litellm.kinlongk.aipg-rancher-amr.intel.com/')
+    agent = VLLMAgent(base_url='model_url')
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark
