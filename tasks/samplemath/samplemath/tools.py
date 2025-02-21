@@ -4,7 +4,7 @@ import modal
 from modal import Image
 
 from corral.base import Tool, ToolArgument
-from corral.utils import modal_tool, tool
+from corral.utils import MODAL_TOOL_REGISTRY, modal_tool, tool
 
 app = modal.App("corral-test")
 
