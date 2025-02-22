@@ -74,6 +74,31 @@ def percentage_calculator(value: float, percentage: float = 100.0) -> float:
 
 ```
 
+### Create tool that would run in [Modal](https://modal.com/) environment
+
+```python
+from corral.utils import modal_tool, MODAL_TOOL_REGISTRY
+@modal_tool(app=app, image=Image.debian_slim().pip_install("numerizer"), memory=512)
+def number_convert(text: str, return_float: bool = False) -> str:
+    """
+    Convert number words to numeric representation.
+
+    Args:
+        text: Text containing number words (e.g. 'forty two', 'one million')
+        return_float: Whether to return float for decimal values (choices: [True, False])
+
+    Returns:
+        String containing the numeric representation
+    """
+    from numerizer import numerize
+
+    result = numerize(text)
+    return str(float(result)) if return_float and "." in result else result
+
+
+# TODO: decorator could not return the tool instance
+number_converter = MODAL_TOOL_REGISTRY["number_convert"]
+```python
 
 ## 2. Create agent example:
 
@@ -117,3 +142,18 @@ runner = MatAgentBenchmark(interface, agent)
 result = runner.bench()
 ```
 
+## Development 
+
+This project uses pre-commit hooks to maintain code quality. The hooks run automatically on each commit to ensure consistent code formatting and catch common issues early.
+
+### Setup
+
+1. Install Python dependencies: `pip install pre-commit`
+2. Install the pre-commit hooks: `pre-commit install`
+
+The checks will run automatically when you commit changes. However, you can also run them manually:
+
+- Run on all files: `pre-commit run --all-files`
+- Run on specific files: `pre-commit run --files path/to/file1.py path/to/file2.py`
+
+For best experience, install `ruff` in your editor to format code on save and to show linting errors.

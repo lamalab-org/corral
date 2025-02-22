@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import litellm
 from loguru import logger
 
-from corral.agents.react import ReActAgent  
+from corral.agents.react import ReActAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 
 def setup_litellm():
