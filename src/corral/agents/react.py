@@ -1,14 +1,11 @@
-from __future__ import annotations
-
 import json
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from litellm import completion
 
-if TYPE_CHECKING:
-    from corral.evaluate import BenchmarkInterface
+from corral.evaluate import BenchmarkInterface
 
 
 @dataclass

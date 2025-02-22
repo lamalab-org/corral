@@ -41,7 +41,7 @@ Task: {input}
 
 REACTTIME = "You have {actions} actions or iteration loops left."
 
-BASELINESYSTEMPROMPT = '''You are solving a benchmark task. Here is the task and tool information:
+BASELINESYSTEMPROMPT = """You are solving a benchmark task. Here is the task and tool information:
 {guide}
 
 To use a tool, format your response exactly like this:
@@ -57,7 +57,7 @@ TOOL CALL:
 When you have the final answer, respond with:
 FINAL ANSWER: {{"answer": your_answer_here}}
 
-Think step by step and explain your reasoning.'''
+Think step by step and explain your reasoning."""
 
 BASELINEUSERPROMPT = (
     """Please solve this task. Think step by step and use the tools as needed."""

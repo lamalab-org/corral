@@ -1,40 +1,40 @@
-from typing import Dict, List, Callable, Optional, Any
+import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
+
+import uvicorn
+from loguru import logger
+from tools import create_tools
+
 from corral.base import Environment, Tool
 from corral.server import create_benchmark_server
-from tools import create_tools
-import uvicorn
-import json
 
-from typing import Dict, List, Callable, Optional, Any
-from dataclasses import dataclass, field
-from corral.base import Environment, Tool
-
-from typing import Dict, List, Callable, Optional, Any
-from dataclasses import dataclass, field
-from corral.base import Environment, Tool
 
 @dataclass
 class TaskDefinition:
     """Definition of a task with its requirements and scoring"""
+
     name: str
     description: str
-    tools: List[str]
-    scoring_fn: Callable[[Dict], float]
-    submission_format: Dict[str, str]
+    tools: list[str]
+    scoring_fn: Callable[[dict], float]
+    submission_format: dict[str, str]
     # Either use output from another task or custom input
-    input_from_task: Optional[str] = None
-    initial_input: Optional[Dict[str, Any]] = None
+    input_from_task: str | None = None
+    initial_input: dict[str, Any] | None = None
+
 
 @dataclass
 class TaskGroup:
     """Container for related tasks"""
-    group_id: str
-    tasks: Dict[str, TaskDefinition]
-    results: Dict[str, Any] = field(default_factory=dict)
-    scores: Dict[str, float] = field(default_factory=dict)
 
-    def get_task_input(self, task_id: str) -> Optional[Dict[str, Any]]:
+    group_id: str
+    tasks: dict[str, TaskDefinition]
+    results: dict[str, Any] = field(default_factory=dict)
+    scores: dict[str, float] = field(default_factory=dict)
+
+    def get_task_input(self, task_id: str) -> dict[str, Any] | None:
         """Get input for a task either from another task or initial input"""
         task = self.tasks.get(task_id)
         if not task:
@@ -44,12 +44,12 @@ class TaskGroup:
             return {"result": self.results[task.input_from_task]}
         return task.initial_input
 
-    def store_result(self, task_id: str, result: Dict[str, Any], score: float) -> None:
+    def store_result(self, task_id: str, result: dict[str, Any], score: float) -> None:
         """Store task result and score"""
         self.results[task_id] = result
         self.scores[task_id] = score
 
-    def get_task_dependencies(self) -> Dict[str, List[str]]:
+    def get_task_dependencies(self) -> dict[str, list[str]]:
         """Get dictionary of task dependencies"""
         dependencies = {}
         for task_id, task in self.tasks.items():
@@ -59,13 +59,12 @@ class TaskGroup:
             dependencies[task_id] = deps
         return dependencies
 
+
 class TaskEnvironment(Environment):
     """Environment that works with a task group"""
+
     def __init__(
-        self,
-        task_id: str,
-        task_group: TaskGroup,
-        available_tools: Dict[str, Tool]
+        self, task_id: str, task_group: TaskGroup, available_tools: dict[str, Tool]
     ):
         self.task_group = task_group
         self.task_id = task_id  # Individual task ID within the group
@@ -86,7 +85,7 @@ class TaskEnvironment(Environment):
                 self.add_tool(available_tools[tool_name])
 
     def get_task_prompt(self) -> str:
-        input_data = self.task_group.get_task_input(self.task_id)
+        _input_data = self.task_group.get_task_input(self.task_id)
 
         prompt = f"""Task: {self.current_task.name}
 Description: {self.current_task.description}
@@ -98,7 +97,10 @@ Required submission format:
 
         prompt += "\nAvailable input data:\n"
 
-        if self.current_task.input_from_task and self.current_task.input_from_task in self.task_group.results:
+        if (
+            self.current_task.input_from_task
+            and self.current_task.input_from_task in self.task_group.results
+        ):
             # If this task depends on a previous task, show its result
             previous_result = self.task_group.results[self.current_task.input_from_task]
             if isinstance(previous_result, dict) and "answer" in previous_result:
@@ -111,7 +113,11 @@ Required submission format:
                 prompt += f"- {key}: {value}\n"
 
         if self.current_task.input_from_task:
-            status = "available" if self.current_task.input_from_task in self.task_group.results else "not yet available"
+            status = (
+                "available"
+                if self.current_task.input_from_task in self.task_group.results
+                else "not yet available"
+            )
             prompt += f"\nThis task uses output from task: {self.current_task.input_from_task} ({status})"
 
         return prompt
@@ -124,7 +130,7 @@ Required submission format:
         try:
             # Clean the submission - take only the numerical answer part
             submission_str = self.state.submitted_answer.strip()
-            print(f"Raw submission: {submission_str}")  # Debug print
+            logger.info(f"Raw submission: {submission_str}")  # Debug logger.info
 
             # Try to parse as JSON first
             try:
@@ -134,24 +140,25 @@ Required submission format:
                 submission = {"answer": submission_str}
 
             # Store result in task group
-            print(f"Parsed submission: {submission}")  # Debug print
+            logger.info(f"Parsed submission: {submission}")  # Debug logger.info
             score = self.current_task.scoring_fn(submission)
             self.task_group.store_result(self.task_id, submission, score)
 
             return score
         except Exception as e:
-            print(f"Error scoring submission for task {self.task_id}: {str(e)}")
-            print(f"Submission was: {self.state.submitted_answer}")
+            logger.info(f"Error scoring submission for task {self.task_id}: {e!s}")
+            logger.info(f"Submission was: {self.state.submitted_answer}")
             return 0.0
 
-def create_catalysis_environments() -> Dict[str, Environment]:
+
+def create_catalysis_environments() -> dict[str, Environment]:
     """Create environments for catalysis tasks"""
 
-    def score_addition(result: Dict) -> float:
+    def score_addition(result: dict) -> float:
         score = 0.0
         if "answer" in result:
             try:
-                answer = float(result["answer"])
+                _answer = float(result["answer"])
                 score = 1.0
             except ValueError:
                 pass
@@ -167,7 +174,7 @@ def create_catalysis_environments() -> Dict[str, Environment]:
                 tools=["calculator"],
                 scoring_fn=score_addition,
                 submission_format={"answer": "numerical result (example: 8)"},
-                initial_input={"x": 3, "y": 5}
+                initial_input={"x": 3, "y": 5},
             ),
             "task2": TaskDefinition(
                 name="Second Addition",
@@ -175,15 +182,15 @@ def create_catalysis_environments() -> Dict[str, Environment]:
                 tools=["calculator"],
                 scoring_fn=score_addition,
                 submission_format={"answer": "numerical result (example: 12)"},
-                input_from_task="task1"
-            )
-        }
+                input_from_task="task1",
+            ),
+        },
     )
 
-    # Print task dependencies for reference
-    print("\nTask Dependencies:")
+    # logger.info task dependencies for reference
+    logger.info("\nTask Dependencies:")
     for task_id, deps in task_group.get_task_dependencies().items():
-        print(f"- {task_id}: depends on {deps}")
+        logger.info(f"- {task_id}: depends on {deps}")
 
     # Create environments for all tasks
     available_tools = create_tools()
@@ -192,23 +199,22 @@ def create_catalysis_environments() -> Dict[str, Environment]:
     for task_id in task_group.tasks:
         # All environments share the same task group instance
         environments[task_id] = TaskEnvironment(
-            task_id=task_id,
-            task_group=task_group,
-            available_tools=available_tools
+            task_id=task_id, task_group=task_group, available_tools=available_tools
         )
 
     return environments
+
 
 if __name__ == "__main__":
     # Create all environments
     environments = create_catalysis_environments()
 
-    print("\nCreated Environments:")
+    logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
-        print(f"- {env_id}")
-        print(f"  Task: {env.current_task.name}")
+        logger.info(f"- {env_id}")
+        logger.info(f"  Task: {env.current_task.name}")
         if env.current_task.input_from_task:
-            print(f"  Depends on: {env.current_task.input_from_task}")
+            logger.info(f"  Depends on: {env.current_task.input_from_task}")
 
     # Create and run server
     app = create_benchmark_server(environments)
