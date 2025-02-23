@@ -1,15 +1,10 @@
-from __future__ import annotations
-
 import inspect
-from typing import TYPE_CHECKING, Callable, get_type_hints
+from collections.abc import Callable, Sequence
+from typing import get_type_hints
+
+from modal import App, Image, Mount, Secret, Volume
 
 from corral.base import ModalTool, Tool, ToolArgument
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from modal import App, Image, Mount, Secret, Volume
-
 
 MODAL_TOOL_REGISTRY = {}
 

@@ -157,7 +157,7 @@ class BenchmarkResult:
             if trials.trials and trials.trials[0].tool_statistics:
                 task_table.add_row("Tool Usage", "")
                 for tool, stats in trials.trials[0].tool_statistics.items():
-                    if isinstance(stats, (int, float)):
+                    if isinstance(stats, int | float):
                         task_table.add_row(f"  • {tool}", str(stats))
                     elif isinstance(stats, list):
                         task_table.add_row(f"  • {tool}", ", ".join(map(str, stats)))
