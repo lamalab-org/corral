@@ -120,6 +120,8 @@ Required submission format:
             )
             prompt += f"\nThis task uses output from task: {self.current_task.input_from_task} ({status})"
 
+        logger.info(f"Task prompt for {self.task_id}:\n{prompt}")
+
         return prompt
 
     def score(self) -> float:
@@ -141,7 +143,8 @@ Required submission format:
 
             # Store result in task group
             logger.info(f"Parsed submission: {submission}")  # Debug logger.info
-            score = self.current_task.scoring_fn(submission)
+            score = self.current_task.scoring_fn(submission["answer"])
+
             self.task_group.store_result(self.task_id, submission, score)
 
             return score
@@ -164,8 +167,16 @@ def create_catalysis_environments() -> dict[str, Environment]:
                 pass
         return score
 
-    def check_structure(result) -> float:
-        logger.info(result)
+    def check_structure(path) -> float:
+        """Check if the is a valid path to a cif file"""
+
+        from pymatgen.core import Structure
+
+        strucutre = Structure.from_file(path)
+
+        # if strecture is not None
+        if strucutre:
+            return 1.0
         return 0
 
     # Create task group
@@ -183,26 +194,26 @@ def create_catalysis_environments() -> dict[str, Environment]:
                     "path_to_write_dir": "/Users/n0w0f/git/n0w0f/mat-agent-bench/tasks/catalyst/temp",
                 },
             ),
-            "task_2": TaskDefinition(
-                name="Create slab",
-                description="Create a slab from the structure of Si and save it as a pickle file and submit the path to the pickle file",
-                tools=[
-                    "create_pymatgen_structure_from_cif",
-                    "create_slab_from_structure",
-                ],
-                scoring_fn=check_structure,
-                submission_format={"answer": "/path/to/picklefile"},
-                input_from_task="task_1",
-            ),
-            # retrive strucutre of co2 molecule
-            "task_3": TaskDefinition(
-                name="Retrieve structure",
-                description="Retrieve structure of Si molecule from Materials Project and save it as a pickle file.",
-                tools=["get_structure_from_mp"],
-                scoring_fn=check_structure,
-                submission_format={"answer": "/path/to/picklefile"},
-                initial_input={"mp_id": "mp-2204849"},
-            ),
+            # "task_2": TaskDefinition(
+            #     name="Create slab",
+            #     description="Create a slab from the structure of Si and save it as a pickle file and submit the path to the pickle file",
+            #     tools=[
+            #         "create_pymatgen_structure_from_cif",
+            #         "create_slab_from_structure",
+            #     ],
+            #     scoring_fn=check_structure,
+            #     submission_format={"answer": "/path/to/picklefile"},
+            #     input_from_task="task_1",
+            # ),
+            # # retrive strucutre of co2 molecule
+            # "task_3": TaskDefinition(
+            #     name="Retrieve structure",
+            #     description="Retrieve structure of Si molecule from Materials Project and save it as a pickle file.",
+            #     tools=["get_structure_from_mp"],
+            #     scoring_fn=check_structure,
+            #     submission_format={"answer": "/path/to/picklefile"},
+            #     initial_input={"mp_id": "mp-2204849"},
+            # ),
             # "task_4": TaskDefinition(
             #     name="Create slab",
             #     description=f"""Create a slab from Si slab with CO2 molecule adsorbed on it.

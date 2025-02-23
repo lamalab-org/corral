@@ -10,7 +10,7 @@ load_dotenv("../.env")
 
 
 @tool
-def get_structure_from_mp(mp_id: int, path_to_write_dir: str) -> Path:
+def get_structure_from_mp(mp_id: str, path_to_write_dir: str) -> Path:
     """Get pymatgen structure from MP API given material id and save it as a cif file.
 
     Args:
@@ -37,7 +37,6 @@ def create_pymatgen_structure_from_cif(cif_path: str) -> str:
 
     Args:
         cif_path: Path to cif file
-        path_to_write_dir: Path to directory where pickle file will be saved
     """
     import pickle
 
@@ -54,7 +53,7 @@ def create_pymatgen_structure_from_cif(cif_path: str) -> str:
 @tool
 def create_slab_from_structure(
     structure_path: str,
-    miller_index=None,
+    miller_index: tuple = (1, 1, 1),
     min_slab_size: int = 12,
     min_vacuum_size: int = 5,
     primitive: bool = True,
@@ -63,7 +62,6 @@ def create_slab_from_structure(
 
     Args:
         structure_path: Path to cif or pickle file containing structure
-        path_to_write_dir: Path to directory where cif file will be saved
         miller_index: Miller index of the surface
         min_slab_size: Minimum slab size
         min_vacuum_size: Minimum vacuum size
@@ -75,8 +73,8 @@ def create_slab_from_structure(
     from pymatgen.core.surface import SlabGenerator
 
     # Load structure from cif or pickle
-    if miller_index is None:
-        miller_index = (1, 0, 0)
+    # if miller_index is None:
+    #     miller_index = (1, 0, 0)
     if structure_path.endswith(".cif"):
         structure = Structure.from_file(structure_path)
     elif structure_path.endswith(".pkl"):
