@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum, StrEnum
-from typing import Any, Callable
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -285,5 +286,5 @@ Example tool call format:
         score = self.score()  # Using existing abstract score method
         self.state.score = score
         self.state.is_completed = True
-        self.state.end_time = datetime.now()
+        self.state.end_time = datetime.now(tz=timezone.utc)
         return score

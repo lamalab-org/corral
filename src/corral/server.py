@@ -1,11 +1,9 @@
-from typing import Dict
-
 from fastapi import FastAPI, HTTPException
 
 from corral.base import Environment, ToolRequest
 
 
-def create_benchmark_server(environments: Dict[str, Environment]) -> FastAPI:
+def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
     app = FastAPI()
 
     @app.get("/tasks")
@@ -46,7 +44,7 @@ def create_benchmark_server(environments: Dict[str, Environment]) -> FastAPI:
             )
             return {"result": result}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     @app.get("/tasks/{task_id}/state")
     def get_state(task_id: str):
