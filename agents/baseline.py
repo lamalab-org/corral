@@ -2,6 +2,7 @@ import json
 
 import anthropic
 from dotenv import load_dotenv
+from loguru import logger
 from prompts import BASELINESYSTEMPROMPT, BASELINEUSERPROMPT
 
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
@@ -35,12 +36,14 @@ class ClaudeAgent:
             messages.append({"role": "assistant", "content": message})
 
             if "FINAL ANSWER:" in message:
-                print(f"Final answer: {message.split('FINAL ANSWER:')[1].strip()}")
+                logger.info(
+                    f"Final answer: {message.split('FINAL ANSWER:')[1].strip()}"
+                )
                 return message.split("FINAL ANSWER:")[1].strip()
 
             if "TOOL CALL:" in message:
                 try:
-                    print(f"Tool call: {message.split('TOOL CALL:')[1].strip()}")
+                    logger.info(f"Tool call: {message.split('TOOL CALL:')[1].strip()}")
                     tool_json = message.split("TOOL CALL:")[1].strip()
                     tool_request = json.loads(tool_json)
                     result = interface.execute_tool(
@@ -68,12 +71,12 @@ if __name__ == "__main__":
 
     # Run benchmark
     result = runner.bench()
-    print("Benchmark completed:")
-    print(f"Average score: {result.average_score}")
-    print(f"Tasks completed: {result.successful_tasks}/{result.total_tasks}")
+    logger.info("Benchmark completed:")
+    logger.info(f"Average score: {result.average_score}")
+    logger.info(f"Tasks completed: {result.successful_tasks}/{result.total_tasks}")
 
-    # Print detailed results
+    # logger.info detailed results
     for task_id, task_result in result.task_results.items():
-        print(f"\nTask {task_id}:")
-        print(f"Score: {task_result.score}")
-        print(f"Tool usage: {task_result.tool_statistics}")
+        logger.info(f"\nTask {task_id}:")
+        logger.info(f"Score: {task_result.score}")
+        logger.info(f"Tool usage: {task_result.tool_statistics}")

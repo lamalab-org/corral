@@ -40,5 +40,4 @@ def calculate_lattice_energy(structure_file: str) -> float:
     energy = _calculate_lattice_energy(structure_file)
     if energy is None:
         raise ValueError("Failed to calculate lattice energy")
-    else:
-        return energy
+    return energy
