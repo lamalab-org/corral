@@ -1,11 +1,15 @@
 import inspect
-from functools import wraps
-from typing import Any, Callable, List, get_type_hints
+from collections.abc import Callable, Sequence
+from typing import get_type_hints
 
-from corral.base import Tool, ToolArgument
+from modal import App, Image, Mount, Secret, Volume
+
+from corral.base import ModalTool, Tool, ToolArgument
+
+MODAL_TOOL_REGISTRY = {}
 
 
-def parse_docstring(func: Callable) -> tuple[str, List[ToolArgument]]:
+def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
     """Parse function docstring to get description and arguments"""
     doc = inspect.getdoc(func)
     if not doc:
@@ -23,10 +27,12 @@ def parse_docstring(func: Callable) -> tuple[str, List[ToolArgument]]:
             break
 
     if not args_section:
-        raise ValueError(f"Docstring must have an 'Args:' section")
+        raise ValueError("Docstring must have an 'Args:' section")
 
     # Parse arguments section, skip the "Args:" line
-    args_lines = [line.strip() for line in args_section.splitlines()[1:] if line.strip()]
+    args_lines = [
+        line.strip() for line in args_section.splitlines()[1:] if line.strip()
+    ]
     arguments = []
 
     # Get type hints from function
@@ -48,8 +54,10 @@ def parse_docstring(func: Callable) -> tuple[str, List[ToolArgument]]:
             choices_str = desc_parts[1].split(")", 1)[0].strip()
             try:
                 choices = eval(choices_str)  # Convert string representation to list
-            except:
-                raise ValueError(f"Invalid choices format for argument {arg_name}")
+            except ValueError:
+                raise ValueError(
+                    f"Invalid choices format for argument {arg_name}"
+                ) from None
 
         # Get type from type hints
         if arg_name not in type_hints:
@@ -80,44 +88,21 @@ def parse_docstring(func: Callable) -> tuple[str, List[ToolArgument]]:
 def tool(func: Callable) -> Tool:
     """
     Decorator to convert a function into a Tool. The decorated function must have:
-    1. A complete docstring with description and Args section
-    2. Type hints for all parameters
-    3. A return type hint
+    1. A complete docstring with description and Args section.
+    2. Type hints for all parameters.
+    3. A return type hint.
 
     The docstring must follow this format:
     ```
-    Brief description of what the tool does.
+                Brief description of what the tool does.
 
-    Args:
-        param1: Description of first parameter (choices: ["optional", "list", "of", "choices"])
-        param2: Description of second parameter
-        ...
+                Args:
+                    param1: Description of first parameter (choices: ["optional", "list", "of", "choices"])
+                    param2: Description of second parameter
+                    ...
 
-    Returns:
-        Description of what the function returns
-    ```
-
-    Example:
-    ```python
-    @tool
-    def calculator(operation: str, x: float, y: float) -> float:
-        '''Perform basic math operations.
-
-        Args:
-            operation: Operation to perform (choices: ["add", "subtract", "multiply", "divide"])
-            x: First number to operate on
-            y: Second number to operate on
-
-        Returns:
-            float: Result of the mathematical operation
-        '''
-        operations = {
-            "add": lambda: x + y,
-            "subtract": lambda: x - y,
-            "multiply": lambda: x * y,
-            "divide": lambda: x / y if y != 0 else "Error: Division by zero",
-        }
-        return operations[operation]()
+                Returns:
+                    Description of what the function returns
     ```
 
     Args:
@@ -164,7 +149,7 @@ def tool(func: Callable) -> Tool:
         description, arguments = parse_docstring(func)
     except Exception as e:
         raise ValueError(
-            f"Error parsing docstring for function {func.__name__}: {str(e)}. "
+            f"Error parsing docstring for function {func.__name__}: {e!s}. "
             "Please ensure it follows the required format shown in the decorator documentation."
         ) from e
 
@@ -187,3 +172,68 @@ def tool(func: Callable) -> Tool:
             return str(func(**kwargs))
 
     return FunctionTool()
+
+
+def create_modal_function(func: Callable, app: App, **modal_kwargs) -> Callable:
+    """Create a Modal function with the given configuration."""
+    modal_kwargs = {k: v for k, v in modal_kwargs.items() if v is not None}
+    return app.function(**modal_kwargs)(func)
+
+
+def modal_tool(
+    app: App,
+    image: Image | None = None,
+    secrets: Sequence[Secret] | None = None,
+    mounts: Sequence[Mount] | None = None,
+    volumes: dict[str, Volume] | None = None,
+    memory: int | None = None,
+    timeout: int | None = None,
+    cpu: float | None = None,
+    retries: int | None = None,
+    gpu: str | None = None,
+    keep_warm: int | None = None,
+    block_network: bool = False,
+    **kwargs,
+):
+    """
+    Decorator that returns a ModalTool instance (which inherits from Tool)
+    that can be used both as a Tool and as a Modal function.
+    """
+    if app is None:
+        raise ValueError(
+            "The 'app' argument is required. This is the Modal App instance."
+        )
+
+    modal_kwargs = {
+        "image": image,
+        "secrets": secrets,
+        "mounts": mounts,
+        "volumes": volumes,
+        "memory": memory,
+        "timeout": timeout,
+        "cpu": cpu,
+        "retries": retries,
+        "gpu": gpu,
+        "keep_warm": keep_warm,
+        "block_network": block_network,
+        **kwargs,
+    }
+
+    def decorator(func: Callable):
+        modal_func = create_modal_function(func, app, **modal_kwargs)
+        description, arguments = parse_docstring(func)
+
+        tool_instance = ModalTool(
+            modal_func=modal_func,
+            name=func.__name__,
+            description=description,
+            arguments=arguments,
+        )
+
+        # Register the tool for later use
+        MODAL_TOOL_REGISTRY[func.__name__] = tool_instance
+
+        # Return the modal function
+        return modal_func
+
+    return decorator
