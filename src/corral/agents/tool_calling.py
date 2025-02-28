@@ -23,7 +23,7 @@ REACT_PROMPT_NO_TOOL = """Task Guide:
 
 {task_guide}
 
-Think what to do next. You can use some of the tools available in the system.
+You must think what to do next. You can use some of the tools available in the system.
 
 When you think that the task is completed, you can submit the answer.
 For that, answer with: "Final Answer: <your answer>". It is very important to follow this format.
@@ -47,12 +47,14 @@ class ToolCallingAgent:
         self,
         model: str = "gpt-4",
         max_iterations: int = 10,
+        api_endpoint: Optional[str] = None,
         system_prompt: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the agent"""
         self.model = model
         self.max_iterations = max_iterations
+        self.api_endpoint = api_endpoint
         if system_prompt:
             self.system_prompt = system_prompt
         self.kwargs = kwargs
@@ -71,6 +73,7 @@ class ToolCallingAgent:
             model=self.model,
             messages=messages,
             tools=tools,
+            api_base=self.api_endpoint,
             tool_choice="auto",
         )
         logger.info(f"Response: {response}")
@@ -157,8 +160,9 @@ class ToolCallingAgent:
         if history is None:
             history = []
 
-        tools = interface.get_available_tools_for_task(task_id)
-        task_guide = interface.get_task_id(task_id)
+        tools = interface.get_available_tools(task_id)
+        # I think this task prompt is without the tools descriptions
+        task_guide = interface.get_task_prompt(task_id)
         messages = self.create_prompt(task_guide=task_guide, history=history)
 
         for i in range(self.max_iterations):
