@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-import json
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import TYPE_CHECKING
 
-import litellm
+if TYPE_CHECKING:
+    from corral.evaluate import BenchmarkInterface
+
+import json
+from typing import Any
+
 from loguru import logger
 
-from corral.evaluate import BenchmarkInterface
-
-
-class LiteLLMMessage(TypedDict, total=False):
-    role: str
-    content: str
-    tool_call_id: Optional[str]
-    name: Optional[str]
-
+from corral.agents.utils import LiteLLMMessage, llm_tool_call
 
 # This should go into the prompt management system
 # ToDo: Implement a prompt management system
@@ -47,8 +43,9 @@ class ToolCallingAgent:
         self,
         model: str = "gpt-4",
         max_iterations: int = 10,
-        api_endpoint: Optional[str] = None,
-        system_prompt: Optional[str] = None,
+        api_endpoint: str | None = None,
+        system_prompt: str | None = None,
+        temperature: float = 0.7,
         **kwargs,
     ):
         """Initialize the agent"""
@@ -57,38 +54,19 @@ class ToolCallingAgent:
         self.api_endpoint = api_endpoint
         if system_prompt:
             self.system_prompt = system_prompt
+        self.temperature = temperature
         self.kwargs = kwargs
 
-    def format_call(
-        self, messages: List[LiteLLMMessage], tools: List[Dict[str, Any]]
-    ) -> Any:
-        """Call the LiteLLM API with the given messages and tools
-        Args:
-            messages (List[LiteLLMMessage]): The messages to send to LiteLLM.
-            tools (List[Dict[str, Any]]): The tools to send to LiteLLM.
-        Returns:
-            Any: The response from LiteLLM.
-        """
-        response = litellm.completion(
-            model=self.model,
-            messages=messages,
-            tools=tools,
-            api_base=self.api_endpoint,
-            tool_choice="auto",
-        )
-        logger.info(f"Response: {response}")
-        return response.choices[0].message
-
     def create_history_messages(
-        self, history: List[Dict[str, Any]]
-    ) -> List[LiteLLMMessage]:
+        self, history: list[dict[str, Any]]
+    ) -> list[LiteLLMMessage]:
         """Create LiteLLMMessage objects from history items ensuring they have required fields
         Args:
             history (List[Dict[str, Any]]): The history items to convert.
         Returns:
             List[LiteLLMMessage]: The converted history items.
         """
-        history_messages: List[LiteLLMMessage] = []
+        history_messages: list[LiteLLMMessage] = []
         required_fields = {"role", "content"}
 
         for item in history:
@@ -120,8 +98,8 @@ class ToolCallingAgent:
                 )
 
     def create_prompt(
-        self, task_guide: str, history: List[Dict[str, Any]]
-    ) -> List[LiteLLMMessage]:
+        self, task_guide: str, history: list[dict[str, Any]]
+    ) -> list[LiteLLMMessage]:
         """Create the initial prompt messages for the agent
         Args:
             task_guide (str): The task guide to use.
@@ -129,7 +107,7 @@ class ToolCallingAgent:
         Returns:
             List[LiteLLMMessage]: The prompt messages.
         """
-        messages: List[LiteLLMMessage] = [
+        messages: list[LiteLLMMessage] = [
             {"role": "system", "content": self.system_prompt},
             {
                 "role": "user",
@@ -146,7 +124,7 @@ class ToolCallingAgent:
         self,
         interface: BenchmarkInterface,
         task_id: str,
-        history: List[Dict[str, Any]] = None,
+        history: list[dict[str, Any]] | None = None,
     ) -> str:
         """Run the agent to solve the task
         Args:
@@ -165,8 +143,15 @@ class ToolCallingAgent:
         task_guide = interface.get_task_prompt(task_id)
         messages = self.create_prompt(task_guide=task_guide, history=history)
 
-        for i in range(self.max_iterations):
-            llm_response = self.format_call(messages, tools)
+        for _i in range(self.max_iterations):
+            llm_response = llm_tool_call(
+                model=self.model,
+                messages=messages,
+                tools=tools,
+                temperature=self.temperature,
+                api_endpoint=self.api_endpoint,
+                **self.kwargs,
+            )
 
             content = llm_response.content
             if content:
