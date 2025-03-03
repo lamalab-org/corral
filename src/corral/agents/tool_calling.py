@@ -9,21 +9,9 @@ import json
 from typing import Any
 
 from loguru import logger
+from promptstore import PromptStore
 
 from corral.agents.utils import LiteLLMMessage, llm_tool_call
-
-# This should go into the prompt management system
-# ToDo: Implement a prompt management system
-# ToDo: Move this to the prompt management system
-REACT_PROMPT_NO_TOOL = """Task Guide:
-
-{task_guide}
-
-You must think what to do next. You can use some of the tools available in the system.
-
-When you think that the task is completed, you can submit the answer.
-For that, answer with: "Final Answer: <your answer>". It is very important to follow this format.
-"""
 
 
 class ToolCallingAgent:
@@ -33,11 +21,12 @@ class ToolCallingAgent:
     Args:
         model (str): The LiteLLM model to use. Defaults to "gpt-4".
         max_iterations (int): The maximum number of iterations to run. Defaults to 10.
+        api_endpoint (str): The API endpoint to use when using VLLM. Defaults to None.
         system_prompt (str): The system prompt to use. Defaults to "You are a helpful AI assistant that solves tasks step by step."
+        temperature (float): The temperature to use. Defaults to 0.7.
+        self.store(PromptStore): The prompt store to use. Defaults to "./prompts".
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
     """
-
-    system_prompt = "You are a helpful AI assistant that solves tasks step by step."
 
     def __init__(
         self,
@@ -52,9 +41,9 @@ class ToolCallingAgent:
         self.model = model
         self.max_iterations = max_iterations
         self.api_endpoint = api_endpoint
-        if system_prompt:
-            self.system_prompt = system_prompt
+        self.system_prompt = system_prompt
         self.temperature = temperature
+        self.store = PromptStore("./prompts")
         self.kwargs = kwargs
 
     def create_history_messages(
@@ -98,7 +87,7 @@ class ToolCallingAgent:
                 )
 
     def create_prompt(
-        self, task_guide: str, history: list[dict[str, Any]]
+        self, prompt: PromptStore, task_guide: str, history: list[dict[str, Any]]
     ) -> list[LiteLLMMessage]:
         """Create the initial prompt messages for the agent
         Args:
@@ -107,13 +96,16 @@ class ToolCallingAgent:
         Returns:
             List[LiteLLMMessage]: The prompt messages.
         """
-        messages: list[LiteLLMMessage] = [
-            {"role": "system", "content": self.system_prompt},
+        messages = list[LiteLLMMessage] = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+
+        messages.append(
             {
                 "role": "user",
-                "content": REACT_PROMPT_NO_TOOL.format(task_guide=task_guide),
-            },
-        ]
+                "content": prompt.fill({"task_guide": task_guide}),
+            }
+        )
 
         if history:
             messages.extend(self.create_history_messages(history))
@@ -125,6 +117,7 @@ class ToolCallingAgent:
         interface: BenchmarkInterface,
         task_id: str,
         history: list[dict[str, Any]] | None = None,
+        prompt_uuid: str | None = "fe04453b-5469-4611-bba6-6d81487df787",
     ) -> str:
         """Run the agent to solve the task
         Args:
@@ -135,13 +128,17 @@ class ToolCallingAgent:
         Returns:
             str: The final answer from the agent.
         """
+        user_prompt = self.store.get(prompt_uuid)
+
         if history is None:
             history = []
 
         tools = interface.get_available_tools(task_id)
         # I think this task prompt is without the tools descriptions
         task_guide = interface.get_task_prompt(task_id)
-        messages = self.create_prompt(task_guide=task_guide, history=history)
+        messages = self.create_prompt(
+            user_prompt, task_guide=task_guide, history=history
+        )
 
         for _i in range(self.max_iterations):
             llm_response = llm_tool_call(

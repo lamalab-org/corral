@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from litellm import completion
+from promptstore import PromptStore
 
 
 @dataclass
@@ -32,6 +33,7 @@ class ReActAgent:
     def __init__(self, model: str = "gpt-4", max_iterations: int = 10):
         self.model = model
         self.max_iterations = max_iterations
+        self.store = PromptStore("./prompts")
 
     def get_llm_response(self, prompt: str) -> str:
         """Get response from LLM using LiteLLM"""
@@ -71,31 +73,28 @@ class ReActAgent:
 
         return thought, action
 
-    def create_prompt(self, task_guide: str, history: list[str]) -> str:
+    def create_prompt(
+        self, user_prompt_uuid, task_guide: str, history: list[str]
+    ) -> str:
         """Create prompt for LLM including context and history"""
-        return f"""Task Guide: {task_guide}
+        prompt = self.store.get(user_prompt_uuid)
+        return prompt.fill(
+            {"task_guide": task_guide}, {"history": chr(10).join(history)}
+        )
 
-Previous steps:
-{chr(10).join(history)}
-
-Think about what to do next and respond in the following format:
-
-Thought: [your reasoning]
-Action: [tool name]
-Action Input: [tool arguments as JSON]
-
-If you have the final answer, respond with:
-Thought: [your reasoning]
-Final Answer: [answer]"""
-
-    def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
+    def solve_task(
+        self,
+        interface: BenchmarkInterface,
+        task_id: str,
+        user_prompt_uuid: str = "d880c4d3-fe60-4cf4-813b-2008076cd595",
+    ) -> str:
         """Main ReAct loop implementation"""
         task_guide = interface.get_task_guide(task_id)
         history: list[str] = []
 
         for _iteration in range(self.max_iterations):
             # Create prompt and get LLM response
-            prompt = self.create_prompt(task_guide, history)
+            prompt = self.create_prompt(user_prompt_uuid, task_guide, history)
             llm_response = self.get_llm_response(prompt)
 
             # Parse response
