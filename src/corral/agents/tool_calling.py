@@ -8,7 +8,6 @@ if TYPE_CHECKING:
 import json
 from typing import Any
 
-from loguru import logger
 from promptstore import PromptStore
 
 from corral.agents.utils import LiteLLMMessage, llm_tool_call
@@ -46,46 +45,6 @@ class ToolCallingAgent:
         self.store = PromptStore("./prompts")
         self.kwargs = kwargs
 
-    def create_history_messages(
-        self, history: list[dict[str, Any]]
-    ) -> list[LiteLLMMessage]:
-        """Create LiteLLMMessage objects from history items ensuring they have required fields
-        Args:
-            history (List[Dict[str, Any]]): The history items to convert.
-        Returns:
-            List[LiteLLMMessage]: The converted history items.
-        """
-        history_messages: list[LiteLLMMessage] = []
-        required_fields = {"role", "content"}
-
-        for item in history:
-            if not isinstance(item, dict):
-                logger.warning(f"Skipping invalid history item (not a dict): {item}")
-                continue
-
-            if not all(field in item for field in required_fields):
-                logger.warning(f"Skipping history item missing required fields: {item}")
-                continue
-
-            valid_fields = {"role", "content", "tool_call_id", "name"}
-            filtered_item = {k: v for k, v in item.items() if k in valid_fields}
-
-            try:
-                message: LiteLLMMessage = {
-                    "role": filtered_item["role"],
-                    "content": filtered_item["content"],
-                }
-                if "tool_call_id" in filtered_item:
-                    message["tool_call_id"] = filtered_item["tool_call_id"]
-                if "name" in filtered_item:
-                    message["name"] = filtered_item["name"]
-
-                history_messages.append(message)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to create LiteLLMMessage from item: {item}. Error: {e}"
-                )
-
     def create_prompt(
         self, prompt: PromptStore, task_guide: str, history: list[dict[str, Any]]
     ) -> list[LiteLLMMessage]:
@@ -98,13 +57,9 @@ class ToolCallingAgent:
         """
         messages = list[LiteLLMMessage] = []
         if self.system_prompt:
-            messages.append({"role": "system", "content": self.system_prompt})
-
+            messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
         messages.append(
-            {
-                "role": "user",
-                "content": prompt.fill({"task_guide": task_guide}),
-            }
+            LiteLLMMessage(role="user", content=prompt.fill({"task_guide": task_guide}))
         )
 
         if history:
@@ -118,6 +73,7 @@ class ToolCallingAgent:
         task_id: str,
         history: list[dict[str, Any]] | None = None,
         prompt_uuid: str | None = "fe04453b-5469-4611-bba6-6d81487df787",
+        task_prompt: str | None = None,
     ) -> str:
         """Run the agent to solve the task
         Args:
@@ -135,7 +91,10 @@ class ToolCallingAgent:
 
         tools = interface.get_available_tools(task_id)
         # I think this task prompt is without the tools descriptions
-        task_guide = interface.get_task_prompt(task_id)
+        if task_prompt is None:
+            task_guide = interface.get_task_prompt(task_id)
+        else:
+            task_guide = task_prompt
         messages = self.create_prompt(
             user_prompt, task_guide=task_guide, history=history
         )
@@ -152,9 +111,9 @@ class ToolCallingAgent:
 
             content = llm_response.content
             if content:
-                messages.append({"role": "assistant", "content": content})
+                messages.append(LiteLLMMessage(role="assistant", content=content))
                 if "Final Answer:" in content:
-                    return content
+                    return content, messages
 
             tool_calls = llm_response.tool_calls
             if tool_calls:
@@ -169,12 +128,12 @@ class ToolCallingAgent:
                     function_call = f"Error: {e}"
 
                 messages.append(
-                    {
-                        "tool_call_id": called_tool.id,
-                        "role": "tool",
-                        "name": function_name,
-                        "content": function_call,
-                    }
+                    LiteLLMMessage(
+                        role="user",
+                        content=f"Tool result: {function_call}",
+                        tool_call_id=called_tool.id,
+                        name=function_name,
+                    )
                 )
 
-        return "Error solving the task. Maximum iterations reached."
+        return "Error solving the task. Maximum iterations reached.", messages
