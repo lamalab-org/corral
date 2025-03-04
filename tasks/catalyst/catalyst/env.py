@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -154,30 +155,40 @@ Required submission format:
             return 0.0
 
 
+def score_addition(result: dict) -> float:
+    score = 0.0
+    if "answer" in result:
+        try:
+            _answer = float(result["answer"])
+            score = 1.0
+        except ValueError:
+            pass
+    return score
+
+
+def check_structure(path) -> float:
+    """Check if the is a valid path to a cif file"""
+
+    from pymatgen.core import Structure
+
+    strucutre = Structure.from_file(path)
+
+    # if strecture is not None
+    if strucutre:
+        return 1.0
+    return 0
+
+
+def check_path_exists(path: str) -> float:
+    """Check if the file path exists"""
+    return 1.0 if Path(path).exists() else 0.0
+
+
 def create_catalysis_environments() -> dict[str, Environment]:
     """Create environments for catalysis tasks"""
 
-    def score_addition(result: dict) -> float:
-        score = 0.0
-        if "answer" in result:
-            try:
-                _answer = float(result["answer"])
-                score = 1.0
-            except ValueError:
-                pass
-        return score
-
-    def check_structure(path) -> float:
-        """Check if the is a valid path to a cif file"""
-
-        from pymatgen.core import Structure
-
-        strucutre = Structure.from_file(path)
-
-        # if strecture is not None
-        if strucutre:
-            return 1.0
-        return 0
+    work_dir = Path("./tasks/adsorption/temp")
+    work_dir.mkdir(parents=True, exist_ok=True)
 
     # Create task group
     task_group = TaskGroup(
@@ -191,12 +202,12 @@ def create_catalysis_environments() -> dict[str, Environment]:
                 submission_format={"answer": "/path/to/ciffile"},
                 initial_input={
                     "mp_id": "mp-149",
-                    "path_to_write_dir": "/Users/n0w0f/git/n0w0f/mat-agent-bench/tasks/catalyst/temp",
+                    "path_to_write_dir": str(work_dir),
                 },
             ),
             "task_2": TaskDefinition(
                 name="Create slab",
-                description="Create a slab from the structure of Si and save it as a cif file and submit the path to the cif file",
+                description="Create a slab from the structure of Si with Miller index (1,1,1) and save it as a cif file. Submit the path to the cif file.",
                 tools=[
                     # "create_pymatgen_structure_from_cif",
                     "create_slab_from_structure",
@@ -206,13 +217,40 @@ def create_catalysis_environments() -> dict[str, Environment]:
                 input_from_task="task_1",
             ),
             "task_3": TaskDefinition(
-                name="Add CO2",
-                description="Add CO2 to the slab and save it as a cif file and submit the path to the cif file",
+                name="Create CO2 Molecule",
+                description="Create a CO2 molecule structure and save it as a cif file. Submit the path to the cif file.",
+                tools=["get_molecule_structure"],
+                scoring_fn=check_structure,
+                submission_format={"answer": "/path/to/ciffile"},
+                initial_input={
+                    "smiles": "O=C=O",  # CO2 SMILES
+                    "path_to_write_dir": str(work_dir),
+                },
+            ),
+            "task_4": TaskDefinition(
+                name="Adsorb CO2 on Silicon Slab",
+                description="Add the CO2 molecule to the silicon slab and save it as a cif file. Position the molecule approximately 2.0 Å above the center of the slab. Submit the path to the resulting cif file.",
                 tools=["add_molecule_to_slab"],
                 scoring_fn=check_structure,
                 submission_format={"answer": "/path/to/ciffile"},
-                input_from_task="task_2",
+                input_from_task="task_2",  # Uses slab from task_2
+                initial_input={
+                    "molecule_path": None,  # Will be filled from task_3
+                    "height": 2.0,
+                },
             ),
+            # "task_3": TaskDefinition(
+            #     name="Add CO2",
+            #     description="Add CO2 to the slab and save it as a cif file and submit the path to the cif file",
+            #     tools=[
+            #         "add_molecule_to_slab",
+            #         "get_structure_from_mp",
+            #         "create_slab_from_structure",
+            #     ],
+            #     scoring_fn=check_structure,
+            #     submission_format={"answer": "/path/to/ciffile"},
+            #     input_from_task="task_2",
+            # ),
         },
         # # retrive strucutre of co2 molecule
         # "task_3": TaskDefinition(
@@ -234,6 +272,20 @@ def create_catalysis_environments() -> dict[str, Environment]:
         #     ),
         # },
     )
+
+    def update_task_4_input(task_group):
+        if "task_3" in task_group.results and "task_2" in task_group.results:
+            task_3_result = task_group.results["task_3"]
+            if isinstance(task_3_result, dict) and "answer" in task_3_result:
+                # Update the initial_input of task_4 with the molecule path
+                task_group.tasks["task_4"].initial_input["molecule_path"] = (
+                    task_3_result["answer"]
+                )
+                return True
+        return False
+
+    # Register the dependency updater as part of the evaluation workflow
+    task_group.update_task_4_input = update_task_4_input
 
     # logger.info task dependencies for reference
     logger.info("\nTask Dependencies:")
