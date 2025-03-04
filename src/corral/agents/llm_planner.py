@@ -43,7 +43,7 @@ class LLMPlanner:
         self,
         interface: BenchmarkInterface,
         task_id: str,
-        user_prompt_uuid: str = "d77a15a2-4ded-4ceb-9b33-e84ab899c899",
+        user_prompt_uuid: str | None = "d77a15a2-4ded-4ceb-9b33-e84ab899c899",
         examples: str = "",
         tool_usage: bool = False,
     ) -> str:
@@ -56,15 +56,21 @@ class LLMPlanner:
             examples (str): The examples to use for planning
             tool_usage (bool): Whether to use tool calling or not
         """
-        user_prompt = self.store.get_prompt(user_prompt_uuid)
+        if user_prompt_uuid is None:
+            raise ValueError("User prompt UUID is required")
+        else:
+            user_prompt = self.store.get(user_prompt_uuid)
 
         tools = interface.get_available_tools_for_task(task_id)
 
-        task_guide = interface.get_task_guide(task_id)
+        task_guide = interface.get_task_prompt(task_id)
         prompt = user_prompt.fill(
-            {"examples": examples, "tools": tools},
-            {"task_guide": task_guide},
-            {"iterations": self.max_iterations},
+            {
+                "examples": examples,
+                "tools": tools,
+                "task_guide": task_guide,
+                "iterations": self.max_iterations,
+            },
         )
 
         messages = list[LiteLLMMessage] = []

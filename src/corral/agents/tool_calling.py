@@ -74,7 +74,7 @@ class ToolCallingAgent:
         history: list[dict[str, Any]] | None = None,
         prompt_uuid: str | None = "fe04453b-5469-4611-bba6-6d81487df787",
         task_prompt: str | None = None,
-    ) -> str:
+    ) -> tuple[str, list[LiteLLMMessage]]:
         """Run the agent to solve the task
         Args:
             interface (BenchmarkInterface): The interface to use.
@@ -84,17 +84,23 @@ class ToolCallingAgent:
         Returns:
             str: The final answer from the agent.
         """
-        user_prompt = self.store.get(prompt_uuid)
+        if prompt_uuid is None:
+            raise ValueError("Prompt UUID is required")
+        else:
+            _user_prompt = self.store.get(prompt_uuid)
 
         if history is None:
             history = []
 
-        tools = interface.get_available_tools(task_id)
+        tools = json.loads(interface.get_available_tools_for_task(task_id))["tools"]
         # I think this task prompt is without the tools descriptions
+        # We want this here since for this agent the tools go into the functions or tools
         if task_prompt is None:
             task_guide = interface.get_task_prompt(task_id)
         else:
             task_guide = task_prompt
+        user_prompt = _user_prompt.fill({"task_guide": task_guide})
+
         messages = self.create_prompt(
             user_prompt, task_guide=task_guide, history=history
         )
@@ -129,8 +135,8 @@ class ToolCallingAgent:
 
                 messages.append(
                     LiteLLMMessage(
-                        role="user",
-                        content=f"Tool result: {function_call}",
+                        role="tool",
+                        content=function_call,
                         tool_call_id=called_tool.id,
                         name=function_name,
                     )
