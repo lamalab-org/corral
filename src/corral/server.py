@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from typing import Dict
 
 from fastapi import FastAPI, HTTPException
 
-from corral.base import Environment, ToolRequest
+from corral.base import Environment, Tool, ToolArgument, ToolRequest
 
 
 def create_benchmark_server(environments: Dict[str, Environment]) -> FastAPI:
@@ -83,6 +85,40 @@ def create_benchmark_server(environments: Dict[str, Environment]) -> FastAPI:
             "submitted_answer": env.state.submitted_answer,
             "tool_statistics": env.state.get_tool_statistics(),
         }
+
+    @app.post("/tasks/{task_id}/tools/add")
+    def add_tool_to_environment(task_id: str, tool_data: dict):
+        """Add a new tool to an environment"""
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        try:
+            tool_arguments = [
+                ToolArgument(
+                    name=arg["name"],
+                    type=arg["type"],
+                    description=arg["description"],
+                    required=arg.get("required", True),
+                    default=arg.get("default", None),
+                    choices=arg.get("choices", None),
+                )
+                for arg in tool_data.get("arguments", [])
+            ]
+
+            tool = Tool(
+                name=tool_data["name"],
+                description=tool_data["description"],
+                arguments=tool_arguments,
+            )
+
+            environments[task_id].add_tool(tool)
+
+            return {
+                "status": "success",
+                "message": f"Tool {tool_data['name']} added successfully",
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to add tool: {e!s}")
 
     # add endpoint for scoring the task
 

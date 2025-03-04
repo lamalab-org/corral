@@ -1,10 +1,12 @@
-import json
-from abc import ABC, abstractmethod
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Dict, List, Protocol
-from loguru import logger
 
 import requests
+from loguru import logger
+
+from corral.base import Tool
 
 
 @dataclass
@@ -43,6 +45,38 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()["prompt"]
 
+    def add_tool_to_environment(self, task_id: str, tool: Tool) -> Dict[str, Any]:
+        """Add a new tool to an environment
+
+        Args:
+            task_id: ID of the task/environment
+            name: Name of the tool
+            description: Description of the tool
+            arguments: List of argument dictionaries with keys: name, type, description, required, default, choices
+            execute_code: Python code as string that will be executed when the tool is called
+
+        Returns:
+            Dictionary with status information
+        """
+        logger.info(f"Adding tool {tool.name} to environment {task_id}")
+
+        tool_data = {
+            "name": name,
+            "description": description,
+            "arguments": arguments,
+            "execute_code": execute_code,
+        }
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/tasks/{task_id}/tools/add", json=tool_data
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to add tool: {e!s}")
+            raise
+
     def execute_tool(
         self, task_id: str, tool_name: str, arguments: Dict[str, Any]
     ) -> ToolResponse:
@@ -63,15 +97,14 @@ class BenchmarkInterface:
         """Submit final answer for a task"""
         logger.info(f"Agent submitting answer {answer} for task {task_id}")
         response = requests.post(
-            f"{self.base_url}/tasks/{task_id}/submit",
-            json={"answer": answer}
+            f"{self.base_url}/tasks/{task_id}/submit", json={"answer": answer}
         )
         response.raise_for_status()
         data = response.json()
         return TaskResult(
             score=data["score"],
             state=data["state"],
-            tool_statistics=data["state"]["tool_statistics"]
+            tool_statistics=data["state"]["tool_statistics"],
         )
 
     def get_task_status(self, task_id: str) -> Dict[str, Any]:
@@ -80,12 +113,14 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()
 
+
 class Agent(Protocol):
     """Protocol defining what an agent must implement"""
 
     def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
         """Solve a task and return the answer"""
         ...
+
 
 @dataclass
 class BenchmarkResult:
