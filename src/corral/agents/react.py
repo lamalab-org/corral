@@ -10,8 +10,9 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from litellm import completion
 from promptstore import PromptStore
+
+from corral.agents.utils import llm_call
 
 
 @dataclass
@@ -37,19 +38,19 @@ class ReActAgent:
 
     def get_llm_response(self, prompt: str) -> str:
         """Get response from LLM using LiteLLM"""
-        response = completion(
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful AI assistant that solves tasks step by step.",
+            },
+            {"role": "user", "content": prompt},
+        ]
+        return llm_call(
             model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful AI assistant that solves tasks step by step.",
-                },
-                {"role": "user", "content": prompt},
-            ],
+            messages=messages,
             temperature=0.7,
             max_tokens=1000,
         )
-        return response.choices[0].message.content
 
     def parse_llm_response(self, response: str) -> tuple[Thought | None, Action | None]:
         """Parse LLM response into Thought and Action"""
