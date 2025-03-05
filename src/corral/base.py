@@ -97,6 +97,7 @@ class Tool:
     Inherit from this class to create new tools.
     Should have an execute method that performs the tool's functionality.
     TODO: might need to take state
+    TODO: add descriptions of the arguments of the class, i.e., name, description, arguments
     """
 
     def __init__(self, name: str, description: str, arguments: list[ToolArgument]):

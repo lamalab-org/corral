@@ -4,9 +4,7 @@ import json
 import os
 import re
 
-import redis
 from langchain.pydantic_v1 import Field
-from redis.client import Redis
 
 from corral.agents.llamp.schemas import (
     BondsSchema,
@@ -25,19 +23,71 @@ from corral.agents.llamp.schemas import (
     ThermoSchema,
 )
 from corral.agents.llamp.utilities import MPAPIWrapper
-from corral.base import Tool
+from corral.base import Tool, ToolArgument
+
+
+def pydantic_schema_to_tool_arguments(schema_class) -> list[ToolArgument]:
+    """
+    Convert a Pydantic schema class to a list of ToolArgument objects.
+
+    Args:
+        schema_class: A Pydantic BaseModel class
+
+    Returns:
+        list[ToolArgument]: A list of ToolArgument objects representing the schema fields
+    """
+    arguments = []
+
+    for field_name, field in schema_class.__fields__.items():
+        field_type = "str"  # Default type
+        if field.type_ == int:
+            field_type = "int"
+        elif field.type_ == float:
+            field_type = "float"
+        elif field.type_ == bool:
+            field_type = "bool"
+        elif field.type_ == list:
+            field_type = "list"
+        elif field.type_ == dict:
+            field_type = "dict"
+
+        description = field.field_info.description or ""
+        required = field.required
+        default = field.default if not field.required else None
+
+        choices = None
+        if hasattr(field.field_info, "choices") and field.field_info.choices:
+            choices = field.field_info.choices
+
+        tool_arg = ToolArgument(
+            name=field_name,
+            type=field_type,
+            description=description,
+            required=required,
+            default=default,
+            choices=choices,
+        )
+
+        arguments.append(tool_arg)
+
+    return arguments
 
 
 class MPTool(Tool):
-    name: str = None
+    name: str | None = None
     api_wrapper: MPAPIWrapper = Field(default_factory=MPAPIWrapper)
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        arguments = pydantic_schema_to_tool_arguments(self.args_schema)
+        super().__init__(
+            name=self.name,
+            description=self.description,
+            arguments=arguments,
+        )
         mp_api_key = os.getenv("MP_API_KEY", kwargs.get("mp_api_key"))
         self.api_wrapper.set_api_key(mp_api_key)
 
-    def _run(self, **query_params):
+    def execute(self, **query_params):
         _res = self.api_wrapper.run(
             function_name=self.name,
             function_args=json.dumps(query_params),
@@ -65,65 +115,6 @@ class MaterialsSummary(MPTool):
         .replace("\n", " ")
     )
     args_schema: type[SummarySchema] = SummarySchema
-
-
-class MaterialsStructureVis(MPTool):
-    name: str = "search_materials_structure__get"
-    description: str = (
-        re.sub(
-            r"\s+",
-            " ",
-            """useful when you need to save the pymatgen structures from Materials
-            Project into local storage and visualize them. Use
-            `search_materials_summary__get` tool instead to get statistics about all the
-            structures on MP.
-
-            TIPS:
-            - If pure elemental structure is desired, use `formula` instead of `elements`
-            """,
-        )
-        .strip()
-        .replace("\n", " ")
-    )
-    args_schema: type[StructureSchema] = StructureSchema(return_mode="text")
-    chat_id: str = ""
-    redis_client: Redis = None
-
-    def __init__(self, *args, chat_id, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.chat_id = chat_id
-        REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-        REDIS_PORT = os.getenv("REDIS_PORT", 6379)
-        REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
-        self.redis_client = redis.Redis(
-            host=REDIS_HOST, port=REDIS_PORT, db=0, password=REDIS_PASSWORD
-        )
-
-    def _run(self, **query_params):
-        _response = super()._run(**query_params)
-
-        for entry in _response:
-            material_id = entry["material_id"]
-            structure = entry["structure"]
-
-            self.redis_client.set(material_id, json.dumps(structure), ex=3600)
-
-        output = "[structures]" + ",".join(
-            list(map(lambda x: x["material_id"], _response))
-        )
-
-        if self.chat_id != "":
-            try:
-                if self.redis_client.ping():
-                    self.redis_client.publish(self.chat_id, output)
-                    self.redis_client.publish(self.chat_id, "AGENT_FINISH")
-                    return output
-                else:
-                    print("Failed to establish Redis connection.")
-            except redis.ConnectionError as e:
-                print(f"Redis connection error: {e!s}")
-
-        return output
 
 
 class MaterialsStructureText(MPTool):
@@ -176,7 +167,7 @@ class MaterialsSynthesis(MPTool):
     )
     args_schema: type[SynthesisSchema] = SynthesisSchema
 
-    def _run(self, **query_params):
+    def execute(self, **query_params):
         _res = self.api_wrapper.run(
             function_name=self.name,
             function_args=json.dumps(query_params),

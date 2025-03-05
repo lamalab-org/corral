@@ -60,16 +60,9 @@ class BenchmarkInterface:
         """
         logger.info(f"Adding tool {tool.name} to environment {task_id}")
 
-        tool_data = {
-            "name": name,
-            "description": description,
-            "arguments": arguments,
-            "execute_code": execute_code,
-        }
-
         try:
             response = requests.post(
-                f"{self.base_url}/tasks/{task_id}/tools/add", json=tool_data
+                f"{self.base_url}/tasks/{task_id}/tools/add", json=tool
             )
             response.raise_for_status()
             return response.json()
