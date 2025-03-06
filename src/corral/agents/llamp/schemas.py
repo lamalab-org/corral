@@ -317,7 +317,7 @@ class StructureSchema(SummarySchema):
     """
 
     limit: int | None = Field(
-        default=5, description="Maximum number of entries to return", requried=True
+        default=5, description="Maximum number of entries to return", required=True
     )
     fields: str | None = Field(
         default="material_id,structure",
