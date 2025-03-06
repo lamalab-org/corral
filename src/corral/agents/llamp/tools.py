@@ -4,8 +4,6 @@ import json
 import os
 import re
 
-from langchain.pydantic_v1 import Field
-
 from corral.agents.llamp.schemas import (
     BondsSchema,
     DielectricSchema,
@@ -38,25 +36,80 @@ def pydantic_schema_to_tool_arguments(schema_class) -> list[ToolArgument]:
     """
     arguments = []
 
-    for field_name, field in schema_class.__fields__.items():
-        field_type = "str"  # Default type
-        if field.type_ == int:
-            field_type = "int"
-        elif field.type_ == float:
-            field_type = "float"
-        elif field.type_ == bool:
-            field_type = "bool"
-        elif field.type_ == list:
-            field_type = "list"
-        elif field.type_ == dict:
-            field_type = "dict"
+    model_fields = (
+        schema_class.model_fields
+        if hasattr(schema_class, "model_fields")
+        else schema_class.__fields__
+    )
 
-        description = field.field_info.description or ""
-        required = field.required
-        default = field.default if not field.required else None
+    for field_name, field in model_fields.items():
+        field_type = "str"  # Default type
+
+        if hasattr(field, "annotation"):
+            annotation = field.annotation
+            if annotation == int:
+                field_type = "int"
+            elif annotation == float:
+                field_type = "float"
+            elif annotation == bool:
+                field_type = "bool"
+            elif annotation == list:
+                field_type = "list"
+            elif annotation == dict:
+                field_type = "dict"
+        elif hasattr(field, "type_"):
+            try:
+                if field.type_ == int:
+                    field_type = "int"
+                elif field.type_ == float:
+                    field_type = "float"
+                elif field.type_ == bool:
+                    field_type = "bool"
+                elif field.type_ == list:
+                    field_type = "list"
+                elif field.type_ == dict:
+                    field_type = "dict"
+            except AttributeError:
+                if hasattr(field, "outer_type_"):
+                    outer_type = field.outer_type_
+                    if outer_type == int:
+                        field_type = "int"
+                    elif outer_type == float:
+                        field_type = "float"
+                    elif outer_type == bool:
+                        field_type = "bool"
+                    elif outer_type == list:
+                        field_type = "list"
+                    elif outer_type == dict:
+                        field_type = "dict"
+
+        description = ""
+        if hasattr(field, "description"):
+            description = field.description or ""
+        elif hasattr(field, "field_info") and hasattr(field.field_info, "description"):
+            description = field.field_info.description or ""
+
+        required = True
+        if hasattr(field, "is_required"):
+            required = field.is_required
+        elif hasattr(field, "required"):
+            required = field.required
+
+        default = None
+        if not required:
+            if hasattr(field, "default"):
+                default = field.default
+            elif hasattr(field, "field_info") and hasattr(field.field_info, "default"):
+                default = field.field_info.default
 
         choices = None
-        if hasattr(field.field_info, "choices") and field.field_info.choices:
+        if hasattr(field, "choices") and field.choices:
+            choices = field.choices
+        elif (
+            hasattr(field, "field_info")
+            and hasattr(field.field_info, "choices")
+            and field.field_info.choices
+        ):
             choices = field.field_info.choices
 
         tool_arg = ToolArgument(
@@ -75,7 +128,7 @@ def pydantic_schema_to_tool_arguments(schema_class) -> list[ToolArgument]:
 
 class MPTool(Tool):
     name: str | None = None
-    api_wrapper: MPAPIWrapper = Field(default_factory=MPAPIWrapper)
+    api_wrapper = MPAPIWrapper(mpApiKey=os.getenv("MP_API_KEY"))
 
     def __init__(self, *args, **kwargs):
         arguments = pydantic_schema_to_tool_arguments(self.args_schema)

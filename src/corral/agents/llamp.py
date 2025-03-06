@@ -4,8 +4,8 @@ import json
 from abc import ABC
 from typing import TypedDict
 
-from langchain.tools import ArxivQueryRun, WikipediaQueryRun
-from langchain.utilities import ArxivAPIWrapper, WikipediaAPIWrapper
+from langchain_community.tools import ArxivQueryRun, WikipediaQueryRun
+from langchain_community.utilities import ArxivAPIWrapper, WikipediaAPIWrapper
 from langchain_experimental.tools import PythonREPLTool
 from promptstore import PromptStore
 
@@ -20,7 +20,8 @@ from corral.agents.llamp.tools import (
     MaterialsSynthesis,
     MaterialsThermo,
 )
-from corral.agents.utils import llm_tool_call
+
+# from corral.agents.utils import llm_tool_call
 from corral.base import Tool, ToolArgument
 from corral.evaluate import BenchmarkInterface
 
@@ -281,7 +282,7 @@ class MPAgent(ABC):
                 if action == "Final Answer":
                     return response.get("action_input"), messages
                 else:
-                    function_name = self.tools[action]
+                    function_name = action
                     function_args = json.loads(response.get("action_input"))
                     try:
                         function_call = str(
@@ -384,3 +385,19 @@ class MPSynthesisExpert(MPAgent):
     @property
     def tools(self):
         return [MaterialsSynthesis()]
+
+
+if __name__ == "__main__":
+    prompt_store = PromptStore("./prompts")
+    system_prompt = prompt_store.get("fb46ddea-eca3-458a-805f-aa6344780929")
+    user_prompt = prompt_store.get("9f8a74c1-cd5e-4fc5-b50e-a2eebaffb409")
+    tool_names = ["1", "second"]
+    tools = [MaterialsSummary(), MaterialsStructureText()]
+    system = system_prompt.fill({"tools": tools, "tool_names": tool_names})
+    user = user_prompt.fill({"input": "input", "agent_scratchpad": ""})
+
+    print(system)
+    print("*" * 100)
+    print("\n")
+    print("*" * 100)
+    print(user)

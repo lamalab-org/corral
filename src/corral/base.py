@@ -199,7 +199,7 @@ class Environment(ABC):
         """Add a tool to the environment"""
         self.tools[tool.name] = tool
 
-    def get_available_tools(self) -> list[dict[str, str]]:
+    def get_available_tools(self) -> list[dict[str, str | list[ToolArgument]]]:
         """Get list of available tools and their descriptions"""
         return [
             {"name": t.name, "description": t.description, "arguments": t.arguments}

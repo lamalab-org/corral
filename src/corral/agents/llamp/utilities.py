@@ -10,8 +10,8 @@ from typing import Any
 import mp_api
 import mp_api.client
 import requests
-from langchain.agents.agent_toolkits.openapi.spec import reduce_openapi_spec
-from langchain.tools.json.tool import JsonSpec
+from langchain_community.agent_toolkits.openapi.spec import reduce_openapi_spec
+from langchain_community.tools.json.tool import JsonSpec
 from pydantic import BaseModel, Field, model_validator
 from pymatgen.core import Structure
 
