@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -61,13 +62,13 @@ class LLMPlanner:
         else:
             user_prompt = self.store.get(user_prompt_uuid)
 
-        tools = interface.get_available_tools_for_task(task_id)
+        tools = json.loads(interface.get_available_tools_for_task(task_id))["tools"]
 
         task_guide = interface.get_task_prompt(task_id)
         prompt = user_prompt.fill(
             {
                 "examples": examples,
-                "tools": tools,
+                "tools": json.dump(tools),
                 "task_guide": task_guide,
                 "iterations": self.max_iterations,
             },
