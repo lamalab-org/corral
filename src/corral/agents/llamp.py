@@ -128,12 +128,12 @@ class MainAgent:
 
         task_guide = interface.get_task_prompt(task_id)
 
-        env_tools = interface.get_available_tools_for_task(task_id)
+        env_tools = json.loads(interface.get_available_tools_for_task(task_id))["tools"]
         tools_names = [tool.name for tool in env_tools]
 
         prefix_uuid = "70545b35-005c-4aaf-ac3b-4979f8ab10cf"
         prefix_prompt = self.prompt_store.get(prefix_uuid)
-        prefix = prefix_prompt.fill({"tools": env_tools})
+        prefix = prefix_prompt.fill({"tools": json.dumps(env_tools)})
 
         format_uuid = "f4093177-d2bb-4b1b-8b77-d067b62a032e"
         format_prompt = self.prompt_store.get(format_uuid)
@@ -257,10 +257,23 @@ class MPAgent(ABC):
         for tool in self.tools:
             self.interface.add_tool_to_environment(self.task_id, tool)
 
+        env_tools = {"tools": []}
+
+        for tool in self.tools:
+            env_tools["tools"].append(
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "arguments": tool.arguments,
+                }
+            )
+
         system_prompt = self.prompt_store.get("fb46ddea-eca3-458a-805f-aa6344780929")
         user_prompt = self.prompt_store.get("9f8a74c1-cd5e-4fc5-b50e-a2eebaffb409")
         tool_names = [tool.name for tool in self.tools]
-        system = system_prompt.fill({"tools": self.tools, "tool_names": tool_names})
+        system = system_prompt.fill(
+            {"tools": json.dumps(env_tools), "tool_names": tool_names}
+        )
         user = user_prompt.fill({"input": input, "agent_scratchpad": ""})
         messages: list[LiteLLMMessage] = []
         messages.append(LiteLLMMessage(role="system", content=system))
@@ -385,19 +398,3 @@ class MPSynthesisExpert(MPAgent):
     @property
     def tools(self):
         return [MaterialsSynthesis()]
-
-
-if __name__ == "__main__":
-    prompt_store = PromptStore("./prompts")
-    system_prompt = prompt_store.get("fb46ddea-eca3-458a-805f-aa6344780929")
-    user_prompt = prompt_store.get("9f8a74c1-cd5e-4fc5-b50e-a2eebaffb409")
-    tool_names = ["1", "second"]
-    tools = [MaterialsSummary(), MaterialsStructureText()]
-    system = system_prompt.fill({"tools": tools, "tool_names": tool_names})
-    user = user_prompt.fill({"input": "input", "agent_scratchpad": ""})
-
-    print(system)
-    print("*" * 100)
-    print("\n")
-    print("*" * 100)
-    print(user)
