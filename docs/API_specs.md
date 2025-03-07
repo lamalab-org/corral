@@ -82,7 +82,6 @@ def tool1(arg1: [str, float, int], arg2: [str, float, int]) -> [str, float, int]
 
     result = function(arg1, arg2)
 
-
     return result
 
 ### Example percentage calculator
