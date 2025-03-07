@@ -157,10 +157,7 @@ class BenchmarkResult:
         n = len(trials)
 
         # Calculate pass@k
-        if c == n:  # All trials succeeded
-            return 1.0
-        else:
-            return 1.0 - (1.0 - c / n) ** k
+        return 1.0 if c == n else 1.0 - (1.0 - c / n) ** k
 
     def task_pass_hat_k(self, task_id: str, k: int) -> float:
         """
