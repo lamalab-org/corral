@@ -79,10 +79,8 @@ def tool1(arg1: [str, float, int], arg2: [str, float, int]) -> [str, float, int]
     Args:
         Describe the arguments here
     """
-    
 
     result = function(arg1, arg2)
-
 
     return result
 
@@ -122,7 +120,7 @@ from prompts import BASELINESYSTEMPROMPT, BASELINEUSERPROMPT
 from openai import OpenAI
 
 
-class Base_Agent:
+class BaseAgent:
     """General agent implementation"""
 
     def __init__(self, base_url: str, tools: list(str), args, **kwargs):
@@ -133,9 +131,9 @@ class Base_Agent:
 
         self.tools = tools
 
-    """ Solve Task function to solve task in the environment """
 
     def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
+    	    """ Solve Task function to solve task in the environment """
         guide = interface.get_task_guide(task_id)
 
         system_prompt = BASELINESYSTEMPROMPT.format(guide=guide)
@@ -198,7 +196,7 @@ if __name__ == "__main__":
     
 
     # Load Agent and Runner
-    agent = Base_Agent(base_url='agent_url')
+    agent = BaseAgent(base_url='agent_url')
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark
