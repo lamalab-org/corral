@@ -1,3 +1,16 @@
+"""
+Materials Project API tools for agent-based materials science operations.
+
+This module provides a set of specialized tools for querying the Materials Project API
+to retrieve various materials properties and data. It implements a framework for converting
+Pydantic schemas into tool arguments that can be used by agents.
+
+This code is adapted from the LLAMP (Large Language model Agent for Materials Project) repository:
+https://github.com/chiang-yuan/llamp
+
+Only modifications to fit our environment were made while preserving the original functionality.
+"""
+
 from __future__ import annotations
 
 import json

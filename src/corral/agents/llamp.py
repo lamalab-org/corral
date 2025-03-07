@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from abc import ABC
-from typing import TypedDict
 
 from langchain_community.tools import ArxivQueryRun, WikipediaQueryRun
 from langchain_community.utilities import ArxivAPIWrapper, WikipediaAPIWrapper
@@ -20,20 +19,15 @@ from corral.agents.llamp.tools import (
     MaterialsSynthesis,
     MaterialsThermo,
 )
-
-# from corral.agents.utils import llm_tool_call
+from corral.agents.utils import (
+    LiteLLMMessage,
+    llm_tool_call,
+)
 from corral.base import Tool, ToolArgument
 from corral.evaluate import BenchmarkInterface
 
 wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
 arxiv = ArxivQueryRun(api_wrapper=ArxivAPIWrapper())
-
-
-class LiteLLMMessage(TypedDict, total=False):
-    role: str
-    content: str
-    name: str | None
-    tool_call_id: str | None
 
 
 class MainAgent:

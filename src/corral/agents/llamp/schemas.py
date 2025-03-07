@@ -1,3 +1,12 @@
+"""
+Materials Project API schemas for agent-based materials science operations.
+
+This code is adapted from the LLAMP (Large Language model Agent for Materials Project) repository:
+https://github.com/chiang-yuan/llamp
+
+Only modifications to fit our environment were made while preserving the original functionality.
+"""
+
 from __future__ import annotations
 
 from emmet.core.summary import HasProps
