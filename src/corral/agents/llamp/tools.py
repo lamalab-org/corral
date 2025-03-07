@@ -60,40 +60,40 @@ def pydantic_schema_to_tool_arguments(schema_class) -> list[ToolArgument]:
 
         if hasattr(field, "annotation"):
             annotation = field.annotation
-            if annotation == int:
+            if annotation is int:
                 field_type = "int"
-            elif annotation == float:
+            elif annotation is float:
                 field_type = "float"
-            elif annotation == bool:
+            elif annotation is bool:
                 field_type = "bool"
-            elif annotation == list:
+            elif annotation is list:
                 field_type = "list"
-            elif annotation == dict:
+            elif annotation is dict:
                 field_type = "dict"
         elif hasattr(field, "type_"):
             try:
-                if field.type_ == int:
+                if field.type_ is int:
                     field_type = "int"
-                elif field.type_ == float:
+                elif field.type_ is float:
                     field_type = "float"
-                elif field.type_ == bool:
+                elif field.type_ is bool:
                     field_type = "bool"
-                elif field.type_ == list:
+                elif field.type_ is list:
                     field_type = "list"
-                elif field.type_ == dict:
+                elif field.type_ is dict:
                     field_type = "dict"
             except AttributeError:
                 if hasattr(field, "outer_type_"):
                     outer_type = field.outer_type_
-                    if outer_type == int:
+                    if outer_type is int:
                         field_type = "int"
-                    elif outer_type == float:
+                    elif outer_type is float:
                         field_type = "float"
-                    elif outer_type == bool:
+                    elif outer_type is bool:
                         field_type = "bool"
-                    elif outer_type == list:
+                    elif outer_type is list:
                         field_type = "list"
-                    elif outer_type == dict:
+                    elif outer_type is dict:
                         field_type = "dict"
 
         description = ""
@@ -143,7 +143,7 @@ class MPTool(Tool):
     name: str | None = None
     api_wrapper = MPAPIWrapper(mpApiKey=os.getenv("MP_API_KEY"))
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, **kwargs):
         arguments = pydantic_schema_to_tool_arguments(self.args_schema)
         super().__init__(
             name=self.name,
@@ -154,11 +154,10 @@ class MPTool(Tool):
         self.api_wrapper.set_api_key(mp_api_key)
 
     def execute(self, **query_params):
-        _res = self.api_wrapper.run(
+        return self.api_wrapper.run(
             function_name=self.name,
             function_args=json.dumps(query_params),
         )
-        return _res
 
 
 class MaterialsSummary(MPTool):
@@ -234,11 +233,10 @@ class MaterialsSynthesis(MPTool):
     args_schema: type[SynthesisSchema] = SynthesisSchema
 
     def execute(self, **query_params):
-        _res = self.api_wrapper.run(
+        return self.api_wrapper.run(
             function_name=self.name,
             function_args=json.dumps(query_params),
         )
-        return _res
 
 
 class MaterialsThermo(MPTool):

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
-from abc import ABC
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import TYPE_CHECKING
 
 from langchain_community.tools import ArxivQueryRun, WikipediaQueryRun
 from langchain_community.utilities import ArxivAPIWrapper, WikipediaAPIWrapper
@@ -23,8 +27,10 @@ from corral.agents.utils import (
     LiteLLMMessage,
     llm_tool_call,
 )
+
+if TYPE_CHECKING:
+    from corral.evaluate import BenchmarkInterface
 from corral.base import Tool, ToolArgument
-from corral.evaluate import BenchmarkInterface
 
 wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
 arxiv = ArxivQueryRun(api_wrapper=ArxivAPIWrapper())
@@ -131,13 +137,13 @@ class MainAgent:
 
         format_uuid = "f4093177-d2bb-4b1b-8b77-d067b62a032e"
         format_prompt = self.prompt_store.get(format_uuid)
-        format = format_prompt.fill({"tools_names": tools_names})
+        format_filled = format_prompt.fill({"tools_names": tools_names})
 
         suffix_uuid = "07016776-37e1-4caf-abfe-fe3fc6872ebf"
         suffix_prompt = self.prompt_store.get(suffix_uuid)
         suffix = suffix_prompt.fill({"chat_id": task_guide})
 
-        initial_prompt = f"{prefix}\n\n{format}\n\n{suffix}"
+        initial_prompt = f"{prefix}\n\n{format_filled}\n\n{suffix}"
 
         messages: list[LiteLLMMessage] = []
         messages.append(LiteLLMMessage(role="user", content=initial_prompt))
@@ -187,6 +193,8 @@ class MainAgent:
                     )
                 )
 
+        return f"No final answer found after {max_iterations}", messages
+
 
 class MPAgent(ABC):
     def __init__(
@@ -216,6 +224,7 @@ class MPAgent(ABC):
     def description(self) -> str | None:
         return self.__doc__
 
+    @abstractmethod
     @property
     def tools(self):
         return []
@@ -223,9 +232,9 @@ class MPAgent(ABC):
     def as_tool(
         self,
     ) -> Tool:
-        def execute(input: str):
+        def execute(input_question: str):
             try:
-                result, _ = self.run_agent(input)
+                result, _ = self.run_agent(input_question)
                 return result, _
             except Exception as e:
                 error_response = (
@@ -233,21 +242,22 @@ class MPAgent(ABC):
                     "Please decompose the request into multiple smaller requests "
                     "or specify 'limit' in request."
                 )
-                return error_response
+                _ = []
+                return error_response, _
 
         return Tool(
             name=self.name,
             description=self.description,
             arguments=[
                 ToolArgument(
-                    "input",
+                    "input_question",
                     "str",
                     "Complete question to ask the assistant agent. Should include all the context and details needed to answer the question holistically.",
                 ),
             ],
         )
 
-    def run_agent(self, input: str) -> str:
+    def run_agent(self, input_question: str) -> str:
         for tool in self.tools:
             self.interface.add_tool_to_environment(self.task_id, tool)
 
@@ -268,7 +278,7 @@ class MPAgent(ABC):
         system = system_prompt.fill(
             {"tools": json.dumps(env_tools), "tool_names": tool_names}
         )
-        user = user_prompt.fill({"input": input, "agent_scratchpad": ""})
+        user = user_prompt.fill({"input": input_question, "agent_scratchpad": ""})
         messages: list[LiteLLMMessage] = []
         messages.append(LiteLLMMessage(role="system", content=system))
         messages.append(LiteLLMMessage(role="user", content=user))

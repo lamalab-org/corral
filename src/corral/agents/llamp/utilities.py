@@ -10,22 +10,17 @@ Only modifications to fit our environment were made while preserving the origina
 from __future__ import annotations
 
 import json
-import logging
-import os.path as osp
 import re
 from pathlib import Path
 from typing import Any
 
-import mp_api
 import mp_api.client
 import requests
 from langchain_community.agent_toolkits.openapi.spec import reduce_openapi_spec
 from langchain_community.tools.json.tool import JsonSpec
+from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 from pymatgen.core import Structure
-
-logger = logging.getLogger(__name__)
-
 
 DEFAULT_LIMIT = 10
 
@@ -56,13 +51,15 @@ class MPAPIWrapper(BaseModel):
         """Validate that the python package exists in environment."""
 
         try:
-            import mp_api
+            from importlib.util import find_spec
 
-        except ImportError:
+            if find_spec("mp_api") is None:
+                raise ImportError("mp_api package not found")
+        except ImportError as err:
             raise ImportError(
                 "Could not import `mp_api` python package. "
                 "Please install it with `pip install mp_api`."
-            )
+            ) from err
         return values
 
     def run(self, function_name: str, function_args: str, debug: bool = False) -> str:
@@ -79,7 +76,7 @@ class MPAPIWrapper(BaseModel):
 
         function_to_call = self.material_routes.get(function_name, None)
         if function_to_call is None:
-            print(f"Function {function_name} is not supported yet.")
+            logger.warning(f"Function {function_name} is not supported yet.")
             return (
                 re.sub(
                     r"\s+",
@@ -95,18 +92,17 @@ class MPAPIWrapper(BaseModel):
 
         try:
             if debug:
-                print(function_args)
+                logger.debug(function_args)
             function_response = function_to_call(query_params=json.loads(function_args))
         except Exception as e:
-            error_response = (
+            return (
                 f"Error on {function_name}: {e}. "
                 "Please revise arguments "
                 "or try smaller request by specifying 'limit' in request."
             )
-            return error_response
 
         if debug:
-            print("MP API response:", json.dumps(function_response))
+            logger.debug("MP API response:", json.dumps(function_response))
 
         return function_response
 
@@ -158,7 +154,7 @@ class MPAPIWrapper(BaseModel):
     @property
     def reduced_spec(self):
         if self.spec_path.exists():
-            with open(self.spec_path) as f:
+            with Path(self.spec_path).open() as f:
                 import json
 
                 raw_spec = json.load(f)
@@ -179,22 +175,18 @@ class MPAPIWrapper(BaseModel):
 
     @property
     def material_functions(self):
-        with open(
-            osp.join(Path(__file__).parent.resolve(), "material_functions.json")
-        ) as f:
+        with (Path(__file__).parent.resolve() / "material_functions.json").open() as f:
             # NOTE: Using all functions available on MP consumes too many tokens.
             # Here we only use a subset of functions.
             # functions = self.functions
             functions = json.load(f)
-            idx = list(map(lambda x: x["name"], functions)).index(
-                "search_materials_core__get"
-            )
+            idx = [i["name"] for i in functions].index("search_materials_core__get")
             functions.pop(idx)
-            idx = list(map(lambda x: x["name"], functions)).index(
+            idx = [i["name"] for i in functions].index(
                 "search_materials_core_formula_autocomplete__get"
             )
             functions.pop(idx)
-            idx = list(map(lambda x: x["name"], functions)).index(
+            idx = [i["name"] for i in functions].index(
                 "search_materials_provenance__get"
             )
             functions.pop(idx)
@@ -258,11 +250,10 @@ class MPAPIWrapper(BaseModel):
         assert "fields" in query_params, "`fields` must be specified in the query"
 
         if "material_id" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["material_id"]
+            query_params["fields"] = [*query_params.get("fields", []), "material_id"]
 
         if "formula_pretty" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["formula_pretty"]
-
+            query_params["fields"] = [*query_params.get("fields", []), "formula_pretty"]
         sort_fields = query_params.get("_sort_fields", "material_id")
         sort_fields = sort_fields.split(",")
 
@@ -271,12 +262,11 @@ class MPAPIWrapper(BaseModel):
         )
         for sort_field in sort_fields:
             if sort_field[0] == "-":
-                sort_field = sort_field[1:]
-                docs = sorted(docs, key=lambda x: x[sort_field], reverse=True)
+                sort_key = sort_field[1:]
+                docs = sorted(docs, key=lambda x: x[sort_key], reverse=True)
             else:
                 docs = sorted(docs, key=lambda x: x[sort_field], reverse=False)
         return docs[: query_params.get("_limit", DEFAULT_LIMIT)]
-
         # limit = query_params.get("_limit", DEFAULT_LIMIT)
 
         # return self.mpr.materials.summary._search(
@@ -290,16 +280,16 @@ class MPAPIWrapper(BaseModel):
         query_params = self._process_query_params(query_params)
 
         if "material_id" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["material_id"]
+            query_params["fields"] = [*query_params.get("fields", []), "material_id"]
 
         if "structure" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["structure"]
+            query_params["fields"] = [*query_params.get("fields", []), "structure"]
 
         if "formula_pretty" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["formula_pretty"]
+            query_params["fields"] = [*query_params.get("fields", []), "formula_pretty"]
 
         if "symmetry" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["symmetry"]
+            query_params["fields"] = [*query_params.get("fields", []), "symmetry"]
 
         # query_params["fields"] = query_params.get(
         #     "fields", []) + ["structure", "material_id"]
@@ -330,6 +320,7 @@ class MPAPIWrapper(BaseModel):
                 "All retrieved structures are saved as Pymatgen Structure json files to the following paths: "
                 + ", ".join(paths)
             )
+        raise ValueError("Invalid return_mode")
 
         # return [Structure.from_dict(doc["structure"]).to_ase_atoms() for doc in docs]
 
@@ -337,10 +328,10 @@ class MPAPIWrapper(BaseModel):
         query_params = self._process_query_params(query_params)
 
         if "material_id" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["material_id"]
+            query_params["fields"] = [*query_params.get("fields", []), "material_id"]
 
         if "description" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["description"]
+            query_params["fields"] = [*query_params.get("fields", []), "description"]
 
         if "material_ids" in query_params:
             return self.mpr.materials.robocrys._search(
@@ -422,8 +413,9 @@ class MPAPIWrapper(BaseModel):
         assert "fields" in query_params, "fields must be specified"
 
         if "energy_above_hull" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + [
-                "energy_above_hull"
+            query_params["fields"] = [
+                *query_params.get("fields", []),
+                "energy_above_hull",
             ]
 
         sort_fields = query_params.get("_sort_fields", "energy_above_hull")
@@ -435,9 +427,9 @@ class MPAPIWrapper(BaseModel):
 
         for sort_field in sort_fields:
             if sort_field[0] == "-":
-                sort_field = sort_field[1:]
+                field_name = sort_field[1:]  # Use a different variable
                 thermo_docs = sorted(
-                    thermo_docs, key=lambda x: x[sort_field], reverse=True
+                    thermo_docs, key=lambda x: x[field_name], reverse=True
                 )
             else:
                 thermo_docs = sorted(
@@ -453,10 +445,10 @@ class MPAPIWrapper(BaseModel):
         )
 
         if "material_id" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["material_id"]
+            query_params["fields"] = [*query_params.get("fields", []), "material_id"]
 
         if "formula_pretty" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["formula_pretty"]
+            query_params["fields"] = [*query_params.get("fields", []), "formula_pretty"]
 
         if "formula" in query_params:
             material_docs = self.mpr.materials.summary.search(
@@ -511,7 +503,8 @@ class MPAPIWrapper(BaseModel):
 
             query_params["material_ids"] = material_ids
 
-        query_params["fields"] = query_params.get("fields", []) + [
+        existing_fields = query_params.get("fields", [])
+        additional_fields = [
             "material_id",
             "formula_pretty",
             "ordering",
@@ -525,7 +518,7 @@ class MPAPIWrapper(BaseModel):
             "total_magnetization_normalized_vol",
             "total_magnetization_normalized_formula_units",
         ]
-
+        query_params["fields"] = existing_fields + additional_fields
         return self.mpr.magnetism._search(
             num_chunks=None, chunk_size=1000, all_fields=False, **query_params
         )
@@ -533,11 +526,13 @@ class MPAPIWrapper(BaseModel):
     def search_materials_elasticity(self, query_params):
         query_params = self._process_query_params(query_params)
 
-        query_params["fields"] = query_params.get("fields", []) + [
+        query_params["fields"] = [
+            *query_params.get("fields", []),
             "material_id",
             "formula_pretty",
             "elastic_tensor",
-            "bulk_modulus" "shear_modulus",
+            "bulk_modulus",
+            "shear_modulus",
             "thermal_conductivity",
             "young_modulus",
             "universal_anisotropy",
@@ -577,13 +572,13 @@ class MPAPIWrapper(BaseModel):
         query_params = self._process_query_params(query_params)
 
         if "material_id" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["material_id"]
+            query_params["fields"] = [*query_params.get("fields", []), "material_id"]
 
         if "formula_pretty" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["formula_pretty"]
+            query_params["fields"] = [*query_params.get("fields", []), "formula_pretty"]
 
         if "band_gap" not in query_params.get("fields", []):
-            query_params["fields"] = query_params.get("fields", []) + ["band_gap"]
+            query_params["fields"] = [*query_params.get("fields", []), "band_gap"]
 
         sort_fields = query_params.get("_sort_fields", "material_id,band_gap")
         sort_fields = sort_fields.split(",")
@@ -597,26 +592,25 @@ class MPAPIWrapper(BaseModel):
 
         for sort_field in sort_fields:
             if sort_field[0] == "-":
-                sort_field = sort_field[1:]
-                docs = sorted(docs, key=lambda x: x[sort_field], reverse=True)
+                field_name = sort_field[1:]
+                docs = sorted(docs, key=lambda x: x[field_name], reverse=True)
             else:
                 docs = sorted(docs, key=lambda x: x[sort_field], reverse=False)
         return docs[: query_params.get("_limit", DEFAULT_LIMIT)]
 
     @property
     def endpoints(self):
-        endpoints = [
+        return [
             (route, method, operation)
             for route, paths in self.spec.dict_["paths"].items()
             for method, operation in paths.items()
             if method in ["get", "post"]
         ]
-        return endpoints
 
     @property
     def functions(self):
         functions = []
-        for route, method, operation in self.endpoints:
+        for _route, _method, operation in self.endpoints:
             if operation is None:
                 continue
 
@@ -631,25 +625,23 @@ class MPAPIWrapper(BaseModel):
             )
 
             properties = {
-                property["name"]: {
-                    "type": property.get("schema", {}).get("type", None),
-                    "description": property.get("description", None)
-                    if property.get("description", None) is not None
+                param["name"]: {
+                    "type": param.get("schema", {}).get("type", None),
+                    "description": param.get("description", None)
+                    if param.get("description", None) is not None
                     else "",
                     **(
-                        {"enum": property.get("schema", {}).get("enum", None)}
-                        if property.get("schema", {}).get("enum", None) is not None
+                        {"enum": param.get("schema", {}).get("enum", None)}
+                        if param.get("schema", {}).get("enum", None) is not None
                         else {}
                     ),
                 }
-                for property in operation["parameters"]
-                if property.get("schema", {}).get("type", None) is not None
+                for param in operation["parameters"]
+                if param.get("schema", {}).get("type", None) is not None
             }
 
             required = [
-                property["name"]
-                for property in operation["parameters"]
-                if property["required"]
+                param["name"] for param in operation["parameters"] if param["required"]
             ]
             functions.append(
                 {
