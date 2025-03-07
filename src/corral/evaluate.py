@@ -85,13 +85,13 @@ class MatAgentBenchmark:
         self.agent = agent
 
     def bench(
-        self, task_ids: list[str] | None = None, trials_per_task: int = 0
+        self, task_ids: list[str] | None = None, trials_per_task: int = 1
     ) -> BenchmarkResult:
         """Run benchmark on specified tasks or all available tasks
 
         Args:
             task_ids: list of task IDs to run, or None for all tasks
-            trials_per_task: Number of trials per task, defaults to k if not specified
+            trials_per_task: Number of trials per task, defaults to 1 if not specified
 
         """
         if task_ids is None:
