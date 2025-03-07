@@ -133,6 +133,7 @@ class BaseAgent:
 
 
     def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
+    	    """ Solve Task function to solve task in the environment """
         guide = interface.get_task_guide(task_id)
 
         system_prompt = BASELINESYSTEMPROMPT.format(guide=guide)
