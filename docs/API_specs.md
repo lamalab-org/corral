@@ -196,7 +196,7 @@ if __name__ == "__main__":
     
 
     # Load Agent and Runner
-    agent = Base_Agent(base_url='agent_url')
+    agent = BaseAgent(base_url='agent_url')
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark
