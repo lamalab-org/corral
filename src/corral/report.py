@@ -57,10 +57,17 @@ class TaskTrialResults:
 
 @dataclass
 class BenchmarkResult:
-    """Results from running benchmark with multiple trials per task"""
+    """
+    This class provides methods for calculating various metrics about benchmark performance.
+
+    Attributes:
+        task_results: Dictionary mapping task IDs to their trial results
+        k: The k value(s) to use for pass@k and pass^k calculations.
+           Can be a single int or a list of ints.
+    """
 
     task_results: dict[str, TaskTrialResults]
-    k: int = 1
+    k: list[int] = field(default_factory=lambda: [1])
 
     @property
     def all_task_ids(self) -> list[str]:
@@ -105,8 +112,9 @@ class BenchmarkResult:
 
         return mean(self.task_success_rate(task_id) for task_id in self.all_task_ids)
 
-    def task_pass_at_k(self, task_id: str) -> float:
-        """Calculate pass@k for a specific task
+    def task_pass_at_k(self, task_id: str, k: int) -> float:
+        """
+        Calculate pass@k for a specific task for a given k value.
 
         pass@k is defined as:
         .. math: P(pass@k) = 1 - (1 - p)^k
@@ -119,9 +127,10 @@ class BenchmarkResult:
 
         Args:
             task_id: The ID of the task to calculate pass@k for
+            k: The k value to use
 
         Returns:
-            The pass@k score for the task
+            The pass@k score
 
         Raises:
             TaskNotFoundError: If the task ID is not found
@@ -131,9 +140,10 @@ class BenchmarkResult:
             raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
 
         trials = self.task_results[task_id].trials
-        if len(trials) < self.k:
+
+        if len(trials) < k:
             raise InsufficientTrialsError(
-                f"Number of trials ({len(trials)}) is less than k ({self.k}) for task ID '{task_id}'."
+                f"Number of trials ({len(trials)}) is less than k ({k}) for task ID '{task_id}'."
             )
 
         c = sum(1 if trial.success else 0 for trial in trials)
@@ -143,11 +153,11 @@ class BenchmarkResult:
         if c == n:  # All trials succeeded
             return 1.0
         else:
-            return 1.0 - (1.0 - c / n) ** self.k
+            return 1.0 - (1.0 - c / n) ** k
 
-    def task_pass_hat_k(self, task_id: str) -> float:
+    def task_pass_hat_k(self, task_id: str, k: int) -> float:
         """
-        Calculate pass^k - probability of all k trials succeeding.
+        Calculate pass^k - probability of all k trials succeeding for a given k value.
 
         pass^k is defined as:
         .. math: P(pass^k) = p^k
@@ -164,13 +174,14 @@ class BenchmarkResult:
 
         Args:
             task_id: The ID of the task to calculate pass^k for
+            k: The k value to use
 
         Returns:
-            The pass^k score for the task
+            The pass^k score
 
         Raises:
             TaskNotFoundError: If the task ID is not found
-            InsufficientTrialsError: If there are fewer trials than k
+            NoResultsError: If there are no trials for the task
         """
         if task_id not in self.task_results:
             raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
@@ -179,20 +190,35 @@ class BenchmarkResult:
         if not trials:
             raise NoResultsError(f"No trials available for task ID '{task_id}'.")
 
-        # Calculate probability of success based on observed success rate
         c = sum(1 if trial.success else 0 for trial in trials)
         n = len(trials)
 
         # Calculate pass^k
-        return (c / n) ** self.k
+        return (c / n) ** k
 
-    def overall_pass_at_k(self) -> float:
-        """Calculate average pass@k across all tasks"""
-        return mean(self.task_pass_at_k(task_id) for task_id in self.all_task_ids)
+    def overall_pass_at_k(self, k: int) -> float:
+        """
+        Calculate average pass@k across all tasks for a given k value.
 
-    def overall_pass_hat_k(self) -> float:
-        """Calculate average pass^k across all tasks"""
-        return mean(self.task_pass_hat_k(task_id) for task_id in self.all_task_ids)
+        Args:
+            k: The k value to use
+
+        Returns:
+            The average pass@k score across all tasks
+        """
+        return mean(self.task_pass_at_k(task_id, k) for task_id in self.all_task_ids)
+
+    def overall_pass_hat_k(self, k: int) -> float:
+        """
+        Calculate average pass^k across all tasks for a given k value.
+
+        Args:
+            k: The k value to use
+
+        Returns:
+            The average pass^k score across all tasks
+        """
+        return mean(self.task_pass_hat_k(task_id, k) for task_id in self.all_task_ids)
 
     def generate_report(self, report_path: str | None = None) -> None:
         """
@@ -200,7 +226,6 @@ class BenchmarkResult:
         Shows overall metrics and detailed per-task tables.
 
         Args:
-            k: Number of trials to consider for pass@k metrics
             report_path: Optional path to save the report. If provided, saves as JSON.
         """
         from rich.console import Console
@@ -214,6 +239,9 @@ class BenchmarkResult:
             Panel("BENCHMARK RESULTS REPORT", style="bold blue", expand=False)
         )
 
+        # Get all k values to report
+        k_values = self.k
+
         # Summary Table
         summary_table = Table(
             title="Overall Metrics", show_header=False, header_style="bold magenta"
@@ -226,8 +254,16 @@ class BenchmarkResult:
         summary_table.add_row(
             "Overall Success Rate", f"{self.overall_success_rate():.3f}"
         )
-        summary_table.add_row(f"Pass@{self.k}", f"{self.overall_pass_at_k():.3f}")
-        summary_table.add_row(f"Pass^{self.k}", f"{self.overall_pass_hat_k():.3f}")
+
+        # Add pass@k and pass^k metrics for each k value
+        pass_at_k_results = {}
+        pass_hat_k_results = {}
+
+        for k_val in k_values:
+            pass_at_k_results[k_val] = self.overall_pass_at_k(k_val)
+            pass_hat_k_results[k_val] = self.overall_pass_hat_k(k_val)
+            summary_table.add_row(f"Pass@{k_val}", f"{pass_at_k_results[k_val]:.3f}")
+            summary_table.add_row(f"Pass^{k_val}", f"{pass_hat_k_results[k_val]:.3f}")
 
         console.print(summary_table)
         console.print()  # Add spacing between tables
@@ -245,8 +281,20 @@ class BenchmarkResult:
 
             # Add task metrics
             task_table.add_row("Success Rate", f"{self.task_success_rate(task_id):.3f}")
-            task_table.add_row(f"Pass@{self.k}", f"{self.task_pass_at_k(task_id):.3f}")
-            task_table.add_row(f"Pass^{self.k}", f"{self.task_pass_hat_k(task_id):.3f}")
+
+            # Add pass@k and pass^k metrics for each k value
+            task_pass_at_k_results = {}
+            task_pass_hat_k_results = {}
+
+            for k_val in k_values:
+                task_pass_at_k_results[k_val] = self.task_pass_at_k(task_id, k_val)
+                task_pass_hat_k_results[k_val] = self.task_pass_hat_k(task_id, k_val)
+                task_table.add_row(
+                    f"Pass@{k_val}", f"{task_pass_at_k_results[k_val]:.3f}"
+                )
+                task_table.add_row(
+                    f"Pass^{k_val}", f"{task_pass_hat_k_results[k_val]:.3f}"
+                )
 
             # Add tool usage statistics if available
             trials = task_trials.trials
@@ -296,36 +344,63 @@ class BenchmarkResult:
         # Save report if path provided
         if report_path:
             try:
+                # Create pass@k and pass^k dictionaries for the report
+                pass_at_k_dict = {
+                    f"pass@{k}": value for k, value in pass_at_k_results.items()
+                }
+                pass_hat_k_dict = {
+                    f"pass^{k}": value for k, value in pass_hat_k_results.items()
+                }
+
+                # Create report data
                 report_data = {
                     "metrics": {
                         "average_score": self.average_score(),
                         "overall_success_rate": self.overall_success_rate(),
-                        f"pass@{self.k}": self.overall_pass_at_k(),
-                        f"pass^{self.k}": self.overall_pass_hat_k(),
+                        **pass_at_k_dict,
+                        **pass_hat_k_dict,
                         "total_tasks": self.total_tasks,
                     },
-                    "task_results": {
-                        task_id: {
-                            "success_rate": self.task_success_rate(task_id),
-                            f"pass@{self.k}": self.task_pass_at_k(task_id),
-                            f"pass^{self.k}": self.task_pass_hat_k(task_id),
-                            "tool_calls": [
-                                {
-                                    "tool_name": tool_call["tool_name"],
-                                    "arguments": tool_call["arguments"],
-                                    "result": tool_call["result"],
-                                    "status": tool_call["status"],
-                                    "error_message": tool_call.get("error_message"),
-                                    "timestamp": tool_call.get("timestamp"),
-                                }
-                                for trial in self.task_results[task_id].trials
-                                if "tool_calls" in trial.tool_statistics
-                                for tool_call in trial.tool_statistics["tool_calls"]
-                            ],
-                        }
-                        for task_id in self.all_task_ids
-                    },
+                    "task_results": {},
                 }
+
+                # Add task-specific results
+                for task_id in self.all_task_ids:
+                    # Calculate task-specific metrics for each k
+                    task_pass_at_k = {}
+                    task_pass_hat_k = {}
+
+                    for k_val in k_values:
+                        task_pass_at_k[k_val] = self.task_pass_at_k(task_id, k_val)
+                        task_pass_hat_k[k_val] = self.task_pass_hat_k(task_id, k_val)
+
+                    # Create task-specific pass@k and pass^k dictionaries
+                    task_pass_at_k_dict = {
+                        f"pass@{k}": value for k, value in task_pass_at_k.items()
+                    }
+                    task_pass_hat_k_dict = {
+                        f"pass^{k}": value for k, value in task_pass_hat_k.items()
+                    }
+
+                    report_data["task_results"][task_id] = {
+                        "success_rate": self.task_success_rate(task_id),
+                        **task_pass_at_k_dict,
+                        **task_pass_hat_k_dict,
+                        "tool_calls": [
+                            {
+                                "tool_name": tool_call["tool_name"],
+                                "arguments": tool_call["arguments"],
+                                "result": tool_call["result"],
+                                "status": tool_call["status"],
+                                "error_message": tool_call.get("error_message"),
+                                "timestamp": tool_call.get("timestamp"),
+                            }
+                            for trial in self.task_results[task_id].trials
+                            if "tool_calls" in trial.tool_statistics
+                            for tool_call in trial.tool_statistics["tool_calls"]
+                        ],
+                    }
+
                 with Path(report_path).open("w") as f:
                     json.dump(report_data, f, indent=2)
                 logger.info(f"Saved detailed report to: {report_path}")

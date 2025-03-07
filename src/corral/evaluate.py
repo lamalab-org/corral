@@ -85,13 +85,16 @@ class MatAgentBenchmark:
         self.agent = agent
 
     def bench(
-        self, task_ids: list[str] | None = None, trials_per_task: int = 1
+        self,
+        task_ids: list[str] | None = None,
+        trials_per_task: int = 1,
+        k_values: int | list[int] | None = None,
     ) -> BenchmarkResult:
         """Run benchmark on specified tasks or all available tasks
 
         Args:
-            task_ids: list of task IDs to run, or None for all tasks
-            trials_per_task: Number of trials per task, defaults to 1 if not specified
+            task_ids: list of task_ids to run, or None for all tasks
+            trials_per_task: Number of trials per task, Default to k=1 to number of trials
 
         """
         if task_ids is None:
@@ -99,6 +102,11 @@ class MatAgentBenchmark:
 
         if trials_per_task == 0:
             raise ValueError("Number of trials per task must be greater than 0")
+
+        if k_values is None:
+            k_values = list(range(1, trials_per_task + 1))
+        elif isinstance(k_values, int):
+            k_values = [k_values]
 
         logger.info(
             f"Running benchmark on tasks: {task_ids} with {trials_per_task} trials per task"
@@ -122,4 +130,4 @@ class MatAgentBenchmark:
             # Store all trials for this task
             task_results[task_id] = task_trials
 
-        return BenchmarkResult(task_results=task_results, k=trials_per_task)
+        return BenchmarkResult(task_results=task_results, k=k_values)
