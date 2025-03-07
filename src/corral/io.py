@@ -59,6 +59,34 @@ class FSManager:
             self.copy_file(source, destination)
             self.fs.rm(source)
 
+    def mkdir(self, path: str, create_parents: bool = False) -> None:
+        """Create a directory at the given path.
+
+        If create_parents is True and the backend supports it, create all missing parent directories.
+        """
+        try:
+            if create_parents:
+                # Many fsspec implementations support mkdirs.
+                # If not available, fall back to calling mkdir for each missing part.
+                if hasattr(self.fs, "mkdirs"):
+                    self.fs.mkdirs(path, exist_ok=True)
+                else:
+                    self.fs.mkdir(path)
+            else:
+                self.fs.mkdir(path)
+        except Exception as e:
+            raise RuntimeError(f"Error creating directory {path}: {e}") from e
+
+    def cat_files(self, paths: list[str], separator: str = "\n") -> str:
+        """Concatenate the contents of multiple files with the given separator."""
+        contents = []
+        for path in paths:
+            try:
+                contents.append(self.read_file(path))
+            except Exception as e:
+                raise RuntimeError(f"Error reading file {path}: {e}") from e
+        return separator.join(contents)
+
 
 class ListFilesTool(Tool):
     """Tool for listing files in a directory"""
@@ -239,3 +267,38 @@ class CopyFileTool(Tool):
             return f"Copied {kwargs['source']} to {kwargs['destination']}"
         except Exception as e:
             return f"Error: {e}"
+
+
+class MkdirTool(Tool):
+    """Tool for creating a directory (and optionally its parent dirs)."""
+
+    def init(self, fs_manager):
+        super().__init__(
+            name="mkdir",
+            description="Create a directory. Optionally create parent directories.",
+            arguments=[
+                ToolArgument(
+                    name="path",
+                    type="str",
+                    description="Path of the directory to create",
+                    required=True,
+                ),
+                ToolArgument(
+                    name="create_parents",
+                    type="bool",
+                    description="If true, create parent directories as needed.",
+                    required=False,
+                    default=False,
+                ),
+            ],
+        )
+        self.fs_manager = fs_manager
+
+        def execute(self, **kwargs) -> str:
+            try:
+                self.fs_manager.mkdir(
+                    kwargs["path"], kwargs.get("create_parents", False)
+                )
+                return f"Directory {kwargs['path']} created successfully."
+            except Exception as e:
+                return f"Error: {e}"
