@@ -5,6 +5,7 @@ from statistics import mean
 from typing import Any
 
 from loguru import logger
+from rich.table import Table
 
 
 class BenchmarkError(Exception):
@@ -226,6 +227,84 @@ class BenchmarkResult:
         """
         return mean(self.task_pass_hat_k(task_id, k) for task_id in self.all_task_ids)
 
+    def _build_summary_table(
+        self, pass_at_k_results: dict, pass_hat_k_results: dict
+    ) -> Table:
+        summary_table = Table(
+            title="Overall Metrics", show_header=False, header_style="bold magenta"
+        )
+        summary_table.add_column("Metric", justify="left", style="cyan")
+        summary_table.add_column("Value", justify="right", style="white")
+        summary_table.add_row("Total Tasks", str(self.total_tasks))
+        summary_table.add_row("Average Score", f"{self.average_score():.3f}")
+        summary_table.add_row(
+            "Overall Success Rate", f"{self.overall_success_rate():.3f}"
+        )
+        for k_val in self.k:
+            summary_table.add_row(f"Pass@{k_val}", f"{pass_at_k_results[k_val]:.3f}")
+            summary_table.add_row(f"Pass^{k_val}", f"{pass_hat_k_results[k_val]:.3f}")
+        return summary_table
+
+    def _build_task_table(self, task_id: str) -> Table:
+        task_table = Table(
+            title=f"Task: {task_id}",
+            show_header=False,
+            header_style="bold green",
+            title_style="bold green",
+        )
+        task_table.add_column("Metric", style="cyan")
+        task_table.add_column("Value", style="white")
+        task_table.add_row("Success Rate", f"{self.task_success_rate(task_id):.3f}")
+        for k_val in self.k:
+            pass_at = self.task_pass_at_k(task_id, k_val)
+            pass_hat = self.task_pass_hat_k(task_id, k_val)
+            task_table.add_row(f"Pass@{k_val}", f"{pass_at:.3f}")
+            task_table.add_row(f"Pass^{k_val}", f"{pass_hat:.3f}")
+        return task_table
+
+    def _build_tool_usage_table(self, task_id: str) -> Table:
+        """Builds a table showing tool usage statistics for a task."""
+        tool_usage_table = Table(
+            title="Tool Usage",
+            show_header=False,
+            header_style="bold blue",
+        )
+        for trial in self.task_results[task_id].trials:
+            if trial.tool_statistics:
+                for tool, stats in trial.tool_statistics.items():
+                    if isinstance(stats, int | float):
+                        tool_usage_table.add_row(f"  • {tool}", str(stats))
+                    elif isinstance(stats, list):
+                        tool_usage_table.add_row(
+                            f"  • {tool}", ", ".join(map(str, stats))
+                        )
+                    else:
+                        tool_usage_table.add_row(f"  • {tool}", str(stats))
+        return tool_usage_table
+
+    def _build_tool_calls_table(self, task_id: str) -> Table:
+        """Builds a table showing detailed tool calls for a task."""
+        tool_calls_table = Table(
+            title="Tool Calls Details",
+            show_header=True,
+            header_style="bold yellow",
+        )
+        tool_calls_table.add_column("Tool Name", style="yellow")
+        tool_calls_table.add_column("Arguments", style="cyan")
+        tool_calls_table.add_column("Result", style="green")
+        tool_calls_table.add_column("Status", style="magenta")
+
+        for trial in self.task_results[task_id].trials:
+            if "tool_calls" in trial.tool_statistics:
+                for tool_call in trial.tool_statistics["tool_calls"]:
+                    tool_calls_table.add_row(
+                        tool_call["tool_name"],
+                        str(tool_call["arguments"]),
+                        str(tool_call["result"]),
+                        tool_call["status"],
+                    )
+        return tool_calls_table
+
     def generate_report(self, report_path: str | None = None) -> None:
         """
         Display and optionally save a detailed report of the benchmark results.
@@ -236,7 +315,6 @@ class BenchmarkResult:
         """
         from rich.console import Console
         from rich.panel import Panel
-        from rich.table import Table
 
         console = Console()
 
@@ -245,106 +323,33 @@ class BenchmarkResult:
             Panel("BENCHMARK RESULTS REPORT", style="bold blue", expand=False)
         )
 
-        # Get all k values to report
-        k_values = self.k
+        # Prepare pass metrics for the summary
+        pass_at_k_results = {k_val: self.overall_pass_at_k(k_val) for k_val in self.k}
+        pass_hat_k_results = {k_val: self.overall_pass_hat_k(k_val) for k_val in self.k}
 
-        # Summary Table
-        summary_table = Table(
-            title="Overall Metrics", show_header=False, header_style="bold magenta"
-        )
-        summary_table.add_column("Metric", justify="left", style="cyan")
-        summary_table.add_column("Value", justify="right", style="white")
-
-        summary_table.add_row("Total Tasks", str(self.total_tasks))
-        summary_table.add_row("Average Score", f"{self.average_score():.3f}")
-        summary_table.add_row(
-            "Overall Success Rate", f"{self.overall_success_rate():.3f}"
-        )
-
-        # Add pass@k and pass^k metrics for each k value
-        pass_at_k_results = {}
-        pass_hat_k_results = {}
-
-        for k_val in k_values:
-            pass_at_k_results[k_val] = self.overall_pass_at_k(k_val)
-            pass_hat_k_results[k_val] = self.overall_pass_hat_k(k_val)
-            summary_table.add_row(f"Pass@{k_val}", f"{pass_at_k_results[k_val]:.3f}")
-            summary_table.add_row(f"Pass^{k_val}", f"{pass_hat_k_results[k_val]:.3f}")
-
+        summary_table = self._build_summary_table(pass_at_k_results, pass_hat_k_results)
         console.print(summary_table)
-        console.print()  # Add spacing between tables
+        console.print()  # Spacing
 
         # Create individual tables for each task
         for task_id, task_trials in self.task_results.items():
-            task_table = Table(
-                title=f"Task: {task_id}",
-                show_header=False,
-                header_style="bold green",
-                title_style="bold green",
-            )
-            task_table.add_column("Metric", style="cyan")
-            task_table.add_column("Value", style="white")
-
-            # Add task metrics
-            task_table.add_row("Success Rate", f"{self.task_success_rate(task_id):.3f}")
-
-            # Add pass@k and pass^k metrics for each k value
-            task_pass_at_k_results = {}
-            task_pass_hat_k_results = {}
-
-            for k_val in k_values:
-                task_pass_at_k_results[k_val] = self.task_pass_at_k(task_id, k_val)
-                task_pass_hat_k_results[k_val] = self.task_pass_hat_k(task_id, k_val)
-                task_table.add_row(
-                    f"Pass@{k_val}", f"{task_pass_at_k_results[k_val]:.3f}"
-                )
-                task_table.add_row(
-                    f"Pass^{k_val}", f"{task_pass_hat_k_results[k_val]:.3f}"
-                )
+            task_table = self._build_task_table(task_id)
+            console.print(task_table)
 
             # Add tool usage statistics if available
             trials = task_trials.trials
             if trials and trials[0].tool_statistics:
-                task_table.add_row("Tool Usage", "")
-                for tool, stats in trials[0].tool_statistics.items():
-                    if isinstance(stats, int | float):
-                        task_table.add_row(f"  • {tool}", str(stats))
-                    elif isinstance(stats, list):
-                        task_table.add_row(f"  • {tool}", ", ".join(map(str, stats)))
-                    else:
-                        task_table.add_row(f"  • {tool}", str(stats))
+                tool_usage_table = self._build_tool_usage_table(task_id)
+                console.print(tool_usage_table)
 
                 # Add detailed tool calls if available
                 if "tool_calls" in trials[0].tool_statistics:
-                    tool_calls_table = Table(
-                        title="Tool Calls Details",
-                        show_header=True,
-                        header_style="bold yellow",
-                    )
-                    tool_calls_table.add_column("Tool Name", style="yellow")
-                    tool_calls_table.add_column("Arguments", style="cyan")
-                    tool_calls_table.add_column("Result", style="green")
-                    tool_calls_table.add_column("Status", style="magenta")
-
-                    for trial in trials:
-                        if "tool_calls" in trial.tool_statistics:
-                            for tool_call in trial.tool_statistics["tool_calls"]:
-                                tool_calls_table.add_row(
-                                    tool_call["tool_name"],
-                                    str(tool_call["arguments"]),
-                                    str(tool_call["result"]),
-                                    tool_call["status"],
-                                )
-
-                    console.print(task_table)
+                    tool_calls_table = self._build_tool_calls_table(task_id)
                     console.print(tool_calls_table)
                     console.print()  # Add spacing between tasks
                 else:
-                    console.print(task_table)
                     console.print()  # Add spacing between tasks
             else:
-                task_table.add_row("Tool Usage", "None")
-                console.print(task_table)
                 console.print()  # Add spacing between tasks
 
         # Save report if path provided
@@ -376,7 +381,7 @@ class BenchmarkResult:
                     task_pass_at_k = {}
                     task_pass_hat_k = {}
 
-                    for k_val in k_values:
+                    for k_val in self.k:
                         task_pass_at_k[k_val] = self.task_pass_at_k(task_id, k_val)
                         task_pass_hat_k[k_val] = self.task_pass_hat_k(task_id, k_val)
 
