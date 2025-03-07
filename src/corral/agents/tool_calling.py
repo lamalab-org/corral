@@ -46,7 +46,7 @@ class ToolCallingAgent:
         self.kwargs = kwargs
 
     def create_prompt(
-        self, prompt: PromptStore, task_guide: str, history: list[dict[str, Any]]
+        self, prompt: str, task_guide: str, history: list[dict[str, Any]]
     ) -> list[LiteLLMMessage]:
         """Create the initial prompt messages for the agent
         Args:
@@ -76,7 +76,7 @@ class ToolCallingAgent:
         task_prompt: str | None = None,
     ) -> tuple[str, list[LiteLLMMessage]]:
         """Run the agent to solve the task
-        
+
         Args:
             interface (BenchmarkInterface): The interface to use.
             task_id (str): The task ID to solve.
