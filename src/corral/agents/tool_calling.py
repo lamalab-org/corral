@@ -52,6 +52,7 @@ class ToolCallingAgent:
         Args:
             task_guide (str): The task guide to use.
             history (List[Dict[str, Any]]): The history items to include.
+            
         Returns:
             List[LiteLLMMessage]: The prompt messages.
         """
