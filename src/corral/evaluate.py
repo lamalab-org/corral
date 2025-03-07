@@ -103,10 +103,13 @@ class MatAgentBenchmark:
         if trials_per_task == 0:
             raise ValueError("Number of trials per task must be greater than 0")
 
+        # Validate and set k_values
         if k_values is None:
             k_values = list(range(1, trials_per_task + 1))
         elif isinstance(k_values, int):
             k_values = [k_values]
+        elif isinstance(k_values, list) and max(k_values) > trials_per_task:
+            raise ValueError("k value is greater than the number of trials")
 
         logger.info(
             f"Running benchmark on tasks: {task_ids} with {trials_per_task} trials per task"
