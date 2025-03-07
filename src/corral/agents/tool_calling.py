@@ -49,9 +49,11 @@ class ToolCallingAgent:
         self, prompt: str, task_guide: str, history: list[dict[str, Any]]
     ) -> list[LiteLLMMessage]:
         """Create the initial prompt messages for the agent
+        
         Args:
             task_guide (str): The task guide to use.
             history (List[Dict[str, Any]]): The history items to include.
+            
         Returns:
             List[LiteLLMMessage]: The prompt messages.
         """
