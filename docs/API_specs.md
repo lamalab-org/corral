@@ -79,7 +79,6 @@ def tool1(arg1: [str, float, int], arg2: [str, float, int]) -> [str, float, int]
     Args:
         Describe the arguments here
     """
-    
 
     result = function(arg1, arg2)
 
