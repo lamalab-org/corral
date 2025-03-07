@@ -120,7 +120,7 @@ from prompts import BASELINESYSTEMPROMPT, BASELINEUSERPROMPT
 from openai import OpenAI
 
 
-class Base_Agent:
+class BaseAgent:
     """General agent implementation"""
 
     def __init__(self, base_url: str, tools: list(str), args, **kwargs):
