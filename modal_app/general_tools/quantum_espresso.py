@@ -4,69 +4,54 @@ from modal import Image
 
 _quantum_espresso_image = (
     Image.debian_slim(python_version="3.12")
-    .apt_install(
-        "git",
-        "wget",
-        "build-essential",
-        "g++",
-        "gfortran",
-        "liblapack-dev",
-        "libfftw3-dev",
-        "libopenmpi-dev",
-    )
+    .apt_install("libfftw3-dev", "quantum-espresso")
     .pip_install("loguru")
+    .run_commands(
+        """echo 'export PATH="/root/q-e-qe-7.2/bin:$PATH"' >> ~/.bashrc && /bin/bash -c 'source ~/.bashrc'"""
+    )
 )
 with _quantum_espresso_image.imports():
     import os
     import subprocess
+    import uuid
 
     from loguru import logger
 
-
-def _install_quantum_espresso():
-    try:
-        logger.debug("Cloning Quantum Espresso repository...")
-        subprocess.run(["git", "clone", "https://github.com/QEF/q-e.git"], check=True)
-
-        logger.debug("Changing to q-e directory...")
-        os.chdir("q-e")
-
-        logger.debug("Running configure script...")
-        subprocess.run(["./configure"], check=True)
-
-        logger.debug("Compiling Quantum Espresso...")
-        subprocess.run(["make", "all"], check=True)
-
-        logger.debug("Adding Quantum Espresso to PATH...")
-        home = os.path.expanduser("~")
-        bashrc_path = os.path.join(home, ".bashrc")
-        with open(bashrc_path, "a") as f:
-            f.write("\nexport PATH=$PATH:$HOME/q-e/bin\n")
-
-        logger.debug("Updating shell environment...")
-        subprocess.run(f"bash -c 'source {bashrc_path}'", shell=True, check=True)
-
-        logger.debug("Quantum Espresso installation completed successfully")
-        return "Quantum Espresso installed successfully"
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Installation failed at step: {e.cmd}")
-        raise Exception(f"Installation failed at step: {e.cmd}")
+import mimetypes
 
 
-quantum_espresso_image = _quantum_espresso_image.run_function(_install_quantum_espresso)
+def _run_quantum_espresso(
+    pw_command: str,
+    options: list[str],
+    input: str,
+    input_file: str = "input.in",
+    output_file: str = "output.out",
+) -> dict[str, str]:
+    """
+    Run a Quantum ESPRESSO command with the given options and input.
 
+    Args:
+        pw_command: The Quantum ESPRESSO command to run.
+        options: The options to pass to the command.
+        input: The input to pass to the command.
+        input_file: The name of the input file to write.
+        output_file: The name of the output file to write.
 
-def _run_quantum_espresso(pw_command: str, options: list[str], input: str) -> str:
-    output_file = "output.out"
-    input_file = "input.in"
+    Returns:
+        Dictionary containing contents of all text files in the run directory.
+    """
+    run_id = str(uuid.uuid4())
+    run_dir = run_id
+    input_file = os.path.join(run_dir, input_file)
+    output_file = os.path.join(run_dir, output_file)
 
     try:
+        os.makedirs(run_dir)
         with open(input_file, "w") as f:
             f.write(input)
         logger.debug(f"Input written to file: {input_file}")
     except OSError as e:
-        logger.error(f"Failed to write input file: {e}")
+        logger.error(f"Failed to create directory or write input file: {e}")
         raise e
 
     try:
@@ -79,18 +64,36 @@ def _run_quantum_espresso(pw_command: str, options: list[str], input: str) -> st
                 command.append(opt)
 
         command.extend(["-in", input_file])
-
         command.extend([">", output_file])
         shell = True
 
         logger.debug(f"Executing Quantum ESPRESSO command: {' '.join(command)}")
         subprocess.run(command, shell=shell, check=True, capture_output=True, text=True)
-        logger.debug(f"Reading output from file: {output_file}")
-        with open(output_file) as f:
-            content = f.read()
-            logger.debug(f"Read {len(content)} characters from output file")
-            return content
+
+        results = {}
+        for filename in os.listdir(run_dir):
+            filepath = os.path.join(run_dir, filename)
+            if filename == "input.in":
+                continue
+
+            mime_type, _ = mimetypes.guess_type(filepath)
+            if mime_type and mime_type.startswith("text/"):
+                try:
+                    with open(filepath) as f:
+                        results[filename] = f.read()
+                except Exception as e:
+                    logger.error(f"Failed to read file {filename}: {e}")
+
+        return results
 
     except subprocess.CalledProcessError as e:
         logger.error(f"Quantum Espresso execution failed: {e.cmd}")
         raise Exception(f"Quantum Espresso execution failed: {e.cmd}\n{e.stderr}")
+    finally:
+        try:
+            import shutil
+
+            shutil.rmtree(run_dir)
+            logger.debug(f"Cleaned up directory: {run_dir}")
+        except OSError as e:
+            logger.warning(f"Failed to clean up directory {run_dir}: {e}")
