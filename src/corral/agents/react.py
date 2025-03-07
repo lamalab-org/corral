@@ -12,6 +12,7 @@ from typing import Any
 
 from promptstore import PromptStore
 
+from corral.agents.prompt_utils import get_prompt
 from corral.agents.utils import llm_call
 
 
@@ -31,17 +32,40 @@ class Action:
 
 
 class ReActAgent:
-    def __init__(self, model: str = "gpt-4", max_iterations: int = 10):
+    def __init__(
+        self,
+        model: str = "gpt-4",
+        max_iterations: int = 10,
+        api_endpoint: str | None = None,
+        system_prompt: str | None = None,
+        user_prompt: str | None = None,
+        **kwargs,
+    ):
         self.model = model
         self.max_iterations = max_iterations
+        self.api_endpoint = api_endpoint
         self.store = PromptStore("./prompts")
+        self.kwargs = kwargs
+        self.system_prompt = (
+            get_prompt(
+                self.store, system_prompt, "400fcecf-f5f2-464b-aff5-8a4377c9685c"
+            ).fill({})
+            if system_prompt is None
+            else system_prompt
+        )
+
+        self.user_prompt = get_prompt(
+            self.store,
+            user_prompt,
+            "d880c4d3-fe60-4cf4-813b-2008076cd595",
+        )
 
     def get_llm_response(self, prompt: str) -> str:
         """Get response from LLM using LiteLLM"""
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful AI assistant that solves tasks step by step.",
+                "content": self.system_prompt,
             },
             {"role": "user", "content": prompt},
         ]
@@ -50,6 +74,8 @@ class ReActAgent:
             messages=messages,
             temperature=0.7,
             max_tokens=1000,
+            api_endpoint=self.api_endpoint,
+            **self.kwargs,
         )
 
     def parse_llm_response(self, response: str) -> tuple[Thought | None, Action | None]:
@@ -74,20 +100,16 @@ class ReActAgent:
 
         return thought, action
 
-    def create_prompt(
-        self, user_prompt_uuid, task_guide: str, history: list[str]
-    ) -> str:
+    def create_prompt(self, task_guide: str, history: list[str]) -> str:
         """Create prompt for LLM including context and history"""
-        prompt = self.store.get(user_prompt_uuid)
-        return prompt.fill(
-            {"task_guide": task_guide}, {"history": chr(10).join(history)}
+        return self.user_prompt.fill(
+            {"task_guide": task_guide, "history": chr(10).join(history)}
         )
 
     def solve_task(
         self,
         interface: BenchmarkInterface,
         task_id: str,
-        user_prompt_uuid: str = "d880c4d3-fe60-4cf4-813b-2008076cd595",
     ) -> str:
         """Main ReAct loop implementation"""
         task_guide = interface.get_task_guide(task_id)
@@ -95,7 +117,7 @@ class ReActAgent:
 
         for _iteration in range(self.max_iterations):
             # Create prompt and get LLM response
-            prompt = self.create_prompt(user_prompt_uuid, task_guide, history)
+            prompt = self.create_prompt(task_guide, history)
             llm_response = self.get_llm_response(prompt)
 
             # Parse response

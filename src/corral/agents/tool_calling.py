@@ -10,29 +10,18 @@ from typing import Any
 
 from promptstore import PromptStore
 
-from corral.agents.utils import LiteLLMMessage, llm_tool_call
+from corral.agents.prompt_utils import get_prompt
+from corral.agents.utils import LiteLLMMessage, llm_call
 
 
 class ToolCallingAgent:
-    """Agent that uses tool calling
-    This agent uses the LiteLLM API to solve tasks by calling tools.
-
-    Args:
-        model (str): The LiteLLM model to use. Defaults to "gpt-4".
-        max_iterations (int): The maximum number of iterations to run. Defaults to 10.
-        api_endpoint (str): The API endpoint to use when using VLLM. Defaults to None.
-        system_prompt (str): The system prompt to use. Defaults to "You are a helpful AI assistant that solves tasks step by step."
-        temperature (float): The temperature to use. Defaults to 0.7.
-        self.store(PromptStore): The prompt store to use. Defaults to "./prompts".
-        **kwargs: Additional keyword arguments to pass to the LiteLLM API.
-    """
-
     def __init__(
         self,
         model: str = "gpt-4",
         max_iterations: int = 10,
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
+        user_prompt: str | None = None,
         temperature: float = 0.7,
         **kwargs,
     ):
@@ -40,20 +29,31 @@ class ToolCallingAgent:
         self.model = model
         self.max_iterations = max_iterations
         self.api_endpoint = api_endpoint
-        self.system_prompt = system_prompt
         self.temperature = temperature
         self.store = PromptStore("./prompts")
         self.kwargs = kwargs
+
+        self.system_prompt = (
+            get_prompt(
+                self.store, system_prompt, "400fcecf-f5f2-464b-aff5-8a4377c9685c"
+            ).fill({})
+            if system_prompt is None
+            else system_prompt
+        )
+
+        self.user_prompt = get_prompt(
+            self.store, user_prompt, "fe04453b-5469-4611-bba6-6d81487df787"
+        )
 
     def create_prompt(
         self, prompt: str, task_guide: str, history: list[dict[str, Any]]
     ) -> list[LiteLLMMessage]:
         """Create the initial prompt messages for the agent
-        
+
         Args:
             task_guide (str): The task guide to use.
             history (List[Dict[str, Any]]): The history items to include.
-            
+
         Returns:
             List[LiteLLMMessage]: The prompt messages.
         """
@@ -74,7 +74,6 @@ class ToolCallingAgent:
         interface: BenchmarkInterface,
         task_id: str,
         history: list[dict[str, Any]] | None = None,
-        prompt_uuid: str | None = "fe04453b-5469-4611-bba6-6d81487df787",
         task_prompt: str | None = None,
     ) -> tuple[str, list[LiteLLMMessage]]:
         """Run the agent to solve the task
@@ -87,11 +86,6 @@ class ToolCallingAgent:
         Returns:
             str: The final answer from the agent.
         """
-        if prompt_uuid is None:
-            raise ValueError("Prompt UUID is required")
-
-        _user_prompt = self.store.get(prompt_uuid)
-
         if history is None:
             history = []
 
@@ -102,14 +96,14 @@ class ToolCallingAgent:
             task_guide = interface.get_task_prompt(task_id)
         else:
             task_guide = task_prompt
-        user_prompt = _user_prompt.fill({"task_guide": task_guide})
+        user_prompt = self.user_prompt.fill({task_guide: task_guide})
 
         messages = self.create_prompt(
             user_prompt, task_guide=task_guide, history=history
         )
 
         for _i in range(self.max_iterations):
-            llm_response = llm_tool_call(
+            llm_response = llm_call(
                 model=self.model,
                 messages=messages,
                 tools=tools,
