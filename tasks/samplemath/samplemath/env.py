@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import uvicorn
 from tools import UnitConverterTool, app, calculator, number_converter
 
