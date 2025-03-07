@@ -90,10 +90,16 @@ class BenchmarkResult:
 
     def average_score(self) -> float:
         """Calculate average score across all results"""
-        all_results = self.all_results
-        if not all_results:
-            raise ValueError("No results available to calculate average score.")
-        return mean(r.score for r in all_results)
+
+        if not self.task_results:
+            raise ValueError("No task results available.")
+
+        task_averages = [
+            sum(trial.score for trial in task.trials) / len(task.trials)
+            for task in self.task_results.values()
+        ]
+
+        return sum(task_averages) / len(task_averages)
 
     def task_success_rate(self, task_id: str) -> float:
         """Calculate success rate for a specific task"""
