@@ -86,8 +86,8 @@ class ToolCallingAgent:
         """
         if prompt_uuid is None:
             raise ValueError("Prompt UUID is required")
-        else:
-            _user_prompt = self.store.get(prompt_uuid)
+
+        _user_prompt = self.store.get(prompt_uuid)
 
         if history is None:
             history = []
@@ -123,23 +123,23 @@ class ToolCallingAgent:
 
             tool_calls = llm_response.tool_calls
             if tool_calls:
-                called_tool = tool_calls[0]
-                function_name = called_tool.function.name
-                function_args = json.loads(called_tool.function.arguments)
-                try:
-                    function_call = interface.execute_tool(
-                        task_id, function_name, json.dumps(function_args)
-                    )
-                except Exception as e:
-                    function_call = f"Error: {e}"
+                for called_tool in tool_calls:
+                    function_name = called_tool.function.name
+                    function_args = json.loads(called_tool.function.arguments)
+                    try:
+                        function_call = interface.execute_tool(
+                            task_id, function_name, json.dumps(function_args)
+                        )
+                    except Exception as e:
+                        function_call = f"Error: {e}"
 
-                messages.append(
-                    LiteLLMMessage(
-                        role="tool",
-                        content=function_call,
-                        tool_call_id=called_tool.id,
-                        name=function_name,
+                    messages.append(
+                        LiteLLMMessage(
+                            role="tool",
+                            content=function_call,
+                            tool_call_id=called_tool.id,
+                            name=str(function_name),
+                        )
                     )
-                )
 
         return "Error solving the task. Maximum iterations reached.", messages
