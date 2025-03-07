@@ -131,7 +131,6 @@ class BaseAgent:
 
         self.tools = tools
 
-    """ Solve Task function to solve task in the environment """
 
     def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
         guide = interface.get_task_guide(task_id)
