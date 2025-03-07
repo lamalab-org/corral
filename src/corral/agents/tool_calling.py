@@ -76,6 +76,7 @@ class ToolCallingAgent:
         task_prompt: str | None = None,
     ) -> tuple[str, list[LiteLLMMessage]]:
         """Run the agent to solve the task
+        
         Args:
             interface (BenchmarkInterface): The interface to use.
             task_id (str): The task ID to solve.
