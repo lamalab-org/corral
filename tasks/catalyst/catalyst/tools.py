@@ -1,8 +1,8 @@
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
 
+from corral.base import Tool
 from corral.utils import tool
 
 load_dotenv("../.env")
@@ -18,6 +18,7 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     """
     Retrieve a pymatgen structure from Materials Project using its API and return its
     CIF content as a text string.
+
     Args:
         mp_id: Materials Project id.
     Returns:
@@ -44,6 +45,7 @@ def create_slab_from_structure_text(
 ) -> str:
     """
     Create a slab from a structure given as CIF-formatted string. Returns slab as CIF string.
+
     Args:
         structure_cif: CIF content (structure) as text.
         miller_index: Miller index to cleave the slab.
@@ -80,13 +82,11 @@ def enumerate_slabs_text(
     Enumerate possible slabs from a bulk structure (given as CIF text) using SlabGenerator.
     Returns a JSON string mapping slab indices to CIF strings.
 
-
-    Collapse
     Args:
-        bulk_cif (str): Bulk structure in CIF format.
-        miller_index (tuple): Miller index (e.g. (1,1,1)).
-        min_slab_size (float): Minimum slab thickness (Å).
-        min_vacuum_size (float): Minimum vacuum layer (Å).
+        bulk_cif: Bulk structure in CIF format.
+        miller_index: Miller index (e.g. (1,1,1)).
+        min_slab_size: Minimum slab thickness (Å).
+        min_vacuum_size: Minimum vacuum layer (Å).
     Returns:
         str: JSON dictionary: {"slab_0": "<cif_string>", "slab_1": "<cif_string>", ...}
     """
@@ -108,7 +108,8 @@ def enumerate_slabs_text(
         # We use get_orthogonal_c_slab() ensures that the slab lattice is reoriented in c axis for easier adsorption placement.
         # get_sorted_structure() variations in atom ordering that might occur due to how the slab was originally created.
         slab_clean = (
-            slab.get_orthogonal_c_slab().get_sorted_structure()
+            slab.get_sorted_structure()
+            # slab.get_orthogonal_c_slab().get_sorted_structure()
         )  # TODO needs to think about the material science
         slabs_dict[f"slab_{i}"] = slab_clean.to(fmt="cif")
 
@@ -122,8 +123,8 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
 
 
     Args:
-        slabs_json (str): JSON string mapping slab keys to CIF strings.
-        index (int): Index of the slab to select (default 0).
+        slabs_json: JSON string mapping slab keys to CIF strings.
+        index: Index of the slab to select (default 0).
     Returns:
         str: CIF string for the selected slab.
     """
@@ -142,10 +143,8 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
     Determine possible adsorption sites on a slab.
     Returns a JSON string that contains lists of binding sites (e.g. top, bridge, hollow).
 
-
-    Collapse
     Args:
-        slab_cif (str): CIF string of the slab.
+        slab_cif: CIF string of the slab.
     Returns:
         str: JSON dictionary of adsorption sites. (list of fractional coordinates)
     """
@@ -160,10 +159,39 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
     )  # returns a dict, e.g. {"top": [site1, ...], "bridge": [...], ...}
 
     # Convert sites to a serializable format (list of fractional coordinates)
-    serializable_sites = {}
-    for key, site_list in sites.items():
-        serializable_sites[key] = [list(site.frac_coords) for site in site_list]
+    serializable_sites = {
+        key: [
+            list(site.frac_coords) if hasattr(site, "frac_coords") else list(site)
+            for site in site_list
+        ]
+        for key, site_list in sites.items()
+    }
+
     return json.dumps(serializable_sites, indent=2)
+
+
+@tool
+def choose_adsorption_site_text(
+    adsorption_sites_json: str, site_type: str, index: int = 0
+) -> list[float]:
+    """
+    Selects one adsorption site from the JSON dictionary of sites (by its type and index) and returns its fractional coordinates.
+
+    Args:
+        adsorption_sites_json: JSON string mapping site types to lists of fractional coordinates.
+        site_type: Type of the site (e.g. "top", "bridge", "hollow").
+        index: Index of the site to select (default 0).
+    Returns:
+        list: Fractional coordinates of the selected site.
+    """
+    import json
+
+    sites = json.loads(adsorption_sites_json)
+    if site_type not in sites:
+        raise ValueError(f"Site type {site_type} not found.")
+    if index >= len(sites[site_type]):
+        raise ValueError(f"Site index {index} not found.")
+    return sites[site_type][index]
 
 
 @tool
@@ -178,10 +206,10 @@ def add_adsorbate_to_slab_text(
     If no site is specified, choose one from the top sites automatically.
 
     Args:
-        slab_cif (str): CIF string of the slab.
-        adsorbate_cif (str): CIF string of the adsorbate.
-        height (float): Height (Å) above the slab surface where the adsorbate should be placed.
-        site (list[float] or None): Optional fractional coordinate [x, y, z] for placement.
+        slab_cif: CIF string of the slab.
+        adsorbate_cif: CIF string of the adsorbate.
+        height: Height (Å) above the slab surface where the adsorbate should be placed.
+        site: Optional fractional coordinate [x, y, z] for placement.
             If None, the first top site will be used.
     Returns:
         str: CIF string of the combined (adsorbate+slab) structure.
@@ -230,11 +258,11 @@ def generate_reconstructed_slab(
     slabgen_params, points_to_remove, points_to_add, etc.). This tool wraps pymatgen ReconstructionGenerator.
 
     Args:
-        bulk_cif (str): CIF string for the bulk structure.
-        miller_index (tuple): Miller index for the slab (e.g. (1,1,1)).
-        min_slab_size (float): Minimum slab thickness (Å).
-        min_vacuum_size (float): Minimum vacuum region (Å).
-        reconstruction_instructions (str): JSON string containing the reconstruction instructions.
+        bulk_cif: CIF string for the bulk structure.
+        miller_index: Miller index for the slab (e.g. (1,1,1)).
+        min_slab_size: Minimum slab thickness (Å).
+        min_vacuum_size: Minimum vacuum region (Å).
+        reconstruction_instructions: JSON string containing the reconstruction instructions.
     Returns:
         str: CIF string of the reconstructed slab.
     """
@@ -272,173 +300,187 @@ def generate_reconstructed_slab(
     return recon_slab.to(fmt="cif")
 
 
+def create_tools() -> dict[str, Tool]:
+    """Create all available tools"""
+    return {
+        "get_structure_from_mp_text": get_structure_from_mp_text,
+        "create_slab_from_structure_text": create_slab_from_structure_text,
+        "enumerate_slabs_text": enumerate_slabs_text,
+        "choose_slab_text": choose_slab_text,
+        "get_adsorption_sites_text": get_adsorption_sites_text,
+        "choose_adsorption_site_text": choose_adsorption_site_text,
+        "add_adsorbate_to_slab_text": add_adsorbate_to_slab_text,
+        "generate_reconstructed_slab": generate_reconstructed_slab,
+    }
+
+
 ####################
 # Tools that will return file paths
 ####################
 
 
-@tool
-def get_structure_from_mp(mp_id: str, path_to_write_dir: str) -> Path:
-    """Get pymatgen structure from MP API given material id and save it as a cif file.
+# @tool
+# def get_structure_from_mp(mp_id: str, path_to_write_dir: str) -> Path:
+#     """Get pymatgen structure from MP API given material id and save it as a cif file.
 
-    Args:
-        mp_id: Materials Project id
-        path_to_write_dir: Path to directory where cif file will be saved
-    """
-    from mp_api.client import MPRester
+#     Args:
+#         mp_id: Materials Project id
+#         path_to_write_dir: Path to directory where cif file will be saved
+#     """
+#     from mp_api.client import MPRester
 
-    with MPRester(os.getenv("MP_API_KEY")) as mpr:
-        docs = mpr.materials.summary.search(
-            material_ids=[str(mp_id)], fields=["structure"]
-        )
-        structure = docs[0].structure
-        from pathlib import Path
+#     with MPRester(os.getenv("MP_API_KEY")) as mpr:
+#         docs = mpr.materials.summary.search(
+#             material_ids=[str(mp_id)], fields=["structure"]
+#         )
+#         structure = docs[0].structure
+#         from pathlib import Path
 
-        path = Path(path_to_write_dir) / f"{mp_id}_structure.cif"
-        structure.to(path, fmt="cif")
-        return path
-
-
-@tool
-def create_pymatgen_structure_from_cif(cif_path: str) -> str:
-    """Create pymatgen structure from cif file given path to cif file and save it as a pickle file.
-
-    Args:
-        cif_path: Path to cif file
-    """
-    import pickle
-
-    from pymatgen.core import Structure
-
-    structure = Structure.from_file(cif_path)
-    # cif path -> pickle path
-    path = cif_path.replace(".cif", ".pkl")
-    with Path(path).open("wb") as f:
-        pickle.dump(structure, f)
-    return path
+#         path = Path(path_to_write_dir) / f"{mp_id}_structure.cif"
+#         structure.to(path, fmt="cif")
+#         return path
 
 
-@tool
-def create_slab_from_structure(
-    structure_path: str,
-    miller_index: tuple = (1, 1, 1),
-    min_slab_size: int = 12,
-    min_vacuum_size: int = 5,
-    primitive: bool = True,
-) -> str:
-    """Create slab from structure and save it as a cif file.
+# @tool
+# def create_pymatgen_structure_from_cif(cif_path: str) -> str:
+#     """Create pymatgen structure from cif file given path to cif file and save it as a pickle file.
 
-    Args:
-        structure_path: Path to cif or pickle file containing structure
-        miller_index: Miller index of the surface
-        min_slab_size: Minimum slab size
-        min_vacuum_size: Minimum vacuum size
-        primitive: Whether to create a primitive slab
-    """
-    import pickle
+#     Args:
+#         cif_path: Path to cif file
+#     """
+#     import pickle
 
-    from pymatgen.core.structure import Structure
-    from pymatgen.core.surface import SlabGenerator
+#     from pymatgen.core import Structure
 
-    # Load structure from cif or pickle
-    # if miller_index is None:
-    #     miller_index = (1, 0, 0)
-    if structure_path.endswith(".cif"):
-        structure = Structure.from_file(structure_path)
-    elif structure_path.endswith(".pkl"):
-        with Path(structure_path).open("rb") as f:
-            structure = pickle.load(f)
-    else:
-        raise ValueError("Invalid structure file format")
-    # Create slab
-    slab_gen = SlabGenerator(
-        structure, miller_index, min_slab_size, min_vacuum_size, primitive=primitive
-    )
-    slab = slab_gen.get_slab()
-    slab = slab.get_orthogonal_c_slab().get_sorted_structure()
-    # cif path -> pickle path
-    path = structure_path.replace(".cif", "_slab.cif").replace(".pkl", "_slab.cif")
-    slab.to(path, fmt="cif")
-    return path
+#     structure = Structure.from_file(cif_path)
+#     # cif path -> pickle path
+#     path = cif_path.replace(".cif", ".pkl")
+#     with Path(path).open("wb") as f:
+#         pickle.dump(structure, f)
+#     return path
 
 
-@tool
-def get_molecule_from_mp(mp_id: str, path_to_write_dir: str) -> Path:
-    """Get pymatgen molecule strucutre from MP API given material id and save it as a cif file.
+# @tool
+# def create_slab_from_structure(
+#     structure_path: str,
+#     miller_index: tuple = (1, 1, 1),
+#     min_slab_size: int = 12,
+#     min_vacuum_size: int = 5,
+#     primitive: bool = True,
+# ) -> str:
+#     """Create slab from structure and save it as a cif file.
 
-    Args:
-        mp_id: Materials Project id
-        path_to_write_dir: Path to directory where cif file will be saved
-    """
-    from mp_api.client import MPRester
+#     Args:
+#         structure_path: Path to cif or pickle file containing structure
+#         miller_index: Miller index of the surface
+#         min_slab_size: Minimum slab size
+#         min_vacuum_size: Minimum vacuum size
+#         primitive: Whether to create a primitive slab
+#     """
+#     import pickle
 
-    with MPRester(os.getenv("MP_API_KEY")) as mpr:
-        docs = mpr.materials.summary.search(
-            material_ids=[str(mp_id)], fields=["structure"]
-        )
-        structure = docs[0].structure
-        from pathlib import Path
+#     from pymatgen.core.structure import Structure
+#     from pymatgen.core.surface import SlabGenerator
 
-        path = Path(path_to_write_dir) / f"{mp_id}_structure.cif"
-        structure.to(path, fmt="cif")
-        return path
+#     # Load structure from cif or pickle
+#     # if miller_index is None:
+#     #     miller_index = (1, 0, 0)
+#     if structure_path.endswith(".cif"):
+#         structure = Structure.from_file(structure_path)
+#     elif structure_path.endswith(".pkl"):
+#         with Path(structure_path).open("rb") as f:
+#             structure = pickle.load(f)
+#     else:
+#         raise ValueError("Invalid structure file format")
+#     # Create slab
+#     slab_gen = SlabGenerator(
+#         structure, miller_index, min_slab_size, min_vacuum_size, primitive=primitive
+#     )
+#     slab = slab_gen.get_slab()
+#     slab = slab.get_orthogonal_c_slab().get_sorted_structure()
+#     # cif path -> pickle path
+#     path = structure_path.replace(".cif", "_slab.cif").replace(".pkl", "_slab.cif")
+#     slab.to(path, fmt="cif")
+#     return path
 
 
-@tool
-def add_molecule_to_slab(
-    slab_path: str,
-    molecule_path: str,
-    height: float = 2.0,
-    site: tuple[float, float, float] | None = None,
-) -> str:
-    """Add molecule to slab and save as a new cif file.
+# @tool
+# def get_molecule_from_mp(mp_id: str, path_to_write_dir: str) -> Path:
+#     """Get pymatgen molecule strucutre from MP API given material id and save it as a cif file.
 
-    Args:
-        slab_path: Path to slab cif file
-        molecule_path: Path to molecule cif file
-        height: Height above the surface to place the molecule (Å)
-        site: Optional (x,y,z) coordinates to place the molecule. If None, places at center.
-    """
-    import pickle
+#     Args:
+#         mp_id: Materials Project id
+#         path_to_write_dir: Path to directory where cif file will be saved
+#     """
+#     from mp_api.client import MPRester
 
-    from pymatgen.analysis.adsorption import AdsorbateSiteFinder
-    from pymatgen.core import Molecule, Structure
+#     with MPRester(os.getenv("MP_API_KEY")) as mpr:
+#         docs = mpr.materials.summary.search(
+#             material_ids=[str(mp_id)], fields=["structure"]
+#         )
+#         structure = docs[0].structure
+#         from pathlib import Path
 
-    # Load structures
-    slab = Structure.from_file(slab_path)
+#         path = Path(path_to_write_dir) / f"{mp_id}_structure.cif"
+#         structure.to(path, fmt="cif")
+#         return path
 
-    # Check if molecule file is cif or pkl
-    if molecule_path.endswith(".cif"):
-        # CIF files may contain structures or molecules
-        try:
-            molecule = Structure.from_file(molecule_path)
-            # Convert to molecule if it's a structure
-            molecule = Molecule(
-                species=molecule.species, coords=molecule.cart_coords, charge=0
-            )
-        except Exception:
-            # Try loading as a molecule directly
-            molecule = Molecule.from_file(molecule_path)
-    else:
-        with Path(molecule_path).open("rb") as f:
-            molecule = pickle.load(f)
 
-    # Find adsorption sites if site not specified
-    if site is None:
-        finder = AdsorbateSiteFinder(slab)
-        sites = finder.find_adsorption_sites()
-        # Choose a top site by default
-        site = sites["top"][0]
+# @tool
+# def add_molecule_to_slab(
+#     slab_path: str,
+#     molecule_path: str,
+#     height: float = 2.0,
+#     site: tuple[float, float, float] | None = None,
+# ) -> str:
+#     """Add molecule to slab and save as a new cif file.
 
-    # Add molecule to slab
-    # Convert molecule to adsorbate format
-    ads_struct = finder.add_adsorbate(molecule, site, height)
+#     Args:
+#         slab_path: Path to slab cif file
+#         molecule_path: Path to molecule cif file
+#         height: Height above the surface to place the molecule (Å)
+#         site: Optional (x,y,z) coordinates to place the molecule. If None, places at center.
+#     """
+#     import pickle
 
-    # Save the combined structure
-    output_path = slab_path.replace(".cif", "_with_molecule.cif")
-    ads_struct.to(output_path, fmt="cif")
+#     from pymatgen.analysis.adsorption import AdsorbateSiteFinder
+#     from pymatgen.core import Molecule, Structure
 
-    return output_path
+#     # Load structures
+#     slab = Structure.from_file(slab_path)
+
+#     # Check if molecule file is cif or pkl
+#     if molecule_path.endswith(".cif"):
+#         # CIF files may contain structures or molecules
+#         try:
+#             molecule = Structure.from_file(molecule_path)
+#             # Convert to molecule if it's a structure
+#             molecule = Molecule(
+#                 species=molecule.species, coords=molecule.cart_coords, charge=0
+#             )
+#         except Exception:
+#             # Try loading as a molecule directly
+#             molecule = Molecule.from_file(molecule_path)
+#     else:
+#         with Path(molecule_path).open("rb") as f:
+#             molecule = pickle.load(f)
+
+#     # Find adsorption sites if site not specified
+#     if site is None:
+#         finder = AdsorbateSiteFinder(slab)
+#         sites = finder.find_adsorption_sites()
+#         # Choose a top site by default
+#         site = sites["top"][0]
+
+#     # Add molecule to slab
+#     # Convert molecule to adsorbate format
+#     ads_struct = finder.add_adsorbate(molecule, site, height)
+
+#     # Save the combined structure
+#     output_path = slab_path.replace(".cif", "_with_molecule.cif")
+#     ads_struct.to(output_path, fmt="cif")
+
+#     return output_path
 
 
 # def create_tools() -> dict[str, Tool]:
