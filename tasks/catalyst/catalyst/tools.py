@@ -3,10 +3,278 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from corral.base import Tool
 from corral.utils import tool
 
 load_dotenv("../.env")
+
+
+####################
+# Tools that will return buffer objects
+####################
+
+
+@tool
+def get_structure_from_mp_text(mp_id: str) -> str:
+    """
+    Retrieve a pymatgen structure from Materials Project using its API and return its
+    CIF content as a text string.
+    Args:
+        mp_id: Materials Project id.
+    Returns:
+        CIF content string.
+    """
+    from mp_api.client import MPRester
+
+    with MPRester(os.getenv("MP_API_KEY")) as mpr:
+        docs = mpr.materials.summary.search(
+            material_ids=[str(mp_id)], fields=["structure"]
+        )
+        structure = docs[0].structure
+
+    return structure.to(fmt="cif")
+
+
+@tool
+def create_slab_from_structure_text(
+    structure_cif: str,
+    miller_index: tuple = (1, 1, 1),
+    min_slab_size: int = 12,
+    min_vacuum_size: int = 5,
+    primitive: bool = True,
+) -> str:
+    """
+    Create a slab from a structure given as CIF-formatted string. Returns slab as CIF string.
+    Args:
+        structure_cif: CIF content (structure) as text.
+        miller_index: Miller index to cleave the slab.
+        min_slab_size: Minimum slab thickness.
+        min_vacuum_size: Vacuum distance needed.
+        primitive: Whether to create a primitive cell slab.
+    Returns:
+        Slab CIF content as string.
+    """
+    from pymatgen.core import Structure
+    from pymatgen.core.surface import SlabGenerator
+
+    # Load the structure from CIF string
+    structure = Structure.from_str(structure_cif, fmt="cif")
+
+    # Create the slab
+    slab_gen = SlabGenerator(
+        structure, miller_index, min_slab_size, min_vacuum_size, primitive=primitive
+    )
+    slab = slab_gen.get_slab()
+    slab = slab.get_orthogonal_c_slab().get_sorted_structure()
+
+    return slab.to(fmt="cif")
+
+
+@tool
+def enumerate_slabs_text(
+    bulk_cif: str,
+    miller_index: tuple = (1, 1, 1),
+    min_slab_size: float = 12,
+    min_vacuum_size: float = 5,
+) -> str:
+    """
+    Enumerate possible slabs from a bulk structure (given as CIF text) using SlabGenerator.
+    Returns a JSON string mapping slab indices to CIF strings.
+
+
+    Collapse
+    Args:
+        bulk_cif (str): Bulk structure in CIF format.
+        miller_index (tuple): Miller index (e.g. (1,1,1)).
+        min_slab_size (float): Minimum slab thickness (Å).
+        min_vacuum_size (float): Minimum vacuum layer (Å).
+    Returns:
+        str: JSON dictionary: {"slab_0": "<cif_string>", "slab_1": "<cif_string>", ...}
+    """
+    import json
+
+    from pymatgen.core import Structure
+    from pymatgen.core.surface import SlabGenerator
+
+    bulk_structure = Structure.from_str(bulk_cif, fmt="cif")
+
+    # Create a SlabGenerator from the bulk structure
+    slab_gen = SlabGenerator(
+        bulk_structure, miller_index, min_slab_size, min_vacuum_size
+    )
+    slabs = slab_gen.get_slabs()  # returns a list of Slab objects
+
+    slabs_dict = {}
+    for i, slab in enumerate(slabs):
+        # We use get_orthogonal_c_slab() ensures that the slab lattice is reoriented in c axis for easier adsorption placement.
+        # get_sorted_structure() variations in atom ordering that might occur due to how the slab was originally created.
+        slab_clean = (
+            slab.get_orthogonal_c_slab().get_sorted_structure()
+        )  # TODO needs to think about the material science
+        slabs_dict[f"slab_{i}"] = slab_clean.to(fmt="cif")
+
+    return json.dumps(slabs_dict, indent=2)
+
+
+@tool
+def choose_slab_text(slabs_json: str, index: int = 0) -> str:
+    """
+    Selects one slab from the JSON dictionary of slabs (by its index) and returns its CIF string.
+
+
+    Args:
+        slabs_json (str): JSON string mapping slab keys to CIF strings.
+        index (int): Index of the slab to select (default 0).
+    Returns:
+        str: CIF string for the selected slab.
+    """
+    import json
+
+    slabs = json.loads(slabs_json)
+    key = f"slab_{index}"
+    if key not in slabs:
+        raise ValueError(f"Slab index {index} not found.")
+    return slabs[key]
+
+
+@tool
+def get_adsorption_sites_text(slab_cif: str) -> str:
+    """
+    Determine possible adsorption sites on a slab.
+    Returns a JSON string that contains lists of binding sites (e.g. top, bridge, hollow).
+
+
+    Collapse
+    Args:
+        slab_cif (str): CIF string of the slab.
+    Returns:
+        str: JSON dictionary of adsorption sites. (list of fractional coordinates)
+    """
+    import json
+
+    from pymatgen.analysis.adsorption import AdsorbateSiteFinder
+    from pymatgen.core import Structure
+
+    finder = AdsorbateSiteFinder(Structure.from_str(slab_cif, fmt="cif"))
+    sites = (
+        finder.find_adsorption_sites()
+    )  # returns a dict, e.g. {"top": [site1, ...], "bridge": [...], ...}
+
+    # Convert sites to a serializable format (list of fractional coordinates)
+    serializable_sites = {}
+    for key, site_list in sites.items():
+        serializable_sites[key] = [list(site.frac_coords) for site in site_list]
+    return json.dumps(serializable_sites, indent=2)
+
+
+@tool
+def add_adsorbate_to_slab_text(
+    slab_cif: str,
+    adsorbate_cif: str,
+    height: float = 2.0,
+    site: list[float] | None = None,
+) -> str:
+    """
+    Place an adsorbate (given as a CIF string) on a slab at a specified adsorption site.
+    If no site is specified, choose one from the top sites automatically.
+
+    Args:
+        slab_cif (str): CIF string of the slab.
+        adsorbate_cif (str): CIF string of the adsorbate.
+        height (float): Height (Å) above the slab surface where the adsorbate should be placed.
+        site (list[float] or None): Optional fractional coordinate [x, y, z] for placement.
+            If None, the first top site will be used.
+    Returns:
+        str: CIF string of the combined (adsorbate+slab) structure.
+    """
+    from pymatgen.analysis.adsorption import AdsorbateSiteFinder
+    from pymatgen.core import Molecule, Structure
+
+    # Load slab
+    slab = Structure.from_str(slab_cif, fmt="cif")
+
+    # Load adsorbate as a Molecule
+    try:
+        adsorbate_struct = Structure.from_str(adsorbate_cif, fmt="cif")
+        adsorbate = Molecule(
+            species=adsorbate_struct.species,
+            coords=adsorbate_struct.cart_coords,
+            charge=0,
+        )
+    except Exception:
+        adsorbate = Molecule.from_str(adsorbate_cif, fmt="cif")
+
+    finder = AdsorbateSiteFinder(slab)
+    if site is None:
+        # try to get the first top site
+        sites = finder.find_adsorption_sites()
+        if sites.get("top"):
+            site = list(sites["top"][0].frac_coords)
+        else:
+            raise ValueError("No top adsorption site found and no site provided.")
+
+    combined_struct = finder.add_adsorbate(adsorbate, site, height)
+    return combined_struct.to(fmt="cif")
+
+
+@tool
+def generate_reconstructed_slab(
+    bulk_cif: str,
+    miller_index: tuple,
+    min_slab_size: float,
+    min_vacuum_size: float,
+    reconstruction_instructions: str,
+) -> str:
+    """
+    Generate a reconstructed slab from an input bulk structure. The reconstruction instructions
+    (as a JSON string or dict) should include all required keys (e.g. name, description, transformation_matrix,
+    slabgen_params, points_to_remove, points_to_add, etc.). This tool wraps pymatgen ReconstructionGenerator.
+
+    Args:
+        bulk_cif (str): CIF string for the bulk structure.
+        miller_index (tuple): Miller index for the slab (e.g. (1,1,1)).
+        min_slab_size (float): Minimum slab thickness (Å).
+        min_vacuum_size (float): Minimum vacuum region (Å).
+        reconstruction_instructions (str): JSON string containing the reconstruction instructions.
+    Returns:
+        str: CIF string of the reconstructed slab.
+    """
+    import json
+
+    from pymatgen.core import Structure
+    from pymatgen.core.surface import ReconstructionGenerator, SlabGenerator
+
+    # Parse the bulk structure from CIF string
+    bulk_structure = Structure.from_str(bulk_cif, fmt="cif")
+
+    # Parse reconstruction instructions (as dict)
+    instructions = json.loads(reconstruction_instructions)
+
+    # Create the unreconstructed slab via SlabGenerator.
+    slab_gen = SlabGenerator(
+        bulk_structure, miller_index, min_slab_size, min_vacuum_size
+    )
+    unrecon_slabs = slab_gen.get_slabs()
+    if not unrecon_slabs:
+        raise ValueError("No slab could be generated.")
+    # For simplicity, take the first slab.
+    unrecon_slab = unrecon_slabs[0].get_orthogonal_c_slab().get_sorted_structure()
+
+    # Build the reconstructed slab.
+    recon_gen = ReconstructionGenerator(
+        unrecon_slab, min_slab_size, min_vacuum_size, instructions["name"]
+    )
+    # The instructions should have been designed to include the required keys.
+    recon_slabs = recon_gen.build_slabs()
+    if not recon_slabs:
+        raise ValueError("Reconstruction failed; no reconstructed slab produced.")
+    recon_slab = recon_slabs[0]
+
+    return recon_slab.to(fmt="cif")
+
+
+####################
+# Tools that will return file paths
+####################
 
 
 @tool
@@ -95,36 +363,6 @@ def create_slab_from_structure(
 
 
 @tool
-def get_molecule_structure(smiles: str, path_to_write_dir: str) -> str:
-    """Get molecule structure from SMILES string and save it as a cif file.
-
-    Args:
-        smiles: SMILES string of the molecule
-        path_to_write_dir: Path to directory where cif file will be saved
-    """
-    # Create a safe filename from SMILES
-    import hashlib
-
-    from pymatgen.io.babel import BabelMolAdaptor
-
-    safe_name = hashlib.md5(smiles.encode()).hexdigest()[:10]
-
-    # Generate 3D structure from SMILES
-    adaptor = BabelMolAdaptor.from_string(smiles, "smi")
-    adaptor.add_hydrogen()
-    adaptor.make3D()
-
-    # Convert to pymatgen Molecule
-    mol = adaptor.pymatgen_mol
-
-    # Save to file
-    path = Path(path_to_write_dir) / f"{safe_name}_molecule.cif"
-    mol.to(str(path), fmt="cif")
-
-    return str(path)
-
-
-@tool
 def get_molecule_from_mp(mp_id: str, path_to_write_dir: str) -> Path:
     """Get pymatgen molecule strucutre from MP API given material id and save it as a cif file.
 
@@ -203,67 +441,13 @@ def add_molecule_to_slab(
     return output_path
 
 
-@tool
-def optimize_structure(structure_path: str, method: str = "uff") -> str:
-    """Perform a quick structural optimization using a force field.
-
-    Args:
-        structure_path: Path to structure file (.cif)
-        method: Force field method ("uff" or "mmff94")
-    """
-    import ase.io
-    from pymatgen.core import Structure
-    from pymatgen.io.babel import BabelMolAdaptor
-
-    # Try loading as Structure first
-    try:
-        struct = Structure.from_file(structure_path)
-        # Convert to ASE Atoms
-        from pymatgen.io.ase import AseAtomsAdaptor
-
-        atoms = AseAtomsAdaptor.get_atoms(struct)
-
-        # For periodic structures, use ASE's UFF implementation
-        from ase.calculators.uff import UFF
-        from ase.optimize import BFGS
-
-        atoms.calc = UFF()
-        dyn = BFGS(atoms)
-        dyn.run(fmax=0.05, steps=100)
-
-        # Save optimized structure
-        output_path = structure_path.replace(".cif", "_optimized.cif")
-        ase.io.write(output_path, atoms)
-
-    except Exception:
-        # Try as a molecule
-        try:
-            # Load the molecule using OpenBabel
-            adaptor = BabelMolAdaptor.from_file(structure_path)
-
-            # Optimize the molecule
-            adaptor.optimize(method)
-
-            # Get the optimized molecule
-            mol_opt = adaptor.pymatgen_mol
-
-            # Save optimized molecule
-            output_path = structure_path.replace(".cif", "_optimized.cif")
-            mol_opt.to(output_path, fmt="cif")
-
-        except Exception as e:
-            raise ValueError(f"Could not optimize structure: {e}") from e
-
-    return output_path
-
-
-def create_tools() -> dict[str, Tool]:
-    """Create all available tools"""
-    return {
-        "get_structure_from_mp": get_structure_from_mp,
-        "create_pymatgen_structure_from_cif": create_pymatgen_structure_from_cif,
-        "create_slab_from_structure": create_slab_from_structure,
-        "get_molecule_structure": get_molecule_structure,
-        "add_molecule_to_slab": add_molecule_to_slab,
-        "optimize_structure": optimize_structure,
-    }
+# def create_tools() -> dict[str, Tool]:
+#     """Create all available tools"""
+#     return {
+#         "get_structure_from_mp": get_structure_from_mp,
+#         "create_pymatgen_structure_from_cif": create_pymatgen_structure_from_cif,
+#         "create_slab_from_structure": create_slab_from_structure,
+#         "get_molecule_structure": get_molecule_structure,
+#         "add_molecule_to_slab": add_molecule_to_slab,
+#         "optimize_structure": optimize_structure,
+#     }
