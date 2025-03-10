@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import argparse
 
@@ -23,13 +21,14 @@ def run_benchmark(model: str = "gpt-4", task_ids: list | None = None, results_di
 
     interface = BenchmarkInterface()
     agent = ReActAgent(model=model, max_iterations = 10, temperature = 0.1)
-    runner = MatAgentBenchmark(interface, agent, k=3, results_dir=results_dir, local_results_dir = local_results_dir, app = app, bash_command=bash_command, dir_command=dir_command)
+    runner = MatAgentBenchmark(interface, agent, results_dir=results_dir, local_results_dir = local_results_dir, app = app, bash_command=bash_command, dir_command=dir_command)
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}, results_dir: {results_dir}")
-    result = runner.bench(task_ids)
+    # result = runner.bench(task_ids)
+    result = runner.bench(task_ids, trials_per_task=2, k_values=[1, 2])
     os.makedirs(local_results_dir, exist_ok=True)
-    result.report(os.path.join(local_results_dir, "results.json"))
+    result.generate_report(os.path.join(local_results_dir, "results.json"))
 
     logger.info("Benchmark completed")
 

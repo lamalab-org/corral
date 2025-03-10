@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any, Protocol
 
 import requests
 from loguru import logger
 
-from corral.report import BenchmarkResult, TaskResult, TaskTrials, ToolResponse
-import uuid
+from corral.report import (
+    BenchmarkResult,
+    TaskTrailResult,
+    TaskTrialResults,
+    ToolResponse,
+)
 import os
 import modal
 
@@ -46,7 +49,7 @@ class BenchmarkInterface:
         except Exception as e:
             return ToolResponse(success=False, result=None, error=str(e))
 
-    def submit_answer(self, task_id: str, answer: str) -> TaskResult:
+    def submit_answer(self, task_id: str, answer: str) -> TaskTrailResult:
         """Submit final answer for a task"""
         logger.info(f"Agent submitting answer {answer} for task {task_id}")
         response = requests.post(
@@ -54,7 +57,8 @@ class BenchmarkInterface:
         )
         response.raise_for_status()
         data = response.json()
-        return TaskResult(
+        return TaskTrailResult(
+            task_id=task_id,
             score=data["score"],
             state=data["state"],
             tool_statistics=data["state"]["tool_statistics"],
@@ -77,10 +81,9 @@ class Agent(Protocol):
 class MatAgentBenchmark:
     """Runs benchmarks using an agent implementation"""
 
-    def __init__(self, interface: BenchmarkInterface, agent: Agent, k: int = 5, results_dir: str = "./results", local_results_dir: str = "./results/", app = "simagent", bash_command = "run_bash_command", dir_command = "change_directory"):
+    def __init__(self, interface: BenchmarkInterface, agent: Agent, results_dir: str = "./results", local_results_dir: str = "./results/", app = "simagent", bash_command = "run_bash_command", dir_command = "change_directory"):
         self.interface = interface
         self.agent = agent
-        self.k = k
         self.app = app
         self.bash_command = bash_command
         self.dir_command = dir_command
@@ -91,18 +94,37 @@ class MatAgentBenchmark:
 
         logger.info(f"Results will be saved in: {self.results_dir}")
 
-    def bench(self, task_ids: list[str] | None = None, trials_per_task: int | None = None) -> BenchmarkResult:
-        """Run benchmark on specified tasks or all available tasks"""
+    def bench(
+        self,
+        task_ids: list[str] | None = None,
+        trials_per_task: int = 1,
+        k_values: int | list[int] | None = None,
+    ) -> BenchmarkResult:
+        """Run benchmark on specified tasks or all available tasks
+
+        Args:
+            task_ids: list of task_ids to run, or None for all tasks
+            trials_per_task: Number of trials per task, Default to k=1 to number of trials
+
+        """
 
         if task_ids is None:
             task_ids = self.interface.get_available_tasks()
 
-        if trials_per_task is None:
-            trials_per_task = self.k
+        if trials_per_task == 0:
+            raise ValueError("Number of trials per task must be greater than 0")
+
+        # Validate and set k_values
+        if k_values is None:
+            k_values = list(range(1, trials_per_task + 1))
+        elif isinstance(k_values, int):
+            k_values = [k_values]
+        elif isinstance(k_values, list) and max(k_values) > trials_per_task:
+            raise ValueError("k value is greater than the number of trials")
 
         logger.info(f"Running benchmark on tasks: {task_ids} with {trials_per_task} trials per task")
 
-        results: dict[str, TaskTrials] = defaultdict(TaskTrials)
+        task_results: dict[str, TaskTrialResults] = {}
 
         # Step 1: Pre-create all required directories before benchmarking
         run_bash_command = modal.Function.lookup(self.app, self.bash_command)
@@ -122,11 +144,14 @@ class MatAgentBenchmark:
 
         # Step 2: Run benchmark using pre-created directories
         for task_id in task_ids:
+            logger.info(f"Running task {task_id}")
+            task_trials = TaskTrialResults(task_id=task_id)
             for run_directory, local_directory in zip(run_directories[task_id], local_run_directories[task_id]):
             # for run_index, run_directory in enumerate(run_directories[task_id], start=1):
                 # Solve task
                 answer = self.agent.solve_task(self.interface, task_id, run_directory, local_directory)
-
+                result = self.interface.submit_answer(task_id, answer)
+                task_trials.trials.append(result)
                 # # Save answer in the pre-created directory
                 # answer_file = os.path.join(run_directory, "answer.txt")
                 # with open(answer_file, "w") as f:
@@ -136,8 +161,9 @@ class MatAgentBenchmark:
 
                 # Submit and store result
                 result = self.interface.submit_answer(task_id, answer)
-                results[task_id].trials.append(result)
+                task_trials.trials.append(result)
 
-        return BenchmarkResult(
-            task_results=dict(results), k=self.k, total_tasks=len(task_ids)
-        )
+            # Store all trials for this task
+            task_results[task_id] = task_trials
+
+        return BenchmarkResult(task_results=task_results, k=k_values)

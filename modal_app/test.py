@@ -30,7 +30,7 @@ run_bash_command = modal.Function.lookup("simagent", "run_bash_command")
 
 # run_bash_command.remote("rm", ["-r", "/results/gpt_4o_mini"])
 
-for dir in ["/results/claude_haiku_test", "/results/claude_sonnet", "/results/claude_sonnet_more_tasks", "/results/gemini_more_tasks", "/results/gpt_4o_test_results", "/results/gpt4o", "/results/gpt4o_more_tasks", "/results/llama3_more_tasks"]:
+for dir in ["/results/gpt_4o_test_results"]:
     run_bash_command.remote("rm", ["-r", dir])
 # run_bash_command.remote("rm", ["-r", "/results/gpt_4"])
 
