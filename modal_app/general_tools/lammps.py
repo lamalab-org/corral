@@ -62,7 +62,7 @@ def _install_lammps():
 
 lammps_image = _lammps_image.run_function(_install_lammps)
 
-def _run_lammps(input: str, output_files: list[str] = []) -> dict:
+def _run_lammps(input: str, output_files: list[str] = [], directory_path: str = None) -> dict:
     """
     Runs a LAMMPS simulation using the specified input file.
 
@@ -79,6 +79,8 @@ def _run_lammps(input: str, output_files: list[str] = []) -> dict:
     import os
     import subprocess
     import logging
+    import gc
+    import io
 
     logger = logging.getLogger(__name__)
 
@@ -87,66 +89,54 @@ def _run_lammps(input: str, output_files: list[str] = []) -> dict:
     lmp_command = "/root/lammps/build/lmp"
     results = {}
 
+    original_cwd = os.getcwd()
+    if directory_path:
+        os.chdir(directory_path)
+
     try:
-        # Write the input script to a file
+        print("Current directory:", os.getcwd())
+
+        # Write input script
         with open(input_file, "w") as f:
             f.write(input)
-        logger.debug(f"Input script written to file: {input_file}")
+        logger.debug(f"Input script written: {input_file}")
 
-        # Construct the LAMMPS command
+        # Run LAMMPS
         command = [lmp_command, "-in", input_file]
+        logger.debug(f"Executing: {' '.join(command)}")
 
-        logger.debug(f"Executing LAMMPS command: {' '.join(command)}")
-        result = subprocess.run(
-            command,
-            shell=False,
-            check=True,
-            capture_output=True,
-            text=True
-        )
+        subprocess.run(command, shell=False, check=True, capture_output=True, text=True)
 
-        # Read log file content
+        # Read log file safely
         if os.path.exists(log_file):
             with open(log_file, "r") as log:
                 results[log_file] = log.read()
-                logger.debug(f"Read log file ({log_file}) content: {len(results[log_file])} characters")
         else:
-            logger.warning(f"Log file ({log_file}) not found.")
+            logger.warning(f"{log_file} not found.")
 
-        # Read additional output files
+        # Read other output files safely
         for output_file in output_files:
             if os.path.exists(output_file):
                 with open(output_file, "r") as out:
                     results[output_file] = out.read()
-                    logger.debug(f"Read output file ({output_file}) content: {len(results[output_file])} characters")
             else:
-                logger.warning(f"Output file ({output_file}) not found.")
+                logger.warning(f"{output_file} not found.")
 
-        results["input.in"] = input
+        results["input.in"] = input  # Store input script
         return results
 
-    except subprocess.CalledProcessError as e:
-        # Capture the exact error message from stdout and stderr
-        error_message = e.stdout.strip() if e.stdout else ""
-        if e.stderr:
-            error_message += f"\n{e.stderr.strip()}"
-
-        # Raise the error with the captured message
-        raise ValueError(f"LAMMPS simulation failed:\nCommand: {' '.join(command)}\n{error_message}")
-
-    except Exception as e:
-        logger.error(f"An unexpected error occurred: {str(e)}")
-        raise e
-
     finally:
-        # Ensure all temporary files are deleted
-        for file in [input_file, log_file] + output_files:
-            if os.path.exists(file):
-                try:
-                    os.remove(file)
-                    logger.debug(f"Deleted file: {file}")
-                except OSError as e:
-                    logger.warning(f"Failed to delete file {file}: {e}")
+        os.chdir(original_cwd)  # Restore original directory
+
+    # finally:
+    #     # Ensure all temporary files are deleted
+    #     for file in [input_file, log_file] + output_files:
+    #         if os.path.exists(file):
+    #             try:
+    #                 os.remove(file)
+    #                 logger.debug(f"Deleted file: {file}")
+    #             except OSError as e:
+    #                 logger.warning(f"Failed to delete file {file}: {e}")
 
 
 

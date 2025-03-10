@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+import shutil
+
 from envs_tools.samplemat import (
     calculate_lattice_energy as _calculate_lattice_energy,
 )
@@ -18,6 +20,8 @@ from general_tools.lammps import (
 )
 
 from modal import App
+import modal
+import subprocess
 
 simagent_name = os.getenv("SIMAGENT_NAME", "")
 if simagent_name and not simagent_name.startswith("-"):
@@ -25,9 +29,14 @@ if simagent_name and not simagent_name.startswith("-"):
 
 # Create the app
 app = App(f"simagent{simagent_name}")
+volume_potential = modal.Volume.from_name("potentials", create_if_missing=True)
+volume_sim = modal.Volume.from_name("simulations", create_if_missing=True)
 
-@app.function(image=lammps_image, cpu=1.0, memory=5120)
-def run_lammps(input: str, output_files: list[str] = []) -> dict:
+# with volume_potential.batch_upload() as batch:
+#     batch.put_directory("/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/modal_app/potentials/", "/")
+
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim})
+def run_lammps(input: str, output_files: list[str] = [], directory_path: str = None) -> dict:
     """
     Run a LAMMPS simulation.
 
@@ -49,11 +58,82 @@ def run_lammps(input: str, output_files: list[str] = []) -> dict:
             "thermo.txt": "Content of thermo.txt",
         }
     """
+    # volume_potential.reload()
+    volume_sim.reload()
+    original_cwd = os.getcwd()
+
+    print("original directory", original_cwd)
+
     try:
-        return _run_lammps(input, output_files)
+        # if save_path:
+        #     os.chdir(save_path)
+        # print("changed directory", os.getcwd())
+        output_dict = _run_lammps(input, output_files, directory_path)
+        volume_sim.commit()
+        return output_dict
+        # if save_path:
+        #     os.makedirs(save_path, exist_ok=True)
+        #     for file_name, content in output_dict.items():
+        #         file_path = os.path.join(save_path, file_name)
+        #         with open(file_path, "w") as file:
+        #             file.write(content)
     except Exception as e:
         raise ValueError(f"LAMMPS simulation failed: {str(e)}")
+    finally:
+        # volume_potential.commit()
+        # os.chdir(original_cwd)
+        # volume_sim.commit()
+        pass
 
+    # try:
+    #     os.chdir(path)
+    # finally:
+    #     os.chdir(original_cwd)
+
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim})
+def run_bash_command(command: str, args: list[str] = [], directory_path: str = None) -> str:
+    """Execute a bash command with optional arguments.
+
+    Args:
+        command: The bash command to execute (e.g., 'mkdir', 'ls').
+        args: A list of arguments for the bash command.
+    """
+    # volume_potential.reload()
+
+    volume_sim.reload()
+    original_cwd = os.getcwd()
+    if directory_path:
+        os.chdir(directory_path)
+    changed_directory = os.getcwd()
+    print("originalcwd", original_cwd)
+    print("changed_cwd", changed_directory)
+    try:
+        # Construct the full command with arguments
+        full_command = [command] + args
+
+        # Run the command
+        result = subprocess.run(
+            full_command,
+            shell=False,  # Avoid shell injection risks
+            check=True,  # Raise CalledProcessError on failure
+            capture_output=True,
+            text=True
+        )
+
+        # Return the standard output
+        volume_sim.commit()
+        return result.stdout
+
+    except subprocess.CalledProcessError as e:
+        raise ValueError(f"Bash command failed: {e.cmd}\n{e.stderr}")
+
+    except Exception as e:
+        raise ValueError(f"An unexpected error occurred: {str(e)}")
+    
+    finally:
+        # volume_potential.commit()
+        os.chdir(original_cwd)
+        # volume_sim.commit()
 
 @app.function(image=quantum_espresso_image, cpu=1.0, memory=5120)
 def run_quantum_espresso(pw_command, options, input) -> str:
@@ -99,4 +179,8 @@ def calculate_lattice_energy(structure_file: str) -> float:
     energy = _calculate_lattice_energy(structure_file)
     if energy is None:
         raise ValueError("Failed to calculate lattice energy")
-    return energy
+    else:
+        return energy
+    
+    
+
