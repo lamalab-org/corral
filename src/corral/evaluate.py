@@ -7,6 +7,9 @@ import requests
 from loguru import logger
 
 from corral.report import BenchmarkResult, TaskResult, TaskTrials, ToolResponse
+import uuid
+import os
+import modal
 
 
 class BenchmarkInterface:
@@ -67,45 +70,69 @@ class BenchmarkInterface:
 class Agent(Protocol):
     """Protocol defining what an agent must implement"""
 
-    def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
+    def solve_task(self, interface: BenchmarkInterface, task_id: str, directory_path : str) -> str:
         """Solve a task and return the answer"""
         ...
-
 
 class MatAgentBenchmark:
     """Runs benchmarks using an agent implementation"""
 
-    def __init__(self, interface: BenchmarkInterface, agent: Agent, k: int = 5):
+    def __init__(self, interface: BenchmarkInterface, agent: Agent, k: int = 5, results_dir: str = "./results", local_results_dir: str = "./results/", app = "simagent", bash_command = "run_bash_command", dir_command = "change_directory"):
         self.interface = interface
         self.agent = agent
         self.k = k
+        self.app = app
+        self.bash_command = bash_command
+        self.dir_command = dir_command
 
-    def bench(
-        self, task_ids: list[str] | None = None, trials_per_task: int | None = None
-    ) -> BenchmarkResult:
-        """Run benchmark on specified tasks or all available tasks
+        # Convert to absolute path (relative to the script's location)
+        self.results_dir = results_dir
+        self.local_results_dir = local_results_dir
 
-        Args:
-            task_ids: list of task IDs to run, or None for all tasks
-            trials_per_task: Number of trials per task, defaults to k if not specified
+        logger.info(f"Results will be saved in: {self.results_dir}")
 
-        """
+    def bench(self, task_ids: list[str] | None = None, trials_per_task: int | None = None) -> BenchmarkResult:
+        """Run benchmark on specified tasks or all available tasks"""
+
         if task_ids is None:
             task_ids = self.interface.get_available_tasks()
 
         if trials_per_task is None:
             trials_per_task = self.k
 
-        logger.info(
-            f"Running benchmark on tasks: {task_ids} with {trials_per_task} trials per task"
-        )
+        logger.info(f"Running benchmark on tasks: {task_ids} with {trials_per_task} trials per task")
 
         results: dict[str, TaskTrials] = defaultdict(TaskTrials)
 
+        # Step 1: Pre-create all required directories before benchmarking
+        run_bash_command = modal.Function.lookup(self.app, self.bash_command)
+        run_directories = {}  # Store the directories for each task_id
+        local_run_directories = {}
         for task_id in task_ids:
-            for _ in range(trials_per_task):
-                # Get answer from agent
-                answer = self.agent.solve_task(self.interface, task_id)
+            run_directories[task_id] = []
+            local_run_directories[task_id] = []
+            for run_number in range(1, trials_per_task + 1):
+                run_directory = os.path.join(self.results_dir, str(task_id), str(run_number))
+                # os.makedirs(run_directory, exist_ok=True)  # Create directory
+                run_bash_command.remote("mkdir", ["-p", run_directory])
+                run_directories[task_id].append(run_directory)
+                local_run_directory = os.path.join(self.local_results_dir, str(task_id), str(run_number))
+                os.makedirs(local_run_directory, exist_ok=True)
+                local_run_directories[task_id].append(local_run_directory)
+
+        # Step 2: Run benchmark using pre-created directories
+        for task_id in task_ids:
+            for run_directory, local_directory in zip(run_directories[task_id], local_run_directories[task_id]):
+            # for run_index, run_directory in enumerate(run_directories[task_id], start=1):
+                # Solve task
+                answer = self.agent.solve_task(self.interface, task_id, run_directory, local_directory)
+
+                # # Save answer in the pre-created directory
+                # answer_file = os.path.join(run_directory, "answer.txt")
+                # with open(answer_file, "w") as f:
+                #     f.write(answer)
+
+                # logger.info(f"Saved answer for {task_id} (run_{run_index}) in {answer_file}")
 
                 # Submit and store result
                 result = self.interface.submit_answer(task_id, answer)

@@ -5,6 +5,7 @@ from modal import Image
 
 from corral.base import Tool, ToolArgument
 from corral.utils import MODAL_TOOL_REGISTRY, modal_tool, tool
+import os
 
 app = modal.App("corral-test")
 
@@ -44,7 +45,8 @@ def percentage_calculator(value: float, percentage: float = 100.0) -> float:
 
 
 @modal_tool(app=app, image=Image.debian_slim().pip_install("numerizer"), memory=512)
-def number_convert(text: str, return_float: bool = False) -> str:
+def number_convert(text: str, return_float: bool = False, directory_path: str = None) -> str:
+    
     """
     Convert number words to numeric representation.
 
@@ -55,6 +57,8 @@ def number_convert(text: str, return_float: bool = False) -> str:
     Returns:
         String containing the numeric representation
     """
+    os.chdir(directory_path)
+    print("present working directory", os.getcwd())
     from numerizer import numerize
 
     result = numerize(text)
