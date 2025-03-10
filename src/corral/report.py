@@ -129,7 +129,7 @@ class BenchmarkResult:
         Where p is the probability of a single trial succeeding.
 
         In practice, pass@k is estimated by:
-        - The number of total trials for a given task. (where n ≥ k)
+        - Taking n samples. (the number of total trials for a given task). (where n ≥ k)
         - Calculating the number c, the number of correct or successful solutions
         - Estimating pass@k as
         .. math: 1 - (1 - c/n)^k when c < n, or 1 when c = n
@@ -171,7 +171,7 @@ class BenchmarkResult:
         Where p is the probability of a single trial succeeding.
 
         In practice, pass^k is estimated by:
-        - The number of total trials for a given task. (where n ≥ k)
+        - Taking n samples. (the number of total trials for a given task). (where n ≥ k)
         - Calculating the number c, the number of correct or successful solutions
         - Estimating pass^k as
         .. math: (c/n)^k
