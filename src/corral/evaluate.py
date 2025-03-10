@@ -95,6 +95,7 @@ class MatAgentBenchmark:
         Args:
             task_ids: list of task_ids to run, or None for all tasks
             trials_per_task: Number of trials per task, Default to k=1 to number of trials
+            k_values: list of k values, for which pass metrics are calculated. Default to [1, 2, 3, ..., trials_per_task]
 
         """
         if task_ids is None:
