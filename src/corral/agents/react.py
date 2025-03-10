@@ -32,6 +32,21 @@ class Action:
 
 
 class ReActAgent:
+    """
+    Agent that uses the ReAct framework to solve tasks
+    Based on https://arxiv.org/abs/2210.03629
+
+    Args:
+        model (str): The model to use for planning
+        max_iterations (int): The maximum number of iterations to plan
+        api_endpoint (str, optional): The API endpoint to use for tool calls
+        system_prompt (str, optional): The system prompt to use.
+            Defaults to "You are a helpful AI assistant that solves tasks step by step."
+        user_prompt (str, optional): The user prompt to use
+        temperature (float): The temperature to use for sampling
+        kwargs: Additional keyword arguments to pass to the LiteLLM API
+    """
+
     def __init__(
         self,
         model: str = "gpt-4",
@@ -39,12 +54,15 @@ class ReActAgent:
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
+        temperature: float = 0.7,
         **kwargs,
     ):
+        """Initialize the agent"""
         self.model = model
         self.max_iterations = max_iterations
         self.api_endpoint = api_endpoint
         self.store = PromptStore("./prompts")
+        self.temperature = temperature
         self.kwargs = kwargs
         self.system_prompt = (
             get_prompt(
@@ -61,7 +79,14 @@ class ReActAgent:
         )
 
     def get_llm_response(self, prompt: str) -> str:
-        """Get response from LLM using LiteLLM"""
+        """Get response from LLM using LiteLLM
+
+        Args:
+            prompt (str): The prompt to send to LLM
+
+        Returns:
+            str: The response from LLM
+        """
         messages = [
             {
                 "role": "system",
@@ -72,11 +97,10 @@ class ReActAgent:
         return llm_call(
             model=self.model,
             messages=messages,
-            temperature=0.7,
-            max_tokens=1000,
+            temperature=self.temperature,
             api_endpoint=self.api_endpoint,
             **self.kwargs,
-        )
+        ).content
 
     def parse_llm_response(self, response: str) -> tuple[Thought | None, Action | None]:
         """Parse LLM response into Thought and Action"""
@@ -106,13 +130,26 @@ class ReActAgent:
             {"task_guide": task_guide, "history": chr(10).join(history)}
         )
 
-    def solve_task(
+    def run_agent(
         self,
         interface: BenchmarkInterface,
         task_id: str,
-    ) -> str:
-        """Main ReAct loop implementation"""
-        task_guide = interface.get_task_guide(task_id)
+        task_prompt: str | None = None,
+    ) -> tuple[str, list[str]]:
+        """Main ReAct loop implementation
+
+        Args:
+            interface (BenchmarkInterface): The interface to use
+            task_id (str): The task ID to solve
+            task_prompt (str): The task prompt to use. Defaults to None.
+
+        Returns:
+            Tuple[str, List[str]]: The final answer and history
+        """
+        if task_prompt is None:
+            task_guide = interface.get_task_guide(task_id)
+        else:
+            task_guide = task_prompt
         history: list[str] = []
 
         for _iteration in range(self.max_iterations):
@@ -130,7 +167,7 @@ class ReActAgent:
             # Check for final answer
             final_answer_match = re.search(r"Final Answer: (.*)", llm_response)
             if final_answer_match:
-                return final_answer_match.group(1).strip()
+                return final_answer_match.group(1).strip(), history
 
             # Execute tool if action exists
             if action:
@@ -155,4 +192,7 @@ class ReActAgent:
             if not thought and not action:
                 break
 
-        return "Unable to solve task within iteration limit"
+        return (
+            "Error solving the task: unable to complete it in the iteration limit",
+            history,
+        )

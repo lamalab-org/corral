@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import litellm
 import openai
+
+if TYPE_CHECKING:
+    from litellm.types.utils import Message
 from loguru import logger
 from tenacity import (
-    before_sleep_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
@@ -23,6 +25,12 @@ RETRY_EXCEPTIONS = (
 )
 
 
+def before_sleep_loguru(retry_state):
+    logger.info(
+        f"Retrying: {retry_state.attempt_number}, wait: {retry_state.next_action.sleep} seconds"
+    )
+
+
 class LiteLLMMessage(TypedDict, total=False):
     role: str
     content: str
@@ -34,7 +42,7 @@ class LiteLLMMessage(TypedDict, total=False):
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=2, min=1),
     retry=retry_if_exception_type(RETRY_EXCEPTIONS),
-    before_sleep=before_sleep_log(logger, log_level=20),
+    before_sleep=before_sleep_loguru,
     reraise=True,
 )
 def llm_call(
@@ -44,7 +52,7 @@ def llm_call(
     tools: dict[str, Any] | None = None,
     api_endpoint: str | None = None,
     **kwargs,
-) -> list[LiteLLMMessage] | dict:
+) -> Message:
     """
     Call LiteLLM API with or without tools based on parameters
 
@@ -57,8 +65,7 @@ def llm_call(
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
 
     Returns:
-        List[LiteLLMMessage] | Dict: The response from the model. Returns a dictionary for tool calling,
-        otherwise returns a list with a single message.
+        Message: The response from the LiteLLM API.
     """
     try:
         params = {
@@ -69,7 +76,7 @@ def llm_call(
             **kwargs,
         }
 
-        if tools:
+        if tools is not None:
             params.update(
                 {
                     "tools": tools,
@@ -77,12 +84,11 @@ def llm_call(
                 }
             )
             response = litellm.completion(**params)
-            return response.choices[0].message
 
         else:
             response = litellm.completion(**params)
-            content = response.choices[0].message.content
-            return [LiteLLMMessage(role="assistant", content=content)]
+
+        return response.choices[0].message
 
     except Exception as e:
         raise ValueError(f"Error in LiteLLM API call: {e}") from e

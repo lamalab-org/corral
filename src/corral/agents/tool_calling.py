@@ -6,7 +6,6 @@ if TYPE_CHECKING:
     from corral.evaluate import BenchmarkInterface
 
 import json
-from typing import Any
 
 from promptstore import PromptStore
 
@@ -15,6 +14,20 @@ from corral.agents.utils import LiteLLMMessage, llm_call
 
 
 class ToolCallingAgent:
+    """
+    Agent that uses native function calling from the providers to solve the task
+
+    Args:
+        model (str): The model to use for planning
+        max_iterations (int): The maximum number of iterations to plan
+        api_endpoint (str, optional): The API endpoint to use for tool calls
+        system_prompt (str, optional): The system prompt to use
+        system_prompt (str, optional): The system prompt to use.
+            Defaults to "You are a helpful AI assistant that solves tasks step by step."
+        temperature (float): The temperature to use for sampling
+        kwargs: Additional keyword arguments to pass to the LiteLLM API
+    """
+
     def __init__(
         self,
         model: str = "gpt-4",
@@ -46,26 +59,28 @@ class ToolCallingAgent:
         )
 
     def create_prompt(
-        self, prompt: str, task_guide: str, history: list[dict[str, Any]]
+        self, task_guide: str, history: list[LiteLLMMessage]
     ) -> list[LiteLLMMessage]:
         """Create the initial prompt messages for the agent
 
         Args:
             task_guide (str): The task guide to use.
-            history (List[Dict[str, Any]]): The history items to include.
+            history (LiteLLMMessage): The history items to include.
 
         Returns:
             List[LiteLLMMessage]: The prompt messages.
         """
-        messages = list[LiteLLMMessage] = []
+        messages: list[LiteLLMMessage] = []
         if self.system_prompt:
             messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
         messages.append(
-            LiteLLMMessage(role="user", content=prompt.fill({"task_guide": task_guide}))
+            LiteLLMMessage(
+                role="user", content=self.user_prompt.fill({"task_guide": task_guide})
+            )
         )
 
         if history:
-            messages.extend(self.create_history_messages(history))
+            messages.extend(history)
 
         return messages
 
@@ -73,7 +88,7 @@ class ToolCallingAgent:
         self,
         interface: BenchmarkInterface,
         task_id: str,
-        history: list[dict[str, Any]] | None = None,
+        history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
     ) -> tuple[str, list[LiteLLMMessage]]:
         """Run the agent to solve the task
@@ -82,9 +97,10 @@ class ToolCallingAgent:
             interface (BenchmarkInterface): The interface to use.
             task_id (str): The task ID to solve.
             history (List[Dict[str, Any]]): The history items to include. Defaults to None.
+            task_prompt (str): The task prompt to use. Defaults to None.
 
         Returns:
-            str: The final answer from the agent.
+            tuple[str, List[LiteLLMMessage]]: The final answer and messages.
         """
         if history is None:
             history = []
@@ -96,11 +112,8 @@ class ToolCallingAgent:
             task_guide = interface.get_task_prompt(task_id)
         else:
             task_guide = task_prompt
-        user_prompt = self.user_prompt.fill({task_guide: task_guide})
 
-        messages = self.create_prompt(
-            user_prompt, task_guide=task_guide, history=history
-        )
+        messages = self.create_prompt(task_guide=task_guide, history=history)
 
         for _i in range(self.max_iterations):
             llm_response = llm_call(
@@ -121,7 +134,7 @@ class ToolCallingAgent:
             tool_calls = llm_response.tool_calls
             if tool_calls:
                 for called_tool in tool_calls:
-                    function_name = called_tool.function.name
+                    function_name = str(called_tool.function.name)
                     function_args = json.loads(called_tool.function.arguments)
                     try:
                         function_call = interface.execute_tool(
