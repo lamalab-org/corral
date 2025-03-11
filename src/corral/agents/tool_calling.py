@@ -1,16 +1,26 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import importlib.resources
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from corral.evaluate import BenchmarkInterface
 
 import json
+from dataclasses import dataclass
 
 from promptstore import PromptStore
 
 from corral.agents.prompt_utils import get_prompt
 from corral.agents.utils import LiteLLMMessage, llm_call
+
+
+@dataclass
+class Action:
+    """Represents an action to be taken"""
+
+    tool_name: str
+    arguments: dict[str, Any]
 
 
 class ToolCallingAgent:
@@ -36,6 +46,7 @@ class ToolCallingAgent:
         system_prompt: str | None = None,
         user_prompt: str | None = None,
         temperature: float = 0.7,
+        prompt_store: PromptStore | None = None,
         **kwargs,
     ):
         """Initialize the agent"""
@@ -43,7 +54,11 @@ class ToolCallingAgent:
         self.max_iterations = max_iterations
         self.api_endpoint = api_endpoint
         self.temperature = temperature
-        self.store = PromptStore("./prompts")
+        if prompt_store:
+            self.store = prompt_store
+        else:
+            with importlib.resources.path("corral.agents", "") as style_path:
+                self.store = PromptStore(f"{style_path}/prompts")
         self.kwargs = kwargs
 
         self.system_prompt = (
@@ -84,6 +99,50 @@ class ToolCallingAgent:
 
         return messages
 
+    def convert_to_openai_tool_format(self, tools_dict: dict) -> list:
+        """
+        Convert a dictionary of tools into the OpenAI tool calling format.
+
+        Args:
+            tools_dict: Dictionary with a 'tools' list containing tool specifications
+
+        Returns:
+            List of tools in OpenAI tool calling format
+        """
+        openai_tools = []
+
+        for tool in tools_dict["tools"]:
+            function = {
+                "name": tool["name"],
+                "description": tool["description"],
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            }
+
+            for arg in tool["arguments"]:
+                arg_type = arg["type"]
+                if arg_type == "str":
+                    arg_type = "string"
+                elif arg_type == "bool":
+                    arg_type = "boolean"
+                elif arg_type == "int" or arg_type == "float":
+                    arg_type = "number"
+                else:
+                    raise ValueError(f"Invalid argument type: {arg_type}")
+
+                property_entry = {"type": arg_type, "description": arg["description"]}
+
+                if arg["choices"]:
+                    property_entry["enum"] = arg["choices"]
+
+                function["parameters"]["properties"][arg["name"]] = property_entry
+
+                if arg["required"]:
+                    function["parameters"]["required"].append(arg["name"])
+
+            openai_tools.append({"type": "function", "function": function})
+
+        return openai_tools
+
     def run_agent(
         self,
         interface: BenchmarkInterface,
@@ -105,7 +164,9 @@ class ToolCallingAgent:
         if history is None:
             history = []
 
-        tools = json.loads(interface.get_available_tools_for_task(task_id))["tools"]
+        tools = self.convert_to_openai_tool_format(
+            interface.get_available_tools_for_task(task_id)
+        )
         # I think this task prompt is without the tools descriptions
         # We want this here since for this agent the tools go into the functions or tools
         if task_prompt is None:
@@ -133,23 +194,32 @@ class ToolCallingAgent:
 
             tool_calls = llm_response.tool_calls
             if tool_calls:
+                messages.append(llm_response)
                 for called_tool in tool_calls:
+                    action = Action(
+                        tool_name=called_tool.function.name,
+                        arguments=json.loads(called_tool.function.arguments),
+                    )
+                    function_call = interface.execute_tool(
+                        task_id, action.tool_name, action.arguments
+                    )
+                    result = str(function_call.result)
+                    if result is None:
+                        result = function_call.error
+
                     function_name = str(called_tool.function.name)
-                    function_args = json.loads(called_tool.function.arguments)
-                    try:
-                        function_call = interface.execute_tool(
-                            task_id, function_name, json.dumps(function_args)
-                        )
-                    except Exception as e:
-                        function_call = f"Error: {e}"
 
                     messages.append(
                         LiteLLMMessage(
-                            role="tool",
-                            content=function_call,
                             tool_call_id=called_tool.id,
-                            name=str(function_name),
+                            role="tool",
+                            content=result,
+                            name=function_name,
                         )
                     )
+            else:
+                messages.append(
+                    LiteLLMMessage(role="assistant", content=llm_response.content)
+                )
 
         return "Error solving the task. Maximum iterations reached.", messages

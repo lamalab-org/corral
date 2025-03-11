@@ -72,7 +72,7 @@ def llm_call(
             "model": model,
             "messages": messages,
             "temperature": temperature,
-            "api_endpoint": api_endpoint,
+            "api_base": api_endpoint,
             **kwargs,
         }
 

@@ -35,12 +35,12 @@ if __name__ == "__main__":
     environments = {
         "math_1": MathEnvironment("math_1", "What is 23 + 45?", 68),
         "math_2": MathEnvironment("math_2", "What is 12 * 8?", 96),
-        "math_3": MathEnvironment("math_3", "What is 99 * 63 * 999 * 111?", 691614693),
-        "math_4": MathEnvironment(
-            "math_4",
-            "What is twenty one thousand four hundred and seventy three * twenty one thousand four hundred and seventy three?",
-            4666829,
-        ),
+        # "math_3": MathEnvironment("math_3", "What is 99 * 63 * 999 * 111?", 691614693),
+        # "math_4": MathEnvironment(
+        #     "math_4",
+        #     "What is twenty one thousand four hundred and seventy three * twenty one thousand four hundred and seventy three?",
+        #     4666829,
+        # ),
     }
 
     # Create and run server

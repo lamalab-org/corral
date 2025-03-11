@@ -138,7 +138,7 @@ class MatAgentBenchmark:
 
             for _ in range(trials_per_task):
                 # Get answer from agent
-                answer = self.agent.solve_task(self.interface, task_id)
+                answer, messages = self.agent.run_agent(self.interface, task_id)
                 # Submit and store result
                 result = self.interface.submit_answer(task_id, answer)
                 task_trials.trials.append(result)

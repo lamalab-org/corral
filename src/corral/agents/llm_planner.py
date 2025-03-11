@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.resources
 import json
 from typing import TYPE_CHECKING
 
@@ -26,6 +27,7 @@ class LLMPlanner:
             Defaults to "You are a helpful AI assistant that solves tasks step by step."
         user_prompt (str, optional): The user prompt to use
         temperature (float): The temperature to use for sampling
+        prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
@@ -37,6 +39,7 @@ class LLMPlanner:
         system_prompt: str | None = None,
         user_prompt: str | None = None,
         temperature: float = 0.7,
+        prompt_store: PromptStore | None = None,
         **kwargs,
     ):
         """Initialize the agent"""
@@ -44,7 +47,11 @@ class LLMPlanner:
         self.max_iterations = max_iterations
         self.api_endpoint = api_endpoint
         self.temperature = temperature
-        self.store = PromptStore("./prompts")
+        if prompt_store:
+            self.store = prompt_store
+        else:
+            with importlib.resources.path("corral.agents", "") as style_path:
+                self.store = PromptStore(f"{style_path}/prompts")
         self.kwargs = kwargs
         self.system_prompt = (
             get_prompt(
