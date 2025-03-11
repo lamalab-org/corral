@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 import math
-from typing import List
 
 import uvicorn
 from chembench.baseline import Generation, Generations
@@ -44,7 +41,7 @@ class Model:
     def __init__(self, answer):
         self.answer = answer
 
-    def generate(self, promp: List[str]) -> Generations:
+    def generate(self) -> Generations:
         generations = []
         for prompt_ in [self.answer]:
             generation = generate(prompt_)
@@ -118,6 +115,8 @@ class ChemBenchEnvironment(Environment):
 
             logger.info("RESULTS")
             logger.info(results[0]["results"][0]["metrics"])
+            score = results[0]["results"][0]["metrics"].get("score", 0.0)
+
             if isinstance(score, bool):
                 score = 1.0 if score else 0.0
 
