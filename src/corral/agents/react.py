@@ -126,8 +126,9 @@ class ReActAgent:
 
     def create_prompt(self, task_guide: str, history: list[LiteLLMMessage]) -> str:
         """Create prompt for LLM including context and history"""
+        limited_history = history[-10:] if len(history) > 10 else history
         user_prompt = self.user_prompt.fill(
-            {"task_guide": task_guide, "history": chr(10).join(history)}
+            {"task_guide": task_guide, "history": str(limited_history)}
         )
 
         return [
@@ -189,6 +190,9 @@ class ReActAgent:
             # Execute tool if action exists
             if action:
                 action_content = f"{thought_prefix}Action: {action.tool_name}\nAction Input: {json.dumps(action.arguments)}"
+                messages.append(
+                    LiteLLMMessage(role="assistant", content=action_content)
+                )
 
                 # Execute tool and get response
                 tool_response = interface.execute_tool(
@@ -204,7 +208,7 @@ class ReActAgent:
                 messages.append(
                     LiteLLMMessage(
                         role="user",
-                        content=f"{action_content}\n{observation}",
+                        content=observation,
                         name=action.tool_name,
                     )
                 )
