@@ -199,7 +199,7 @@ def add_adsorbate_to_slab_text(
     slab_cif: str,
     adsorbate_cif: str,
     height: float = 2.0,
-    site: list[float] | None = None,
+    site: list[float] = None,
 ) -> str:
     """
     Place an adsorbate (given as a CIF string) on a slab at a specified adsorption site.

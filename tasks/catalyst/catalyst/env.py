@@ -8,6 +8,8 @@ from typing import Any
 import uvicorn
 from loguru import logger
 from score import (
+    check_adsorption_sites,
+    check_adsorption_structure,
     check_mp_structure,
     check_slab_structure,
     check_slabs_json,
@@ -281,54 +283,54 @@ def create_catalysis_environments(
                     "work_dir": str(work_dir_path),
                 },
             ),
-            # "create_molecule": TaskDefinition(
-            #     name="Create CO2 Molecule",
-            #     description="Create a CO2 molecule structure using MP - ID save it as a CIF file. Submit the path to the CIF file.",
-            #     tools=["get_structure_from_mp_text"],
-            #     scoring_fn=check_molecule_structure,
-            #     submission_format={"answer": "/path/to/co2.cif"},
-            #     initial_input={"mp_id": "mp-20066", "work_dir": str(work_dir_path)},
-            # ),
-            # "get_adsorption_sites": TaskDefinition(
-            #     name="Identify Adsorption Sites",
-            #     description="Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
-            #     tools=["get_adsorption_sites_text"],
-            #     scoring_fn=check_adsorption_sites,
-            #     submission_format={"answer": "/path/to/adsorption_sites.json"},
-            #     input_from_tasks=["choose_slab"],
-            #     initial_input={
-            #         "work_dir": str(work_dir_path),
-            #     },
-            # ),
-            # "choose_adsorption_site": TaskDefinition(
-            #     name="Choose Adsorption Site",
-            #     description="Choose one adsorption site (preferably a top site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
-            #     tools=["choose_adsorption_site_text"],
-            #     scoring_fn=lambda path: 1.0 if Path(path).exists() else 0.0,
-            #     submission_format={"answer": "/path/to/chosen_site.json"},
-            #     input_from_tasks=["get_adsorption_sites"],
-            #     initial_input={
-            #         "site_type": "top",  # Default to top site
-            #         "index": 0,  # Default to first site of the type
-            #         "work_dir": str(work_dir_path),
-            #     },
-            # ),
-            # "add_adsorbate": TaskDefinition(
-            #     name="Add CO2 to Silicon Slab",
-            #     description="Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Å and save the combined structure as a CIF file. Submit the path to the CIF file.",
-            #     tools=["add_adsorbate_to_slab_text"],
-            #     scoring_fn=check_adsorption_structure,
-            #     submission_format={"answer": "/path/to/slab_with_co2.cif"},
-            #     input_from_tasks=[
-            #         "choose_slab",
-            #         "create_molecule",
-            #         "choose_adsorption_site",
-            #     ],
-            #     initial_input={
-            #         "height": 2.0,  # Å above the surface
-            #         "work_dir": str(work_dir_path),
-            #     },
-            # ),
+            "create_molecule": TaskDefinition(
+                name="Create CO2 Molecule",
+                description="Create a CO2 molecule structure using MP - ID save it as a CIF file. Submit the path to the CIF file.",
+                tools=["get_structure_from_mp_text"],
+                scoring_fn=check_mp_structure,
+                submission_format={"answer": "/path/to/co2.cif"},
+                initial_input={"mp_id": "mp-20066", "work_dir": str(work_dir_path)},
+            ),
+            "get_adsorption_sites": TaskDefinition(
+                name="Identify Adsorption Sites",
+                description="Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
+                tools=["get_adsorption_sites_text"],
+                scoring_fn=check_adsorption_sites,
+                submission_format={"answer": "/path/to/adsorption_sites.json"},
+                input_from_tasks=["choose_slab"],
+                initial_input={
+                    "work_dir": str(work_dir_path),
+                },
+            ),
+            "choose_adsorption_site": TaskDefinition(
+                name="Choose Adsorption Site",
+                description="Choose one adsorption site (preferably a top site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
+                tools=["choose_adsorption_site_text"],
+                scoring_fn=lambda path: 1.0 if Path(path).exists() else 0.0,
+                submission_format={"answer": "/path/to/chosen_site.json"},
+                input_from_tasks=["get_adsorption_sites"],
+                initial_input={
+                    "site_type": "top",  # Default to top site
+                    "index": 0,  # Default to first site of the type
+                    "work_dir": str(work_dir_path),
+                },
+            ),
+            "add_adsorbate": TaskDefinition(
+                name="Add CO2 to Silicon Slab",
+                description="Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Å and save the combined structure as a CIF file. Submit the path to the CIF file.",
+                tools=["add_adsorbate_to_slab_text"],
+                scoring_fn=check_adsorption_structure,
+                submission_format={"answer": "/path/to/slab_with_co2.cif"},
+                input_from_tasks=[
+                    "choose_slab",
+                    "create_molecule",
+                    "choose_adsorption_site",
+                ],
+                initial_input={
+                    "height": 2.0,  # Å above the surface
+                    "work_dir": str(work_dir_path),
+                },
+            ),
         },
     )
 
