@@ -76,6 +76,9 @@ def llm_call(
             **kwargs,
         }
 
+        if "anthropic" in model:
+            params["max_tokens"] = 8192
+
         if tools is not None:
             params.update(
                 {
