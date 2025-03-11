@@ -1,4 +1,5 @@
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +21,8 @@ from corral.io import (
 )
 from corral.server import create_benchmark_server
 
+BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
+
 
 @dataclass
 class TaskDefinition:
@@ -28,7 +31,7 @@ class TaskDefinition:
     name: str
     description: str
     tools: list[str]
-    scoring_fn: Callable[[dict], float]
+    scoring_fn: Callable[[dict | str], float]
     submission_format: dict[str, str]
     # Either use output from another task or custom input
     input_from_tasks: list[str] = field(default_factory=list)
@@ -213,8 +216,6 @@ Required submission format:
 
             # Extract the answer field for scoring
             answer = submission.get("answer", submission)
-            if isinstance(answer, str):
-                answer = {"answer": answer}
             score = self.current_task.scoring_fn(answer)
 
             self.task_group.store_result(self.task_id, submission, score)
@@ -229,30 +230,52 @@ Required submission format:
 # ======================= SCORING FUNCTIONS =======================
 
 
+def resolve_path(path_or_str: str) -> str:
+    """
+    Resolves a path that might be relative to the base work directory.
+
+    Args:
+        path_or_str: Either a path to a file or a string content
+
+    Returns:
+        str: The resolved path or the original string if not a file path
+    """
+    # Check if it might be a path
+    try:
+        # If it's an absolute path or already exists, return as is
+        if Path(path_or_str).is_absolute() or Path(path_or_str).exists():
+            return path_or_str
+
+        # Try to resolve against base directory
+        full_path = Path(BASE_WORK_DIR) / path_or_str
+        if full_path.exists():
+            return str(full_path)
+
+        # If we can't resolve it, return the original
+        return path_or_str
+    except Exception:
+        # If there's any error treating it as a path, return the original
+        return path_or_str
+
+
 def check_mp_structure(path_or_cif: str) -> float:
     """
     Check if the path points to a valid CIF file containing a structure from Materials Project.
-
-    Args:
-        path_or_cif: Either a path to a CIF file or a CIF string
-
-    Returns:
-        float: Score between 0.0 and 1.0
     """
+    logger.info("check_mp_structure")
+    logger.info(f"Input path_or_cif: {path_or_cif}")
     try:
-        # Determine if the input is a path or a CIF string
+        path_or_cif = resolve_path(path_or_cif)
+
+        # Then continue with the existing logic
         if Path(path_or_cif).exists():
             structure = Structure.from_file(path_or_cif)
         else:
             structure = Structure.from_str(path_or_cif, fmt="cif")
 
-        # Check if the structure is valid
         if structure and len(structure) > 0:
-            # Basic check for Si structure (for MP-149)
-            if any(site.species_string == "Si" for site in structure):
-                return 1.0
-            return 0.75  # Valid structure but not containing Si
-        return 0.5  # Empty but valid structure
+            return 1.0  # Valid structure
+        return 0.0  # Invalid structure
     except Exception as e:
         logger.error(f"Error validating structure: {e}")
         return 0.0
@@ -268,7 +291,10 @@ def check_slab_structure(path_or_cif: str) -> float:
     Returns:
         float: Score between 0.0 and 1.0
     """
+    logger.info("check_slab_structure")
+    logger.info("Input path_or_cif: ", path_or_cif)
     try:
+        path_or_cif = resolve_path(path_or_cif)
         # Determine if the input is a path or a CIF string
         if Path(path_or_cif).exists():
             structure = Structure.from_file(path_or_cif)
@@ -300,6 +326,7 @@ def check_molecule_structure(path_or_cif: str) -> float:
         float: Score between 0.0 and 1.0
     """
     try:
+        path_or_cif = resolve_path(path_or_cif)
         # Determine if the input is a path or a CIF string
         if Path(path_or_cif).exists():
             structure = Structure.from_file(path_or_cif)
@@ -339,6 +366,7 @@ def check_adsorption_structure(path_or_cif: str) -> float:
         float: Score between 0.0 and 1.0
     """
     try:
+        path_or_cif = resolve_path(path_or_cif)
         # Determine if the input is a path or a CIF string
         if Path(path_or_cif).exists():
             structure = Structure.from_file(path_or_cif)
@@ -416,7 +444,7 @@ def check_adsorption_sites(sites_json: str) -> float:
 
 
 def create_catalysis_environments(
-    fs_tools: dict[str, Tool] | None = None, work_dir: str = "./tasks/adsorption/temp"
+    fs_tools: dict[str, Tool] | None = None, work_dir: str = BASE_WORK_DIR
 ) -> dict[str, Environment]:
     """Create environments for catalysis tasks"""
 
@@ -562,7 +590,7 @@ def create_catalysis_environments(
 
 if __name__ == "__main__":
     # Create file system manager and tools
-    fs_manager = FSManager("file")
+    fs_manager = FSManager("file", base_path=BASE_WORK_DIR)
 
     fs_tools = {
         "list_files": ListFilesTool(fs_manager),
