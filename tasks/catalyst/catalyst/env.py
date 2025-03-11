@@ -7,7 +7,11 @@ from typing import Any
 
 import uvicorn
 from loguru import logger
-from pymatgen.core import Structure
+from score import (
+    check_mp_structure,
+    check_slab_structure,
+    check_slabs_json,
+)
 
 from corral.base import Environment, Tool
 from corral.io import (
@@ -172,7 +176,7 @@ Required submission format:
                 prompt += f"- {key}: {value}\n"
 
         # Add IO tools description for saving results
-        prompt += "\nIMPORTANT: You have access to filesystem tools which allow you to read and write files. "
+        prompt += "\nIMPORTANT: You have access to filesystem tools which allow you to read and write files. Also ypu can retry many times to get the correct answer. "
         prompt += "Since some task results will be used in subsequent tasks, make sure to save your results using appropriate filenames. "
         prompt += (
             "This will help you reference and retrieve these files in later tasks."
@@ -227,222 +231,6 @@ Required submission format:
             return 0.0
 
 
-# ======================= SCORING FUNCTIONS =======================
-
-
-def resolve_path(path_or_str: str) -> str:
-    """
-    Resolves a path that might be relative to the base work directory.
-
-    Args:
-        path_or_str: Either a path to a file or a string content
-
-    Returns:
-        str: The resolved path or the original string if not a file path
-    """
-    # Check if it might be a path
-    try:
-        # If it's an absolute path or already exists, return as is
-        if Path(path_or_str).is_absolute() or Path(path_or_str).exists():
-            return path_or_str
-
-        # Try to resolve against base directory
-        full_path = Path(BASE_WORK_DIR) / path_or_str
-        if full_path.exists():
-            return str(full_path)
-
-        # If we can't resolve it, return the original
-        return path_or_str
-    except Exception:
-        # If there's any error treating it as a path, return the original
-        return path_or_str
-
-
-def check_mp_structure(path_or_cif: str) -> float:
-    """
-    Check if the path points to a valid CIF file containing a structure from Materials Project.
-    """
-    logger.info("check_mp_structure")
-    logger.info(f"Input path_or_cif: {path_or_cif}")
-    try:
-        path_or_cif = resolve_path(path_or_cif)
-
-        # Then continue with the existing logic
-        if Path(path_or_cif).exists():
-            structure = Structure.from_file(path_or_cif)
-        else:
-            structure = Structure.from_str(path_or_cif, fmt="cif")
-
-        if structure and len(structure) > 0:
-            return 1.0  # Valid structure
-        return 0.0  # Invalid structure
-    except Exception as e:
-        logger.error(f"Error validating structure: {e}")
-        return 0.0
-
-
-def check_slab_structure(path_or_cif: str) -> float:
-    """
-    Check if the path points to a valid CIF file containing a slab structure.
-
-    Args:
-        path_or_cif: Either a path to a CIF file or a CIF string
-
-    Returns:
-        float: Score between 0.0 and 1.0
-    """
-    logger.info("check_slab_structure")
-    logger.info("Input path_or_cif: ", path_or_cif)
-    try:
-        path_or_cif = resolve_path(path_or_cif)
-        # Determine if the input is a path or a CIF string
-        if Path(path_or_cif).exists():
-            structure = Structure.from_file(path_or_cif)
-        else:
-            structure = Structure.from_str(path_or_cif, fmt="cif")
-
-        # Check if the structure is valid
-        if structure and len(structure) > 0:
-            # Check for a slab - looking for elongated c-axis
-            lattice = structure.lattice
-            abc = lattice.abc
-            if abc[2] > 2 * max(abc[0], abc[1]):  # c significantly larger than a or b
-                return 1.0
-            return 0.75  # Valid structure but may not be a proper slab
-        return 0.5  # Empty but valid structure
-    except Exception as e:
-        logger.error(f"Error validating slab structure: {e}")
-        return 0.0
-
-
-def check_molecule_structure(path_or_cif: str) -> float:
-    """
-    Check if the path points to a valid CIF file containing a molecule structure (e.g., CO2).
-
-    Args:
-        path_or_cif: Either a path to a CIF file or a CIF string
-
-    Returns:
-        float: Score between 0.0 and 1.0
-    """
-    try:
-        path_or_cif = resolve_path(path_or_cif)
-        # Determine if the input is a path or a CIF string
-        if Path(path_or_cif).exists():
-            structure = Structure.from_file(path_or_cif)
-        else:
-            structure = Structure.from_str(path_or_cif, fmt="cif")
-
-        # Check if the structure is valid
-        if structure and len(structure) > 0:
-            # Check for CO2 molecule (simple check for C and O atoms)
-            has_carbon = any(site.species_string == "C" for site in structure)
-            has_oxygen = any(site.species_string == "O" for site in structure)
-
-            if has_carbon and has_oxygen:
-                # Look for correct stoichiometry (1 C, 2 O)
-                c_count = sum(1 for site in structure if site.species_string == "C")
-                o_count = sum(1 for site in structure if site.species_string == "O")
-
-                if c_count == 1 and o_count == 2:
-                    return 1.0
-                else:
-                    return 0.75  # Has C and O but not correct stoichiometry
-            return 0.5  # Valid structure but missing C or O
-        return 0.25  # Empty but valid structure
-    except Exception as e:
-        logger.error(f"Error validating molecule structure: {e}")
-        return 0.0
-
-
-def check_adsorption_structure(path_or_cif: str) -> float:
-    """
-    Check if the path points to a valid CIF file containing a slab with an adsorbed molecule.
-
-    Args:
-        path_or_cif: Either a path to a CIF file or a CIF string
-
-    Returns:
-        float: Score between 0.0 and 1.0
-    """
-    try:
-        path_or_cif = resolve_path(path_or_cif)
-        # Determine if the input is a path or a CIF string
-        if Path(path_or_cif).exists():
-            structure = Structure.from_file(path_or_cif)
-        else:
-            structure = Structure.from_str(path_or_cif, fmt="cif")
-
-        # Check if the structure is valid
-        if structure and len(structure) > 0:
-            # Check for a slab with CO2 molecule
-            has_silicon = any(site.species_string == "Si" for site in structure)
-            has_carbon = any(site.species_string == "C" for site in structure)
-            has_oxygen = any(site.species_string == "O" for site in structure)
-
-            if has_silicon and has_carbon and has_oxygen:
-                # Determine if the structure has slab-like characteristics
-                lattice = structure.lattice
-                abc = lattice.abc
-                if abc[2] > 2 * max(
-                    abc[0], abc[1]
-                ):  # c significantly larger than a or b
-                    return 1.0
-                return 0.75  # Has all atoms but may not be in a slab configuration
-            return 0.5  # Missing some atoms
-        return 0.25  # Empty but valid structure
-    except Exception as e:
-        logger.error(f"Error validating adsorption structure: {e}")
-        return 0.0
-
-
-def check_adsorption_sites(sites_json: str) -> float:
-    """
-    Check if the JSON string contains valid adsorption sites.
-
-    Args:
-        sites_json: JSON string containing adsorption sites
-
-    Returns:
-        float: Score between 0.0 and 1.0
-    """
-    try:
-        sites = json.loads(sites_json)
-
-        # Check if the structure contains expected site types
-        expected_types = ["top", "bridge", "hollow"]
-        found_types = [site_type for site_type in expected_types if site_type in sites]
-
-        if not found_types:
-            return 0.25  # No recognized site types
-
-        # Check if sites have coordinates
-        has_coords = all(
-            isinstance(sites.get(site_type), list) and len(sites.get(site_type)) > 0
-            for site_type in found_types
-        )
-
-        if not has_coords:
-            return 0.5  # Has site types but no coordinates
-
-        # Check structure of coordinates
-        valid_coords = all(
-            all(
-                isinstance(coord, list) and len(coord) == 3
-                for coord in sites.get(site_type, [])
-            )
-            for site_type in found_types
-        )
-
-        if not valid_coords:
-            return 0.75  # Has coordinates but they're not in the expected format
-
-        return 1.0  # Valid sites with coordinates
-    except Exception as e:
-        logger.error(f"Error validating adsorption sites: {e}")
-        return 0.0
-
-
 def create_catalysis_environments(
     fs_tools: dict[str, Tool] | None = None, work_dir: str = BASE_WORK_DIR
 ) -> dict[str, Environment]:
@@ -467,25 +255,11 @@ def create_catalysis_environments(
                     "work_dir": str(work_dir_path),
                 },
             ),
-            "create_slab": TaskDefinition(
-                name="Create Silicon Slab",
-                description="Create a slab from the bulk Si structure with Miller index (1,1,1) and save it as a CIF file. Submit the path to the CIF file.",
-                tools=["create_slab_from_structure_text"],
-                scoring_fn=check_slab_structure,
-                submission_format={"answer": "/path/to/slab.cif"},
-                input_from_tasks=["retrieve_structure"],
-                initial_input={
-                    "miller_index": (1, 1, 1),
-                    "min_slab_size": 12,
-                    "min_vacuum_size": 5,
-                    "work_dir": str(work_dir_path),
-                },
-            ),
             "enumerate_slabs": TaskDefinition(
                 name="Enumerate Possible Slabs",
                 description="Enumerate possible slabs from the bulk Si structure with Miller index (1,1,1) and save the result as a JSON file. Submit the path to the JSON file.",
                 tools=["enumerate_slabs_text"],
-                scoring_fn=lambda path: 1.0 if Path(path).exists() else 0.0,
+                scoring_fn=check_slabs_json,
                 submission_format={"answer": "/path/to/slabs.json"},
                 input_from_tasks=["retrieve_structure"],
                 initial_input={
@@ -507,54 +281,54 @@ def create_catalysis_environments(
                     "work_dir": str(work_dir_path),
                 },
             ),
-            "create_molecule": TaskDefinition(
-                name="Create CO2 Molecule",
-                description="Create a CO2 molecule structure using MP - ID save it as a CIF file. Submit the path to the CIF file.",
-                tools=["get_structure_from_mp_text"],
-                scoring_fn=check_molecule_structure,
-                submission_format={"answer": "/path/to/co2.cif"},
-                initial_input={"mp_id": "mp-20066", "work_dir": str(work_dir_path)},
-            ),
-            "get_adsorption_sites": TaskDefinition(
-                name="Identify Adsorption Sites",
-                description="Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
-                tools=["get_adsorption_sites_text"],
-                scoring_fn=check_adsorption_sites,
-                submission_format={"answer": "/path/to/adsorption_sites.json"},
-                input_from_tasks=["choose_slab"],
-                initial_input={
-                    "work_dir": str(work_dir_path),
-                },
-            ),
-            "choose_adsorption_site": TaskDefinition(
-                name="Choose Adsorption Site",
-                description="Choose one adsorption site (preferably a top site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
-                tools=["choose_adsorption_site_text"],
-                scoring_fn=lambda path: 1.0 if Path(path).exists() else 0.0,
-                submission_format={"answer": "/path/to/chosen_site.json"},
-                input_from_tasks=["get_adsorption_sites"],
-                initial_input={
-                    "site_type": "top",  # Default to top site
-                    "index": 0,  # Default to first site of the type
-                    "work_dir": str(work_dir_path),
-                },
-            ),
-            "add_adsorbate": TaskDefinition(
-                name="Add CO2 to Silicon Slab",
-                description="Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Å and save the combined structure as a CIF file. Submit the path to the CIF file.",
-                tools=["add_adsorbate_to_slab_text"],
-                scoring_fn=check_adsorption_structure,
-                submission_format={"answer": "/path/to/slab_with_co2.cif"},
-                input_from_tasks=[
-                    "choose_slab",
-                    "create_molecule",
-                    "choose_adsorption_site",
-                ],
-                initial_input={
-                    "height": 2.0,  # Å above the surface
-                    "work_dir": str(work_dir_path),
-                },
-            ),
+            # "create_molecule": TaskDefinition(
+            #     name="Create CO2 Molecule",
+            #     description="Create a CO2 molecule structure using MP - ID save it as a CIF file. Submit the path to the CIF file.",
+            #     tools=["get_structure_from_mp_text"],
+            #     scoring_fn=check_molecule_structure,
+            #     submission_format={"answer": "/path/to/co2.cif"},
+            #     initial_input={"mp_id": "mp-20066", "work_dir": str(work_dir_path)},
+            # ),
+            # "get_adsorption_sites": TaskDefinition(
+            #     name="Identify Adsorption Sites",
+            #     description="Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
+            #     tools=["get_adsorption_sites_text"],
+            #     scoring_fn=check_adsorption_sites,
+            #     submission_format={"answer": "/path/to/adsorption_sites.json"},
+            #     input_from_tasks=["choose_slab"],
+            #     initial_input={
+            #         "work_dir": str(work_dir_path),
+            #     },
+            # ),
+            # "choose_adsorption_site": TaskDefinition(
+            #     name="Choose Adsorption Site",
+            #     description="Choose one adsorption site (preferably a top site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
+            #     tools=["choose_adsorption_site_text"],
+            #     scoring_fn=lambda path: 1.0 if Path(path).exists() else 0.0,
+            #     submission_format={"answer": "/path/to/chosen_site.json"},
+            #     input_from_tasks=["get_adsorption_sites"],
+            #     initial_input={
+            #         "site_type": "top",  # Default to top site
+            #         "index": 0,  # Default to first site of the type
+            #         "work_dir": str(work_dir_path),
+            #     },
+            # ),
+            # "add_adsorbate": TaskDefinition(
+            #     name="Add CO2 to Silicon Slab",
+            #     description="Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Å and save the combined structure as a CIF file. Submit the path to the CIF file.",
+            #     tools=["add_adsorbate_to_slab_text"],
+            #     scoring_fn=check_adsorption_structure,
+            #     submission_format={"answer": "/path/to/slab_with_co2.cif"},
+            #     input_from_tasks=[
+            #         "choose_slab",
+            #         "create_molecule",
+            #         "choose_adsorption_site",
+            #     ],
+            #     initial_input={
+            #         "height": 2.0,  # Å above the surface
+            #         "work_dir": str(work_dir_path),
+            #     },
+            # ),
         },
     )
 
@@ -590,6 +364,7 @@ def create_catalysis_environments(
 
 if __name__ == "__main__":
     # Create file system manager and tools
+    Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
     fs_manager = FSManager("file", base_path=BASE_WORK_DIR)
 
     fs_tools = {
