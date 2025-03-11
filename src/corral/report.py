@@ -121,14 +121,16 @@ class BenchmarkResult:
 
     def task_pass_at_k(self, task_id: str, k: int) -> float:
         """
-        Calculate pass@k for a specific task for a given k value.
+        Calculate pass@k - probability that at least one out of k trials succeeds for a given k value.
 
         pass@k is defined as:
         .. math: P(pass@k) = 1 - (1 - p)^k
 
+        Where p is the probability of a single trial succeeding.
+
         In practice, pass@k is estimated by:
-        - Taking n samples for each problem (where n ≥ k)
-        - Calculating the number c of correct solutions
+        - Taking n samples. (the number of total trials for a given task). (where n ≥ k)
+        - Calculating the number c, the number of correct or successful solutions
         - Estimating pass@k as
         .. math: 1 - (1 - c/n)^k when c < n, or 1 when c = n
 
@@ -169,8 +171,8 @@ class BenchmarkResult:
         Where p is the probability of a single trial succeeding.
 
         In practice, pass^k is estimated by:
-        - Taking n samples for each problem (where n ≥ k)
-        - Calculating the number c of correct solutions
+        - Taking n samples. (the number of total trials for a given task). (where n ≥ k)
+        - Calculating the number c, the number of correct or successful solutions
         - Estimating pass^k as
         .. math: (c/n)^k
 

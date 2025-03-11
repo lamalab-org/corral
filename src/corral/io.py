@@ -1,4 +1,5 @@
 import json
+import re
 
 import fsspec
 
@@ -65,13 +66,10 @@ class FSManager:
         If create_parents is True and the backend supports it, create all missing parent directories.
         """
         try:
-            if create_parents:
+            if create_parents and hasattr(self.fs, "mkdirs"):
                 # Many fsspec implementations support mkdirs.
                 # If not available, fall back to calling mkdir for each missing part.
-                if hasattr(self.fs, "mkdirs"):
-                    self.fs.mkdirs(path, exist_ok=True)
-                else:
-                    self.fs.mkdir(path)
+                self.fs.mkdirs(path, exist_ok=True)
             else:
                 self.fs.mkdir(path)
         except Exception as e:
@@ -238,7 +236,7 @@ class CatFilesTool(Tool):
 
 
 class CopyFileTool(Tool):
-    """Tool for copying a files."""
+    """Tool for copying files."""
 
     def __init__(self, fs_manager: FSManager):
         super().__init__(
@@ -272,7 +270,7 @@ class CopyFileTool(Tool):
 class MkdirTool(Tool):
     """Tool for creating a directory (and optionally its parent dirs)."""
 
-    def init(self, fs_manager):
+    def __init__(self, fs_manager):
         super().__init__(
             name="mkdir",
             description="Create a directory. Optionally create parent directories.",
@@ -294,11 +292,199 @@ class MkdirTool(Tool):
         )
         self.fs_manager = fs_manager
 
-        def execute(self, **kwargs) -> str:
-            try:
-                self.fs_manager.mkdir(
-                    kwargs["path"], kwargs.get("create_parents", False)
+    def execute(self, **kwargs) -> str:
+        try:
+            self.fs_manager.mkdir(kwargs["path"], kwargs.get("create_parents", False))
+            return f"Directory {kwargs['path']} created successfully."
+        except Exception as e:
+            return f"Error: {e}"
+
+
+class GrepTool(Tool):
+    """Tool for searching patterns in files, similar to bash grep"""
+
+    def __init__(self, fs_manager: FSManager):
+        super().__init__(
+            name="grep",
+            description="Search for patterns in files using Python regular expressions",
+            arguments=[
+                ToolArgument(
+                    name="pattern",
+                    type="str",
+                    description="Regular expression pattern to search for",
+                    required=True,
+                ),
+                ToolArgument(
+                    name="path",
+                    type="str",
+                    description="Path to file or directory to search",
+                    required=True,
+                ),
+                ToolArgument(
+                    name="recursive",
+                    type="bool",
+                    description="Search recursively in directories (like grep -r)",
+                    required=False,
+                    default=False,
+                ),
+                ToolArgument(
+                    name="ignore_case",
+                    type="bool",
+                    description="Perform case-insensitive matching (like grep -i)",
+                    required=False,
+                    default=False,
+                ),
+                ToolArgument(
+                    name="line_numbers",
+                    type="bool",
+                    description="Show line numbers for matches (like grep -n)",
+                    required=False,
+                    default=True,
+                ),
+                ToolArgument(
+                    name="context_lines",
+                    type="int",
+                    description="Number of context lines to show before and after each match (like grep -C)",
+                    required=False,
+                    default=0,
+                ),
+                ToolArgument(
+                    name="max_matches",
+                    type="int",
+                    description="Maximum number of matches to return (0 for unlimited)",
+                    required=False,
+                    default=0,
+                ),
+            ],
+        )
+        self.fs_manager = fs_manager
+
+    def _search_file(
+        self,
+        file_path: str,
+        pattern: str,
+        ignore_case: bool,
+        line_numbers: bool,
+        context_lines: int,
+    ) -> list[dict]:
+        """Search for pattern in a single file"""
+
+        try:
+            content = self.fs_manager.read_file(file_path)
+            lines = content.splitlines()
+            flags = re.IGNORECASE if ignore_case else 0
+            matches = []
+
+            for i, line in enumerate(lines, 1):
+                if re.search(pattern, line, flags):
+                    match = {"file": file_path, "line": line.strip()}
+
+                    if line_numbers:
+                        match["line_number"] = i
+
+                    if context_lines > 0:
+                        before = []
+                        after = []
+
+                        start = max(0, i - context_lines - 1)
+                        before = [
+                            {"line": lines[j].strip(), "line_number": j + 1}
+                            for j in range(start, i - 1)
+                        ]
+
+                        end = min(len(lines), i + context_lines)
+                        after = [
+                            {"line": lines[j].strip(), "line_number": j + 1}
+                            for j in range(i, end)
+                        ]
+
+                        if before:
+                            match["context_before"] = before
+                        if after:
+                            match["context_after"] = after
+
+                    matches.append(match)
+
+            return matches
+        except Exception as e:
+            return [{"file": file_path, "error": f"Error processing file: {e!s}"}]
+
+    def execute(self, **kwargs) -> str:
+        pattern = kwargs["pattern"]
+        path = kwargs["path"]
+        recursive = kwargs.get("recursive", False)
+        ignore_case = kwargs.get("ignore_case", False)
+        line_numbers = kwargs.get("line_numbers", True)
+        context_lines = kwargs.get("context_lines", 0)
+        max_matches = kwargs.get("max_matches", 0)
+
+        try:
+            if recursive:
+                files = self.fs_manager.list_files(path, recursive=True)
+            else:
+                file_info = self.fs_manager.file_info(path)
+                files = (
+                    [path]
+                    if file_info["type"] == "file"
+                    else self.fs_manager.list_files(path)
                 )
-                return f"Directory {kwargs['path']} created successfully."
-            except Exception as e:
-                return f"Error: {e}"
+
+            all_matches = []
+            match_count = 0
+
+            for file_path in files:
+                try:
+                    if self.fs_manager.file_info(file_path)["type"] != "file":
+                        continue
+                except Exception:
+                    continue
+
+                matches = self._search_file(
+                    file_path, pattern, ignore_case, line_numbers, context_lines
+                )
+
+                all_matches.extend(matches)
+                match_count += len(matches)
+
+                if max_matches > 0 and match_count >= max_matches:
+                    all_matches = all_matches[:max_matches]
+                    break
+
+            if not all_matches:
+                return "No matches found"
+
+            result_lines = []
+            for match in all_matches:
+                if "error" in match:
+                    result_lines.append(f"ERROR: {match['file']}: {match['error']}")
+                    continue
+
+                file_path = match["file"]
+
+                if "context_before" in match:
+                    for ctx in match["context_before"]:
+                        line_prefix = f"{ctx['line_number']}:" if line_numbers else ""
+                        result_lines.append(
+                            f"{file_path}:{line_prefix}{ctx['line']} (context)"
+                        )
+
+                line_prefix = (
+                    f"{match['line_number']}:"
+                    if line_numbers and "line_number" in match
+                    else ""
+                )
+                result_lines.append(f"{file_path}:{line_prefix}{match['line']}")
+
+                if "context_after" in match:
+                    for ctx in match["context_after"]:
+                        line_prefix = f"{ctx['line_number']}:" if line_numbers else ""
+                        result_lines.append(
+                            f"{file_path}:{line_prefix}{ctx['line']} (context)"
+                        )
+
+                result_lines.append("")
+
+            return "\n".join(result_lines)
+
+        except Exception as e:
+            return f"Error searching for pattern: {e!s}"
