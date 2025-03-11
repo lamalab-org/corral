@@ -270,7 +270,7 @@ class CopyFileTool(Tool):
 class MkdirTool(Tool):
     """Tool for creating a directory (and optionally its parent dirs)."""
 
-    def init(self, fs_manager):
+    def __init__(self, fs_manager):
         super().__init__(
             name="mkdir",
             description="Create a directory. Optionally create parent directories.",
