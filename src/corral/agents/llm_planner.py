@@ -83,7 +83,7 @@ class LLMPlanner:
         Returns:
             Tuple[str, List[LiteLLMMessage]]: The final answer and messages
         """
-        tools = json.loads(interface.get_available_tools_for_task(task_id))["tools"]
+        tools = interface.get_available_tools_for_task(task_id)
 
         task_guide = interface.get_task_prompt(task_id)
         prompt = self.user_prompt.fill(
@@ -106,6 +106,7 @@ class LLMPlanner:
                 max_iterations=self.max_iterations,
                 api_endpoint=self.api_endpoint,
                 temperature=self.temperature,
+                prompt_store=self.store,
                 **self.kwargs,
             )
         else:
@@ -114,6 +115,7 @@ class LLMPlanner:
                 max_iterations=10,
                 api_endpoint=self.api_endpoint,
                 temperature=self.temperature,
+                prompt_store=self.store,
                 **self.kwargs,
             )
 

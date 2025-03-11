@@ -35,6 +35,7 @@ class ToolCallingAgent:
         system_prompt (str, optional): The system prompt to use.
             Defaults to "You are a helpful AI assistant that solves tasks step by step."
         temperature (float): The temperature to use for sampling
+        prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
