@@ -30,6 +30,8 @@ class Action:
     tool_name: str
     arguments: dict[str, Any]
 
+    arguments: dict[str, Any]
+
 
 class ReActAgent:
     """
