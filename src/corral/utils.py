@@ -1,15 +1,10 @@
-from __future__ import annotations
-
 import inspect
-from typing import TYPE_CHECKING, Callable, get_type_hints
+from collections.abc import Callable, Sequence
+from typing import get_type_hints
+
+from modal import App, Image, Mount, Secret, Volume
 
 from corral.base import ModalTool, Tool, ToolArgument
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from modal import App, Image, Mount, Secret, Volume
-
 
 MODAL_TOOL_REGISTRY = {}
 
@@ -59,8 +54,10 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
             choices_str = desc_parts[1].split(")", 1)[0].strip()
             try:
                 choices = eval(choices_str)  # Convert string representation to list
-            except:
-                raise ValueError(f"Invalid choices format for argument {arg_name}")
+            except ValueError:
+                raise ValueError(
+                    f"Invalid choices format for argument {arg_name}"
+                ) from None
 
         # Get type from type hints
         if arg_name not in type_hints:
@@ -91,44 +88,21 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
 def tool(func: Callable) -> Tool:
     """
     Decorator to convert a function into a Tool. The decorated function must have:
-    1. A complete docstring with description and Args section
-    2. Type hints for all parameters
-    3. A return type hint
+    1. A complete docstring with description and Args section.
+    2. Type hints for all parameters.
+    3. A return type hint.
 
     The docstring must follow this format:
     ```
-    Brief description of what the tool does.
+                Brief description of what the tool does.
 
-    Args:
-        param1: Description of first parameter (choices: ["optional", "list", "of", "choices"])
-        param2: Description of second parameter
-        ...
+                Args:
+                    param1: Description of first parameter (choices: ["optional", "list", "of", "choices"])
+                    param2: Description of second parameter
+                    ...
 
-    Returns:
-        Description of what the function returns
-    ```
-
-    Example:
-    ```python
-    @tool
-    def calculator(operation: str, x: float, y: float) -> float:
-        """Perform basic math operations.
-
-        Args:
-            operation: Operation to perform (choices: ["add", "subtract", "multiply", "divide"])
-            x: First number to operate on
-            y: Second number to operate on
-
-        Returns:
-            float: Result of the mathematical operation
-        """
-        operations = {
-            "add": lambda: x + y,
-            "subtract": lambda: x - y,
-            "multiply": lambda: x * y,
-            "divide": lambda: x / y if y != 0 else "Error: Division by zero",
-        }
-        return operations[operation]()
+                Returns:
+                    Description of what the function returns
     ```
 
     Args:
@@ -219,7 +193,6 @@ def modal_tool(
     gpu: str | None = None,
     keep_warm: int | None = None,
     block_network: bool = False,
-    register_globally: bool = True,
     **kwargs,
 ):
     """
@@ -258,8 +231,7 @@ def modal_tool(
         )
 
         # Register the tool for later use
-        MODAL_TOOL_REGISTRY[name] = tool_instance
-        func.tool = tool_instance
+        MODAL_TOOL_REGISTRY[func.__name__] = tool_instance
 
         # Return the modal function
         return modal_func
