@@ -96,6 +96,7 @@ class ReActAgent:
             },
             {"role": "user", "content": prompt},
         ]
+
         return llm_call(
             model=self.model,
             messages=messages,
