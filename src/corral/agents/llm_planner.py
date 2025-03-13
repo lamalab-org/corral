@@ -12,6 +12,7 @@ from corral.agents.prompt_utils import get_prompt
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.agents.utils import LiteLLMMessage, llm_call
+from corral.utils import serialize_messages
 
 
 class LLMPlanner:
@@ -62,15 +63,15 @@ class LLMPlanner:
         )
 
         self.user_prompt = get_prompt(
-            self.store, user_prompt, "d77a15a2-4ded-4ceb-9b33-e84ab899c899"
+            self.store, user_prompt, "1c7f064f-9a3b-40f5-a555-94e551722d50"
         )
 
     def run_agent(
         self,
         interface: BenchmarkInterface,
         task_id: str,
-        examples: str = "",
         tool_usage: bool = False,
+        examples: str | None = None,
     ) -> tuple[str, list[LiteLLMMessage]]:
         """Run the LLM planner agent
 
@@ -86,14 +87,23 @@ class LLMPlanner:
         tools = interface.get_available_tools_for_task(task_id)
 
         task_guide = interface.get_task_prompt(task_id)
-        prompt = self.user_prompt.fill(
-            {
-                "examples": examples,
-                "tools": json.dumps(tools),
-                "task_guide": task_guide,
-                "iterations": self.max_iterations,
-            },
-        )
+        if examples is not None:
+            prompt = self.user_prompt.fill(
+                {
+                    "tools": json.dumps(tools),
+                    "task_guide": task_guide,
+                    "iterations": self.max_iterations,
+                },
+            )
+        else:
+            prompt = self.user_prompt.fill(
+                {
+                    "tools": json.dumps(tools),
+                    "task_guide": task_guide,
+                    "iterations": self.max_iterations,
+                    "examples": examples,
+                },
+            )
 
         messages: list[LiteLLMMessage] = []
         if self.system_prompt:
@@ -130,9 +140,13 @@ class LLMPlanner:
 
             messages.append(
                 LiteLLMMessage(
-                    role="assistant", content=plan, name="high-level planner"
+                    role="assistant", content=plan, name="high-level-planner"
                 )
             )
+
+            if "Final Answer:" in plan:
+                final_answer = plan.split("Final Answer:")[1].strip()
+                return final_answer, messages
 
             final_answer, low_level_planner_messages = agent.run_agent(
                 interface=interface,
@@ -140,21 +154,13 @@ class LLMPlanner:
                 task_prompt=plan,
             )
 
-            if final_answer.split(" ")[0] != "Error":
-                messages.append(
-                    LiteLLMMessage(
-                        role="assistant",
-                        content=f"Final Answer: {final_answer}.\nIteration by the agent:\n{low_level_planner_messages!s}",
-                        name="low-level planner",
-                    )
-                )
-                return final_answer, messages
+            serialized_messages = serialize_messages(low_level_planner_messages)
 
             messages.append(
                 LiteLLMMessage(
                     role="assistant",
-                    content=f"Error: {final_answer}.\nIteration by the agent:\n{low_level_planner_messages!s}\n\nPlease provide a new plan.",
-                    name="low-level planner",
+                    content=f"Answer submitted by the executor: {final_answer}.\nMessages by the executor:\n{json.dumps(serialized_messages, indent=2)}",
+                    name="low-level-planner",
                 )
             )
 
