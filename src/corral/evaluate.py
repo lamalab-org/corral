@@ -11,6 +11,7 @@ from corral.report import (
     TaskTrialResults,
     ToolResponse,
 )
+from corral.utils import save_agent_messages
 
 
 class BenchmarkInterface:
@@ -101,6 +102,7 @@ class MatAgentBenchmark:
         task_ids: list[str] | None = None,
         trials_per_task: int = 1,
         k_values: int | list[int] | None = None,
+        verbose: bool | None = False,
     ) -> BenchmarkResult:
         """Run benchmark on specified tasks or all available tasks
 
@@ -142,6 +144,11 @@ class MatAgentBenchmark:
                 # Submit and store result
                 result = self.interface.submit_answer(task_id, answer)
                 task_trials.trials.append(result)
+
+                if verbose:
+                    save_agent_messages(
+                        messages, task_id, self.agent.__class__.__name__
+                    )
 
             # Store all trials for this task
             task_results[task_id] = task_trials

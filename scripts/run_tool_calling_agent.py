@@ -20,7 +20,7 @@ def run_benchmark(model: str = "gpt-4o", task_ids: list | None = None):
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
-    result = runner.bench(task_ids, trials_per_task=2, k_values=[1, 2])
+    result = runner.bench(task_ids, trials_per_task=2, k_values=[1, 2], verbose=True)
     result.generate_report("results.json")
 
     logger.info("Benchmark completed")
