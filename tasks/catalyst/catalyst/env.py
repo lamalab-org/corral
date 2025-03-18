@@ -1,75 +1,136 @@
-from typing import Dict, List, Callable, Optional, Any
-from dataclasses import dataclass, field
-from corral.base import Environment, Tool
-from corral.server import create_benchmark_server
-from tools import create_tools
-import uvicorn
 import json
-
-from typing import Dict, List, Callable, Optional, Any
+import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from corral.base import Environment, Tool
+from pathlib import Path
+from typing import Any
 
-from typing import Dict, List, Callable, Optional, Any
-from dataclasses import dataclass, field
+import uvicorn
+from loguru import logger
+from score import (
+    check_adsorption_sites,
+    check_adsorption_structure,
+    check_mp_structure,
+    check_slab_structure,
+    check_slabs_json,
+)
+
 from corral.base import Environment, Tool
+from corral.io import (
+    CatFilesTool,
+    CopyFileTool,
+    FileInfoTool,
+    FSManager,
+    ListFilesTool,
+    ReadFileTool,
+    WriteFileTool,
+)
+from corral.server import create_benchmark_server
+
+BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
+
 
 @dataclass
 class TaskDefinition:
     """Definition of a task with its requirements and scoring"""
+
     name: str
     description: str
-    tools: List[str]
-    scoring_fn: Callable[[Dict], float]
-    submission_format: Dict[str, str]
+    tools: list[str]
+    scoring_fn: Callable[[dict | str], float]
+    submission_format: dict[str, str]
     # Either use output from another task or custom input
-    input_from_task: Optional[str] = None
-    initial_input: Optional[Dict[str, Any]] = None
+    input_from_tasks: list[str] = field(default_factory=list)
+    initial_input: dict[str, Any] = field(default_factory=dict)
+
+    # Helper method to check if task has dependencies
+    def has_dependencies(self) -> bool:
+        return len(self.input_from_tasks) > 0
+
 
 @dataclass
 class TaskGroup:
     """Container for related tasks"""
-    group_id: str
-    tasks: Dict[str, TaskDefinition]
-    results: Dict[str, Any] = field(default_factory=dict)
-    scores: Dict[str, float] = field(default_factory=dict)
 
-    def get_task_input(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """Get input for a task either from another task or initial input"""
+    group_id: str
+    tasks: dict[str, TaskDefinition]
+    results: dict[str, Any] = field(default_factory=dict)
+    scores: dict[str, float] = field(default_factory=dict)
+
+    def get_task_input(self, task_id: str) -> dict[str, Any]:
+        """Get input for a task either from other tasks or initial input"""
         task = self.tasks.get(task_id)
         if not task:
-            return None
+            return {}
 
-        if task.input_from_task and task.input_from_task in self.results:
-            return {"result": self.results[task.input_from_task]}
-        return task.initial_input
+        # Start with the initial input
+        combined_input = task.initial_input.copy() if task.initial_input else {}
 
-    def store_result(self, task_id: str, result: Dict[str, Any], score: float) -> None:
+        # Add inputs from dependent tasks
+        for dep_task_id in task.input_from_tasks:
+            if dep_task_id in self.results:
+                # Add the dependent task's result to the input
+                dep_result = self.results[dep_task_id]
+                if isinstance(dep_result, dict) and "answer" in dep_result:
+                    # Extract the relevant part of the result
+                    combined_input[f"result_from_{dep_task_id}"] = dep_result["answer"]
+                else:
+                    combined_input[f"result_from_{dep_task_id}"] = dep_result
+
+        return combined_input
+
+    def store_result(self, task_id: str, result: dict[str, Any], score: float) -> None:
         """Store task result and score"""
         self.results[task_id] = result
         self.scores[task_id] = score
 
-    def get_task_dependencies(self) -> Dict[str, List[str]]:
+    def get_task_dependencies(self) -> dict[str, list[str]]:
         """Get dictionary of task dependencies"""
-        dependencies = {}
-        for task_id, task in self.tasks.items():
-            deps = []
-            if task.input_from_task:
-                deps.append(task.input_from_task)
-            dependencies[task_id] = deps
-        return dependencies
+        return {task_id: task.input_from_tasks for task_id, task in self.tasks.items()}
+
+    def get_ordered_tasks(self) -> list[str]:
+        """Return tasks in dependency order"""
+        # Simple topological sort
+        dependencies = self.get_task_dependencies()
+        visited = set()
+        ordered = []
+
+        def visit(task_id):
+            if task_id in visited:
+                return
+            visited.add(task_id)
+            for dep in dependencies.get(task_id, []):
+                visit(dep)
+            ordered.append(task_id)
+
+        for task_id in self.tasks:
+            visit(task_id)
+
+        return ordered
+
+    def check_dependencies_satisfied(self, task_id: str) -> bool:
+        """Check if all dependencies for a task are satisfied"""
+        task = self.tasks.get(task_id)
+        if not task:
+            return False
+
+        return all(dep_task_id in self.results for dep_task_id in task.input_from_tasks)
+
 
 class TaskEnvironment(Environment):
     """Environment that works with a task group"""
+
     def __init__(
         self,
         task_id: str,
         task_group: TaskGroup,
-        available_tools: Dict[str, Tool]
+        available_tools: dict[str, Tool],
+        fs_tools: dict[str, Tool] | None = None,
     ):
         self.task_group = task_group
-        self.task_id = task_id  # Individual task ID within the group
+        self.task_id = task_id
         self.available_tools = available_tools
+        self.fs_tools = fs_tools or {}
 
         if task_id not in task_group.tasks:
             raise ValueError(f"Task {task_id} not found in task group")
@@ -80,13 +141,17 @@ class TaskEnvironment(Environment):
         self.tools = {}
         super().__init__(f"{task_group.group_id}_{task_id}")
 
-        # Add required tools
+        # Add required tools for the task
         for tool_name in self.current_task.tools:
             if tool_name in available_tools:
                 self.add_tool(available_tools[tool_name])
 
+        # Add all file system tools
+        for tool in self.fs_tools.values():
+            self.add_tool(tool)
+
     def get_task_prompt(self) -> str:
-        input_data = self.task_group.get_task_input(self.task_id)
+        _combined_input = self.task_group.get_task_input(self.task_id)
 
         prompt = f"""Task: {self.current_task.name}
 Description: {self.current_task.description}
@@ -98,22 +163,41 @@ Required submission format:
 
         prompt += "\nAvailable input data:\n"
 
-        if self.current_task.input_from_task and self.current_task.input_from_task in self.task_group.results:
-            # If this task depends on a previous task, show its result
-            previous_result = self.task_group.results[self.current_task.input_from_task]
-            if isinstance(previous_result, dict) and "answer" in previous_result:
-                prompt += f"Previous task result: {previous_result['answer']}\n"
-            else:
-                prompt += f"Previous task result: {previous_result}\n"
+        # Display input data from dependencies
+        for dep_task_id in self.current_task.input_from_tasks:
+            if dep_task_id in self.task_group.results:
+                dep_result = self.task_group.results[dep_task_id]
+                if isinstance(dep_result, dict) and "answer" in dep_result:
+                    prompt += f"- Input from {dep_task_id}: {dep_result['answer']}\n"
+                else:
+                    prompt += f"- Input from {dep_task_id}: {dep_result}\n"
 
+        # Display initial input data
         if self.current_task.initial_input:
             for key, value in self.current_task.initial_input.items():
                 prompt += f"- {key}: {value}\n"
 
-        if self.current_task.input_from_task:
-            status = "available" if self.current_task.input_from_task in self.task_group.results else "not yet available"
-            prompt += f"\nThis task uses output from task: {self.current_task.input_from_task} ({status})"
+        # Add IO tools description for saving results
+        prompt += "\nIMPORTANT: You have access to filesystem tools which allow you to read and write files. Also ypu can retry many times to get the correct answer. "
+        prompt += "Since some task results will be used in subsequent tasks, make sure to save your results using appropriate filenames. "
+        prompt += (
+            "This will help you reference and retrieve these files in later tasks."
+        )
 
+        # Add note about dependencies
+        if self.current_task.input_from_tasks:
+            status = []
+            for dep_id in self.current_task.input_from_tasks:
+                status_text = (
+                    "available"
+                    if dep_id in self.task_group.results
+                    else "not yet available"
+                )
+                status.append(f"{dep_id} ({status_text})")
+
+            prompt += f"\n\nThis task uses output from tasks: {', '.join(status)}"
+
+        logger.info(f"Task prompt for {self.task_id}:\n{prompt}")
         return prompt
 
     def score(self) -> float:
@@ -124,7 +208,7 @@ Required submission format:
         try:
             # Clean the submission - take only the numerical answer part
             submission_str = self.state.submitted_answer.strip()
-            print(f"Raw submission: {submission_str}")  # Debug print
+            logger.info(f"Raw submission: {submission_str}")
 
             # Try to parse as JSON first
             try:
@@ -134,104 +218,175 @@ Required submission format:
                 submission = {"answer": submission_str}
 
             # Store result in task group
-            print(f"Parsed submission: {submission}")  # Debug print
-            score = self.current_task.scoring_fn(submission)
+            logger.info(f"Parsed submission: {submission}")
+
+            # Extract the answer field for scoring
+            answer = submission.get("answer", submission)
+            score = self.current_task.scoring_fn(answer)
+
             self.task_group.store_result(self.task_id, submission, score)
 
             return score
         except Exception as e:
-            print(f"Error scoring submission for task {self.task_id}: {str(e)}")
-            print(f"Submission was: {self.state.submitted_answer}")
+            logger.error(f"Error scoring submission for task {self.task_id}: {e!s}")
+            logger.error(f"Submission was: {self.state.submitted_answer}")
             return 0.0
 
-def create_catalysis_environments() -> Dict[str, Environment]:
+
+def create_catalysis_environments(
+    fs_tools: dict[str, Tool] | None = None, work_dir: str = BASE_WORK_DIR
+) -> dict[str, Environment]:
     """Create environments for catalysis tasks"""
 
-    def score_addition(result: Dict) -> float:
-        score = 0.0
-        if "answer" in result:
-            try:
-                answer = float(result["answer"])
-                score = 1.0
-            except ValueError:
-                pass
-        return score
+    # Ensure work directory exists
+    work_dir_path = Path(work_dir)
+    work_dir_path.mkdir(parents=True, exist_ok=True)
 
-    def check_structure(result)-> float:
-        return 0
-
-    # Create task group
+    # Create task group with improved dependency management
     task_group = TaskGroup(
         group_id="catalyst",
         tasks={
-            "task_1": TaskDefinition(
-                name="Retrieve structure",
-                description="Retrieve structure of Si from Materials Project and save it as a cif file and submit the path to the cif file",
-                tools=["get_structure_from_mp"],
-                scoring_fn=check_structure,
-                submission_format={"answer": "/path/to/ciffile"},
-                initial_input={"mp_id": "mp-149" , "path_to_write_dir": "/Users/n0w0f/git/n0w0f/mat-agent-bench/tasks/catalyst/temp"}
+            "retrieve_structure": TaskDefinition(
+                name="Retrieve Bulk Structure",
+                description="Retrieve structure of Si from Materials Project using the MP-149 ID and save it as a CIF file. Submit the path to the CIF file.",
+                tools=["get_structure_from_mp_text"],
+                scoring_fn=check_mp_structure,
+                submission_format={"answer": "/path/to/bulk_structure.cif"},
+                initial_input={
+                    "mp_id": "mp-149",  # Silicon
+                    "work_dir": str(work_dir_path),
+                },
             ),
-            "task_2": TaskDefinition(
-                name="Create slab",
-                description="Create a slab from the structure of Si and save it as a pickle file and submit the path to the pickle file",
-                tools=["create_pymatgen_structure_from_cif","create_slab_from_structure"],
-                scoring_fn=check_structure,
-                submission_format={"answer": "/path/to/picklefile"},
-                input_from_task="task_1"
+            "enumerate_slabs": TaskDefinition(
+                name="Enumerate Possible Slabs",
+                description="Enumerate possible slabs from the bulk Si structure with Miller index (1,1,1) and save the result as a JSON file. Submit the path to the JSON file.",
+                tools=["enumerate_slabs_text"],
+                scoring_fn=check_slabs_json,
+                submission_format={"answer": "/path/to/slabs.json"},
+                input_from_tasks=["retrieve_structure"],
+                initial_input={
+                    "miller_index": (1, 1, 1),
+                    "min_slab_size": 12,
+                    "min_vacuum_size": 5,
+                    "work_dir": str(work_dir_path),
+                },
             ),
-            #retrive strucutre of co2 molecule
-            "task_3": TaskDefinition(
-                name="Retrieve structure",
-                description="Retrieve structure of Si molecule from Materials Project and save it as a pickle file.",
-                tools=["get_structure_from_mp"],
-                scoring_fn=check_structure,
-                submission_format={"answer": "/path/to/picklefile"},
-                initial_input={"mp_id": "mp-2204849"}
+            "choose_slab": TaskDefinition(
+                name="Choose Slab",
+                description="Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
+                tools=["choose_slab_text"],
+                scoring_fn=check_slab_structure,
+                submission_format={"answer": "/path/to/chosen_slab.cif"},
+                input_from_tasks=["enumerate_slabs"],
+                initial_input={
+                    "index": 0,  # Default to first slab
+                    "work_dir": str(work_dir_path),
+                },
             ),
-            # "task_4": TaskDefinition(
-            #     name="Create slab",
-            #     description=f"""Create a slab from Si slab with CO2 molecule adsorbed on it.
-            #     Find the adsorption sites possible and create a list of possible configurations save the list of strucutre as pickle file""",
-            #     tools=["pymatgen_slab_creator"],
-            #     scoring_fn=check_structure,
-            #     submission_format={"answer": "/path/to/picklefile"},
-            #     input_from_task="task_2"
-            # ),
-
-        }
+            "create_molecule": TaskDefinition(
+                name="Create CO2 Molecule",
+                description="Create a CO2 molecule structure using MP - ID save it as a CIF file. Submit the path to the CIF file.",
+                tools=["get_structure_from_mp_text"],
+                scoring_fn=check_mp_structure,
+                submission_format={"answer": "/path/to/co2.cif"},
+                initial_input={"mp_id": "mp-20066", "work_dir": str(work_dir_path)},
+            ),
+            "get_adsorption_sites": TaskDefinition(
+                name="Identify Adsorption Sites",
+                description="Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
+                tools=["get_adsorption_sites_text"],
+                scoring_fn=check_adsorption_sites,
+                submission_format={"answer": "/path/to/adsorption_sites.json"},
+                input_from_tasks=["choose_slab"],
+                initial_input={
+                    "work_dir": str(work_dir_path),
+                },
+            ),
+            "choose_adsorption_site": TaskDefinition(
+                name="Choose Adsorption Site",
+                description="Choose one adsorption site (preferably a top site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
+                tools=["choose_adsorption_site_text"],
+                scoring_fn=lambda path: 1.0 if Path(path).exists() else 0.0,
+                submission_format={"answer": "/path/to/chosen_site.json"},
+                input_from_tasks=["get_adsorption_sites"],
+                initial_input={
+                    "site_type": "top",  # Default to top site
+                    "index": 0,  # Default to first site of the type
+                    "work_dir": str(work_dir_path),
+                },
+            ),
+            "add_adsorbate": TaskDefinition(
+                name="Add CO2 to Silicon Slab",
+                description="Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Å and save the combined structure as a CIF file. Submit the path to the CIF file.",
+                tools=["add_adsorbate_to_slab_text"],
+                scoring_fn=check_adsorption_structure,
+                submission_format={"answer": "/path/to/slab_with_co2.cif"},
+                input_from_tasks=[
+                    "choose_slab",
+                    "create_molecule",
+                    "choose_adsorption_site",
+                ],
+                initial_input={
+                    "height": 2.0,  # Å above the surface
+                    "work_dir": str(work_dir_path),
+                },
+            ),
+        },
     )
 
     # Print task dependencies for reference
-    print("\nTask Dependencies:")
+    logger.info("\nTask Dependencies:")
     for task_id, deps in task_group.get_task_dependencies().items():
-        print(f"- {task_id}: depends on {deps}")
+        logger.info(f"- {task_id}: depends on {deps}")
+
+    # Print ordering of tasks
+    ordered_tasks = task_group.get_ordered_tasks()
+    logger.info("\nTask Execution Order:")
+    for i, task_id in enumerate(ordered_tasks):
+        logger.info(f"{i+1}. {task_id}")
+
+    # Create all available tools
+    # This assumes you have a function to create the tools
+    from tools import create_tools
+
+    available_tools = create_tools()
 
     # Create environments for all tasks
-    available_tools = create_tools()
     environments = {}
-
     for task_id in task_group.tasks:
-        # All environments share the same task group instance
-        #task_id = f"{task_group.group_id}_{_id}"
         environments[task_id] = TaskEnvironment(
             task_id=task_id,
             task_group=task_group,
-            available_tools=available_tools
+            available_tools=available_tools,
+            fs_tools=fs_tools,
         )
 
     return environments
 
-if __name__ == "__main__":
-    # Create all environments
-    environments = create_catalysis_environments()
 
-    print("\nCreated Environments:")
+if __name__ == "__main__":
+    # Create file system manager and tools
+    Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
+    fs_manager = FSManager("file", base_path=BASE_WORK_DIR)
+
+    fs_tools = {
+        "list_files": ListFilesTool(fs_manager),
+        "read_file": ReadFileTool(fs_manager),
+        "write_file": WriteFileTool(fs_manager),
+        "file_info": FileInfoTool(fs_manager),
+        "cat_files": CatFilesTool(fs_manager),
+        "copy_file": CopyFileTool(fs_manager),
+    }
+
+    # Create all environments with file system tools
+    environments = create_catalysis_environments(fs_tools=fs_tools)
+
+    logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
-        print(f"- {env_id}")
-        print(f"  Task: {env.current_task.name}")
-        if env.current_task.input_from_task:
-            print(f"  Depends on: {env.current_task.input_from_task}")
+        logger.info(f"- {env_id}")
+        logger.info(f"  Task: {env.current_task.name}")
+        if env.current_task.input_from_tasks:
+            logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
 
     # Create and run server
     app = create_benchmark_server(environments)

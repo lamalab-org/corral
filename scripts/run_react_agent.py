@@ -1,7 +1,6 @@
 import os
 import argparse
 
-import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
