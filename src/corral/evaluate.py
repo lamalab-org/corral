@@ -1,9 +1,9 @@
-from __future__ import annotations
-
-from typing import Any, Protocol
-
-import requests
+import json
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any, Dict, List, Protocol, Optional
 from loguru import logger
+import requests
 
 from corral.report import (
     BenchmarkResult,
