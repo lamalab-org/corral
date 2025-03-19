@@ -1,0 +1,96 @@
+LAMMPS (19 Nov 2024 - Development - patch_19Nov2024-56-ga78aee5731)
+# LAMMPS Input Script for Bulk Energy Calculation
+
+units metal
+dimension 3
+boundary p p p  # Periodic in all directions (Bulk System)
+atom_style atomic
+
+# Read initial FCC aluminum structure (fully periodic)
+read_data ../../lattice_generation/task_1/structure.xyz
+Reading data file ...
+  orthogonal box = (0 0 0) to (4 4 4)
+  1 by 1 by 1 MPI processor grid
+  reading atoms ...
+  4 atoms
+  reading velocities ...
+  4 velocities
+  read_data CPU = 0.003 seconds
+
+# ------------------------- Potential ---------------------------#
+pair_style eam/alloy
+pair_coeff * * /Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/Al99.eam.alloy Al
+
+neighbor 2.0 bin
+neigh_modify every 1 delay 0 check yes
+
+# ----------------------- Bulk Minimization --------------------------#
+fix 1 all box/relax iso 0.0 vmax 0.001
+thermo 10
+thermo_style custom step atoms temp pe ke etotal press
+
+# Minimize energy for bulk system (periodic boundary conditions)
+min_style cg
+minimize 1e-25 1e-25 5000 10000
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 8.28721
+  ghost atom cutoff = 8.28721
+  binsize = 4.143605, bins = 1 1 1
+  1 neighbor lists, perpetual/occasional/extra = 1 0 0
+  (1) pair eam/alloy, perpetual
+      attributes: half, newton on
+      pair build: half/bin/atomonly/newton
+      stencil: half/bin/3d
+      bin: standard
+WARNING: Energy due to 1 extra global DOFs will be included in minimizer energies
+ (src/min.cpp:219)
+Per MPI rank memory allocation (min/avg/max) = 4.366 | 4.366 | 4.366 Mbytes
+   Step        Atoms         Temp          PotEng         KinEng         TotEng         Press     
+         0           4   0             -13.417787      0             -13.417787      29590.11     
+        10           4   0             -13.439104      0             -13.439104      5853.9553    
+        19           4   0             -13.44          0             -13.44         -2.9409537e-10
+Loop time of 0.000935216 on 1 procs for 19 steps with 4 atoms
+
+90.6% CPU use with 1 MPI tasks x no OpenMP threads
+
+Minimization stats:
+  Stopping criterion = energy tolerance
+  Energy initial, next-to-last, final = 
+     -13.4177872966399  -13.4399999527352  -13.4399999527352
+  Force two-norm initial, final = 3.5459895 3.6131617e-14
+  Force max component initial, final = 3.5459895 3.6130179e-14
+  Final line search alpha, max atom move = 1 3.6130179e-14
+  Iterations, force evaluations = 19 26
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.00040581 | 0.00040581 | 0.00040581 |   0.0 | 43.39
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.00012282 | 0.00012282 | 0.00012282 |   0.0 | 13.13
+Output  | 1.7617e-05 | 1.7617e-05 | 1.7617e-05 |   0.0 |  1.88
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 0.000389   |            |       | 41.59
+
+Nlocal:              4 ave           4 max           4 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:            662 ave         662 max         662 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:            280 ave         280 max         280 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 280
+Ave neighs/atom = 70
+Neighbor list builds = 0
+Dangerous builds = 0
+
+write_data bulk.xyz  # Save bulk structure after minimization
+System init for write_data ...
+variable E_bulk equal pe  # Store bulk energy
+
+# Output the bulk energy
+print "Bulk Energy (eV) = ${E_bulk}"
+Bulk Energy (eV) = -13.4399999527352
+Total wall time: 0:00:00

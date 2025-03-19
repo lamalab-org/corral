@@ -1,0 +1,103 @@
+LAMMPS (19 Nov 2024 - Development - patch_19Nov2024-56-ga78aee5731)
+# LAMMPS Input Script for Slab Energy Calculation
+
+units metal
+dimension 3
+boundary p p m  # Non-periodic in z-direction (two free surfaces)
+atom_style atomic
+
+# Read the bulk structure data from the previous run
+read_data ../../lattice_generation/task_1/structure.xyz
+Reading data file ...
+  orthogonal box = (0 0 0) to (4 4 4)
+  1 by 1 by 1 MPI processor grid
+  reading atoms ...
+  4 atoms
+  reading velocities ...
+  4 velocities
+  read_data CPU = 0.001 seconds
+
+# ------------------------- Potential ---------------------------#
+pair_style eam/alloy
+pair_coeff * * /Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/Al99.eam.alloy Al
+
+neighbor 2.0 bin
+neigh_modify every 1 delay 0 check yes
+
+# ----------------------- Minimize for Slab --------------------------#
+# Expand z-direction to introduce vacuum
+change_box all z scale 1.5  # Expand z to create vacuum
+Changing box ...
+  orthogonal box = (0 0 -1.0005) to (4 4 5.0001)
+
+# Minimize energy for the slab (with two free surfaces)
+#fix 1 all box/relax aniso 0.0 vmax 0.001
+thermo 10
+thermo_style custom step atoms temp pe ke etotal press
+
+min_style cg
+minimize 1e-25 1e-25 5000 10000
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 8.28721
+  ghost atom cutoff = 8.28721
+  binsize = 4.143605, bins = 1 1 2
+  1 neighbor lists, perpetual/occasional/extra = 1 0 0
+  (1) pair eam/alloy, perpetual
+      attributes: half, newton on
+      pair build: half/bin/atomonly/newton
+      stencil: half/bin/3d
+      bin: standard
+Per MPI rank memory allocation (min/avg/max) = 4.335 | 4.335 | 4.335 Mbytes
+   Step        Atoms         Temp          PotEng         KinEng         TotEng         Press     
+         0           4   0             -11.434953      0             -11.434953      630.60843    
+         6           4   0             -11.444598      0             -11.444598     -7849.3144    
+Loop time of 9.9832e-05 on 1 procs for 6 steps with 4 atoms
+
+94.2% CPU use with 1 MPI tasks x no OpenMP threads
+
+Minimization stats:
+  Stopping criterion = quadratic factors are zero
+  Energy initial, next-to-last, final = 
+     -11.4349531688183  -11.4445979192089  -11.4445979192089
+  Force two-norm initial, final = 0.36399733 9.3870182e-16
+  Force max component initial, final = 0.18199867 4.8572257e-16
+  Final line search alpha, max atom move = 1 4.8572257e-16
+  Iterations, force evaluations = 6 12
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 6.1559e-05 | 6.1559e-05 | 6.1559e-05 |   0.0 | 61.66
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 1.3771e-05 | 1.3771e-05 | 1.3771e-05 |   0.0 | 13.79
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 2.45e-05   |            |       | 24.54
+
+Nlocal:              4 ave           4 max           4 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:            117 ave         117 max         117 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:             96 ave          96 max          96 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 96
+Ave neighs/atom = 24
+Neighbor list builds = 0
+Dangerous builds = 0
+
+write_data slab.xyz  # Save slab structure after minimization
+System init for write_data ...
+variable E_slab equal pe  # Store slab energy
+
+# Compute surface area (A = lx * ly)
+variable A equal "lx*ly"
+
+# Calculate Surface Energy (convert eV/Å² to J/m²)
+
+# Output Results
+print "Slab Energy (eV) = ${E_slab}"
+Slab Energy (eV) = -11.4445979192089
+Total wall time: 0:00:00

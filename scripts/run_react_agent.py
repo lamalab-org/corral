@@ -1,6 +1,7 @@
 import os
 import argparse
 
+import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -25,7 +26,7 @@ def run_benchmark(model: str = "gpt-4", task_ids: list | None = None, results_di
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}, results_dir: {results_dir}")
     # result = runner.bench(task_ids)
-    result = runner.bench(task_ids, trials_per_task=1, k_values=[1])
+    result = runner.bench(task_ids, trials_per_task=3, k_values=[1])
     os.makedirs(local_results_dir, exist_ok=True)
     result.generate_report(os.path.join(local_results_dir, "results.json"))
 
