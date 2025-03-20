@@ -59,7 +59,10 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
-        score = env.submit_answer(answer["answer"])
+        directory = None
+        if "directory" in answer:
+            directory = answer['directory']
+        score = env.submit_answer(answer["answer"], directory)
 
         state_dict = env.state.__dict__  # Get state as dict
         tool_statistics = env.state.get_tool_statistics()

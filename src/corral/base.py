@@ -3,7 +3,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum, StrEnum
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
@@ -71,6 +71,7 @@ class TaskState:
     feedback: str | None = None
     start_time: datetime = field(default_factory=datetime.now)
     end_time: datetime | None = None
+    current_directory: str | None = None
 
     def get_tool_statistics(self) -> dict[str, Any]:
         """Get statistics about tool usage"""
@@ -280,9 +281,10 @@ Example tool call format:
         self.state.tool_calls.append(tool_call)
         return tool_call
 
-    def submit_answer(self, answer: str) -> float:
+    def submit_answer(self, answer: str, directory: Optional[str] = None) -> float:
         """Submit final answer and get score"""
         self.state.submitted_answer = answer
+        self.state.current_directory = directory
         score = self.score()  # Using existing abstract score method
         self.state.score = score
         self.state.is_completed = True

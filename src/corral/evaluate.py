@@ -49,11 +49,15 @@ class BenchmarkInterface:
         except Exception as e:
             return ToolResponse(success=False, result=None, error=str(e))
 
-    def submit_answer(self, task_id: str, answer: str) -> TaskTrailResult:
+    def submit_answer(self, task_id: str, answer: str, directory: Optional[str] = None) -> TaskTrailResult:
         """Submit final answer for a task"""
         logger.info(f"Agent submitting answer {answer} for task {task_id}")
+        payload = {"answer": answer}
+        if directory is not None:
+            payload["directory"] = directory        
+
         response = requests.post(
-            f"{self.base_url}/tasks/{task_id}/submit", json={"answer": answer}
+            f"{self.base_url}/tasks/{task_id}/submit", json=payload
         )
         response.raise_for_status()
         data = response.json()
@@ -151,17 +155,8 @@ class MatAgentBenchmark:
             # for run_index, run_directory in enumerate(run_directories[task_id], start=1):
                 # Solve task
                 answer = self.agent.solve_task(self.interface, task_id, run_directory, local_directory)
-                result = self.interface.submit_answer(task_id, answer)
-                task_trials.trials.append(result)
-                # # Save answer in the pre-created directory
-                # answer_file = os.path.join(run_directory, "answer.txt")
-                # with open(answer_file, "w") as f:
-                #     f.write(answer)
-
-                # logger.info(f"Saved answer for {task_id} (run_{run_index}) in {answer_file}")
-
                 # Submit and store result
-                result = self.interface.submit_answer(task_id, answer)
+                result = self.interface.submit_answer(task_id, answer, run_directory)
                 task_trials.trials.append(result)
 
             # Store all trials for this task

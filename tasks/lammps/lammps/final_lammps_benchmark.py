@@ -14,15 +14,13 @@ for file in ['task_1.json']:
     json_path = os.path.join(task_jsons_path, file)
     with open(json_path, "r", encoding="utf-8") as file:
         data = json.load(file)  # Parses JSON into a Python dictionary
-        task_id = data['id']
-        prompt = data['input'][0]['prompt']
-        target_score = float(data['output'][0]['target'])
-        threshold = float(data['output'][0]['threshold'])
-        tools = data['tools'] 
-        tool_functions = [globals().get(tool_name) for tool_name in tools]
-        for tool in tool_functions:
-            print(tool)
-        environments[task_id] = LammpsEnvironment(task_id, prompt, target_score, tool_functions, threshold)
+    task_id = data['id']
+    prompt = data['input'][0]['prompt']
+    target_score = float(data['output'][0]['target'])
+    threshold = float(data['output'][0]['threshold'])
+    tools = data['tools'] 
+    tool_functions = [globals().get(tool_name) for tool_name in tools]
+    environments[task_id] = LammpsEnvironment(task_id, prompt, target_score, tool_functions, threshold, data['keywords'][-1])
         
 
 app = create_benchmark_server(environments)
