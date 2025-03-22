@@ -31,7 +31,6 @@ class ToolCallingAgent:
         model (str): The model to use for planning
         max_iterations (int): The maximum number of iterations to plan
         api_endpoint (str, optional): The API endpoint to use for tool calls
-        system_prompt (str, optional): The system prompt to use
         system_prompt (str, optional): The system prompt to use.
             Defaults to "You are a helpful AI assistant that solves tasks step by step."
         temperature (float): The temperature to use for sampling
