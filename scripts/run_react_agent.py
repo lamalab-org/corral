@@ -9,7 +9,6 @@ from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 def setup_litellm():
     """Setup LiteLLM with appropriate configuration"""
     litellm.set_verbose = True
-    # os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 
 
 def run_benchmark(model: str = "gpt-4o", task_ids: list | None = None):
