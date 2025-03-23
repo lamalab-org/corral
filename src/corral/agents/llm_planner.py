@@ -29,7 +29,7 @@ class LLMPlanner:
         user_prompt (str, optional): The user prompt to use
         temperature (float): The temperature to use for sampling
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
-        kwargs: Additional keyword arguments to pass to the LiteLLM API
+        kwargs: Additional keyword arguments to pass to the LiteLLM API for all LLM calls
     """
 
     def __init__(
