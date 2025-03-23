@@ -71,7 +71,7 @@ class LLMPlanner:
         interface: BenchmarkInterface,
         task_id: str,
         tool_usage: bool = False,
-        examples: str | None = None,
+        examples: list[str] | None = None,
     ) -> tuple[str, list[LiteLLMMessage]]:
         """Run the LLM planner agent
 
@@ -87,15 +87,19 @@ class LLMPlanner:
         tools = interface.get_available_tools_for_task(task_id)
 
         task_guide = interface.get_task_prompt(task_id)
-        if examples is not None:
+        if examples is None:
             prompt = self.user_prompt.fill(
                 {
                     "tools": json.dumps(tools),
                     "task_guide": task_guide,
                     "iterations": self.max_iterations,
+                    "examples": "",
                 },
             )
         else:
+            example_prompt = f"To help you in understanding this task, the next {len(examples)} examples are provided:\n\n"
+            examples = example_prompt + "\n\n".join(examples)
+
             prompt = self.user_prompt.fill(
                 {
                     "tools": json.dumps(tools),
@@ -122,7 +126,7 @@ class LLMPlanner:
         else:
             agent = ReActAgent(
                 model=self.model,
-                max_iterations=10,
+                max_iterations=self.max_iterations,
                 api_endpoint=self.api_endpoint,
                 temperature=self.temperature,
                 prompt_store=self.store,
