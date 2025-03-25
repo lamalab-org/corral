@@ -11,6 +11,7 @@ from corral.report import (
     TaskTrialResults,
     ToolResponse,
 )
+from corral.utils import save_agent_messages
 
 
 class BenchmarkInterface:
@@ -25,9 +26,21 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()
 
+    def get_available_tools_for_task(self, task_id: str) -> str:
+        """Get list of available tools for a task"""
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/tools")
+        response.raise_for_status()
+        return response.json()
+
     def get_task_guide(self, task_id: str) -> str:
         """Get complete guide for task including tools"""
         response = requests.get(f"{self.base_url}/tasks/{task_id}/guide")
+        response.raise_for_status()
+        return response.json()["prompt"]
+
+    def get_task_prompt(self, task_id: str) -> str:
+        """Get task prompt without tools description"""
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/prompt")
         response.raise_for_status()
         return response.json()["prompt"]
 
@@ -89,6 +102,7 @@ class MatAgentBenchmark:
         task_ids: list[str] | None = None,
         trials_per_task: int = 1,
         k_values: int | list[int] | None = None,
+        verbose: bool | None = False,
     ) -> BenchmarkResult:
         """Run benchmark on specified tasks or all available tasks
 
@@ -126,10 +140,15 @@ class MatAgentBenchmark:
 
             for _ in range(trials_per_task):
                 # Get answer from agent
-                answer = self.agent.solve_task(self.interface, task_id)
+                answer, messages = self.agent.run_agent(self.interface, task_id)
                 # Submit and store result
                 result = self.interface.submit_answer(task_id, answer)
                 task_trials.trials.append(result)
+
+                if verbose:
+                    save_agent_messages(
+                        messages, task_id, self.agent.__class__.__name__
+                    )
 
             # Store all trials for this task
             task_results[task_id] = task_trials
