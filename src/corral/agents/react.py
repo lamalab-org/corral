@@ -39,12 +39,12 @@ class ReActAgent:
 
     Args:
         model (str): The model to use for planning
-        max_iterations (int): The maximum number of iterations to plan
-        api_endpoint (str, optional): The API endpoint to use for tool calls
+        max_iterations (int): The maximum number of iterations to run. Defaults to 10.
+        api_endpoint (str, optional): The API endpoint URL for the LLM provider (e.g., OpenAI, VLLM, or self-hosted models) to handle tool/function calling requests. Defaults to None.
         system_prompt (str, optional): The system prompt to use.
             Defaults to "You are a helpful AI assistant that solves tasks step by step."
-        user_prompt (str, optional): The user prompt to use
-        temperature (float): The temperature to use for sampling
+        user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide` and `history` as variables.
+        temperature (float): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
@@ -152,10 +152,10 @@ class ReActAgent:
             interface (BenchmarkInterface): The interface to use
             task_id (str): The task ID to solve
             history (List[Dict[str, Any]]): The history items to include. Defaults to None.
-            task_prompt (str): The task prompt to use. Defaults to None.
+            task_prompt (str): The task prompt to use. `task_prompt` is intended to be a plan or description about the task, that should always be provided when this agent is called as a subagent of a main orchestrator. Defaults to None.
 
         Returns:
-            Tuple[str, List[str]]: The final answer and history
+            tuple[str, list[LiteLLMMessage]]:: The final answer and messages history
         """
         if task_prompt is None:
             task_guide = interface.get_task_guide(task_id)

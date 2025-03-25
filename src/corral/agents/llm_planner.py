@@ -22,13 +22,13 @@ class LLMPlanner:
 
     Args:
         model (str): The model to use for planning
-        max_iterations (int): The maximum number of iterations to plan
-        api_endpoint (str, optional): The API endpoint to use for tool calls
+        max_iterations (int): The maximum number of iterations to plan. Defaults to 10.
+        api_endpoint (str, optional): The API endpoint URL for the LLM provider (e.g., OpenAI, VLLM, or self-hosted models) to handle tool/function calling requests. Defaults to None.
         system_prompt (str, optional): The system prompt to use.
             Defaults to "You are a helpful AI assistant that solves tasks step by step."
-        user_prompt (str, optional): The user prompt to use
-        temperature (float): The temperature to use for sampling. 
-        	Defaults to 0.7. 
+        user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide`, `tools`, `iterations` and `examples`. `examples` is thought to include few-shot guide.
+        temperature (float): The temperature to use for sampling.
+                Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         kwargs: Additional keyword arguments to pass to the LiteLLM API for all LLM calls
     """
