@@ -1,9 +1,13 @@
 import inspect
+import json
 from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import get_type_hints
 
 from modal import App, Image, Mount, Secret, Volume
 
+from corral.agents.utils import LiteLLMMessage
 from corral.base import ModalTool, Tool, ToolArgument
 
 MODAL_TOOL_REGISTRY = {}
@@ -237,3 +241,86 @@ def modal_tool(
         return modal_func
 
     return decorator
+
+
+def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
+    """
+    Serialize LiteLLMMessage objects to a format that can be saved to a JSON file.
+
+    Args:
+        messages (List[LiteLLMMessage]): The messages to serialize.
+
+    Returns:
+        List[Dict]: The serialized messages.
+    """
+    serializable_messages = []
+    for msg in messages:
+        if isinstance(msg, dict):
+            message_dict = msg.copy()
+        else:
+            message_dict = {"role": msg.role, "content": msg.content}
+
+            if hasattr(msg, "tool_call_id") and msg.tool_call_id:
+                message_dict["tool_call_id"] = msg.tool_call_id
+            if hasattr(msg, "name") and msg.name:
+                message_dict["name"] = msg.name
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                message_dict["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in msg.tool_calls
+                ]
+
+        serializable_messages.append(message_dict)
+
+    return serializable_messages
+
+
+def save_agent_messages(
+    messages: list[LiteLLMMessage],
+    task_id: str,
+    agent_name: str,
+    output_dir: str = "agent_logs",
+) -> str:
+    """Save agent conversation to a JSON file for logging and analysis purposes.
+
+    This function handles both regular dictionaries and LiteLLMMessage objects,
+    properly serializing them for storage.
+
+    Args:
+        messages: List of message objects (LiteLLMMessages or dictionaries)
+        task_id: The ID of the task being solved
+        agent_name: The name of the agent that generated the messages
+        output_dir: Directory to save the logs (will be created if it doesn't exist)
+
+    Returns:
+        str: Path to the saved file
+    """
+    Path(output_dir).mkdir(exist_ok=True, parents=True)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"{task_id}_{timestamp}.json"
+    file_path = Path(output_dir) / filename
+
+    # Convert messages to serializable format
+    serializable_messages = serialize_messages(messages)
+
+    # Write to file with metadata and pretty formatting
+    with Path(file_path).open("w") as f:
+        json.dump(
+            {
+                "task_id": task_id,
+                "agent": agent_name,
+                "timestamp": timestamp,
+                "messages": serializable_messages,
+            },
+            f,
+            indent=2,
+        )
+
+    return file_path

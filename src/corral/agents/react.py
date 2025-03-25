@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-import json
-import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
-
-from litellm import completion
+import importlib.resources
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from corral.evaluate import BenchmarkInterface
+
+import json
+import re
+from dataclasses import dataclass
+from typing import Any
+
+from promptstore import PromptStore
+
+from corral.agents.prompt_utils import get_prompt
+from corral.agents.utils import LiteLLMMessage, format_examples, llm_call
 
 
 @dataclass
@@ -27,25 +33,74 @@ class Action:
 
 
 class ReActAgent:
-    def __init__(self, model: str = "gpt-4", max_iterations: int = 10):
+    """
+    Agent that uses the ReAct framework to solve tasks
+    Based on https://arxiv.org/abs/2210.03629
+
+    Args:
+        model (str): The model to use for running the agent
+        max_iterations (int, optional): The maximum number of iterations to run. Defaults to 10.
+        api_endpoint (str, optional): The API endpoint URL for the LLM provider (e.g., OpenAI, VLLM, or self-hosted models) to handle tool/function calling requests. Defaults to None.
+        system_prompt (str, optional): The system prompt to use.
+            Defaults to "You are a helpful AI assistant that solves tasks step by step."
+        user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide`, `history` and `examples` as variables.
+        temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
+        prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
+        kwargs: Additional keyword arguments to pass to the LiteLLM API
+    """
+
+    def __init__(
+        self,
+        model: str = "gpt-4o",
+        max_iterations: int = 10,
+        api_endpoint: str | None = None,
+        system_prompt: str | None = None,
+        user_prompt: str | None = None,
+        temperature: float = 0.7,
+        prompt_store: PromptStore | None = None,
+        **kwargs,
+    ):
+        """Initialize the agent"""
         self.model = model
         self.max_iterations = max_iterations
-
-    def get_llm_response(self, prompt: str) -> str:
-        """Get response from LLM using LiteLLM"""
-        response = completion(
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful AI assistant that solves tasks step by step.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.7,
-            max_tokens=1000,
+        self.api_endpoint = api_endpoint
+        if prompt_store:
+            self.store = prompt_store
+        else:
+            with importlib.resources.path("corral.agents", "") as style_path:
+                self.store = PromptStore(f"{style_path}/prompts")
+        self.temperature = temperature
+        self.kwargs = kwargs
+        self.system_prompt = (
+            get_prompt(
+                self.store, system_prompt, "400fcecf-f5f2-464b-aff5-8a4377c9685c"
+            ).fill({})
+            if system_prompt is None
+            else system_prompt
         )
-        return response.choices[0].message.content
+
+        self.user_prompt = get_prompt(
+            self.store,
+            user_prompt,
+            "d880c4d3-fe60-4cf4-813b-2008076cd595",
+        )
+
+    def get_llm_response(self, messages: list[LiteLLMMessage]) -> str:
+        """Get response from the LLM using LiteLLM
+
+        Args:
+            messages(list[LiteLLMMessage]): The prompt to send to the LLM
+
+        Returns:
+            str: The response from the LLM
+        """
+        return llm_call(
+            model=self.model,
+            messages=messages,
+            temperature=self.temperature,
+            api_endpoint=self.api_endpoint,
+            **self.kwargs,
+        ).content
 
     def parse_llm_response(self, response: str) -> tuple[Thought | None, Action | None]:
         """Parse LLM response into Thought and Action"""
@@ -69,49 +124,82 @@ class ReActAgent:
 
         return thought, action
 
-    def create_prompt(self, task_guide: str, history: list[str]) -> str:
+    def create_prompt(
+        self, task_guide: str, history: list[LiteLLMMessage], examples: list[str]
+    ) -> str:
         """Create prompt for LLM including context and history"""
-        return f"""Task Guide: {task_guide}
+        limited_history = history[-10:] if len(history) > 10 else history
+        user_prompt = self.user_prompt.fill(
+            {
+                "task_guide": task_guide,
+                "history": str(limited_history),
+                "examples": format_examples(examples),
+            }
+        )
 
-Previous steps:
-{chr(10).join(history)}
+        return [
+            {
+                "role": "system",
+                "content": self.system_prompt,
+            },
+            {"role": "user", "content": user_prompt},
+        ]
 
-Think about what to do next and respond in the following format:
+    def run_agent(
+        self,
+        interface: BenchmarkInterface,
+        task_id: str,
+        history: list[LiteLLMMessage] | None = None,
+        task_prompt: str | None = None,
+        examples: list[str] | None = None,
+    ) -> tuple[str, list[LiteLLMMessage]]:
+        """Main ReAct loop implementation
 
-Thought: [your reasoning]
-Action: [tool name]
-Action Input: [tool arguments as JSON]
+        Args:
+            interface (BenchmarkInterface): The interface to use
+            task_id (str): The task ID to solve
+            history (List[Dict[str, Any]], optional): The history items to include. Defaults to None.
+            task_prompt (str, optional): The task prompt to use. `task_prompt` is intended to be a plan or description about the task, that should always be provided when this agent is called as a subagent of a main orchestrator. Defaults to None.
+            examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
 
-If you have the final answer, respond with:
-Thought: [your reasoning]
-Final Answer: [answer]"""
+        Returns:
+            tuple[str, list[LiteLLMMessage]]:: The final answer and messages history
+        """
+        if task_prompt is None:
+            task_guide = interface.get_task_guide(task_id)
+        else:
+            task_guide = task_prompt
 
-    def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
-        """Main ReAct loop implementation"""
-        task_guide = interface.get_task_guide(task_id)
-        history: list[str] = []
+        if history is None:
+            history: list[LiteLLMMessage] = []
+
+        messages = self.create_prompt(task_guide, history, examples)
 
         for _iteration in range(self.max_iterations):
             # Create prompt and get LLM response
-            prompt = self.create_prompt(task_guide, history)
-            llm_response = self.get_llm_response(prompt)
+            llm_response = self.get_llm_response(messages)
 
             # Parse response
             thought, action = self.parse_llm_response(llm_response)
-
-            # Record thought
-            if thought:
-                history.append(f"Thought: {thought.content}")
+            thought_prefix = f"Thought: {thought.content}\n" if thought else ""
 
             # Check for final answer
             final_answer_match = re.search(r"Final Answer: (.*)", llm_response)
+
             if final_answer_match:
-                return final_answer_match.group(1).strip()
+                messages.append(
+                    LiteLLMMessage(
+                        role="assistant",
+                        content=f"{thought_prefix}Final Answer: {final_answer_match.group(1)}",
+                    )
+                )
+                return final_answer_match.group(1).strip(), messages
 
             # Execute tool if action exists
             if action:
-                history.append(
-                    f"Action: {action.tool_name}\nAction Input: {json.dumps(action.arguments)}"
+                action_content = f"{thought_prefix}Action: {action.tool_name}\nAction Input: {json.dumps(action.arguments)}"
+                messages.append(
+                    LiteLLMMessage(role="assistant", content=action_content)
                 )
 
                 # Execute tool and get response
@@ -119,16 +207,25 @@ Final Answer: [answer]"""
                     task_id, action.tool_name, action.arguments
                 )
 
-                # Record observation
                 observation = (
                     f"Observation: {tool_response.result}"
                     if tool_response.success
                     else f"Error: {tool_response.error}"
                 )
-                history.append(observation)
+
+                messages.append(
+                    LiteLLMMessage(
+                        role="user",
+                        content=observation,
+                        name=action.tool_name,
+                    )
+                )
 
             # If no action or thought was parsed, break the loop
             if not thought and not action:
                 break
 
-        return "Unable to solve task within iteration limit"
+        return (
+            "Error solving the task: unable to complete it in the iteration limit",
+            messages,
+        )
