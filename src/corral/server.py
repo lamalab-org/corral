@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import Dict
-
 from fastapi import FastAPI, HTTPException
 
 from corral.base import Environment, Tool, ToolArgument, ToolRequest
 
 
-def create_benchmark_server(environments: Dict[str, Environment]) -> FastAPI:
+def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
     app = FastAPI()
 
     @app.get("/tasks")
@@ -48,7 +46,7 @@ def create_benchmark_server(environments: Dict[str, Environment]) -> FastAPI:
             )
             return {"result": result}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     @app.get("/tasks/{task_id}/state")
     def get_state(task_id: str):
@@ -66,9 +64,22 @@ def create_benchmark_server(environments: Dict[str, Environment]) -> FastAPI:
         score = env.submit_answer(answer["answer"])
 
         state_dict = env.state.__dict__  # Get state as dict
-        state_dict["tool_statistics"] = (
-            env.state.get_tool_statistics()
-        )  # Add tool statistics
+        tool_statistics = env.state.get_tool_statistics()
+
+        # Add detailed tool calls to the statistics
+        tool_statistics["tool_calls"] = [
+            {
+                "tool_name": call.tool_name,
+                "arguments": call.arguments,
+                "result": call.result,
+                "status": call.status.value,  # Convert enum to string
+                "error_message": call.error_message,
+                "timestamp": call.timestamp.isoformat() if call.timestamp else None,
+            }
+            for call in env.state.tool_calls
+        ]
+
+        state_dict["tool_statistics"] = tool_statistics
 
         return {"score": score, "state": state_dict}
 
@@ -118,7 +129,9 @@ def create_benchmark_server(environments: Dict[str, Environment]) -> FastAPI:
                 "message": f"Tool {tool_data['name']} added successfully",
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to add tool: {e!s}")
+            raise HTTPException(
+                status_code=400, detail=f"Failed to add tool: {e!s}"
+            ) from e
 
     # add endpoint for scoring the task
 

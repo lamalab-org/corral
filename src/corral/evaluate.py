@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import requests
 from loguru import logger
 
-from corral.base import Tool
+if TYPE_CHECKING:
+    from corral.base import Tool
+
+from corral.report import (
+    BenchmarkResult,
+    TaskTrailResult,
+    TaskTrialResults,
+    ToolResponse,
+)
 
 
 @dataclass
@@ -14,17 +22,8 @@ class TaskResult:
     """Result of a task submission"""
 
     score: float
-    state: Dict[str, Any]
-    tool_statistics: Dict[str, Any]
-
-
-@dataclass
-class ToolResponse:
-    """Response from a tool execution"""
-
-    success: bool
-    result: str | None
-    error: str | None
+    state: dict[str, Any]
+    tool_statistics: dict[str, Any]
 
 
 class BenchmarkInterface:
@@ -33,7 +32,7 @@ class BenchmarkInterface:
     def __init__(self, base_url: str = "http://localhost:8000"):
         self.base_url = base_url
 
-    def get_available_tasks(self) -> List[str]:
+    def get_available_tasks(self) -> list[str]:
         """Get list of available task IDs"""
         response = requests.get(f"{self.base_url}/tasks")
         response.raise_for_status()
@@ -45,7 +44,7 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()["prompt"]
 
-    def add_tool_to_environment(self, task_id: str, tool: Tool) -> Dict[str, Any]:
+    def add_tool_to_environment(self, task_id: str, tool: Tool) -> dict[str, Any]:
         """Add a new tool to an environment
 
         Args:
@@ -71,7 +70,7 @@ class BenchmarkInterface:
             raise
 
     def execute_tool(
-        self, task_id: str, tool_name: str, arguments: Dict[str, Any]
+        self, task_id: str, tool_name: str, arguments: dict[str, Any]
     ) -> ToolResponse:
         """Execute a tool and get result"""
         try:
@@ -86,7 +85,7 @@ class BenchmarkInterface:
         except Exception as e:
             return ToolResponse(success=False, result=None, error=str(e))
 
-    def submit_answer(self, task_id: str, answer: str) -> TaskResult:
+    def submit_answer(self, task_id: str, answer: str) -> TaskTrailResult:
         """Submit final answer for a task"""
         logger.info(f"Agent submitting answer {answer} for task {task_id}")
         response = requests.post(
@@ -94,13 +93,14 @@ class BenchmarkInterface:
         )
         response.raise_for_status()
         data = response.json()
-        return TaskResult(
+        return TaskTrailResult(
+            task_id=task_id,
             score=data["score"],
             state=data["state"],
             tool_statistics=data["state"]["tool_statistics"],
         )
 
-    def get_task_status(self, task_id: str) -> Dict[str, Any]:
+    def get_task_status(self, task_id: str) -> dict[str, Any]:
         """Get current status of a task"""
         response = requests.get(f"{self.base_url}/tasks/{task_id}/status")
         response.raise_for_status()
@@ -115,17 +115,6 @@ class Agent(Protocol):
         ...
 
 
-@dataclass
-class BenchmarkResult:
-    """Results from running benchmark"""
-
-    # TODO: think about the report
-    task_results: Dict[str, TaskResult]
-    average_score: float
-    total_tasks: int
-    successful_tasks: int
-
-
 class MatAgentBenchmark:
     """Runs benchmarks using an agent implementation"""
 
@@ -133,28 +122,54 @@ class MatAgentBenchmark:
         self.interface = interface
         self.agent = agent
 
-    def bench(self, task_ids: List[str] | None = None) -> BenchmarkResult:
-        """Run benchmark on specified tasks or all available tasks"""
+    def bench(
+        self,
+        task_ids: list[str] | None = None,
+        trials_per_task: int = 1,
+        k_values: int | list[int] | None = None,
+    ) -> BenchmarkResult:
+        """Run benchmark on specified tasks or all available tasks
+
+        Args:
+            task_ids: list of task_ids to run, or None for all tasks
+            trials_per_task: Number of trials per task, Default to k=1 to number of trials
+            k_values: list of k values, for which pass metrics are calculated. Default to [1, 2, 3, ..., trials_per_task]
+
+        """
         if task_ids is None:
             task_ids = self.interface.get_available_tasks()
-        logger.info(f"Running benchmark on tasks: {task_ids}")
 
-        results = {}
-        for task_id in task_ids:
-            # Get answer from agent
-            answer = self.agent.solve_task(self.interface, task_id)
+        if trials_per_task == 0:
+            raise ValueError("Number of trials per task must be greater than 0")
 
-            # Submit and store result
-            result = self.interface.submit_answer(task_id, answer)
-            results[task_id] = result
+        # Validate and set k_values
+        if k_values is None:
+            k_values = list(range(1, trials_per_task + 1))
+        elif isinstance(k_values, int):
+            k_values = [k_values]
+        elif isinstance(k_values, list) and max(k_values) > trials_per_task:
+            raise ValueError("k value is greater than the number of trials")
 
-        # Calculate statistics
-        scores = [r.score for r in results.values()]
-        successful = len([s for s in scores if s > 0])
-
-        return BenchmarkResult(
-            task_results=results,
-            average_score=sum(scores) / len(scores),
-            total_tasks=len(scores),
-            successful_tasks=successful,
+        logger.info(
+            f"Running benchmark on tasks: {task_ids} with {trials_per_task} trials per task"
         )
+
+        task_results: dict[str, TaskTrialResults] = {}
+
+        for task_id in task_ids:
+            logger.info(f"Running task {task_id}")
+
+            # Create container for this task's trials
+            task_trials = TaskTrialResults(task_id=task_id)
+
+            for _ in range(trials_per_task):
+                # Get answer from agent
+                answer = self.agent.solve_task(self.interface, task_id)
+                # Submit and store result
+                result = self.interface.submit_answer(task_id, answer)
+                task_trials.trials.append(result)
+
+            # Store all trials for this task
+            task_results[task_id] = task_trials
+
+        return BenchmarkResult(task_results=task_results, k=k_values)
