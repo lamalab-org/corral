@@ -7,7 +7,7 @@ This task is a simple example of a task that uses the Material Project RAG Llamp
 Install environment
 
 ```bash
-cd tasks/llamp_agent
+cd tasks/mp_rag_task
 uv venv --python 3.11.0
 uv sync
 ```
@@ -15,7 +15,7 @@ uv sync
 Run the environment
 
 ```bash
-cd tasks/llamp_agent/llamp_agent
+cd tasks/mp_rag_task/mp_rag_task
 python -m env
 ```
 

@@ -215,25 +215,24 @@ class Environment(ABC):
             tool.get_usage_guide() for tool in self.tools.values()
         )
         # TODO: make it configurable
-        return f"""Task: {self.get_task_prompt()}
-
-Available Tools:
-{tools_guide}
-
-How to use tools:
-1. Each tool call must specify the tool name and required arguments
-2. Tools may return errors if arguments are invalid
-3. You can make multiple tool calls as needed
-4. All tool calls are recorded and affect your final score
-Example tool call format:
-{{
-    "tool_name": "tool_name",
-    "arguments": {{
-        "arg1": value1,
-        "arg2": value2
-    }}
-}}
-"""
+        return (
+            f"Task: {self.get_task_prompt()}\n\n"
+            "Available Tools:\n"
+            f"{tools_guide}\n\n"
+            "How to use tools:\n"
+            "1. Each tool call must specify the tool name and required arguments\n"
+            "2. Tools may return errors if arguments are invalid\n"
+            "3. You can make multiple tool calls as needed\n"
+            "4. All tool calls are recorded and affect your final score\n"
+            "Example tool call format:\n"
+            "{{\n"
+            '    "tool_name": "tool_name",\n'
+            '    "arguments": {{\n'
+            '        "arg1": value1,\n'
+            '        "arg2": value2\n'
+            "    }}\n"
+            "}}\n"
+        )
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
         """Execute a tool and record the call with enhanced error handling"""

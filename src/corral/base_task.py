@@ -24,6 +24,7 @@ class TaskDefinition:
     # Either use output from another task or custom input
     input_from_tasks: list[str] = field(default_factory=list)
     initial_input: dict[str, Any] = field(default_factory=dict)
+    scoring_inputs: dict[str, Any] = field(default_factory=dict)
 
     # Helper method to check if task has dependencies
     def has_dependencies(self) -> bool:
@@ -135,13 +136,11 @@ class TaskEnvironment(Environment):
                 self.add_tool(available_tools[tool_name])
 
     def get_task_prompt(self) -> str:
-        _combined_input = self.task_group.get_task_input(self.task_id)
-
-        prompt = f"""Task: {self.current_task.name}
-Description: {self.current_task.description}
-
-Required submission format:
-"""
+        prompt = (
+            f"Task: {self.current_task.name}\n"
+            f"Description: {self.current_task.description}\n\n"
+            "Required submission format:\n"
+        )
         for key, desc in self.current_task.submission_format.items():
             prompt += f"- {key}: {desc}\n"
 
@@ -206,11 +205,16 @@ Required submission format:
 
             # Extract the answer field for scoring
             answer = submission.get("answer", submission)
-            score = self.current_task.scoring_fn(answer)
+
+            # Pass additional scoring inputs as keyword arguments
+            score = self.current_task.scoring_fn(
+                answer, **self.current_task.scoring_inputs
+            )
 
             self.task_group.store_result(self.task_id, submission, score)
 
             return score
+
         except Exception as e:
             logger.error(f"Error scoring submission for task {self.task_id}: {e!s}")
             logger.error(f"Submission was: {self.state.submitted_answer}")
