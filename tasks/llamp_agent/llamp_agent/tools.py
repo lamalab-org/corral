@@ -17,7 +17,9 @@ import json
 import os
 import re
 
-from corral.agents.llamp.schemas import (
+from langchain_community.tools import ArxivQueryRun, WikipediaQueryRun
+from langchain_community.utilities import ArxivAPIWrapper, WikipediaAPIWrapper
+from schemas import (
     BondsSchema,
     DielectricSchema,
     ElasticitySchema,
@@ -33,7 +35,8 @@ from corral.agents.llamp.schemas import (
     TasksSchema,
     ThermoSchema,
 )
-from corral.agents.llamp.utilities import MPAPIWrapper
+from utilities import MPAPIWrapper
+
 from corral.base import Tool, ToolArgument
 
 
@@ -137,6 +140,10 @@ def pydantic_schema_to_tool_arguments(schema_class) -> list[ToolArgument]:
         arguments.append(tool_arg)
 
     return arguments
+
+
+wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
+arxiv = ArxivQueryRun(api_wrapper=ArxivAPIWrapper())
 
 
 class MPTool(Tool):

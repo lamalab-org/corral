@@ -7,9 +7,6 @@ from abc import (
 )
 from typing import TYPE_CHECKING
 
-from langchain_community.tools import ArxivQueryRun, WikipediaQueryRun
-from langchain_community.utilities import ArxivAPIWrapper, WikipediaAPIWrapper
-from langchain_experimental.tools import PythonREPLTool
 from promptstore import PromptStore
 
 from corral.agents.llamp.tools import (
@@ -31,9 +28,6 @@ from corral.agents.utils import (
 if TYPE_CHECKING:
     from corral.evaluate import BenchmarkInterface
 from corral.base import Tool, ToolArgument
-
-wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
-arxiv = ArxivQueryRun(api_wrapper=ArxivAPIWrapper())
 
 
 class MainAgent:
@@ -108,9 +102,9 @@ class MainAgent:
                 task_id=task_id,
                 kwargs=self.kwargs,
             ).as_tool(),
-            arxiv,
-            wikipedia,
-            PythonREPLTool(),
+            # arxiv,
+            # wikipedia,
+            # PythonREPLTool(),
         ]
 
         for tool in tools:
