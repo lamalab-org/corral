@@ -27,7 +27,8 @@ class LLMPlanner:
         system_prompt (str, optional): The system prompt to use.
             Defaults to "You are a helpful AI assistant that solves tasks step by step."
         user_prompt (str, optional): The user prompt to use
-        temperature (float): The temperature to use for sampling
+        temperature (float): The temperature to use for sampling. 
+        	Defaults to 0.7. 
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         kwargs: Additional keyword arguments to pass to the LiteLLM API for all LLM calls
     """
