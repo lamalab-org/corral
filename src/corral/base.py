@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum, StrEnum
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -200,7 +204,8 @@ class Environment(ABC):
     def get_available_tools(self) -> list[dict[str, str]]:
         """Get list of available tools and their descriptions"""
         return [
-            {"name": t.name, "description": t.description} for t in self.tools.values()
+            {"name": t.name, "description": t.description, "arguments": t.arguments}
+            for t in self.tools.values()
         ]
 
     def get_environment_guide(self) -> str:
