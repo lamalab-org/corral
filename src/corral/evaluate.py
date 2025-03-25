@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
 import requests
 from loguru import logger
-
-if TYPE_CHECKING:
-    from corral.base import Tool
 
 from corral.report import (
     BenchmarkResult,
@@ -15,6 +12,7 @@ from corral.report import (
     TaskTrialResults,
     ToolResponse,
 )
+from corral.utils import save_agent_messages
 
 
 @dataclass
@@ -38,36 +36,23 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()
 
+    def get_available_tools_for_task(self, task_id: str) -> str:
+        """Get list of available tools for a task"""
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/tools")
+        response.raise_for_status()
+        return response.json()
+
     def get_task_guide(self, task_id: str) -> str:
         """Get complete guide for task including tools"""
         response = requests.get(f"{self.base_url}/tasks/{task_id}/guide")
         response.raise_for_status()
         return response.json()["prompt"]
 
-    def add_tool_to_environment(self, task_id: str, tool: Tool) -> dict[str, Any]:
-        """Add a new tool to an environment
-
-        Args:
-            task_id: ID of the task/environment
-            name: Name of the tool
-            description: Description of the tool
-            arguments: List of argument dictionaries with keys: name, type, description, required, default, choices
-            execute_code: Python code as string that will be executed when the tool is called
-
-        Returns:
-            Dictionary with status information
-        """
-        logger.info(f"Adding tool {tool.name} to environment {task_id}")
-
-        try:
-            response = requests.post(
-                f"{self.base_url}/tasks/{task_id}/tools/add", json=tool
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Failed to add tool: {e!s}")
-            raise
+    def get_task_prompt(self, task_id: str) -> str:
+        """Get task prompt without tools description"""
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/prompt")
+        response.raise_for_status()
+        return response.json()["prompt"]
 
     def execute_tool(
         self, task_id: str, tool_name: str, arguments: dict[str, Any]
@@ -127,6 +112,7 @@ class MatAgentBenchmark:
         task_ids: list[str] | None = None,
         trials_per_task: int = 1,
         k_values: int | list[int] | None = None,
+        verbose: bool | None = False,
     ) -> BenchmarkResult:
         """Run benchmark on specified tasks or all available tasks
 
@@ -164,10 +150,15 @@ class MatAgentBenchmark:
 
             for _ in range(trials_per_task):
                 # Get answer from agent
-                answer = self.agent.solve_task(self.interface, task_id)
+                answer, messages = self.agent.run_agent(self.interface, task_id)
                 # Submit and store result
                 result = self.interface.submit_answer(task_id, answer)
                 task_trials.trials.append(result)
+
+                if verbose:
+                    save_agent_messages(
+                        messages, task_id, self.agent.__class__.__name__
+                    )
 
             # Store all trials for this task
             task_results[task_id] = task_trials
