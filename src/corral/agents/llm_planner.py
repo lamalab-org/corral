@@ -12,7 +12,7 @@ from corral.agents.prompt_utils import get_prompt
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.agents.utils import LiteLLMMessage, llm_call
-from corral.utils import serialize_messages
+from corral.utils import format_examples, serialize_messages
 
 
 class LLMPlanner:
@@ -21,13 +21,13 @@ class LLMPlanner:
     Based on https://arxiv.org/abs/2212.04088
 
     Args:
-        model (str): The model to use for planning
-        max_iterations (int): The maximum number of iterations to plan. Defaults to 10.
+        model (str): The model to use for running the agent
+        max_iterations (int, optional): The maximum number of iterations to plan. Defaults to 10.
         api_endpoint (str, optional): The API endpoint URL for the LLM provider (e.g., OpenAI, VLLM, or self-hosted models) to handle tool/function calling requests. Defaults to None.
         system_prompt (str, optional): The system prompt to use.
             Defaults to "You are a helpful AI assistant that solves tasks step by step."
         user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide`, `tools`, `iterations` and `examples`. `examples` is thought to include few-shot guide.
-        temperature (float): The temperature to use for sampling.
+        temperature (float, optional): The temperature to use for sampling.
                 Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         kwargs: Additional keyword arguments to pass to the LiteLLM API for all LLM calls
@@ -79,8 +79,8 @@ class LLMPlanner:
         Args:
             interface (BenchmarkInterface): The benchmark interface to use
             task_id (str): The task ID to solve
-            examples (str): The examples to use for planning
-            tool_usage (bool): Whether to use tool calling or not
+            examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
+            tool_usage (bool, optional): Whether to use tool calling or not. Defaults to False.
 
         Returns:
             Tuple[str, List[LiteLLMMessage]]: The final answer and messages
@@ -88,27 +88,14 @@ class LLMPlanner:
         tools = interface.get_available_tools_for_task(task_id)
 
         task_guide = interface.get_task_prompt(task_id)
-        if examples is None:
-            prompt = self.user_prompt.fill(
-                {
-                    "tools": json.dumps(tools),
-                    "task_guide": task_guide,
-                    "iterations": self.max_iterations,
-                    "examples": "",
-                },
-            )
-        else:
-            example_prompt = f"To help you in understanding this task, the next {len(examples)} examples are provided:\n\n"
-            examples = example_prompt + "\n\n".join(examples)
-
-            prompt = self.user_prompt.fill(
-                {
-                    "tools": json.dumps(tools),
-                    "task_guide": task_guide,
-                    "iterations": self.max_iterations,
-                    "examples": examples,
-                },
-            )
+        prompt = self.user_prompt.fill(
+            {
+                "tools": json.dumps(tools),
+                "task_guide": task_guide,
+                "iterations": self.max_iterations,
+                "examples": format_examples(examples),
+            },
+        )
 
         messages: list[LiteLLMMessage] = []
         if self.system_prompt:

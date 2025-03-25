@@ -14,7 +14,7 @@ from typing import Any
 from promptstore import PromptStore
 
 from corral.agents.prompt_utils import get_prompt
-from corral.agents.utils import LiteLLMMessage, llm_call
+from corral.agents.utils import LiteLLMMessage, format_examples, llm_call
 
 
 @dataclass
@@ -38,13 +38,13 @@ class ReActAgent:
     Based on https://arxiv.org/abs/2210.03629
 
     Args:
-        model (str): The model to use for planning
-        max_iterations (int): The maximum number of iterations to run. Defaults to 10.
+        model (str): The model to use for running the agent
+        max_iterations (int, optional): The maximum number of iterations to run. Defaults to 10.
         api_endpoint (str, optional): The API endpoint URL for the LLM provider (e.g., OpenAI, VLLM, or self-hosted models) to handle tool/function calling requests. Defaults to None.
         system_prompt (str, optional): The system prompt to use.
             Defaults to "You are a helpful AI assistant that solves tasks step by step."
-        user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide` and `history` as variables.
-        temperature (float): The temperature to use for sampling. Defaults to 0.7.
+        user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide`, `history` and `examples` as variables.
+        temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
@@ -85,14 +85,14 @@ class ReActAgent:
             "d880c4d3-fe60-4cf4-813b-2008076cd595",
         )
 
-    def get_llm_response(self, messages: str) -> str:
-        """Get response from LLM using LiteLLM
+    def get_llm_response(self, messages: list[LiteLLMMessage]) -> str:
+        """Get response from the LLM using LiteLLM
 
         Args:
-            prompt (str): The prompt to send to LLM
+            messages(list[LiteLLMMessage]): The prompt to send to the LLM
 
         Returns:
-            str: The response from LLM
+            str: The response from the LLM
         """
         return llm_call(
             model=self.model,
@@ -124,11 +124,17 @@ class ReActAgent:
 
         return thought, action
 
-    def create_prompt(self, task_guide: str, history: list[LiteLLMMessage]) -> str:
+    def create_prompt(
+        self, task_guide: str, history: list[LiteLLMMessage], examples: list[str]
+    ) -> str:
         """Create prompt for LLM including context and history"""
         limited_history = history[-10:] if len(history) > 10 else history
         user_prompt = self.user_prompt.fill(
-            {"task_guide": task_guide, "history": str(limited_history)}
+            {
+                "task_guide": task_guide,
+                "history": str(limited_history),
+                "examples": format_examples(examples),
+            }
         )
 
         return [
@@ -145,14 +151,16 @@ class ReActAgent:
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
+        examples: list[str] | None = None,
     ) -> tuple[str, list[LiteLLMMessage]]:
         """Main ReAct loop implementation
 
         Args:
             interface (BenchmarkInterface): The interface to use
             task_id (str): The task ID to solve
-            history (List[Dict[str, Any]]): The history items to include. Defaults to None.
-            task_prompt (str): The task prompt to use. `task_prompt` is intended to be a plan or description about the task, that should always be provided when this agent is called as a subagent of a main orchestrator. Defaults to None.
+            history (List[Dict[str, Any]], optional): The history items to include. Defaults to None.
+            task_prompt (str, optional): The task prompt to use. `task_prompt` is intended to be a plan or description about the task, that should always be provided when this agent is called as a subagent of a main orchestrator. Defaults to None.
+            examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
 
         Returns:
             tuple[str, list[LiteLLMMessage]]:: The final answer and messages history
@@ -165,7 +173,7 @@ class ReActAgent:
         if history is None:
             history: list[LiteLLMMessage] = []
 
-        messages = self.create_prompt(task_guide, history)
+        messages = self.create_prompt(task_guide, history, examples)
 
         for _iteration in range(self.max_iterations):
             # Create prompt and get LLM response

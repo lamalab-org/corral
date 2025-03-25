@@ -28,13 +28,13 @@ class ToolCallingAgent:
     Agent that uses native function calling from the providers to solve the task
 
     Args:
-        model (str): The model to use for planning
+        model (str): The model to use for running the agent
         max_iterations (int, optional): The maximum number of iterations to run. Defaults to 10.
         api_endpoint (str, optional): The API endpoint URL for the LLM provider (e.g., OpenAI, VLLM, or self-hosted models) to handle tool/function calling requests. Defaults to None.
         system_prompt (str, optional): The system prompt to use.
             Defaults to "You are a helpful AI assistant that solves tasks step by step."
-        user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with only `task_guide` as variable.
-        temperature (float): The temperature to use for sampling. Defaults to 0.7.
+        user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide` and `examples` as variables.
+        temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
@@ -75,13 +75,14 @@ class ToolCallingAgent:
         )
 
     def create_prompt(
-        self, task_guide: str, history: list[LiteLLMMessage]
+        self, task_guide: str, history: list[LiteLLMMessage], examples: list[str]
     ) -> list[LiteLLMMessage]:
         """Create the initial prompt messages for the agent
 
         Args:
             task_guide (str): The task guide to use.
-            history (LiteLLMMessage): The history items to include.
+            history (list[LiteLLMMessage]): The history items to include.
+            examples (list[str]): The few-shot examples to include.
 
         Returns:
             List[LiteLLMMessage]: The prompt messages.
@@ -91,7 +92,10 @@ class ToolCallingAgent:
             messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
         messages.append(
             LiteLLMMessage(
-                role="user", content=self.user_prompt.fill({"task_guide": task_guide})
+                role="user",
+                content=self.user_prompt.fill(
+                    {"task_guide": task_guide, "examples": examples}
+                ),
             )
         )
 
@@ -105,10 +109,10 @@ class ToolCallingAgent:
         Convert a dictionary of tools into the OpenAI tool calling format.
 
         Args:
-            tools_dict: Dictionary with a 'tools' list containing tool specifications
+            tools_dict (dict): Dictionary with a 'tools' list containing tool specifications
 
         Returns:
-            List of tools in OpenAI tool calling format
+            list: List of tools in OpenAI tool calling format
         """
         openai_tools = []
 
@@ -150,14 +154,16 @@ class ToolCallingAgent:
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
+        examples: list[str] | None = None,
     ) -> tuple[str, list[LiteLLMMessage]]:
         """Run the agent to solve the task
 
         Args:
             interface (BenchmarkInterface): The interface to use.
             task_id (str): The task ID to solve.
-            history (List[Dict[str, Any]]): The history items to include. Defaults to None.
-            task_prompt (str): The task prompt to use. Defaults to None.
+            history (list[LiteLLMMessage], optional): The history items to include. Defaults to None.
+            task_prompt (str, optional): The task prompt to use. `task_prompt` is intended to be a plan or description about the task, that should always be provided when this agent is called as a subagent of a main orchestrator. Defaults to None.
+            examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
 
         Returns:
             tuple[str, List[LiteLLMMessage]]: The final answer and messages.
@@ -168,14 +174,14 @@ class ToolCallingAgent:
         tools = self.convert_to_openai_tool_format(
             interface.get_available_tools_for_task(task_id)
         )
-        # I think this task prompt is without the tools descriptions
-        # We want this here since for this agent the tools go into the functions or tools
         if task_prompt is None:
             task_guide = interface.get_task_prompt(task_id)
         else:
             task_guide = task_prompt
 
-        messages = self.create_prompt(task_guide=task_guide, history=history)
+        messages = self.create_prompt(
+            task_guide=task_guide, history=history, examples=examples
+        )
 
         for _i in range(self.max_iterations):
             llm_response = llm_call(

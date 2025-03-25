@@ -95,3 +95,19 @@ def llm_call(
 
     except Exception as e:
         raise ValueError(f"Error in LiteLLM API call: {e}") from e
+
+
+def format_examples(examples: list[str]) -> str:
+    """Format few-shot part of the prompt from a list of shots
+
+    Args:
+        examples (List[str]): The examples to format
+
+    Returns:
+        str: The formatted examples
+    """
+    if examples is None:
+        return ""
+    else:
+        example_prompt = f"To help you in understanding this task, the next {len(examples)} examples are provided:\n\n"
+        return example_prompt + "\n\n".join(examples)
