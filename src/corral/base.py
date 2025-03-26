@@ -1,5 +1,4 @@
 import copy
-import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -65,7 +64,7 @@ class LLMMessage:
 class TaskState:
     task_id: str
     task_prompt: str
-    trial_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    trial_id: str = "0"
     messages: list[LLMMessage] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     is_completed: bool = False
@@ -188,6 +187,7 @@ class Environment(ABC):
         self.task_id = task_id
         self.tools: dict[str, Tool] = {}
         self.trial_states: dict[str, TaskState] = {}
+        self.trial_counter = -1
         self.reset_state()
 
     def save_current_state(self) -> TaskState:
@@ -206,13 +206,28 @@ class Environment(ABC):
             archived_snapshot = self.save_current_state()
             self.trial_states[self.state.trial_id] = archived_snapshot
 
-        new_trial_id = str(uuid.uuid4())
+        self.trial_counter += 1
+        new_trial_id = str(self.trial_counter)
+
         self.state = TaskState(
             task_id=self.task_id,
             trial_id=new_trial_id,
             task_prompt=self.get_task_prompt(),
         )
         return self.state.trial_id
+
+    def get_unique_trail_identifier(self) -> str:
+        """
+        Generate a combined identifier using task_id, trial_id, and a timestamp.
+
+        Returns:
+            A string combining task_id, trial_id, and timestamp in format: "{task_id}_{trial_id}_{timestamp}"
+        """
+        if not hasattr(self, "state") or self.state is None:
+            return f"{self.task_id}_no_trial_{datetime.now(tz=timezone.utc).strftime('%m%d%H%M')}"
+
+        timestamp = datetime.now(tz=timezone.utc).strftime("%m%d%H%M")
+        return f"{self.task_id}_{self.state.trial_id}_{timestamp}"
 
     @abstractmethod
     def get_task_prompt(self) -> str:

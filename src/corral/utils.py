@@ -143,7 +143,7 @@ def tool(func: Callable) -> Tool:
 
     # Validate docstring format
     doc = inspect.getdoc(func)
-    if "Args:" not in doc:
+    if doc is None or "Args:" not in doc:
         raise ValueError(
             f"Function {func.__name__}'s docstring must have an 'Args:' section. "
             "See the decorator documentation for the required format."

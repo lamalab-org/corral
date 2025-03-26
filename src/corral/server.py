@@ -79,7 +79,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         state_dict["tool_statistics"] = tool_statistics
         finished_trail = env.reset_state()  # Reset the state for the next trail
 
-        return {"score": score, "state": state_dict, "trail_id": finished_trail}
+        return {"score": score, "state": state_dict, "trial_id": finished_trail}
 
     @app.get("/tasks/{task_id}/status")
     def get_task_status(task_id: str):
