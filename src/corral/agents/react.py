@@ -24,9 +24,12 @@ class Action:
 
 
 class ReActAgent:
-    def __init__(self, model: str = "gpt-4", max_iterations: int = 10):
+    def __init__(
+        self, model: str = "gpt-4", max_iterations: int = 10, temperature: float = 0.0
+    ):
         self.model = model
         self.max_iterations = max_iterations
+        self.temperature = temperature
 
     def get_llm_response(self, prompt: str) -> str:
         """Get response from LLM using LiteLLM"""
@@ -39,7 +42,7 @@ class ReActAgent:
                 },
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.7,
+            temperature=self.temperature,
             max_tokens=1000,
         )
         return response.choices[0].message.content

@@ -131,6 +131,7 @@ class TaskEnvironment(Environment):
         self.task_id = task_id
         self.available_tools = available_tools
         self.fs_tools = fs_tools or {}
+        self._trail_name = None
 
         if task_id not in task_group.tasks:
             raise ValueError(f"Task {task_id} not found in task group")
@@ -199,6 +200,9 @@ Required submission format:
 
         logger.info(f"Task prompt for {self.task_id}:\n{prompt}")
         return prompt
+
+    def _rename_dir():
+        pass
 
     def score(self) -> float:
         """Score the submitted answer"""
