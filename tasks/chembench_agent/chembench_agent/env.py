@@ -1,10 +1,8 @@
-import math
-
 import uvicorn
 from chembench.baseline import Generation, Generations
 from chembench.evaluate import ChemBenchmark
 from chembench.prompter import PrompterBuilder
-from chembench.task import TopicQuestions, TopicRegistry
+from chembench.task import Task
 from dotenv import load_dotenv
 from loguru import logger
 from tools import brave_search, smiles_to_iupac_name, wikipedia_search, wolfram_alpha
@@ -13,40 +11,20 @@ from corral.base import Environment
 from corral.server import create_benchmark_server
 
 load_dotenv("../.env", override=True)
+
+
 _CHEMBENCH_TOOLS = [wikipedia_search, brave_search, wolfram_alpha, smiles_to_iupac_name]
-benchmark = ChemBenchmark(
-    report_dir="../reports", verbose=True, state_file="../benchmark_state.pkl"
-)
-registry = TopicRegistry.from_huggingface("n0w0f/ChemBench-dev")
-
-dummy_prompter = PrompterBuilder.from_model_object(
-    model=None,
-    prompt_type="instruction",
-    post_process_ce=None,
-    post_process_math=None,
-    post_process_pu=None,
-    post_process_smiles=None,
-    post_process_rxnsmiles=None,
-    other=None,
-)
-
-
-def generate(
-    prompt,
-):
-    return prompt
 
 
 class Model:
-    def __init__(self, answer):
-        self.answer = answer
+    def __init__(self, name: str = "Dummy Model"):
+        self.name = name
 
-    def generate(self) -> Generations:
+    def generate(self, prompts: list[str], **_kwargs):
         generations = []
-        for prompt_ in [self.answer]:
-            generation = generate(prompt_)
-            generation = [Generation(text=generation)]
-            generations.append(generation)
+        for _prompt in prompts:
+            generation = None
+            generations.append([Generation(text=generation)])
 
         return Generations(generations=generations)
 
@@ -55,88 +33,114 @@ class ChemBenchEnvironment(Environment):
     def __init__(
         self,
         task_id: str,
-        topic: str = "test_2",
+        tasks: list[Task],
+        benchmark: ChemBenchmark,
+        prompter: PrompterBuilder,
     ):
-        self.topic = topic
-        self.task_id = int(task_id)
-        self.registry = registry
+        self.task_id = task_id
+        self.tasks = tasks
         self.benchmark = benchmark
-        self.dummy_prompter = dummy_prompter
+        self.prompter = prompter
+
+        self.task_map = {}
+        self.all_prompts = []
+        self.all_score_maps = []
+
         super().__init__(task_id)
         # Add multiple tools
         for tool in _CHEMBENCH_TOOLS:
             self.add_tool(tool)
 
-    def get_prompter(self, answer):
-        model = Model(answer)
-        return PrompterBuilder.from_model_object(
-            model=model,
-            prompt_type="instruction",
-            post_process_ce=None,
-            post_process_math=None,
-            post_process_pu=None,
-            post_process_smiles=None,
-            post_process_rxnsmiles=None,
-            other=None,
-        )
-
     def get_task_prompt(self) -> str:
-        example = self.registry.topics[self.topic].tasks[self.task_id]._examples
-        # assuming all tasks are mcq, if not conditionally prompt
-        prompts, _ = self.dummy_prompter._prompts_with_choices(example)
-        return f"\n \n Solve this problem: {prompts[0]}"
+        current_idx = 0
+        for task_idx, task in enumerate(self.tasks):
+            if self.prompter.is_mcq(task):
+                prompts, score_maps = self.prompter._prompts_with_choices(
+                    task._examples
+                )
+            else:
+                prompts = self.prompter._prompts_general(task._examples)
+                score_maps = [{"correct": 1, "incorrect": 0}] * len(task._examples)
+
+            for i in range(len(prompts)):
+                self.task_map[current_idx + i] = {
+                    "task_idx": task_idx,
+                    "example_idx": i,
+                }
+
+            self.all_prompts.extend(prompts)
+            self.all_score_maps.extend(score_maps)
+            current_idx += len(prompts)
+
+        if len(self.all_prompts) != 1:
+            raise ValueError("Only one prompt per task is supported")
+
+        return f"\n\nSolve this problem: {prompts[0][0]["content"]}"
 
     def score(self) -> float:
         """Score based on submitted answer"""
         logger.info(self.state.submitted_answer)
+        model_kwargs = {}
         if self.state.submitted_answer is None:
             return 0.0
 
         try:
-            # Get the specific task we want to benchmark
-            task = self.registry.topics[self.topic].tasks[self.task_id]
-
-            # Create a new TopicRegistry with just this task
-            single_task_registry = TopicRegistry()
-            single_task_registry.topics[self.topic] = TopicQuestions(
-                topic=self.topic, tasks=[task]
-            )
-
             submitted_result = str(self.state.submitted_answer)
-            prompter = self.get_prompter(submitted_result)
+            completions = [submitted_result]
 
-            # Run benchmark with the single-task registry
-            results = self.benchmark.bench(
-                single_task_registry, prompter, topics=[self.topic]
-            )
+            all_results = []
+            for i, completion_list in enumerate(completions):
+                task_info = self.task_map[i]
+                task = self.tasks[task_info["task_idx"]]
 
-            if not results:
-                raise ValueError("No results returned from benchmark")
+                result = self.prompter._process_single_result(
+                    completion_list,
+                    task,
+                    task_info["example_idx"],
+                    self.all_score_maps[i],
+                    self.all_prompts[i],
+                    **model_kwargs,
+                )
+                all_results.append(result)
 
-            logger.info("RESULTS")
-            logger.info(results[0]["results"][0]["metrics"])
-            score = results[0]["results"][0]["metrics"].get("score", 0.0)
+            if len(all_results) != 1:
+                raise ValueError("Only one result per task is supported")
 
-            if isinstance(score, bool):
-                score = 1.0 if score else 0.0
-
-            if isinstance(score, float) and math.isnan(score):
-                return 0.0
-
-            return float(score)  # Ensure we return a valid float
+            logger.info(all_results[0]["metrics"])
+            return float(all_results[0]["metrics"]["all_correct"])
 
         except (ValueError, TypeError, AttributeError) as e:
             logger.info(f"Error in scoring: {e!s}")
             return 0.0
 
 
-if __name__ == "__main__":
-    environments = {
-        "chembench_1": ChemBenchEnvironment("1"),
-        "chembench_2": ChemBenchEnvironment("2"),
-        "chembench_3": ChemBenchEnvironment("3"),
-    }
+def get_all_tasks(benchmark: ChemBenchmark) -> list[Task]:
+    tasks = []
+    for topic in benchmark.registry.get_all_topics():
+        if topic == "chemical_preference":
+            continue
+        questions = benchmark.registry.get_topic(topic)
+        tasks.extend(questions.tasks)
+    return tasks
+
+
+def main():
+    benchmark = ChemBenchmark.from_huggingface(report_dir="../reports", verbose=True)
+    prompter = PrompterBuilder.from_model_object(
+        model=Model(),
+    )
+    tasks = get_all_tasks(benchmark)
+
+    environments = {}
+    for task in tasks:
+        environments[task._uuid] = ChemBenchEnvironment(
+            task._uuid, [task], benchmark, prompter
+        )
 
     # Create and run server
     app = create_benchmark_server(environments)
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+if __name__ == "__main__":
+    main()
