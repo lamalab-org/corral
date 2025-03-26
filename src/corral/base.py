@@ -1,13 +1,11 @@
-from __future__ import annotations
-
+import copy
+import uuid
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum, StrEnum
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -67,6 +65,7 @@ class LLMMessage:
 class TaskState:
     task_id: str
     task_prompt: str
+    trial_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     messages: list[LLMMessage] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     is_completed: bool = False
@@ -186,8 +185,34 @@ class Environment(ABC):
     """Base class for task environments"""
 
     def __init__(self, task_id: str):
+        self.task_id = task_id
         self.tools: dict[str, Tool] = {}
-        self.state = TaskState(task_id=task_id, task_prompt=self.get_task_prompt())
+        self.trial_states: dict[str, TaskState] = {}
+        self.reset_state()
+
+    def save_current_state(self) -> TaskState:
+        """
+        Archive the current state as a snapshot.
+
+        Returns:
+            TaskState: A deep copy of the current task state
+        """
+        # Create a deep copy of the entire TaskState object
+        return copy.deepcopy(self.state)
+
+    def reset_state(self) -> str:
+        """Reset the environment state with a new trial id and fresh TaskState and return finished trail id."""
+        if hasattr(self, "state") and self.state is not None:
+            archived_snapshot = self.save_current_state()
+            self.trial_states[self.state.trial_id] = archived_snapshot
+
+        new_trial_id = str(uuid.uuid4())
+        self.state = TaskState(
+            task_id=self.task_id,
+            trial_id=new_trial_id,
+            task_prompt=self.get_task_prompt(),
+        )
+        return self.state.trial_id
 
     @abstractmethod
     def get_task_prompt(self) -> str:
@@ -204,7 +229,11 @@ class Environment(ABC):
     def get_available_tools(self) -> list[dict[str, str]]:
         """Get list of available tools and their descriptions"""
         return [
-            {"name": t.name, "description": t.description, "arguments": t.arguments}
+            {
+                "name": t.name,
+                "description": t.description,
+                "arguments": ", ".join(arg.name for arg in t.arguments),
+            }
             for t in self.tools.values()
         ]
 
