@@ -169,7 +169,7 @@ Required submission format:
             for key, value in self.current_task.initial_input.items():
                 prompt += f"- {key}: {value}\n"
 
-        prompt += "Whatever potentials you need to run the simulation, you can find them at /potentials/EAM/. Do not change your working directory, it has already been set. If the task is to give the final output as a scalar, only return the numerical value, without any units."
+        prompt += "Whatever potentials you need to run the simulation, you can find them at /potentials/. A type of potential can be accessed by /potentials/TYPE where TYPE can be [EAM, TERSOFF] which further contains the exact potential files. You can assume the potential files to be correct, hence do not try to read the entire potential files. Do not change your working directory, it has already been set. If the task is to give the final output as a scalar, only return the numerical value, without any units."
 
         # # Add IO tools description for saving results
         # prompt += "\nIMPORTANT: You have access to filesystem tools which allow you to read and write files. Also ypu can retry many times to get the correct answer. "

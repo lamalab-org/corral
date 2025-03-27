@@ -10,7 +10,7 @@ from corral.server import create_benchmark_server
 import modal 
 
 class LammpsEnvironment(Environment):
-    def __init__(self, task_id: str, question: str, answer: float, tools: list, threshold: float, minimiser: str):
+    def __init__(self, task_id: str, question: str, answer: float, tools: list, threshold: float, minimiser: str, name: str):
         self.question = question
         self.correct_answer = answer
         self.threshold = threshold
@@ -22,6 +22,7 @@ class LammpsEnvironment(Environment):
             self.min_arg = 'hftn'
         self.minimiser = minimiser
         self.vol = modal.Volume.from_name("simulations")
+        self.name = name
         super().__init__(task_id)
 
         # Add multiple tools
@@ -31,7 +32,7 @@ class LammpsEnvironment(Environment):
         # self.add_tool(run_bash_command)
 
     def get_task_prompt(self) -> str:
-        return f"{self.question} Whatever potentials you need to run the simulation, you can find them at /potentials/. A type of potential can be accessed by /potentials/TYPE where TYPE can be [EAM, TERSOFF] which further contains the exact potential files. Do not change your working directory, it has already been set. If the task is to give the final output as a scalar, only return the numerical value, without any units. "
+        return f"{self.question} Whatever potentials you need to run the simulation, you can find them at /potentials/. A type of potential can be accessed by /potentials/TYPE where TYPE can be [EAM, TERSOFF] which further contains the exact potential files. Potential files have been taken from the original sources, and hence are correct. Do not try to read the entire potential files at once, they are too large it will crash the program. Do not change your working directory, it has already been set. If the task is to give the final output as a scalar, only return the numerical value, without any units."
 
     def score(self) -> float:
         """Score based on submitted answer"""
@@ -39,6 +40,13 @@ class LammpsEnvironment(Environment):
         print("working directory of the agent", self.state.current_directory)
         if self.state.submitted_answer is None:
             return 0.0
+        
+        if self.name == 'npt':
+            try:                 
+                submitted_result = float(self.state.submitted_answer)
+                return 1.0 if abs(submitted_result - self.correct_answer) < self.threshold else 0.0
+            except ValueError:
+                return 0.0
 
         try:
             min_style_arg = 'cg'
@@ -56,7 +64,7 @@ class LammpsEnvironment(Environment):
                 return 1.0 if abs(submitted_result - self.correct_answer) < self.threshold else 0.0
             else:
                 return 0
-        except ValueError:
+        except (FileNotFoundError, ValueError):
             return 0.0
 
 

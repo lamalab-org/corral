@@ -16,20 +16,22 @@ def setup_litellm():
     # os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 
 
-def run_benchmark(model: str = "gpt-4", task_ids: list | None = None, results_dir: str = "./results", local_results_dir: str = "./results", app = "simagent", bash_command = "run_bash_command", dir_command = None):
+def run_benchmark(model: str = "gpt-4", task_ids: list | None = None, results_dir = None, local_results_dir = None, app = None, bash_command = None, dir_command = None):
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = ReActAgent(model=model, max_iterations = 15, temperature = 0.1)
+    agent = ReActAgent(model=model, max_iterations = 10, temperature = 0.1)
     runner = MatAgentBenchmark(interface, agent, results_dir=results_dir, local_results_dir = local_results_dir, app = app, bash_command=bash_command, dir_command=dir_command)
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}, results_dir: {results_dir}")
     # result = runner.bench(task_ids)
-    result = runner.bench(task_ids, trials_per_task=2, k_values=[1])
-    os.makedirs(local_results_dir, exist_ok=True)
-    result.generate_report(os.path.join(local_results_dir, "results.json"))
-
+    result = runner.bench(task_ids, trials_per_task=10, k_values=[1])
+    if local_results_dir:
+        os.makedirs(local_results_dir, exist_ok=True)
+        result.generate_report(os.path.join(local_results_dir, "results.json"))
+    else:
+        result.generate_report("results.json")
     logger.info("Benchmark completed")
 
 if __name__ == "__main__":
@@ -39,10 +41,10 @@ if __name__ == "__main__":
     # **Argument Parsing**
     parser = argparse.ArgumentParser(description="Run the ReAct agent benchmark.")
     parser.add_argument("--model", type=str, default="gpt-4", help="The model to use (e.g., gpt-4)")
-    parser.add_argument("--results_dir", type=str, default="./results", help="Directory to store results")
-    parser.add_argument("--local_results_dir", type=str, default="./results", help="Directory to store results")
-    parser.add_argument("--app", type=str, default="simagent", help="Application name")
-    parser.add_argument("--bash_command", type=str, default="run_bash_command", help="Command for running bash")
+    parser.add_argument("--results_dir", type=str, default=None, help="Directory to store results")
+    parser.add_argument("--local_results_dir", type=str, default=None, help="Directory to store results")
+    parser.add_argument("--app", type=str, default=None, help="Application name")
+    parser.add_argument("--bash_command", type=str, default=None, help="Command for running bash")
     args = parser.parse_args()
 
     try:
@@ -69,3 +71,6 @@ if __name__ == "__main__":
 #     except Exception as e:
 #         logger.error(f"Benchmark failed: {e!s}")
 #         raise
+
+
+# python run_react_agent.py --model gpt-4o --results_dir /results/sub_sample/gpt_4o --local_results_dir ./sub_sample/gpt_4o --app simagent --bash_command run_bash_command

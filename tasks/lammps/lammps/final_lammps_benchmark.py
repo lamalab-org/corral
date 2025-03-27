@@ -8,7 +8,8 @@ json_files = os.listdir(task_jsons_path)
 
 environments = {}
 
-for file in ['task_1.json']:
+files = ['task_11.json']
+for file in files:
 
 # for file in json_files:
     json_path = os.path.join(task_jsons_path, file)
@@ -20,8 +21,8 @@ for file in ['task_1.json']:
     threshold = float(data['output'][0]['threshold'])
     tools = data['tools'] 
     tool_functions = [globals().get(tool_name) for tool_name in tools]
-    environments[task_id] = LammpsEnvironment(task_id, prompt, target_score, tool_functions, threshold, data['keywords'][-1])
-        
+    environments[task_id] = LammpsEnvironment(task_id, prompt, target_score, tool_functions, threshold, data['keywords'][-1], data['name'])
+    # break
 
 app = create_benchmark_server(environments)
 uvicorn.run(app, host="0.0.0.0", port=8000)

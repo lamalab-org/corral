@@ -79,7 +79,7 @@ Final Answer: [answer]
 Make sure to restrict your output to one Thought, Action, and Action Input per response. Since this is for scientific experiments, do not make up answers.
 """
 
-    def solve_task(self, interface: BenchmarkInterface, task_id: str, directory_path: str, local_directory_path: str) -> str:
+    def solve_task(self, interface: BenchmarkInterface, task_id: str, directory_path: Optional[str] = None, local_directory_path: Optional[str] = None) -> str:
         """Main ReAct loop implementation"""
         task_guide = interface.get_task_guide(task_id)
         history: list[str] = []
@@ -87,10 +87,12 @@ Make sure to restrict your output to one Thought, Action, and Action Input per r
         import os
 
         # Ensure the local directory exists
-        os.makedirs(local_directory_path, exist_ok=True)
+        if local_directory_path:
+            os.makedirs(local_directory_path, exist_ok=True)
 
-        # Define the file path where all LLM responses and actions will be stored
-        response_file_path = os.path.join(local_directory_path, f"task_{task_id}_responses.txt")
+        # # Define the file path where all LLM responses and actions will be stored
+        if local_directory_path:
+            response_file_path = os.path.join(local_directory_path, f"task_{task_id}_responses.txt")
 
         for iteration in range(self.max_iterations):
             # Create prompt and get LLM response
@@ -122,7 +124,8 @@ Make sure to restrict your output to one Thought, Action, and Action Input per r
 
             # Execute tool if action exists
             if action:
-                action.arguments["directory_path"] = directory_path
+                if directory_path:
+                    action.arguments["directory_path"] = directory_path
                 history.append(
                     f"Action: {action.tool_name}\nAction Input: {json.dumps(action.arguments)}"
                 )

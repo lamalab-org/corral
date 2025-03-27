@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Protocol, Optional
 from loguru import logger
 import requests
+import time
 
 from corral.report import (
     BenchmarkResult,
@@ -131,35 +132,57 @@ class MatAgentBenchmark:
 
         task_results: dict[str, TaskTrialResults] = {}
 
-        # Step 1: Pre-create all required directories before benchmarking
-        run_bash_command = modal.Function.lookup(self.app, self.bash_command)
-        run_directories = {}  # Store the directories for each task_id
-        local_run_directories = {}
-        for task_id in task_ids:
-            run_directories[task_id] = []
-            local_run_directories[task_id] = []
-            for run_number in range(1, trials_per_task + 1):
-                run_directory = os.path.join(self.results_dir, str(task_id), str(run_number))
-                # os.makedirs(run_directory, exist_ok=True)  # Create directory
-                run_bash_command.remote("mkdir", ["-p", run_directory])
-                run_directories[task_id].append(run_directory)
-                local_run_directory = os.path.join(self.local_results_dir, str(task_id), str(run_number))
-                os.makedirs(local_run_directory, exist_ok=True)
-                local_run_directories[task_id].append(local_run_directory)
+        if self.app:
+            # Step 1: Pre-create all required directories before benchmarking
+            run_bash_command = modal.Function.lookup(self.app, self.bash_command)
+            run_directories = {}  # Store the directories for each task_id
+            local_run_directories = {}
+            for task_id in task_ids:
+                run_directories[task_id] = []
+                local_run_directories[task_id] = []
+                for run_number in range(1, trials_per_task + 1):
+                    run_directory = os.path.join(self.results_dir, str(task_id), str(run_number))
+                    # os.makedirs(run_directory, exist_ok=True)  # Create directory
+                    run_bash_command.remote("mkdir", ["-p", run_directory])
+                    run_directories[task_id].append(run_directory)
+                    local_run_directory = os.path.join(self.local_results_dir, str(task_id), str(run_number))
+                    os.makedirs(local_run_directory, exist_ok=True)
+                    local_run_directories[task_id].append(local_run_directory)
 
-        # Step 2: Run benchmark using pre-created directories
-        for task_id in task_ids:
-            logger.info(f"Running task {task_id}")
-            task_trials = TaskTrialResults(task_id=task_id)
-            for run_directory, local_directory in zip(run_directories[task_id], local_run_directories[task_id]):
-            # for run_index, run_directory in enumerate(run_directories[task_id], start=1):
-                # Solve task
-                answer = self.agent.solve_task(self.interface, task_id, run_directory, local_directory)
-                # Submit and store result
-                result = self.interface.submit_answer(task_id, answer, run_directory)
-                task_trials.trials.append(result)
 
-            # Store all trials for this task
-            task_results[task_id] = task_trials
+            # Step 2: Run benchmark using pre-created directories
+            for task_id in task_ids:
+                logger.info(f"Running task {task_id}")
+                task_trials = TaskTrialResults(task_id=task_id)
+                for run_directory, local_directory in zip(run_directories[task_id], local_run_directories[task_id]):
+                # for run_index, run_directory in enumerate(run_directories[task_id], start=1):
+                    # Solve task
+                    answer = self.agent.solve_task(self.interface, task_id, run_directory, local_directory)
+                    # Submit and store result
+                    result = self.interface.submit_answer(task_id, answer, run_directory)
+                    task_trials.trials.append(result)
+                    time.sleep(10)
 
-        return BenchmarkResult(task_results=task_results, k=k_values)
+
+                # Store all trials for this task
+                task_results[task_id] = task_trials
+            return BenchmarkResult(task_results=task_results, k=k_values)
+        
+        else:
+            for task_id in task_ids:
+                logger.info(f"Running task {task_id}")
+
+                # Create container for this task's trials
+                task_trials = TaskTrialResults(task_id=task_id)
+
+                for _ in range(trials_per_task):
+                    # Get answer from agent
+                    answer = self.agent.solve_task(self.interface, task_id)
+                    # Submit and store result
+                    result = self.interface.submit_answer(task_id, answer)
+                    task_trials.trials.append(result)
+
+                # Store all trials for this task
+                task_results[task_id] = task_trials
+
+            return BenchmarkResult(task_results=task_results, k=k_values)
