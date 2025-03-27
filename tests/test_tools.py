@@ -1,7 +1,9 @@
+from typing import Optional, Union
+
 import pytest
 
 from corral.base import Tool
-from corral.utils import tool
+from corral.utils import format_type_annotation, tool
 
 
 # Sample functions for testing
@@ -39,13 +41,13 @@ def sample_tool_with_defaults(x: float, y: float = 1.0) -> float:
 
 
 # Fixtures
-@pytest.fixture
+@pytest.fixture()
 def calculator_tool():
     """Fixture providing a basic calculator tool"""
     return tool(sample_valid_tool)
 
 
-@pytest.fixture
+@pytest.fixture()
 def calculator_with_defaults():
     """Fixture providing a calculator with default arguments"""
     return tool(sample_tool_with_defaults)
@@ -69,7 +71,7 @@ class TestToolCreation:
         assert operation_arg.choices == ["add", "subtract", "multiply", "divide"]
 
     @pytest.mark.parametrize(
-        "operation,x,y,expected",
+        ("operation", "x", "y", "expected"),
         [
             ("add", 5, 3, "8"),
             ("subtract", 5, 3, "2"),
@@ -99,7 +101,7 @@ class TestToolCreation:
 
 class TestArgumentValidation:
     @pytest.mark.parametrize(
-        "args,expected_valid,error_message",
+        ("args", "expected_valid", "error_message"),
         [
             ({"x": 1.0}, False, "Missing required argument"),
             (
@@ -193,3 +195,101 @@ class TestDocstringValidation:
         with pytest.raises(ValueError) as exc_info:
             tool(test_func)
         assert "Missing documentation for parameters" in str(exc_info.value)
+
+
+def test_format_type_annotation():
+    """Test the format_type_annotation function with various types including unions."""
+    # Basic types
+    assert format_type_annotation(str) == "str"
+    assert format_type_annotation(int) == "int"
+    assert format_type_annotation(float) == "float"
+
+    # Union types using | operator
+    union_type = str | int
+    assert format_type_annotation(union_type) == "str | int"
+
+    # Union types using typing.Union
+
+    union_type_old = Union[str, int]  # noqa: UP007
+    assert format_type_annotation(union_type_old) == "str | int"
+
+    # Optional type (which is Union[T, None])
+    optional_type = Optional[str]  # noqa: UP007
+    assert format_type_annotation(optional_type) == "str | None"
+
+    # Nested unions and complex types
+    complex_union = list[str | int] | None
+    formatted = format_type_annotation(complex_union)
+    assert "list" in formatted
+    assert "str | int" in formatted
+    assert "None" in formatted
+
+    # Tuple with mixed types
+    assert format_type_annotation(tuple[str, int]) == "tuple[str, int]"
+
+
+def test_integration_with_actual_docstring():
+    """Test with a docstring similar to the original function.
+
+    This test verifies that a function with union types like `list[float] | None`
+    is properly parsed and the tool is correctly created with appropriate
+    type information.
+    """
+
+    @tool
+    def test_function(
+        slab_cif: str,
+        adsorbate_cif: str,
+        height: float = 2.0,
+        site: list[float] | None = None,
+    ) -> str:
+        """
+        Place an adsorbate on a slab at a specified adsorption site.
+        If no site is specified, choose one from the top sites automatically.
+
+        Args:
+            slab_cif: CIF string of the slab.
+            adsorbate_cif: CIF string of the adsorbate.
+            height: Height (Å) above the slab surface where the adsorbate should be placed.
+            site: Optional fractional coordinate [x, y, z] for placement.
+                If None, the first top site will be used.
+        Returns:
+            str: CIF string of the combined structure.
+        """
+        return "Test result"
+
+    # Verify all arguments were correctly parsed
+    args = {arg.name: arg for arg in test_function.arguments}
+
+    assert len(args) == 4
+    assert "slab_cif" in args
+    assert "adsorbate_cif" in args
+    assert "height" in args
+    assert "site" in args
+
+    # Check specific properties of the site parameter
+    site_param = args["site"]
+
+    # Allow for different valid representations of the type
+    valid_type_patterns = [
+        "list[float] | None",
+        "list[float] | NoneType",
+        "list | None",
+        "list | NoneType",
+    ]
+
+    assert any(site_param.type == pattern for pattern in valid_type_patterns) or (
+        "list" in site_param.type.lower()
+        and ("none" in site_param.type.lower() or "nonetype" in site_param.type.lower())
+    ), f"Type '{site_param.type}' doesn't match any expected pattern"
+
+    assert site_param.default is None
+
+    # Verify the docstring description was properly captured
+    assert "place an adsorbate on a slab" in test_function.description.lower()
+
+    # Test that the tool can be executed
+    result = test_function.execute(
+        slab_cif="sample_slab", adsorbate_cif="sample_adsorbate", height=2.5
+    )
+    assert result == "Test result"
