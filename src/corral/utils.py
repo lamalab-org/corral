@@ -1,12 +1,30 @@
 import inspect
+import types
 from collections.abc import Callable, Sequence
-from typing import get_type_hints
+from typing import Union, get_args, get_origin, get_type_hints
 
 from modal import App, Image, Mount, Secret, Volume
 
 from corral.base import ModalTool, Tool, ToolArgument
 
 MODAL_TOOL_REGISTRY = {}
+
+
+def format_annotation(annotation) -> str:
+    # For classes and simple types having a name
+    if hasattr(annotation, "name"):
+        return annotation.name
+    # Check if it's a union type created with the "|" operator
+    if isinstance(annotation, types.UnionType):
+        args = get_args(annotation)
+        return " | ".join(format_annotation(arg) for arg in args)
+        # Check for unions coming from typing.Union (just in case)
+    origin = get_origin(annotation)
+    if origin is Union:
+        args = get_args(annotation)
+        return " | ".join(format_annotation(arg) for arg in args)
+    # Fallback to the string representation if nothing else applies.
+    return str(annotation)
 
 
 def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
@@ -63,7 +81,11 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
         if arg_name not in type_hints:
             continue  # Skip non-argument sections like Returns
 
-        arg_type = type_hints[arg_name].__name__
+        # arg_type = type_hints[arg_name].__name__
+
+        # Instead of using __name__ directly, use our helper.
+        arg_annotation = type_hints[arg_name]
+        arg_type = format_annotation(arg_annotation)
 
         # Check if argument has default value
         signature = inspect.signature(func)
