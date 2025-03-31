@@ -179,7 +179,7 @@ Required submission format:
                 prompt += f"- {key}: {value}\n"
 
         # Add IO tools description for saving results
-        prompt += "\nIMPORTANT: You have access to filesystem tools which allow you to read and write files. Also ypu can retry many times to get the correct answer. "
+        prompt += "\nIMPORTANT: You have access to filesystem tools which allow you to read and write files. Also you can retry many times to get the correct answer. "
         prompt += "Since some task results will be used in subsequent tasks, make sure to save your results using appropriate filenames. "
         prompt += (
             "This will help you reference and retrieve these files in later tasks."
