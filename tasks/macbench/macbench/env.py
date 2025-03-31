@@ -5,15 +5,45 @@ from chembench.prompter import PrompterBuilder
 from chembench.task import Task
 from dotenv import load_dotenv
 from loguru import logger
-from tools import brave_search, wikipedia_search, wolfram_alpha
+from promptstore import PromptStore
+from tools import (
+    enhanced_brave_search,
+    llm_vision_expert,
+    search_lab_safety,
+    search_ms_guide,
+    search_nmr_guide,
+)
+from utils import (
+    create_vector_database,
+)
 
 from corral.base import Environment
 from corral.server import create_benchmark_server
+from corral.utils import chunk_text
 
 load_dotenv("../.env", override=True)
+store = PromptStore("./prompts")
 
 
-_MACBENCH_TOOLS = [wikipedia_search, brave_search, wolfram_alpha]
+def create_embedding_datasets():
+    """Create embedding datasets for the tools"""
+    lab_safety_guidelines = store.get("314a75ca-c96c-48d9-92e9-0ade5e1ce373")
+    create_vector_database(
+        chunk_text(lab_safety_guidelines.fill({})), "lab_safety_collection"
+    )
+    ms_guidelines = store.get("d8f0ce84-f4aa-4c77-a0da-dba2e054bfff").fill({})
+    create_vector_database([ms_guidelines], "ms_guide_collection")
+    nmr_guidelines = store.get("ee669c37-8a6a-400d-82de-f73cc3a7a175").fill({})
+    create_vector_database([nmr_guidelines], "nmr_guide_collection")
+
+
+_MACBENCH_TOOLS = [
+    search_lab_safety,
+    enhanced_brave_search,
+    search_ms_guide,
+    search_nmr_guide,
+    llm_vision_expert,
+]
 
 
 class Model:
@@ -48,6 +78,7 @@ class MaCBenchEnvironment(Environment):
 
         super().__init__(task_id)
         # Add multiple tools
+        create_embedding_datasets()
         for tool in _MACBENCH_TOOLS:
             self.add_tool(tool)
 

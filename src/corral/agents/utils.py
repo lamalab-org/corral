@@ -33,7 +33,7 @@ def before_sleep_loguru(retry_state):
 
 class LiteLLMMessage(TypedDict, total=False):
     role: str
-    content: str
+    content: str | list
     tool_call_id: str | None
     name: str | None
 

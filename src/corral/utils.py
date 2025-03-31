@@ -5,12 +5,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import get_type_hints
 
+import openai
 from modal import App, Image, Mount, Secret, Volume
 
 from corral.agents.utils import LiteLLMMessage
 from corral.base import ModalTool, Tool, ToolArgument
 
 MODAL_TOOL_REGISTRY = {}
+
+openai_client = openai.Client()
 
 
 def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
@@ -324,3 +327,47 @@ def save_agent_messages(
         )
 
     return file_path
+
+
+def embed_text(
+    chunks: list, model: str = "text-embedding-3-small"
+) -> list[list[float]]:
+    """
+    Embed a list of text chunks using the specified model.
+    Args:
+        chunks: List of text chunks to embed
+        model: Model to use for embeddings. Default: "text-embedding-3-small"
+
+    Returns:
+        List of embeddings, each corresponding to a chunk
+
+    Raises:
+        ValueError: If chunks is not a non-empty list of strings
+    """
+    if (
+        not chunks
+        or not isinstance(chunks, list)
+        or not all(isinstance(chunk, str) for chunk in chunks)
+    ):
+        raise ValueError("Input must be a non-empty list of strings")
+
+    result_embeddings = openai_client.embeddings.create(
+        model=model,
+        input=chunks,
+    )
+    return [item.embedding for item in result_embeddings.data]
+
+
+def chunk_text(text: str) -> list[str]:
+    """
+    Split a long text into smaller chunks based on the number of tokens.
+    Args:
+        text: The text to be split into chunks
+
+    Returns:
+        List of text chunks
+    """
+    if not text or not isinstance(text, str):
+        raise ValueError("Input must be a non-empty string")
+
+    return [chunk.strip() for chunk in text.split("\n")]
