@@ -18,10 +18,7 @@ def format_type_annotation(annotation):
 
     # Handle basic types
     if isinstance(annotation, type):
-        if annotation is type(None):
-            return "None"
-        return annotation.__name__
-
+        return "None" if annotation is type(None) else annotation.__name__
     # Handle new-style union (str | int)
     if isinstance(annotation, type | type(None)):
         return annotation.__name__
