@@ -27,7 +27,6 @@ from corral.agents.utils import (
     llm_tool_call,
 )
 from corral.base import Tool, ToolArgument
-from corral.evaluate import BenchmarkInterface
 from corral.io import (
     CatFilesTool,
     CopyFileTool,
@@ -46,19 +45,12 @@ arxiv = ArxivQueryRun(api_wrapper=ArxivAPIWrapper())
 class MPAgent(ABC):
     def __init__(
         self,
-        model: str,
-        interface: BenchmarkInterface,
-        task_id: str,
         max_iterations: int = 3,
-        api_endpoint: str | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.0,
         **kwargs,
     ):
-        self.model = model
-        self.interface = interface
-        self.task_id = task_id
+        self.model = "openai/gpt-4o"
         self.max_iterations = max_iterations
-        self.api_endpoint = api_endpoint
         self.temperature = temperature
         self.prompt_store = PromptStore("./prompts")
         self.kwargs = kwargs
@@ -146,14 +138,15 @@ class MPAgent(ABC):
                     function_name = action
                     function_args = json.loads(response.get("action_input"))
                     try:
-                        function_call = str(
-                            self.interface.execute_tool(
-                                self.task_id, function_name, json.dumps(function_args)
-                            )
+                        tool = next(
+                            (t for t in self.tools if t.name == function_name), None
                         )
+                        if tool:
+                            function_call = str(tool.execute(**function_args))
+                        else:
+                            function_call = f"Error: Tool '{function_name}' not found"
                     except Exception as e:
                         function_call = f"Error: {e}"
-
                     messages.append(
                         LiteLLMMessage(
                             role="tool",
@@ -259,60 +252,15 @@ def create_tools() -> dict[str, Tool]:
         "file_info": FileInfoTool(fs_manager),
         "cat_files": CatFilesTool(fs_manager),
         "copy_file": CopyFileTool(fs_manager),
-        "MP_thermo_expert": MPThermoExpert(
-            model=self.model,
-            interface=interface,
-            task_id=task_id,
-            kwargs=self.kwargs,
-        ).as_tool(),
-        "MP_elasticity_expert": MPElasticityExpert(
-            model=self.model,
-            interface=interface,
-            task_id=task_id,
-            kwargs=self.kwargs,
-        ).as_tool(),
-        "MP_dielectric_expert": MPDielectricExpert(
-            model=self.model,
-            interface=interface,
-            task_id=task_id,
-            kwargs=self.kwargs,
-        ).as_tool(),
-        "MP_magnetism_expert": MPMagnetismExpert(
-            model=self.model,
-            interface=interface,
-            task_id=task_id,
-            kwargs=self.kwargs,
-        ).as_tool(),
-        "MP_electronic_expert": MPElectronicExpert(
-            model=self.model,
-            interface=interface,
-            task_id=task_id,
-            kwargs=self.kwargs,
-        ).as_tool(),
-        "MP_piezoelectronic_expert": MPPiezoelectricExpert(
-            model=self.model,
-            interface=interface,
-            task_id=task_id,
-            kwargs=self.kwargs,
-        ).as_tool(),
-        "MP_summary_expert": MPSummaryExpert(
-            model=self.model,
-            interface=interface,
-            task_id=task_id,
-            kwargs=self.kwargs,
-        ).as_tool(),
-        "MP_synthesis_expert": MPSynthesisExpert(
-            model=self.model,
-            interface=interface,
-            task_id=task_id,
-            kwargs=self.kwargs,
-        ).as_tool(),
-        "MP_structure_retriever": MPStructureRetriever(
-            model=self.model,
-            interface=interface,
-            task_id=task_id,
-            kwargs=self.kwargs,
-        ).as_tool(),
+        "MP_thermo_expert": MPThermoExpert().as_tool(),
+        "MP_elasticity_expert": MPElasticityExpert().as_tool(),
+        "MP_dielectric_expert": MPDielectricExpert().as_tool(),
+        "MP_magnetism_expert": MPMagnetismExpert().as_tool(),
+        "MP_electronic_expert": MPElectronicExpert().as_tool(),
+        "MP_piezoelectronic_expert": MPPiezoelectricExpert().as_tool(),
+        "MP_summary_expert": MPSummaryExpert().as_tool(),
+        "MP_synthesis_expert": MPSynthesisExpert().as_tool(),
+        "MP_structure_retriever": MPStructureRetriever().as_tool(),
         "arxiv": arxiv,
         "wikipedia": wikipedia,
         "Python_REPL_tool": PythonREPLTool(),
