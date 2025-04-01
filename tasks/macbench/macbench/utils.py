@@ -31,7 +31,7 @@ def vector_database_search(
         )
 
     try:
-        client = chromadb.PersistentClient(path=persist_directory)
+        client = chromadb.PersistentClient(path=str(persist_directory))
 
         try:
             collection = client.get_collection(name=collection_name)
@@ -83,28 +83,28 @@ def create_vector_database(
         ValueError: If OPENAI_API_KEY environment variable is not set
     """
 
-    embeddings = embed_text(
-        chunks=chunks,
-    )
-
     persist_directory = Path(Path.cwd()) / "vector_db"
     persist_directory.mkdir(parents=True, exist_ok=True)
 
-    client = chromadb.PersistentClient(path=persist_directory)
+    client = chromadb.PersistentClient(path=str(persist_directory))
 
     try:
-        # Remove old collection if it exists
-        collection = client.get_collection(name=collection_name)
-        client.delete_collection(name=collection_name)
-    except Exception:
-        pass
+        if collection_name in client.list_collections():
+            client.delete_collection(name=collection_name)
 
-    collection = client.create_collection(name=collection_name)
+        collection = client.create_collection(name=collection_name)
 
-    collection.add(
-        embeddings=embeddings,
-        documents=chunks,
-        ids=[f"id_{i}" for i in range(len(chunks))],
-    )
+        embeddings = embed_text(
+            chunks=chunks,
+        )
 
-    return f"Successfully created vector database with {len(chunks)} instructions in collection '{collection_name}'."
+        collection.add(
+            embeddings=embeddings,
+            documents=chunks,
+            ids=[f"id_{i}" for i in range(len(chunks))],
+        )
+
+        return f"Successfully created vector database with {len(chunks)} instructions in collection '{collection_name}'."
+
+    except Exception as e:
+        raise RuntimeError(f"Error creating vector database: {e!s}") from e

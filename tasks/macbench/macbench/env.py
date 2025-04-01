@@ -92,7 +92,6 @@ class MaCBenchEnvironment(Environment):
 
         super().__init__(task_id)
         # Add multiple tools
-        create_embedding_datasets()
         for tool in _MACBENCH_TOOLS:
             self.add_tool(tool)
 
@@ -161,7 +160,8 @@ class MaCBenchEnvironment(Environment):
 
 def get_all_tasks(benchmark: ChemBenchmark) -> list[Task]:
     tasks = []
-    for topic in benchmark.registry.get_all_topics():
+    topics = benchmark.registry.get_all_topics()
+    for _i, topic in enumerate(topics, 1):
         questions = benchmark.registry.get_topic(topic)
         tasks.extend(questions.tasks)
     return tasks
@@ -177,6 +177,7 @@ def main():
     )
     tasks = get_all_tasks(benchmark)
 
+    create_embedding_datasets()
     environments = {}
     for task in tasks:
         environments[task._uuid] = MaCBenchEnvironment(
