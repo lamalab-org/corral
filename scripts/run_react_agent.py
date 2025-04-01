@@ -13,9 +13,7 @@ def setup_litellm():
     litellm.set_verbose = True
 
 
-def run_benchmark(
-    model: str = "anthropic/claude-3-haiku-20240307", task_ids: list | None = None
-):
+def run_benchmark(model: str = "openai/gpt-4o", task_ids: list | None = None):
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()

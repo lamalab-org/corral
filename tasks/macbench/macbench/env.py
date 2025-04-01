@@ -1,3 +1,6 @@
+import os
+from typing import Any
+
 import uvicorn
 from chembench.baseline import Generation, Generations
 from chembench.evaluate import ChemBenchmark
@@ -25,11 +28,21 @@ from utils import (
 )
 
 from corral.base import Environment
+from corral.io import (
+    CatFilesTool,
+    CopyFileTool,
+    FileInfoTool,
+    FSManager,
+    ListFilesTool,
+    ReadFileTool,
+    WriteFileTool,
+)
 from corral.server import create_benchmark_server
 from corral.utils import chunk_text
 
 load_dotenv("../.env", override=True)
 store = PromptStore("./prompts")
+BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
 
 
 def create_embedding_datasets():
@@ -80,6 +93,7 @@ class MaCBenchEnvironment(Environment):
         tasks: list[Task],
         benchmark: ChemBenchmark,
         prompter: PrompterBuilder,
+        tools: dict[str, Any] | None,
     ):
         self.task_id = task_id
         self.tasks = tasks
@@ -93,6 +107,8 @@ class MaCBenchEnvironment(Environment):
         super().__init__(task_id)
         # Add multiple tools
         for tool in _MACBENCH_TOOLS:
+            self.add_tool(tool)
+        for tool in tools.values():
             self.add_tool(tool)
 
     def get_task_prompt(self) -> str:
@@ -115,9 +131,6 @@ class MaCBenchEnvironment(Environment):
             self.all_prompts.extend(prompts)
             self.all_score_maps.extend(score_maps)
             current_idx += len(prompts)
-
-        if len(self.all_prompts) != 1:
-            raise ValueError("Only one prompt per task is supported")
 
         return f"\n\nSolve this problem: {prompts[0][0]["content"]}"
 
@@ -175,13 +188,24 @@ def main():
         model=Model(),
         prompt_type="multimodal_instruction",
     )
+    fs_manager = FSManager("file", base_path=BASE_WORK_DIR)
+
+    fs_tools = {
+        "list_files": ListFilesTool(fs_manager),
+        "read_file": ReadFileTool(fs_manager),
+        "write_file": WriteFileTool(fs_manager),
+        "file_info": FileInfoTool(fs_manager),
+        "cat_files": CatFilesTool(fs_manager),
+        "copy_file": CopyFileTool(fs_manager),
+    }
+
     tasks = get_all_tasks(benchmark)
 
     create_embedding_datasets()
     environments = {}
     for task in tasks:
         environments[task._uuid] = MaCBenchEnvironment(
-            task._uuid, [task], benchmark, prompter
+            task._uuid, [task], benchmark, prompter, tools=fs_tools
         )
 
     # Create and run server
