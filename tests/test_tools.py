@@ -269,21 +269,12 @@ def test_integration_with_actual_docstring():
 
     # Check specific properties of the site parameter
     site_param = args["site"]
+    expected_type = format_type_annotation(list[float] | None)
 
-    # Allow for different valid representations of the type
-    valid_type_patterns = [
-        "list[float] | None",
-        "list[float] | NoneType",
-        "list | None",
-        "list | NoneType",
-    ]
-
-    assert any(site_param.type == pattern for pattern in valid_type_patterns) or (
-        "list" in site_param.type.lower()
-        and ("none" in site_param.type.lower() or "nonetype" in site_param.type.lower())
-    ), f"Type '{site_param.type}' doesn't match any expected pattern"
-
-    assert site_param.default is None
+    # Then make the assertion strict
+    assert (
+        site_param.type == expected_type
+    ), f"Expected type '{expected_type}', got '{site_param.type}'"
 
     # Verify the docstring description was properly captured
     assert "place an adsorbate on a slab" in test_function.description.lower()
