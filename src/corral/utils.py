@@ -3,7 +3,7 @@ import json
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import get_type_hints
+from typing import Optional, Union, get_args, get_origin, get_type_hints
 
 from modal import App, Image, Mount, Secret, Volume
 
@@ -13,8 +13,56 @@ from corral.base import ModalTool, Tool, ToolArgument
 MODAL_TOOL_REGISTRY = {}
 
 
+def format_type_annotation(annotation):
+    """Formats type annotations to readable strings."""
+
+    # Handle basic types
+    if isinstance(annotation, type):
+        return "None" if annotation is type(None) else annotation.__name__
+    # Handle new-style union (str | int)
+    if isinstance(annotation, type | type(None)):
+        return annotation.__name__
+
+    # Handle new-style unions using '|'
+    if get_origin(annotation) is Union:
+        args = [format_type_annotation(arg) for arg in get_args(annotation)]
+        return " | ".join(args).replace("NoneType", "None")
+
+    # Handle old-style unions (Union[str, int])
+    if hasattr(annotation, "__origin__") and annotation.__origin__ is Union:
+        args = [format_type_annotation(arg) for arg in annotation.__args__]
+        return " | ".join(args).replace("NoneType", "None")
+
+    # Handle Optional (which is Union[T, None])
+    if annotation is Optional:
+        return f"{format_type_annotation(annotation.__args__[0])} | None"
+
+    # Handle generic types like list, dict, etc.
+    if hasattr(annotation, "__origin__"):
+        origin = format_type_annotation(annotation.__origin__)
+        args = ", ".join(format_type_annotation(arg) for arg in annotation.__args__)
+        return f"{origin}[{args}]"
+
+    # Fallback to string representation for unknown types
+    return str(annotation)
+
+
 def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
-    """Parse function docstring to get description and arguments"""
+    """Parse function docstring to get description and arguments.
+
+    This function extracts the description and arguments from a function's docstring.
+    It expects a docstring with a description section and an Args section.
+
+    Args:
+        func: The function to parse docstring from
+
+    Returns:
+        tuple: (description, arguments) where description is a string and
+               arguments is a list of ToolArgument objects
+
+    Raises:
+        ValueError: If the docstring is missing or doesn't have an Args section
+    """
     doc = inspect.getdoc(func)
     if not doc:
         raise ValueError(f"Function {func.__name__} must have a docstring")
@@ -67,7 +115,8 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
         if arg_name not in type_hints:
             continue  # Skip non-argument sections like Returns
 
-        arg_type = type_hints[arg_name].__name__
+        arg_annotation = type_hints[arg_name]
+        arg_type = format_type_annotation(arg_annotation)
 
         # Check if argument has default value
         signature = inspect.signature(func)
