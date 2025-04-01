@@ -103,7 +103,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         return {"trials": env.trial_states}
 
     @app.get("/tasks/{task_id}/trials/{trial_id}")
-    def get_trial(task_id: str, trial_id: str):
+    def get_trial_state(task_id: str, trial_id: str):
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
         env = environments[task_id]
