@@ -82,9 +82,7 @@ def check_mp_structure(path_or_cif: str) -> float:
         else:
             structure = Structure.from_str(path_or_cif, fmt="cif")
 
-        if structure and len(structure) > 0:
-            return 1.0  # Valid structure
-        return 0.0  # Invalid structure
+        return 1.0 if structure and len(structure) > 0 else 0.0
     except Exception as e:
         logger.error(f"Error validating structure: {e}")
         return 0.0
