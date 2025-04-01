@@ -9,13 +9,10 @@ Only modifications to fit our environment were made while preserving the origina
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from emmet.core.summary import HasProps
-    from pymatgen.analysis.magnetism.analyzer import Ordering
+from emmet.core.summary import HasProps  # noqa: TCH002
 from emmet.core.thermo import ThermoType
 from pydantic import BaseModel, Field
+from pymatgen.analysis.magnetism.analyzer import Ordering  # noqa: TCH002
 
 
 class SummarySchema(BaseModel):

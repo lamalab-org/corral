@@ -20,11 +20,12 @@ from llamp_tools import (
     MaterialsSynthesis,
     MaterialsThermo,
 )
+from loguru import logger
 from promptstore import PromptStore
 
 from corral.agents.utils import (
     LiteLLMMessage,
-    llm_tool_call,
+    llm_call,
 )
 from corral.base import Tool, ToolArgument
 from corral.io import (
@@ -63,26 +64,28 @@ class MPAgent(ABC):
     def description(self) -> str | None:
         return self.__doc__
 
-    @abstractmethod
     @property
+    @abstractmethod
     def tools(self):
         return []
 
-    def as_tool(
-        self,
-    ) -> Tool:
-        def execute(input_question: str):
+    def as_tool(self) -> Tool:
+        def execute(**args):
             try:
-                result, messages = self.run_agent(input_question)
-                return result, messages
+                return "0,0"
+                input_question = args.get("input_question")
+                logger.info(
+                    f"Running {self.__class__.__name__} with input: {input_question}"
+                )
+                result, _ = self.run_agent(input_question)
+                return result
             except Exception as e:
-                error_response = (
-                    f"Error on {self.__class__.__name__}: {e}. "
+                logger.error(f"Error in {self.__class__.__name__}: {e}")
+                raise RuntimeError(
+                    f"Error in {self.__class__.__name__}: {e}. "
                     "Please decompose the request into multiple smaller requests "
                     "or specify 'limit' in request."
-                )
-                _ = []
-                return error_response, messages
+                ) from e
 
         return Tool(
             name=self.name,
@@ -97,6 +100,7 @@ class MPAgent(ABC):
         )
 
     def run_agent(self, input_question: str) -> str:
+        logger.info(f"Running {self.__class__.__name__} with input: {input_question}")
         env_tools = {"tools": []}
 
         for tool in self.tools:
@@ -120,8 +124,9 @@ class MPAgent(ABC):
         messages.append(LiteLLMMessage(role="user", content=user))
 
         for _i in range(self.max_iterations):
+            logger.info(f"Iteration {_i + 1} of {self.max_iterations}")
             try:
-                response = json.loads(llm_tool_call(messages))
+                response = json.loads(llm_call(messages))
             except Exception as e:
                 response = f"Error: {e}"
                 messages.append(LiteLLMMessage(role="assistant", content=response))
