@@ -1,34 +1,68 @@
 import inspect
-import types
+import json
 from collections.abc import Callable, Sequence
-from typing import Union, get_args, get_origin, get_type_hints
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional, Union, get_args, get_origin, get_type_hints
 
 from modal import App, Image, Mount, Secret, Volume
 
+from corral.agents.utils import LiteLLMMessage
 from corral.base import ModalTool, Tool, ToolArgument
 
 MODAL_TOOL_REGISTRY = {}
 
 
-def format_annotation(annotation) -> str:
-    # For classes and simple types having a name
-    if hasattr(annotation, "name"):
-        return annotation.name
-    # Check if it's a union type created with the "|" operator
-    if isinstance(annotation, types.UnionType):
-        args = get_args(annotation)
-        return " | ".join(format_annotation(arg) for arg in args)
-        # Check for unions coming from typing.Union (just in case)
-    origin = get_origin(annotation)
-    if origin is Union:
-        args = get_args(annotation)
-        return " | ".join(format_annotation(arg) for arg in args)
-    # Fallback to the string representation if nothing else applies.
+def format_type_annotation(annotation):
+    """Formats type annotations to readable strings."""
+
+    # Handle basic types
+    if isinstance(annotation, type):
+        return "None" if annotation is type(None) else annotation.__name__
+    # Handle new-style union (str | int)
+    if isinstance(annotation, type | type(None)):
+        return annotation.__name__
+
+    # Handle new-style unions using '|'
+    if get_origin(annotation) is Union:
+        args = [format_type_annotation(arg) for arg in get_args(annotation)]
+        return " | ".join(args).replace("NoneType", "None")
+
+    # Handle old-style unions (Union[str, int])
+    if hasattr(annotation, "__origin__") and annotation.__origin__ is Union:
+        args = [format_type_annotation(arg) for arg in annotation.__args__]
+        return " | ".join(args).replace("NoneType", "None")
+
+    # Handle Optional (which is Union[T, None])
+    if annotation is Optional:
+        return f"{format_type_annotation(annotation.__args__[0])} | None"
+
+    # Handle generic types like list, dict, etc.
+    if hasattr(annotation, "__origin__"):
+        origin = format_type_annotation(annotation.__origin__)
+        args = ", ".join(format_type_annotation(arg) for arg in annotation.__args__)
+        return f"{origin}[{args}]"
+
+    # Fallback to string representation for unknown types
     return str(annotation)
 
 
 def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
-    """Parse function docstring to get description and arguments"""
+    """Parse function docstring to get description and arguments.
+
+    This function extracts the description and arguments from a function's docstring.
+    It expects a docstring with a description section and an Args section.
+
+    Args:
+        func: The function to parse docstring from
+
+    Returns:
+        tuple: (description, arguments) where description is a string and
+               arguments is a list of ToolArgument objects
+
+    Raises:
+        ValueError: If the docstring is missing or doesn't have an Args section
+    """
     doc = inspect.getdoc(func)
     if not doc:
         raise ValueError(f"Function {func.__name__} must have a docstring")
@@ -81,11 +115,8 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
         if arg_name not in type_hints:
             continue  # Skip non-argument sections like Returns
 
-        # arg_type = type_hints[arg_name].__name__
-
-        # Instead of using __name__ directly, use our helper.
         arg_annotation = type_hints[arg_name]
-        arg_type = format_annotation(arg_annotation)
+        arg_type = format_type_annotation(arg_annotation)
 
         # Check if argument has default value
         signature = inspect.signature(func)
@@ -259,3 +290,86 @@ def modal_tool(
         return modal_func
 
     return decorator
+
+
+def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
+    """
+    Serialize LiteLLMMessage objects to a format that can be saved to a JSON file.
+
+    Args:
+        messages (List[LiteLLMMessage]): The messages to serialize.
+
+    Returns:
+        List[Dict]: The serialized messages.
+    """
+    serializable_messages = []
+    for msg in messages:
+        if isinstance(msg, dict):
+            message_dict = msg.copy()
+        else:
+            message_dict = {"role": msg.role, "content": msg.content}
+
+            if hasattr(msg, "tool_call_id") and msg.tool_call_id:
+                message_dict["tool_call_id"] = msg.tool_call_id
+            if hasattr(msg, "name") and msg.name:
+                message_dict["name"] = msg.name
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                message_dict["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in msg.tool_calls
+                ]
+
+        serializable_messages.append(message_dict)
+
+    return serializable_messages
+
+
+def save_agent_messages(
+    messages: list[LiteLLMMessage],
+    task_id: str,
+    agent_name: str,
+    output_dir: str = "agent_logs",
+) -> str:
+    """Save agent conversation to a JSON file for logging and analysis purposes.
+
+    This function handles both regular dictionaries and LiteLLMMessage objects,
+    properly serializing them for storage.
+
+    Args:
+        messages: List of message objects (LiteLLMMessages or dictionaries)
+        task_id: The ID of the task being solved
+        agent_name: The name of the agent that generated the messages
+        output_dir: Directory to save the logs (will be created if it doesn't exist)
+
+    Returns:
+        str: Path to the saved file
+    """
+    Path(output_dir).mkdir(exist_ok=True, parents=True)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"{task_id}_{timestamp}.json"
+    file_path = Path(output_dir) / filename
+
+    # Convert messages to serializable format
+    serializable_messages = serialize_messages(messages)
+
+    # Write to file with metadata and pretty formatting
+    with Path(file_path).open("w") as f:
+        json.dump(
+            {
+                "task_id": task_id,
+                "agent": agent_name,
+                "timestamp": timestamp,
+                "messages": serializable_messages,
+            },
+            f,
+            indent=2,
+        )
+
+    return file_path
