@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import modal
 import numpy as np
@@ -159,44 +160,47 @@ def llm_vision_expert(query: str, image_path: str) -> str:
     # Ideally we would like to use the latest model
     model = "gpt-4o-2024-11-20"
 
-    with Path(image_path).open("rb") as f:
-        image_bytes = f.read()
+    try:
+        with Path(image_path).open("rb") as f:
+            image_bytes = f.read()
 
-    system_prompt = store.get("9c471e7f-7bbd-4ef4-8068-bf66e838e590")
-    system_prompt = system_prompt.fill({})
-    user_prompt = [
-        {
-            "type": "image",
-            "content": image_bytes,
-        },
-        {
-            "type": "text",
-            "content": f"Query: {query}",
-        },
-    ]
-    messages = [
-        LiteLLMMessage(role="system", content=system_prompt),
-        LiteLLMMessage(role="user", content=user_prompt),
-    ]
-    # str to avoid typing warnings
-    return str(
-        llm_call(
-            model=model,
-            messages=messages,
-            temperature=0.0,
+        system_prompt = store.get("9c471e7f-7bbd-4ef4-8068-bf66e838e590")
+        system_prompt = system_prompt.fill({})
+        user_prompt = [
+            {
+                "type": "image",
+                "content": image_bytes,
+            },
+            {
+                "type": "text",
+                "content": f"Query: {query}",
+            },
+        ]
+        messages = [
+            LiteLLMMessage(role="system", content=system_prompt),
+            LiteLLMMessage(role="user", content=user_prompt),
+        ]
+        # str to avoid typing warnings
+        return str(
+            llm_call(
+                model=model,
+                messages=messages,
+                temperature=0.0,
+            )
         )
-    )
+    except Exception as e:
+        return f"Error while extracting data: {e}"
 
 
 @modal_tool(
     app=app,
     image=Image.debian_slim().pip_install("transformers", "PIL"),
-    gpu="A100",
+    gpu="A100-40GB",
     volumes={
         "/root/.cache/huggingface": hf_cache_vol,
     },
 )
-def deplot_image_extractor_modal(image_bytes: bytes):
+def deplot_image_extractor_modal(image_bytes: bytes) -> str:
     """
     Extract data from charts and plots using Google's Deplot model on Modal servers.
 
@@ -211,26 +215,29 @@ def deplot_image_extractor_modal(image_bytes: bytes):
     from PIL import Image
     from transformers import Pix2StructForConditionalGeneration, Pix2StructProcessor
 
-    processor = Pix2StructProcessor.from_pretrained("google/deplot")
-    model = Pix2StructForConditionalGeneration.from_pretrained("google/deplot")
+    try:
+        processor = Pix2StructProcessor.from_pretrained("google/deplot")
+        model = Pix2StructForConditionalGeneration.from_pretrained("google/deplot")
 
-    image = Image.open(io.BytesIO(image_bytes))
+        image = Image.open(io.BytesIO(image_bytes))
 
-    inputs = processor(
-        images=image,
-        text="Generate underlying data table of the figure below:",
-        return_tensors="pt",
-    )
-    predictions = model.generate(**inputs)
+        inputs = processor(
+            images=image,
+            text="Generate underlying data table of the figure below:",
+            return_tensors="pt",
+        )
+        predictions = model.generate(**inputs)
 
-    return processor.decode(predictions[0], skip_special_tokens=True)
+        return str(processor.decode(predictions[0], skip_special_tokens=True))
+    except Exception as e:
+        return f"Error while extracting data: {e}"
 
 
 deplot_image_extractor_remote = MODAL_TOOL_REGISTRY["deplot_image_extractor_modal"]
 
 
 @tool
-def deplot_image_extractor(image_path: str):
+def deplot_image_extractor(image_path: str) -> str:
     """
     Extract data from charts and plots using Google's Deplot model.
     Ideally the response of this tool should be used compared to the
@@ -257,13 +264,13 @@ def deplot_image_extractor(image_path: str):
 @modal_tool(
     app=app,
     image=Image.debian_slim().pip_install("transformers==4.31.0", "torch==2.1.0"),
-    gpu="A100",
+    gpu="A100-40GB",
     volumes={
         "/root/.cache/huggingface": hf_cache_vol,
     },
     scaledown_window=1200,
 )
-def chart_vllm_bytes(query: str, image_bytes: bytes):
+def chart_vllm_bytes(query: str, image_bytes: bytes) -> str:
     """
     Analyze charts and plots using the ChartVLM model.
 
@@ -282,26 +289,29 @@ def chart_vllm_bytes(query: str, image_bytes: bytes):
 
     model_name = "U4R/ChartVLM-large"
 
-    processor = AutoProcessor.from_pretrained(model_name)
-    model = AutoModelForVision2Seq.from_pretrained(model_name)
+    try:
+        processor = AutoProcessor.from_pretrained(model_name)
+        model = AutoModelForVision2Seq.from_pretrained(model_name)
 
-    image = Image.open(io.BytesIO(image_bytes))
+        image = Image.open(io.BytesIO(image_bytes))
 
-    inputs = processor(images=image, text=query, return_tensors="pt")
+        inputs = processor(images=image, text=query, return_tensors="pt")
 
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs, max_length=512, num_beams=3, early_stopping=True
-        )
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs, max_length=512, num_beams=3, early_stopping=True
+            )
 
-    return processor.decode(outputs[0], skip_special_tokens=True)
+        return str(processor.decode(outputs[0], skip_special_tokens=True))
+    except Exception as e:
+        return f"Error while extracting data: {e}"
 
 
 chart_vllm_bytes_remote = MODAL_TOOL_REGISTRY["chart_vllm_bytes"]
 
 
 @tool
-def chart_vllm_local(query: str, image_path: str):
+def chart_vllm_extractor(query: str, image_path: str) -> str:
     """
     Analyze charts and plots using the ChartVLM model.
     Ideally the response of this tool should be used compared to the
@@ -331,10 +341,10 @@ def chart_vllm_local(query: str, image_path: str):
     image=Image.debian_slim()
     .apt_install("tesseract-ocr")
     .pip_install("pytesseract", "opencv-python", "Pillow"),
-    gpu=None,
+    gpu="A10G",
     memory=1024,
 )
-def extract_table_text_modal(image_bytes: bytes, lang: str = "eng"):
+def extract_table_text_modal(image_bytes: bytes, lang: str = "eng") -> str:
     """
     Extract text from images containing tables using OCR (pyTesseract).
 
@@ -379,14 +389,14 @@ def extract_table_text_modal(image_bytes: bytes, lang: str = "eng"):
 
         return f"Raw Extracted Text:\n{extracted_text}\n\n{structured_text}"
     except Exception as e:
-        return f"Extracted Text:\n{extracted_text}\nError: {e}"
+        return f"Error while extracting text: {e}"
 
 
 extract_table_text_remote = MODAL_TOOL_REGISTRY["extract_table_text_modal"]
 
 
 @tool
-def extract_table_text(image_path: str, lang: str = "eng"):
+def extract_table_text(image_path: str, lang: str = "eng") -> str:
     """
     Extract text from images containing tables using OCR (pyTesseract).
     Ideally the response of this tool should be used compared to the
@@ -472,16 +482,14 @@ def rxnscribe_reaction_extraction(image_path: str) -> list[dict]:
 
 # Tool from AILA (arXiv:2501.10385)
 @tool
-def Image_Analyzer(
+def afm_image_analyzer(
     image_path: str,
     calculate_friction: bool = False,
     calculate_mean_roughness: bool = False,
     calculate_rms_roughness: bool = False,
-):
+) -> dict[str, str | Any]:
     """
-    Display and return the image data from the given path. If a filename is provided, return the image data
-    from that specific file. If no filename is provided, return the image data from the latest image file
-    in the directory. If dynamic_code is provided, it will be executed to process the image data. Don not install any Python library or any software.
+    Display and return the image data from the given path of an AFM image.
 
     Additionally, calculate the following if requested:
     - Average Friction
@@ -495,7 +503,7 @@ def Image_Analyzer(
         calculate_rms_roughness: Whether to calculate RMS roughness. Defaults to False.
 
     Returns:
-    - dict: A dictionary containing the status, image data, or an error message.
+    - dict[str, str | Any]: A dictionary containing the status, image data, or an error message.
     """
     try:
         # Read the file

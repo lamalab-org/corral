@@ -7,8 +7,15 @@ from dotenv import load_dotenv
 from loguru import logger
 from promptstore import PromptStore
 from tools import (
+    afm_image_analyzer,
+    chart_vllm_extractor,
+    decimer_molecule_extraction,
+    deplot_image_extractor,
     enhanced_brave_search,
+    extract_table_text,
     llm_vision_expert,
+    molscribe_molecule_extraction,
+    rxnscribe_reaction_extraction,
     search_lab_safety,
     search_ms_guide,
     search_nmr_guide,
@@ -43,6 +50,13 @@ _MACBENCH_TOOLS = [
     search_ms_guide,
     search_nmr_guide,
     llm_vision_expert,
+    deplot_image_extractor,
+    chart_vllm_extractor,
+    extract_table_text,
+    decimer_molecule_extraction,
+    molscribe_molecule_extraction,
+    rxnscribe_reaction_extraction,
+    afm_image_analyzer,
 ]
 
 
