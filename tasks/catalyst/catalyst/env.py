@@ -208,32 +208,54 @@ Required submission format:
         logger.info(f"Task prompt for {self.task_id}:\n{prompt}")
         return prompt
 
-    def _rename_dir():
-        pass
-
     def score(self) -> float:
         """Score the submitted answer"""
         if not self.state.submitted_answer:
             return 0.0
 
         try:
-            # Clean the submission - take only the numerical answer part
             submission_str = self.state.submitted_answer.strip()
             logger.info(f"Raw submission: {submission_str}")
 
             # Try to parse as JSON first
             try:
                 submission = json.loads(submission_str)
+
+                # If submission is a dict, look for answer field or alternatives
+                if isinstance(submission, dict):
+                    # Check for alternative keys if "answer" not present
+                    if "answer" not in submission:
+                        # Check for other common keys
+                        possible_keys = ["ans", "answers"]
+                        for key in possible_keys:
+                            if key in submission:
+                                # Map alternative key to "answer"
+                                submission["answer"] = submission[key]
+                                logger.info(
+                                    f"Found alternative key '{key}', mapped to 'answer'"
+                                )
+                                break
+
+                    # Now extract answer for scoring, default to full submission if still no answer key
+                    answer_for_scoring = submission.get("answer", submission_str)
+                else:
+                    # If submission parsed as JSON but is not a dict (e.g., a list or primitive),
+                    # use it directly and wrap in a dict for storage
+                    answer_for_scoring = submission
+                    submission = {"answer": submission}
+
             except json.JSONDecodeError:
-                # If not valid JSON, try to create a simple answer dict
+                # If not valid JSON, use the string directly for scoring
+                # and create a dict for storage
+                answer_for_scoring = submission_str
                 submission = {"answer": submission_str}
 
-            # Store result in task group
+            # Store full result in task group
             logger.info(f"Parsed submission: {submission}")
+            logger.info(f"Using for scoring: {answer_for_scoring}")
 
-            # Extract the answer field for scoring
-            answer = submission.get("answer", submission)
-            score = self.current_task.scoring_fn(answer)
+            # Call the scoring function with the extracted answer
+            score = self.current_task.scoring_fn(answer_for_scoring)
 
             self.task_group.store_result(self.task_id, submission, score)
 
@@ -296,7 +318,7 @@ def create_catalysis_environments(
             ),
             "create_molecule": TaskDefinition(
                 name="Create CO2 Molecule",
-                description="Create a CO2 molecule structure using MP - ID save it as a CIF file. Submit the path to the CIF file.",
+                description="Retrieve CO2 molecule structure using MP - ID save it as a CIF file. Submit the path to the CIF file.",
                 tools=["get_structure_from_mp_text"],
                 scoring_fn=check_mp_structure,
                 submission_format={"answer": "/path/to/co2.cif"},
