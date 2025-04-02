@@ -14,6 +14,7 @@ from score import (
     check_slab_structure,
     check_slabs_json,
 )
+from tools import create_tools
 
 from corral.base import Environment, Tool
 from corral.io import (
@@ -380,8 +381,6 @@ def create_catalysis_environments(
 
     # Create all available tools
     # This assumes you have a function to create the tools
-    from tools import create_tools
-
     available_tools = create_tools()
 
     # Create environments for all tasks

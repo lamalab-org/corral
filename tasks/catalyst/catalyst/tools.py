@@ -21,6 +21,7 @@ def get_structure_from_mp_text(mp_id: str) -> str:
 
     Args:
         mp_id: Materials Project id.
+
     Returns:
         CIF content string.
     """
@@ -52,6 +53,7 @@ def create_slab_from_structure_text(
         min_slab_size: Minimum slab thickness.
         min_vacuum_size: Vacuum distance needed.
         primitive: Whether to create a primitive cell slab.
+
     Returns:
         Slab CIF content as string.
     """
@@ -87,6 +89,7 @@ def enumerate_slabs_text(
         miller_index: Miller index (e.g. (1,1,1)).
         min_slab_size: Minimum slab thickness (Å).
         min_vacuum_size: Minimum vacuum layer (Å).
+
     Returns:
         str: JSON dictionary: {"slab_0": "<cif_string>", "slab_1": "<cif_string>", ...}
     """
@@ -125,6 +128,7 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
     Args:
         slabs_json: JSON string mapping slab keys to CIF strings.
         index: Index of the slab to select (default 0).
+
     Returns:
         str: CIF string for the selected slab.
     """
@@ -145,6 +149,7 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
 
     Args:
         slab_cif: CIF string of the slab.
+
     Returns:
         str: JSON dictionary of adsorption sites. (list of fractional coordinates)
     """
@@ -181,6 +186,7 @@ def choose_adsorption_site_text(
         adsorption_sites_json: JSON string mapping site types to lists of fractional coordinates.
         site_type: Type of the site (e.g. "top", "bridge", "hollow").
         index: Index of the site to select (default 0).
+
     Returns:
         list: Fractional coordinates of the selected site.
     """
@@ -211,6 +217,7 @@ def add_adsorbate_to_slab_text(
         height: Height (Å) above the slab surface where the adsorbate should be placed.
         site: Optional fractional coordinate [x, y, z] for placement.
             If None, the first top site will be used.
+
     Returns:
         str: CIF string of the combined (adsorbate+slab) structure.
     """
@@ -263,6 +270,7 @@ def generate_reconstructed_slab(
         min_slab_size: Minimum slab thickness (Å).
         min_vacuum_size: Minimum vacuum region (Å).
         reconstruction_instructions: JSON string containing the reconstruction instructions.
+
     Returns:
         str: CIF string of the reconstructed slab.
     """
