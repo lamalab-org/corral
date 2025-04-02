@@ -1,4 +1,3 @@
-import shutil
 from pathlib import Path
 
 import chromadb
@@ -85,8 +84,6 @@ def create_vector_database(
     """
 
     persist_directory = Path(Path.cwd()) / "vector_db"
-    if persist_directory.exists():
-        shutil.rmtree(persist_directory)
     persist_directory.mkdir(parents=True, exist_ok=True)
 
     client = chromadb.PersistentClient(path=str(persist_directory))

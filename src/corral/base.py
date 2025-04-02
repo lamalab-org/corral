@@ -190,7 +190,7 @@ class Environment(ABC):
         self.state = TaskState(task_id=task_id, task_prompt=self.get_task_prompt())
 
     @abstractmethod
-    def get_task_prompt(self) -> str:
+    def get_task_prompt(self) -> str | list[dict]:
         """Return the task prompt for the agent"""
 
     @abstractmethod
@@ -208,15 +208,13 @@ class Environment(ABC):
             for t in self.tools.values()
         ]
 
-    def get_environment_guide(self) -> str:
-        """Generate a complete guide for the environment and its tools"""
+    def get_tools_guide(self) -> str:
+        """Generate a guide for the available tools"""
         tools_guide = "\n\n".join(
             tool.get_usage_guide() for tool in self.tools.values()
         )
-        # TODO: make it configurable
-        return f"""Task: {self.get_task_prompt()}
 
-Available Tools:
+        return f"""Available Tools:
 {tools_guide}
 
 How to use tools:
@@ -232,6 +230,16 @@ Example tool call format:
         "arg2": value2
     }}
 }}
+"""
+
+    def get_environment_guide(self) -> str:
+        """Generate a complete guide for the environment and its tools"""
+        tools_guide = self.get_tools_guide()
+
+        # TODO: make it configurable
+        return f"""Task: {self.get_task_prompt()}
+
+{tools_guide}
 """
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:

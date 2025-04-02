@@ -194,7 +194,7 @@ def llm_vision_expert(query: str, image_path: str) -> str:
 
 @modal_tool(
     app=app,
-    image=Image.debian_slim().pip_install("transformers", "PIL"),
+    image=Image.debian_slim().pip_install("transformers", "Pillow"),
     gpu="A100-40GB",
     volumes={
         "/root/.cache/huggingface": hf_cache_vol,
@@ -263,7 +263,7 @@ def deplot_image_extractor(image_path: str) -> str:
 
 @modal_tool(
     app=app,
-    image=Image.debian_slim().pip_install("transformers==4.31.0", "torch==2.1.0"),
+    image=Image.debian_slim().pip_install("transformers", "torch", "Pillow"),
     gpu="A100-40GB",
     volumes={
         "/root/.cache/huggingface": hf_cache_vol,
@@ -340,7 +340,7 @@ def chart_vllm_extractor(query: str, image_path: str) -> str:
     app=app,
     image=Image.debian_slim()
     .apt_install("tesseract-ocr")
-    .pip_install("pytesseract", "opencv-python", "Pillow"),
+    .pip_install("pytesseract", "opencv-python", "Pillow", "numpy"),
     gpu="A10G",
     memory=1024,
 )

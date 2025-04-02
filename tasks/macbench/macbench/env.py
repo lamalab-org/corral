@@ -11,6 +11,7 @@ from loguru import logger
 from promptstore import PromptStore
 from tools import (
     afm_image_analyzer,
+    app,
     chart_vllm_extractor,
     decimer_molecule_extraction,
     deplot_image_extractor,
@@ -111,7 +112,7 @@ class MaCBenchEnvironment(Environment):
         for tool in tools.values():
             self.add_tool(tool)
 
-    def get_task_prompt(self) -> str:
+    def get_task_prompt(self) -> list[dict]:
         current_idx = 0
         for task_idx, task in enumerate(self.tasks):
             if self.prompter.is_mcq(task):
@@ -127,12 +128,11 @@ class MaCBenchEnvironment(Environment):
                     "task_idx": task_idx,
                     "example_idx": i,
                 }
-
             self.all_prompts.extend(prompts)
             self.all_score_maps.extend(score_maps)
             current_idx += len(prompts)
 
-        return f"\n\nSolve this problem: {prompts[0][0]["content"]}"
+        return self.all_prompts[0][0]["content"]
 
     def score(self) -> float:
         """Score based on submitted answer"""
@@ -209,8 +209,9 @@ def main():
         )
 
     # Create and run server
-    app = create_benchmark_server(environments)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    with app.run():
+        server_app = create_benchmark_server(environments)
+        uvicorn.run(server_app, host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":

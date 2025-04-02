@@ -97,7 +97,7 @@ def llm_call(
         raise ValueError(f"Error in LiteLLM API call: {e}") from e
 
 
-def format_examples(examples: list[str]) -> str:
+def format_examples(examples: list[str] | None) -> str:
     """Format few-shot part of the prompt from a list of shots
 
     Args:

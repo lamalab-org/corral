@@ -125,25 +125,56 @@ class ReActAgent:
         return thought, action
 
     def create_prompt(
-        self, task_guide: str, history: list[LiteLLMMessage], examples: list[str]
-    ) -> str:
+        self,
+        task_guide: str | list,
+        history: list[LiteLLMMessage],
+        examples: list[str] | None,
+        tools: str,
+    ) -> list[LiteLLMMessage]:
         """Create prompt for LLM including context and history"""
         limited_history = history[-10:] if len(history) > 10 else history
-        user_prompt = self.user_prompt.fill(
-            {
-                "task_guide": task_guide,
-                "history": str(limited_history),
-                "examples": format_examples(examples),
-            }
+        messages: list[LiteLLMMessage] = []
+        messages.append(
+            LiteLLMMessage(
+                role="system",
+                content=self.system_prompt,
+            )
         )
+        if isinstance(task_guide, list):
+            user_prompt = self.user_prompt.fill(
+                {
+                    "task_guide": f"The task is to correctly answer the question with an image specified below. To solve the task you have available the next tools:\n\n{tools}",
+                    "history": str(limited_history),
+                    "examples": format_examples(examples),
+                }
+            )
+            user_content = [
+                {
+                    "type": "text",
+                    "text": user_prompt,
+                }
+            ]
+            user_content.extend(task_guide)
+        elif isinstance(task_guide, str):
+            user_content = self.user_prompt.fill(
+                {
+                    "task_guide": "Task: " + task_guide,
+                    "history": str(limited_history),
+                    "examples": format_examples(examples),
+                }
+            )
+        else:
+            raise ValueError(
+                f"task_guide should be str or list, got {type(task_guide)}"
+            )
 
-        return [
-            {
-                "role": "system",
-                "content": self.system_prompt,
-            },
-            {"role": "user", "content": user_prompt},
-        ]
+        messages.append(
+            LiteLLMMessage(
+                role="user",
+                content=user_content,
+            )
+        )
+        return messages
 
     def run_agent(
         self,
@@ -165,15 +196,15 @@ class ReActAgent:
         Returns:
             tuple[str, list[LiteLLMMessage]]:: The final answer and messages history
         """
+        if history is None:
+            history = []
         if task_prompt is None:
-            task_guide = interface.get_task_guide(task_id)
+            task_guide = interface.get_task_prompt(task_id)
+            tools = interface.get_tools_guide(task_id)
         else:
             task_guide = task_prompt
 
-        if history is None:
-            history: list[LiteLLMMessage] = []
-
-        messages = self.create_prompt(task_guide, history, examples)
+        messages = self.create_prompt(task_guide, history, examples, tools)
 
         for _iteration in range(self.max_iterations):
             # Create prompt and get LLM response
