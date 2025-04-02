@@ -434,7 +434,7 @@ def decimer_molecule_extraction(image_path: str) -> str:
         String containing the extracted molecule information
     """
     decimer_remote = modal.Function.from_name(
-        "chem-env", "molecule_image_extraction_decimer"
+        "rxnenv", "molecule_image_extraction_decimer"
     )
     with Path(image_path).open("rb") as f:
         image_bytes = f.read()
@@ -455,7 +455,7 @@ def molscribe_molecule_extraction(image_path: str) -> str:
         String containing the extracted molecule information
     """
     molscribe_remote = modal.Function.from_name(
-        "chem-env", "molecule_image_extraction_molscribe"
+        "rxnenv", "molecule_image_extraction_molscribe"
     )
     with Path(image_path).open("rb") as f:
         image_bytes = f.read()
@@ -473,7 +473,7 @@ def rxnscribe_reaction_extraction(image_path: str) -> list[dict]:
     Returns:
         List of dictionaries containing the extracted reaction information
     """
-    rxnscribe_remote = modal.Function.from_name("chem-env", "rxn_schema_extraction")
+    rxnscribe_remote = modal.Function.from_name("rxnenv", "rxn_schema_extraction")
     with Path(image_path).open("rb") as f:
         image_bytes = f.read()
 
