@@ -40,8 +40,12 @@ class TaskDefinition:
     scoring_fn: Callable[[dict | str], float]
     submission_format: dict[str, str]
     # Either use output from another task or custom input
-    input_from_tasks: list[str] = field(default_factory=list)
-    initial_input: dict[str, Any] = field(default_factory=dict)
+    input_from_tasks: list[str] = field(
+        default_factory=list
+    )  # input required from some of the previous tasks in the group
+    initial_input: dict[str, Any] = field(
+        default_factory=dict
+    )  # initial input for the task, if required
 
     # Helper method to check if task has dependencies
     def has_dependencies(self) -> bool:
@@ -114,7 +118,10 @@ class TaskGroup:
         if not task:
             return False
 
-        return all(dep_task_id in self.results for dep_task_id in task.input_from_tasks)
+        return all(
+            dep_task_id in self.results and self.results[dep_task_id] is not None
+            for dep_task_id in task.input_from_tasks
+        )
 
 
 class TaskEnvironment(Environment):
