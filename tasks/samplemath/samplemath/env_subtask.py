@@ -1,63 +1,11 @@
 import json
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Any
 
 import uvicorn
 from loguru import logger
-from tools import create_tools
+from tools import UnitConverterTool, app, calculator, number_converter
 
-from corral.base import Environment, Tool
+from corral.base import Environment, TaskDefinition, TaskGroup, Tool
 from corral.server import create_benchmark_server
-
-
-@dataclass
-class TaskDefinition:
-    """Definition of a task with its requirements and scoring"""
-
-    name: str
-    description: str
-    tools: list[str]
-    scoring_fn: Callable[[dict], float]
-    submission_format: dict[str, str]
-    # Either use output from another task or custom input
-    input_from_task: str | None = None
-    initial_input: dict[str, Any] | None = None
-
-
-@dataclass
-class TaskGroup:
-    """Container for related tasks"""
-
-    group_id: str
-    tasks: dict[str, TaskDefinition]
-    results: dict[str, Any] = field(default_factory=dict)
-    scores: dict[str, float] = field(default_factory=dict)
-
-    def get_task_input(self, task_id: str) -> dict[str, Any] | None:
-        """Get input for a task either from another task or initial input"""
-        task = self.tasks.get(task_id)
-        if not task:
-            return None
-
-        if task.input_from_task and task.input_from_task in self.results:
-            return {"result": self.results[task.input_from_task]}
-        return task.initial_input
-
-    def store_result(self, task_id: str, result: dict[str, Any], score: float) -> None:
-        """Store task result and score"""
-        self.results[task_id] = result
-        self.scores[task_id] = score
-
-    def get_task_dependencies(self) -> dict[str, list[str]]:
-        """Get dictionary of task dependencies"""
-        dependencies = {}
-        for task_id, task in self.tasks.items():
-            deps = []
-            if task.input_from_task:
-                deps.append(task.input_from_task)
-            dependencies[task_id] = deps
-        return dependencies
 
 
 class TaskEnvironment(Environment):
@@ -193,7 +141,11 @@ def create_catalysis_environments() -> dict[str, Environment]:
         logger.info(f"- {task_id}: depends on {deps}")
 
     # Create environments for all tasks
-    available_tools = create_tools()
+    available_tools = {
+        "calculator": calculator,
+        "unit_converter": UnitConverterTool(),
+        "number_converter": number_converter,
+    }
     environments = {}
 
     for task_id in task_group.tasks:
