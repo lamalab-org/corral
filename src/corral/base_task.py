@@ -204,7 +204,10 @@ class TaskEnvironment(Environment):
             logger.info(f"Parsed submission: {submission}")
 
             # Extract the answer field for scoring
-            answer = submission.get("answer", submission)
+            try:
+                answer = submission.get("answer", submission)
+            except Exception:
+                answer = submission_str
 
             # Pass additional scoring inputs as keyword arguments
             score = self.current_task.scoring_fn(

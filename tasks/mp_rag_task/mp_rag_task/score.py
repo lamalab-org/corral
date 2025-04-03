@@ -84,7 +84,7 @@ def retrieve_material_property(material: str, property_type: str) -> list:
             else:
                 raise ValueError(f"Property type {property_type} not supported")
 
-    return property_values
+    return str(property_values)
 
 
 def retrieve_elastic_tensors(material: str) -> list[str]:

@@ -48,12 +48,19 @@ class MPAgent(ABC):
         self,
         max_iterations: int = 3,
         temperature: float = 0.0,
+        prompt_store: PromptStore | None = None,
         **kwargs,
     ):
         self.model = "openai/gpt-4o"
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.prompt_store = PromptStore("./prompts")
+        if prompt_store:
+            self.prompt_store = prompt_store
+        else:
+            current_dir = Path(__file__).parent
+            prompts_path = current_dir / "prompts"
+            self.prompt_store = PromptStore(prompts_path)
         self.kwargs = kwargs
 
     @property
@@ -72,7 +79,6 @@ class MPAgent(ABC):
     def as_tool(self) -> Tool:
         def execute(**args):
             try:
-                return "0,0"
                 input_question = args.get("input_question")
                 logger.info(
                     f"Running {self.__class__.__name__} with input: {input_question}"
@@ -87,7 +93,7 @@ class MPAgent(ABC):
                     "or specify 'limit' in request."
                 ) from e
 
-        return Tool(
+        tool = Tool(
             name=self.name,
             description=self.description,
             arguments=[
@@ -98,6 +104,9 @@ class MPAgent(ABC):
                 ),
             ],
         )
+
+        tool.execute = execute
+        return tool
 
     def run_agent(self, input_question: str) -> str:
         logger.info(f"Running {self.__class__.__name__} with input: {input_question}")
@@ -116,7 +125,7 @@ class MPAgent(ABC):
         user_prompt = self.prompt_store.get("9f8a74c1-cd5e-4fc5-b50e-a2eebaffb409")
         tool_names = [tool.name for tool in self.tools]
         system = system_prompt.fill(
-            {"tools": json.dumps(env_tools), "tool_names": tool_names}
+            {"tools": json.dumps(str(env_tools)), "tool_names": tool_names}
         )
         user = user_prompt.fill({"input": input_question, "agent_scratchpad": ""})
         messages: list[LiteLLMMessage] = []
@@ -126,22 +135,42 @@ class MPAgent(ABC):
         for _i in range(self.max_iterations):
             logger.info(f"Iteration {_i + 1} of {self.max_iterations}")
             try:
-                response = json.loads(llm_call(messages))
+                response = llm_call(
+                    model=self.model,
+                    messages=messages,
+                    temperature=self.temperature,
+                    **self.kwargs,
+                )
+                try:
+                    if hasattr(response, "content"):
+                        response_dict = json.loads(response.content)
+                        messages.append(
+                            LiteLLMMessage(role="assistant", content=response.content)
+                        )
+                    else:
+                        response_dict = response
+                        messages.append(
+                            LiteLLMMessage(
+                                role="assistant", content=json.dumps(response)
+                            )
+                        )
+                except Exception:
+                    response_dict = response
+                    messages.append(
+                        LiteLLMMessage(role="assistant", content=str(response))
+                    )
             except Exception as e:
-                response = f"Error: {e}"
-                messages.append(LiteLLMMessage(role="assistant", content=response))
-                continue
-            messages.append(
-                LiteLLMMessage(role="assistant", content=json.dumps(response))
-            )
+                raise RuntimeError(
+                    f"Error in {self.__class__.__name__} response parsing: {e}\n{response}"
+                ) from e
 
-            action = response.get("action", "")
+            action = response_dict.get("action", "")
             if action:
                 if action == "Final Answer":
-                    return response.get("action_input"), messages
+                    return response_dict.get("action_input"), messages
                 else:
                     function_name = action
-                    function_args = json.loads(response.get("action_input"))
+                    function_args = response_dict.get("action_input")
                     try:
                         tool = next(
                             (t for t in self.tools if t.name == function_name), None
@@ -154,10 +183,9 @@ class MPAgent(ABC):
                         function_call = f"Error: {e}"
                     messages.append(
                         LiteLLMMessage(
-                            role="tool",
-                            content=function_call,
+                            role="assistant",
+                            content=f"Observation: {function_call!s}",
                             name=function_name,
-                            tool_call_id=response.get("tool_call_id"),
                         )
                     )
 
