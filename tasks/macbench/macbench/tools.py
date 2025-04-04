@@ -11,7 +11,6 @@ from modal import Image, Volume
 from NSFopen.read import read
 from promptstore import PromptStore
 from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
-from utils import vector_database_search
 
 from corral.agents.utils import (
     LiteLLMMessage,
@@ -22,6 +21,7 @@ from corral.utils import (
     embed_text,
     modal_tool,
     tool,
+    vector_database_search,
 )
 
 store = PromptStore("./prompts")

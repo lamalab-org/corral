@@ -24,9 +24,6 @@ from tools import (
     search_ms_guide,
     search_nmr_guide,
 )
-from utils import (
-    create_vector_database,
-)
 
 from corral.base import Environment
 from corral.io import (
@@ -39,7 +36,10 @@ from corral.io import (
     WriteFileTool,
 )
 from corral.server import create_benchmark_server
-from corral.utils import chunk_text
+from corral.utils import (
+    chunk_text,
+    create_vector_database,
+)
 
 load_dotenv("../.env", override=True)
 store = PromptStore("./prompts")
