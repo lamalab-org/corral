@@ -1,16 +1,17 @@
-## Example Environment with ChemBench scoring
+# Example Environment with ChemBench scoring
 
 Install environment
+
 ```bash
-cd tasks/chembench_agent
+cd tasks/chembench
 uv venv --python 3.11.0
 uv sync
 ```
 
-
 Run the environment
+
 ```bash
-cd tasks/chembench_agent/chembench_agent
+cd tasks/chembench/chembench
 python -m env
 ```
 
