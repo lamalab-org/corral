@@ -10,7 +10,6 @@ import chromadb
 import modal
 import numpy as np
 import requests
-from bs4 import BeautifulSoup
 from langchain_community.tools.brave_search.tool import BraveSearch
 from loguru import logger
 from rdkit import Chem
@@ -559,52 +558,3 @@ def search_clinical_trials(drug_name: str, query: str, top_k: int = 5) -> list[d
 
     finally:
         cleanup_vector_db(collection_name)
-
-
-def extract_response(content):
-    """
-    Extract chemical-material compatibility rating from the HTML response.
-
-    Args:
-        content: HTML content from the VWR website
-
-    Returns:
-        dict: Contains compatibility information including:
-            - success: Whether the extraction was successful
-            - rating: The compatibility rating (A-Excellent, B-Good, C-Fair, D-Poor, etc.)
-            - status: Text description of the rating
-    """
-
-    try:
-        soup = BeautifulSoup(content, "html.parser")
-
-        filter_div = soup.find(
-            "div", class_="filter-option custom-checkbox toggle-content"
-        )
-
-        if not filter_div:
-            return {
-                "success": False,
-                "rating": "N/A",
-                "status": "Could not find compatibility ratings section",
-            }
-
-        visible_label = filter_div.find("label", style=lambda s: s != "display:none")
-
-        if not visible_label:
-            return {
-                "success": False,
-                "rating": "N/A",
-                "status": "No compatibility rating is displayed",
-            }
-
-        rating_text = visible_label.get_text(strip=True)
-        label_id = visible_label.get("id", "")
-
-        return {
-            "rating": rating_text,
-            "category": label_id,
-        }
-
-    except Exception as e:
-        return {"rating": "N/A", "status": f"Error processing response: {e!s}"}
