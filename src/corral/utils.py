@@ -5,12 +5,163 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Union, get_args, get_origin, get_type_hints
 
+import chromadb
+from litellm import embedding
 from modal import App, Image, Mount, Secret, Volume
 
 from corral.agents.utils import LiteLLMMessage
 from corral.base import ModalTool, Tool, ToolArgument
 
 MODAL_TOOL_REGISTRY = {}
+
+
+def vector_database_search(
+    query: str, collection_name: str = "default_collection"
+) -> list[dict]:
+    """Retrieve the top 5 most similar instructions from a vector database based on the query.
+
+    Args:
+        query: The search query to find similar instructions
+        collection_name: The name of the collection in the vector database (default: "default_collection")
+
+    Returns:
+        A list of dictionaries containing the top 5 most similar instructions with their content and metadata
+
+    Raises:
+        RuntimeError: If the specified collection doesn't exist
+    """
+    query_embedding = embed_text(
+        chunks=[query],
+    )[0]
+
+    persist_directory = Path(Path.cwd()) / "vector_db"
+    if not persist_directory.exists():
+        raise RuntimeError(
+            f"Vector database directory '{persist_directory}' does not exist. Please create the vector database first."
+        )
+
+    try:
+        client = chromadb.PersistentClient(path=str(persist_directory))
+
+        try:
+            collection = client.get_collection(name=collection_name)
+        except Exception as e:
+            raise RuntimeError(
+                f"Collection '{collection_name}' does not exist: {e!s}"
+            ) from e
+
+        results = collection.query(query_embeddings=[query_embedding], n_results=5)
+
+        formatted_results = []
+        for _i, (doc, doc_id, distance) in enumerate(
+            zip(
+                results["documents"][0],
+                results["ids"][0],
+                results["distances"][0],
+                strict=False,
+            )
+        ):
+            similarity_score = 1 - distance
+
+            formatted_results.append(
+                {
+                    "content": doc,
+                    "metadata": {"id": doc_id},
+                    "similarity_score": similarity_score,
+                }
+            )
+
+        return formatted_results
+
+    except Exception as e:
+        raise RuntimeError(f"Error querying vector database: {e!s}") from e
+
+
+def create_vector_database(
+    chunks: list[str], collection_name: str = "default_collection"
+) -> str:
+    """Create a vector database from text instructions, splitting by newlines.
+
+    Args:
+        chunks: The text instructions to be stored in the vector database
+        collection_name: The name of the collection in the vector database (default: "default_collection")
+
+    Returns:
+        A confirmation message indicating the number of chunks stored
+
+    Raises:
+        ValueError: If OPENAI_API_KEY environment variable is not set
+    """
+
+    persist_directory = Path(Path.cwd()) / "vector_db"
+    persist_directory.mkdir(parents=True, exist_ok=True)
+
+    client = chromadb.PersistentClient(path=str(persist_directory))
+
+    try:
+        if collection_name in client.list_collections():
+            client.delete_collection(name=collection_name)
+
+        collection = client.create_collection(name=collection_name)
+
+        embeddings = embed_text(
+            chunks=chunks,
+        )
+
+        collection.add(
+            embeddings=embeddings,
+            documents=chunks,
+            ids=[f"id_{i}" for i in range(len(chunks))],
+        )
+
+        return f"Successfully created vector database with {len(chunks)} instructions in collection '{collection_name}'."
+
+    except Exception as e:
+        raise RuntimeError(f"Error creating vector database: {e!s}") from e
+
+
+def embed_text(
+    chunks: list, model: str = "openai/text-embedding-3-small"
+) -> list[list[float]]:
+    """
+    Embed a list of text chunks using the specified model.
+    Args:
+        chunks: List of text chunks to embed
+        model: Model to use for embeddings. Default: "text-embedding-3-small"
+
+    Returns:
+        List of embeddings, each corresponding to a chunk
+
+    Raises:
+        ValueError: If chunks is not a non-empty list of strings
+    """
+    if (
+        not chunks
+        or not isinstance(chunks, list)
+        or not all(isinstance(chunk, str) for chunk in chunks)
+    ):
+        raise ValueError("Input must be a non-empty list of strings")
+
+    result_embeddings = embedding(
+        model=model,
+        input=chunks,
+    )
+    return [item["embedding"] for item in result_embeddings["data"]]
+
+
+def chunk_text(text: str) -> list[str]:
+    """
+    Split a long text into smaller chunks based on the number of lines.
+    Args:
+        text: The text to be split into chunks
+
+    Returns:
+        List of text chunks
+    """
+    if not text or not isinstance(text, str):
+        raise ValueError("Input must be a non-empty string")
+
+    return [chunk.strip() for chunk in text.split("\n")]
 
 
 def format_type_annotation(annotation):
