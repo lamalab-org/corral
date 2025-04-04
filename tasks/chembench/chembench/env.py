@@ -1,3 +1,6 @@
+import os
+from typing import Any
+
 import uvicorn
 from chembench.baseline import Generation, Generations
 from chembench.evaluate import ChemBenchmark
@@ -5,15 +8,58 @@ from chembench.prompter import PrompterBuilder
 from chembench.task import Task
 from dotenv import load_dotenv
 from loguru import logger
-from tools import brave_search, smiles_to_iupac_name, wikipedia_search, wolfram_alpha
+from tools import (
+    enhanced_brave_search,
+    get_c_nmr_spectra_pubchem,
+    get_compound_info,
+    get_element_info,
+    get_formula_from_smiles,
+    get_functional_groups,
+    get_ghs_classification_pubchem,
+    get_h_nmr_spectra_pubchem,
+    get_ms_spectra_pubchem,
+    get_number_of_isomers,
+    get_pka_from_smiles,
+    get_smiles_from_name,
+    relevant_pubchem_sections,
+    search_clinical_trials,
+    simulate_spectra,
+    smiles_to_name,
+)
 
 from corral.base import Environment
+from corral.io import (
+    CatFilesTool,
+    CopyFileTool,
+    FileInfoTool,
+    FSManager,
+    ListFilesTool,
+    ReadFileTool,
+    WriteFileTool,
+)
 from corral.server import create_benchmark_server
 
 load_dotenv("../.env", override=True)
+BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
 
-
-_CHEMBENCH_TOOLS = [wikipedia_search, brave_search, wolfram_alpha, smiles_to_iupac_name]
+_CHEMBENCH_TOOLS = [
+    enhanced_brave_search,
+    relevant_pubchem_sections,
+    smiles_to_name,
+    get_smiles_from_name,
+    get_pka_from_smiles,
+    get_formula_from_smiles,
+    get_element_info,
+    get_number_of_isomers,
+    get_compound_info,
+    get_ghs_classification_pubchem,
+    get_ms_spectra_pubchem,
+    get_h_nmr_spectra_pubchem,
+    get_c_nmr_spectra_pubchem,
+    simulate_spectra,
+    get_functional_groups,
+    search_clinical_trials,
+]
 
 
 class Model:
@@ -36,6 +82,7 @@ class ChemBenchEnvironment(Environment):
         tasks: list[Task],
         benchmark: ChemBenchmark,
         prompter: PrompterBuilder,
+        tools: dict[str, Any] | None,
     ):
         self.task_id = task_id
         self.tasks = tasks
@@ -49,6 +96,8 @@ class ChemBenchEnvironment(Environment):
         super().__init__(task_id)
         # Add multiple tools
         for tool in _CHEMBENCH_TOOLS:
+            self.add_tool(tool)
+        for tool in tools.values():
             self.add_tool(tool)
 
     def get_task_prompt(self) -> str:
@@ -116,9 +165,8 @@ class ChemBenchEnvironment(Environment):
 
 def get_all_tasks(benchmark: ChemBenchmark) -> list[Task]:
     tasks = []
-    for topic in benchmark.registry.get_all_topics():
-        if topic == "chemical_preference":
-            continue
+    topics = benchmark.registry.get_all_topics()
+    for _i, topic in enumerate(topics, 1):
         questions = benchmark.registry.get_topic(topic)
         tasks.extend(questions.tasks)
     return tasks
@@ -126,15 +174,27 @@ def get_all_tasks(benchmark: ChemBenchmark) -> list[Task]:
 
 def main():
     benchmark = ChemBenchmark.from_huggingface(report_dir="../reports", verbose=True)
+
     prompter = PrompterBuilder.from_model_object(
         model=Model(),
     )
+
+    fs_manager = FSManager("file", base_path=BASE_WORK_DIR)
+    fs_tools = {
+        "list_files": ListFilesTool(fs_manager),
+        "read_file": ReadFileTool(fs_manager),
+        "write_file": WriteFileTool(fs_manager),
+        "file_info": FileInfoTool(fs_manager),
+        "cat_files": CatFilesTool(fs_manager),
+        "copy_file": CopyFileTool(fs_manager),
+    }
+
     tasks = get_all_tasks(benchmark)
 
     environments = {}
     for task in tasks:
         environments[task._uuid] = ChemBenchEnvironment(
-            task._uuid, [task], benchmark, prompter
+            task._uuid, [task], benchmark, prompter, tools=fs_tools
         )
 
     # Create and run server
