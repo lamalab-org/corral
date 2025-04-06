@@ -1,9 +1,15 @@
+import gc
+import shutil
+from collections.abc import Generator
 from pathlib import Path
 
 import git
+from dotenv import load_dotenv
 from loguru import logger
 
 from corral.utils import create_vector_database
+
+load_dotenv("../.env", override=True)
 
 
 def clone_lammps_repo(target_dir: str = "lammps_repo") -> str:
@@ -47,46 +53,120 @@ def get_rst_files(repo_path: str) -> list[str]:
     return [str(file) for file in rst_files]
 
 
-def read_rst_files(rst_files: list[str]) -> list[dict[str, str]]:
+def read_rst_files_in_batches(
+    rst_files: list[str], batch_size: int = 5
+) -> Generator[list[str], None, None]:
     """
-    Read content from RST files.
+    Read content from RST files in batches.
 
     Args:
         rst_files: List of paths to RST files
+        batch_size: Number of files to process in each batch
 
     Returns:
-        List of dictionaries containing filename and content
+        Generator yielding batches of document contents
     """
-    docs = []
+    total_files = len(rst_files)
+    logger.info(f"Processing {total_files} files in batches of {batch_size}")
 
-    for file_path in rst_files:
-        path = Path(file_path)
-        file_name = path.name
+    for i in range(0, total_files, batch_size):
+        batch_files = rst_files[i : i + batch_size]
+        docs = []
+
+        for file_path in batch_files:
+            path = Path(file_path)
+            file_name = path.name
+
+            try:
+                with path.open(encoding="utf-8") as f:
+                    content = f.read()
+
+                docs.append(str({"filename": file_name, "content": content}))
+                logger.info(f"Read {file_name} ({len(content)} characters)")
+
+            except Exception as e:
+                logger.error(f"Error reading {file_name}: {e}")
+
+        logger.info(
+            f"Yielding batch {i//batch_size + 1}/{(total_files + batch_size - 1)//batch_size} with {len(docs)} documents"
+        )
+        yield docs
+
+
+def cleanup_repo(repo_path: str) -> None:
+    """
+    Remove the cloned repository to free up disk space.
+
+    Args:
+        repo_path: Path to the repository to be removed
+    """
+    path = Path(repo_path)
+    if path.exists():
+        logger.info(f"Cleaning up: removing repository at {repo_path}")
+        shutil.rmtree(repo_path)
+        logger.info("Repository removed successfully")
+    else:
+        logger.info(f"Repository at {repo_path} doesn't exist, nothing to clean up")
+
+
+def create_vector_database_incrementally(
+    rst_files: list[str], collection_name: str, db_path: str, batch_size: int = 5
+) -> None:
+    """
+    Create a vector database incrementally by processing batches of files.
+
+    Args:
+        rst_files: List of paths to RST files
+        collection_name: Name for the vector database collection
+        db_path: Path where to store the vector database
+        batch_size: Size of each batch of files to process
+    """
+    total_docs = 0
+
+    for i, docs_batch in enumerate(read_rst_files_in_batches(rst_files, batch_size)):
+        if not docs_batch:
+            continue
 
         try:
-            with path.open(encoding="utf-8") as f:
-                content = f.read()
+            update_mode = "recreate" if i == 0 else "append"
 
-            docs.append({"filename": file_name, "content": content})
+            with logger.contextualize(batch=i + 1):
+                logger.info(
+                    f"Processing batch {i+1} with {len(docs_batch)} documents using update_mode='{update_mode}'"
+                )
 
-            logger.info(f"Read {file_name} ({len(content)} characters)")
+                create_vector_database(
+                    chunks=docs_batch,
+                    collection_name=collection_name,
+                    path=db_path,
+                    update_mode=update_mode,
+                )
+
+            total_docs += len(docs_batch)
+            logger.info(
+                f"Processed batch {i+1} with {len(docs_batch)} documents. Total processed: {total_docs}"
+            )
+
+            gc.collect()
 
         except Exception as e:
-            logger.info(f"Error reading {file_name}: {e}")
+            logger.error(f"Error processing batch {i+1}: {e}")
 
-    return docs
+    logger.info(f"Finished creating vector database with {total_docs} total documents")
 
 
 def main():
     """Main function to execute the script."""
     repo_path = clone_lammps_repo()
     rst_files = get_rst_files(repo_path)
-    docs = read_rst_files(rst_files)
+    # rst_files = list(filter(lambda file: not file.endswith("Bibliography.rst"), rst_files))
 
-    create_vector_database(docs, "lammps_manual", "../vector_databases/lammps_manual")
+    create_vector_database_incrementally(
+        rst_files, "lammps_manual", "../vector_databases/lammps_manual", batch_size=10
+    )
 
-    return docs
+    cleanup_repo(repo_path)
 
 
 if __name__ == "__main__":
-    docs = main()
+    main()
