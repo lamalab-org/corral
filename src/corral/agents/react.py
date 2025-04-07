@@ -7,8 +7,14 @@ from typing import Any
 from promptstore import PromptStore
 
 from corral.agents.prompt_utils import get_prompt
-from corral.agents.utils import LiteLLMMessage, format_examples, llm_call
+from corral.agents.utils import (
+    LiteLLMMessage,
+    TrackedAgentMixin,
+    format_examples,
+    llm_call,
+)
 from corral.evaluate import BenchmarkInterface
+from corral.graph import GraphTrackerFactory, NodeType
 
 
 @dataclass
@@ -26,7 +32,7 @@ class Action:
     arguments: dict[str, Any]
 
 
-class ReActAgent:
+class ReActAgent(TrackedAgentMixin):
     """
     Agent that uses the ReAct framework to solve tasks
     Based on https://arxiv.org/abs/2210.03629
@@ -40,6 +46,7 @@ class ReActAgent:
         user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide`, `history` and `examples` as variables.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
+        graph_factory: Optional[GraphTrackerFactory] = None,
         kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
@@ -52,9 +59,12 @@ class ReActAgent:
         user_prompt: str | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
+        graph_factory: GraphTrackerFactory | None = None,
         **kwargs,
     ):
         """Initialize the agent"""
+        TrackedAgentMixin.__init__(self, graph_factory=graph_factory)
+
         self.model = model
         self.max_iterations = max_iterations
         self.api_endpoint = api_endpoint
@@ -167,6 +177,9 @@ class ReActAgent:
         if history is None:
             history: list[LiteLLMMessage] = []
 
+        self.start_tracking(task_id=task_id, agent_type="ReActAgent")
+        tracker = self.get_tracker()
+
         messages = self.create_prompt(task_guide, history, examples)
 
         for _iteration in range(self.max_iterations):
@@ -176,6 +189,13 @@ class ReActAgent:
             # Parse response
             thought, action = self.parse_llm_response(llm_response)
             thought_prefix = f"Thought: {thought.content}\n" if thought else ""
+
+            if thought and tracker:
+                tracker.add_node(
+                    node_type=NodeType.LLM_RESPONSE,
+                    content=thought.content,
+                    metadata={"type": "thought", "iteration": _iteration},
+                )
 
             # Check for final answer
             final_answer_match = re.search(r"Final Answer: (.*)", llm_response)
@@ -187,6 +207,7 @@ class ReActAgent:
                         content=f"{thought_prefix}Final Answer: {final_answer_match.group(1)}",
                     )
                 )
+                self.stop_tracking(visualize=True)
                 return final_answer_match.group(1).strip(), messages
 
             # Execute tool if action exists
@@ -196,10 +217,31 @@ class ReActAgent:
                     LiteLLMMessage(role="assistant", content=action_content)
                 )
 
+                # Track the tool call
+                tool_action_node = None
+                if tracker:
+                    tool_action_node = tracker.add_node(
+                        node_type=NodeType.TOOL_CALL,
+                        content={
+                            "tool_name": action.tool_name,
+                            "arguments": action.arguments,
+                        },
+                        metadata={"iteration": _iteration},
+                    )
+
                 # Execute tool and get response
                 tool_response = interface.execute_tool(
                     task_id, action.tool_name, action.arguments
                 )
+
+                # Track the tool response
+                if tracker and tool_action_node:
+                    tracker.track_tool_response(
+                        result=tool_response.result
+                        if tool_response.success
+                        else tool_response.error,
+                        tool_call_node_id=tool_action_node,
+                    )
 
                 observation = (
                     f"Observation: {tool_response.result}"
