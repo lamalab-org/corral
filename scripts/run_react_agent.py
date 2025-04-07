@@ -22,7 +22,7 @@ def run_benchmark(
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
-    result = runner.bench(task_ids, trials_per_task=2, k_values=[2])
+    result = runner.bench(task_ids, trials_per_task=1, k_values=[1])
     result.generate_report("results.json")
 
     logger.info("Benchmark completed")
