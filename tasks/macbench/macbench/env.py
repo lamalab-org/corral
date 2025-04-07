@@ -2,11 +2,9 @@ import os
 from typing import Any
 
 import uvicorn
-from chembench.baseline import Generation, Generations
 from chembench.evaluate import ChemBenchmark
 from chembench.prompter import PrompterBuilder
 from chembench.task import Task
-from dotenv import load_dotenv
 from loguru import logger
 from promptstore import PromptStore
 from tools import (
@@ -37,11 +35,11 @@ from corral.io import (
 )
 from corral.server import create_benchmark_server
 from corral.utils import (
+    Model,
     chunk_text,
     create_vector_database,
 )
 
-load_dotenv("../.env", override=True)
 store = PromptStore("./prompts")
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
 
@@ -74,20 +72,17 @@ _MACBENCH_TOOLS = [
 ]
 
 
-class Model:
-    def __init__(self, name: str = "Dummy Model"):
-        self.name = name
-
-    def generate(self, prompts: list[str], **_kwargs):
-        generations = []
-        for _prompt in prompts:
-            generation = None
-            generations.append([Generation(text=generation)])
-
-        return Generations(generations=generations)
-
-
 class MaCBenchEnvironment(Environment):
+    """MaCBench Environment based on the multimodal Q&A MaCBench dataset (arXiv:2411.16955).
+
+    Args:
+        task_id (str): The task ID.
+        tasks (list[Task]): List of tasks.
+        benchmark (ChemBenchmark): The benchmark object.
+        prompter (PrompterBuilder): The prompter object.
+        tools (dict[str, Any] | None): Dictionary of tools to be used apart from the default MaCBench tools, e.g., file system tools.
+    """
+
     def __init__(
         self,
         task_id: str,
@@ -96,6 +91,7 @@ class MaCBenchEnvironment(Environment):
         prompter: PrompterBuilder,
         tools: dict[str, Any] | None,
     ):
+        """Initialize the MaCBench environment."""
         self.task_id = task_id
         self.tasks = tasks
         self.benchmark = benchmark
@@ -113,6 +109,9 @@ class MaCBenchEnvironment(Environment):
             self.add_tool(tool)
 
     def get_task_prompt(self) -> list[dict]:
+        """Get the task prompt for the environment.
+        Each task will correspond to each question in MaCBench.
+        """
         current_idx = 0
         for task_idx, task in enumerate(self.tasks):
             if self.prompter.is_mcq(task):
@@ -172,6 +171,7 @@ class MaCBenchEnvironment(Environment):
 
 
 def get_all_tasks(benchmark: ChemBenchmark) -> list[Task]:
+    """Get all tasks from the benchmark registry."""
     tasks = []
     topics = benchmark.registry.get_all_topics()
     for _i, topic in enumerate(topics, 1):

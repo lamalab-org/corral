@@ -1,13 +1,11 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any, TypedDict
+import json
+from typing import Any, TypedDict
 
 import litellm
 import openai
-
-if TYPE_CHECKING:
-    from litellm.types.utils import Message
+from litellm.types.utils import Message
 from loguru import logger
+from promptstore import Prompt
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -22,6 +20,10 @@ RETRY_EXCEPTIONS = (
     openai.APIError,
     openai.APIStatusError,
     openai.InternalServerError,
+)
+
+LIST_PROMPT = (
+    "The task is to correctly answer the question with an image specified below."
 )
 
 
@@ -101,7 +103,7 @@ def format_examples(examples: list[str] | None) -> str:
     """Format few-shot part of the prompt from a list of shots
 
     Args:
-        examples (List[str]): The examples to format
+        examples (List[str], optional): The examples to format. Defaults to None.
 
     Returns:
         str: The formatted examples
@@ -111,3 +113,62 @@ def format_examples(examples: list[str] | None) -> str:
     else:
         example_prompt = f"To help you in understanding this task, the next {len(examples)} examples are provided:\n\n"
         return example_prompt + "\n\n".join(examples)
+
+
+def _build_user_content(
+    agent: str,
+    user_prompt: Prompt,
+    task_guide: str | list,
+    tools: str = "",
+    examples: list[str] | None = None,
+    history: list[LiteLLMMessage] | None = None,
+    iterations: int = 0,
+) -> list | str:
+    """
+    Fill the user prompt with the required parameters, managing the different types of agents.
+    Additionally, it manages the case when the task_guide is a list of messages.
+
+    Args:
+        agent (str): The type of agent being prompted. Important to know the variables to fill.
+        user_prompt (Prompt): The user prompt to use.
+        task_guide (str | list): Task guide used for describing the environment task.
+        tools (str, optional): The tools to use. Defaults to an empty string.
+        examples (List[str], optional): The examples to use. Defaults to None.
+        history (List[LiteLLMMessage], optional): The history items to include. Defaults to None.
+        iterations (int, optional): The number of iterations. Defaults to 0.
+
+    Returns:
+        list | str: The filled user prompt.
+    """
+    if history is None:
+        history = []
+
+    base_kwargs = {
+        "task_guide": LIST_PROMPT,
+        "examples": format_examples(examples),
+    }
+
+    if agent == "react":
+        base_kwargs["task_guide"] += (
+            f"To solve the task you have available the next tools:\n\n{tools}"
+        )
+        base_kwargs["history"] = json.dumps(history)
+
+    if agent == "tool_calling":
+        pass
+    elif agent == "llm_planner":
+        base_kwargs["tools"] = json.dumps(tools)
+        base_kwargs["iterations"] = str(iterations)
+    else:
+        raise ValueError(f"Unknown agent type: {agent}")
+
+    if isinstance(task_guide, list):
+        user_prompt_text = user_prompt.fill(base_kwargs)
+        user_content = [{"type": "text", "text": user_prompt_text}]
+        user_content.extend(task_guide)
+        return user_content
+    elif isinstance(task_guide, str):
+        base_kwargs["task_guide"] = task_guide
+        return user_prompt.fill(base_kwargs)
+    else:
+        raise ValueError(f"task_guide should be str or list, got {type(task_guide)}")

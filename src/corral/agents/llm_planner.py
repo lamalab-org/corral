@@ -1,17 +1,13 @@
-from __future__ import annotations
-
 import importlib.resources
 import json
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from corral.evaluate import BenchmarkInterface
 from promptstore import PromptStore
 
 from corral.agents.prompt_utils import get_prompt
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
-from corral.agents.utils import LiteLLMMessage, format_examples, llm_call
+from corral.agents.utils import LiteLLMMessage, _build_user_content, llm_call
+from corral.evaluate import BenchmarkInterface
 from corral.utils import serialize_messages
 
 
@@ -88,35 +84,15 @@ class LLMPlanner:
         tools = interface.get_available_tools_for_task(task_id)
 
         task_guide = interface.get_task_prompt(task_id)
-        if isinstance(task_guide, list):
-            user_prompt = self.user_prompt.fill(
-                {
-                    "tools": json.dumps(tools),
-                    "task_guide": "The task is to correctly answer the question with an image specified below.",
-                    "iterations": self.max_iterations,
-                    "examples": format_examples(examples),
-                }
-            )
-            user_content = [
-                {
-                    "type": "text",
-                    "text": user_prompt,
-                }
-            ]
-            user_content.extend(task_guide)
-        elif isinstance(task_guide, str):
-            user_content = self.user_prompt.fill(
-                {
-                    "tools": json.dumps(tools),
-                    "task_guide": task_guide,
-                    "iterations": self.max_iterations,
-                    "examples": format_examples(examples),
-                },
-            )
-        else:
-            raise ValueError(
-                f"task_guide should be str or list, got {type(task_guide)}"
-            )
+
+        user_content = _build_user_content(
+            agent="llm_planner",
+            user_prompt=self.user_prompt,
+            task_guide=task_guide,
+            iterations=self.max_iterations,
+            examples=examples,
+            tools=tools,
+        )
 
         messages: list[LiteLLMMessage] = []
         if self.system_prompt:

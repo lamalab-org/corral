@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 from pathlib import Path
 from typing import Any
@@ -8,7 +6,6 @@ import modal
 import numpy as np
 from langchain_community.tools.brave_search.tool import BraveSearch
 from modal import Image, Volume
-from NSFopen.read import read
 from promptstore import PromptStore
 from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 
@@ -36,12 +33,12 @@ def enhanced_brave_search(
     """Perform a web search using Brave Search, then filter and rank results using embeddings.
 
     Args:
-        query: The search query string
-        num_results: Maximum number of results to return. Defaults to 5
-        min_similarity: Minimum similarity score threshold. Defaults to 0.75
+        query (str): The search query string
+        num_results (int, optional): Maximum number of results to return. Defaults to 5
+        min_similarity (float, optional): Minimum similarity score threshold. Defaults to 0.75
 
     Returns:
-        A list of dictionaries containing the most relevant search results
+        list[dict]: A list of dictionaries containing the most relevant search results
         with their content and metadata, sorted by similarity score
 
     Raises:
@@ -91,7 +88,7 @@ def enhanced_brave_search(
         return sorted_results[:num_results]
 
     except Exception:
-        return []
+        return ["Error while performing search."]
 
 
 @tool
@@ -99,10 +96,10 @@ def search_lab_safety(query: str) -> list[dict]:
     """Search lab safety knowledge database for relevant information or guidelines.
 
     Args:
-        query: The search query related to laboratory safety
+        query (str): The search query related to laboratory safety
 
     Returns:
-        A list of lab safety information entries with content and relevance scores
+        list[dict]: A list of lab safety information entries with content and relevance scores
 
     Raises:
         RuntimeError: If the lab safety collection doesn't exist
@@ -115,10 +112,10 @@ def search_ms_guide(query: str) -> list[dict]:
     """Search mass spectrometry knowledge database for relevant information or guidelines.
 
     Args:
-        query: The search query related to mass spectrometry
+        query (str): The search query related to mass spectrometry
 
     Returns:
-        A list of mass spectrometry information entries with content and relevance scores
+        list[dict]: A list of mass spectrometry information entries with content and relevance scores
 
     Raises:
         RuntimeError: If the mass spectrometry collection doesn't exist
@@ -131,10 +128,10 @@ def search_nmr_guide(query: str) -> list[dict]:
     """Search NMR spectroscopy knowledge database for relevant information or guidelines.
 
     Args:
-        query: The search query related to NMR spectroscopy
+        query (str): The search query related to NMR spectroscopy
 
     Returns:
-        A list of NMR spectroscopy information entries with content and relevance scores
+        list[dict]: A list of NMR spectroscopy information entries with content and relevance scores
 
     Raises:
         RuntimeError: If the NMR spectroscopy collection doesn't exist
@@ -150,11 +147,11 @@ def llm_vision_expert(query: str, image_path: str) -> str:
     response of other tools to determine the best answer.
 
     Args:
-        query: The question or instruction related to the image
-        image_path: The path to the image file
+        query (str): The question or instruction related to the image
+        image_path (str): The path to the image file
 
     Returns:
-        The response from the LLM regarding the image analysis
+        str: The response from the LLM regarding the image analysis
     """
 
     # Ideally we would like to use the latest model
@@ -202,13 +199,13 @@ def llm_vision_expert(query: str, image_path: str) -> str:
 )
 def deplot_image_extractor_modal(image_bytes: bytes) -> str:
     """
-    Extract data from charts and plots using Google's Deplot model on Modal servers.
+    Extract data from charts and plots using Google's Deplot model.
 
     Args:
-        image_bytes: Image file data as bytes
+        image_bytes (bytes): Image file data as bytes
 
     Returns:
-        String containing the extracted data table representation
+        str: String containing the extracted data table representation
     """
     import io
 
@@ -244,10 +241,10 @@ def deplot_image_extractor(image_path: str) -> str:
     response of other tools to determine the best answer.
 
     Args:
-        image_path: Path to the image file containing a chart or plot
+        image_path (str): Path to the image file containing a chart or plot
 
     Returns:
-        String containing the extracted data table representation
+        str: String containing the extracted data table representation
     """
     from PIL import Image
 
@@ -275,11 +272,11 @@ def chart_vllm_bytes(query: str, image_bytes: bytes) -> str:
     Analyze charts and plots using the ChartVLM model.
 
     Args:
-        query: The question or instruction about the chart image
-        image_bytes: Image file data as bytes
+        query (str): The question or instruction about the chart image
+        image_bytes (bytes): Image file data as bytes
 
     Returns:
-        String containing the analysis or answer about the chart
+        str: String containing the analysis or answer about the chart
     """
     import io
 
@@ -318,11 +315,11 @@ def chart_vllm_extractor(query: str, image_path: str) -> str:
     response of other tools to determine the best answer.
 
     Args:
-        query: The question or instruction about the chart image
-        image_path: Path to the image file containing a chart or plot
+        query (str): The question or instruction about the chart image
+        image_path (str): Path to the image file containing a chart or plot
 
     Returns:
-        String containing the analysis or answer about the chart
+        str: String containing the analysis or answer about the chart
     """
     import io
 
@@ -349,11 +346,11 @@ def extract_table_text_modal(image_bytes: bytes, lang: str = "eng") -> str:
     Extract text from images containing tables using OCR (pyTesseract).
 
     Args:
-        image_bytes: Image file data as bytes
-        lang: Language code for OCR. Default: 'eng' for English
+        image_bytes (bytes): Image file data as bytes
+        lang (str, optional): Language code for OCR. Default: 'eng' for English
 
     Returns:
-        String containing the extracted text from the table image
+        str: String containing the extracted text from the table image
     """
     import io
 
@@ -403,11 +400,11 @@ def extract_table_text(image_path: str, lang: str = "eng") -> str:
     response of other tools to determine the best answer.
 
     Args:
-        image_path: Path to the image file containing a table
-        lang: Language code for OCR. Default: 'eng' for English
+        image_path (str): Path to the image file containing a table
+        lang (str, optional): Language code for OCR. Default: 'eng' for English
 
     Returns:
-        String containing the extracted text from the table image
+        str: String containing the extracted text from the table image
     """
     from PIL import Image
 
@@ -421,17 +418,19 @@ def extract_table_text(image_path: str, lang: str = "eng") -> str:
     return extract_table_text_remote.remote(img_bytes, lang)
 
 
+# https://github.com/Kohulan/DECIMER-Image_Transformer
 @tool
 def decimer_molecule_extraction(image_path: str) -> str:
-    """Extract molecule information from an image using Decimer.
+    """Extract molecule smiles from an image using Decimer.
+    Decimer is an open-source tool for Optical Chemical Structure Recognition.
     Ideally the response of this tool should be used compared to the
     response of other tools to determine the best answer.
 
     Args:
-        image_path: Path to the image file containing a molecule
+        image_path (str): Path to the image file containing a molecule
 
     Returns:
-        String containing the extracted molecule information
+        str: String containing the extracted molecule information
     """
     decimer_remote = modal.Function.from_name(
         "rxnenv", "molecule_image_extraction_decimer"
@@ -442,17 +441,25 @@ def decimer_molecule_extraction(image_path: str) -> str:
     return decimer_remote.remote(image_bytes)
 
 
+# https://github.com/thomas0809/MolScribe
 @tool
-def molscribe_molecule_extraction(image_path: str) -> str:
+def molscribe_molecule_extraction(image_path: str) -> dict[str, Any]:
     """Extract molecule information from an image using MolScribe.
+    MolScribe is an image-to-graph model that translates a molecular image to its chemical structure
     Ideally the response of this tool should be used compared to the
-    response of other tools to determine the best answer.
+    response of other tools to determine the best answer. Example of the output:
+    {
+        'smiles': 'Fc1ccc(-c2cc(-c3ccccc3)n(-c3ccccc3)c2)cc1',
+        'confidence': 0.9175,
+        'atoms': [{'atom_symbol': '[Ph]', 'x': 0.5714, 'y': 0.9523, 'confidence': 0.9127}, ... ],
+        'bonds': [{'bond_type': 'single', 'endpoint_atoms': [0, 1], 'confidence': 0.9999}, ... ]
+    }
 
     Args:
-        image_path: Path to the image file containing a molecule
+        image_path (str): Path to the image file containing a molecule
 
     Returns:
-        String containing the extracted molecule information
+        str: String containing the extracted molecule information
     """
     molscribe_remote = modal.Function.from_name(
         "rxnenv", "molecule_image_extraction_molscribe"
@@ -463,100 +470,41 @@ def molscribe_molecule_extraction(image_path: str) -> str:
     return molscribe_remote.remote(image_bytes)
 
 
+# https://github.com/thomas0809/MolScribe
 @tool
 def rxnscribe_reaction_extraction(image_path: str) -> list[dict]:
     """Extract reaction information from an image using RXNScribe.
+    RxnScribe is a sequence generation model for reaction diagram parsing.
+    This is, from an image it returns:
+    {  # First reaction
+        'reactants': [
+            {
+                'category': '[Mol]', 'category_id': 1, 'bbox': (0.1550, 0.0246, 0.2851, 0.2614),
+                'smiles': '*OC(=O)c1ccccc1C#Cc1ccccc1',
+            },
+            # ... more reactants
+        ],
+        'conditions': [
+            {
+                'category': '[Txt]', 'category_id': 2, 'bbox': (0.2941, 0.0641, 0.3811, 0.1450),
+                'text': ['CIBcat', '(1.4 equiv)']
+            },
+            # ... more conditions
+        ],
+        'products': [
+            # ...
+        ]
+    },
+    # More reactions
 
     Args:
-        image_path: Path to the image file containing a reaction
+        image_path (str): Path to the image file containing a reaction
 
     Returns:
-        List of dictionaries containing the extracted reaction information
+        list[dict]: List of dictionaries containing the extracted reaction information
     """
     rxnscribe_remote = modal.Function.from_name("rxnenv", "rxn_schema_extraction")
     with Path(image_path).open("rb") as f:
         image_bytes = f.read()
 
     return rxnscribe_remote.remote(image_bytes)
-
-
-# Tool from AILA (arXiv:2501.10385)
-@tool
-def afm_image_analyzer(
-    image_path: str,
-    calculate_friction: bool = False,
-    calculate_mean_roughness: bool = False,
-    calculate_rms_roughness: bool = False,
-) -> dict[str, str | Any]:
-    """
-    Display and return the image data from the given path of an AFM image.
-
-    Additionally, calculate the following if requested:
-    - Average Friction
-    - Mean Roughness
-    - RMS Roughness
-
-    Args:
-        image_path: Path to the image file.
-        calculate_friction: Whether to calculate average friction. Defaults to False.
-        calculate_mean_roughness: Whether to calculate mean roughness. Defaults to False.
-        calculate_rms_roughness: Whether to calculate RMS roughness. Defaults to False.
-
-    Returns:
-    - dict[str, str | Any]: A dictionary containing the status, image data, or an error message.
-    """
-    try:
-        # Read the file
-        afm = read(image_path)
-
-        # Extract data and parameters
-        data = afm.data  # Raw data
-
-        # Assuming 'Image', 'Forward', and 'Z-Axis' are keys in the data structure
-        image_data = data["Image"]["Forward"]["Z-Axis"]
-
-        # Calculate Average Friction if requested
-        if calculate_friction:
-            friction = 0.5 * (
-                data["Image"]["Forward"]["Friction force"]
-                - data["Image"]["Backward"]["Friction force"]
-            )
-            average_friction = np.mean(friction)
-
-        # Calculate Mean Roughness if requested
-        if calculate_mean_roughness:
-            z = data["Image"]["Forward"]["Z-Axis"]
-            z_mean = np.mean(z)
-            absolute_differences = np.abs(z - z_mean)
-            total_sum = np.sum(absolute_differences)
-            M, N = z.shape
-            mean_roughness = total_sum / (M * N)
-
-        # Calculate RMS Roughness if requested
-        if calculate_rms_roughness:
-            z = data["Image"]["Forward"]["Z-Axis"]
-            z_mean = np.mean(z)
-            squared_differences = (z - z_mean) ** 2
-            total_sum = np.sum(squared_differences)
-            M, N = z.shape
-            rms_roughness = np.sqrt(total_sum / (M * N))
-
-        # Return the image data along with status
-        result = {
-            "status": "Success",
-            "message": f"Raw Image {image_path} processed successfully.",
-            "image_data": image_data,
-        }
-
-        # Include calculated metrics in the result if they were calculated
-        if calculate_friction:
-            result["average_friction"] = average_friction
-        if calculate_mean_roughness:
-            result["mean_roughness"] = mean_roughness
-        if calculate_rms_roughness:
-            result["rms_roughness"] = rms_roughness
-
-        return result
-
-    except Exception as e:
-        return {"status": "Error", "message": f"An error occurred: {e!s}"}

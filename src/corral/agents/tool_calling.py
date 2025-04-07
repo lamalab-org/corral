@@ -1,18 +1,13 @@
-from __future__ import annotations
-
 import importlib.resources
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from corral.evaluate import BenchmarkInterface
-
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from promptstore import PromptStore
 
 from corral.agents.prompt_utils import get_prompt
-from corral.agents.utils import LiteLLMMessage, llm_call
+from corral.agents.utils import LiteLLMMessage, _build_user_content, llm_call
+from corral.evaluate import BenchmarkInterface
 
 
 @dataclass
@@ -90,27 +85,12 @@ class ToolCallingAgent:
         messages: list[LiteLLMMessage] = []
         if self.system_prompt:
             messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
-        if isinstance(task_guide, list):
-            user_prompt = self.user_prompt.fill(
-                {
-                    "task_guide": "The task is to correctly answer the question with an image specified below. If you want the tools to use use the images, first save the image, and provide the path to the tools.",
-                    "examples": examples,
-                }
-            )
-            user_content = [
-                {
-                    "type": "text",
-                    "text": user_prompt,
-                }
-            ]
-            user_content.extend(task_guide)
-        elif isinstance(task_guide, str):
-            user_content = self.user_prompt.fill(
-                {"task_guide": task_guide, "examples": examples}
-            )
-        else:
-            raise ValueError("task_guide must be a string or a list")
-
+        user_content = _build_user_content(
+            agent="tool_calling",
+            user_prompt=self.user_prompt,
+            task_guide=task_guide,
+            examples=examples,
+        )
         messages.append(LiteLLMMessage(role="user", content=user_content))
 
         # History is meant to be the conversation history, so we add it to the messages
@@ -144,7 +124,7 @@ class ToolCallingAgent:
                     arg_type = "string"
                 elif arg_type == "bool":
                     arg_type = "boolean"
-                elif arg_type == "int" or arg_type == "float":
+                elif arg_type in ["int", "float"]:
                     arg_type = "number"
                 elif arg_type == "list[str]":
                     arg_type = "array"

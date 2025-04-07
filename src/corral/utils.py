@@ -5,12 +5,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import get_type_hints
 
+from chembench.baseline import Generation, Generations
 from modal import App, Image, Mount, Secret, Volume
 
 from corral.agents.utils import LiteLLMMessage
 from corral.base import ModalTool, Tool, ToolArgument
 
 MODAL_TOOL_REGISTRY = {}
+
+
+class Model:
+    def __init__(self, name: str = "Dummy Model"):
+        self.name = name
+
+    def generate(self, prompts: list[str], **_kwargs):
+        generations = []
+        for _prompt in prompts:
+            generation = None
+            generations.append([Generation(text=generation)])
+
+        return Generations(generations=generations)
 
 
 def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
