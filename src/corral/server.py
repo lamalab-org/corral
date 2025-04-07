@@ -76,10 +76,10 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             }
             for call in env.state.tool_calls
         ]
-
         state_dict["tool_statistics"] = tool_statistics
+        finished_trail = env.reset_state()  # Reset the state for the next trail
 
-        return {"score": score, "state": state_dict}
+        return {"score": score, "state": state_dict, "trial_id": finished_trail}
 
     @app.get("/tasks/{task_id}/status")
     def get_task_status(task_id: str):
@@ -94,6 +94,23 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             "submitted_answer": env.state.submitted_answer,
             "tool_statistics": env.state.get_tool_statistics(),
         }
+
+    @app.get("/tasks/{task_id}/trials")
+    def get_all_trials(task_id: str):
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+        env = environments[task_id]
+        return {"trials": env.trial_states}
+
+    @app.get("/tasks/{task_id}/trials/{trial_id}")
+    def get_trial_state(task_id: str, trial_id: str):
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+        env = environments[task_id]
+        trial_state = env.trial_states.get(trial_id)
+        if trial_state is None:
+            raise HTTPException(status_code=404, detail="Trial not found")
+        return {"trial_state": trial_state}
 
     # add endpoint for scoring the task
 
