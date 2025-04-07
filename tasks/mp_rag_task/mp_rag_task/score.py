@@ -13,7 +13,7 @@ def retrieve_material_id(material: str) -> list:
     Retrieves the material ID for a given material formula.
 
     Args:
-        material: Material formula, i.e. "NaCl"
+        material (str): Material formula, i.e. "NaCl"
 
     Returns:
         list: Material IDs
@@ -31,8 +31,8 @@ def retrieve_material_property(material: str, property_type: str) -> list:
     Retrieves specified property for a given material formula.
 
     Args:
-        material: Material formula, i.e. "NaCl"
-        property_type: Type of property to retrieve ('elastic_tensor', 'bandgap', etc.)
+        material (str): Material formula, i.e. "NaCl"
+        property_type (str): Type of property to retrieve ('elastic_tensor', 'bandgap', etc.)
 
     Returns:
         list: List of tuples containing (material_id, property_value) for the material
@@ -84,49 +84,30 @@ def retrieve_material_property(material: str, property_type: str) -> list:
             else:
                 raise ValueError(f"Property type {property_type} not supported")
 
-    return str(property_values)
+    return property_values
 
 
-def retrieve_elastic_tensors(material: str) -> list[str]:
+def retrieve_material_property_values(material: str, property_type: str) -> list:
     """
-    Retrieves the elastic tensors for a given material.
+    Retrieves property values for a given material.
 
     Args:
-        material: Material name, i.e. "NaCl"
+        material (str): Material name, i.e. "NaCl"
+        property_type (str): Type of property to retrieve ('elastic_tensor', 'bandgap',
+                      'formation_energy', 'nsites', 'bulk_modulus')
 
     Returns:
-        list[str]: List of elastic tensors
+        list: List of property values (without material IDs)
     """
-    results = retrieve_material_property(material, "elastic_tensor")
-    return [tensor for _, tensor in results]
+    results = retrieve_material_property(material, property_type)
 
+    if isinstance(results, str):
+        try:
+            results = ast.literal_eval(results)
+        except (ValueError, SyntaxError):
+            return []
 
-def retrieve_bandgap_values(material: str) -> list[float]:
-    """
-    Retrieves the bandgap values for a given material.
-
-    Args:
-        material: Material name, i.e. "NaCl"
-
-    Returns:
-        list[float]: List of bandgap values
-    """
-    results = retrieve_material_property(material, "bandgap")
-    return [bandgap for _, bandgap in results]
-
-
-def retrieve_formation_energy(material: str) -> list[float]:
-    """
-    Retrieves the formation energy values for a given material.
-
-    Args:
-        material: Material name, i.e. "NaCl"
-
-    Returns:
-        list[float]: List of formation energy values
-    """
-    results = retrieve_material_property(material, "formation_energy")
-    return [energy for _, energy in results]
+    return [str(value) for _, value in results]
 
 
 def check_elastic_tensor(elastic_tensor: str, material: str) -> float:
@@ -139,13 +120,13 @@ def check_elastic_tensor(elastic_tensor: str, material: str) -> float:
     3. Numerical comparison with tolerance
 
     Args:
-        elastic_tensor: String representation of the elastic tensor to check
-        material: Material name, i.e. "NaCl"
+        elastic_tensor (str): String representation of the elastic tensor to check
+        material (str): Material name, i.e. "NaCl"
 
     Returns:
         float: 1.0 if the tensor matches any reference tensor, 0.0 otherwise
     """
-    elastic_tensors = retrieve_elastic_tensors(material)
+    elastic_tensors = retrieve_material_property_values(material, "elastic_tensor")
 
     # Direct string match
     if elastic_tensor in elastic_tensors:
@@ -215,7 +196,8 @@ def check_elastic_tensor_file(file_path: str, material: str) -> float:
     Validates if the elastic tensor in the given file matches any reference elastic tensor.
 
     Args:
-        file_path: Path to the file containing the elastic tensor
+        file_path (str): Path to the file containing the elastic tensor
+        material (str): Material name, i.e. "NaCl"
 
     Returns:
         float: 1.0 if the tensor matches any reference tensor, 0.0 otherwise
@@ -228,24 +210,42 @@ def check_elastic_tensor_file(file_path: str, material: str) -> float:
         return float(False)
 
 
+def check_simple_property(
+    property_value: float, material: str, property_type: str
+) -> float:
+    """
+    Validates if the given property value matches an expected value for the material.
+
+    Args:
+        property_value (float): Property value to check
+        material (str): Material name, i.e. "NaCl"
+        property_type (str): Type of property to check (e.g., "bandgap", "formation_energy")
+
+    Returns:
+        float: 1.0 if the property value matches an expected value, 0.0 otherwise
+    """
+    if not isinstance(property_value, float):
+        return float(False)
+
+    property_values = retrieve_material_property_values(material, property_type)
+    for value in property_values:
+        if value == property_value:
+            return float(True)
+    return float(False)
+
+
 def check_simple_bandgap(bandgap: float, material: str) -> float:
     """
     Validates if the given bandgap is within the expected range.
 
     Args:
-        bandgap: Bandgap value to check
-        material: Material name, i.e. "NaCl"
+        bandgap (float): Bandgap value to check
+        material (str): Material name, i.e. "NaCl"
 
     Returns:
         float: 1.0 if the bandgap is within the expected range, 0.0 otherwise
     """
-    if not isinstance(bandgap, float):
-        return float(False)
-    bandgap_values = retrieve_bandgap_values(material)
-    for bandgap_value in bandgap_values:
-        if bandgap_value == bandgap:
-            return float(True)
-    return float(False)
+    return check_simple_property(bandgap, material, "bandgap")
 
 
 def check_simple_formation_energy(formation_energy: float, material: str) -> float:
@@ -253,20 +253,13 @@ def check_simple_formation_energy(formation_energy: float, material: str) -> flo
     Validates if the given formation energy is within the expected range.
 
     Args:
-        formation_energy: Formation energy value to check
-        material: Material name, i.e. "NaCl"
+        formation_energy (float): Formation energy value to check
+        material (str): Material name, i.e. "NaCl"
 
     Returns:
         float: 1.0 if the formation energy is within the expected range, 0.0 otherwise
     """
-    if not isinstance(formation_energy, float):
-        return float(False)
-
-    formation_energy_values = retrieve_formation_energy(material)
-    for formation_energy_value in formation_energy_values:
-        if formation_energy_value == formation_energy:
-            return float(True)
-    return float(False)
+    return check_simple_property(formation_energy, material, "formation_energy")
 
 
 def check_bandgap_formation_energy(
@@ -281,7 +274,13 @@ def check_bandgap_formation_energy(
     Validates if the given material meets the criteria of having a bandgap between the specified range, a formation energy between the specified range, and a maximum number of atoms in the unit cell.
 
     Args:
-        material: Material name, i.e. "NaCl"
+        material (str): Material name, i.e. "NaCl"
+        bandgap_low (float): Lower bound of the bandgap range
+        bandgap_high (float): Upper bound of the bandgap range
+        formation_energy_low (float): Lower bound of the formation energy range
+        formation_energy_high (float): Upper bound of the formation energy range
+        max_atoms (int): Maximum number of atoms in the unit cell
+        1.0 if the material meets the criteria, 0.0 otherwise
 
     Returns:
         float: 1.0 if the material meets the criteria, 0.0 otherwise
@@ -323,11 +322,11 @@ def check_bandgap_bulk_modulus(
     Validates if the given material meets the criteria of having a bandgap between the specified range and a bulk modulus between the specified range.
 
     Args:
-        material: Material name, i.e. "NaCl"
-        bandgap_low: Lower bound of the bandgap range
-        bandgap_high: Upper bound of the bandgap range
-        bulk_modulus_low: Lower bound of the bulk modulus range
-        bulk_modulus_high: Upper bound of the bulk modulus range
+        material (str): Material name, i.e. "NaCl"
+        bandgap_low (float): Lower bound of the bandgap range
+        bandgap_high (float): Upper bound of the bandgap range
+        bulk_modulus_low (float): Lower bound of the bulk modulus range
+        bulk_modulus_high (float): Upper bound of the bulk modulus range
 
     Returns:
         float: 1.0 if the material meets the criteria, 0.0 otherwise
@@ -359,7 +358,7 @@ def check_cif_material(cif_path: str) -> float:
     Validates if the path contains a CIF file for a material that meets the criteria of having a bandgap between the specified range, a formation energy between the specified range, and a maximum number of atoms in the unit cell.
 
     Args:
-        cif_path: Path to the CIF file
+        cif_path (str): Path to the CIF file
 
     Returns:
         float: 1.0 if the CIF file meets the criteria, 0.0 otherwise
@@ -388,13 +387,13 @@ def check_bandgap_formation_bulk_modulus(
     Validates if the given material meets the criteria of having a bandgap between the specified range, a formation energy between the specified range, and a bulk modulus between the specified range.
 
     Args:
-        material: Material name, i.e. "NaCl"
-        bandgap_low: Lower bound of the bandgap range
-        bandgap_high: Upper bound of the bandgap range
-        formation_energy_low: Lower bound of the formation energy range
-        formation_energy_high: Upper bound of the formation energy range
-        bulk_modulus_low: Lower bound of the bulk modulus range
-        bulk_modulus_high: Upper bound of the bulk modulus range
+        material (str): Material name, i.e. "NaCl"
+        bandgap_low (float): Lower bound of the bandgap range
+        bandgap_high (float): Upper bound of the bandgap range
+        formation_energy_low (float): Lower bound of the formation energy range
+        formation_energy_high (float): Upper bound of the formation energy range
+        bulk_modulus_low (float): Lower bound of the bulk modulus range
+        bulk_modulus_high (float): Upper bound of the bulk modulus range
 
     Returns:
         float: 1.0 if the material meets the criteria, 0.0 otherwise
