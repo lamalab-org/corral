@@ -222,7 +222,7 @@ class Environment(ABC):
             "How to use tools:\n"
             "1. Each tool call must specify the tool name and required arguments\n"
             "2. Tools may return errors if arguments are invalid\n"
-            "3. You can make multiple tool calls as needed\n"
+            "3. You can make multiple tool calls as needed. The tools will be executed sequentially in the order they are called.\n"
             "4. All tool calls are recorded and affect your final score\n"
             "Example tool call format:\n"
             "{{\n"
