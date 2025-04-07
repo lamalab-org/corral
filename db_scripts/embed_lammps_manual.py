@@ -159,7 +159,6 @@ def main():
     """Main function to execute the script."""
     repo_path = clone_lammps_repo()
     rst_files = get_rst_files(repo_path)
-    # rst_files = list(filter(lambda file: not file.endswith("Bibliography.rst"), rst_files))
 
     create_vector_database_incrementally(
         rst_files, "lammps_manual", "../vector_databases/lammps_manual", batch_size=10
