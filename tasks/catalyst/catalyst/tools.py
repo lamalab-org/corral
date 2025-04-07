@@ -123,6 +123,7 @@ def enumerate_slabs_text(
 def choose_slab_text(slabs_json: str, index: int = 0) -> str:
     """
     Selects one slab from the JSON dictionary of slabs (by its index) and returns its CIF string.
+
     Args:
         slabs_json: JSON string mapping slab keys to CIF strings.
         index: Index of the slab to select (default 0).

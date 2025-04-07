@@ -1,5 +1,7 @@
 import json
 import os
+import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import uvicorn
@@ -25,7 +27,83 @@ from corral.io import (
 )
 from corral.server import create_benchmark_server
 
-BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
+# Base working directory
+if "CORRAL_WORK_DIR" not in os.environ:
+    raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
+BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+
+# Registry of scoring functions
+SCORING_FUNCTIONS = {
+    "mp_structure": check_mp_structure,
+    "slabs_json": check_slabs_json,
+    "slab_structure": check_slab_structure,
+    "adsorption_sites": check_adsorption_sites,
+    "adsorption_structure": check_adsorption_structure,
+    "file_exists": lambda path: 1.0 if Path(path).exists() else 0.0,
+}
+
+
+def get_scoring_function(name: str, params: dict | None = None) -> Callable:
+    """Get a scoring function by name from the registry, with optional parameters"""
+    fn = SCORING_FUNCTIONS.get(name)
+    if fn is None:
+        logger.warning(f"Scoring function '{name}' not found, using default")
+        return lambda *_: 0.0
+
+    # If it's a factory function (i.e., takes arguments), call with params
+    if params:
+        try:
+            return fn(**params)
+        except Exception as e:
+            logger.error(
+                f"Error initializing scoring function '{name}' with params {params}: {e}"
+            )
+            return lambda *_: 0.0
+    else:
+        return fn
+
+
+def load_tasks_from_json(
+    json_path: str | Path, work_dir: str
+) -> dict[str, TaskDefinition]:
+    """Load task definitions from a JSON file.
+
+    Args:
+        json_path: Path to the JSON file containing task definitions
+        work_dir: Working directory to use for task execution
+
+    Returns:
+        dictionary of task definitions keyed by task ID
+    """
+    if not Path(json_path).exists():
+        raise FileNotFoundError(f"Task definition file not found: {json_path}")
+
+    with Path(json_path).open() as f:
+        task_data = json.load(f)
+
+    tasks = {}
+    for task_id, task_info in task_data.items():
+        # Get the scoring function by name from the registry
+        scoring_fn_name = task_info.get("scoring_function", "default")
+        scoring_params = task_info.get("scoring_params", {})
+        scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
+
+        # Add work_dir to initial input if not already present
+        initial_input = task_info.get("initial_input", {}).copy()
+        if "work_dir" not in initial_input:
+            initial_input["work_dir"] = work_dir
+
+        tasks[task_id] = TaskDefinition(
+            name=task_info["name"],
+            description=task_info["description"],
+            tools=task_info.get("tools", []),
+            scoring_fn=scoring_fn,
+            submission_format=task_info.get("submission_format", ""),
+            input_from_tasks=task_info.get("input_from_tasks", []),
+            initial_input=initial_input,
+        )
+
+    return tasks
 
 
 class TaskEnvironment(Environment):
@@ -36,13 +114,12 @@ class TaskEnvironment(Environment):
         task_id: str,
         task_group: TaskGroup,
         available_tools: dict[str, Tool],
-        fs_tools: dict[str, Tool] | None = None,
+        common_tools: dict[str, Tool] | None = None,
     ):
         self.task_group = task_group
         self.task_id = task_id
         self.available_tools = available_tools
-        self.fs_tools = fs_tools or {}
-        self._trail_name = None
+        self.common_tools = common_tools or {}
 
         if task_id not in task_group.tasks:
             raise ValueError(f"Task {task_id} not found in task group")
@@ -57,21 +134,26 @@ class TaskEnvironment(Environment):
         for tool_name in self.current_task.tools:
             if tool_name in available_tools:
                 self.add_tool(available_tools[tool_name])
+            else:
+                logger.warning(
+                    f"Tool {tool_name} required for task {task_id} not found"
+                )
 
         # Add all file system tools
-        for tool in self.fs_tools.values():
+        for tool in self.common_tools.values():
             self.add_tool(tool)
 
     def get_task_prompt(self) -> str:
+        """Generate the task prompt for the current task"""
         _combined_input = self.task_group.get_task_input(self.task_id)
 
         prompt = f"""Task: {self.current_task.name}
 Description: {self.current_task.description}
 
 Required submission format:
+{self.current_task.submission_format}
+
 """
-        for key, desc in self.current_task.submission_format.items():
-            prompt += f"- {key}: {desc}\n"
 
         prompt += "\nAvailable input data:\n"
 
@@ -87,7 +169,8 @@ Required submission format:
         # Display initial input data
         if self.current_task.initial_input:
             for key, value in self.current_task.initial_input.items():
-                prompt += f"- {key}: {value}\n"
+                if key != "work_dir":  # Skip work_dir to avoid cluttering the prompt
+                    prompt += f"- {key}: {value}\n"
 
         # Add IO tools description for saving results
         prompt += "\nIMPORTANT: You have access to filesystem tools which allow you to read and write files. Also you can retry many times to get the correct answer. "
@@ -95,6 +178,8 @@ Required submission format:
         prompt += (
             "This will help you reference and retrieve these files in later tasks."
         )
+        work_dir = self.current_task.initial_input.get("work_dir", "")
+        prompt += f"\nWorking directory: {work_dir}\n ONLY use these working directroy files. Do not use any other files.\n"
 
         # Add note about dependencies
         if self.current_task.input_from_tasks:
@@ -115,161 +200,57 @@ Required submission format:
     def score(self) -> float:
         """Score the submitted answer"""
         if not self.state.submitted_answer:
+            logger.warning(f"No submission found for task {self.task_id}")
             return 0.0
 
         try:
-            submission_str = self.state.submitted_answer.strip()
-            logger.info(f"Raw submission: {submission_str}")
+            # Get and log the raw submission
+            answer_value = self.state.submitted_answer.strip()
+            logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
 
-            # Try to parse as JSON first
-            try:
-                submission = json.loads(submission_str)
+            # Call the scoring function with the raw answer
+            score = self.current_task.scoring_fn(answer_value)
 
-                # If submission is a dict, look for answer field or alternatives
-                if isinstance(submission, dict):
-                    # Check for alternative keys if "answer" not present
-                    if "answer" not in submission:
-                        # Check for other common keys
-                        possible_keys = ["ans", "answers"]
-                        for key in possible_keys:
-                            if key in submission:
-                                # Map alternative key to "answer"
-                                submission["answer"] = submission[key]
-                                logger.info(
-                                    f"Found alternative key '{key}', mapped to 'answer'"
-                                )
-                                break
-
-                    # Now extract answer for scoring, default to full submission if still no answer key
-                    answer_for_scoring = submission.get("answer", submission_str)
-                else:
-                    # If submission parsed as JSON but is not a dict (e.g., a list or primitive),
-                    # use it directly and wrap in a dict for storage
-                    answer_for_scoring = submission
-                    submission = {"answer": submission}
-
-            except json.JSONDecodeError:
-                # If not valid JSON, use the string directly for scoring
-                # and create a dict for storage
-                answer_for_scoring = submission_str
-                submission = {"answer": submission_str}
-
-            # Store full result in task group
-            logger.info(f"Parsed submission: {submission}")
-            logger.info(f"Using for scoring: {answer_for_scoring}")
-
-            # Call the scoring function with the extracted answer
-            score = self.current_task.scoring_fn(answer_for_scoring)
-
-            self.task_group.store_result(self.task_id, submission, score)
+            # Store result in task group
+            self.task_group.store_result(self.task_id, {"answer": answer_value}, score)
+            logger.info(f"Task {self.task_id} scored: {score}")
 
             return score
+
         except Exception as e:
-            logger.error(f"Error scoring submission for task {self.task_id}: {e!s}")
-            logger.error(f"Submission was: {self.state.submitted_answer}")
+            logger.error(
+                f"Error scoring submission for task {self.task_id}: {e!s}",
+                exc_info=True,
+            )
+            logger.error(f"Submission was: {self.state.submitted_answer!r}")
             return 0.0
 
 
-def create_catalysis_environments(
-    fs_tools: dict[str, Tool] | None = None, work_dir: str = BASE_WORK_DIR
-) -> dict[str, Environment]:
-    """Create environments for catalysis tasks"""
+def create_environments(
+    task_json_path: str | Path,
+    common_tools: dict[str, Tool] | None = None,
+    work_dir: str = BASE_WORK_DIR,
+) -> dict[str, TaskEnvironment]:
+    """Create environments for tasks defined in a JSON file
 
-    # Ensure work directory exists
-    work_dir_path = Path(work_dir)
-    work_dir_path.mkdir(parents=True, exist_ok=True)
+    Args:
+        task_json_path: Path to the JSON file with task definitions
+        common_tools: dictionary of Tools which are common for subtasks, for example file system tools
+        work_dir: Working directory for task execution
 
-    # Create task group with improved dependency management
-    task_group = TaskGroup(
-        group_id="catalyst",
-        tasks={
-            "retrieve_structure": TaskDefinition(
-                name="Retrieve Bulk Structure",
-                description="Retrieve structure of Si from Materials Project using the MP-149 ID and save it as a CIF file. Submit the path to the CIF file.",
-                tools=["get_structure_from_mp_text"],
-                scoring_fn=check_mp_structure,
-                submission_format={"answer": "/path/to/bulk_structure.cif"},
-                initial_input={
-                    "mp_id": "mp-149",  # Silicon
-                    "work_dir": str(work_dir_path),
-                },
-            ),
-            "enumerate_slabs": TaskDefinition(
-                name="Enumerate Possible Slabs",
-                description="Enumerate possible slabs from the bulk Si structure with Miller index (1,1,1) and save the result as a JSON file. Submit the path to the JSON file.",
-                tools=["enumerate_slabs_text"],
-                scoring_fn=check_slabs_json,
-                submission_format={"answer": "/path/to/slabs.json"},
-                input_from_tasks=["retrieve_structure"],
-                initial_input={
-                    "miller_index": (1, 1, 1),
-                    "min_slab_size": 12,
-                    "min_vacuum_size": 5,
-                    "work_dir": str(work_dir_path),
-                },
-            ),
-            "choose_slab": TaskDefinition(
-                name="Choose Slab",
-                description="Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
-                tools=["choose_slab_text"],
-                scoring_fn=check_slab_structure,
-                submission_format={"answer": "/path/to/chosen_slab.cif"},
-                input_from_tasks=["enumerate_slabs"],
-                initial_input={
-                    "index": 0,  # Default to first slab
-                    "work_dir": str(work_dir_path),
-                },
-            ),
-            "create_molecule": TaskDefinition(
-                name="Create CO2 Molecule",
-                description="Retrieve CO2 molecule structure using MP - ID save it as a CIF file. Submit the path to the CIF file.",
-                tools=["get_structure_from_mp_text"],
-                scoring_fn=check_mp_structure,
-                submission_format={"answer": "/path/to/co2.cif"},
-                initial_input={"mp_id": "mp-20066", "work_dir": str(work_dir_path)},
-            ),
-            "get_adsorption_sites": TaskDefinition(
-                name="Identify Adsorption Sites",
-                description="Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
-                tools=["get_adsorption_sites_text"],
-                scoring_fn=check_adsorption_sites,
-                submission_format={"answer": "/path/to/adsorption_sites.json"},
-                input_from_tasks=["choose_slab"],
-                initial_input={
-                    "work_dir": str(work_dir_path),
-                },
-            ),
-            "choose_adsorption_site": TaskDefinition(
-                name="Choose Adsorption Site",
-                description="Choose one adsorption site (preferably a top site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
-                tools=["choose_adsorption_site_text"],
-                scoring_fn=lambda path: 1.0 if Path(path).exists() else 0.0,
-                submission_format={"answer": "/path/to/chosen_site.json"},
-                input_from_tasks=["get_adsorption_sites"],
-                initial_input={
-                    "site_type": "top",  # Default to top site
-                    "index": 0,  # Default to first site of the type
-                    "work_dir": str(work_dir_path),
-                },
-            ),
-            "add_adsorbate": TaskDefinition(
-                name="Add CO2 to Silicon Slab",
-                description="Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Å and save the combined structure as a CIF file. Submit the path to the CIF file.",
-                tools=["add_adsorbate_to_slab_text"],
-                scoring_fn=check_adsorption_structure,
-                submission_format={"answer": "/path/to/slab_with_co2.cif"},
-                input_from_tasks=[
-                    "choose_slab",
-                    "create_molecule",
-                    "choose_adsorption_site",
-                ],
-                initial_input={
-                    "height": 2.0,  # Å above the surface
-                    "work_dir": str(work_dir_path),
-                },
-            ),
-        },
-    )
+    Returns:
+        dictionary of environments keyed by task ID
+    """
+
+    logger.info(f"Creating environments from {task_json_path} with work_dir {work_dir}")
+
+    # Load tasks from JSON
+    tasks = load_tasks_from_json(task_json_path, work_dir)
+
+    # Create task group
+    group_id = Path(task_json_path).stem  # Use filename (without extension) as group ID
+    logger.info(f"Creating task group with ID: {group_id}")
+    task_group = TaskGroup(group_id=group_id, tasks=tasks)
 
     # Print task dependencies for reference
     logger.info("\nTask Dependencies:")
@@ -283,7 +264,6 @@ def create_catalysis_environments(
         logger.info(f"{i+1}. {task_id}")
 
     # Create all available tools
-    # This assumes you have a function to create the tools
     available_tools = create_tools()
 
     # Create environments for all tasks
@@ -293,16 +273,43 @@ def create_catalysis_environments(
             task_id=task_id,
             task_group=task_group,
             available_tools=available_tools,
-            fs_tools=fs_tools,
+            common_tools=common_tools,
         )
 
     return environments
 
 
+def run_server(
+    environments: Mapping[str, Environment], host: str = "0.0.0.0", port: int = 8000
+):
+    """Run the benchmark server with the provided environments
+
+    Args:
+        environments: dictionary of environments
+        host: Server host
+        port: Server port
+    """
+    app = create_benchmark_server(dict(environments))
+    logger.info(f"Starting server on {host}:{port}")
+    uvicorn.run(app, host=host, port=port)
+
+
 if __name__ == "__main__":
-    # Create file system manager and tools
-    Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
-    fs_manager = FSManager("file", base_path=BASE_WORK_DIR)
+    # Determine tasks file path
+    if len(sys.argv) > 1:
+        tasks_json_path = sys.argv[1]
+    else:
+        tasks_json_path = os.environ.get(
+            "CORRAL_TASKS_PATH",
+            Path(__file__).parent / "tasks" / "catalysis_tasks.json",
+        )
+
+    # Get server settings from environment if provided
+    host = os.environ.get("CORRAL_HOST", "0.0.0.0")
+    port = int(os.environ.get("CORRAL_PORT", "8000"))
+    work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
+    Path(work_dir).mkdir(parents=True, exist_ok=True)
+    fs_manager = FSManager("file", base_path=work_dir)
 
     fs_tools = {
         "list_files": ListFilesTool(fs_manager),
@@ -313,8 +320,10 @@ if __name__ == "__main__":
         "copy_file": CopyFileTool(fs_manager),
     }
 
-    # Create all environments with file system tools
-    environments = create_catalysis_environments(fs_tools=fs_tools)
+    # Create environments
+    environments = create_environments(
+        task_json_path=tasks_json_path, common_tools=fs_tools, work_dir=work_dir
+    )
 
     logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
@@ -323,6 +332,5 @@ if __name__ == "__main__":
         if env.current_task.input_from_tasks:
             logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
 
-    # Create and run server
-    app = create_benchmark_server(environments)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Run server
+    run_server(environments, host, port)
