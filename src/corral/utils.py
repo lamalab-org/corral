@@ -487,6 +487,11 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
         arg_name = arg_name.strip()
         arg_desc = arg_desc.strip()
 
+        # Extract bare parameter name without the type annotation in parentheses
+        # This handles formats like "query (str): Description"
+        if "(" in arg_name and ")" in arg_name:
+            arg_name = arg_name.split("(")[0].strip()
+
         # Parse choices if specified in format (choices: [val1, val2, ...])
         choices = None
         if "(choices:" in arg_desc:
