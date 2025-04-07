@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Optional, Union, get_args, get_origin, get_type_hints
 
 import chromadb
+import modal
 import tiktoken
+from chembench.baseline import Generation, Generations
 from litellm import embedding
 from loguru import logger
 from modal import App, Image, Mount, Secret, Volume
@@ -23,6 +25,19 @@ from corral.agents.utils import LiteLLMMessage
 from corral.base import ModalTool, Tool, ToolArgument
 
 MODAL_TOOL_REGISTRY = {}
+
+
+class Model:
+    def __init__(self, name: str = "Dummy Model"):
+        self.name = name
+
+    def generate(self, prompts: list[str], **_kwargs):
+        generations = []
+        for _prompt in prompts:
+            generation = None
+            generations.append([Generation(text=generation)])
+
+        return Generations(generations=generations)
 
 
 def vector_database_search(
@@ -747,3 +762,11 @@ def save_agent_messages(
         )
 
     return file_path
+
+
+def remote_call(function_name: str, env_name: str = "chemenv"):
+    def wrapper(arg: str) -> str:
+        remote = modal.Function.from_name(env_name, function_name)
+        return remote.remote(arg)
+
+    return wrapper

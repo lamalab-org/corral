@@ -2,7 +2,6 @@ import os
 from typing import Any
 
 import uvicorn
-from chembench.baseline import Generation, Generations
 from chembench.evaluate import ChemBenchmark
 from chembench.prompter import PrompterBuilder
 from chembench.task import Task
@@ -38,6 +37,7 @@ from corral.io import (
     WriteFileTool,
 )
 from corral.server import create_benchmark_server
+from corral.utils import Model
 
 load_dotenv("../.env", override=True)
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
@@ -62,27 +62,27 @@ _CHEMBENCH_TOOLS = [
 ]
 
 
-class Model:
-    def __init__(self, name: str = "Dummy Model"):
-        self.name = name
-
-    def generate(self, prompts: list[str], **_kwargs):
-        generations = []
-        for _prompt in prompts:
-            generation = None
-            generations.append([Generation(text=generation)])
-
-        return Generations(generations=generations)
-
-
 class ChemBenchEnvironment(Environment):
+    """
+    Environment based in Q&A tasks from ChemBench (	arXiv:2404.01475)
+
+    Args:
+        task_id (str): Unique identifier for the task.
+        tasks (list[Task]): List of tasks to be included in the environment.
+        benchmark (ChemBenchmark): ChemBenchmark instance for evaluation.
+        prompter (PrompterBuilder): PrompterBuilder instance from ChemBench for generating prompts.
+        tools (dict[str, Any] | None): Dictionary of tools to be used in the environment
+            in addition to the default ones from the environment (_CHEMBENCH_TOOLS).
+            Normally I/O tools. Default is None.
+    """
+
     def __init__(
         self,
         task_id: str,
         tasks: list[Task],
         benchmark: ChemBenchmark,
         prompter: PrompterBuilder,
-        tools: dict[str, Any] | None,
+        tools: dict[str, Any] | None = None,
     ):
         self.task_id = task_id
         self.tasks = tasks
@@ -101,6 +101,8 @@ class ChemBenchEnvironment(Environment):
             self.add_tool(tool)
 
     def get_task_prompt(self) -> str:
+        """Get the task prompt for the environment.
+        The task prompt is the default prompt from ChemBench containing the question and formatting instructions."""
         current_idx = 0
         for task_idx, task in enumerate(self.tasks):
             if self.prompter.is_mcq(task):
@@ -125,6 +127,7 @@ class ChemBenchEnvironment(Environment):
             raise ValueError("Only one prompt per task is supported")
 
         return f"\n\nSolve this problem: {prompts[0][0]['content']}"
+
     def score(self) -> float:
         """Score based on submitted answer"""
         logger.info(self.state.submitted_answer)
@@ -163,6 +166,7 @@ class ChemBenchEnvironment(Environment):
 
 
 def get_all_tasks(benchmark: ChemBenchmark) -> list[Task]:
+    """Get all tasks from the ChemBench registry."""
     tasks = []
     topics = benchmark.registry.get_all_topics()
     for _i, topic in enumerate(topics, 1):

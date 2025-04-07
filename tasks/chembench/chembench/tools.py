@@ -24,6 +24,7 @@ from tenacity import (
 from corral.utils import (
     create_vector_database,
     embed_text,
+    remote_call,
     tool,
     vector_database_search,
 )
@@ -36,12 +37,12 @@ def enhanced_brave_search(
     """Perform a web search using Brave Search, then filter and rank results using embeddings.
 
     Args:
-        query: The search query string
-        num_results: Maximum number of results to return. Defaults to 5
-        min_similarity: Minimum similarity score threshold. Defaults to 0.75
+        query (str): The search query string
+        num_results (int, optional): Maximum number of results to return. Defaults to 5
+        min_similarity (float, optional): Minimum similarity score threshold. Defaults to 0.75
 
     Returns:
-        A list of dictionaries containing the most relevant search results
+        list[dict]: A list of dictionaries containing the most relevant search results
         with their content and metadata, sorted by similarity score
 
     Raises:
@@ -95,19 +96,19 @@ def enhanced_brave_search(
         return []
 
 
-def process_pubchem_json(data):
+def process_pubchem_json(data: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Process PubChem JSON data by extracting the smallest TOCHeading units.
 
-    Parameters:
-    - data: JSON data in PubChem format
+    Args:
+        data[dict]: JSON data in PubChem format
 
     Returns:
-    - A list of dictionaries, each containing:
-      - name: The section name (from TOCHeading)
-      - root_path: Path to the section in the original JSON
-      - description: The section description
-      - original: The original unprocessed section data
+        list[dict]: A list of dictionaries, each containing:
+            - name: The section name (from TOCHeading)
+            - root_path: Path to the section in the original JSON
+            - description: The section description
+            - original: The original unprocessed section data
     """
     result = []
 
@@ -147,8 +148,12 @@ def process_pubchem_json(data):
     return result
 
 
-def cleanup_vector_db(collection_name: str) -> None:
-    """Clean up the vector database collection"""
+def delete_vector_db(collection_name: str) -> None:
+    """Delete the vector database collection
+
+    Args:
+        collection_name (str): The name of the collection to delete
+    """
     try:
         persist_directory = Path(Path.cwd()) / "vector_db"
         client = chromadb.PersistentClient(path=str(persist_directory))
@@ -170,12 +175,12 @@ def relevant_pubchem_sections(
     Useful for searching through PubChem records for a specific compound.
 
     Args:
-        compound: The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
-        query: Text query to search for in the full record of the compound.
-        top_k: Number of top results to return (default: 5)
+        compound (str): The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
+        query (str): Text query to search for in the full record of the compound.
+        top_k (int, optional): Number of top results to return. Defaults to 5.
 
     Returns:
-        List of dictionaries containing the most relevant compounds
+        list[dict]: A list of dictionaries containing the most relevant sections
     """
     collection_name = f"compounds_db_{uuid.uuid4().hex}"
 
@@ -196,7 +201,7 @@ def relevant_pubchem_sections(
         return [{"error": f"Error: {e!s}"}]
 
     finally:
-        cleanup_vector_db(collection_name)
+        delete_vector_db(collection_name)
 
 
 @tool
@@ -205,13 +210,14 @@ def smiles_to_name(compound: str) -> str:
     Returns the IUPAC name of a compound given its SMILES representation.
 
     Args:
-        compound: The SMILES representation of the compound.
+        compound (str): The SMILES representation of the compound.
 
     Returns:
-        The IUPAC name of the compound.
+        str: The IUPAC name of the compound.
     """
-    remote = modal.Function.from_name("chemenv", "get_iupac_name")
-    return remote.remote(compound)
+    return remote_call(function_name="get_iupac_name", env_name="chemenv")(
+        compound=compound
+    )
 
 
 @tool
@@ -220,13 +226,14 @@ def get_smiles_from_name(compound: str) -> str:
     Returns the SMILES representation of a compound given its IUPAC name.
 
     Args:
-        compound: The IUPAC name of the compound.
+        compound (str): The IUPAC name of the compound.
 
     Returns:
-        The SMILES representation of the compound.
+        str: The SMILES representation of the compound.
     """
-    remote = modal.Function.from_name("chemenv", "get_smiles_from_name")
-    return remote.remote(compound)
+    return remote_call(function_name="get_smiles_from_name", env_name="chemenv")(
+        compound=compound
+    )
 
 
 @tool
@@ -235,13 +242,14 @@ def get_pka_from_smiles(smiles: str) -> str:
     Returns the pKa value of a compound given its SMILES representation.
 
     Args:
-        smiles: The SMILES representation of the compound.
+        smiles (str): The SMILES representation of the compound.
 
     Returns:
-        The pKa value of the compound.
+        str: The pKa value of the compound.
     """
-    remote = modal.Function.from_name("chemenv", "pka_from_smiles")
-    return remote.remote(smiles)
+    return remote_call(function_name="pka_from_smiles", env_name="chemenv")(
+        smiles=smiles
+    )
 
 
 @tool
@@ -271,90 +279,101 @@ def get_formula_from_smiles(smiles: str) -> str:
 def get_element_info(element: str) -> str:
     """
     Returns information about a chemical element given its symbol.
+    The information will include the element's name, symbol, atomic number,
+    atomic mass, electronic configuration, electronegativity, group, period,
+    and block.
 
     Args:
-        element: The symbol of the chemical element, e.g., "H" for Hydrogen.
+        element (str): The symbol of the chemical element, e.g., "H" for Hydrogen.
 
     Returns:
-        Information about the element.
+        str: Information about the element.
     """
-    remote = modal.Function.from_name("chemenv", "get_element_info")
-    return remote.remote(element)
+    return remote_call(function_name="get_element_info", env_name="chemenv")(
+        element=element
+    )
 
 
 @tool
 def get_number_of_isomers(compound: str) -> str:
     """
-    Returns the number of isomers for a given compound.
+    Returns the number of isomers for a given compound based on the compounds with the same empirical formula in PubChem as `compound`.
+    Note that this implies that this number is not exhaustive
 
     Args:
-        compound: The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
+        compound (str): The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
 
     Returns:
-        int: The number of isomers for the compound.
+        str: The number of isomers for the compound.
     """
-    remote = modal.Function.from_name("chemenv", "get_number_isomers_pubchem")
-    return remote.remote(compound)
+    return remote_call(function_name="get_number_isomers_pubchem", env_name="chemenv")(
+        compound=compound
+    )
 
 
 @tool
-def get_compound_isomers(compound: str) -> str:
+def get_compound_isomers(compound: str) -> list:
     """
-    Returns the isomers of a given compound.
+    Returns the isomers of a given compound based on the compounds with the same empirical formula in PubChem as `compound`.
+    Note that this implies that this number is not exhaustive
 
     Args:
-        compound: The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
+        compound (str): The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
 
     Returns:
         list: The isomers of the compound.
     """
-    remote = modal.Function.from_name("chemenv", "get_compound_isomers_pubchem")
-    return remote.remote(compound)
+    return remote_call(
+        function_name="get_compound_isomers_pubchem", env_name="chemenv"
+    )(compound=compound)
 
 
 @tool
-def get_ghs_classification_pubchem(compound: str) -> str:
+def get_ghs_classification_pubchem(compound: str) -> dict:
     """
     Returns the GHS classification of a compound from PubChem.
 
     Args:
-        compound: The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
+        compound (str): The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
 
     Returns:
         dict: The GHS classification of the compound.
     """
-    remote = modal.Function.from_name("chemenv", "get_ghs_classification_pubchem")
-    return remote.remote(compound)
+    return remote_call(
+        function_name="get_ghs_classification_pubchem", env_name="chemenv"
+    )(compound=compound)
 
 
 @tool
-def get_ms_spectra_pubchem(compound: str) -> str:
+def get_ms_spectra_pubchem(compound: str) -> dict:
     """
     Returns the MS spectra of a compound from PubChem.
 
     Args:
-        compound: The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
+        compound (str): The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
 
     Returns:
         dict: The MS spectra of the compound.
     """
-    remote = modal.Function.from_name("chemenv", "get_ms_spectra_pubchem")
-    return remote.remote(compound)
+    return remote_call(function_name="get_ms_spectra_pubchem", env_name="chemenv")(
+        compound=compound
+    )
 
 
 @tool
-def get_h_nmr_spectra_pubchem(compound: str) -> str:
+def get_h_nmr_spectra_pubchem(compound: str) -> dict:
     """
     Returns the 1H-NMR spectra of a compound from PubChem.
 
     Args:
-        compound: The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
+        compound (str): The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
 
     Returns:
-        dict: The H NMR spectra of the compound.
+        dict: The H-NMR spectra of the compound.
     """
-    remote = modal.Function.from_name("chemenv", "get_h_nmr_spectra_pubchem")
-    return remote.remote(compound)
+    return remote_call(function_name="get_h_nmr_spectra_pubchem", env_name="chemenv")(
+        compound=compound
+    )
 
 
 @tool
@@ -363,13 +382,14 @@ def get_c_nmr_spectra_pubchem(compound: str) -> str:
     Returns the C-NMR spectra of a compound from PubChem.
 
     Args:
-        compound: The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
+        compound (str): The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
 
     Returns:
-        dict: The C NMR spectra of the compound.
+        dict: The C-NMR spectra of the compound.
     """
-    remote = modal.Function.from_name("chemenv", "get_c_nmr_spectra_pubchem")
-    return remote.remote(compound)
+    return remote_call(function_name="get_c_nmr_spectra_pubchem", env_name="chemenv")(
+        compound=compound
+    )
 
 
 @tool
@@ -380,28 +400,30 @@ def simulate_spectra(smiles: str) -> dict[str, str]:
     Use this to complement the PubChem data.
 
     Args:
-        smiles: The SMILES representation of the compound.
+        smiles (str): The SMILES representation of the compound.
 
     Returns:
         dict: The simulated spectra of the compound.
     """
-    remote = modal.Function.from_name("chemenv", "simulate_spectra")
-    return remote.remote(smiles)
+    return remote_call(function_name="simulate_spectra", env_name="chemenv")(
+        smiles=smiles
+    )
 
 
 @tool
-def get_functional_groups(smiles: str) -> str:
+def get_functional_groups(smiles: str) -> list[str]:
     """
-    Returns all the functional groups of a compound given its SMILES representation.
+    Returns the names of all the functional groups of a compound given its SMILES representation.
 
     Args:
-        smiles: The SMILES representation of the compound.
+        smiles (str): The SMILES representation of the compound.
 
     Returns:
-        list: The functional groups of the compound.
+        list[str]: The names of the functional groups of the compound.
     """
-    remote = modal.Function.from_name("chemenv", "get_functional_groups")
-    return remote.remote(smiles)
+    return remote_call(function_name="get_functional_groups", env_name="chemenv")(
+        smiles=smiles
+    )
 
 
 @retry(
@@ -409,15 +431,30 @@ def get_functional_groups(smiles: str) -> str:
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception_type(requests.exceptions.RequestException),
 )
-def fetch_study_page(base_url, params):
-    """Fetch a single page of study data with retry logic"""
+def fetch_study_page(base_url: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Fetch a single page of study data with retry logic
+
+    Args:
+        base_url (str): The base URL for the API endpoint
+        params (dict): The parameters to include in the API request
+
+    Returns:
+        dict: The JSON response from the API
+    """
     response = requests.get(base_url, params=params)
     response.raise_for_status()
     return response.json()
 
 
 def fetch_all_studies(drug_name: str) -> list[dict[str, Any]]:
-    """Fetch all studies related to a specific drug from ClinicalTrials.gov"""
+    """Fetch all studies related to a specific drug from ClinicalTrials.gov
+
+    Args:
+        drug_name (str): The name of the drug to search for
+
+    Returns:
+        list[dict]: A list of dictionaries containing study data
+    """
     base_url = "https://clinicaltrials.gov/api/v2/studies"
     params = {"query.interventionName": drug_name, "pageSize": 100, "format": "json"}
     all_studies = []
@@ -443,7 +480,14 @@ def fetch_all_studies(drug_name: str) -> list[dict[str, Any]]:
 
 
 def parse_study_data(studies: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Parse the study data to extract relevant information"""
+    """Parse the study data to extract relevant information
+
+    Args:
+        studies (list[dict]): A list of dictionaries containing study data
+
+    Returns:
+        list[dict]: A list of dictionaries with parsed study data
+    """
     parsed_data = []
     for study in studies:
         nct_id = (
@@ -547,7 +591,6 @@ def search_clinical_trials(drug_name: str, query: str, top_k: int = 5) -> list[d
         create_vector_database(
             chunks=chunks,
             collection_name=collection_name,
-            ids=[str(i) for i in range(len(chunks))],
         )
         return vector_database_search(
             query=query, collection_name=collection_name, top_k=top_k
@@ -557,4 +600,4 @@ def search_clinical_trials(drug_name: str, query: str, top_k: int = 5) -> list[d
         return [{"error": f"Error searching clinical trials: {e!s}"}]
 
     finally:
-        cleanup_vector_db(collection_name)
+        delete_vector_db(collection_name)
