@@ -31,12 +31,12 @@ def vector_database_search(
     """Retrieve the top 5 most similar instructions from a vector database based on the query.
 
     Args:
-        query: The search query to find similar instructions
-        collection_name: The name of the collection in the vector database (default: "default_collection")
-        path: The path to the vector database directory (default: None, which uses current working directory)
+        query (str): The search query to find similar instructions
+        collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
+        path (str): The path to the vector database directory. Defaults to None, which uses "vector_db" in the current directory.
 
     Returns:
-        A list of dictionaries containing the top 5 most similar instructions with their content and metadata
+        list[dict]: A list of dictionaries containing the top 5 most similar instructions with their content and metadata
 
     Raises:
         RuntimeError: If the specified collection doesn't exist
@@ -99,12 +99,15 @@ def _tokenize_and_split_chunks(
     In addition the chunking is done naively, i.e. it does not look for sentence boundaries.
 
     Args:
-        chunks: List of text chunks to process
-        chunk_size: Maximum number of tokens per chunk
-        batch_size: Number of chunks to process in each batch
+        chunks (list[str]): List of text chunks to process
+        chunk_size (int): Maximum number of tokens per chunk
+        batch_size (batch_size): Number of chunks to process in each batch. Default is 2.
 
     Returns:
-        List of text chunks, each within the token limit
+        list[str]: List of processed chunks, each within the specified token limit
+
+    Raises:
+        ValueError: If chunk_size is less than 1
     """
 
     logger.info(
@@ -203,16 +206,16 @@ def create_vector_database(
     """Create or update a vector database from text instructions.
 
     Args:
-        chunks: The text instructions to be stored in the vector database
-        collection_name: The name of the collection in the vector database (default: "default_collection")
-        path: Path to store the vector database (default: None, which uses "vector_db" in current directory)
-        chunk_size: Maximum number of tokens per chunk (default: 8192)
-        update_mode: How to handle existing collections: "recreate" deletes and recreates the collection,
+        chunks (list[str]): The text instructions to be stored in the vector database
+        collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
+        path (str, optional): Path to store the vector database. Default is "vector_db" in the current directory.
+        chunk_size (int, optional): Maximum number of tokens per chunk. Default is 8192.
+        update_mode (str, optional): How to handle existing collections: "recreate" deletes and recreates the collection,
                     "append" adds new chunks to existing collection, "upsert" updates existing chunks and
-                    adds new ones (default: "recreate")
+                    adds new ones. Default is "recreate".
 
     Returns:
-        A confirmation message indicating the number of chunks stored or updated
+        str: A message indicating the success of the operation
 
     Raises:
         ValueError: If OPENAI_API_KEY environment variable is not set or update_mode is invalid
@@ -335,19 +338,16 @@ def embed_text(
     """
     Embed a list of text chunks using the specified model with automatic retries.
     Args:
-        chunks: List of text chunks to embed
-        model: Model to use for embeddings. Default: "openai/text-embedding-3-large"
+        chunks (list): List of text chunks to embed
+        model (str, optional): Model to use for embeddings. Default: "openai/text-embedding-3-large"
 
     Returns:
-        List of embeddings, each corresponding to a chunk
+        list[list[float]]: List of embeddings for each chunk
 
     Raises:
         ValueError: If chunks is not a non-empty list of strings
         RuntimeError: If embeddings fail after multiple retries
     """
-    import litellm
-
-    litellm._turn_on_debug()
     if (
         not chunks
         or not isinstance(chunks, list)
@@ -376,10 +376,10 @@ def chunk_text(text: str) -> list[str]:
     """
     Split a long text into smaller chunks based on the number of lines.
     Args:
-        text: The text to be split into chunks
+        text (str): The text to be split into chunks
 
     Returns:
-        List of text chunks
+        list[str]: A list of text chunks, each containing a single line
     """
     if not text or not isinstance(text, str):
         raise ValueError("Input must be a non-empty string")
@@ -428,10 +428,10 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
     It expects a docstring with a description section and an Args section.
 
     Args:
-        func: The function to parse docstring from
+        func (Callable): The function to parse docstring from
 
     Returns:
-        tuple: (description, arguments) where description is a string and
+        tuple[str, list[ToolArgument]]: (description, arguments) where description is a string and
                arguments is a list of ToolArgument objects
 
     Raises:
@@ -533,7 +533,7 @@ def tool(func: Callable) -> Tool:
     ```
 
     Args:
-        func: The function to convert into a tool
+        func (Callable): The function to convert into a tool
 
     Returns:
         Tool: A Tool instance wrapping the function
@@ -716,10 +716,10 @@ def save_agent_messages(
     properly serializing them for storage.
 
     Args:
-        messages: List of message objects (LiteLLMMessages or dictionaries)
-        task_id: The ID of the task being solved
-        agent_name: The name of the agent that generated the messages
-        output_dir: Directory to save the logs (will be created if it doesn't exist)
+        messages (list[LiteLLMMessage]): List of message objects (LiteLLMMessages or dictionaries)
+        task_id (str): The ID of the task being solved
+        agent_name (str): The name of the agent that generated the messages
+        output_dir (str, optional): Directory to save the logs (will be created if it doesn't exist). Default is "agent_logs".
 
     Returns:
         str: Path to the saved file

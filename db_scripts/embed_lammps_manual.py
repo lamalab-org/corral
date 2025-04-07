@@ -17,10 +17,10 @@ def clone_lammps_repo(target_dir: str = "lammps_repo") -> str:
     Clone the LAMMPS repository if it doesn't exist already.
 
     Args:
-        target_dir: Directory where the repo will be cloned
+        target_dir (str): Directory where the repo will be cloned. Default is "lammps_repo".
 
     Returns:
-        Path to the cloned repository
+        str: Path to the cloned repository
     """
     repo_url = "https://github.com/lammps/lammps"
     repo_path = Path(target_dir).resolve()
@@ -40,10 +40,10 @@ def get_rst_files(repo_path: str) -> list[str]:
     Get all RST files in the doc/src directory.
 
     Args:
-        repo_path: Path to the LAMMPS repository
+        repo_path (str): Path to the LAMMPS repository
 
     Returns:
-        List of paths to RST files
+        list[str]: List of paths to RST files
     """
     doc_src_path = Path(repo_path) / "doc" / "src"
     rst_files = list(doc_src_path.glob("*.rst"))
@@ -60,11 +60,11 @@ def read_rst_files_in_batches(
     Read content from RST files in batches.
 
     Args:
-        rst_files: List of paths to RST files
-        batch_size: Number of files to process in each batch
+        rst_files (list[str]): List of paths to RST files
+        batch_size (int, optional): Number of files to process in each batch. Default is 5.
 
     Returns:
-        Generator yielding batches of document contents
+        Generator[list[str], None, None]: A generator yielding batches of file contents
     """
     total_files = len(rst_files)
     logger.info(f"Processing {total_files} files in batches of {batch_size}")
@@ -98,7 +98,7 @@ def cleanup_repo(repo_path: str) -> None:
     Remove the cloned repository to free up disk space.
 
     Args:
-        repo_path: Path to the repository to be removed
+        repo_path (str): Path to the repository to be removed
     """
     path = Path(repo_path)
     if path.exists():
@@ -116,10 +116,10 @@ def create_vector_database_incrementally(
     Create a vector database incrementally by processing batches of files.
 
     Args:
-        rst_files: List of paths to RST files
-        collection_name: Name for the vector database collection
-        db_path: Path where to store the vector database
-        batch_size: Size of each batch of files to process
+        rst_files (list[str]): List of paths to RST files
+        collection_name (str): Name for the vector database collection
+        db_path (str): Path where to store the vector database
+        batch_size (int, optional): Size of each batch of files to process. Default is 5.
     """
     total_docs = 0
 
