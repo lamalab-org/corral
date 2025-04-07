@@ -124,8 +124,7 @@ class ChemBenchEnvironment(Environment):
         if len(self.all_prompts) != 1:
             raise ValueError("Only one prompt per task is supported")
 
-        return f"\n\nSolve this problem: {prompts[0][0]["content"]}"
-
+        return f"\n\nSolve this problem: {prompts[0][0]['content']}"
     def score(self) -> float:
         """Score based on submitted answer"""
         logger.info(self.state.submitted_answer)
