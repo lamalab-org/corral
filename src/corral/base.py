@@ -203,7 +203,14 @@ class Environment(ABC):
         self.tools[tool.name] = tool
 
     def get_available_tools(self) -> list[dict[str, str | list[ToolArgument]]]:
-        """Get list of available tools and their descriptions"""
+        """Get list of available tools with their descriptions and arguments.
+
+        Returns:
+            list[dict[str, str | list[ToolArgument]]]: A list of dictionaries where each dictionary contains:
+                - 'name': the tool's name as a string.
+                - 'description': a string describing the tool.
+                - 'arguments': a list of ToolArgument objects representing the tool's arguments.
+        """
         return [
             {"name": t.name, "description": t.description, "arguments": t.arguments}
             for t in self.tools.values()
