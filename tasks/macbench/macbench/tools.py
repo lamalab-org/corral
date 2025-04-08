@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any
 
+import cv2
 import modal
 from modal import Image, Volume
 from promptstore import PromptStore
@@ -111,7 +112,7 @@ def llm_vision_expert(query: str, image_path: str) -> str:
     """
 
     # Ideally we would like to use the latest model
-    model = "gpt-4o-2024-11-20"
+    model = "gemini/gemini-2.5-pro"
 
     try:
         with Path(image_path).open("rb") as f:
@@ -147,7 +148,9 @@ def llm_vision_expert(query: str, image_path: str) -> str:
 
 @modal_tool(
     app=app,
-    image=Image.debian_slim().pip_install("transformers", "Pillow"),
+    image=Image.debian_slim().pip_install(
+        "transformers", "Pillow", "torch", "torchvision", "loguru"
+    ),
     gpu="A100-40GB",
     volumes={
         "/root/.cache/huggingface": hf_cache_vol,
@@ -165,24 +168,40 @@ def deplot_image_extractor_modal(image_bytes: bytes) -> str:
     """
     import io
 
+    from loguru import logger
     from PIL import Image
     from transformers import Pix2StructForConditionalGeneration, Pix2StructProcessor
 
+    logger.info("Starting deplot_image_extractor_modal function")
     try:
+        logger.info("Loading Pix2Struct processor and model")
         processor = Pix2StructProcessor.from_pretrained("google/deplot")
         model = Pix2StructForConditionalGeneration.from_pretrained("google/deplot")
+        logger.info("Successfully loaded processor and model")
 
+        logger.debug(f"Processing image of size {len(image_bytes)} bytes")
         image = Image.open(io.BytesIO(image_bytes))
+        logger.info(
+            f"Image loaded successfully: {image.format} image, size {image.size}"
+        )
 
+        logger.info("Preparing inputs for model")
         inputs = processor(
             images=image,
             text="Generate underlying data table of the figure below:",
             return_tensors="pt",
         )
+        logger.info("Running model inference")
         predictions = model.generate(**inputs)
+        logger.info("Inference complete, decoding results")
 
-        return str(processor.decode(predictions[0], skip_special_tokens=True))
+        result = str(processor.decode(predictions[0], skip_special_tokens=True))
+        logger.info(
+            f"Successfully extracted data from image (output length: {len(result)} chars)"
+        )
+        return result
     except Exception as e:
+        logger.error(f"Error in deplot_image_extractor_modal: {e}")
         return f"Error while extracting data: {e}"
 
 
@@ -216,86 +235,18 @@ def deplot_image_extractor(image_path: str) -> str:
 
 @modal_tool(
     app=app,
-    image=Image.debian_slim().pip_install("transformers", "torch", "Pillow"),
-    gpu="A100-40GB",
-    volumes={
-        "/root/.cache/huggingface": hf_cache_vol,
-    },
-    scaledown_window=1200,
-)
-def chart_vllm_bytes(query: str, image_bytes: bytes) -> str:
-    """
-    Analyze charts and plots using the ChartVLM model.
-
-    Args:
-        query (str): The question or instruction about the chart image
-        image_bytes (bytes): Image file data as bytes
-
-    Returns:
-        str: String containing the analysis or answer about the chart
-    """
-    import io
-
-    import torch
-    from PIL import Image
-    from transformers import AutoModelForVision2Seq, AutoProcessor
-
-    model_name = "U4R/ChartVLM-large"
-
-    try:
-        processor = AutoProcessor.from_pretrained(model_name)
-        model = AutoModelForVision2Seq.from_pretrained(model_name)
-
-        image = Image.open(io.BytesIO(image_bytes))
-
-        inputs = processor(images=image, text=query, return_tensors="pt")
-
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs, max_length=512, num_beams=3, early_stopping=True
-            )
-
-        return str(processor.decode(outputs[0], skip_special_tokens=True))
-    except Exception as e:
-        return f"Error while extracting data: {e}"
-
-
-chart_vllm_bytes_remote = MODAL_TOOL_REGISTRY["chart_vllm_bytes"]
-
-
-@tool
-def chart_vllm_extractor(query: str, image_path: str) -> str:
-    """
-    Analyze charts and plots using the ChartVLM model.
-    Ideally the response of this tool should be used compared to the
-    response of other tools to determine the best answer.
-
-    Args:
-        query (str): The question or instruction about the chart image
-        image_path (str): Path to the image file containing a chart or plot
-
-    Returns:
-        str: String containing the analysis or answer about the chart
-    """
-    import io
-
-    from PIL import Image
-
-    with Image.open(image_path) as img:
-        img_byte_arr = io.BytesIO()
-        img.save(img_byte_arr, format=img.format or "PNG")
-        img_bytes = img_byte_arr.getvalue()
-
-    return chart_vllm_bytes_remote.remote(query, img_bytes)
-
-
-@modal_tool(
-    app=app,
     image=Image.debian_slim()
-    .apt_install("tesseract-ocr")
-    .pip_install("pytesseract", "opencv-python", "Pillow", "numpy"),
-    gpu="A10G",
-    memory=1024,
+    .apt_install(
+        "tesseract-ocr",
+        "libgl1-mesa-glx",
+        "libglib2.0-0",
+        "libsm6",
+        "libxext6",
+        "libxrender-dev",
+    )
+    .pip_install("pytesseract", "opencv-python", "Pillow", "numpy", "loguru"),
+    gpu="A100-40GB",
+    timeout=600,
 )
 def extract_table_text_modal(image_bytes: bytes, lang: str = "eng") -> str:
     """
@@ -313,35 +264,63 @@ def extract_table_text_modal(image_bytes: bytes, lang: str = "eng") -> str:
     import cv2
     import numpy as np
     import pytesseract
+    from loguru import logger
     from PIL import Image
 
+    logger.info(f"Starting OCR processing with language: {lang}")
+    logger.debug(f"Received image data of size: {len(image_bytes)} bytes")
+
     image = Image.open(io.BytesIO(image_bytes))
+    logger.info(f"Loaded image with dimensions: {image.size}")
 
     # Preprocess the image for OCR
+    logger.info("Starting image preprocessing")
     # Convert to grayscale and apply thresholding
     img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    logger.debug("Converted image to grayscale")
+
     _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+    logger.debug("Applied thresholding to image")
+
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     processed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    logger.debug("Applied morphological operations")
+
     custom_config = r"--oem 3 --psm 6 -l " + lang
+    logger.info(f"OCR configuration: {custom_config}")
+
+    logger.info("Extracting raw text with pytesseract")
     extracted_text = pytesseract.image_to_string(processed, config=custom_config)
+    logger.debug(f"Raw text extraction complete: {len(extracted_text)} characters")
 
     try:
+        logger.info("Extracting structured table data")
         table_data = pytesseract.image_to_data(
             processed, config=custom_config, output_type=pytesseract.Output.DICT
         )
+
+        logger.debug(f"Found {len(table_data['text'])} text elements in table")
         structured_text = "Structured Table Data:\n"
         last_block_num = -1
+        text_blocks_count = 0
+
         for i in range(len(table_data["text"])):
             if table_data["text"][i].strip() != "":
                 if last_block_num != table_data["block_num"][i]:
                     structured_text += "\n"
                     last_block_num = table_data["block_num"][i]
+                    text_blocks_count += 1
                 structured_text += table_data["text"][i] + " "
 
-        return f"Raw Extracted Text:\n{extracted_text}\n\n{structured_text}"
+        logger.info(
+            f"Structured table processing complete with {text_blocks_count} text blocks"
+        )
+        result = f"Raw Extracted Text:\n{extracted_text}\n\n{structured_text}"
+        logger.success("OCR extraction completed successfully")
+        return result
     except Exception as e:
+        logger.error(f"Error during structured data extraction: {e!s}")
         return f"Error while extracting text: {e}"
 
 
@@ -464,3 +443,129 @@ def rxnscribe_reaction_extraction(image_path: str) -> list[dict]:
         image_bytes = f.read()
 
     return rxnscribe_remote.remote(image_bytes)
+
+
+@tool
+def extract_plot_with_labels(image_path: str, output_path: str) -> str:
+    """
+    Extracts a plot from an image while preserving the axis labels and saves it to the specified path.
+    Perfect when the plot contains noise as text or other elements
+    around which can make difficult to extract the information from
+    the plot to specialized tools.
+
+    Args:
+        image_path (str): Path to the input image
+        output_path (str): Path where the extracted plot will be saved
+
+    Returns:
+        str: Confirmation message indicating where the cropped image was saved
+    """
+    # Load image
+    image = cv2.imread(image_path)
+    if image is None:
+        raise FileNotFoundError(f"Could not load image from {image_path}")
+
+    # Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Apply Gaussian blur to reduce noise
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # Use binary thresholding to identify the plot background (usually white)
+    _, thresh = cv2.threshold(blurred, 240, 255, cv2.THRESH_BINARY)
+
+    # Find contours in the inverted threshold image
+    contours, _ = cv2.findContours(~thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if not contours:
+        # Fallback to Canny edge detection if thresholding doesn't work well
+        edges = cv2.Canny(blurred, threshold1=50, threshold2=150)
+        contours, _ = cv2.findContours(
+            edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+
+    # Find the largest contour (assuming it's the plot area)
+    if contours:
+        plot_contour = max(contours, key=cv2.contourArea)
+
+        # Get bounding box of the plot
+        x, y, w, h = cv2.boundingRect(plot_contour)
+
+        # Automatically determine the padding needed for left (y-axis) and bottom (x-axis)
+        # by analyzing text regions around the plot
+
+        # Analyze left side for y-axis labels and title
+        search_width = min(150, x)  # Use up to 150px or available space
+        left_region = gray[
+            max(0, y - 30) : min(y + h + 30, image.shape[0]),
+            max(0, x - search_width) : x,
+        ]
+
+        if left_region.size > 0:
+            # Use text detection with more aggressive threshold to catch all text
+            left_thresh = cv2.threshold(left_region, 200, 255, cv2.THRESH_BINARY_INV)[1]
+            left_contours, _ = cv2.findContours(
+                left_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+
+            if left_contours:
+                # Find the leftmost text element
+                if len(left_contours) > 0:
+                    leftmost_x = min([cv2.boundingRect(c)[0] for c in left_contours])
+                    padding_left = max(search_width - leftmost_x, 0)
+                    # Add a bit extra to ensure we catch all of the text
+                    padding_left += 10
+                else:
+                    padding_left = int(w * 0.15)  # More generous default
+            else:
+                padding_left = int(w * 0.15)
+        else:
+            padding_left = int(w * 0.15)
+
+        # Analyze bottom side for x-axis labels
+        search_height = min(120, image.shape[0] - (y + h))
+        bottom_region = gray[
+            y + h : min(y + h + search_height, image.shape[0]),
+            max(0, x - 20) : min(x + w + 20, image.shape[1]),
+        ]
+
+        if bottom_region.size > 0:
+            # Use text detection with more aggressive threshold
+            bottom_thresh = cv2.threshold(
+                bottom_region, 200, 255, cv2.THRESH_BINARY_INV
+            )[1]
+            bottom_contours, _ = cv2.findContours(
+                bottom_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+
+            if bottom_contours:
+                # Find the lowest text element
+                bottom_bounds = [cv2.boundingRect(c) for c in bottom_contours]
+                lowest_y = max([b[1] + b[3] for b in bottom_bounds])
+                padding_bottom = lowest_y + 10  # Add a small margin
+            else:
+                padding_bottom = int(h * 0.12)
+        else:
+            padding_bottom = int(h * 0.12)
+
+        # Use minimal padding for right and top (aggressive cropping)
+        padding_right = 1  # Very minimal right padding, extremely aggressive
+        padding_top = 1  # Very minimal top padding, extremely aggressive
+
+        # Calculate new coordinates with padding (ensuring we stay within image bounds)
+        x1 = max(0, x - padding_left)
+        y1 = max(0, y - padding_top)
+        x2 = min(image.shape[1], x + w + padding_right)
+        y2 = min(image.shape[0], y + h + padding_bottom)
+
+        # Crop the image with padding to include labels
+        extracted_plot = image[y1:y2, x1:x2]
+    else:
+        # If no contours found, use the original image
+        extracted_plot = image
+
+    # Save the image to the output path
+    cv2.imwrite(output_path, extracted_plot)
+
+    # Return confirmation message
+    return f"Cropped image saved in {output_path}"
