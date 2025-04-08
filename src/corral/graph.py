@@ -314,7 +314,7 @@ class GraphTracker:
             f.write(self.to_json())
 
     @classmethod
-    def load_from_file(cls, file_path: str) -> "GraphTracker":
+    def load_from_file(cls, file_path: str | Path) -> "GraphTracker":
         """Load a graph from a file
 
         Args:
