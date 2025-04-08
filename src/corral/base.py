@@ -267,7 +267,6 @@ class Environment(ABC):
         )
         # TODO: make it configurable
         return (
-            f"Task: {self.get_task_prompt()}\n\n"
             "Available Tools:\n"
             f"{tools_guide}\n\n"
             "How to use tools:\n"

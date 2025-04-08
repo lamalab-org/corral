@@ -154,6 +154,7 @@ class ReActAgent:
                 content=user_content,
             )
         )
+
         return messages
 
     def run_agent(

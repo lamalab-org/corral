@@ -1,3 +1,4 @@
+import base64
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,8 @@ from corral.utils import (
     web_search,
 )
 
-store = PromptStore("./prompts")
+current_file_dir = Path(__file__).parent
+store = PromptStore(current_file_dir / "prompts")
 app = modal.App("macbench")
 hf_cache_vol = Volume.from_name("huggingface-cache", create_if_missing=True)
 
@@ -110,24 +112,28 @@ def llm_vision_expert(query: str, image_path: str) -> str:
     Returns:
         str: The response from the LLM regarding the image analysis
     """
-
     # Ideally we would like to use the latest model
-    model = "gemini/gemini-2.5-pro"
+    # This Gemini seems to be the best one for OCR tasks
+    model = "gemini/gemini-2.5-pro-preview-03-25"
 
     try:
         with Path(image_path).open("rb") as f:
             image_bytes = f.read()
 
+        base64_image = base64.b64encode(image_bytes).decode("utf-8")
+
         system_prompt = store.get("9c471e7f-7bbd-4ef4-8068-bf66e838e590")
         system_prompt = system_prompt.fill({})
         user_prompt = [
             {
-                "type": "image",
-                "content": image_bytes,
+                "type": "text",
+                "text": f"Query: {query}",
             },
             {
-                "type": "text",
-                "content": f"Query: {query}",
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{base64_image}",
+                },
             },
         ]
         messages = [
@@ -446,7 +452,7 @@ def rxnscribe_reaction_extraction(image_path: str) -> list[dict]:
 
 
 @tool
-def extract_plot_with_labels(image_path: str, output_path: str) -> str:
+def crop_plot_with_labels(image_path: str, output_path: str) -> str:
     """
     Extracts a plot from an image while preserving the axis labels and saves it to the specified path.
     Perfect when the plot contains noise as text or other elements
