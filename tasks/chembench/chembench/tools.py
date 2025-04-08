@@ -1,32 +1,23 @@
 from __future__ import annotations
 
 import gc
-import os
 import uuid
 from pathlib import Path
 from typing import Any
 
 import chromadb
-import modal
-import numpy as np
 import requests
-from langchain_community.tools.brave_search.tool import BraveSearch
 from loguru import logger
 from rdkit import Chem
-from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
+from rdkit.Chem import rdMolDescriptors
 
 from corral.utils import (
     create_vector_database,
-    embed_text,
+    make_api_request,
     remote_call,
     tool,
     vector_database_search,
+    web_search,
 )
 
 
@@ -48,52 +39,11 @@ def enhanced_brave_search(
     Raises:
         ValueError: If BRAVE_SEARCH_API_KEY environment variable is not set
     """
-    api_key = os.getenv("BRAVE_SEARCH_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "BRAVE_SEARCH_API_KEY environment variable is required but not set"
-        )
-
-    try:
-        # TODO: Avoid using LangChain
-        brave_search_tool = BraveSearch.from_api_key(api_key=api_key)
-        initial_results = brave_search_tool._run(query)
-
-        if not initial_results:
-            return []
-
-        query_embedding = np.array(embed_text(chunks=[query])[0]).reshape(1, -1)
-        result_texts = [f"{r['title']}: {r['snippet']}" for r in initial_results]
-        result_embeddings = np.array(embed_text(chunks=result_texts))
-
-        similarity_scores = sklearn_cosine_similarity(
-            query_embedding, result_embeddings
-        ).flatten()
-
-        results_with_scores = []
-        for i, result in enumerate(initial_results):
-            similarity = float(similarity_scores[i])
-
-            results_with_scores.append(
-                {
-                    "title": result["title"],
-                    "snippet": result["snippet"],
-                    "link": result["link"],
-                    "similarity_score": similarity,
-                }
-            )
-
-        filtered_results = [
-            r for r in results_with_scores if r["similarity_score"] >= min_similarity
-        ]
-        sorted_results = sorted(
-            filtered_results, key=lambda x: x["similarity_score"], reverse=True
-        )
-
-        return sorted_results[:num_results]
-
-    except Exception:
-        return []
+    return web_search(
+        query=query,
+        num_results=num_results,
+        min_similarity=min_similarity,
+    )
 
 
 def process_pubchem_json(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -159,8 +109,15 @@ def delete_vector_db(collection_name: str) -> None:
         client = chromadb.PersistentClient(path=str(persist_directory))
         if collection_name in [c.name for c in client.list_collections()]:
             client.delete_collection(name=collection_name)
-        # Force Python garbage collection
+
         gc.collect()
+
+        import subprocess
+
+        collection_path = persist_directory / collection_name
+        if collection_path.exists():
+            subprocess.run(["rm", "-rf", str(collection_path)], check=True)
+            logger.info(f"Removed collection directory: {collection_path}")
     except Exception as e:
         logger.warning(f"Warning: Exception during cleanup: {e!s}")
 
@@ -185,10 +142,9 @@ def relevant_pubchem_sections(
     collection_name = f"compounds_db_{uuid.uuid4().hex}"
 
     try:
-        remote_pubchem_record = modal.Function.from_name(
-            "chemenv", "get_pubchem_full_record"
-        )
-        full_record = remote_pubchem_record.remote(compound)
+        full_record = remote_call(
+            function_name="get_pubchem_full_record", env_name="chemenv"
+        )(compound=compound)
 
         chunks = process_pubchem_json(full_record)
 
@@ -268,8 +224,7 @@ def get_formula_from_smiles(smiles: str) -> str:
 
         if mol is None:
             return "Invalid SMILES string"
-
-        return Chem.rdMolDescriptors.CalcMolFormula(mol)
+        return rdMolDescriptors.CalcMolFormula(mol)
 
     except Exception as e:
         return f"Error: {e!s}"
@@ -426,26 +381,6 @@ def get_functional_groups(smiles: str) -> list[str]:
     )
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(requests.exceptions.RequestException),
-)
-def fetch_study_page(base_url: str, params: dict[str, Any]) -> dict[str, Any]:
-    """Fetch a single page of study data with retry logic
-
-    Args:
-        base_url (str): The base URL for the API endpoint
-        params (dict): The parameters to include in the API request
-
-    Returns:
-        dict: The JSON response from the API
-    """
-    response = requests.get(base_url, params=params)
-    response.raise_for_status()
-    return response.json()
-
-
 def fetch_all_studies(drug_name: str) -> list[dict[str, Any]]:
     """Fetch all studies related to a specific drug from ClinicalTrials.gov
 
@@ -456,7 +391,7 @@ def fetch_all_studies(drug_name: str) -> list[dict[str, Any]]:
         list[dict]: A list of dictionaries containing study data
     """
     base_url = "https://clinicaltrials.gov/api/v2/studies"
-    params = {"query.interventionName": drug_name, "pageSize": 100, "format": "json"}
+    params = {"query.term": drug_name, "pageSize": 100, "format": "json"}
     all_studies = []
     next_page_token = None
 
@@ -465,7 +400,10 @@ def fetch_all_studies(drug_name: str) -> list[dict[str, Any]]:
             if next_page_token:
                 params["pageToken"] = next_page_token
 
-            data = fetch_study_page(base_url, params)
+            data = make_api_request(
+                url=base_url, method="GET", params=params, verbose=True
+            )
+
             studies = data.get("studies", [])
             all_studies.extend(studies)
 
@@ -553,21 +491,19 @@ def parse_study_data(studies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return parsed_data
 
 
-@tool
-def search_clinical_trials(drug_name: str, query: str, top_k: int = 5) -> list[dict]:
+def _search_clinical_trials(search_term: str, query: str, top_k: int = 5) -> list[dict]:
     """
-    Fetches clinical trial data for a specific drug from ClinicalTrials.gov
-    with semantic search capabilities from a query
+    Helper function that fetches clinical trial data and performs semantic search.
 
     Args:
-        drug_name: Name of the drug to search for in clinical trials
-        query: Text query to find relevant trials
-        top_k: Number of top results to return if query is provided (default: 5)
+        search_term (str): Term to search for in ClinicalTrials.gov
+        query (str): Text query for semantic search on the retrieved trials
+        top_k (int): Number of top results to return (default: 5)
 
     Returns:
-        List of dictionaries with parsed clinical trial data, optionally filtered by relevance
+        list[dict]: List of dictionaries with relevant clinical trial data
     """
-    studies = fetch_all_studies(drug_name)
+    studies = fetch_all_studies(search_term)
     parsed_studies = parse_study_data(studies)
 
     collection_name = f"clinical_trials_{uuid.uuid4().hex}"
@@ -601,6 +537,42 @@ def search_clinical_trials(drug_name: str, query: str, top_k: int = 5) -> list[d
 
     finally:
         delete_vector_db(collection_name)
+
+
+@tool
+def search_clinical_trials_by_query(query: str, top_k: int = 5) -> list[dict]:
+    """
+    Fetches clinical trial data for a specific query from ClinicalTrials.gov
+    returns the most relevant trials based on the query.
+
+    Args:
+        query (str): Text query to find relevant clinical trials
+        top_k (int): Number of top results to return if query is provided. Defaults to 5
+
+    Returns:
+        list[dict]: List of dictionaries with parsed clinical trial data, optionally filtered by relevance
+    """
+    return _search_clinical_trials(search_term=query, query=query, top_k=top_k)
+
+
+@tool
+def search_clinical_trials_by_drug(
+    drug_name: str, query: str, top_k: int = 5
+) -> list[dict]:
+    """
+    Fetches ALL clinical trial data for a specific drug from ClinicalTrials.gov
+    with semantic search capabilities from a query
+    This function is costly so it should be used with caution and as a last resource.
+
+    Args:
+        drug_name: Name of the drug to search for in clinical trials
+        query: Text query to find relevant trials
+        top_k: Number of top results to return if query is provided (default: 5)
+
+    Returns:
+        list[dict]: List of dictionaries with parsed clinical trial data, optionally filtered by relevance
+    """
+    return _search_clinical_trials(search_term=drug_name, query=query, top_k=top_k)
 
 
 @tool
