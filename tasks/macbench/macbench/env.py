@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -39,7 +40,8 @@ from corral.utils import (
     create_vector_database,
 )
 
-store = PromptStore("./prompts")
+current_file_dir = Path(__file__).parent
+store = PromptStore(current_file_dir / "prompts")
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
 
 
