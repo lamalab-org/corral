@@ -7,7 +7,7 @@ from typing import Any
 from promptstore import PromptStore
 
 from corral.agents.prompt_utils import get_prompt
-from corral.agents.utils import LiteLLMMessage, format_examples, llm_call
+from corral.agents.utils import LiteLLMMessage, _build_user_content, llm_call
 from corral.evaluate import BenchmarkInterface
 
 
@@ -96,48 +96,66 @@ class ReActAgent:
             **self.kwargs,
         ).content
 
-    def parse_llm_response(self, response: str) -> tuple[Thought | None, Action | None]:
-        """Parse LLM response into Thought and Action"""
+    def parse_llm_response(
+        self, response: str
+    ) -> tuple[Thought | None, list[Action] | None]:
+        """Parse LLM response into Thought and Actions"""
         thought_match = re.search(
             r"Thought: (.*?)(?=\nAction:|Final Answer:|$)", response, re.DOTALL
         )
-        action_match = re.search(
-            r"Action: (\w+)\nAction Input: ({.*})", response, re.DOTALL
+        action_matches = re.finditer(
+            r"Action: (\w+)\nAction Input: ({.*?}(?=\nAction:|\nThought:|\nFinal Answer:|$))",
+            response,
+            re.DOTALL,
         )
 
         thought = Thought(thought_match.group(1).strip()) if thought_match else None
 
-        action = None
-        if action_match:
+        actions = []
+        for action_match in action_matches:
             tool_name = action_match.group(1).strip()
             try:
-                arguments = json.loads(action_match.group(2).strip())
-                action = Action(tool_name=tool_name, arguments=arguments)
+                action_input = action_match.group(2).strip()
+                arguments = json.loads(action_input)
+                actions.append(Action(tool_name=tool_name, arguments=arguments))
             except json.JSONDecodeError:
                 pass
 
-        return thought, action
+        return thought, actions if actions else None
 
     def create_prompt(
-        self, task_guide: str, history: list[LiteLLMMessage], examples: list[str]
-    ) -> str:
+        self,
+        task_guide: str | list,
+        history: list[LiteLLMMessage],
+        examples: list[str] | None,
+        tools: str,
+    ) -> list[LiteLLMMessage]:
         """Create prompt for LLM including context and history"""
-        limited_history = history[-10:] if len(history) > 10 else history
-        user_prompt = self.user_prompt.fill(
-            {
-                "task_guide": task_guide,
-                "history": str(limited_history),
-                "examples": format_examples(examples),
-            }
+        messages: list[LiteLLMMessage] = []
+        messages.append(
+            LiteLLMMessage(
+                role="system",
+                content=self.system_prompt,
+            )
         )
 
-        return [
-            {
-                "role": "system",
-                "content": self.system_prompt,
-            },
-            {"role": "user", "content": user_prompt},
-        ]
+        user_content = _build_user_content(
+            agent="react",
+            user_prompt=self.user_prompt,
+            task_guide=task_guide,
+            history=history,
+            tools=tools,
+            examples=examples,
+        )
+
+        messages.append(
+            LiteLLMMessage(
+                role="user",
+                content=user_content,
+            )
+        )
+
+        return messages
 
     def run_agent(
         self,
@@ -159,22 +177,22 @@ class ReActAgent:
         Returns:
             tuple[str, list[LiteLLMMessage]]:: The final answer and messages history
         """
+        if history is None:
+            history = []
         if task_prompt is None:
-            task_guide = interface.get_task_guide(task_id)
+            task_guide = interface.get_task_prompt(task_id)
+            tools = interface.get_tools_guide(task_id)
         else:
             task_guide = task_prompt
 
-        if history is None:
-            history: list[LiteLLMMessage] = []
-
-        messages = self.create_prompt(task_guide, history, examples)
+        messages = self.create_prompt(task_guide, history, examples, tools)
 
         for _iteration in range(self.max_iterations):
             # Create prompt and get LLM response
             llm_response = self.get_llm_response(messages)
 
             # Parse response
-            thought, action = self.parse_llm_response(llm_response)
+            thought, actions = self.parse_llm_response(llm_response)
             thought_prefix = f"Thought: {thought.content}\n" if thought else ""
 
             # Check for final answer
@@ -189,34 +207,35 @@ class ReActAgent:
                 )
                 return final_answer_match.group(1).strip(), messages
 
-            # Execute tool if action exists
-            if action:
-                action_content = f"{thought_prefix}Action: {action.tool_name}\nAction Input: {json.dumps(action.arguments)}"
-                messages.append(
-                    LiteLLMMessage(role="assistant", content=action_content)
-                )
-
-                # Execute tool and get response
-                tool_response = interface.execute_tool(
-                    task_id, action.tool_name, action.arguments
-                )
-
-                observation = (
-                    f"Observation: {tool_response.result}"
-                    if tool_response.success
-                    else f"Error: {tool_response.error}"
-                )
-
-                messages.append(
-                    LiteLLMMessage(
-                        role="user",
-                        content=observation,
-                        name=action.tool_name,
+            # Execute tools if actions exist
+            if actions:
+                for action in actions:
+                    action_content = f"{thought_prefix}Action: {action.tool_name}\nAction Input: {json.dumps(action.arguments)}"
+                    messages.append(
+                        LiteLLMMessage(role="assistant", content=action_content)
                     )
-                )
+
+                    # Execute tool and get response
+                    tool_response = interface.execute_tool(
+                        task_id, action.tool_name, action.arguments
+                    )
+
+                    observation = (
+                        f"Observation: {tool_response.result}"
+                        if tool_response.success
+                        else f"Error: {tool_response.error}"
+                    )
+
+                    messages.append(
+                        LiteLLMMessage(
+                            role="user",
+                            content=observation,
+                            name=action.tool_name,
+                        )
+                    )
 
             # If no action or thought was parsed, break the loop
-            if not thought and not action:
+            if not thought and actions is None:
                 break
 
         return (

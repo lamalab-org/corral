@@ -5,6 +5,8 @@ from loguru import logger
 from corral.agents.react import ReActAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 
+load_dotenv("../.env", override=True)
+
 
 def setup_litellm():
     """Setup LiteLLM with appropriate configuration"""
@@ -22,7 +24,7 @@ def run_benchmark(
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
-    result = runner.bench(task_ids, trials_per_task=1, k_values=[1])
+    result = runner.bench(task_ids, trials_per_task=1, k_values=[1], verbose=True)
     result.generate_report("results.json")
 
     logger.info("Benchmark completed")
