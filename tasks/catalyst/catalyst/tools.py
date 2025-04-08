@@ -253,58 +253,210 @@ def add_adsorbate_to_slab_text(
 @tool
 def generate_reconstructed_slab(
     bulk_cif: str,
-    miller_index: tuple,
+    miller_index: tuple[int, int, int],
     min_slab_size: float,
     min_vacuum_size: float,
     reconstruction_instructions: str,
+    return_all_variants: bool = False,
 ) -> str:
     """
-    Generate a reconstructed slab from an input bulk structure. The reconstruction instructions
-    (as a JSON string or dict) should include all required keys (e.g. name, description, transformation_matrix,
-    slabgen_params, points_to_remove, points_to_add, etc.). This tool wraps pymatgen ReconstructionGenerator.
+    Generate reconstructed slab(s) from a bulk structure with full parameter utilization.
+
+    Example reconstruction_instructions JSON: # https://pymatgen.org/pymatgen.core.html#module-pymatgen.core.surface
+    {
+        "name": "fcc_111_2x2_octopolar",
+        "description": "Octopolar reconstruction of FCC (111) surface",
+        "miller_index": [1, 1, 1],
+        "Woods_notation": "p(2x2)",
+        "reference": "Optional reference to publication or source",
+        "spacegroup": {"symbol": "Fm-3m", "number": 225},
+        "transformation_matrix": [[2, 0, 0], [0, 2, 0], [0, 0, 1]],
+        "SlabGenerator_parameters": {
+            "center_slab": true,
+            "in_unit_planes": false,
+            "primitive": false,
+            "lll_reduce": true
+        },
+        "points_to_remove": [
+            [0.25, 0.25, 0],
+            [0.75, 0.75, 0]
+        ],
+        "points_to_add": [
+            [0.5, 0.5, 0.2, "Cu", {"charge": 1}]
+        ],
+        "variant_info": [
+            {
+                "index": 0,
+                "description": "Standard octopolar reconstruction",
+                "characteristics": ["most stable", "C3v symmetric"]
+            }
+        ],
+        "base_reconstruction": null  # Optional reference to another reconstruction
+    }
 
     Args:
-        bulk_cif: CIF string for the bulk structure.
-        miller_index: Miller index for the slab (e.g. (1,1,1)).
-        min_slab_size: Minimum slab thickness (Å).
-        min_vacuum_size: Minimum vacuum region (Å).
-        reconstruction_instructions: JSON string containing the reconstruction instructions.
+        bulk_cif (str): CIF string of bulk structure
+        miller_index (tuple[int, int, int]): Miller indices (h,k,l) for surface orientation
+        min_slab_size (float): Minimum slab thickness (Å)
+        min_vacuum_size (float): Minimum vacuum thickness (Å)
+        reconstruction_instructions (str): JSON string with reconstruction parameters
+        return_all_variants (bool): If True, returns all slab variants as JSON
 
     Returns:
-        str: CIF string of the reconstructed slab.
+        str: Either a single CIF string (if return_all_variants=False) or a
+             JSON string with all variants and metadata (if return_all_variants=True)
     """
     import json
+    from copy import deepcopy
 
+    import numpy as np
     from pymatgen.core import Structure
-    from pymatgen.core.surface import ReconstructionGenerator, SlabGenerator
+    from pymatgen.core.surface import ReconstructionGenerator
+    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
-    # Parse the bulk structure from CIF string
-    bulk_structure = Structure.from_str(bulk_cif, fmt="cif")
+    # Parse bulk structure
+    try:
+        bulk_structure = Structure.from_str(bulk_cif, fmt="cif")
+    except Exception as e:
+        raise ValueError(f"Invalid CIF format: {e!s}") from e
 
-    # Parse reconstruction instructions (as dict)
-    instructions = json.loads(reconstruction_instructions)
+    # Validate Miller indices are valid for the structure
+    try:
+        sg = SpacegroupAnalyzer(bulk_structure)
+        # This will raise an exception if the Miller indices are invalid
+        sg.get_conventional_standard_structure(international_monoclinic=True)
+    except Exception as err:
+        raise ValueError(
+            f"Miller indices {miller_index} are invalid for the given structure"
+        ) from err
 
-    # Create the unreconstructed slab via SlabGenerator.
-    slab_gen = SlabGenerator(
-        bulk_structure, miller_index, min_slab_size, min_vacuum_size
-    )
-    unrecon_slabs = slab_gen.get_slabs()
-    if not unrecon_slabs:
-        raise ValueError("No slab could be generated.")
-    # For simplicity, take the first slab.
-    unrecon_slab = unrecon_slabs[0].get_orthogonal_c_slab().get_sorted_structure()
+    # Parse reconstruction instructions
+    try:
+        instructions = json.loads(reconstruction_instructions)
+    except Exception as e:
+        raise ValueError(
+            f"Invalid JSON format in reconstruction_instructions: {e!s}"
+        ) from e
 
-    # Build the reconstructed slab.
+    # Validate reconstruction instructions
+    required_fields = {
+        "name",
+        "transformation_matrix",
+        "SlabGenerator_parameters",
+        "points_to_remove",
+        "points_to_add",
+    }
+    missing_fields = required_fields - set(instructions.keys())
+    if missing_fields:
+        raise ValueError(f"Missing required fields in instructions: {missing_fields}")
+
+    # Verify transformation matrix dimensions
+    trans_matrix = instructions["transformation_matrix"]
+    if (
+        not isinstance(trans_matrix, list)
+        or len(trans_matrix) != 3
+        or not all(isinstance(row, list) and len(row) == 3 for row in trans_matrix)
+    ):
+        raise ValueError("Transformation matrix must be a 3x3 array")
+
+    # Convert to numpy array for easier handling
+    trans_matrix = np.array(trans_matrix)
+
+    # Initialize reconstruction generator
     recon_gen = ReconstructionGenerator(
-        unrecon_slab, min_slab_size, min_vacuum_size, instructions["name"]
+        initial_structure=bulk_structure,
+        min_slab_size=min_slab_size,
+        min_vacuum_size=min_vacuum_size,
+        reconstruction_name=instructions["name"],
     )
-    # The instructions should have been designed to include the required keys.
-    recon_slabs = recon_gen.build_slabs()
-    if not recon_slabs:
-        raise ValueError("Reconstruction failed; no reconstructed slab produced.")
-    recon_slab = recon_slabs[0]
 
-    return recon_slab.to(fmt="cif")
+    slabgen_params = {}
+
+    if "SlabGenerator_parameters" in instructions:
+        slabgen_params.update(instructions["SlabGenerator_parameters"])
+
+    slabgen_params["miller_index"] = miller_index
+    slabgen_params["min_slab_size"] = min_slab_size
+    slabgen_params["min_vacuum_size"] = min_vacuum_size
+
+    # Set parameters on the reconstruction generator
+    recon_gen.slabgen_params = slabgen_params
+    recon_gen.trans_matrix = trans_matrix
+    recon_gen.reconstruction_json = deepcopy(instructions)
+
+    # Generate reconstructed slabs
+    try:
+        recon_slabs = recon_gen.build_slabs()
+    except Exception as e:
+        raise ValueError(f"Reconstruction failed: {e!s}") from e
+
+    if not recon_slabs:
+        raise ValueError("Reconstruction failed - no slabs were generated")
+
+    # Return single CIF if requested
+    if not return_all_variants:
+        return recon_slabs[0].to(fmt="cif")
+
+    output = {
+        "variants": [],
+        "reconstruction_metadata": {
+            "name": instructions["name"],
+            "description": instructions.get("description", ""),
+            "reference": instructions.get("reference", ""),
+            "miller_index": list(miller_index),
+            "woods_notation": instructions.get("Woods_notation", ""),
+            "spacegroup": instructions.get("spacegroup", {}),
+            "transformation_matrix": instructions["transformation_matrix"],
+            "total_variants": len(recon_slabs),
+            "slab_parameters": {
+                "min_slab_size": min_slab_size,
+                "min_vacuum_size": min_vacuum_size,
+                "SlabGenerator_parameters": {
+                    k: v
+                    for k, v in slabgen_params.items()
+                    if k not in ["miller_index", "min_slab_size", "min_vacuum_size"]
+                },
+            },
+        },
+    }
+
+    for idx, slab in enumerate(recon_slabs):
+        # Get spacegroup info
+        try:
+            spacegroup_info = slab.get_space_group_info()
+        except Exception:
+            spacegroup_info = ("Unknown", None)  # Default if unable to determine
+
+        lattice_params = slab.lattice.parameters
+        variant_info = {
+            "index": idx,
+            "cif": slab.to(fmt="cif"),
+            "spacegroup": str(spacegroup_info),
+            "formula": slab.composition.reduced_formula,
+            "lattice_parameters": {
+                "a": lattice_params[0],
+                "b": lattice_params[1],
+                "c": lattice_params[2],
+                "alpha": lattice_params[3],
+                "beta": lattice_params[4],
+                "gamma": lattice_params[5],
+            },
+            "num_atoms": len(slab),
+            "surface_area": float(slab.lattice.volume / lattice_params[2]),
+        }
+
+        if "variant_info" in instructions:
+            matching_variants = [
+                v for v in instructions.get("variant_info", []) if v.get("index") == idx
+            ]
+            if matching_variants:
+                variant_info.update(
+                    {k: v for k, v in matching_variants[0].items() if k != "index"}
+                )
+
+        output["variants"].append(variant_info)
+
+    return json.dumps(output, indent=2)
 
 
 def create_tools() -> dict[str, Tool]:
