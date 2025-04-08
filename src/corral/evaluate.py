@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import requests
@@ -10,6 +13,15 @@ from corral.report import (
     ToolResponse,
 )
 from corral.utils import save_agent_messages
+
+
+@dataclass
+class TaskResult:
+    """Result of a task submission"""
+
+    score: float
+    state: dict[str, Any]
+    tool_statistics: dict[str, Any]
 
 
 class BenchmarkInterface:

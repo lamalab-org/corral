@@ -50,8 +50,8 @@ def vector_database_search(
     Args:
         query (str): The search query to find similar instructions
         collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
-        path (str): The path to the vector database directory. Defaults to None, which uses "vector_db" in the current directory.
-        top_k (int): The number of similar instructions to retrieve. Default is 5.
+        path (str, optional): The path to the vector database directory. Defaults to None, which uses "vector_db" in the current directory.
+        top_k (int, optional): The number of similar instructions to retrieve. Default is 5.
 
     Returns:
         list[dict]: A list of dictionaries containing the top 5 most similar instructions with their content and metadata
