@@ -446,7 +446,7 @@ def rxnscribe_reaction_extraction(image_path: str) -> list[dict]:
 
 
 @tool
-def extract_plot_with_labels(image_path: str, output_path: str) -> str:
+def crop_plot_with_labels(image_path: str, output_path: str) -> str:
     """
     Extracts a plot from an image while preserving the axis labels and saves it to the specified path.
     Perfect when the plot contains noise as text or other elements

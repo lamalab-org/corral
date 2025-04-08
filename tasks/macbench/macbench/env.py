@@ -8,9 +8,8 @@ from chembench.task import Task
 from loguru import logger
 from promptstore import PromptStore
 from tools import (
-    afm_image_analyzer,
     app,
-    chart_vllm_extractor,
+    crop_plot_with_labels,
     decimer_molecule_extraction,
     deplot_image_extractor,
     enhanced_brave_search,
@@ -63,12 +62,11 @@ _MACBENCH_TOOLS = [
     search_nmr_guide,
     llm_vision_expert,
     deplot_image_extractor,
-    chart_vllm_extractor,
     extract_table_text,
     decimer_molecule_extraction,
     molscribe_molecule_extraction,
     rxnscribe_reaction_extraction,
-    afm_image_analyzer,
+    crop_plot_with_labels,
 ]
 
 
