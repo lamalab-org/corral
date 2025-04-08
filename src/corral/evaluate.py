@@ -80,6 +80,7 @@ class BenchmarkInterface:
         data = response.json()
         return TaskTrailResult(
             task_id=task_id,
+            trial_id=data["trial_id"],
             score=data["score"],
             state=data["state"],
             tool_statistics=data["state"]["tool_statistics"],
