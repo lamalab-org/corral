@@ -296,9 +296,6 @@ class MPAPIWrapper(BaseModel):
 
         limit = query_params.get("_limit", DEFAULT_LIMIT)
 
-        # return self.mpr.materials.summary._search(
-        #     num_chunks=None, chunk_size=1000, all_fields=False, **query_params
-        # )[:limit]
 
         docs = self.mpr.materials.summary._search(
             num_chunks=None, chunk_size=1000, all_fields=False, **query_params
