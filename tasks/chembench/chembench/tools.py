@@ -1,19 +1,15 @@
 from __future__ import annotations
 
 import gc
-import os
 import uuid
 from pathlib import Path
 from typing import Any
 
 import chromadb
 import modal
-import numpy as np
 import requests
-from langchain_community.tools.brave_search.tool import BraveSearch
 from loguru import logger
 from rdkit import Chem
-from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -23,10 +19,10 @@ from tenacity import (
 
 from corral.utils import (
     create_vector_database,
-    embed_text,
     remote_call,
     tool,
     vector_database_search,
+    web_search,
 )
 
 
@@ -48,52 +44,11 @@ def enhanced_brave_search(
     Raises:
         ValueError: If BRAVE_SEARCH_API_KEY environment variable is not set
     """
-    api_key = os.getenv("BRAVE_SEARCH_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "BRAVE_SEARCH_API_KEY environment variable is required but not set"
-        )
-
-    try:
-        # TODO: Avoid using LangChain
-        brave_search_tool = BraveSearch.from_api_key(api_key=api_key)
-        initial_results = brave_search_tool._run(query)
-
-        if not initial_results:
-            return []
-
-        query_embedding = np.array(embed_text(chunks=[query])[0]).reshape(1, -1)
-        result_texts = [f"{r['title']}: {r['snippet']}" for r in initial_results]
-        result_embeddings = np.array(embed_text(chunks=result_texts))
-
-        similarity_scores = sklearn_cosine_similarity(
-            query_embedding, result_embeddings
-        ).flatten()
-
-        results_with_scores = []
-        for i, result in enumerate(initial_results):
-            similarity = float(similarity_scores[i])
-
-            results_with_scores.append(
-                {
-                    "title": result["title"],
-                    "snippet": result["snippet"],
-                    "link": result["link"],
-                    "similarity_score": similarity,
-                }
-            )
-
-        filtered_results = [
-            r for r in results_with_scores if r["similarity_score"] >= min_similarity
-        ]
-        sorted_results = sorted(
-            filtered_results, key=lambda x: x["similarity_score"], reverse=True
-        )
-
-        return sorted_results[:num_results]
-
-    except Exception:
-        return []
+    return web_search(
+        query=query,
+        num_results=num_results,
+        min_similarity=min_similarity,
+    )
 
 
 def process_pubchem_json(data: dict[str, Any]) -> list[dict[str, Any]]:

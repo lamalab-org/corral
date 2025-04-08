@@ -1,18 +1,21 @@
 import gc
 import inspect
 import json
+import os
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Union, get_args, get_origin, get_type_hints
+from typing import Any, Optional, Union, get_args, get_origin, get_type_hints
 
 import chromadb
-import modal
+import numpy as np
+import requests
 import tiktoken
 from chembench.baseline import Generation, Generations
 from litellm import embedding
 from loguru import logger
 from modal import App, Image, Mount, Secret, Volume
+from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -797,9 +800,177 @@ def save_agent_messages(
     return file_path
 
 
-def remote_call(function_name: str, env_name: str = "chemenv"):
-    def wrapper(arg: str) -> str:
-        remote = modal.Function.from_name(env_name, function_name)
-        return remote.remote(arg)
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(
+        (requests.exceptions.RequestException, requests.exceptions.HTTPError)
+    ),
+)
+def make_api_request(
+    url: str,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    params: dict[str, Any] | None = None,
+    json_data: dict[str, Any] | None = None,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """
+    Make an API request with retry capabilities.
 
-    return wrapper
+    Args:
+        url (str): The API endpoint URL
+        method (str, optional): HTTP method (GET, POST, PUT, etc.). Defaults to "GET".
+        headers (dict[str, str], optional): Request headers. Defaults to None.
+        params (dict[str, Any], optional): URL parameters. Defaults to None.
+        json_data (dict[str, Any], optional): JSON data for POST/PUT requests. Defaults to None.
+        verbose (bool, optional): Whether to print verbose output. Defaults to False.
+
+    Returns:
+        dict[str, Any]: JSON response from the API
+
+    Raises:
+        requests.exceptions.RequestException: If the request fails after retries
+    """
+    method = method.upper()
+    logger.info(f"Making {method} request to {url}")
+
+    if verbose:
+        logger.debug(f"Headers: {headers}")
+        logger.debug(f"Params: {params}")
+        if json_data:
+            logger.debug(f"JSON data: {json_data}")
+
+    response = requests.request(
+        method=method, url=url, headers=headers, params=params, json=json_data
+    )
+
+    if verbose:
+        logger.debug(f"Response status code: {response.status_code}")
+        logger.debug(f"Response content: {response.text[:500]}...")
+
+    response.raise_for_status()
+    return response.json()
+
+
+def make_brave_search_request(query: str, api_key: str) -> list[dict[str, Any]]:
+    """
+    Make a request to the Brave Search API using the general API request function.
+
+    Args:
+        query (str): The search query string
+        api_key (str): The Brave Search API key
+
+    Returns:
+        list[dict[str, Any]]: List of search results
+
+    Raises:
+        requests.exceptions.RequestException: If the request fails after retries
+    """
+    headers = {"X-Subscription-Token": api_key, "Accept": "application/json"}
+
+    params = {"q": query}
+
+    logger.info(f"Making Brave Search API request for query: '{query}'")
+
+    data = make_api_request(
+        url="https://api.search.brave.com/res/v1/web/search",
+        method="GET",
+        headers=headers,
+        params=params,
+        verbose=True,
+    )
+
+    return [
+        {
+            "title": web_result.get("title", ""),
+            "snippet": web_result.get("description", ""),
+            "link": web_result.get("url", ""),
+        }
+        for web_result in data.get("web", {}).get("results", [])
+    ]
+
+
+def web_search(
+    query: str, num_results: int = 5, min_similarity: float = 0.75
+) -> list[dict[str, Any]]:
+    """Perform a web search using Brave Search, then filter and rank results using embeddings.
+
+    Args:
+        query (str): The search query string
+        num_results (int, optional): Maximum number of results to return. Defaults to 5
+        min_similarity (float, optional): Minimum similarity score threshold. Defaults to 0.75
+
+    Returns:
+        list[dict]: A list of dictionaries containing the most relevant search results
+        with their content and metadata, sorted by similarity score
+
+    Raises:
+        ValueError: If BRAVE_SEARCH_API_KEY environment variable is not set
+    """
+    logger.info(
+        f"Starting web search for query: '{query}' with parameters: num_results={num_results}, min_similarity={min_similarity}"
+    )
+
+    api_key = os.getenv("BRAVE_SEARCH_API_KEY")
+    if not api_key:
+        logger.error("BRAVE_SEARCH_API_KEY environment variable is not set")
+        raise ValueError(
+            "BRAVE_SEARCH_API_KEY environment variable is required but not set"
+        )
+
+    try:
+        logger.info("Making Brave Search API request")
+        initial_results = make_brave_search_request(query, api_key)
+
+        if not initial_results:
+            logger.warning("No results returned from Brave Search API")
+            return []
+
+        logger.info(
+            f"Retrieved {len(initial_results)} initial results from Brave Search"
+        )
+
+        logger.info("Generating query embedding")
+        query_embedding = np.array(embed_text(chunks=[query])[0]).reshape(1, -1)
+        result_texts = [f"{r['title']}: {r['snippet']}" for r in initial_results]
+        logger.info("Generating result embeddings")
+        result_embeddings = np.array(embed_text(chunks=result_texts))
+
+        logger.info("Calculating similarity scores")
+        similarity_scores = sklearn_cosine_similarity(
+            query_embedding, result_embeddings
+        ).flatten()
+
+        logger.info("Processing results with similarity scores")
+        results_with_scores = []
+        for i, result in enumerate(initial_results):
+            similarity = float(similarity_scores[i])
+
+            results_with_scores.append(
+                {
+                    "title": result["title"],
+                    "snippet": result["snippet"],
+                    "link": result["link"],
+                    "similarity_score": similarity,
+                }
+            )
+
+        logger.info(f"Filtering results with similarity threshold {min_similarity}")
+        filtered_results = [
+            r for r in results_with_scores if r["similarity_score"] >= min_similarity
+        ]
+        logger.info(f"{len(filtered_results)} results passed the similarity threshold")
+
+        logger.info("Sorting results by similarity score")
+        sorted_results = sorted(
+            filtered_results, key=lambda x: x["similarity_score"], reverse=True
+        )
+
+        final_results = sorted_results[:num_results]
+        logger.info(f"Returning {len(final_results)} final results")
+        return final_results
+
+    except Exception as e:
+        logger.error(f"Error while performing search: {e!s}", exc_info=True)
+        return []

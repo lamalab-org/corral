@@ -1,13 +1,9 @@
-import os
 from pathlib import Path
 from typing import Any
 
 import modal
-import numpy as np
-from langchain_community.tools.brave_search.tool import BraveSearch
 from modal import Image, Volume
 from promptstore import PromptStore
-from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 
 from corral.agents.utils import (
     LiteLLMMessage,
@@ -15,10 +11,10 @@ from corral.agents.utils import (
 )
 from corral.utils import (
     MODAL_TOOL_REGISTRY,
-    embed_text,
     modal_tool,
     tool,
     vector_database_search,
+    web_search,
 )
 
 store = PromptStore("./prompts")
@@ -44,51 +40,11 @@ def enhanced_brave_search(
     Raises:
         ValueError: If BRAVE_SEARCH_API_KEY environment variable is not set
     """
-    api_key = os.getenv("BRAVE_SEARCH_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "BRAVE_SEARCH_API_KEY environment variable is required but not set"
-        )
-
-    try:
-        brave_search_tool = BraveSearch.from_api_key(api_key=api_key)
-        initial_results = brave_search_tool._run(query)
-
-        if not initial_results:
-            return []
-
-        query_embedding = np.array(embed_text(chunks=[query])[0]).reshape(1, -1)
-        result_texts = [f"{r['title']}: {r['snippet']}" for r in initial_results]
-        result_embeddings = np.array(embed_text(chunks=result_texts))
-
-        similarity_scores = sklearn_cosine_similarity(
-            query_embedding, result_embeddings
-        ).flatten()
-
-        results_with_scores = []
-        for i, result in enumerate(initial_results):
-            similarity = float(similarity_scores[i])
-
-            results_with_scores.append(
-                {
-                    "title": result["title"],
-                    "snippet": result["snippet"],
-                    "link": result["link"],
-                    "similarity_score": similarity,
-                }
-            )
-
-        filtered_results = [
-            r for r in results_with_scores if r["similarity_score"] >= min_similarity
-        ]
-        sorted_results = sorted(
-            filtered_results, key=lambda x: x["similarity_score"], reverse=True
-        )
-
-        return sorted_results[:num_results]
-
-    except Exception:
-        return ["Error while performing search."]
+    return web_search(
+        query=query,
+        num_results=num_results,
+        min_similarity=min_similarity,
+    )
 
 
 @tool
