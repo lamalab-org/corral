@@ -231,7 +231,7 @@ class Environment(ABC):
         return f"{self.task_id}_{self.state.trial_id}_{timestamp}"
 
     @abstractmethod
-    def get_task_prompt(self) -> str:
+    def get_task_prompt(self) -> str | list[dict]:
         """Return the task prompt for the agent"""
 
     @abstractmethod
@@ -260,8 +260,8 @@ class Environment(ABC):
             for t in self.tools.values()
         ]
 
-    def get_environment_guide(self) -> str:
-        """Generate a complete guide for the environment and its tools"""
+    def get_tools_guide(self) -> str:
+        """Generate a guide for the available tools"""
         tools_guide = "\n\n".join(
             tool.get_usage_guide() for tool in self.tools.values()
         )
@@ -284,6 +284,16 @@ class Environment(ABC):
             "    }}\n"
             "}}\n"
         )
+
+    def get_environment_guide(self) -> str:
+        """Generate a complete guide for the environment and its tools"""
+        tools_guide = self.get_tools_guide()
+
+        # TODO: make it configurable
+        return f"""Task: {self.get_task_prompt()}
+
+{tools_guide}
+"""
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
         """Execute a tool and record the call with enhanced error handling"""
