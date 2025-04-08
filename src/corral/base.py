@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from corral.graph import GraphTrackerFactory, NodeType
+
 
 class Role(StrEnum):
     """Defines the role type of a component in the system."""
@@ -183,11 +185,16 @@ class ModalTool(Tool):
 class Environment(ABC):
     """Base class for task environments"""
 
-    def __init__(self, task_id: str):
+    def __init__(self, task_id: str, graph_factory: GraphTrackerFactory | None):
         self.task_id = task_id
         self.tools: dict[str, Tool] = {}
         self.trial_states: dict[str, TaskState] = {}
         self.trial_counter = -1
+
+        # Graph tracking components
+        self.graph_factory = graph_factory or GraphTrackerFactory()
+        self.graph_tracker = None
+
         self.reset_state()
 
     def save_current_state(self) -> TaskState:
@@ -206,6 +213,12 @@ class Environment(ABC):
             archived_snapshot = self.save_current_state()
             self.trial_states[self.state.trial_id] = archived_snapshot
 
+            # Save the graph data for the completed trial if tracking is enabled
+            if self.graph_tracker:
+                self.graph_factory.save_tracker(
+                    task_id=self.task_id, trial_id=self.state.trial_id, visualize=True
+                )
+
         self.trial_counter += 1
         new_trial_id = str(self.trial_counter)
 
@@ -214,6 +227,19 @@ class Environment(ABC):
             trial_id=new_trial_id,
             task_prompt=self.get_task_prompt(),
         )
+        # Create a new graph tracker for this trial
+        self.graph_tracker = self.graph_factory.create_tracker(
+            task_id=self.task_id, agent_type="Environment", trial_id=new_trial_id
+        )
+
+        # Track the initial task prompt
+        if self.graph_tracker:
+            self.graph_tracker.add_node(
+                node_type=NodeType.LLM_PROMPT,
+                content=self.get_task_prompt(),
+                metadata={"type": "task_prompt"},
+            )
+
         return self.state.trial_id
 
     def get_unique_trail_identifier(self) -> str:
@@ -278,8 +304,34 @@ Example tool call format:
 }}
 """
 
+    def add_message(self, role: Role, content: str) -> None:
+        """Add a message to the environment state and track it in the graph
+
+        Args:
+            role: Role of the message sender
+            content: Content of the message
+        """
+        # Create message
+        message = LLMMessage(role=role, content=content)
+        self.state.messages.append(message)
+
+        # Track in graph
+        if self.graph_tracker:
+            if role == Role.AGENT:
+                self.graph_tracker.add_node(
+                    node_type=NodeType.LLM_RESPONSE,
+                    content=content,
+                    metadata={"role": role.value},
+                )
+            else:
+                self.graph_tracker.add_node(
+                    node_type=NodeType.LLM_PROMPT,
+                    content=content,
+                    metadata={"role": role.value},
+                )
+
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
-        """Execute a tool and record the call with enhanced error handling"""
+        """Execute a tool and record the call"""
         # Check if tool exists
         if tool_name not in self.tools:
             tool_call = ToolCall(
@@ -290,6 +342,11 @@ Example tool call format:
                 error_message=f"Tool {tool_name} not found",
             )
             self.state.tool_calls.append(tool_call)
+
+            # Track in graph
+            if self.graph_tracker:
+                tool_node_id = self.graph_tracker.track_tool_call(tool_call)
+
             return tool_call
 
         tool = self.tools[tool_name]
@@ -305,6 +362,11 @@ Example tool call format:
                 error_message=error_message,
             )
             self.state.tool_calls.append(tool_call)
+
+            # Track in graph
+            if self.graph_tracker:
+                tool_node_id = self.graph_tracker.track_tool_call(tool_call)
+
             return tool_call
 
         # Execute tool
@@ -327,6 +389,15 @@ Example tool call format:
             )
 
         self.state.tool_calls.append(tool_call)
+
+        # Track in graph
+        if self.graph_tracker:
+            tool_node_id = self.graph_tracker.track_tool_call(tool_call)
+
+            # Track the response if successful
+            if tool_call.status == ToolCallStatus.SUCCESS and tool_call.result:
+                self.graph_tracker.track_tool_response(tool_call.result, tool_node_id)
+
         return tool_call
 
     def submit_answer(self, answer: str) -> float:
@@ -336,7 +407,22 @@ Example tool call format:
         self.state.score = score
         self.state.is_completed = True
         self.state.end_time = datetime.now(tz=timezone.utc)
+
+        # Track in graph
+        if self.graph_tracker:
+            self.graph_tracker.track_final_submission(answer, score)
+
         return score
+
+    def get_graph_statistics(self) -> dict[str, Any]:
+        """Get statistics about the current graph
+
+        Returns:
+            Dictionary of statistics or empty dict if no graph tracker
+        """
+        if self.graph_tracker:
+            return self.graph_tracker.get_statistics()
+        return {}
 
 
 ### Classes related to subtasks
