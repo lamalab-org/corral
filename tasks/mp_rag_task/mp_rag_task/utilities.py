@@ -317,7 +317,6 @@ class MPAPIWrapper(BaseModel):
             )
         raise ValueError("Invalid return_mode")
 
-        # return [Structure.from_dict(doc["structure"]).to_ase_atoms() for doc in docs]
 
     def search_materials_robocrys(self, query_params: dict):
         query_params = self._process_query_params(query_params)
