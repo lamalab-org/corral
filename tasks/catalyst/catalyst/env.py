@@ -14,7 +14,7 @@ from score import (
 )
 from tools import create_tools
 
-from corral.base import Environment, TaskDefinition, TaskGroup, Tool
+from corral.base import Environment, Tool
 from corral.io import (
     CatFilesTool,
     CopyFileTool,
@@ -25,6 +25,7 @@ from corral.io import (
     WriteFileTool,
 )
 from corral.server import run_server
+from corral.task import TaskDefinition, TaskGroup
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:
