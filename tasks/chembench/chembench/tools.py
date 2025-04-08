@@ -109,8 +109,15 @@ def delete_vector_db(collection_name: str) -> None:
         client = chromadb.PersistentClient(path=str(persist_directory))
         if collection_name in [c.name for c in client.list_collections()]:
             client.delete_collection(name=collection_name)
-        # Force Python garbage collection
+
         gc.collect()
+
+        import subprocess
+
+        collection_path = persist_directory / collection_name
+        if collection_path.exists():
+            subprocess.run(["rm", "-rf", str(collection_path)], check=True)
+            logger.info(f"Removed collection directory: {collection_path}")
     except Exception as e:
         logger.warning(f"Warning: Exception during cleanup: {e!s}")
 
