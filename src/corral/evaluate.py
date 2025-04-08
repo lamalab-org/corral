@@ -48,7 +48,13 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()["prompt"]
 
-    def get_task_prompt(self, task_id: str) -> str:
+    def get_tools_guide(self, task_id: str) -> str:
+        """Get tools guide for task"""
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/tools/guide")
+        response.raise_for_status()
+        return response.json()["prompt"]
+
+    def get_task_prompt(self, task_id: str) -> str | list[dict]:
         """Get task prompt without tools description"""
         response = requests.get(f"{self.base_url}/tasks/{task_id}/prompt")
         response.raise_for_status()
