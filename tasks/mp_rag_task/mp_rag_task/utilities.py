@@ -67,11 +67,12 @@ class MPAPIWrapper(BaseModel):
         Performs an mp-api call and returns the result.
 
         Args:
-            function_name: a function name to call
-            function_args: arguments for the function
-            debug: whether to print debug information
+            function_name (str): a function name to call
+            function_args (str): arguments for the function
+            debug (bool): whether to print debug information
+            
         Returns:
-            function response in text format
+            str: function response in text format
         """
 
         function_to_call = self.material_routes.get(function_name, None)
@@ -291,16 +292,10 @@ class MPAPIWrapper(BaseModel):
         if "symmetry" not in query_params.get("fields", []):
             query_params["fields"] = [*query_params.get("fields", []), "symmetry"]
 
-        # query_params["fields"] = query_params.get(
-        #     "fields", []) + ["structure", "material_id"]
-
         return_mode = query_params.pop("return_mode", "file")
 
         limit = query_params.get("_limit", DEFAULT_LIMIT)
 
-        # return self.mpr.materials.summary._search(
-        #     num_chunks=None, chunk_size=1000, all_fields=False, **query_params
-        # )[:limit]
 
         docs = self.mpr.materials.summary._search(
             num_chunks=None, chunk_size=1000, all_fields=False, **query_params
@@ -322,7 +317,6 @@ class MPAPIWrapper(BaseModel):
             )
         raise ValueError("Invalid return_mode")
 
-        # return [Structure.from_dict(doc["structure"]).to_ase_atoms() for doc in docs]
 
     def search_materials_robocrys(self, query_params: dict):
         query_params = self._process_query_params(query_params)
@@ -547,22 +541,6 @@ class MPAPIWrapper(BaseModel):
             matereial_ids = [doc["material_id"] for doc in material_docs]
             query_params["material_ids"] = ",".join(matereial_ids)
 
-        # # BUG: mp-api does not support get elastic properties by material_ids
-        # if "material_ids" in query_params:
-        #     material_ids = query_params["material_ids"].split(",")
-        #     elastic_docs = []
-        #     for material_id in material_ids:
-        #         try:
-        #             elastic_doc = self.mpr.materials.elasticity.get_data_by_id(
-        #                 document_id=material_id,
-        #                 fields=["pretty_formula", "elasticity", "task_id"],
-        #             )
-        #             elastic_docs.append(elastic_doc)
-
-        #         except Exception:
-        #             continue
-
-        #     return elastic_docs[:query_params.get("_limit", 10)]
 
         return self.mpr.materials.elasticity._search(
             num_chunks=None, chunk_size=1000, all_fields=False, **query_params
