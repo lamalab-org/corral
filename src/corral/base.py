@@ -1,13 +1,10 @@
-from __future__ import annotations
-
+import copy
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum, StrEnum
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -67,6 +64,7 @@ class LLMMessage:
 class TaskState:
     task_id: str
     task_prompt: str
+    trial_id: str = "0"
     messages: list[LLMMessage] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     is_completed: bool = False
@@ -100,6 +98,7 @@ class Tool:
     Inherit from this class to create new tools.
     Should have an execute method that performs the tool's functionality.
     TODO: might need to take state
+    TODO: add descriptions of the arguments of the class, i.e., name, description, arguments
     """
 
     def __init__(self, name: str, description: str, arguments: list[ToolArgument]):
@@ -186,8 +185,50 @@ class Environment(ABC):
     """Base class for task environments"""
 
     def __init__(self, task_id: str):
+        self.task_id = task_id
         self.tools: dict[str, Tool] = {}
-        self.state = TaskState(task_id=task_id, task_prompt=self.get_task_prompt())
+        self.trial_states: dict[str, TaskState] = {}
+        self.trial_counter = -1
+        self.reset_state()
+
+    def save_current_state(self) -> TaskState:
+        """
+        Archive the current state as a snapshot.
+
+        Returns:
+            TaskState: A deep copy of the current task state
+        """
+        # Create a deep copy of the entire TaskState object
+        return copy.deepcopy(self.state)
+
+    def reset_state(self) -> str:
+        """Reset the environment state with a new trial id and fresh TaskState and return finished trail id."""
+        if hasattr(self, "state") and self.state is not None:
+            archived_snapshot = self.save_current_state()
+            self.trial_states[self.state.trial_id] = archived_snapshot
+
+        self.trial_counter += 1
+        new_trial_id = str(self.trial_counter)
+
+        self.state = TaskState(
+            task_id=self.task_id,
+            trial_id=new_trial_id,
+            task_prompt=self.get_task_prompt(),
+        )
+        return self.state.trial_id
+
+    def get_unique_trail_identifier(self) -> str:
+        """
+        Generate a combined identifier using task_id, trial_id, and a timestamp.
+
+        Returns:
+            A string combining task_id, trial_id, and timestamp in format: "{task_id}_{trial_id}_{timestamp}"
+        """
+        if not hasattr(self, "state") or self.state is None:
+            return f"{self.task_id}_no_trial_{datetime.now(tz=timezone.utc).strftime('%m%d%H%M')}"
+
+        timestamp = datetime.now(tz=timezone.utc).strftime("%m%d%H%M")
+        return f"{self.task_id}_{self.state.trial_id}_{timestamp}"
 
     @abstractmethod
     def get_task_prompt(self) -> str | list[dict]:
@@ -201,10 +242,21 @@ class Environment(ABC):
         """Add a tool to the environment"""
         self.tools[tool.name] = tool
 
-    def get_available_tools(self) -> list[dict[str, str]]:
-        """Get list of available tools and their descriptions"""
+    def get_available_tools(self) -> list[dict[str, str | list[ToolArgument]]]:
+        """Get list of available tools with their descriptions and arguments.
+
+        Returns:
+            list[dict[str, str | list[ToolArgument]]]: A list of dictionaries where each dictionary contains:
+                - 'name': the tool's name as a string.
+                - 'description': a string describing the tool.
+                - 'arguments': a list of ToolArgument objects representing the tool's arguments.
+        """
         return [
-            {"name": t.name, "description": t.description, "arguments": t.arguments}
+            {
+                "name": t.name,
+                "description": t.description,
+                "arguments": ", ".join(arg.name for arg in t.arguments),
+            }
             for t in self.tools.values()
         ]
 
@@ -213,24 +265,25 @@ class Environment(ABC):
         tools_guide = "\n\n".join(
             tool.get_usage_guide() for tool in self.tools.values()
         )
-
-        return f"""Available Tools:
-{tools_guide}
-
-How to use tools:
-1. Each tool call must specify the tool name and required arguments
-2. Tools may return errors if arguments are invalid
-3. You can make multiple tool calls as needed
-4. All tool calls are recorded and affect your final score
-Example tool call format:
-{{
-    "tool_name": "tool_name",
-    "arguments": {{
-        "arg1": value1,
-        "arg2": value2
-    }}
-}}
-"""
+        # TODO: make it configurable
+        return (
+            f"Task: {self.get_task_prompt()}\n\n"
+            "Available Tools:\n"
+            f"{tools_guide}\n\n"
+            "How to use tools:\n"
+            "1. Each tool call must specify the tool name and required arguments\n"
+            "2. Tools may return errors if arguments are invalid\n"
+            "3. You can make multiple tool calls as needed. The tools will be executed sequentially in the order they are called.\n"
+            "4. All tool calls are recorded and affect your final score\n"
+            "Example tool call format:\n"
+            "{{\n"
+            '    "tool_name": "tool_name",\n'
+            '    "arguments": {{\n'
+            '        "arg1": value1,\n'
+            '        "arg2": value2\n'
+            "    }}\n"
+            "}}\n"
+        )
 
     def get_environment_guide(self) -> str:
         """Generate a complete guide for the environment and its tools"""
