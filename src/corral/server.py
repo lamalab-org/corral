@@ -1,10 +1,37 @@
+import os
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 
 from corral.base import Environment, ToolRequest
+from corral.graph import GraphTrackerFactory
 
 
-def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
+def create_benchmark_server(
+    environments: dict[str, Environment], graph_output_dir: str = "./graph_output"
+) -> FastAPI:
+    """CORRAL Benchmark Server"""
     app = FastAPI()
+
+    graph_factory = GraphTrackerFactory(output_dir=graph_output_dir)
+
+    # Convert standard environments to graph-tracked environments if needed
+    for task_id, env in environments.items():
+        if env.graph_factory is None:
+            env.graph_factory = graph_factory
+            # Create new tracker for the current state if needed
+            if env.graph_tracker is None and hasattr(env, "state"):
+                env.graph_tracker = graph_factory.create_tracker(
+                    task_id=task_id,
+                    agent_type="Environment",
+                    trial_id=env.state.trial_id
+                    if hasattr(env, "state") and env.state
+                    else "0",
+                )
+    Path(graph_output_dir).mkdir(parents=True, exist_ok=True)
+
+    app.mount("/graphs", StaticFiles(directory=graph_output_dir), name="graphs")
 
     @app.get("/tasks")
     def get_available_tasks():
@@ -112,6 +139,53 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Trial not found")
         return {"trial_state": trial_state}
 
-    # add endpoint for scoring the task
+    @app.get("/graphs")
+    def list_available_graphs():
+        """List all available graph visualizations"""
+        graph_files = []
+
+        # List JSON and PNG files in the graph output directory
+        try:
+            files = os.listdir(graph_output_dir)
+            for file in files:
+                if file.endswith((".json", ".png")):
+                    file_path = Path(graph_output_dir) / file
+                    file_info = {
+                        "name": file,
+                        "path": f"/graphs/{file}",
+                        "size": file_path.stat().st_size,
+                        "modified": file_path.stat().st_mtime,
+                    }
+                    graph_files.append(file_info)
+        except Exception as e:
+            return {"error": str(e), "graphs": []}
+
+        return {
+            "graphs": sorted(graph_files, key=lambda x: x["modified"], reverse=True)
+        }
+
+    @app.get("/graphs/{task_id}/{trial_id}/statistics")
+    def get_graph_statistics(task_id: str, trial_id: str):
+        """Get statistics for a specific graph"""
+        graph_file = f"{task_id}_{trial_id}.json"
+        graph_path = Path(graph_output_dir) / graph_file
+
+        if not graph_path.exists():
+            raise HTTPException(status_code=404, detail="Graph not found")
+
+        try:
+            # Load graph and get statistics
+            graph = graph_factory.get_tracker(task_id, trial_id)
+            if not graph:
+                from corral.graph import GraphTracker  # Ensure GraphTracker is imported
+
+                graph = GraphTracker.load_from_file(graph_path)
+
+            stats = graph.get_statistics()
+            return {"statistics": stats}
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Error loading graph: {e!s}"
+            ) from e
 
     return app
