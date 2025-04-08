@@ -292,9 +292,6 @@ class MPAPIWrapper(BaseModel):
         if "symmetry" not in query_params.get("fields", []):
             query_params["fields"] = [*query_params.get("fields", []), "symmetry"]
 
-        # query_params["fields"] = query_params.get(
-        #     "fields", []) + ["structure", "material_id"]
-
         return_mode = query_params.pop("return_mode", "file")
 
         limit = query_params.get("_limit", DEFAULT_LIMIT)
