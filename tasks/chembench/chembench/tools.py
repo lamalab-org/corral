@@ -601,3 +601,36 @@ def search_clinical_trials(drug_name: str, query: str, top_k: int = 5) -> list[d
 
     finally:
         delete_vector_db(collection_name)
+
+
+@tool
+def search_materials_compatibility(
+    material: str, chemical: str, top_k: int = 10
+) -> list[dict]:
+    """
+    Search for materials compatibility data in a dedicated dataset based on the provided material and
+    chemical.
+
+    Args:
+        material (str): The material to search for.
+        chemical (str): The chemical to search for.
+        top_k (int): The number of top results to return.
+
+    Returns:
+        list[dict]: A list of dictionaries containing the most relevant materials compatibility data.
+    """
+    collection_name = "materials_compatibility"
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "vector_databases"
+        / "materials_compatibility"
+    )
+
+    try:
+        query = f"Compatibility of {material} with {chemical}"
+        return vector_database_search(
+            query=query, collection_name=collection_name, path=str(path), top_k=top_k
+        )
+
+    except Exception as e:
+        return [{"error": f"Error searching materials compatibility: {e!s}"}]

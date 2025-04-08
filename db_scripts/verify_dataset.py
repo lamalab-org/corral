@@ -27,13 +27,12 @@ def verify_vector_database(db_path: str, collection_name: str):
         # Initialize ChromaDB client with updated configuration
         client = chromadb.PersistentClient(path=str(db_path))
 
-        # Get list of collections
+        # Get list of collections - in v0.6.0+ this returns just the names
         collections = client.list_collections()
-        collection_names = [col.name for col in collections]
 
-        logger.info(f"Found collections: {collection_names}")
+        logger.info(f"Found collections: {collections}")
 
-        if collection_name not in collection_names:
+        if collection_name not in collections:
             logger.error(f"Collection '{collection_name}' not found in the database")
             return False
 
@@ -49,7 +48,7 @@ def verify_vector_database(db_path: str, collection_name: str):
             return False
 
         # Try a simple query to verify functionality using the same embedding function
-        query = "LAMMPS commands"
+        query = "Copper"
         query_embedding = embed_text(
             chunks=[query], model="openai/text-embedding-3-large"
         )[0]
@@ -80,9 +79,9 @@ def verify_vector_database(db_path: str, collection_name: str):
 
 if __name__ == "__main__":
     # Use the same path as in the embedding script
-    db_path = "../vector_databases/lammps_manual"
+    db_path = "../vector_databases/materials_compatibility"
 
-    success = verify_vector_database(db_path, "lammps_manual")
+    success = verify_vector_database(db_path, "materials_compatibility")
 
     if success:
         logger.success("Vector database verification successful!")

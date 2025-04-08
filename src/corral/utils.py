@@ -14,7 +14,6 @@ from litellm import embedding
 from loguru import logger
 from modal import App, Image, Mount, Secret, Volume
 from tenacity import (
-    before_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
@@ -41,7 +40,10 @@ class Model:
 
 
 def vector_database_search(
-    query: str, collection_name: str = "default_collection", path: str | None = None
+    query: str,
+    collection_name: str = "default_collection",
+    path: str | None = None,
+    top_k: int = 5,
 ) -> list[dict]:
     """Retrieve the top 5 most similar instructions from a vector database based on the query.
 
@@ -49,6 +51,7 @@ def vector_database_search(
         query (str): The search query to find similar instructions
         collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
         path (str): The path to the vector database directory. Defaults to None, which uses "vector_db" in the current directory.
+        top_k (int): The number of similar instructions to retrieve. Default is 5.
 
     Returns:
         list[dict]: A list of dictionaries containing the top 5 most similar instructions with their content and metadata
@@ -77,7 +80,7 @@ def vector_database_search(
                 f"Collection '{collection_name}' does not exist: {e!s}"
             ) from e
 
-        results = collection.query(query_embeddings=[query_embedding], n_results=5)
+        results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
 
         formatted_results = []
         for _i, (doc, doc_id, distance) in enumerate(
@@ -255,8 +258,7 @@ def create_vector_database(
     client = chromadb.PersistentClient(path=str(persist_directory))
 
     try:
-        # Get list of collections and check if our collection exists
-        collection_list = [col.name for col in client.list_collections()]
+        collection_list = client.list_collections()
         collection_exists = collection_name in collection_list
 
         logger.debug(f"Available collections: {collection_list}")
@@ -344,14 +346,14 @@ def create_vector_database(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=2, max=30),
     retry=retry_if_exception_type((ConnectionError, TimeoutError)),
-    before=before_log(logger, "INFO"),
-    after=before_log(logger, "INFO"),
 )
 def embed_text(
     chunks: list, model: str = "openai/text-embedding-3-large"
 ) -> list[list[float]]:
     """
     Embed a list of text chunks using the specified model with automatic retries.
+    If the list is large (>2048 chunks), it will process them in smaller batches.
+
     Args:
         chunks (list): List of text chunks to embed
         model (str, optional): Model to use for embeddings. Default: "openai/text-embedding-3-large"
@@ -373,6 +375,32 @@ def embed_text(
 
     logger.info(f"Embedding {len(chunks)} text chunks using model: {model}")
 
+    BATCH_SIZE = 2048  # This is a configuration from LiteLLM:
+    # https://docs.litellm.ai/docs/embedding/supported_embedding#required-fields
+
+    # Process in batches if the input is large
+    if len(chunks) > BATCH_SIZE:
+        logger.info(f"Input size exceeds {BATCH_SIZE} chunks, processing in batches")
+        all_embeddings = []
+
+        # Process chunks in batches
+        for i in range(0, len(chunks), BATCH_SIZE):
+            batch = chunks[i : i + BATCH_SIZE]
+            logger.info("Processing batched chunks)")
+
+            try:
+                batch_embeddings = embed_text(batch, model=model)
+                all_embeddings.extend(batch_embeddings)
+            except Exception as e:
+                logger.error(f"Error in batch {i//BATCH_SIZE + 1}: {e!s}")
+                raise
+
+        logger.info(
+            f"Successfully generated {len(all_embeddings)} embeddings across all batches"
+        )
+        return all_embeddings
+
+    # For smaller inputs, process normally
     try:
         result_embeddings = embedding(
             model=model,
