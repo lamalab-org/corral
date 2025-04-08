@@ -67,11 +67,12 @@ class MPAPIWrapper(BaseModel):
         Performs an mp-api call and returns the result.
 
         Args:
-            function_name: a function name to call
-            function_args: arguments for the function
-            debug: whether to print debug information
+            function_name (str): a function name to call
+            function_args (str): arguments for the function
+            debug (bool): whether to print debug information
+            
         Returns:
-            function response in text format
+            str: function response in text format
         """
 
         function_to_call = self.material_routes.get(function_name, None)
