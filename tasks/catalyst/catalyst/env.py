@@ -104,7 +104,7 @@ def load_tasks_from_json(
     return tasks
 
 
-class TaskEnvironment(Environment):
+class TaskGroupEnvironment(Environment):
     """Environment that works with a task group"""
 
     def __init__(
@@ -232,7 +232,7 @@ def create_environments(
     task_json_path: str | Path,
     taskgroup_common_tools: dict[str, Tool] | None = None,
     work_dir: str = BASE_WORK_DIR,
-) -> dict[str, TaskEnvironment]:
+) -> dict[str, TaskGroupEnvironment]:
     """Create environments for tasks defined in a JSON file
 
     Args:
@@ -271,7 +271,7 @@ def create_environments(
     # Create environments for all tasks
     environments = {}
     for task_id in task_group.tasks:
-        environments[task_id] = TaskEnvironment(
+        environments[task_id] = TaskGroupEnvironment(
             task_id=task_id,
             task_group=task_group,
             subtask_specific_tools=subtask_specific_tools,
