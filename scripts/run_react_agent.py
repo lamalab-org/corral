@@ -4,6 +4,7 @@ from loguru import logger
 
 from corral.agents.react import ReActAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
+from corral.graph import GraphTrackerFactory
 
 
 def setup_litellm():
@@ -17,7 +18,10 @@ def run_benchmark(
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = ReActAgent(model=model, max_iterations=10, temperature=0.0)
+    graph_factory = GraphTrackerFactory(output_dir="./graph_output")
+    agent = ReActAgent(
+        model=model, graph_factory=graph_factory, max_iterations=10, temperature=0.0
+    )
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark
