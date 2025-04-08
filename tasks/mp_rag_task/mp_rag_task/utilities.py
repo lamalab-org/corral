@@ -70,7 +70,7 @@ class MPAPIWrapper(BaseModel):
             function_name (str): a function name to call
             function_args (str): arguments for the function
             debug (bool): whether to print debug information
-            
+
         Returns:
             str: function response in text format
         """
@@ -83,8 +83,8 @@ class MPAPIWrapper(BaseModel):
                     r"\s+",
                     " ",
                     f"""
-                I want to call {function_name} but it is not supported yet.
-                Please rephrase or confine your request.
+                {function_name} it is not supported.
+                Please change to another function.
                 """,
                 )
                 .strip()
@@ -296,7 +296,6 @@ class MPAPIWrapper(BaseModel):
 
         limit = query_params.get("_limit", DEFAULT_LIMIT)
 
-
         docs = self.mpr.materials.summary._search(
             num_chunks=None, chunk_size=1000, all_fields=False, **query_params
         )[:limit]
@@ -316,7 +315,6 @@ class MPAPIWrapper(BaseModel):
                 + ", ".join(paths)
             )
         raise ValueError("Invalid return_mode")
-
 
     def search_materials_robocrys(self, query_params: dict):
         query_params = self._process_query_params(query_params)
@@ -540,7 +538,6 @@ class MPAPIWrapper(BaseModel):
 
             matereial_ids = [doc["material_id"] for doc in material_docs]
             query_params["material_ids"] = ",".join(matereial_ids)
-
 
         return self.mpr.materials.elasticity._search(
             num_chunks=None, chunk_size=1000, all_fields=False, **query_params
