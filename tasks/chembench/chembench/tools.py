@@ -10,15 +10,10 @@ import modal
 import requests
 from loguru import logger
 from rdkit import Chem
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 from corral.utils import (
     create_vector_database,
+    make_api_request,
     remote_call,
     tool,
     vector_database_search,
@@ -381,26 +376,6 @@ def get_functional_groups(smiles: str) -> list[str]:
     )
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(requests.exceptions.RequestException),
-)
-def fetch_study_page(base_url: str, params: dict[str, Any]) -> dict[str, Any]:
-    """Fetch a single page of study data with retry logic
-
-    Args:
-        base_url (str): The base URL for the API endpoint
-        params (dict): The parameters to include in the API request
-
-    Returns:
-        dict: The JSON response from the API
-    """
-    response = requests.get(base_url, params=params)
-    response.raise_for_status()
-    return response.json()
-
-
 def fetch_all_studies(drug_name: str) -> list[dict[str, Any]]:
     """Fetch all studies related to a specific drug from ClinicalTrials.gov
 
@@ -420,7 +395,10 @@ def fetch_all_studies(drug_name: str) -> list[dict[str, Any]]:
             if next_page_token:
                 params["pageToken"] = next_page_token
 
-            data = fetch_study_page(base_url, params)
+            data = make_api_request(
+                url=base_url, method="GET", params=params, verbose=True
+            )
+
             studies = data.get("studies", [])
             all_studies.extend(studies)
 
