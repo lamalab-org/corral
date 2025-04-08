@@ -46,54 +46,53 @@ store = PromptStore(current_file_dir / "prompts")
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
 
 
+def process_collection(collections, collection_name, prompt_id, transform):
+    if collection_name not in collections:
+        logger.info(f"Creating {collection_name}")
+        guidelines = store.get(prompt_id).fill({})
+        data = transform(guidelines)
+        create_vector_database(
+            data, collection_name=collection_name, update_mode="recreate"
+        )
+
+
 def create_embedding_datasets():
-    """Create embedding datasets for the tools"""
     persist_directory = Path(Path.cwd()) / "vector_db"
     persist_directory.mkdir(parents=True, exist_ok=True)
-
     client = chromadb.PersistentClient(path=str(persist_directory))
     collections = set(client.list_collections())
     logger.info(f"Existing collections: {collections}")
 
-    collection_names = [
+    # Skip creation if all collections exist.
+    collection_names = {
         "lab_safety_collection",
         "ms_guide_collection",
         "nmr_guide_collection",
-    ]
-
-    # Check if all collections already exist. If so, skip creation.
-    if all(name in collections for name in collection_names):
+    }
+    if collections.issuperset(collection_names):
         logger.info("All vector databases already exist. Skipping creation.")
         return
 
-    # Process lab safety guidelines
-    if "lab_safety_collection" not in collections:
-        collection_name = "lab_safety_collection"
-        logger.info(f"Creating {collection_name}")
-        lab_safety_guidelines = store.get("314a75ca-c96c-48d9-92e9-0ade5e1ce373")
-        create_vector_database(
-            chunk_text(lab_safety_guidelines.fill({})),
-            collection_name=collection_name,
-            update_mode="recreate",
-        )
+    collection_configs = [
+        {
+            "name": "lab_safety_collection",
+            "prompt_id": "314a75ca-c96c-48d9-92e9-0ade5e1ce373",
+            "transform": lambda txt: chunk_text(txt),  # returns list
+        },
+        {
+            "name": "ms_guide_collection",
+            "prompt_id": "d8f0ce84-f4aa-4c77-a0da-dba2e054bfff",
+            "transform": lambda txt: [txt],  # wrap in list
+        },
+        {
+            "name": "nmr_guide_collection",
+            "prompt_id": "ee669c37-8a6a-400d-82de-f73cc3a7a175",
+            "transform": lambda txt: [txt],  # wrap in list
+        },
+    ]
 
-    # Process MS guidelines
-    if "ms_guide_collection" not in collections:
-        collection_name = "ms_guide_collection"
-        logger.info(f"Creating {collection_name}")
-        ms_guidelines = store.get("d8f0ce84-f4aa-4c77-a0da-dba2e054bfff").fill({})
-        create_vector_database(
-            [ms_guidelines], collection_name=collection_name, update_mode="recreate"
-        )
-
-    # Process NMR guidelines
-    if "nmr_guide_collection" not in collections:
-        collection_name = "nmr_guide_collection"
-        logger.info(f"Creating {collection_name}")
-        nmr_guidelines = store.get("ee669c37-8a6a-400d-82de-f73cc3a7a175").fill({})
-        create_vector_database(
-            [nmr_guidelines], collection_name=collection_name, update_mode="recreate"
-        )
+    for cfg in collection_configs:
+        process_collection(collections, cfg["name"], cfg["prompt_id"], cfg["transform"])
 
 
 _MACBENCH_TOOLS = [
