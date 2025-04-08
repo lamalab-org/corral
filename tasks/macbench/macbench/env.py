@@ -1,6 +1,8 @@
 import os
+from pathlib import Path
 from typing import Any
 
+import chromadb
 import uvicorn
 from chembench.evaluate import ChemBenchmark
 from chembench.prompter import PrompterBuilder
@@ -8,9 +10,8 @@ from chembench.task import Task
 from loguru import logger
 from promptstore import PromptStore
 from tools import (
-    afm_image_analyzer,
     app,
-    chart_vllm_extractor,
+    crop_plot_with_labels,
     decimer_molecule_extraction,
     deplot_image_extractor,
     enhanced_brave_search,
@@ -40,20 +41,58 @@ from corral.utils import (
     create_vector_database,
 )
 
-store = PromptStore("./prompts")
+current_file_dir = Path(__file__).parent
+store = PromptStore(current_file_dir / "prompts")
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
 
 
+def process_collection(collections, collection_name, prompt_id, transform):
+    if collection_name not in collections:
+        logger.info(f"Creating {collection_name}")
+        guidelines = store.get(prompt_id).fill({})
+        data = transform(guidelines)
+        create_vector_database(
+            data, collection_name=collection_name, update_mode="recreate"
+        )
+
+
 def create_embedding_datasets():
-    """Create embedding datasets for the tools"""
-    lab_safety_guidelines = store.get("314a75ca-c96c-48d9-92e9-0ade5e1ce373")
-    create_vector_database(
-        chunk_text(lab_safety_guidelines.fill({})), "lab_safety_collection"
-    )
-    ms_guidelines = store.get("d8f0ce84-f4aa-4c77-a0da-dba2e054bfff").fill({})
-    create_vector_database([ms_guidelines], "ms_guide_collection")
-    nmr_guidelines = store.get("ee669c37-8a6a-400d-82de-f73cc3a7a175").fill({})
-    create_vector_database([nmr_guidelines], "nmr_guide_collection")
+    persist_directory = Path(Path.cwd()) / "vector_db"
+    persist_directory.mkdir(parents=True, exist_ok=True)
+    client = chromadb.PersistentClient(path=str(persist_directory))
+    collections = set(client.list_collections())
+    logger.info(f"Existing collections: {collections}")
+
+    # Skip creation if all collections exist.
+    collection_names = {
+        "lab_safety_collection",
+        "ms_guide_collection",
+        "nmr_guide_collection",
+    }
+    if collections.issuperset(collection_names):
+        logger.info("All vector databases already exist. Skipping creation.")
+        return
+
+    collection_configs = [
+        {
+            "name": "lab_safety_collection",
+            "prompt_id": "314a75ca-c96c-48d9-92e9-0ade5e1ce373",
+            "transform": lambda txt: chunk_text(txt),  # returns list
+        },
+        {
+            "name": "ms_guide_collection",
+            "prompt_id": "d8f0ce84-f4aa-4c77-a0da-dba2e054bfff",
+            "transform": lambda txt: [txt],  # wrap in list
+        },
+        {
+            "name": "nmr_guide_collection",
+            "prompt_id": "ee669c37-8a6a-400d-82de-f73cc3a7a175",
+            "transform": lambda txt: [txt],  # wrap in list
+        },
+    ]
+
+    for cfg in collection_configs:
+        process_collection(collections, cfg["name"], cfg["prompt_id"], cfg["transform"])
 
 
 _MACBENCH_TOOLS = [
@@ -63,12 +102,11 @@ _MACBENCH_TOOLS = [
     search_nmr_guide,
     llm_vision_expert,
     deplot_image_extractor,
-    chart_vllm_extractor,
     extract_table_text,
     decimer_molecule_extraction,
     molscribe_molecule_extraction,
     rxnscribe_reaction_extraction,
-    afm_image_analyzer,
+    crop_plot_with_labels,
 ]
 
 
@@ -102,6 +140,7 @@ class MaCBenchEnvironment(Environment):
         self.all_score_maps = []
 
         super().__init__(task_id)
+        create_embedding_datasets()
         # Add multiple tools
         for tool in _MACBENCH_TOOLS:
             self.add_tool(tool)
@@ -201,7 +240,6 @@ def main():
 
     tasks = get_all_tasks(benchmark)
 
-    create_embedding_datasets()
     environments = {}
     for task in tasks:
         environments[task._uuid] = MaCBenchEnvironment(

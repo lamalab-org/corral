@@ -150,11 +150,11 @@ def _build_user_content(
 
     if agent == "react":
         base_kwargs["task_guide"] += (
-            f"To solve the task you have available the next tools:\n\n{tools}"
+            f" To solve the task you have available the next tools:\n\n{tools}"
         )
         base_kwargs["history"] = json.dumps(history)
-
-    if agent == "tool_calling":
+        base_kwargs["tools"] = json.dumps(tools)
+    elif agent == "tool_calling":
         pass
     elif agent == "llm_planner":
         base_kwargs["tools"] = json.dumps(tools)
