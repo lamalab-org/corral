@@ -2,9 +2,6 @@ import os
 from typing import Any
 
 import uvicorn
-from chembench.evaluate import ChemBenchmark
-from chembench.prompter import PrompterBuilder
-from chembench.task import Task
 from dotenv import load_dotenv
 from loguru import logger
 from tools import (
@@ -21,11 +18,16 @@ from tools import (
     get_pka_from_smiles,
     get_smiles_from_name,
     relevant_pubchem_sections,
-    search_clinical_trials,
+    search_clinical_trials_by_drug,
+    search_clinical_trials_by_query,
+    search_materials_compatibility,
     simulate_spectra,
     smiles_to_name,
 )
 
+from chembench.evaluate import ChemBenchmark
+from chembench.prompter import PrompterBuilder
+from chembench.task import Task
 from corral.base import Environment
 from corral.io import (
     CatFilesTool,
@@ -58,7 +60,9 @@ _CHEMBENCH_TOOLS = [
     get_c_nmr_spectra_pubchem,
     simulate_spectra,
     get_functional_groups,
-    search_clinical_trials,
+    search_clinical_trials_by_query,
+    search_clinical_trials_by_drug,
+    search_materials_compatibility,
 ]
 
 
