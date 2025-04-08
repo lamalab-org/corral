@@ -15,7 +15,9 @@ def run_benchmark(model: str = "gpt-4o", task_ids: list | None = None):
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = ReActAgent(model=model)
+    agent = ReActAgent(
+        model=model, system_prompt="70545b35-005c-4aaf-ac3b-4979f8ab10cf"
+    )
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark

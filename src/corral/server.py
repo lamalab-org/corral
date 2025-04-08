@@ -1,6 +1,11 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from fastapi import FastAPI, HTTPException
 
-from corral.base import Environment, ToolRequest
+if TYPE_CHECKING:
+    from corral.base import Environment, ToolRequest
 
 
 def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
