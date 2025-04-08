@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
-import modal
 import requests
 from loguru import logger
 from rdkit import Chem
+from rdkit.Chem import rdMolDescriptors
 
 from corral.utils import (
     create_vector_database,
@@ -135,10 +135,9 @@ def relevant_pubchem_sections(
     collection_name = f"compounds_db_{uuid.uuid4().hex}"
 
     try:
-        remote_pubchem_record = modal.Function.from_name(
-            "chemenv", "get_pubchem_full_record"
-        )
-        full_record = remote_pubchem_record.remote(compound)
+        full_record = remote_call(
+            function_name="get_pubchem_full_record", env_name="chemenv"
+        )(compound=compound)
 
         chunks = process_pubchem_json(full_record)
 
@@ -218,8 +217,7 @@ def get_formula_from_smiles(smiles: str) -> str:
 
         if mol is None:
             return "Invalid SMILES string"
-
-        return Chem.rdMolDescriptors.CalcMolFormula(mol)
+        return rdMolDescriptors.CalcMolFormula(mol)
 
     except Exception as e:
         return f"Error: {e!s}"
@@ -386,7 +384,7 @@ def fetch_all_studies(drug_name: str) -> list[dict[str, Any]]:
         list[dict]: A list of dictionaries containing study data
     """
     base_url = "https://clinicaltrials.gov/api/v2/studies"
-    params = {"query.interventionName": drug_name, "pageSize": 100, "format": "json"}
+    params = {"query.term": drug_name, "pageSize": 100, "format": "json"}
     all_studies = []
     next_page_token = None
 
@@ -486,21 +484,19 @@ def parse_study_data(studies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return parsed_data
 
 
-@tool
-def search_clinical_trials(drug_name: str, query: str, top_k: int = 5) -> list[dict]:
+def _search_clinical_trials(search_term: str, query: str, top_k: int = 5) -> list[dict]:
     """
-    Fetches clinical trial data for a specific drug from ClinicalTrials.gov
-    with semantic search capabilities from a query
+    Helper function that fetches clinical trial data and performs semantic search.
 
     Args:
-        drug_name: Name of the drug to search for in clinical trials
-        query: Text query to find relevant trials
-        top_k: Number of top results to return if query is provided (default: 5)
+        search_term (str): Term to search for in ClinicalTrials.gov
+        query (str): Text query for semantic search on the retrieved trials
+        top_k (int): Number of top results to return (default: 5)
 
     Returns:
-        List of dictionaries with parsed clinical trial data, optionally filtered by relevance
+        list[dict]: List of dictionaries with relevant clinical trial data
     """
-    studies = fetch_all_studies(drug_name)
+    studies = fetch_all_studies(search_term)
     parsed_studies = parse_study_data(studies)
 
     collection_name = f"clinical_trials_{uuid.uuid4().hex}"
@@ -534,6 +530,42 @@ def search_clinical_trials(drug_name: str, query: str, top_k: int = 5) -> list[d
 
     finally:
         delete_vector_db(collection_name)
+
+
+@tool
+def search_clinical_trials_by_query(query: str, top_k: int = 5) -> list[dict]:
+    """
+    Fetches clinical trial data for a specific query from ClinicalTrials.gov
+    returns the most relevant trials based on the query.
+
+    Args:
+        query (str): Text query to find relevant clinical trials
+        top_k (int): Number of top results to return if query is provided. Defaults to 5
+
+    Returns:
+        list[dict]: List of dictionaries with parsed clinical trial data, optionally filtered by relevance
+    """
+    return _search_clinical_trials(search_term=query, query=query, top_k=top_k)
+
+
+@tool
+def search_clinical_trials_by_drug(
+    drug_name: str, query: str, top_k: int = 5
+) -> list[dict]:
+    """
+    Fetches ALL clinical trial data for a specific drug from ClinicalTrials.gov
+    with semantic search capabilities from a query
+    This function is costly so it should be used with caution and as a last resource.
+
+    Args:
+        drug_name: Name of the drug to search for in clinical trials
+        query: Text query to find relevant trials
+        top_k: Number of top results to return if query is provided (default: 5)
+
+    Returns:
+        list[dict]: List of dictionaries with parsed clinical trial data, optionally filtered by relevance
+    """
+    return _search_clinical_trials(search_term=drug_name, query=query, top_k=top_k)
 
 
 @tool

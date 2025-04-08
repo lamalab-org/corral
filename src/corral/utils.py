@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Union, get_args, get_origin, get_type_hints
+from urllib.parse import quote
 
 import chromadb
 import modal
@@ -135,6 +136,8 @@ def _tokenize_and_split_chunks(
     logger.info(
         f"Tokenizing and splitting {len(chunks)} chunks with max size {chunk_size} tokens"
     )
+    chunks = [str(chunk) for chunk in chunks]
+
     encoding = tiktoken.get_encoding("o200k_base")
     target_size = int(0.8 * chunk_size)
     processed_chunks = []
@@ -815,9 +818,9 @@ def remote_call(function_name: str, env_name: str = "chemenv"):
         Callable: A wrapper function that calls the remote function
     """
 
-    def wrapper(arg: str) -> str:
+    def wrapper(**kwargs) -> str:
         remote = modal.Function.from_name(env_name, function_name)
-        return remote.remote(arg)
+        return remote.remote(**kwargs)
 
     return wrapper
 
@@ -855,6 +858,7 @@ def make_api_request(
         requests.exceptions.RequestException: If the request fails after retries
     """
     method = method.upper()
+    url = quote(url, safe=":/?&=")
     logger.info(f"Making {method} request to {url}")
 
     if verbose:
