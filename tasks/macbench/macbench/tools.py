@@ -112,7 +112,6 @@ def llm_vision_expert(query: str, image_path: str) -> str:
     Returns:
         str: The response from the LLM regarding the image analysis
     """
-
     # Ideally we would like to use the latest model
     # This Gemini seems to be the best one for OCR tasks
     model = "gemini/gemini-2.5-pro-preview-03-25"

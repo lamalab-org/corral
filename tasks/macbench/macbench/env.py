@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import chromadb
 import uvicorn
 from chembench.evaluate import ChemBenchmark
 from chembench.prompter import PrompterBuilder
@@ -47,14 +48,52 @@ BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
 
 def create_embedding_datasets():
     """Create embedding datasets for the tools"""
-    lab_safety_guidelines = store.get("314a75ca-c96c-48d9-92e9-0ade5e1ce373")
-    create_vector_database(
-        chunk_text(lab_safety_guidelines.fill({})), "lab_safety_collection"
-    )
-    ms_guidelines = store.get("d8f0ce84-f4aa-4c77-a0da-dba2e054bfff").fill({})
-    create_vector_database([ms_guidelines], "ms_guide_collection")
-    nmr_guidelines = store.get("ee669c37-8a6a-400d-82de-f73cc3a7a175").fill({})
-    create_vector_database([nmr_guidelines], "nmr_guide_collection")
+    persist_directory = Path(Path.cwd()) / "vector_db"
+    persist_directory.mkdir(parents=True, exist_ok=True)
+
+    client = chromadb.PersistentClient(path=str(persist_directory))
+    collections = set(client.list_collections())
+    logger.info(f"Existing collections: {collections}")
+
+    collection_names = [
+        "lab_safety_collection",
+        "ms_guide_collection",
+        "nmr_guide_collection",
+    ]
+
+    # Check if all collections already exist. If so, skip creation.
+    if all(name in collections for name in collection_names):
+        logger.info("All vector databases already exist. Skipping creation.")
+        return
+
+    # Process lab safety guidelines
+    if "lab_safety_collection" not in collections:
+        collection_name = "lab_safety_collection"
+        logger.info(f"Creating {collection_name}")
+        lab_safety_guidelines = store.get("314a75ca-c96c-48d9-92e9-0ade5e1ce373")
+        create_vector_database(
+            chunk_text(lab_safety_guidelines.fill({})),
+            collection_name=collection_name,
+            update_mode="recreate",
+        )
+
+    # Process MS guidelines
+    if "ms_guide_collection" not in collections:
+        collection_name = "ms_guide_collection"
+        logger.info(f"Creating {collection_name}")
+        ms_guidelines = store.get("d8f0ce84-f4aa-4c77-a0da-dba2e054bfff").fill({})
+        create_vector_database(
+            [ms_guidelines], collection_name=collection_name, update_mode="recreate"
+        )
+
+    # Process NMR guidelines
+    if "nmr_guide_collection" not in collections:
+        collection_name = "nmr_guide_collection"
+        logger.info(f"Creating {collection_name}")
+        nmr_guidelines = store.get("ee669c37-8a6a-400d-82de-f73cc3a7a175").fill({})
+        create_vector_database(
+            [nmr_guidelines], collection_name=collection_name, update_mode="recreate"
+        )
 
 
 _MACBENCH_TOOLS = [
@@ -102,6 +141,7 @@ class MaCBenchEnvironment(Environment):
         self.all_score_maps = []
 
         super().__init__(task_id)
+        create_embedding_datasets()
         # Add multiple tools
         for tool in _MACBENCH_TOOLS:
             self.add_tool(tool)
@@ -201,7 +241,6 @@ def main():
 
     tasks = get_all_tasks(benchmark)
 
-    create_embedding_datasets()
     environments = {}
     for task in tasks:
         environments[task._uuid] = MaCBenchEnvironment(
