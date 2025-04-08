@@ -542,22 +542,6 @@ class MPAPIWrapper(BaseModel):
             matereial_ids = [doc["material_id"] for doc in material_docs]
             query_params["material_ids"] = ",".join(matereial_ids)
 
-        # # BUG: mp-api does not support get elastic properties by material_ids
-        # if "material_ids" in query_params:
-        #     material_ids = query_params["material_ids"].split(",")
-        #     elastic_docs = []
-        #     for material_id in material_ids:
-        #         try:
-        #             elastic_doc = self.mpr.materials.elasticity.get_data_by_id(
-        #                 document_id=material_id,
-        #                 fields=["pretty_formula", "elasticity", "task_id"],
-        #             )
-        #             elastic_docs.append(elastic_doc)
-
-        #         except Exception:
-        #             continue
-
-        #     return elastic_docs[:query_params.get("_limit", 10)]
 
         return self.mpr.materials.elasticity._search(
             num_chunks=None, chunk_size=1000, all_fields=False, **query_params
