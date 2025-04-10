@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum, StrEnum
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel
 
 from corral.graph import GraphTrackerFactory, NodeType
@@ -186,21 +187,26 @@ class ModalTool(Tool):
 class Environment(ABC):
     """Base class for task environments"""
 
-    def __init__(self, task_id: str, graph_factory: GraphTrackerFactory | None):
+    def __init__(self, task_id: str, graph_factory: GraphTrackerFactory | None = None):
+        """Initialize the environment
+
+        Args:
+            task_id: ID of the task
+            graph_factory: Optional graph factory to use
+        """
         self.task_id = task_id
         self.tools: dict[str, Tool] = {}
         self.trial_states: dict[str, TaskState] = {}
         self.trial_counter = -1
 
         # Graph tracking components
-        self.graph_factory = graph_factory or GraphTrackerFactory()
+        self.graph_factory = graph_factory
         self.graph_tracker = None
 
         self.reset_state()
 
     def save_current_state(self) -> TaskState:
-        """
-        Archive the current state as a snapshot.
+        """Archive the current state as a snapshot.
 
         Returns:
             TaskState: A deep copy of the current task state
@@ -209,13 +215,13 @@ class Environment(ABC):
         return deepcopy(self.state)
 
     def reset_state(self) -> str:
-        """Reset the environment state with a new trial id and fresh TaskState and return finished trail id."""
+        """Reset the environment state with a new trial id and fresh TaskState and return finished trial id."""
         if hasattr(self, "state") and self.state is not None:
             archived_snapshot = self.save_current_state()
             self.trial_states[self.state.trial_id] = archived_snapshot
 
             # Save the graph data for the completed trial if tracking is enabled
-            if self.graph_tracker:
+            if self.graph_tracker and self.graph_factory:
                 self.graph_factory.save_tracker(
                     task_id=self.task_id, trial_id=self.state.trial_id, visualize=True
                 )
@@ -228,28 +234,24 @@ class Environment(ABC):
             trial_id=new_trial_id,
             task_prompt=self.get_task_prompt(),
         )
-        # Create a new graph tracker for this trial
-        self.graph_tracker = self.graph_factory.create_tracker(
-            task_id=self.task_id, agent_type="Environment", trial_id=new_trial_id
-        )
 
-        # Track the initial task prompt
-        if self.graph_tracker:
+        # Get or create a tracker for this trial
+        if self.graph_factory:
+            self.graph_tracker = self.graph_factory.get_or_create_tracker(
+                task_id=self.task_id, trial_id=new_trial_id
+            )
+
+            # Track the initial task prompt
             self.graph_tracker.add_node(
                 node_type=NodeType.LLM_PROMPT,
                 content=self.get_task_prompt(),
-                metadata={"type": "task_prompt"},
+                metadata={"type": "task_prompt", "component": "environment"},
             )
 
         return self.state.trial_id
 
     def get_unique_trail_identifier(self) -> str:
-        """
-        Generate a combined identifier using task_id, trial_id, and a timestamp.
-
-        Returns:
-            A string combining task_id, trial_id, and timestamp in format: "{task_id}_{trial_id}_{timestamp}"
-        """
+        """Generate a combined identifier using task_id, trial_id, and a timestamp."""
         if not hasattr(self, "state") or self.state is None:
             return f"{self.task_id}_no_trial_{datetime.now(tz=timezone.utc).strftime('%m%d%H%M')}"
 
@@ -268,15 +270,8 @@ class Environment(ABC):
         """Add a tool to the environment"""
         self.tools[tool.name] = tool
 
-    def get_available_tools(self) -> list[dict[str, str | list[ToolArgument]]]:
-        """Get list of available tools with their descriptions and arguments.
-
-        Returns:
-            list[dict[str, str | list[ToolArgument]]]: A list of dictionaries where each dictionary contains:
-                - 'name': the tool's name as a string.
-                - 'description': a string describing the tool.
-                - 'arguments': a list of ToolArgument objects representing the tool's arguments.
-        """
+    def get_available_tools(self) -> list[dict[str, str | list]]:
+        """Get list of available tools with their descriptions and arguments."""
         return [
             {
                 "name": t.name,
@@ -291,42 +286,34 @@ class Environment(ABC):
         tools_guide = "\n\n".join(
             tool.get_usage_guide() for tool in self.tools.values()
         )
-        # TODO: make it configurable
         return (
             "Available Tools:\n"
             f"{tools_guide}\n\n"
             "How to use tools:\n"
             "1. Each tool call must specify the tool name and required arguments\n"
             "2. Tools may return errors if arguments are invalid\n"
-            "3. You can make multiple tool calls as needed. The tools will be executed sequentially in the order they are called.\n"
+            "3. You can make multiple tool calls as needed. The tools will be executed sequentially.\n"
             "4. All tool calls are recorded and affect your final score\n"
             "Example tool call format:\n"
-            "{{\n"
+            "{\n"
             '    "tool_name": "tool_name",\n'
-            '    "arguments": {{\n'
+            '    "arguments": {\n'
             '        "arg1": value1,\n'
             '        "arg2": value2\n'
-            "    }}\n"
-            "}}\n"
+            "    }\n"
+            "}\n"
         )
 
     def get_environment_guide(self) -> str:
         """Generate a complete guide for the environment and its tools"""
         tools_guide = self.get_tools_guide()
-
-        # TODO: make it configurable
         return f"""Task: {self.get_task_prompt()}
 
 {tools_guide}
 """
 
     def add_message(self, role: Role, content: str) -> None:
-        """Add a message to the environment state and track it in the graph
-
-        Args:
-            role: Role of the message sender
-            content: Content of the message
-        """
+        """Add a message to the environment state and track it in the graph"""
         # Create message
         message = LLMMessage(role=role, content=content)
         self.state.messages.append(message)
@@ -337,14 +324,55 @@ class Environment(ABC):
                 self.graph_tracker.add_node(
                     node_type=NodeType.LLM_RESPONSE,
                     content=content,
-                    metadata={"role": role.value},
+                    metadata={"role": role.value, "component": "environment"},
                 )
             else:
                 self.graph_tracker.add_node(
                     node_type=NodeType.LLM_PROMPT,
                     content=content,
-                    metadata={"role": role.value},
+                    metadata={"role": role.value, "component": "environment"},
                 )
+
+    def track_agent_activity(
+        self, node_type_str: str, content: Any, metadata: dict[str, Any] | None = None
+    ) -> str | None:
+        """Track agent activities in the environment's graph
+
+        This method allows the environment to record activities reported by the agent
+        through the API endpoint.
+
+        Args:
+            node_type_str: String representation of the NodeType
+            content: Content of the node
+            metadata: Additional metadata
+
+        Returns:
+            ID of the created node or None if tracking is disabled
+        """
+        if not self.graph_tracker:
+            return None
+
+        # Ensure we have metadata
+        metadata = metadata or {}
+
+        # Mark this as coming from the agent
+        metadata["component"] = "agent"
+
+        # Convert string to NodeType enum
+        try:
+            node_type = NodeType(node_type_str)
+        except ValueError:
+            logger.warning(f"Invalid node type: {node_type_str}")
+            return None
+
+        # Add the node to our tracker
+        node_id = self.graph_tracker.add_node(
+            node_type=node_type, content=content, metadata=metadata
+        )
+
+        logger.info(f"Tracked agent activity: {node_type_str}")
+
+        return node_id
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
         """Execute a tool and record the call"""
@@ -361,7 +389,9 @@ class Environment(ABC):
 
             # Track in graph
             if self.graph_tracker:
-                tool_node_id = self.graph_tracker.track_tool_call(tool_call)
+                tool_node_id = self.graph_tracker.track_tool_call(
+                    tool_call, metadata={"component": "environment"}
+                )
 
             return tool_call
 
@@ -381,7 +411,9 @@ class Environment(ABC):
 
             # Track in graph
             if self.graph_tracker:
-                tool_node_id = self.graph_tracker.track_tool_call(tool_call)
+                tool_node_id = self.graph_tracker.track_tool_call(
+                    tool_call, metadata={"component": "environment"}
+                )
 
             return tool_call
 
@@ -408,11 +440,17 @@ class Environment(ABC):
 
         # Track in graph
         if self.graph_tracker:
-            tool_node_id = self.graph_tracker.track_tool_call(tool_call)
+            tool_node_id = self.graph_tracker.track_tool_call(
+                tool_call, metadata={"component": "environment"}
+            )
 
             # Track the response if successful
             if tool_call.status == ToolCallStatus.SUCCESS and tool_call.result:
-                self.graph_tracker.track_tool_response(tool_call.result, tool_node_id)
+                self.graph_tracker.track_tool_response(
+                    tool_call.result,
+                    tool_node_id,
+                    metadata={"component": "environment"},
+                )
 
         return tool_call
 
@@ -426,16 +464,14 @@ class Environment(ABC):
 
         # Track in graph
         if self.graph_tracker:
-            self.graph_tracker.track_final_submission(answer, score)
+            self.graph_tracker.track_final_submission(
+                answer, score, metadata={"component": "environment"}
+            )
 
         return score
 
     def get_graph_statistics(self) -> dict[str, Any]:
-        """Get statistics about the current graph
-
-        Returns:
-            Dictionary of statistics or empty dict if no graph tracker
-        """
+        """Get statistics about the current graph"""
         if self.graph_tracker:
             return self.graph_tracker.get_statistics()
         return {}

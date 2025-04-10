@@ -7,8 +7,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
+from corral.agents.utils import AgentTrackingRequest
 from corral.base import Environment, ToolRequest
-from corral.graph import GraphTrackerFactory
+from corral.graph import GraphTracker, GraphTrackerFactory, NodeType
 
 
 def create_benchmark_server(
@@ -48,13 +49,6 @@ def create_benchmark_server(
             raise HTTPException(status_code=404, detail="Task not found")
         return {"prompt": environments[task_id].get_task_prompt()}
 
-    @app.get("/tasks/{task_id}/guide")
-    def get_environment_guide(task_id: str):
-        """Get the task prompt for the agent"""
-        if task_id not in environments:
-            raise HTTPException(status_code=404, detail="Task not found")
-        return {"prompt": environments[task_id].get_environment_guide()}
-
     @app.get("/tasks/{task_id}/tools/guide")
     def get_tools_guide(task_id: str):
         """Get the tools guide for the agent"""
@@ -83,15 +77,9 @@ def create_benchmark_server(
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
-    @app.get("/tasks/{task_id}/state")
-    def get_state(task_id: str):
-        """Get the current state of the task"""
-        if task_id not in environments:
-            raise HTTPException(status_code=404, detail="Task not found")
-        return environments[task_id].state
-
     @app.post("/tasks/{task_id}/submit")
     def submit_answer(task_id: str, answer: dict):
+        """Submit an answer for evaluation"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
 
@@ -118,36 +106,45 @@ def create_benchmark_server(
 
         return {"score": score, "state": state_dict, "trial_id": finished_trail}
 
-    @app.get("/tasks/{task_id}/status")
-    def get_task_status(task_id: str):
-        """Get task completion status"""
+    @app.post("/tasks/{task_id}/track")
+    def track_agent_activity(task_id: str, tracking_data: AgentTrackingRequest):
+        """Track agent activity in the environment's graph"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
-        return {
-            "is_completed": env.state.is_completed,
-            "score": env.state.score,
-            "submitted_answer": env.state.submitted_answer,
-            "tool_statistics": env.state.get_tool_statistics(),
-        }
 
-    @app.get("/tasks/{task_id}/trials")
-    def get_all_trials(task_id: str):
-        if task_id not in environments:
-            raise HTTPException(status_code=404, detail="Task not found")
-        env = environments[task_id]
-        return {"trials": env.trial_states}
+        # Check if environment has tracking method
+        if not hasattr(env, "track_agent_activity"):
+            # Add compatibility function if not present
+            def track_agent_activity(node_type_str, content, metadata=None):
+                """Compatibility method for environments without tracking"""
+                if not hasattr(env, "graph_tracker") or not env.graph_tracker:
+                    return None
 
-    @app.get("/tasks/{task_id}/trials/{trial_id}")
-    def get_trial_state(task_id: str, trial_id: str):
-        if task_id not in environments:
-            raise HTTPException(status_code=404, detail="Task not found")
-        env = environments[task_id]
-        trial_state = env.trial_states.get(trial_id)
-        if trial_state is None:
-            raise HTTPException(status_code=404, detail="Trial not found")
-        return {"trial_state": trial_state}
+                metadata = metadata or {}
+                metadata["component"] = "agent"
+
+                try:
+                    node_type = NodeType(node_type_str)
+                    return env.graph_tracker.add_node(
+                        node_type=node_type, content=content, metadata=metadata
+                    )
+                except Exception as e:
+                    logger.error(f"Error tracking agent activity: {e}")
+                    return None
+
+            env.track_agent_activity = track_agent_activity
+
+        # Track the activity
+        node_id = env.track_agent_activity(
+            tracking_data.node_type, tracking_data.content, tracking_data.metadata
+        )
+
+        if node_id:
+            return {"node_id": node_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to track activity")
 
     @app.get("/graphs")
     def list_available_graphs():
@@ -174,29 +171,63 @@ def create_benchmark_server(
             "graphs": sorted(graph_files, key=lambda x: x["modified"], reverse=True)
         }
 
-    @app.get("/graphs/{task_id}/{trial_id}/statistics")
-    def get_graph_statistics(task_id: str, trial_id: str):
-        """Get statistics for a specific graph"""
-        graph_file = f"{task_id}_{trial_id}.json"
-        graph_path = Path(graph_output_dir) / graph_file
+    @app.post("/graphs/visualize")
+    def visualize_all_graphs(directory_path: str | Path | None = None):
+        """Generate and save visualizations for all graphs in the specified directory
 
-        if not graph_path.exists():
-            raise HTTPException(status_code=404, detail="Graph not found")
+        Args:
+            directory_path: Optional path to the directory containing graph JSON files.
+                        If not provided, uses the default graph_output_dir.
 
-        try:
-            # Load graph and get statistics
-            graph = graph_factory.get_tracker(task_id, trial_id)
-            if not graph:
-                from corral.graph import GraphTracker  # Ensure GraphTracker is imported
+        Returns:
+            List of paths to generated visualization files
+        """
+        # Use default directory if none provided
+        directory = directory_path or graph_output_dir
+        directory_path = Path(directory)
 
-                graph = GraphTracker.load_from_file(graph_path)
-
-            stats = graph.get_statistics()
-            return {"statistics": stats}
-        except Exception as e:
+        if not directory_path.exists():
             raise HTTPException(
-                status_code=500, detail=f"Error loading graph: {e!s}"
-            ) from e
+                status_code=404, detail=f"Directory not found: {directory}"
+            )
+
+        # Find all JSON graph files
+        graph_files = list(directory_path.glob("*.json"))
+
+        if not graph_files:
+            return {"message": "No graph files found", "visualizations": []}
+
+        # Generate visualizations for each file
+        visualizations = []
+        for graph_file in graph_files:
+            try:
+                # Load the graph
+                graph = GraphTracker.load_from_file(graph_file)
+
+                # Create visualization filename
+                viz_path = graph_file.with_suffix(".png")
+
+                # Generate visualization
+                graph.visualize(save_path=viz_path)
+
+                visualizations.append(
+                    {
+                        "original_file": str(graph_file),
+                        "visualization": str(viz_path),
+                        "task_id": graph.task_id,
+                        "trial_id": graph.trial_id,
+                    }
+                )
+
+                logger.info(f"Generated visualization: {viz_path}")
+
+            except Exception as e:
+                logger.error(f"Error visualizing graph {graph_file}: {e}")
+
+        return {
+            "message": f"Generated {len(visualizations)} visualizations",
+            "visualizations": visualizations,
+        }
 
     return app
 
