@@ -1,8 +1,11 @@
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
+import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
+from loguru import logger
 
 from corral.base import Environment, ToolRequest
 from corral.graph import GraphTrackerFactory
@@ -196,3 +199,18 @@ def create_benchmark_server(
             ) from e
 
     return app
+
+
+def run_server(
+    environments: Mapping[str, Environment], host: str = "0.0.0.0", port: int = 8000
+):
+    """Run the benchmark server with the provided environments
+
+    Args:
+        environments: dictionary of environments
+        host: Server host
+        port: Server port
+    """
+    app = create_benchmark_server(dict(environments))
+    logger.info(f"Starting server on {host}:{port}")
+    uvicorn.run(app, host=host, port=port)

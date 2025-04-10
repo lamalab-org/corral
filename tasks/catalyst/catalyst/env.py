@@ -1,10 +1,9 @@
 import json
 import os
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from pathlib import Path
 
-import uvicorn
 from loguru import logger
 from score import (
     check_adsorption_sites,
@@ -15,7 +14,7 @@ from score import (
 )
 from tools import create_tools
 
-from corral.base import Environment, TaskDefinition, TaskGroup, Tool
+from corral.base import Environment, Tool
 from corral.graph import GraphTrackerFactory
 from corral.io import (
     CatFilesTool,
@@ -26,7 +25,8 @@ from corral.io import (
     ReadFileTool,
     WriteFileTool,
 )
-from corral.server import create_benchmark_server
+from corral.server import run_server
+from corral.task import TaskDefinition, TaskGroup
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:
@@ -48,18 +48,16 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
     """Get a scoring function by name from the registry, with optional parameters"""
     fn = SCORING_FUNCTIONS.get(name)
     if fn is None:
-        logger.warning(f"Scoring function '{name}' not found, using default")
-        return lambda *_: 0.0
+        raise ValueError(f"Scoring function '{name}' not found in the registry")
 
     # If it's a factory function (i.e., takes arguments), call with params
     if params:
         try:
             return fn(**params)
         except Exception as e:
-            logger.error(
+            raise ValueError(
                 f"Error initializing scoring function '{name}' with params {params}: {e}"
-            )
-            return lambda *_: 0.0
+            ) from e
     else:
         return fn
 
@@ -107,21 +105,25 @@ def load_tasks_from_json(
     return tasks
 
 
-class TaskEnvironment(Environment):
+class TaskGroupEnvironment(Environment):
     """Environment that works with a task group"""
 
     def __init__(
         self,
         task_id: str,
         task_group: TaskGroup,
-        available_tools: dict[str, Tool],
-        common_tools: dict[str, Tool] | None = None,
+        subtask_specific_tools: dict[str, Tool],
+        taskgroup_common_tools: dict[str, Tool] | None = None,
         graph_factory=None,
     ):
         self.task_group = task_group
         self.task_id = task_id
-        self.available_tools = available_tools
-        self.common_tools = common_tools or {}
+        self.subtask_specific_tools = (
+            subtask_specific_tools  # tools specific to only the subtask
+        )
+        self.taskgroup_common_tools = (
+            taskgroup_common_tools or {}
+        )  # tools common to all subtasks
 
         if task_id not in task_group.tasks:
             raise ValueError(f"Task {task_id} not found in task group")
@@ -136,15 +138,15 @@ class TaskEnvironment(Environment):
 
         # Add required tools for the task
         for tool_name in self.current_task.tools:
-            if tool_name in available_tools:
-                self.add_tool(available_tools[tool_name])
+            if tool_name in subtask_specific_tools:
+                self.add_tool(subtask_specific_tools[tool_name])
             else:
                 logger.warning(
                     f"Tool {tool_name} required for task {task_id} not found"
                 )
 
         # Add all file system tools
-        for tool in self.common_tools.values():
+        for tool in self.taskgroup_common_tools.values():
             self.add_tool(tool)
 
     def get_task_prompt(self) -> str:
@@ -232,14 +234,14 @@ Required submission format:
 
 def create_environments(
     task_json_path: str | Path,
-    common_tools: dict[str, Tool] | None = None,
+    taskgroup_common_tools: dict[str, Tool] | None = None,
     work_dir: str = BASE_WORK_DIR,
-) -> dict[str, TaskEnvironment]:
+) -> dict[str, TaskGroupEnvironment]:
     """Create environments for tasks defined in a JSON file
 
     Args:
         task_json_path: Path to the JSON file with task definitions
-        common_tools: dictionary of Tools which are common for subtasks, for example file system tools
+        taskgroup_common_tools: dictionary of Tools which are common for subtasks, for example file system tools
         work_dir: Working directory for task execution
 
     Returns:
@@ -268,35 +270,20 @@ def create_environments(
         logger.info(f"{i+1}. {task_id}")
 
     # Create all available tools
-    available_tools = create_tools()
+    subtask_specific_tools = create_tools()
 
     # Create environments for all tasks
     environments = {}
     for task_id in task_group.tasks:
-        environments[task_id] = TaskEnvironment(
+        environments[task_id] = TaskGroupEnvironment(
             task_id=task_id,
             task_group=task_group,
-            available_tools=available_tools,
-            common_tools=common_tools,
             graph_factory=graph_factory,
+            subtask_specific_tools=subtask_specific_tools,
+            taskgroup_common_tools=taskgroup_common_tools,
         )
 
     return environments
-
-
-def run_server(
-    environments: Mapping[str, Environment], host: str = "0.0.0.0", port: int = 8000
-):
-    """Run the benchmark server with the provided environments
-
-    Args:
-        environments: dictionary of environments
-        host: Server host
-        port: Server port
-    """
-    app = create_benchmark_server(dict(environments))
-    logger.info(f"Starting server on {host}:{port}")
-    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
@@ -327,7 +314,9 @@ if __name__ == "__main__":
 
     # Create environments
     environments = create_environments(
-        task_json_path=tasks_json_path, common_tools=fs_tools, work_dir=work_dir
+        task_json_path=tasks_json_path,
+        taskgroup_common_tools=fs_tools,
+        work_dir=work_dir,
     )
 
     logger.info("\nCreated Environments:")

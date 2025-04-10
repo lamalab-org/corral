@@ -99,7 +99,7 @@ Required submission format:
             return 0.0
 
 
-def create_catalysis_environments() -> dict[str, Environment]:
+def create_environments() -> dict[str, Environment]:
     """Create environments for catalysis tasks"""
 
     def score_addition(result: dict) -> float:
@@ -159,7 +159,7 @@ def create_catalysis_environments() -> dict[str, Environment]:
 
 if __name__ == "__main__":
     # Create all environments
-    environments = create_catalysis_environments()
+    environments = create_environments()
 
     logger.info("\nCreated Environments:")
     for env_id, env in environments.items():

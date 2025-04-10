@@ -121,9 +121,7 @@ def check_slab_structure(path_or_cif: str) -> float:
             structure = Structure.from_str(path_or_cif, fmt="cif")
 
         # Check if the structure is valid
-        if structure and len(structure) > 0:
-            return 1.0  # Valid structure
-        return 0.0
+        return 1.0 if structure and len(structure) > 0 else 0.0
     except Exception as e:
         logger.error(f"Error validating slab structure: {e}")
         return 0.0
