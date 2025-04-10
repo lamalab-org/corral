@@ -3,9 +3,11 @@ from typing import Any, TypedDict
 
 import litellm
 import openai
+import requests
 from litellm.types.utils import Message
 from loguru import logger
 from promptstore import Prompt
+from pydantic import BaseModel
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -13,7 +15,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from corral.graph import GraphTrackerFactory
+from corral.graph import GraphTrackerFactory, NodeType
 
 RETRY_EXCEPTIONS = (
     openai.APITimeoutError,
@@ -23,6 +25,7 @@ RETRY_EXCEPTIONS = (
     openai.APIStatusError,
     openai.InternalServerError,
 )
+
 
 LIST_PROMPT = (
     "The task is to correctly answer the question with an image specified below."
@@ -177,95 +180,245 @@ def tracked_llm_call(
     return response
 
 
-class TrackedAgentMixin:
-    """Mixin to add graph tracking to agents"""
+class AgentTrackingRequest(BaseModel):
+    """Request model for agent tracking API endpoint"""
 
-    def __init__(self, graph_factory: GraphTrackerFactory | None = None, **kwargs):
-        """Initialize the tracked agent mixin
+    node_type: str
+    content: Any
+    metadata: dict[str, Any] = {}
+
+
+class TrackedAgentMixin:
+    """Mixin for agents that want to track their interactions in a graph"""
+
+    def __init__(
+        self,
+        graph_factory: GraphTrackerFactory | None = None,
+        server_url: str = "http://localhost:8000",
+    ):
+        """Initialize the mixin
 
         Args:
-            graph_factory: Optional graph tracker factory
-            **kwargs: Additional arguments to pass to parent constructor
+            graph_factory: Optional graph factory to use (for backward compatibility)
+            server_url: URL of the benchmark server for server-side tracking
         """
-        # Initialize parent if possible
-        super().__init__(**kwargs) if hasattr(super(), "__init__") else None
+        self.graph_factory = graph_factory
+        self.graph_tracker = None
 
-        # Set up graph tracking
-        self.graph_factory = graph_factory or GraphTrackerFactory()
-        self._active_tracker = None
-        self._task_id = None
-        self._trial_id = None
+        # Server tracking attributes
+        self.server_url = server_url
+        self.tracking_task_id = None
+        self.tracking_agent_type = None
+        self.tracking_trial_id = None
+        self.use_server_tracking = True  # Default to server-side tracking
 
     def start_tracking(
-        self,
-        task_id: str,
-        trial_id: str | None = None,
-        agent_type: str | None = None,
+        self, task_id: str, agent_type: str = "Agent", trial_id: str | None = None
     ) -> None:
-        """Start tracking an agent run
+        """Start tracking agent interactions
 
         Args:
             task_id: ID of the task
+            agent_type: Type of agent (for metadata)
             trial_id: Optional trial ID
-            agent_type: Optional agent type, defaults to class name
         """
-        if not agent_type:
-            agent_type = self.__class__.__name__
+        self.tracking_task_id = task_id
+        self.tracking_agent_type = agent_type
+        self.tracking_trial_id = trial_id
 
-        self._task_id = task_id
-        self._trial_id = trial_id
+        logger.info(
+            f"Agent {agent_type} started tracking for task {task_id}, trial {trial_id}"
+        )
 
-        # Get or create tracker
-        self._active_tracker = self.graph_factory.get_tracker(task_id, trial_id)
-        if not self._active_tracker:
-            self._active_tracker = self.graph_factory.create_tracker(
-                task_id=task_id, agent_type=agent_type, trial_id=trial_id
+    def add_node(
+        self, node_type: NodeType, content: Any, metadata: dict | None = None
+    ) -> str | None:
+        """Add a node to the graph (either server-side or local)
+
+        Args:
+            node_type: Type of node
+            content: Content of the node
+            metadata: Additional metadata
+
+        Returns:
+            Node ID if successful, None otherwise
+        """
+        if not self.tracking_task_id:
+            return None
+
+        metadata = metadata or {}
+        metadata["component"] = "agent"
+        metadata["agent_type"] = self.tracking_agent_type
+
+        if self.use_server_tracking:
+            # Send tracking data to server
+            try:
+                response = requests.post(
+                    f"{self.server_url}/tasks/{self.tracking_task_id}/track",
+                    json={
+                        "node_type": node_type.value,
+                        "content": content,
+                        "metadata": metadata,
+                    },
+                )
+                if response.status_code == 200:
+                    return response.json().get("node_id")
+                else:
+                    logger.warning(
+                        f"Failed to send tracking data: {response.status_code} {response.text}"
+                    )
+                    # Fall back to local tracking if available
+                    if self.graph_tracker:
+                        return self.graph_tracker.add_node(
+                            node_type=node_type, content=content, metadata=metadata
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to send tracking data: {e}")
+                # Fall back to local tracking if available
+                if self.graph_tracker:
+                    return self.graph_tracker.add_node(
+                        node_type=node_type, content=content, metadata=metadata
+                    )
+        elif self.graph_tracker:
+            # Use local graph tracker
+            return self.graph_tracker.add_node(
+                node_type=node_type, content=content, metadata=metadata
             )
+
+        return None
+
+    def track_llm_prompt(self, messages: list[dict]) -> str | None:
+        """Track an LLM prompt
+
+        Args:
+            messages: List of messages to send to the LLM
+
+        Returns:
+            Node ID if successful, None otherwise
+        """
+        return self.add_node(
+            node_type=NodeType.LLM_PROMPT,
+            content=messages,
+            metadata={"message_count": len(messages)},
+        )
+
+    def track_llm_response(
+        self, content: str, prompt_node_id: str | None = None
+    ) -> str | None:
+        """Track an LLM response
+
+        Args:
+            content: Content of the LLM response
+            prompt_node_id: Optional ID of the prompt node
+
+        Returns:
+            Node ID if successful, None otherwise
+        """
+        metadata = {"length": len(content)}
+        if prompt_node_id:
+            metadata["prompt_node_id"] = prompt_node_id
+
+        return self.add_node(
+            node_type=NodeType.LLM_RESPONSE, content=content, metadata=metadata
+        )
+
+    def track_thought(self, content: str) -> str | None:
+        """Track an agent thought
+
+        Args:
+            content: Content of the thought
+
+        Returns:
+            Node ID if successful, None otherwise
+        """
+        return self.add_node(
+            node_type=NodeType.LLM_RESPONSE, content=content, metadata={"thought": True}
+        )
+
+    def track_tool_call(self, tool_name: str, arguments: dict) -> str | None:
+        """Track a tool call
+
+        Args:
+            tool_name: Name of the tool
+            arguments: Arguments for the tool
+
+        Returns:
+            Node ID if successful, None otherwise
+        """
+        return self.add_node(
+            node_type=NodeType.TOOL_CALL,
+            content={"tool_name": tool_name, "arguments": arguments},
+            metadata={},
+        )
+
+    def track_tool_response(
+        self, result: str, success: bool = True, tool_name: str | None = None
+    ) -> str | None:
+        """Track a tool response
+
+        Args:
+            result: Result of the tool call
+            success: Whether the tool call was successful
+            tool_name: Optional name of the tool
+
+        Returns:
+            Node ID if successful, None otherwise
+        """
+        metadata = {"success": success}
+        if tool_name:
+            metadata["tool_name"] = tool_name
+
+        return self.add_node(
+            node_type=NodeType.TOOL_RESPONSE, content=result, metadata=metadata
+        )
+
+    def track_final_submission(
+        self, answer: str, score: float | None = None
+    ) -> str | None:
+        """Track the final submission
+
+        Args:
+            answer: The final answer
+            score: Optional score
+
+        Returns:
+            Node ID if successful, None otherwise
+        """
+        metadata = {}
+        if score is not None:
+            metadata["score"] = score
+
+        return self.add_node(
+            node_type=NodeType.FINAL_SUBMISSION, content=answer, metadata=metadata
+        )
+
+    def get_tracker(self) -> Any:
+        """Get the current tracker (for backward compatibility)"""
+        return self.graph_tracker
 
     def stop_tracking(self, visualize: bool = False) -> None:
-        """Stop tracking and save results
+        """Stop tracking agent interactions
 
         Args:
-            visualize: Whether to generate visualization
+            visualize: Whether to generate visualization (only for local tracking)
         """
-        if self._active_tracker and self._task_id:
+        task_id = self.tracking_task_id
+        trial_id = self.tracking_trial_id
+
+        self.tracking_task_id = None
+        self.tracking_trial_id = None
+
+        # For backward compatibility with local tracking
+        if self.graph_tracker and self.graph_factory:
+            # Save the tracker
             self.graph_factory.save_tracker(
-                task_id=self._task_id, trial_id=self._trial_id, visualize=visualize
+                task_id=task_id,
+                trial_id=trial_id,
+                visualize=visualize,
             )
-
-        self._active_tracker = None
-        self._task_id = None
-        self._trial_id = None
-
-    def get_tracker(self) -> Any | None:
-        """Get the active tracker
-
-        Returns:
-            Active tracker or None
-        """
-        return self._active_tracker
-
-    def tracked_llm_call(self, *args, **kwargs) -> Any:
-        """Call LLM with tracking
-
-        Args:
-            *args: Arguments to pass to tracked_llm_call
-            **kwargs: Keyword arguments to pass to tracked_llm_call
-
-        Returns:
-            LLM response
-        """
-        # Add tracking info if available
-        if self._active_tracker and self._task_id:
-            kwargs.update(
-                {
-                    "graph_factory": self.graph_factory,
-                    "task_id": self._task_id,
-                    "trial_id": self._trial_id,
-                }
+            logger.info(
+                f"Saved local tracking data for task {task_id}, trial {trial_id}"
             )
-
-        return tracked_llm_call(*args, **kwargs)
 
 
 def _build_user_content(
