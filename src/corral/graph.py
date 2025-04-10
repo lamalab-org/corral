@@ -143,7 +143,7 @@ class GraphTracker:
         Args:
             source: ID of the source node
             target: ID of the target node
-            edge_type: Type of the edge (e.g., "calls", "responds")
+            edge_type: Type of the edge (e.g., "calls", "response")
             metadata: Additional edge metadata
         """
         if source not in self.nodes or target not in self.nodes:

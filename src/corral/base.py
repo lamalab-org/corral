@@ -214,7 +214,7 @@ class Environment(ABC):
         # Create a deep copy of the entire TaskState object
         return deepcopy(self.state)
 
-    def reset_state(self) -> str:
+    def reset_state(self) -> str:  # TODO: sync graphtracker object with state
         """Reset the environment state with a new trial id and fresh TaskState and return finished trial id."""
         if hasattr(self, "state") and self.state is not None:
             archived_snapshot = self.save_current_state()
