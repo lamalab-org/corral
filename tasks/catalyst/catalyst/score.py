@@ -25,7 +25,6 @@ def resolve_path(path_or_str: str) -> str:
         # Replace escaped quotes that might come from JSON strings
         path_or_str = path_or_str.replace('\\"', '"').replace("\\'", "'")
 
-    # Rest of your existing logic
     try:
         # If it's an absolute path or already exists, return as is
         if Path(path_or_str).is_absolute() or Path(path_or_str).exists():
@@ -153,10 +152,7 @@ def check_co2_molecule_structure(path_or_cif: str) -> float:
                 c_count = sum(1 for site in structure if site.species_string == "C")
                 o_count = sum(1 for site in structure if site.species_string == "O")
 
-                if c_count == 1 and o_count == 2:
-                    return 1.0
-                else:
-                    return 0.75  # Has C and O but not correct stoichiometry
+                return 1.0 if c_count == 1 and o_count == 2 else 0.75
             return 0.5  # Valid structure but missing C or O
         return 0.25  # Empty but valid structure
     except Exception as e:
