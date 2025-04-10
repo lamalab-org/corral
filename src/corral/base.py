@@ -1,6 +1,6 @@
-import copy
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum, StrEnum
@@ -199,7 +199,7 @@ class Environment(ABC):
             TaskState: A deep copy of the current task state
         """
         # Create a deep copy of the entire TaskState object
-        return copy.deepcopy(self.state)
+        return deepcopy(self.state)
 
     def reset_state(self) -> str:
         """Reset the environment state with a new trial id and fresh TaskState and return finished trail id."""
