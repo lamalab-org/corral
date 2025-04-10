@@ -228,14 +228,19 @@ def add_adsorbate_to_slab_text(
 
     # Load adsorbate as a Molecule
     try:
-        adsorbate_struct = Structure.from_str(adsorbate_cif, fmt="cif")
-        adsorbate = Molecule(
-            species=adsorbate_struct.species,
-            coords=adsorbate_struct.cart_coords,
-            charge=0,
-        )
-    except Exception:
-        adsorbate = Molecule.from_str(adsorbate_cif, fmt="cif")
+        # First try loading directly as molecule
+        adsorbate = Molecule.from_str(adsorbate_cif, fmt="xyz")
+    except ValueError:
+        try:
+            # If that fails, try as structure and convert to molecule
+            struct = Structure.from_str(adsorbate_cif, fmt="cif")
+            adsorbate = Molecule(
+                species=struct.species,
+                coords=struct.cart_coords.tolist(),
+                charge=0,
+            )
+        except Exception as e:
+            raise ValueError(f"Could not parse adsorbate CIF: {e!r}") from e
 
     finder = AdsorbateSiteFinder(slab)
     if site is None:
@@ -260,7 +265,7 @@ def generate_reconstructed_slab(
     return_all_variants: bool = False,
 ) -> str:
     """
-    Generate reconstructed slab(s) from a bulk structure with full parameter utilization.
+    Generate reconstructed slab(s) from a bulk structure.
 
     Example reconstruction_instructions JSON: # https://pymatgen.org/pymatgen.core.html#module-pymatgen.core.surface
     {
@@ -295,12 +300,12 @@ def generate_reconstructed_slab(
     }
 
     Args:
-        bulk_cif (str): CIF string of bulk structure
-        miller_index (tuple[int, int, int]): Miller indices (h,k,l) for surface orientation
-        min_slab_size (float): Minimum slab thickness (Å)
-        min_vacuum_size (float): Minimum vacuum thickness (Å)
-        reconstruction_instructions (str): JSON string with reconstruction parameters
-        return_all_variants (bool): If True, returns all slab variants as JSON
+        bulk_cif: CIF string of bulk structure
+        miller_index : Miller indices (h,k,l) for surface orientation
+        min_slab_size : Minimum slab thickness (Å)
+        min_vacuum_size : Minimum vacuum thickness (Å)
+        reconstruction_instructions : JSON string with reconstruction parameters
+        return_all_variants : If True, returns all slab variants as JSON
 
     Returns:
         str: Either a single CIF string (if return_all_variants=False) or a

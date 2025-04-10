@@ -48,11 +48,6 @@ def check_slabs_json(slabs_json: str) -> float:
     Check that the slabs JSON contains at least one valid slab by trying to parse
     the CIF string for one of the slabs. Accepts either a path to a JSON file or a raw JSON string.
     """
-    import json
-    from pathlib import Path
-
-    from pymatgen.core import Structure
-
     try:
         # Try loading from file if it's a valid path
         json_data = None
@@ -100,7 +95,7 @@ def check_mp_structure(path_or_cif: str) -> float:
         return 0.0
 
 
-def check_slab_structure(path_or_cif: str) -> float:
+def check_slab_structure(path_or_cif: str) -> float:  # TODO: better slab check.
     """
     Check if the path points to a valid CIF file containing a slab structure.
 
@@ -235,7 +230,7 @@ def check_adsorption_sites(sites_json_or_path: str) -> float:
         found_types = [alias for alias, canon in type_aliases.items() if alias in sites]
 
         if not found_types:
-            return 0.25  # No recognized site types
+            return 0  # No recognized site types
 
         # Check if sites have coordinates
         has_coords = any(
@@ -244,7 +239,7 @@ def check_adsorption_sites(sites_json_or_path: str) -> float:
         )
 
         if not has_coords:
-            return 0.5  # Has site types but all are empty
+            return 0  # Has site types but all are empty
 
         # Check if at least one site type has valid coordinates
         has_valid_coords = any(
@@ -257,7 +252,7 @@ def check_adsorption_sites(sites_json_or_path: str) -> float:
         )
 
         if not has_valid_coords:
-            return 0.75  # Has coordinates but they're malformed
+            return 0  # Has coordinates but they're malformed
 
         return 1.0  # At least one site type has valid coordinates
 

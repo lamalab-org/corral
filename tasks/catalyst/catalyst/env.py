@@ -111,7 +111,9 @@ class TaskGroupEnvironment(Environment):
         self,
         task_id: str,
         task_group: TaskGroup,
-        subtask_specific_tools: dict[str, Tool],
+        subtask_specific_tools: dict[
+            str, Tool
+        ],  # here this is a dict with keys as name for tools, and values are tool objects. eg:  "get_structure_from_mp_text": get_structure_from_mp_text,
         taskgroup_common_tools: dict[str, Tool] | None = None,
     ):
         self.task_group = task_group
