@@ -1,11 +1,10 @@
-from __future__ import annotations
+from collections.abc import Mapping
 
-from typing import TYPE_CHECKING
-
+import uvicorn
 from fastapi import FastAPI, HTTPException
+from loguru import logger
 
-if TYPE_CHECKING:
-    from corral.base import Environment, ToolRequest
+from corral.base import Environment, ToolRequest
 
 
 def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
@@ -127,3 +126,18 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
     # add endpoint for scoring the task
 
     return app
+
+
+def run_server(
+    environments: Mapping[str, Environment], host: str = "0.0.0.0", port: int = 8000
+):
+    """Run the benchmark server with the provided environments
+
+    Args:
+        environments: dictionary of environments
+        host: Server host
+        port: Server port
+    """
+    app = create_benchmark_server(dict(environments))
+    logger.info(f"Starting server on {host}:{port}")
+    uvicorn.run(app, host=host, port=port)
