@@ -1,18 +1,13 @@
-from __future__ import annotations
-
 import importlib.resources
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from corral.evaluate import BenchmarkInterface
-
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from promptstore import PromptStore
 
 from corral.agents.prompt_utils import get_prompt
-from corral.agents.utils import LiteLLMMessage, llm_call
+from corral.agents.utils import LiteLLMMessage, _build_user_content, llm_call
+from corral.evaluate import BenchmarkInterface
 
 
 @dataclass
@@ -75,7 +70,7 @@ class ToolCallingAgent:
         )
 
     def create_prompt(
-        self, task_guide: str, history: list[LiteLLMMessage], examples: list[str]
+        self, task_guide: str | list, history: list[LiteLLMMessage], examples: list[str]
     ) -> list[LiteLLMMessage]:
         """Create the initial prompt messages for the agent
 
@@ -90,15 +85,15 @@ class ToolCallingAgent:
         messages: list[LiteLLMMessage] = []
         if self.system_prompt:
             messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
-        messages.append(
-            LiteLLMMessage(
-                role="user",
-                content=self.user_prompt.fill(
-                    {"task_guide": task_guide, "examples": examples}
-                ),
-            )
+        user_content = _build_user_content(
+            agent="tool_calling",
+            user_prompt=self.user_prompt,
+            task_guide=task_guide,
+            examples=examples,
         )
+        messages.append(LiteLLMMessage(role="user", content=user_content))
 
+        # History is meant to be the conversation history, so we add it to the messages
         if history:
             messages.extend(history)
 
@@ -129,8 +124,21 @@ class ToolCallingAgent:
                     arg_type = "string"
                 elif arg_type == "bool":
                     arg_type = "boolean"
-                elif arg_type == "int" or arg_type == "float":
+                elif arg_type in ["int", "float"]:
                     arg_type = "number"
+                elif arg_type == "list[str]":
+                    arg_type = "array"
+                    property_entry = {
+                        "type": arg_type,
+                        "description": arg["description"],
+                        "items": {"type": "string"},
+                    }
+                    function["parameters"]["properties"][arg["name"]] = property_entry
+
+                    if arg["required"]:
+                        function["parameters"]["required"].append(arg["name"])
+
+                    continue
                 else:
                     raise ValueError(f"Invalid argument type: {arg_type}")
 

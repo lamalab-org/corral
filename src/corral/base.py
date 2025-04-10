@@ -100,6 +100,7 @@ class Tool:
     Inherit from this class to create new tools.
     Should have an execute method that performs the tool's functionality.
     TODO: might need to take state
+    TODO: add descriptions of the arguments of the class, i.e., name, description, arguments
     """
 
     def __init__(self, name: str, description: str, arguments: list[ToolArgument]):
@@ -256,7 +257,7 @@ class Environment(ABC):
         return f"{self.task_id}_{self.state.trial_id}_{timestamp}"
 
     @abstractmethod
-    def get_task_prompt(self) -> str:
+    def get_task_prompt(self) -> str | list[dict]:
         """Return the task prompt for the agent"""
 
     @abstractmethod
@@ -267,8 +268,15 @@ class Environment(ABC):
         """Add a tool to the environment"""
         self.tools[tool.name] = tool
 
-    def get_available_tools(self) -> list[dict[str, str]]:
-        """Get list of available tools and their descriptions"""
+    def get_available_tools(self) -> list[dict[str, str | list[ToolArgument]]]:
+        """Get list of available tools with their descriptions and arguments.
+
+        Returns:
+            list[dict[str, str | list[ToolArgument]]]: A list of dictionaries where each dictionary contains:
+                - 'name': the tool's name as a string.
+                - 'description': a string describing the tool.
+                - 'arguments': a list of ToolArgument objects representing the tool's arguments.
+        """
         return [
             {
                 "name": t.name,
@@ -278,30 +286,38 @@ class Environment(ABC):
             for t in self.tools.values()
         ]
 
-    def get_environment_guide(self) -> str:
-        """Generate a complete guide for the environment and its tools"""
+    def get_tools_guide(self) -> str:
+        """Generate a guide for the available tools"""
         tools_guide = "\n\n".join(
             tool.get_usage_guide() for tool in self.tools.values()
         )
         # TODO: make it configurable
+        return (
+            "Available Tools:\n"
+            f"{tools_guide}\n\n"
+            "How to use tools:\n"
+            "1. Each tool call must specify the tool name and required arguments\n"
+            "2. Tools may return errors if arguments are invalid\n"
+            "3. You can make multiple tool calls as needed. The tools will be executed sequentially in the order they are called.\n"
+            "4. All tool calls are recorded and affect your final score\n"
+            "Example tool call format:\n"
+            "{{\n"
+            '    "tool_name": "tool_name",\n'
+            '    "arguments": {{\n'
+            '        "arg1": value1,\n'
+            '        "arg2": value2\n'
+            "    }}\n"
+            "}}\n"
+        )
+
+    def get_environment_guide(self) -> str:
+        """Generate a complete guide for the environment and its tools"""
+        tools_guide = self.get_tools_guide()
+
+        # TODO: make it configurable
         return f"""Task: {self.get_task_prompt()}
 
-Available Tools:
 {tools_guide}
-
-How to use tools:
-1. Each tool call must specify the tool name and required arguments
-2. Tools may return errors if arguments are invalid
-3. You can make multiple tool calls as needed
-4. All tool calls are recorded and affect your final score
-Example tool call format:
-{{
-    "tool_name": "tool_name",
-    "arguments": {{
-        "arg1": value1,
-        "arg2": value2
-    }}
-}}
 """
 
     def add_message(self, role: Role, content: str) -> None:
