@@ -16,6 +16,7 @@ from score import (
 from tools import create_tools
 
 from corral.base import Environment, TaskDefinition, TaskGroup, Tool
+from corral.graph import GraphTrackerFactory
 from corral.io import (
     CatFilesTool,
     CopyFileTool,
@@ -115,6 +116,7 @@ class TaskEnvironment(Environment):
         task_group: TaskGroup,
         available_tools: dict[str, Tool],
         common_tools: dict[str, Tool] | None = None,
+        graph_factory=None,
     ):
         self.task_group = task_group
         self.task_id = task_id
@@ -128,7 +130,9 @@ class TaskEnvironment(Environment):
 
         # Initialize tools and environment
         self.tools = {}
-        super().__init__(f"{task_group.group_id}_{task_id}")
+        super().__init__(
+            f"{task_group.group_id}_{task_id}", graph_factory=graph_factory
+        )
 
         # Add required tools for the task
         for tool_name in self.current_task.tools:
@@ -241,7 +245,7 @@ def create_environments(
     Returns:
         dictionary of environments keyed by task ID
     """
-
+    graph_factory = GraphTrackerFactory(output_dir="./graph_output")
     logger.info(f"Creating environments from {task_json_path} with work_dir {work_dir}")
 
     # Load tasks from JSON
@@ -274,6 +278,7 @@ def create_environments(
             task_group=task_group,
             available_tools=available_tools,
             common_tools=common_tools,
+            graph_factory=graph_factory,
         )
 
     return environments

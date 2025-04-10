@@ -13,7 +13,6 @@ import modal
 import numpy as np
 import requests
 import tiktoken
-from chembench.baseline import Generation, Generations
 from litellm import embedding
 from loguru import logger
 from modal import App, Image, Mount, Secret, Volume
@@ -29,19 +28,6 @@ from corral.agents.utils import LiteLLMMessage
 from corral.base import ModalTool, Tool, ToolArgument
 
 MODAL_TOOL_REGISTRY = {}
-
-
-class Model:
-    def __init__(self, name: str = "Dummy Model"):
-        self.name = name
-
-    def generate(self, prompts: list[str], **_kwargs):
-        generations = []
-        for _prompt in prompts:
-            generation = None
-            generations.append([Generation(text=generation)])
-
-        return Generations(generations=generations)
 
 
 def vector_database_search(
