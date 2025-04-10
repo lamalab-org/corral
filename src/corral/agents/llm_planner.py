@@ -132,6 +132,8 @@ class LLMPlanner:
                     role="assistant", content=plan, name="high-level-planner"
                 )
             )
+            if plan is None:
+                continue
 
             if "Final Answer:" in plan:
                 final_answer = plan.split("Final Answer:")[1].strip()

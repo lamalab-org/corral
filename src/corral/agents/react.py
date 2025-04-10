@@ -184,6 +184,7 @@ class ReActAgent:
             tools = interface.get_tools_guide(task_id)
         else:
             task_guide = task_prompt
+            tools = interface.get_tools_guide(task_id)
 
         messages = self.create_prompt(task_guide, history, examples, tools)
 
