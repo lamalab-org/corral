@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -17,11 +18,135 @@ from tools import (
     create_tools,
 )
 
-from corral.base import Environment
-from corral.base_task import TaskDefinition, TaskEnvironment, TaskGroup
+from corral.base import Environment, Tool
 from corral.server import create_benchmark_server
+from corral.task import TaskDefinition, TaskGroup
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
+
+
+class TaskEnvironment(Environment):
+    """Environment that works with a task group
+
+    Args:
+        task_id (str): ID of the task to work on
+        task_group (TaskGroup): Task group containing all the subtasks
+        available_tools (dict[str, Tool]): All tools available in the environment (including file system tools)
+
+    Raises:
+        ValueError: If task ID is not found in the task group
+    """
+
+    def __init__(
+        self,
+        task_id: str,
+        task_group: TaskGroup,
+        available_tools: dict[str, Tool],
+    ):
+        self.task_id = task_id
+        self.task_group = task_group
+        self.available_tools = available_tools
+
+        if task_id not in task_group.tasks:
+            raise ValueError(f"Task {task_id} not found in task group")
+
+        self.current_task = task_group.tasks[task_id]
+
+        # Initialize tools and environment
+        super().__init__(f"{task_group.group_id}_{task_id}")
+
+        # Add required tools for the task
+        for tool_name in self.current_task.tools:
+            if tool_name in available_tools:
+                self.add_tool(available_tools[tool_name])
+
+    def get_task_prompt(self) -> str:
+        prompt = (
+            f"Task: {self.current_task.name}\n"
+            f"Description: {self.current_task.description}\n\n"
+            "Required submission format:\n"
+        )
+        for key, desc in self.current_task.submission_format.items():
+            prompt += f"- {key}: {desc}\n"
+
+        prompt += "\nAvailable input data:\n"
+
+        # Display input data from dependencies
+        for dep_task_id in self.current_task.input_from_tasks:
+            if dep_task_id in self.task_group.results:
+                dep_result = self.task_group.results[dep_task_id]
+                if isinstance(dep_result, dict) and "answer" in dep_result:
+                    prompt += f"- Input from {dep_task_id}: {dep_result['answer']}\n"
+                else:
+                    prompt += f"- Input from {dep_task_id}: {dep_result}\n"
+
+        # Display initial input data
+        if self.current_task.initial_input:
+            for key, value in self.current_task.initial_input.items():
+                prompt += f"- {key}: {value}\n"
+
+        # Add IO tools description for saving results
+        prompt += "\nIMPORTANT: You have access to filesystem tools which allow you to read and write files. Also, you can retry many times to get the correct answer.\n"
+        prompt += "Since some task results will be used in subsequent tasks, make sure to save your results using appropriate filenames.\n"
+        prompt += (
+            "This will help you reference and retrieve these files in later tasks."
+        )
+
+        # Add note about dependencies
+        if self.current_task.input_from_tasks:
+            status = []
+            for dep_id in self.current_task.input_from_tasks:
+                status_text = (
+                    "available"
+                    if dep_id in self.task_group.results
+                    else "not yet available"
+                )
+                status.append(f"{dep_id} ({status_text})")
+
+            prompt += f"\n\nThis task uses output from tasks: {', '.join(status)}"
+
+        logger.info(f"Task prompt for {self.task_id}:\n{prompt}")
+        return prompt
+
+    def score(self) -> float:
+        """Score the submitted answer"""
+        if not self.state.submitted_answer:
+            return 0.0
+
+        try:
+            # Clean the submission - take only the numerical answer part
+            submission_str = self.state.submitted_answer.strip()
+            logger.info(f"Raw submission: {submission_str}")
+
+            # Try to parse as JSON first
+            try:
+                submission = json.loads(submission_str)
+            except json.JSONDecodeError:
+                # If not valid JSON, try to create a simple answer dict
+                submission = {"answer": submission_str}
+
+            # Store result in task group
+            logger.info(f"Parsed submission: {submission}")
+
+            # Extract the answer field for scoring
+            try:
+                answer = submission.get("answer", submission)
+            except Exception:
+                answer = submission_str
+
+            # Pass additional scoring inputs as keyword arguments
+            score = self.current_task.scoring_fn(
+                answer, **self.current_task.scoring_inputs
+            )
+
+            self.task_group.store_result(self.task_id, submission, score)
+
+            return score
+
+        except Exception as e:
+            logger.error(f"Error scoring submission for task {self.task_id}: {e!s}")
+            logger.error(f"Submission was: {self.state.submitted_answer}")
+            return 0.0
 
 
 def create_mp_rag_environments(work_dir: str = BASE_WORK_DIR) -> dict[str, Environment]:
