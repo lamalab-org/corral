@@ -1,22 +1,27 @@
 import json
 import re
+import modal
 
 import fsspec
+from typing import Optional
 
 from corral.base import Tool, ToolArgument
-
 
 class FSManager:
     """A file-system abstraction layer using fsspec.
     This object is created with a given protocol (e.g., "file", "s3", "ftp")"""
 
-    def __init__(self, protocol: str = "file", **kwargs):
+    def __init__(self, protocol: str = "file", app: Optional[str] = None, **kwargs):
         self.protocol = protocol
         self.fs = fsspec.filesystem(protocol, **kwargs)
+        self.app = app
 
     def list_files(self, path: str, recursive: bool = False) -> list[str]:
         """List files in a directory"""
         try:
+            if self.app:
+                list_files_ = modal.Function.lookup(self.app, "list_files")
+                return list_files_.remote(path, recursive)
             return self.fs.ls(path, detail=False, recursive=recursive)
         except Exception as e:
             raise RuntimeError(f"Error listing files: {e}") from e
@@ -24,6 +29,9 @@ class FSManager:
     def read_file(self, path: str) -> str:
         """Read contents of a file"""
         try:
+            if self.app:
+                read_file_ = modal.Function.lookup(self.app, "read_file")
+                return read_file_.remote(path)
             with self.fs.open(path, "r") as f:
                 return f.read()
         except Exception as e:
@@ -32,21 +40,32 @@ class FSManager:
     def write_file(self, path: str, content: str) -> None:
         """Write content to a file"""
         try:
-            with self.fs.open(path, "w") as f:
-                f.write(content)
+            if self.app:
+                write_file_ = modal.Function.lookup(self.app, "write_file") 
+                write_file_.remote(path, content)
+            else:
+                with self.fs.open(path, "w") as f:
+                    f.write(content)
         except Exception as e:
             raise RuntimeError(f"Error writing files: {e}") from e
 
     def file_info(self, path: str) -> dict:
         """Get file information"""
         try:
+            if self.app:
+                file_info_ = modal.Function.lookup(self.app, "file_info")
+                return file_info_.remote(path) 
             return self.fs.info(path)
         except Exception as e:
             raise RuntimeError(f"Error getting file info: {e}") from e
 
     def copy_file(self, source: str, destination: str) -> None:
         try:
-            self.fs.copy(source, destination)
+            if self.app:
+                copy_file_ = modal.Function.lookup(self.app, "copy_file")
+                copy_file_.remote(source, destination)
+            else:
+                self.fs.copy(source, destination)
         except Exception as e:
             raise RuntimeError(
                 f"Error copying from {source} to {destination}: {e}"
@@ -54,8 +73,12 @@ class FSManager:
 
     def move_file(self, source: str, destination: str) -> None:
         try:
+            if self.app:
+                move_file_ = modal.Function.lookup(self.app, "move_file")
+                move_file_.remote(source, destination)
+            else:
             # fsspec does not always provide a move method; if not, copy then remove.
-            self.fs.mv(source, destination)
+                self.fs.mv(source, destination)
         except Exception:
             self.copy_file(source, destination)
             self.fs.rm(source)
@@ -66,17 +89,24 @@ class FSManager:
         If create_parents is True and the backend supports it, create all missing parent directories.
         """
         try:
-            if create_parents and hasattr(self.fs, "mkdirs"):
-                # Many fsspec implementations support mkdirs.
-                # If not available, fall back to calling mkdir for each missing part.
-                self.fs.mkdirs(path, exist_ok=True)
+            if self.app:
+                mkdir_ = modal.Function.lookup(self.app, "mkdir")
+                mkdir_.remote(path, create_parents)
             else:
-                self.fs.mkdir(path)
+                if create_parents and hasattr(self.fs, "mkdirs"):
+                    # Many fsspec implementations support mkdirs.
+                    # If not available, fall back to calling mkdir for each missing part.
+                    self.fs.mkdirs(path, exist_ok=True)
+                else:
+                    self.fs.mkdir(path)
         except Exception as e:
             raise RuntimeError(f"Error creating directory {path}: {e}") from e
 
     def cat_files(self, paths: list[str], separator: str = "\n") -> str:
         """Concatenate the contents of multiple files with the given separator."""
+        if self.app:
+            cat_files_ = modal.Function.lookup(self.app, "cat_files")
+            return cat_files_.remote(paths, separator)
         contents = []
         for path in paths:
             try:
@@ -85,6 +115,27 @@ class FSManager:
                 raise RuntimeError(f"Error reading file {path}: {e}") from e
         return separator.join(contents)
 
+
+class ReadFileTool(Tool):
+    """Tool for reading file contents"""
+
+    def __init__(self, fs_manager: FSManager):
+        super().__init__(
+            name="read_file",
+            description="Read the contents of a file into a string",
+            arguments=[
+                ToolArgument(
+                    name="path",
+                    type="str",
+                    description="Path to the file to read",
+                    required=True,
+                )
+            ],
+        )
+        self.fs_manager = fs_manager
+
+    def execute(self, **kwargs) -> str:
+        return self.fs_manager.read_file(kwargs["path"])
 
 class ListFilesTool(Tool):
     """Tool for listing files in a directory"""
@@ -116,29 +167,6 @@ class ListFilesTool(Tool):
             kwargs["path"], kwargs.get("recursive", False)
         )
         return json.dumps({"files": files}, indent=2)
-
-
-class ReadFileTool(Tool):
-    """Tool for reading file contents"""
-
-    def __init__(self, fs_manager: FSManager):
-        super().__init__(
-            name="read_file",
-            description="Read the contents of a file into a string",
-            arguments=[
-                ToolArgument(
-                    name="path",
-                    type="str",
-                    description="Path to the file to read",
-                    required=True,
-                )
-            ],
-        )
-        self.fs_manager = fs_manager
-
-    def execute(self, **kwargs) -> str:
-        return self.fs_manager.read_file(kwargs["path"])
-
 
 class WriteFileTool(Tool):
     """Tool for writing content to a file"""

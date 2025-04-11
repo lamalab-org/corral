@@ -15,12 +15,12 @@ def run_benchmark(model: str = "gpt-4o", task_ids: list | None = None):
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = ReActAgent(model=model)
+    agent = ReActAgent(model=model, max_iterations = 15, temperature = 0.2)
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
-    result = runner.bench(task_ids, trials_per_task=2, k_values=[1, 2], verbose=True)
+    result = runner.bench(task_ids, trials_per_task=1, k_values=[1], verbose=True)
     result.generate_report("results.json")
 
     logger.info("Benchmark completed")
@@ -31,7 +31,10 @@ if __name__ == "__main__":
     setup_litellm()
 
     try:
-        run_benchmark()
+        # model = "groq/llama-3.3-70b-versatile"
+        # model = "claude-3-5-sonnet-20240620"
+        model = "gpt-4o"
+        run_benchmark(model = model)
 
     except Exception as e:
         logger.error(f"Benchmark failed: {e!s}")
