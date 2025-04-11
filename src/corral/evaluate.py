@@ -116,7 +116,7 @@ class MatAgentBenchmark:
 
     def _get_checkpoint_path(self, session_id: str):
         """Get path for checkpoint file"""
-        return self.checkpoint_dir / f"checkpoint.pkl"
+        return self.checkpoint_dir / "checkpoint.pkl"
     
     def _save_checkpoint(self, session_id: str, task_results: dict, current_task: str, 
                         completed_trials: int):
