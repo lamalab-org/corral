@@ -15,7 +15,7 @@ def run_benchmark(model: str = "gpt-4o", task_ids: list | None = None):
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = ReActAgent(model=model, max_iterations = 15, temperature = 0.2)
+    agent = ReActAgent(model=model, max_iterations = 20, temperature = 0.0)
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark
@@ -32,8 +32,8 @@ if __name__ == "__main__":
 
     try:
         # model = "groq/llama-3.3-70b-versatile"
-        # model = "claude-3-5-sonnet-20240620"
-        model = "gpt-4o"
+        model = "anthropic/claude-3-7-sonnet-20250219"
+        # model = "gpt-4o"
         run_benchmark(model = model)
 
     except Exception as e:
