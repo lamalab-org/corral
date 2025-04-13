@@ -1,4 +1,6 @@
+import json
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -476,3 +478,295 @@ def create_tools() -> dict[str, Tool]:
         "add_adsorbate_to_slab_text": add_adsorbate_to_slab_text,
         "generate_reconstructed_slab": generate_reconstructed_slab,
     }
+
+
+### Tools relevant for ocp - hard
+
+
+def get_bulk_polymorphs_data(composition: str) -> str:
+    """
+    Query the Materials Project database to find polymorphs for a given composition.
+
+    Args:
+        composition: Chemical composition (e.g., 'TiO2')
+        api_key: Materials Project API key (optional if set in environment)
+
+    Returns:
+        JSON string containing polymorph data including MP IDs, structures (CIF),
+        energies above hull, formation_energy_per_atom, band gaps, densities,
+        volumes, number of sites, symmetry, and stability. (sorted by energy above hull)
+    """
+
+    from mp_api.client import MPRester
+
+    # Use provided API key or get from environment
+    mp_api_key = os.getenv("MP_API_KEY")
+    if not mp_api_key:
+        raise ValueError(
+            "Materials Project API key not provided and not found in environment"
+        )
+
+    with MPRester(mp_api_key) as mpr:
+        # Query for materials with the given composition
+        docs = mpr.materials.summary.search(
+            formula=composition,
+            fields=[
+                "material_id",
+                "structure",
+                "energy_above_hull",
+                "formation_energy_per_atom",
+                "band_gap",
+                "density",
+                "volume",
+                "nsites",
+                "symmetry",
+                "is_stable",
+            ],
+        )
+
+        # Convert structures to CIF for easy storage
+        polymorph_data = []
+        for doc in docs:
+            structure_cif = doc.structure.to(fmt="cif")
+
+            polymorph_data.append(
+                {
+                    "material_id": doc.material_id,
+                    "cif": structure_cif,
+                    "energy_above_hull": doc.energy_above_hull,
+                    "formation_energy_per_atom": doc.formation_energy_per_atom,
+                    "band_gap": doc.band_gap,
+                    "density": doc.density,
+                    "volume": doc.volume,
+                    "nsites": doc.nsites,
+                    "space_group": doc.symmetry.symbol,
+                    "is_stable": doc.is_stable,
+                }
+            )
+
+        # Sort by energy above hull (stability)
+        polymorph_data = sorted(polymorph_data, key=lambda x: x["energy_above_hull"])
+
+        return json.dumps(polymorph_data, indent=2)
+
+
+@tool
+def sort_and_get_first_from_json(polymorph_data_json: str) -> str:
+    """
+    From a JSON string, sort the data based on a given key and return the first element of the specified key.
+
+    Args:
+        json_data: JSON string containing the data to be sorted.
+        sort_key: Key to sort the data by.
+        return_key: Key of the first element to return after sorting.
+
+    Returns:
+        Value of the specified return_key from the first element after sorting.
+    """
+
+    def sort_and_get_first(json_data: str, sort_key: str, return_key: str) -> any:
+        data = json.loads(json_data)
+
+        # Sort the data based on the given key
+        sorted_data = sorted(data, key=lambda x: x[sort_key])
+
+        # Return the value of the specified key from the first element
+        return sorted_data[0][return_key]
+
+    # Example usage for polymorph data
+    return sort_and_get_first(polymorph_data_json, "energy_above_hull", "cif")
+
+
+@tool
+def get_symmetrically_distinct_miller_indices_from_bulk(
+    bulk_structure_path_or_string: str, from_path: bool = False, max_miller: int = 2
+) -> list:
+    """
+    Get symmetrically distinct Miller indices for a bulk structure.
+
+    Args:
+        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
+        from_path: Boolean indicating if the input is a file path
+        max_miller: Maximum Miller index to consider (1, 2, or 3)
+
+    Returns:
+        List of symmetrically distinct Miller indices
+    """
+    # Load the bulk structure from a CIF file or string
+    if from_path:
+        from pymatgen.core import Structure
+
+        bulk_structure = Structure.from_file(bulk_structure_path_or_string)
+    else:
+        from pymatgen.core import Structure
+
+        bulk_structure = Structure.from_str(bulk_structure_path_or_string, fmt="cif")
+
+    from pymatgen.core.surface import get_symmetrically_distinct_miller_indices
+
+    return get_symmetrically_distinct_miller_indices(bulk_structure, max_miller)
+
+
+@tool
+def enumerate_all_possible_miller_indices(max_miller: int = 2) -> list:
+    """
+    Generate all possible Miller indices up to a given maximum.
+
+    Args:
+        max_miller: Maximum Miller index to consider (1, 2, or 3)
+
+    Returns:
+        List of tuples representing all possible Miller indices
+    """
+    mill_list = []
+    for i in range(max_miller + 1):
+        for j in range(max_miller + 1):
+            for k in range(max_miller + 1):
+                if i == 0 and j == 0 and k == 0:
+                    continue  # Skip (0,0,0)
+                mill_list.append((i, j, k))
+    return mill_list
+
+
+def find_all_unique_slabs_upto_millerindex(
+    bulk_structure_path_or_string: str,
+    from_path: bool = False,
+    max_index: int = 2,
+    min_slab_size: float = 8,
+    min_vacuum_size: float = 15,
+    center_slab: bool = True,
+    max_normal_search: int = 10,
+) -> str:
+    from pymatgen.core.surface import generate_all_slabs
+
+    if from_path:
+        from pymatgen.core import Structure
+
+        bulk_structure = Structure.from_file(bulk_structure_path_or_string)
+    else:
+        from pymatgen.core import Structure
+
+        bulk_structure = Structure.from_str(bulk_structure_path_or_string, fmt="cif")
+
+    slabs = generate_all_slabs(
+        bulk_structure,
+        max_index=max_index,
+        min_slab_size=min_slab_size,
+        min_vacuum_size=min_vacuum_size,
+        center_slab=center_slab,
+        max_normal_search=max_normal_search,
+    )
+    slabs_dict = {}
+    for i, slab in enumerate(slabs):
+        slab_id = (
+            f"{slab.miller_index[0]}{slab.miller_index[1]}{slab.miller_index[2]}_{i}"
+        )
+        slabs_dict[slab_id] = {
+            "miller_index": slab.miller_index,
+            "termination": i,
+            "cif": slab.to(fmt="cif"),
+            "area": slab.surface_area,
+            "num_sites": len(slab),
+            "slab_thickness": slab.thickness,
+        }
+
+    return json.dumps(slabs_dict, indent=2)
+
+
+def find_all_unique_slabs_upto_millerindex_to_file(
+    bulk_structure_path_or_string: str,
+    out_put_path: str,
+    from_path: bool = False,
+    max_index: int = 2,
+    min_slab_size: float = 8,
+    min_vacuum_size: float = 15,
+    center_slab: bool = True,
+    max_normal_search: int = 10,
+) -> str:
+    from pymatgen.core.surface import generate_all_slabs
+
+    if from_path:
+        from pymatgen.core import Structure
+
+        bulk_structure = Structure.from_file(bulk_structure_path_or_string)
+    else:
+        from pymatgen.core import Structure
+
+        bulk_structure = Structure.from_str(bulk_structure_path_or_string, fmt="cif")
+
+    slabs = generate_all_slabs(
+        bulk_structure,
+        max_index=max_index,
+        min_slab_size=min_slab_size,
+        min_vacuum_size=min_vacuum_size,
+        center_slab=center_slab,
+        max_normal_search=max_normal_search,
+    )
+    slabs_dict = {}
+    for i, slab in enumerate(slabs):
+        slab_id = (
+            f"{slab.miller_index[0]}{slab.miller_index[1]}{slab.miller_index[2]}_{i}"
+        )
+        slabs_dict[slab_id] = {
+            "miller_index": slab.miller_index,
+            "termination": i,
+            "cif": slab.to(fmt="cif"),
+            "area": slab.surface_area,
+            "num_sites": len(slab),
+            "slab_thickness": slab.thickness,
+        }
+
+    with Path(out_put_path).open("w") as f:
+        json.dump(slabs_dict, f, indent=2)
+    return f"Slabs data written to {out_put_path}"
+
+
+def enumerate_slabs_for_list_of_miller_index(
+    bulk_structure_path_or_string: str,
+    from_path: bool = False,
+    miller_index_list: list[tuple] | None = None,
+    min_slab_size: float = 12,
+    min_vacuum_size: float = 5,
+) -> str:
+    """
+    Generates slabs for a given bulk structure and specified Miller indices.
+
+    Args:
+        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
+        from_path: Boolean indicating if the input is a file path
+        miller_index_list: List of Miller indices to generate slabs for (e.g., [(1, 1, 1), (2, 0, 0)])
+        min_slab_size: Minimum slab thickness in Angstroms
+        min_vacuum_size: Minimum vacuum size in Angstroms
+
+    Returns:
+        str: JSON dictionary: {"slab_0": "<cif_string>", "slab_1": "<cif_string>", ...}
+    """
+    import json
+
+    from pymatgen.core import Structure
+    from pymatgen.core.surface import SlabGenerator
+
+    if miller_index_list is None:
+        raise ValueError("Miller indexes should be defined")
+
+    if from_path:
+        bulk_structure = Structure.from_file(bulk_structure_path_or_string)
+    else:
+        bulk_structure = Structure.from_str(bulk_structure_path_or_string, fmt="cif")
+
+    slabs_dict = {}
+    for millers in miller_index_list:
+        slab_gen = SlabGenerator(
+            bulk_structure, millers, min_slab_size, min_vacuum_size
+        )
+        slabs = slab_gen.get_slabs()  # returns a list of Slab objects
+        for i, slab in enumerate(slabs):
+            # We use get_orthogonal_c_slab() ensures that the slab lattice is reoriented in c axis for easier adsorption placement.
+            # get_sorted_structure() variations in atom ordering that might occur due to how the slab was originally created.
+            slab_clean = (
+                slab.get_sorted_structure()
+                # slab.get_orthogonal_c_slab().get_sorted_structure()
+            )
+            slabs_dict[f"slab_{i}_{millers}"] = slab_clean.to(fmt="cif")
+
+    return json.dumps(slabs_dict, indent=2)
