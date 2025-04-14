@@ -127,7 +127,7 @@ def create_spectra_elu_environments(
         task_id = task["name"]
         task_definitions[task_id] = TaskDefinition(
             name="Organic Compound Elucidation",
-            description=f"Return the smiles string or name for the compound with the following characterization analysis: {task['spectra']}",
+            description=f"Return the SMILES string or name for the compound with the following characterization analysis: {task['spectra']}",
             tools=list(available_tools.keys()),  # Use all available tools
             scoring_fn=score_molecule_similarity,
             scoring_inputs={"ground_truth": task["smiles"]},

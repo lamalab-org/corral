@@ -209,6 +209,150 @@ def simulate_spectra(smiles: str) -> dict[str, str]:
     )
 
 
+@tool
+def search_by_smiles(smiles, top_k=10):
+    """
+    Search the NMRShift database for entries matching the given SMILES.
+
+    Args:
+        smiles (str): SMILES string to search for
+        top_k (int, optional): Maximum number of results to return. Defaults to 10
+
+    Returns:
+        list: Matching entries
+    """
+    collection_name = "nmrshiftdb2"
+    db_path = Path(__file__).resolve().parents[3] / "vector_databases" / "nmrshiftdb2"
+
+    query = f"SMILES: {smiles}"
+
+    return vector_database_search(
+        query=query,
+        collection_name=collection_name,
+        path=db_path,
+        top_k=top_k,
+        metadata_only=True,
+    )
+
+
+@tool
+def retrieve_protons_shifts() -> list[dict[str, str]]:
+    """
+    Retrieve the proton shifts ranges for hydrocarbons.
+
+    Returns:
+        list: A list of dictionaries containing the proton shifts ranges
+    """
+
+    return str(
+        [
+            {"Proton": "Aldehyde", "δ / ppm": "9.5 - 10.5"},
+            {"Proton": "Aromatic", "δ / ppm": "6.5 - 8.2"},
+            {"Proton": "Alkene", "δ / ppm": "4.5 - 6.1"},
+            {"Proton": "Alkyne", "δ / ppm": "2.0 - 3.2"},
+            {"Proton": "Acetal", "δ / ppm": "4.5 - 6.0"},
+            {"Proton": "Alkoxy", "δ / ppm": "3.4 - 4.8"},
+            {"Proton": "Methyl (CH₃-R)", "δ / ppm": "~0.9"},
+            {"Proton": "N-methyl", "δ / ppm": "3.0 - 3.5"},
+            {"Proton": "Methoxy", "δ / ppm": "3.3 - 3.8"},
+            {
+                "Proton": "CH₃ attached to double bonds/aromatics",
+                "δ / ppm": "1.8 - 2.5",
+            },
+            {"Proton": "Methyl (CH₃-CO-)", "δ / ppm": "1.8 - 2.7"},
+            {"Proton": "Methylene (CH₂-O-)", "δ / ppm": "~3.6 - 4.7"},
+            {"Proton": "Methylene (CH₂-O-)", "δ / ppm": "~3.6 - 4.7"},
+            {"Proton": "Methylene (CH₂-R₁R₂)", "δ / ppm": "~1.3"},
+            {"Proton": "Methine (CH-R₁R₂R₃)", "δ / ppm": "~1.5"},
+            {"Proton": "Cyclopropane", "δ / ppm": "0.22"},
+            {"Proton": "Me₄Si (TMS)", "δ / ppm": "0.0"},
+            {"Proton": "Metal hydride", "δ / ppm": "-5 to -20"},
+        ]
+    )
+
+
+@tool
+def retrieve_aromatic_protons_shifts() -> list[dict[str, str]]:
+    """
+    Retrieve the proton shifts ranges for aromatic hydrocarbons.
+
+    Returns:
+        list: A list of dictionaries containing the proton shifts ranges
+    """
+    return str(
+        [
+            {"Substituent": "NO₂", "Ortho": 0.95, "Meta": 0.17, "Para": 0.33},
+            {"Substituent": "CHO", "Ortho": 0.58, "Meta": 0.21, "Para": 0.27},
+            {"Substituent": "COCl", "Ortho": 0.83, "Meta": 0.16, "Para": 0.30},
+            {"Substituent": "COOH", "Ortho": 0.8, "Meta": 0.14, "Para": 0.2},
+            {"Substituent": "COOCH₃", "Ortho": 0.74, "Meta": 0.07, "Para": 0.2},
+            {"Substituent": "COCH₃", "Ortho": 0.64, "Meta": 0.09, "Para": 0.3},
+            {"Substituent": "CN", "Ortho": 0.27, "Meta": 0.11, "Para": 0.3},
+            {"Substituent": "C₆H₅", "Ortho": 0.18, "Meta": 0, "Para": 0.08},
+            {"Substituent": "CCl₃", "Ortho": 0.8, "Meta": 0.2, "Para": 0.2},
+            {"Substituent": "CHCl₂", "Ortho": 0.1, "Meta": 0.06, "Para": 0.1},
+            {"Substituent": "CH₂Cl", "Ortho": 0, "Meta": 0.01, "Para": 0},
+            {"Substituent": "CH₃", "Ortho": -0.17, "Meta": -0.09, "Para": -0.18},
+            {"Substituent": "CH₂CH₃", "Ortho": -0.15, "Meta": -0.06, "Para": -0.18},
+            {"Substituent": "CH(CH₃)₂", "Ortho": -0.14, "Meta": -0.09, "Para": -0.18},
+            {"Substituent": "C(CH₃)₃", "Ortho": 0.01, "Meta": -0.1, "Para": -0.24},
+            {"Substituent": "CH₂OH", "Ortho": -0.1, "Meta": -0.1, "Para": -0.1},
+            {"Substituent": "CH₂NH₂", "Ortho": 0, "Meta": 0, "Para": 0.22},
+            {"Substituent": "F", "Ortho": -0.3, "Meta": -0.02, "Para": -0.22},
+            {"Substituent": "Cl", "Ortho": 0.02, "Meta": 0.06, "Para": -0.04},
+            {"Substituent": "Br", "Ortho": 0.22, "Meta": -0.13, "Para": -0.03},
+            {"Substituent": "I", "Ortho": 0.4, "Meta": -0.26, "Para": -0.03},
+            {"Substituent": "OCH₃", "Ortho": -0.43, "Meta": -0.09, "Para": -0.37},
+            {"Substituent": "OCOCH₃", "Ortho": -0.21, "Meta": -0.02, "Para": -0.4},
+            {"Substituent": "OH", "Ortho": -0.5, "Meta": -0.14, "Para": -0.4},
+            {
+                "Substituent": "p-CH₃C₆H₄SO₃",
+                "Ortho": -0.26,
+                "Meta": -0.05,
+                "Para": -0.25,
+            },
+            {"Substituent": "NH₂", "Ortho": -0.75, "Meta": -0.24, "Para": -0.63},
+            {"Substituent": "SCH₃", "Ortho": -0.03, "Meta": 0, "Para": -0.3},
+            {"Substituent": "N(CH₃)₂", "Ortho": -0.6, "Meta": -0.1, "Para": -0.62},
+        ]
+    )
+
+
+@tool
+def retrieve_carbon_shifts() -> list[dict[str, str]]:
+    """
+    Retrieve the carbon shifts ranges for hydrocarbons.
+
+    Returns:
+        list: A list of dictionaries containing the carbon shifts ranges
+    """
+    return str(
+        [
+            {"Group": "CH₃-", "Shift (ppm)": "10-30 ppm"},
+            {"Group": "R₃C-, R₂CH, RCH₂", "Shift (ppm)": "25-50 ppm"},
+            {"Group": "=CH₂", "Shift (ppm)": "105-120 ppm"},
+            {"Group": "=CH", "Shift (ppm)": "110-140 ppm"},
+            {"Group": "=CR₂", "Shift (ppm)": "130-150 ppm"},
+            {"Group": "Alkyne", "Shift (ppm)": "70-85 ppm"},
+            {"Group": "Ar-H", "Shift (ppm)": "115-130 ppm"},
+            {"Group": "Ar-C", "Shift (ppm)": "130-150 ppm"},
+            {"Group": "Ketones", "Shift (ppm)": "200-210 ppm"},
+            {"Group": "Aldehydes", "Shift (ppm)": "190-200 ppm"},
+            {"Group": "Conjugated C=O", "Shift (ppm)": "180-200 ppm"},
+            {"Group": "Carboxylic acids", "Shift (ppm)": "170-180 ppm"},
+            {"Group": "Carboxylic esters", "Shift (ppm)": "160-170 ppm"},
+            {"Group": "Phenols (C1)", "Shift (ppm)": "150-160 ppm"},
+            {"Group": "Furans (C2)", "Shift (ppm)": "140-150 ppm"},
+            {"Group": "Acetals", "Shift (ppm)": "90-110 ppm"},
+            {"Group": "R₃C-O", "Shift (ppm)": "70-85 ppm"},
+            {"Group": "R₂HC-O", "Shift (ppm)": "60-80 ppm"},
+            {"Group": "RH₂C-O", "Shift (ppm)": "45-65 ppm"},
+            {"Group": "H₃C-O", "Shift (ppm)": "50-60 ppm"},
+            {"Group": "Epoxides", "Shift (ppm)": "40-60 ppm"},
+        ]
+    )
+
+
 def create_tools() -> dict[str, Tool]:
     """Create a dictionary of all available tools for the agent environment"""
     Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
