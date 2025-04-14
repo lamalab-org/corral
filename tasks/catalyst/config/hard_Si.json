@@ -1,0 +1,107 @@
+{
+  "find_bulk_polymorphs": {
+    "name": "Find Bulk Polymorphs",
+    "description": "Given a chemical composition (e.g., 'TiO2'), query the Materials Project database for potential stable bulk polymorphs. Save the results (including MP IDs, CIF strings, and energy above hull) as a JSON file. Submit the path to the JSON file.",
+    "tools": ["get_bulk_polymorphs_data"],
+    "scoring_function": "check_polymorph_data_json",
+    "submission_format": "/path/to/polymorph_data.json",
+    "initial_input": {
+      "composition": "TiO2"
+    }
+  },
+  "select_stable_bulk": {
+    "name": "Select Most Stable Bulk",
+    "description": "From the polymorph data file, identify the most stable bulk structure (lowest energy above hull) and save its structure as a CIF file. Submit the path to the CIF file.",
+    "tools": ["select_most_stable_bulk_from_data"],
+    "scoring_function": "mp_structure",
+    "submission_format": "/path/to/stable_bulk.cif",
+    "input_from_tasks": ["find_bulk_polymorphs"],
+    "initial_input": {}
+  },
+  "enumerate_slabs": {
+    "name": "Enumerate Potential Slabs",
+    "description": "Enumerate possible slab terminations (e.g., Miller indices up to 2) for the selected stable bulk structure. Save the potential slab structures as a JSON dictionary mapping unique identifiers (e.g., 'miller_shift_top') to CIF strings. Submit the path to the JSON file.",
+    "tools": ["enumerate_possible_slabs"],
+    "scoring_function": "slabs_json",
+    "submission_format": "/path/to/potential_slabs.json",
+    "input_from_tasks": ["select_stable_bulk"],
+    "initial_input": {
+      "max_miller": 2
+    }
+  },
+  "estimate_slab_stability": {
+    "name": "Estimate Slab Stability (Relaxation Placeholder)",
+    "description": "Simulate the relaxation of the potential slab structures generated previously. **(Use the placeholder relaxation tool)**. Return a JSON file containing the relaxed slab CIFs and their estimated total energies (or surface energies). Submit the path to the JSON file.",
+    "tools": ["estimate_slab_stability_and_relax"],
+    "scoring_function": "check_relaxed_slab_data_json",
+    "submission_format": "/path/to/relaxed_slabs_data.json",
+    "input_from_tasks": ["enumerate_slabs"],
+    "initial_input": {}
+  },
+  "select_stable_slab": {
+    "name": "Select Most Stable Slab",
+    "description": "From the relaxed slab data, identify the most stable slab (lowest estimated energy) and save its *relaxed* structure as a CIF file. Also, keep track of its energy. Submit the path to the relaxed CIF file.",
+    "tools": ["select_most_stable_slab_from_data"],
+    "scoring_function": "slab_structure",
+    "submission_format": "/path/to/stable_relaxed_slab.cif",
+    "input_from_tasks": ["estimate_slab_stability"],
+    "initial_input": {}
+  },
+  "get_adsorbate": {
+    "name": "Get Adsorbate Molecule",
+    "description": "Retrieve the structure for the specified adsorbate molecule (e.g., CO) using its MP ID and save it as a CIF file. Submit the path to the CIF file.",
+    "tools": ["get_structure_from_mp_text"],
+    "scoring_function": "mp_structure",
+    "submission_format": "/path/to/adsorbate.cif",
+    "initial_input": {
+      "mp_id": "mp-19713"
+    }
+  },
+  "find_adsorption_sites": {
+    "name": "Find Adsorption Sites on Stable Slab",
+    "description": "Identify potential adsorption sites (e.g., ontop, bridge, hollow) on the selected *stable relaxed* slab structure. Save the site coordinates as a JSON file. Submit the path to the JSON file.",
+    "tools": ["get_adsorption_sites_text"],
+    "scoring_function": "adsorption_sites",
+    "submission_format": "/path/to/adsorption_sites.json",
+    "input_from_tasks": ["select_stable_slab"],
+    "initial_input": {}
+  },
+  "generate_initial_configs": {
+    "name": "Generate Initial Adsorbate+Slab Configurations",
+    "description": "Place the adsorbate molecule onto the *stable relaxed* slab at each of the identified adsorption sites (or a subset like top, bridge, hollow). Save each initial configuration as a CIF file within a JSON dictionary mapping site identifiers to CIF strings. Submit the path to the JSON file.",
+    "tools": ["generate_adsorbate_slab_configs"],
+    "scoring_function": "check_adsorbate_slab_configs_json",
+    "submission_format": "/path/to/initial_adsorbate_slab_configs.json",
+    "input_from_tasks": [
+      "select_stable_slab",
+      "get_adsorbate",
+      "find_adsorption_sites"
+    ],
+    "initial_input": {
+      "height": 1.8
+    }
+  },
+  "relax_adsorbate_configs": {
+    "name": "Relax Adsorbate+Slab Configurations (Placeholder)",
+    "description": "Simulate the relaxation of the initial adsorbate+slab configurations. **(Use the placeholder relaxation tool)**. Return a JSON file containing the relaxed adsorbate+slab CIFs and their estimated total energies. Submit the path to the JSON file.",
+    "tools": ["relax_adsorbate_slab_configs"],
+    "scoring_function": "check_relaxed_adsorbate_slab_data_json",
+    "submission_format": "/path/to/relaxed_adsorbate_slab_data.json",
+    "input_from_tasks": ["generate_initial_configs"],
+    "initial_input": {}
+  },
+  "calculate_adsorption_energy": {
+    "name": "Calculate Final Adsorption Energy",
+    "description": "Calculate the adsorption energy using the formula E_ads = E_ads_slab_relaxed - E_slab_relaxed - E_gas. Identify the *lowest* energy relaxed adsorbate+slab configuration from the previous step. Use its energy for E_ads_slab_relaxed. Retrieve the energy of the corresponding relaxed stable slab (E_slab_relaxed) from the slab stability estimation step. Use the provided gas-phase energy for the adsorbate (E_gas). Submit the final calculated adsorption energy as a single floating-point number.",
+    "tools": ["calculate_adsorption_energy"],
+    "scoring_function": "check_adsorption_energy_float",
+    "submission_format": "-0.52",
+    "input_from_tasks": [
+      "relax_adsorbate_configs",
+      "estimate_slab_stability",
+      "select_stable_slab"
+    ],
+    "initial_input": {
+      "adsorbate_gas_energy": -14.85
+  }
+}

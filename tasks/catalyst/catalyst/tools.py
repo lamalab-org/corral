@@ -3,6 +3,13 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from tool_utils import (
+    find_surface_atoms_with_voronoi,
+    load_structure,
+    set_fixed_atom_constraints,
+    standardize_bulk,
+    tile_atoms,
+)
 
 from corral.base import Tool
 from corral.utils import tool
@@ -466,23 +473,10 @@ def generate_reconstructed_slab(
     return json.dumps(output, indent=2)
 
 
-def create_tools() -> dict[str, Tool]:
-    """Create all available tools"""
-    return {
-        "get_structure_from_mp_text": get_structure_from_mp_text,
-        "create_slab_from_structure_text": create_slab_from_structure_text,
-        "enumerate_slabs_text": enumerate_slabs_text,
-        "choose_slab_text": choose_slab_text,
-        "get_adsorption_sites_text": get_adsorption_sites_text,
-        "choose_adsorption_site_text": choose_adsorption_site_text,
-        "add_adsorbate_to_slab_text": add_adsorbate_to_slab_text,
-        "generate_reconstructed_slab": generate_reconstructed_slab,
-    }
-
-
 ### Tools relevant for ocp - hard
 
 
+@tool
 def get_bulk_polymorphs_data(composition: str) -> str:
     """
     Query the Materials Project database to find polymorphs for a given composition.
@@ -578,6 +572,63 @@ def sort_and_get_first_from_json(polymorph_data_json: str) -> str:
 
 
 @tool
+def process_slab_ocdata_style(
+    slab_cif: str,
+    bulk_cif: str,
+    min_xy_size: float = 8.0,
+    apply_constraints: bool = True,
+) -> str:
+    """
+    Applies ocdata-style processing to a raw slab CIF string:
+    1. Tags surface atoms based on height and coordination relative to the bulk.
+    2. Tiles the slab to meet a minimum lateral (XY) size.
+    3. (Optional) Applies constraints to fix bulk-like atoms (tag=0).
+
+    Requires the original bulk structure for accurate surface atom tagging.
+
+    Args:
+        slab_cif: CIF string of the raw slab structure (typically from pymatgen generation).
+        bulk_cif: CIF string of the original bulk structure used for coordination reference.
+        min_xy_size: Minimum lateral size (Å) the slab should span after tiling.
+        apply_constraints: If True, applies FixAtoms constraints to non-surface atoms (tag=0).
+
+    Returns:
+        str: CIF string of the processed (tagged, tiled, constrained) slab.
+    """
+    from pymatgen.core import Structure
+    from pymatgen.io.ase import AseAtomsAdaptor
+
+    try:
+        # Load structures
+        slab_struct_pmg = load_structure(slab_cif)
+        slab_atoms_ase = AseAtomsAdaptor.get_atoms(slab_struct_pmg)
+
+        bulk_struct_pmg = load_structure(bulk_cif)
+        # Standardize bulk *before* getting ASE atoms for consistent coordination check
+        standardized_bulk_pmg = standardize_bulk(bulk_struct_pmg)
+        standardized_bulk_ase = AseAtomsAdaptor.get_atoms(standardized_bulk_pmg)
+
+        # 1. Tag Surface Atoms
+        tags = find_surface_atoms_with_voronoi(standardized_bulk_ase, slab_atoms_ase)
+        slab_atoms_ase.set_tags(tags)
+
+        # 2. Tile the Tagged Slab
+        tiled_atoms_ase = tile_atoms(slab_atoms_ase, min_xy_size)
+
+        # 3. Apply Constraints (Optional)
+        final_atoms_ase = tiled_atoms_ase
+        if apply_constraints:
+            final_atoms_ase = set_fixed_atom_constraints(tiled_atoms_ase)
+
+        # 4. Convert back to CIF
+        final_struct_pmg = Structure.from_ase_atoms(final_atoms_ase)
+        return final_struct_pmg.to(fmt="cif")
+
+    except Exception as e:
+        return f"ERROR: Slab processing failed - {e}"
+
+
+@tool
 def get_symmetrically_distinct_miller_indices_from_bulk(
     bulk_structure_path_or_string: str, from_path: bool = False, max_miller: int = 2
 ) -> list:
@@ -593,16 +644,10 @@ def get_symmetrically_distinct_miller_indices_from_bulk(
         List of symmetrically distinct Miller indices
     """
     # Load the bulk structure from a CIF file or string
-    if from_path:
-        from pymatgen.core import Structure
-
-        bulk_structure = Structure.from_file(bulk_structure_path_or_string)
-    else:
-        from pymatgen.core import Structure
-
-        bulk_structure = Structure.from_str(bulk_structure_path_or_string, fmt="cif")
 
     from pymatgen.core.surface import get_symmetrically_distinct_miller_indices
+
+    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
 
     return get_symmetrically_distinct_miller_indices(bulk_structure, max_miller)
 
@@ -628,6 +673,7 @@ def enumerate_all_possible_miller_indices(max_miller: int = 2) -> list:
     return mill_list
 
 
+@tool
 def find_all_unique_slabs_upto_millerindex(
     bulk_structure_path_or_string: str,
     from_path: bool = False,
@@ -639,14 +685,7 @@ def find_all_unique_slabs_upto_millerindex(
 ) -> str:
     from pymatgen.core.surface import generate_all_slabs
 
-    if from_path:
-        from pymatgen.core import Structure
-
-        bulk_structure = Structure.from_file(bulk_structure_path_or_string)
-    else:
-        from pymatgen.core import Structure
-
-        bulk_structure = Structure.from_str(bulk_structure_path_or_string, fmt="cif")
+    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
 
     slabs = generate_all_slabs(
         bulk_structure,
@@ -673,6 +712,7 @@ def find_all_unique_slabs_upto_millerindex(
     return json.dumps(slabs_dict, indent=2)
 
 
+@tool
 def find_all_unique_slabs_upto_millerindex_to_file(
     bulk_structure_path_or_string: str,
     out_put_path: str,
@@ -685,14 +725,7 @@ def find_all_unique_slabs_upto_millerindex_to_file(
 ) -> str:
     from pymatgen.core.surface import generate_all_slabs
 
-    if from_path:
-        from pymatgen.core import Structure
-
-        bulk_structure = Structure.from_file(bulk_structure_path_or_string)
-    else:
-        from pymatgen.core import Structure
-
-        bulk_structure = Structure.from_str(bulk_structure_path_or_string, fmt="cif")
+    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
 
     slabs = generate_all_slabs(
         bulk_structure,
@@ -721,6 +754,7 @@ def find_all_unique_slabs_upto_millerindex_to_file(
     return f"Slabs data written to {out_put_path}"
 
 
+@tool
 def enumerate_slabs_for_list_of_miller_index(
     bulk_structure_path_or_string: str,
     from_path: bool = False,
@@ -770,3 +804,420 @@ def enumerate_slabs_for_list_of_miller_index(
             slabs_dict[f"slab_{i}_{millers}"] = slab_clean.to(fmt="cif")
 
     return json.dumps(slabs_dict, indent=2)
+
+
+@tool
+def generate_adsorbate_slab_configs(
+    slab_cif: str, adsorbate_cif: str, adsorption_sites_json: str, height: float = 1.8
+) -> str:
+    """
+    Generate configurations of adsorbates on slab at different adsorption sites.
+
+    Args:
+        slab_cif: CIF string of the slab
+        adsorbate_cif: CIF string of the adsorbate molecule
+        adsorption_sites_json: JSON string with adsorption sites information
+        height: Height in Angstroms for initial adsorbate placement
+
+    Returns:
+        JSON string mapping site identifiers to adsorbate+slab configurations
+    """
+    from pymatgen.analysis.adsorption import AdsorbateSiteFinder
+    from pymatgen.core import Molecule, Structure
+
+    # Load structures
+    slab = Structure.from_str(slab_cif, fmt="cif")
+
+    # Try to load adsorbate as a molecule or structure
+    try:
+        adsorbate_struct = Structure.from_str(adsorbate_cif, fmt="cif")
+        adsorbate = Molecule(
+            species=adsorbate_struct.species,
+            coords=list(adsorbate_struct.cart_coords),
+            charge=0,
+        )
+    except Exception as e:
+        raise ValueError(f"Could not parse adsorbate: {e}") from e
+
+    # Parse adsorption sites
+    adsorption_sites = json.loads(adsorption_sites_json)
+
+    # Generate configs for different sites
+    configs = {}
+    finder = AdsorbateSiteFinder(slab)
+
+    for site_type, sites in adsorption_sites.items():
+        # For each site type (top, bridge, hollow), select a few sites
+        max_sites = min(3, len(sites))  # Limit to 3 sites per type
+
+        for i in range(max_sites):
+            site = sites[i]
+            site_coords = site if isinstance(site, list) else list(site)
+
+            try:
+                # Add adsorbate to the slab
+                ads_slab = finder.add_adsorbate(adsorbate, site_coords, height)
+
+                # Add to configs
+                config_id = f"{site_type}_{i}"
+                configs[config_id] = {
+                    "site_type": site_type,
+                    "site_index": i,
+                    "site_coords": site_coords,
+                    "height": height,
+                    "cif": ads_slab.to(fmt="cif"),
+                }
+            except Exception:
+                # Skip sites that cause errors
+                continue
+
+    return json.dumps(configs, indent=2)
+
+
+@tool
+def get_mp_surface_properties(material_id: str) -> str:
+    """
+    Get surface properties for a specific material from the Materials Project. (Material ID, Formula,
+    Weighted Surface Energy, Weighted Surface Energy (eV/Å^2), Surface Anisotropy, Shape Factor,
+    Has Reconstructed)
+
+    Args:
+        material_id: Materials Project ID (e.g., "mp-149")
+        api_key: Materials Project API key (optional if set in environment)
+
+    Returns:
+        JSON string with surface properties
+    """
+    from mp_api.client import MPRester
+
+    # Use provided API key or get from environment
+    mp_api_key = os.getenv("MP_API_KEY")
+    if not mp_api_key:
+        raise ValueError(
+            "Materials Project API key not provided and not found in environment"
+        )
+
+    with MPRester(mp_api_key) as mpr:
+        # Get surface properties
+        try:
+            surface_docs = mpr.summary.search(
+                material_ids=[material_id],
+                fields=[
+                    "material_id",
+                    "formula_pretty",
+                    "weighted_surface_energy",
+                    "weighted_surface_energy_EV_PER_ANG2",
+                    "surface_anisotropy",
+                    "shape_factor",
+                    "has_reconstructed",
+                ],
+            )
+
+            if not surface_docs:
+                return json.dumps(
+                    {"error": f"No surface properties found for {material_id}"}
+                )
+
+            surface_data = []
+            for doc in surface_docs:
+                data = {
+                    "material_id": doc.material_id,
+                    "formula_pretty": doc.formula_pretty,
+                }
+
+                # Add surface properties if available
+                if hasattr(doc, "weighted_surface_energy"):
+                    data["weighted_surface_energy"] = doc.weighted_surface_energy
+                if hasattr(doc, "weighted_surface_energy_EV_PER_ANG2"):
+                    data["weighted_surface_energy_EV_PER_ANG2"] = (
+                        doc.weighted_surface_energy_EV_PER_ANG2
+                    )
+                if hasattr(doc, "surface_anisotropy"):
+                    data["surface_anisotropy"] = doc.surface_anisotropy
+                if hasattr(doc, "shape_factor"):
+                    data["shape_factor"] = doc.shape_factor
+                if hasattr(doc, "has_reconstructed"):
+                    data["has_reconstructed"] = doc.has_reconstructed
+
+                surface_data.append(data)
+
+            return json.dumps(surface_data, indent=2)
+        except Exception as e:
+            return json.dumps({"error": f"Error fetching surface properties: {e!s}"})
+
+
+@tool
+def get_mp_thermo_data(material_id: str) -> str:
+    """
+    Get thermodynamic data for a specific material from the Materials Project. (Material ID, Thermo Type (functional used),
+    Formation Energy per Atom, Energy Above Hull, Decomposes To, Is Stable, Energy Type, Uncorrected Energy per Atom)
+
+    Args:
+        material_id: Materials Project ID (e.g., "mp-149")
+
+    Returns:
+        JSON string with thermodynamic data
+    """
+    from mp_api.client import MPRester
+
+    # Use provided API key or get from environment
+    mp_api_key = os.getenv("MP_API_KEY")
+    if not mp_api_key:
+        raise ValueError(
+            "Materials Project API key not provided and not found in environment"
+        )
+
+    with MPRester(mp_api_key) as mpr:
+        # Get thermodynamic data
+        thermo_docs = mpr.thermo.search(
+            material_ids=[material_id],
+            fields=[
+                "material_id",
+                "thermo_type",
+                "formation_energy_per_atom",
+                "energy_above_hull",
+                "decomposes_to",
+                "is_stable",
+                "energy_type",
+                "uncorrected_energy_per_atom",
+            ],
+        )
+
+        if not thermo_docs:
+            return json.dumps(
+                {"error": f"No thermodynamic data found for {material_id}"}
+            )
+
+        thermo_data = [
+            {
+                "material_id": doc.material_id,
+                "thermo_type": str(doc.thermo_type),
+                "formation_energy_per_atom": doc.formation_energy_per_atom,
+                "energy_above_hull": doc.energy_above_hull,
+                "decomposes_to": [
+                    {
+                        "material_id": d.material_id,
+                        "formula": getattr(d, "formula", ""),
+                        "amount": d.amount,
+                    }
+                    for d in (doc.decomposes_to or [])
+                ],
+                "is_stable": doc.is_stable,
+                "energy_type": doc.energy_type,
+                "uncorrected_energy_per_atom": doc.uncorrected_energy_per_atom,
+            }
+            for doc in thermo_docs
+        ]
+
+        return json.dumps(thermo_data, indent=2)
+
+
+# tools to relax and get energy using mlff
+# tool to compute adsorption energy
+
+
+## OCP - training  creating a dataset and training ML model
+
+
+@tool
+def save_slabs_to_db(
+    db_path: str,
+    slabs_json: str,
+    table_name: str = "slabs",
+) -> str:
+    """
+    Save slabs (from JSON) to a SQLite database.
+
+    Args:
+        db_path: Path to SQLite database file.
+        slabs_json: JSON string where keys are slab IDs and values include Miller index, termination, cif, area, num_site, slab_thickness.
+        table_name: Table name to insert slabs into.
+
+    Returns:
+        Status string.
+    """
+    import json
+    import sqlite3
+
+    slabs = json.loads(slabs_json)
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        # Create table if not exists
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                slab_id TEXT PRIMARY KEY,
+                miller_index TEXT,
+                termination INTEGER,
+                cif TEXT,
+                area REAL,
+                num_sites INTEGER,
+                slab_thickness REAL
+            )
+        """)
+        # Insert slabs
+        for slab_id, slab_data in slabs.items():
+            cursor.execute(
+                f"""
+                INSERT OR REPLACE INTO {table_name}
+                (slab_id, miller_index, termination, cif, area, num_sites, slab_thickness)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    slab_id,
+                    str(slab_data["miller_index"]),
+                    slab_data["termination"],
+                    slab_data["cif"],
+                    slab_data["area"],
+                    slab_data["num_sites"],
+                    slab_data["slab_thickness"],
+                ),
+            )
+
+    return f"Saved {len(slabs)} slabs to {table_name} in {db_path}"
+
+
+@tool
+def save_adsorbate_slab_configs_to_db(
+    db_path: str, configs_json: str, table_name: str = "adsorbate_slabs"
+) -> str:
+    """
+    Save adsorbate+slab configs to SQLite DB.
+
+    Args:
+        db_path: Path to SQLite database file.
+        configs_json: JSON string from `generate_adsorbate_slab_configs`.
+        table_name: Name of the database table.
+
+    Returns:
+        Status string.
+    """
+    import json
+    import sqlite3
+
+    configs = json.loads(configs_json)
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                config_id TEXT PRIMARY KEY,
+                site_type TEXT,
+                site_index INTEGER,
+                site_coords TEXT,
+                height REAL,
+                cif TEXT
+            )
+        """)
+
+        for config_id, data in configs.items():
+            cursor.execute(
+                f"""
+                INSERT OR REPLACE INTO {table_name}
+                (config_id, site_type, site_index, site_coords, height, cif)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    config_id,
+                    data["site_type"],
+                    data["site_index"],
+                    json.dumps(data["site_coords"]),
+                    data["height"],
+                    data["cif"],
+                ),
+            )
+
+    return f"Saved {len(configs)} adsorbate+slab configs to {table_name} in {db_path}"
+
+
+@tool
+def add_column_to_db_table(
+    db_path: str, table_name: str, column_name: str, compute_function_code: str
+) -> str:
+    """
+    Add a new column to an existing SQLite table and compute its values.
+
+    Args:
+        db_path: Path to database
+        table_name: Table name
+        column_name: Name of new column to add
+        compute_function_code: String of a Python function that accepts a row dict and returns a value.
+
+    Example:
+        compute_function_code = '''
+        def compute(row):
+            return len(row["cif"])  # Example: size of CIF string
+        '''
+
+    Returns:
+        Status string
+    """
+    import sqlite3
+
+    local_vars = {}
+    exec(compute_function_code, {}, local_vars)
+    compute = local_vars.get("compute")
+
+    if not compute:
+        raise ValueError("compute_function_code must define a 'compute(row)' function.")
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # Add column if not exists
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        columns = [col[1] for col in cursor.fetchall()]
+        if column_name not in columns:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name}")
+
+        # Fetch all rows
+        cursor.execute(f"SELECT * FROM {table_name}")
+        rows = cursor.fetchall()
+
+        updated = 0
+        for row in rows:
+            row_dict = dict(row)
+            value = compute(row_dict)
+            cursor.execute(
+                f"""
+                UPDATE {table_name}
+                SET {column_name} = ?
+                WHERE ROWID = ?
+            """,
+                (value, row["rowid"]),
+            )
+            updated += 1
+
+    return f"Updated {updated} rows in {table_name} with column '{column_name}'"
+
+
+def create_tools() -> dict[str, Tool]:
+    """Create all available tools"""
+    return {
+        "get_structure_from_mp_text": get_structure_from_mp_text,
+        "create_slab_from_structure_text": create_slab_from_structure_text,
+        "enumerate_slabs_text": enumerate_slabs_text,
+        "choose_slab_text": choose_slab_text,
+        "get_adsorption_sites_text": get_adsorption_sites_text,
+        "choose_adsorption_site_text": choose_adsorption_site_text,
+        "add_adsorbate_to_slab_text": add_adsorbate_to_slab_text,
+        "generate_reconstructed_slab": generate_reconstructed_slab,
+        # OCP hard
+        "get_bulk_polymorphs_data": get_bulk_polymorphs_data,
+        "sort_and_get_first_from_json": sort_and_get_first_from_json,
+        "process_slab_ocdata_style": process_slab_ocdata_style,
+        "get_symmetrically_distinct_miller_indices_from_bulk": get_symmetrically_distinct_miller_indices_from_bulk,
+        "enumerate_all_possible_miller_indices": enumerate_all_possible_miller_indices,
+        "find_all_unique_slabs_upto_millerindex": find_all_unique_slabs_upto_millerindex,
+        "find_all_unique_slabs_upto_millerindex_to_file": find_all_unique_slabs_upto_millerindex_to_file,
+        "enumerate_slabs_for_list_of_miller_index": enumerate_slabs_for_list_of_miller_index,
+        "generate_adsorbate_slab_configs": generate_adsorbate_slab_configs,
+        "get_mp_surface_properties": get_mp_surface_properties,
+        "get_mp_thermo_data": get_mp_thermo_data,
+        # OCP training
+        "save_slabs_to_db": save_slabs_to_db,
+        "save_adsorbate_slab_configs_to_db": save_adsorbate_slab_configs_to_db,
+        "add_column_to_db_table": add_column_to_db_table,
+    }
