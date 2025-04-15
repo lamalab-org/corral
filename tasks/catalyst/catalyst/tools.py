@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from loguru import logger
 from tool_utils import (
     find_surface_atoms_with_voronoi,
     load_structure,
@@ -318,7 +319,7 @@ def generate_reconstructed_slab(
 
     Returns:
         str: Either a single CIF string (if return_all_variants=False) or a
-             JSON string with all variants and metadata (if return_all_variants=True)
+            JSON string with all variants and metadata (if return_all_variants=True)
     """
     import json
     from copy import deepcopy
@@ -1020,18 +1021,22 @@ def get_mp_thermo_data(material_id: str) -> str:
 
 
 @tool
-def save_slabs_to_db(
+def save_structures_to_db(
     db_path: str,
-    slabs_json: str,
-    table_name: str = "slabs",
+    structures_json: str,
+    structure_type: str = "slab",  # Options: "bulk", "slab", "adsorbate", "adsorbate_slab"
+    table_name: str | None = None,
+    additional_properties: dict | None = None,
 ) -> str:
     """
-    Save slabs (from JSON) to a SQLite database.
+    Save structures (bulk, slabs, adsorbates, or adsorbate+slab) to a SQLite database with appropriate schema.
 
     Args:
         db_path: Path to SQLite database file.
-        slabs_json: JSON string where keys are slab IDs and values include Miller index, termination, cif, area, num_site, slab_thickness.
-        table_name: Table name to insert slabs into.
+        structures_json: JSON string with structure data.
+        structure_type: Type of structures being saved ("bulk", "slab", "adsorbate", or "adsorbate_slab").
+        table_name: Override default table name (default is determined by structure_type).
+        additional_properties: Dictionary of additional properties to save for all structures.
 
     Returns:
         Status string.
@@ -1039,158 +1044,650 @@ def save_slabs_to_db(
     import json
     import sqlite3
 
-    slabs = json.loads(slabs_json)
+    structures = json.loads(structures_json)
+
+    # Determine table name if not provided
+    if table_name is None:
+        table_name = structure_type + "s"
 
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
-        # Create table if not exists
-        cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                slab_id TEXT PRIMARY KEY,
-                miller_index TEXT,
-                termination INTEGER,
-                cif TEXT,
-                area REAL,
-                num_sites INTEGER,
-                slab_thickness REAL
-            )
-        """)
-        # Insert slabs
-        for slab_id, slab_data in slabs.items():
-            cursor.execute(
-                f"""
-                INSERT OR REPLACE INTO {table_name}
-                (slab_id, miller_index, termination, cif, area, num_sites, slab_thickness)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    slab_id,
-                    str(slab_data["miller_index"]),
-                    slab_data["termination"],
-                    slab_data["cif"],
-                    slab_data["area"],
-                    slab_data["num_sites"],
-                    slab_data["slab_thickness"],
-                ),
-            )
 
-    return f"Saved {len(slabs)} slabs to {table_name} in {db_path}"
+        # Create schema based on structure type
+        if structure_type == "bulk":
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    material_id TEXT PRIMARY KEY,
+                    formula TEXT,
+                    cif TEXT,
+                    energy_above_hull REAL,
+                    formation_energy_per_atom REAL,
+                    band_gap REAL,
+                    density REAL,
+                    volume REAL,
+                    nsites INTEGER,
+                    space_group TEXT,
+                    is_stable INTEGER
+                )
+            """)
+
+            # Insert bulk structures
+            for material_id, data in structures.items():
+                cursor.execute(
+                    f"""
+                    INSERT OR REPLACE INTO {table_name}
+                    (material_id, formula, cif, energy_above_hull, formation_energy_per_atom,
+                     band_gap, density, volume, nsites, space_group, is_stable)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        material_id,
+                        data.get("formula", ""),
+                        data["cif"],
+                        data.get("energy_above_hull", None),
+                        data.get("formation_energy_per_atom", None),
+                        data.get("band_gap", None),
+                        data.get("density", None),
+                        data.get("volume", None),
+                        data.get("nsites", None),
+                        data.get("space_group", None),
+                        1 if data.get("is_stable", False) else 0,
+                    ),
+                )
+
+        elif structure_type == "slab":
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    slab_id TEXT PRIMARY KEY,
+                    parent_material_id TEXT,
+                    miller_index TEXT,
+                    termination INTEGER,
+                    cif TEXT,
+                    area REAL,
+                    num_sites INTEGER,
+                    slab_thickness REAL,
+                    relaxed INTEGER DEFAULT 0,
+                    energy REAL,
+                    surface_energy REAL
+                )
+            """)
+
+            # Insert slabs
+            for slab_id, data in structures.items():
+                cursor.execute(
+                    f"""
+                    INSERT OR REPLACE INTO {table_name}
+                    (slab_id, parent_material_id, miller_index, termination, cif, area,
+                     num_sites, slab_thickness, relaxed, energy, surface_energy)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        slab_id,
+                        data.get("parent_material_id", ""),
+                        str(data.get("miller_index", [])),
+                        data.get("termination", 0),
+                        data["cif"],
+                        data.get("area", None),
+                        data.get("num_sites", None),
+                        data.get("slab_thickness", None),
+                        1 if data.get("relaxed", False) else 0,
+                        data.get("energy", None),
+                        data.get("surface_energy", None),
+                    ),
+                )
+
+        elif structure_type == "adsorbate":
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    adsorbate_id TEXT PRIMARY KEY,
+                    formula TEXT,
+                    cif TEXT,
+                    gas_phase_energy REAL,
+                    num_atoms INTEGER
+                )
+            """)
+
+            # Insert adsorbates
+            for adsorbate_id, data in structures.items():
+                cursor.execute(
+                    f"""
+                    INSERT OR REPLACE INTO {table_name}
+                    (adsorbate_id, formula, cif, gas_phase_energy, num_atoms)
+                    VALUES (?, ?, ?, ?, ?)
+                """,
+                    (
+                        adsorbate_id,
+                        data.get("formula", ""),
+                        data["cif"],
+                        data.get("gas_phase_energy", None),
+                        data.get("num_atoms", None),
+                    ),
+                )
+
+        elif structure_type == "adsorbate_slab":
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    config_id TEXT PRIMARY KEY,
+                    slab_id TEXT,
+                    adsorbate_id TEXT,
+                    site_type TEXT,
+                    site_index INTEGER,
+                    site_coords TEXT,
+                    height REAL,
+                    orientation TEXT,
+                    cif TEXT,
+                    relaxed INTEGER DEFAULT 0,
+                    energy REAL,
+                    adsorption_energy REAL
+                )
+            """)
+
+            # Insert adsorbate+slab configurations
+            for config_id, data in structures.items():
+                cursor.execute(
+                    f"""
+                    INSERT OR REPLACE INTO {table_name}
+                    (config_id, slab_id, adsorbate_id, site_type, site_index, site_coords,
+                     height, orientation, cif, relaxed, energy, adsorption_energy)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        config_id,
+                        data.get("slab_id", ""),
+                        data.get("adsorbate_id", ""),
+                        data.get("site_type", ""),
+                        data.get("site_index", None),
+                        json.dumps(data.get("site_coords", [])),
+                        data.get("height", None),
+                        data.get("orientation", "default"),
+                        data["cif"],
+                        1 if data.get("relaxed", False) else 0,
+                        data.get("energy", None),
+                        data.get("adsorption_energy", None),
+                    ),
+                )
+        else:
+            raise ValueError(f"Unknown structure_type: {structure_type}")
+
+        # Add additional properties if provided
+        if additional_properties:
+            for column_name, data_type in additional_properties.items():
+                from contextlib import suppress
+
+                with suppress(sqlite3.OperationalError):
+                    cursor.execute(
+                        f"ALTER TABLE {table_name} ADD COLUMN {column_name} {data_type}"
+                    )
+
+    return f"Saved {len(structures)} {structure_type} structures to {table_name} in {db_path}"
 
 
 @tool
-def save_adsorbate_slab_configs_to_db(
-    db_path: str, configs_json: str, table_name: str = "adsorbate_slabs"
+def add_descriptor_column_to_db(
+    db_path: str,
+    table_name: str,
+    descriptor_type: str,
+    descriptor_function_code: str,
+    batch_size: int = 100,
+    dependencies: list | None = None,
 ) -> str:
     """
-    Save adsorbate+slab configs to SQLite DB.
+    Add one or more descriptor columns to a database table and compute values efficiently.
+    Specialized for ML feature calculation with support for batch processing.
 
     Args:
-        db_path: Path to SQLite database file.
-        configs_json: JSON string from `generate_adsorbate_slab_configs`.
-        table_name: Name of the database table.
+        db_path: Path to database.
+        table_name: Table name to modify.
+        descriptor_type: Type of descriptor to add (e.g., "coordination", "d_band", "bond_length").
+        descriptor_function_code: String of a Python function that accepts a row dict and returns
+                                 a dict mapping column names to values.
+        batch_size: Number of rows to process in each batch for memory efficiency.
+        dependencies: List of other tables this calculation depends on (for joining data).
 
     Returns:
-        Status string.
+        Status string with descriptor statistics.
     """
     import json
     import sqlite3
+    from collections import defaultdict
 
-    configs = json.loads(configs_json)
+    import numpy as np
 
-    with sqlite3.connect(db_path) as conn:
-        cursor = conn.cursor()
-
-        cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                config_id TEXT PRIMARY KEY,
-                site_type TEXT,
-                site_index INTEGER,
-                site_coords TEXT,
-                height REAL,
-                cif TEXT
-            )
-        """)
-
-        for config_id, data in configs.items():
-            cursor.execute(
-                f"""
-                INSERT OR REPLACE INTO {table_name}
-                (config_id, site_type, site_index, site_coords, height, cif)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    config_id,
-                    data["site_type"],
-                    data["site_index"],
-                    json.dumps(data["site_coords"]),
-                    data["height"],
-                    data["cif"],
-                ),
-            )
-
-    return f"Saved {len(configs)} adsorbate+slab configs to {table_name} in {db_path}"
-
-
-@tool
-def add_column_to_db_table(
-    db_path: str, table_name: str, column_name: str, compute_function_code: str
-) -> str:
-    """
-    Add a new column to an existing SQLite table and compute its values.
-
-    Args:
-        db_path: Path to database
-        table_name: Table name
-        column_name: Name of new column to add
-        compute_function_code: String of a Python function that accepts a row dict and returns a value.
-
-    Example:
-        compute_function_code = '''
-        def compute(row):
-            return len(row["cif"])  # Example: size of CIF string
-        '''
-
-    Returns:
-        Status string
-    """
-    import sqlite3
-
+    # Execute the provided descriptor function code
     local_vars = {}
-    exec(compute_function_code, {}, local_vars)
-    compute = local_vars.get("compute")
+    exec(descriptor_function_code, {}, local_vars)
+    compute_descriptor = local_vars.get("compute_descriptor")
 
-    if not compute:
-        raise ValueError("compute_function_code must define a 'compute(row)' function.")
+    if not compute_descriptor:
+        raise ValueError(
+            "descriptor_function_code must define a 'compute_descriptor(row)' function."
+        )
+
+    # Statistics to track descriptor calculations
+    stats = defaultdict(
+        lambda: {
+            "count": 0,
+            "min": float("inf"),
+            "max": float("-inf"),
+            "sum": 0,
+            "sum_sq": 0,
+        }
+    )
 
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # Add column if not exists
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        columns = [col[1] for col in cursor.fetchall()]
-        if column_name not in columns:
-            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name}")
+        # Get total row count for progress reporting
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+        total_rows = cursor.fetchone()[0]
 
-        # Fetch all rows
-        cursor.execute(f"SELECT * FROM {table_name}")
+        # Process in batches for memory efficiency
+        for offset in range(0, total_rows, batch_size):
+            # Fetch a batch of rows
+            cursor.execute(
+                f"SELECT rowid, * FROM {table_name} LIMIT {batch_size} OFFSET {offset}"
+            )
+            rows = cursor.fetchall()
+
+            batch_updates = []
+            new_columns = set()
+
+            # Process each row in the batch
+            for row in rows:
+                row_dict = dict(row)
+
+                # If we need data from other tables (e.g., joining bulk + slab data)
+                if dependencies:
+                    for dep_table in dependencies:
+                        join_column = (
+                            f"{dep_table}_id"  # Assume foreign key naming convention
+                        )
+                        if join_column in row_dict:
+                            join_id = row_dict[join_column]
+                            dep_cursor = conn.cursor()
+                            dep_cursor.execute(
+                                f"SELECT * FROM {dep_table} WHERE {join_column.split('_')[0]}_id = ?",
+                                (join_id,),
+                            )
+                            dep_row = dep_cursor.fetchone()
+                            if dep_row:
+                                # Add dependency data to row_dict with prefixed keys
+                                row_dict.update(
+                                    {
+                                        f"{dep_table}_{k}": v
+                                        for k, v in dict(dep_row).items()
+                                    }
+                                )
+
+                # Calculate descriptors for this row
+                try:
+                    descriptor_values = compute_descriptor(row_dict)
+
+                    # Update column tracking
+                    for col_name, value in descriptor_values.items():
+                        new_columns.add(col_name)
+
+                        # Track statistics for numerical values
+                        if isinstance(value, int | float) and not isinstance(
+                            value, bool
+                        ):
+                            stats[col_name]["count"] += 1
+                            stats[col_name]["min"] = min(stats[col_name]["min"], value)
+                            stats[col_name]["max"] = max(stats[col_name]["max"], value)
+                            stats[col_name]["sum"] += value
+                            stats[col_name]["sum_sq"] += value * value
+
+                    # Add to batch updates
+                    batch_updates.append((row_dict["rowid"], descriptor_values))
+
+                except Exception as e:
+                    logger.info(
+                        f"Error calculating descriptors for row {row_dict.get('rowid')}: {e}"
+                    )
+
+            # Make sure all new columns exist in the table
+            for col_name in new_columns:
+                try:
+                    # Try to determine column type from first successful calculation
+                    first_value = next(
+                        (
+                            values[col_name]
+                            for _, values in batch_updates
+                            if col_name in values
+                        ),
+                        None,
+                    )
+
+                    col_type = "TEXT"
+                    if isinstance(first_value, int):
+                        col_type = "INTEGER"
+                    elif isinstance(first_value, float):
+                        col_type = "REAL"
+                    elif isinstance(first_value, bool):
+                        col_type = "INTEGER"  # SQLite has no boolean
+
+                    cursor.execute(
+                        f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}"
+                    )
+                except sqlite3.OperationalError:
+                    # Column likely already exists
+                    pass
+
+            # Apply all updates
+            for rowid, values in batch_updates:
+                for col_name, val in values.items():  # Renamed loop variable to 'val'
+                    # Convert non-primitive types to JSON
+                    if not isinstance(val, int | float | str | bool | type(None)):
+                        serialized_val = json.dumps(val)
+
+                    # Update the column
+                    cursor.execute(
+                        f"UPDATE {table_name} SET {col_name} = ? WHERE rowid = ?",
+                        (serialized_val, rowid),
+                    )
+
+    # Calculate final statistics
+    for data in stats.values():
+        if data["count"] > 0:
+            mean = data["sum"] / data["count"]
+            variance = (data["sum_sq"] / data["count"]) - (mean * mean)
+            std_dev = np.sqrt(max(0, variance))
+
+            data["mean"] = mean
+            data["std_dev"] = std_dev
+
+    # Format results
+    results = {
+        "descriptor_type": descriptor_type,
+        "table": table_name,
+        "rows_processed": total_rows,
+        "columns_added": list(new_columns),
+        "statistics": dict(stats),
+    }
+
+    return json.dumps(results, indent=2)
+
+
+@tool
+def generate_ml_dataset_format(
+    db_path: str,
+    table_name: str,
+    feature_columns: list,
+    target_column: str,
+    output_format: str = "csv",
+    output_path: str = "ml_dataset",
+    validation_split: float = 0.2,
+    normalize_features: bool = True,
+    include_metadata: bool = True,
+) -> str:
+    """
+    Generate a ML-ready dataset in the specified format with proper train/validation splits.
+
+    Args:
+        db_path: Path to SQLite database
+        table_name: Table containing the data
+        feature_columns: List of column names to use as features
+        target_column: Column name for the prediction target
+        output_format: Format for the dataset (csv, json, npz)
+        output_path: Base path/filename for the output files
+        validation_split: Fraction to use for validation set
+        normalize_features: Whether to normalize features
+        include_metadata: Whether to include feature metadata
+
+    Returns:
+        Status string with information about the generated dataset
+    """
+    import json
+    import sqlite3
+
+    import numpy as np
+
+    # Connect to database
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # Get column names from the table
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        all_columns = [row["name"] for row in cursor.fetchall()]
+
+        # Make sure specified columns exist
+        valid_feature_columns = [col for col in feature_columns if col in all_columns]
+
+        if not valid_feature_columns:
+            return json.dumps({"error": "No valid feature columns found"})
+
+        if target_column not in all_columns:
+            return json.dumps({"error": f"Target column '{target_column}' not found"})
+
+        # Fetch all data
+        columns_to_fetch = [*valid_feature_columns, target_column]
+        cursor.execute(f"SELECT {', '.join(columns_to_fetch)} FROM {table_name}")
         rows = cursor.fetchall()
 
-        updated = 0
-        for row in rows:
-            row_dict = dict(row)
-            value = compute(row_dict)
-            cursor.execute(
-                f"""
-                UPDATE {table_name}
-                SET {column_name} = ?
-                WHERE ROWID = ?
-            """,
-                (value, row["rowid"]),
-            )
-            updated += 1
+        if not rows:
+            return json.dumps({"error": "No data found in table"})
 
-    return f"Updated {updated} rows in {table_name} with column '{column_name}'"
+        # Convert to numpy arrays
+        feature_data = []
+        target_data = []
+
+        for row in rows:
+            # Only include rows with valid target values
+            if row[target_column] is not None:
+                try:
+                    target_val = float(row[target_column])
+
+                    # Extract feature values
+                    feature_row = []
+                    valid_row = True
+
+                    for col in valid_feature_columns:
+                        if row[col] is not None:
+                            try:
+                                feature_row.append(float(row[col]))
+                            except (ValueError, TypeError):
+                                valid_row = False
+                                break
+                        else:
+                            valid_row = False
+                            break
+
+                    # Only add complete rows
+                    if valid_row and len(feature_row) == len(valid_feature_columns):
+                        feature_data.append(feature_row)
+                        target_data.append(target_val)
+
+                except (ValueError, TypeError):
+                    # Skip rows with invalid target values
+                    continue
+
+        if not feature_data:
+            return json.dumps({"error": "No valid data rows found"})
+
+        # Convert to numpy arrays
+        X = np.array(feature_data)
+        y = np.array(target_data)
+
+        # Calculate normalization parameters if needed
+        normalization_params = {}
+        if normalize_features:
+            normalization_params = {}
+            for i, col in enumerate(valid_feature_columns):
+                col_data = X[:, i]
+                col_mean = np.mean(col_data)
+                col_std = np.std(col_data)
+
+                # Avoid division by zero
+                if col_std == 0:
+                    col_std = 1.0
+
+                normalization_params[col] = {
+                    "mean": float(col_mean),
+                    "std": float(col_std),
+                }
+
+                # Normalize the data
+                X[:, i] = (col_data - col_mean) / col_std
+
+        # Split into train/validation sets
+        n_samples = len(X)
+        rng = np.random.default_rng()
+        indices = rng.permutation(n_samples)
+        n_validation = int(validation_split * n_samples)
+
+        validation_idx = indices[:n_validation]
+        train_idx = indices[n_validation:]
+
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_val, y_val = X[validation_idx], y[validation_idx]
+
+        # Create output directory if it doesn't exist
+        from pathlib import Path
+
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        # Save in the requested format
+        metadata = {
+            "features": valid_feature_columns,
+            "target": target_column,
+            "normalization": normalization_params if normalize_features else None,
+            "dataset_size": n_samples,
+            "train_size": len(X_train),
+            "validation_size": len(X_val),
+            "validation_split": validation_split,
+        }
+
+        if output_format.lower() == "csv":
+            import csv
+
+            # Save training data
+            train_path = f"{output_path}_train.csv"
+            from pathlib import Path
+
+            with Path(train_path).open("w", newline="") as f:
+                writer = csv.writer(f)
+                # Write header
+                writer.writerow([*valid_feature_columns, target_column])
+                # Write data
+                for i in range(len(X_train)):
+                    writer.writerow([*list(X_train[i]), y_train[i]])
+
+            # Save validation data
+            val_path = f"{output_path}_validation.csv"
+            with Path(val_path).open("w", newline="") as f:
+                writer = csv.writer(f)
+                # Write header
+                writer.writerow([*valid_feature_columns, target_column])
+                # Write data
+                for i in range(len(X_val)):
+                    writer.writerow([*list(X_val[i]), y_val[i]])
+
+            # Save metadata if requested
+            if include_metadata:
+                meta_path = f"{output_path}_metadata.json"
+                with Path(meta_path).open("w") as f:
+                    json.dump(metadata, f, indent=2)
+
+            result = {
+                "format": "csv",
+                "train_path": train_path,
+                "validation_path": val_path,
+                "metadata_path": meta_path if include_metadata else None,
+                "train_samples": len(X_train),
+                "validation_samples": len(X_val),
+            }
+
+        elif output_format.lower() == "json":
+            # Save training data
+            train_path = f"{output_path}_train.json"
+            train_data = {
+                "features": valid_feature_columns,
+                "target": target_column,
+                "data": [
+                    {
+                        "features": {
+                            col: float(X_train[i, j])
+                            for j, col in enumerate(valid_feature_columns)
+                        },
+                        "target": float(y_train[i]),
+                    }
+                    for i in range(len(X_train))
+                ],
+            }
+            with Path(train_path).open("w") as f:
+                json.dump(train_data, f, indent=2)
+
+            # Save validation data
+            val_path = f"{output_path}_validation.json"
+            val_data = {
+                "features": valid_feature_columns,
+                "target": target_column,
+                "data": [
+                    {
+                        "features": {
+                            col: float(X_val[i, j])
+                            for j, col in enumerate(valid_feature_columns)
+                        },
+                        "target": float(y_val[i]),
+                    }
+                    for i in range(len(X_val))
+                ],
+            }
+            with Path(val_path).open("w") as f:
+                json.dump(val_data, f, indent=2)
+
+            # Save metadata if requested
+            if include_metadata:
+                meta_path = f"{output_path}_metadata.json"
+                with Path(meta_path).open("w") as f:
+                    json.dump(metadata, f, indent=2)
+
+            result = {
+                "format": "json",
+                "train_path": train_path,
+                "validation_path": val_path,
+                "metadata_path": meta_path if include_metadata else None,
+                "train_samples": len(X_train),
+                "validation_samples": len(X_val),
+            }
+
+        elif output_format.lower() == "npz":
+            # Save as numpy arrays
+            np_path = f"{output_path}.npz"
+            np.savez(
+                np_path,
+                X_train=X_train,
+                y_train=y_train,
+                X_val=X_val,
+                y_val=y_val,
+                feature_names=valid_feature_columns,
+                target_name=target_column,
+            )
+
+            # Save metadata if requested
+            if include_metadata:
+                meta_path = f"{output_path}_metadata.json"
+                with Path(meta_path).open("w") as f:
+                    json.dump(metadata, f, indent=2)
+
+            result = {
+                "format": "npz",
+                "npz_path": np_path,
+                "metadata_path": meta_path if include_metadata else None,
+                "train_samples": len(X_train),
+                "validation_samples": len(X_val),
+                "train_key": "X_train",
+                "train_target_key": "y_train",
+                "validation_key": "X_val",
+                "validation_target_key": "y_val",
+            }
+
+        else:
+            return json.dumps({"error": f"Unsupported output format: {output_format}"})
+
+        return json.dumps(result, indent=2)
 
 
 def create_tools() -> dict[str, Tool]:
@@ -1217,7 +1714,6 @@ def create_tools() -> dict[str, Tool]:
         "get_mp_surface_properties": get_mp_surface_properties,
         "get_mp_thermo_data": get_mp_thermo_data,
         # OCP training
-        "save_slabs_to_db": save_slabs_to_db,
-        "save_adsorbate_slab_configs_to_db": save_adsorbate_slab_configs_to_db,
-        "add_column_to_db_table": add_column_to_db_table,
+        "save_structures_to_db": save_structures_to_db,
+        "add_descriptor_column_to_db": add_descriptor_column_to_db,
     }
