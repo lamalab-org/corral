@@ -1,4 +1,4 @@
-# Example Environment with Spectra Elucidation
+# Example Environment with Spectra Elucidation Hard
 
 Install environment
 
