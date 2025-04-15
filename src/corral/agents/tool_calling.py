@@ -3,12 +3,17 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
 from promptstore import PromptStore
 
 from corral.agents.prompt_utils import get_prompt
-from corral.agents.utils import LiteLLMMessage, _build_user_content, llm_call
+from corral.agents.utils import (
+    LiteLLMMessage,
+    _build_user_content,
+    convert_to_openai_tool_format,
+    llm_call,
+)
 from corral.evaluate import BenchmarkInterface
-from loguru import logger
 
 
 @dataclass
@@ -100,88 +105,6 @@ class ToolCallingAgent:
 
         return messages
 
-    def convert_to_openai_tool_format(self, tools_dict: dict) -> list:
-        """
-        Convert a dictionary of tools into the OpenAI tool calling format.
-    
-        Args:
-            tools_dict (dict): Dictionary with a 'tools' list containing tool specifications
-    
-        Returns:
-            list: List of tools in OpenAI tool calling format
-        """
-        openai_tools = []
-    
-        for tool in tools_dict["tools"]:
-            function = {
-                "name": tool["name"],
-                "description": tool["description"],
-                "parameters": {"type": "object", "properties": {}, "required": []},
-            }
-    
-            if isinstance(tool["arguments"], str):
-                arg_names = [arg_name.strip() for arg_name in tool["arguments"].split(",")]
-                
-                for arg_name in arg_names:
-                    if arg_name:
-                        property_entry = {
-                            "type": "string",
-                            "description": f"Argument: {arg_name}"
-                        }
-                        function["parameters"]["properties"][arg_name] = property_entry
-                        function["parameters"]["required"].append(arg_name)
-                
-            else:
-                for arg in tool["arguments"]:
-                    if not isinstance(arg, dict):
-                        raise ValueError(
-                            f"Expected arg to be a dictionary but got: {arg}"
-                        )
-                    
-                    arg_type = arg.get("type")
-                    if not arg_type:
-                        raise ValueError(
-                            f"Argument type is missing for argument: {arg['name']}"
-                        )
-                    
-                    if arg_type == "str":
-                        arg_type = "string"
-                    elif arg_type == "bool":
-                        arg_type = "boolean"
-                    elif arg_type in ["int", "float"]:
-                        arg_type = "number"
-                    elif arg_type == "list[str]":
-                        arg_type = "array"
-                        property_entry = {
-                            "type": arg_type,
-                            "description": arg.get("description", ""),
-                            "items": {"type": "string"},
-                        }
-                        function["parameters"]["properties"][arg["name"]] = property_entry
-    
-                        if arg.get("required", False):
-                            function["parameters"]["required"].append(arg["name"])
-    
-                        continue
-                    else:
-                        raise ValueError(
-                            f"Unsupported argument type: {arg_type} for argument: {arg['name']}"
-                        )
-    
-                    property_entry = {"type": arg_type, "description": arg.get("description", "")}
-    
-                    if arg.get("choices"):
-                        property_entry["enum"] = arg["choices"]
-    
-                    function["parameters"]["properties"][arg["name"]] = property_entry
-    
-                    if arg.get("required", False):
-                        function["parameters"]["required"].append(arg["name"])
-    
-            openai_tools.append({"type": "function", "function": function})
-    
-        return openai_tools
-
     def run_agent(
         self,
         interface: BenchmarkInterface,
@@ -193,19 +116,19 @@ class ToolCallingAgent:
         """Run the agent to solve the task"""
         if history is None:
             history = []
-    
-        tools = self.convert_to_openai_tool_format(
+
+        tools = convert_to_openai_tool_format(
             interface.get_available_tools_for_task(task_id)
         )
         if task_prompt is None:
             task_guide = interface.get_task_prompt(task_id)
         else:
             task_guide = task_prompt
-    
+
         messages = self.create_prompt(
             task_guide=task_guide, history=history, examples=examples
         )
-    
+
         for _i in range(self.max_iterations):
             try:
                 llm_response = llm_call(
@@ -216,17 +139,17 @@ class ToolCallingAgent:
                     api_endpoint=self.api_endpoint,
                     **self.kwargs,
                 )
-    
+
                 content = llm_response.content
                 if content:
                     messages.append(LiteLLMMessage(role="assistant", content=content))
                     if "Final Answer:" in content:
                         return content, messages
-    
+
                 tool_calls = llm_response.tool_calls
                 if tool_calls:
                     messages.append(llm_response)
-                    
+
                     for called_tool in tool_calls:
                         action = Action(
                             tool_name=called_tool.function.name,
@@ -241,7 +164,7 @@ class ToolCallingAgent:
                                 result = function_call.error
                         except Exception as e:
                             result = str(e)
-    
+
                         function_name = str(called_tool.function.name)
 
                         messages.append(
@@ -262,8 +185,8 @@ class ToolCallingAgent:
                 messages.append(
                     LiteLLMMessage(
                         role="system",
-                        content=f"Error during tool execution: {str(e)}",
+                        content=f"Error during tool execution: {e!s}",
                     )
                 )
-    
+
         return "Error solving the task. Maximum iterations reached.", messages

@@ -743,16 +743,25 @@ def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
             if hasattr(msg, "name") and msg.name:
                 message_dict["name"] = msg.name
             if hasattr(msg, "tool_calls") and msg.tool_calls:
-                message_dict["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in msg.tool_calls
-                ]
+                message_dict["tool_calls"] = []
+                for tc in msg.tool_calls:
+                    if isinstance(tc, dict):
+                        tool_call = {
+                            "id": tc.get("id"),
+                            "function": {
+                                "name": tc.get("function", {}).get("name"),
+                                "arguments": tc.get("function", {}).get("arguments"),
+                            },
+                        }
+                    else:
+                        tool_call = {
+                            "id": tc.id,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                    message_dict["tool_calls"].append(tool_call)
 
         serializable_messages.append(message_dict)
 
