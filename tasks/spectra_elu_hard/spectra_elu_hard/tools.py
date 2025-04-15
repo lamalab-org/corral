@@ -261,7 +261,6 @@ def retrieve_protons_shifts() -> list[dict[str, str]]:
             },
             {"Proton": "Methyl (CH₃-CO-)", "δ / ppm": "1.8 - 2.7"},
             {"Proton": "Methylene (CH₂-O-)", "δ / ppm": "~3.6 - 4.7"},
-            {"Proton": "Methylene (CH₂-O-)", "δ / ppm": "~3.6 - 4.7"},
             {"Proton": "Methylene (CH₂-R₁R₂)", "δ / ppm": "~1.3"},
             {"Proton": "Methine (CH-R₁R₂R₃)", "δ / ppm": "~1.5"},
             {"Proton": "Cyclopropane", "δ / ppm": "0.22"},
