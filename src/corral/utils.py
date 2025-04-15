@@ -49,6 +49,7 @@ def vector_database_search(
     collection_name: str = "default_collection",
     path: str | None = None,
     top_k: int = 5,
+    metadata_only: bool = False,
 ) -> list[dict]:
     """Retrieve the top 5 most similar instructions from a vector database based on the query.
 
@@ -57,6 +58,7 @@ def vector_database_search(
         collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
         path (str, optional): The path to the vector database directory. Defaults to None, which uses "vector_db" in the current directory.
         top_k (int, optional): The number of similar instructions to retrieve. Default is 5.
+        metadata_only (bool, optional): If True, retrieves only metadata without document content. Default is False.
 
     Returns:
         list[dict]: A list of dictionaries containing the top 5 most similar instructions with their content and metadata
@@ -85,26 +87,29 @@ def vector_database_search(
                 f"Collection '{collection_name}' does not exist: {e!s}"
             ) from e
 
-        results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
+        include = (
+            ["metadatas", "distances"]
+            if metadata_only
+            else ["documents", "metadatas", "distances"]
+        )
+
+        results = collection.query(
+            query_embeddings=[query_embedding], n_results=top_k, include=include
+        )
 
         formatted_results = []
-        for _i, (doc, doc_id, distance) in enumerate(
-            zip(
-                results["documents"][0],
-                results["ids"][0],
-                results["distances"][0],
-                strict=False,
-            )
-        ):
-            similarity_score = 1 - distance
 
-            formatted_results.append(
-                {
-                    "content": doc,
-                    "metadata": {"id": doc_id},
-                    "similarity_score": similarity_score,
-                }
-            )
+        for i in range(len(results["ids"][0])):
+            result_item = {
+                "id": results["ids"][0][i],
+                "metadata": results["metadatas"][0][i],
+                "similarity_score": 1 - results["distances"][0][i],
+            }
+
+            if not metadata_only and "documents" in results:
+                result_item["content"] = results["documents"][0][i]
+
+            formatted_results.append(result_item)
 
         return formatted_results
 
@@ -221,12 +226,157 @@ def _tokenize_and_split_chunks(
     return processed_chunks
 
 
+def _setup_collection(
+    client: chromadb.PersistentClient, collection_name: str, update_mode: str
+) -> tuple[Any, str, bool]:
+    """Setup the collection based on the update mode and return it with operation status."""
+    collection_list = client.list_collections()
+    collection_exists = collection_name in collection_list
+    operation = "created"  # Default operation status
+
+    logger.debug(f"Available collections: {collection_list}")
+    logger.debug(f"Collection '{collection_name}' exists: {collection_exists}")
+
+    if update_mode == "recreate" and collection_exists:
+        logger.info(
+            f"Collection '{collection_name}' already exists, deleting before recreation"
+        )
+        client.delete_collection(name=collection_name)
+        collection = client.create_collection(name=collection_name)
+        logger.info(f"Created collection '{collection_name}'")
+    elif not collection_exists:
+        logger.info(
+            f"Collection '{collection_name}' does not exist, creating new collection"
+        )
+        collection = client.create_collection(name=collection_name)
+        logger.info(f"Created new collection '{collection_name}'")
+    else:
+        logger.info(
+            f"Using existing collection '{collection_name}' for {update_mode} operation"
+        )
+        collection = client.get_collection(name=collection_name)
+        if update_mode == "append":
+            operation = "updated (appended)"
+        elif update_mode == "upsert":
+            operation = "updated (upserted)"
+
+    return collection, operation, collection_exists
+
+
+def _validate_inputs(
+    chunks: list[str], update_mode: str, metadatas: list[dict] | None
+) -> None:
+    """Validate inputs for the create_vector_database function."""
+    logger.info(f"Creating vector database with {len(chunks)} chunks")
+
+    if metadatas is not None and len(metadatas) != len(chunks):
+        raise ValueError(
+            f"Length of metadata ({len(metadatas)}) must match length of chunks ({len(chunks)})"
+        )
+
+    if update_mode not in ["recreate", "append", "upsert"]:
+        raise ValueError("update_mode must be one of: 'recreate', 'append', 'upsert'")
+
+
+def _setup_database_environment(
+    path: str | None,
+) -> tuple[Path, chromadb.PersistentClient]:
+    """Setup the vector database environment and return the directory and client."""
+    persist_directory = Path(Path.cwd()) / "vector_db" if path is None else Path(path)
+    persist_directory.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Using persist directory: {persist_directory}")
+
+    return persist_directory, chromadb.PersistentClient(path=str(persist_directory))
+
+
+def _add_documents_to_collection(
+    collection,
+    update_mode: str,
+    batch_embeddings: list[list[float]],
+    batch_chunks: list[str],
+    batch_ids: list[str],
+    batch_metadatas: list[dict] | None,
+) -> None:
+    """Add documents to the collection using the appropriate method based on update mode."""
+    try:
+        if update_mode == "upsert":
+            collection.upsert(
+                embeddings=batch_embeddings,
+                documents=batch_chunks,
+                ids=batch_ids,
+                metadatas=batch_metadatas,
+            )
+        else:  # For both "recreate" and "append" modes
+            collection.add(
+                embeddings=batch_embeddings,
+                documents=batch_chunks,
+                ids=batch_ids,
+                metadatas=batch_metadatas,
+            )
+    except Exception as e:
+        logger.error(f"Error during {update_mode} operation: {e!s}")
+        raise RuntimeError(f"Error during {update_mode} operation: {e!s}") from e
+
+
+def _process_chunks_in_batches(
+    collection,
+    processed_chunks: list[str],
+    embeddings: list[list[float]],
+    start_id: int,
+    update_mode: str,
+    metadatas: list[dict] | None,
+) -> int:
+    """Process chunks in batches to add them to the collection."""
+    BATCH_SIZE = 1000
+    total_processed = 0
+
+    logger.info(
+        f"Processing {len(processed_chunks)} documents with embeddings in batches of {BATCH_SIZE}"
+    )
+
+    # Process in batches to reduce memory usage
+    for batch_idx in range(0, len(processed_chunks), BATCH_SIZE):
+        batch_end = min(batch_idx + BATCH_SIZE, len(processed_chunks))
+        batch_chunks = processed_chunks[batch_idx:batch_end]
+        batch_embeddings = embeddings[batch_idx:batch_end]
+        batch_ids = [
+            f"id_{i}" for i in range(start_id + batch_idx, start_id + batch_end)
+        ]
+        batch_metadatas = (
+            metadatas[batch_idx:batch_end] if metadatas is not None else None
+        )
+
+        logger.info(
+            f"Processing batch {batch_idx//BATCH_SIZE + 1}/{(len(processed_chunks) + BATCH_SIZE - 1)//BATCH_SIZE} "
+            f"({batch_end - batch_idx} documents)"
+        )
+
+        # Add documents using appropriate method based on update mode
+        _add_documents_to_collection(
+            collection,
+            update_mode,
+            batch_embeddings,
+            batch_chunks,
+            batch_ids,
+            batch_metadatas,
+        )
+
+        total_processed += batch_end - batch_idx
+        logger.info(f"Processed {total_processed}/{len(processed_chunks)} documents")
+
+        # Force garbage collection between batches
+        gc.collect()
+
+    return total_processed
+
+
 def create_vector_database(
     chunks: list[str],
     collection_name: str = "default_collection",
     path: str | None = None,
     chunk_size: int = 8192,
     update_mode: str = "recreate",
+    metadatas: list[dict] | None = None,
 ) -> str:
     """Create or update a vector database from text instructions.
 
@@ -238,109 +388,48 @@ def create_vector_database(
         update_mode (str, optional): How to handle existing collections: "recreate" deletes and recreates the collection,
                     "append" adds new chunks to existing collection, "upsert" updates existing chunks and
                     adds new ones. Default is "recreate".
+        metadatas (list[dict], optional): Metadata for each chunk. Default is None.
 
     Returns:
         str: A message indicating the success of the operation
 
     Raises:
-        ValueError: If OPENAI_API_KEY environment variable is not set or update_mode is invalid
+        ValueError: If update_mode is invalid or if metadata length doesn't match chunks length
+        RuntimeError: If there's an error during database operations
     """
-    logger.info(
-        f"Creating vector database with {len(chunks)} chunks in collection '{collection_name}'"
-    )
-
-    if update_mode not in ["recreate", "append", "upsert"]:
-        raise ValueError("update_mode must be one of: 'recreate', 'append', 'upsert'")
-
-    persist_directory = Path(Path.cwd()) / "vector_db" if path is None else Path(path)
-
-    persist_directory.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Using persist directory: {persist_directory}")
-
-    processed_chunks = _tokenize_and_split_chunks(chunks, chunk_size)
-    logger.info(
-        f"Processed {len(chunks)} chunks into {len(processed_chunks)} chunks after tokenization and splitting"
-    )
-
-    client = chromadb.PersistentClient(path=str(persist_directory))
-
     try:
-        collection_list = client.list_collections()
-        collection_exists = collection_name in collection_list
+        # Validate inputs
+        _validate_inputs(chunks, update_mode, metadatas)
 
-        logger.debug(f"Available collections: {collection_list}")
-        logger.debug(f"Collection '{collection_name}' exists: {collection_exists}")
+        # Setup database environment
+        persist_directory, client = _setup_database_environment(path)
 
-        if update_mode == "recreate" and collection_exists:
-            logger.info(
-                f"Collection '{collection_name}' already exists, deleting before recreation"
-            )
-            client.delete_collection(name=collection_name)
-            collection = client.create_collection(name=collection_name)
-            logger.info(f"Created collection '{collection_name}'")
-        elif not collection_exists:
-            logger.info(
-                f"Collection '{collection_name}' does not exist, creating new collection"
-            )
-            collection = client.create_collection(name=collection_name)
-            logger.info(f"Created new collection '{collection_name}'")
-        else:
-            logger.info(
-                f"Using existing collection '{collection_name}' for {update_mode} operation"
-            )
-            collection = client.get_collection(name=collection_name)
-
-        logger.info(f"Generating embeddings for {len(processed_chunks)} chunks")
-        embeddings = embed_text(
-            chunks=processed_chunks,
+        # Process chunks for embedding
+        processed_chunks = _tokenize_and_split_chunks(chunks, chunk_size)
+        logger.info(
+            f"Processed {len(chunks)} chunks into {len(processed_chunks)} chunks after tokenization and splitting"
         )
 
-        # For recreate or new collection, use sequential IDs
-        if update_mode == "recreate" or not collection_exists:
-            ids = [f"id_{i}" for i in range(len(processed_chunks))]
-            logger.info(
-                f"Adding {len(processed_chunks)} documents with embeddings to collection"
-            )
-            collection.add(
-                embeddings=embeddings,
-                documents=processed_chunks,
-                ids=ids,
-            )
-            operation = "created"
-        # For append mode, get existing IDs to avoid conflicts
-        else:
-            try:
-                existing_count = collection.count()
-                start_id = existing_count
-                ids = [
-                    f"id_{i}" for i in range(start_id, start_id + len(processed_chunks))
-                ]
+        # Setup collection based on update mode
+        collection, operation, collection_exists = _setup_collection(
+            client, collection_name, update_mode
+        )
 
-                if update_mode == "append":
-                    logger.info(
-                        f"Appending {len(processed_chunks)} documents with embeddings to collection"
-                    )
-                    collection.add(
-                        embeddings=embeddings,
-                        documents=processed_chunks,
-                        ids=ids,
-                    )
-                    operation = "updated (appended)"
-                elif update_mode == "upsert":
-                    logger.info(
-                        f"Upserting {len(processed_chunks)} documents with embeddings to collection"
-                    )
-                    collection.upsert(
-                        embeddings=embeddings,
-                        documents=processed_chunks,
-                        ids=ids,
-                    )
-                    operation = "updated (upserted)"
-            except Exception as e:
-                logger.error(f"Error during {update_mode} operation: {e!s}")
-                raise RuntimeError(
-                    f"Error during {update_mode} operation: {e!s}"
-                ) from e
+        # Generate embeddings
+        logger.info(f"Generating embeddings for {len(processed_chunks)} chunks")
+        embeddings = embed_text(chunks=processed_chunks)
+
+        # Process and add documents in batches
+        start_id = (
+            0
+            if update_mode == "recreate" or not collection_exists
+            else collection.count()
+        )
+
+        # Process in batches and add to collection
+        _process_chunks_in_batches(
+            collection, processed_chunks, embeddings, start_id, update_mode, metadatas
+        )
 
         return f"Successfully {operation} vector database with {len(processed_chunks)} instructions in collection '{collection_name}'."
 
