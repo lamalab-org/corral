@@ -173,11 +173,10 @@ def convert_sd_to_vector_db(
             smiles = Chem.MolToSmiles(mol)
             smiles_list.append(smiles)
 
-            # Extract properties from molecule
-            properties = {}
-            for prop_name in mol.GetPropNames():
-                properties[prop_name] = mol.GetProp(prop_name)
-
+            properties = {
+                prop_name: mol.GetProp(prop_name)
+                for prop_name in mol.GetPropNames()
+            }
             # Parse NMR data
             nmr_data = parse_nmr_properties(properties)
 
