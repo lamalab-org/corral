@@ -140,11 +140,13 @@ class ToolCallingAgent:
                     **self.kwargs,
                 )
 
+                final_answer_match = re.search(r"Final Answer: (.*)", llm_response)
+
                 content = llm_response.content
                 if content:
-                    messages.append(LiteLLMMessage(role="assistant", content=content))
-                    if "Final Answer:" in content:
-                        return content, messages
+                    if final_answer_match in content:
+                        messages.append(LiteLLMMessage(role="assistant", content=content))
+                        return final_answer_match.group(1).strip(), messages
 
                 tool_calls = llm_response.tool_calls
                 if tool_calls:
