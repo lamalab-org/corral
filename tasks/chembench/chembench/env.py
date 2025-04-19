@@ -127,9 +127,6 @@ class ChemBenchEnvironment(Environment):
             self.all_score_maps.extend(score_maps)
             current_idx += len(prompts)
 
-        if len(self.all_prompts) != 1:
-            raise ValueError("Only one prompt per task is supported")
-
         return f"\n\nSolve this problem: {prompts[0][0]['content']}"
 
     def score(self) -> float:
