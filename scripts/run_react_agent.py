@@ -14,12 +14,12 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "anthropic/claude-3-7-sonnet-20250219", task_ids: list | None = None
+    model: str = "anthropic/claude-3-7-sonnet-20250219", task_ids: list | None = None, temperature: float = 0.0
 ):
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = ReActAgent(model=model, max_iterations=10, temperature=0.0)
+    agent = ReActAgent(model=model, max_iterations=10, temperature=temperature)
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark

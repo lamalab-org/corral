@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pickle
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Protocol
 
 import requests
@@ -110,9 +113,77 @@ class Agent(Protocol):
 class MatAgentBenchmark:
     """Runs benchmarks using an agent implementation"""
 
-    def __init__(self, interface: BenchmarkInterface, agent: Agent):
+    def __init__(
+        self,
+        interface: BenchmarkInterface,
+        agent: Agent,
+        checkpoint_dir: str = "./benchmark_checkpoints",
+        checkpoint_name: str | None = None,
+    ):
         self.interface = interface
         self.agent = agent
+        self.checkpoint_dir = Path(checkpoint_dir)
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.checkpoint_name = (
+            checkpoint_name
+            if checkpoint_name is not None
+            else f"checkpoint_{self.agent.__class__.__name__}"
+        )
+
+    def _get_checkpoint_path(self, session_id: str) -> Path:
+        """Get path for checkpoint file"""
+        return self.checkpoint_dir / f"{self.checkpoint_name}_{session_id}.pkl"
+
+    def _save_checkpoint(
+        self,
+        session_id: str,
+        task_results: dict,
+        current_task: str,
+        completed_trials: int,
+    ) -> None:
+        """Save checkpoint with current benchmark progress"""
+        checkpoint = {
+            "task_results": task_results,
+            "current_task": current_task,
+            "completed_trials": completed_trials,
+            "session_id": session_id,
+        }
+        with self._get_checkpoint_path(session_id).open("wb") as f:
+            pickle.dump(checkpoint, f)
+        logger.info(f"Checkpoint saved for session {session_id}")
+
+    def _load_checkpoint(self, session_id: str) -> dict | None:
+        """Load checkpoint if available"""
+        path = self._get_checkpoint_path(session_id)
+        if path.exists():
+            with path.open("rb") as f:
+                return pickle.load(f)
+        return None
+
+    def _resume_checkpoint(
+        self, session_id: str, task_ids: list[str], trials_per_task: int
+    ) -> tuple[dict, int, int]:
+        """Resume from checkpoint if available"""
+        checkpoint = self._load_checkpoint(session_id)
+        task_results = {}
+        start_task_idx = 0
+        start_trial = 0
+
+        if checkpoint:
+            logger.info(f"Resuming from checkpoint for session {session_id}")
+            task_results = checkpoint["task_results"]
+            current_task = checkpoint["current_task"]
+            completed_trials = checkpoint["completed_trials"]
+            if current_task in task_ids:
+                start_task_idx = task_ids.index(current_task)
+                start_trial = completed_trials
+                if (
+                    completed_trials >= trials_per_task
+                    and start_task_idx < len(task_ids) - 1
+                ):
+                    start_task_idx += 1
+                    start_trial = 0
+        return task_results, start_task_idx, start_trial
 
     def bench(
         self,
@@ -120,14 +191,17 @@ class MatAgentBenchmark:
         trials_per_task: int = 1,
         k_values: int | list[int] | None = None,
         verbose: bool | None = False,
+        session_id: str | None = None,
     ) -> BenchmarkResult:
-        """Run benchmark on specified tasks or all available tasks
+        """Run benchmark on specified tasks or all available tasks with checkpointing
 
         Args:
             task_ids: list of task_ids to run, or None for all tasks
             trials_per_task: Number of trials per task, Default to k=1 to number of trials
             k_values: list of k values, for which pass metrics are calculated. Default to [1, 2, 3, ..., trials_per_task]
-
+            verbose: Whether to save agent messages
+            session_id: Unique ID for this benchmark session, used for checkpointing.
+                If None, a timestamp-based ID is generated.
         """
         if task_ids is None:
             task_ids = self.interface.get_available_tasks()
@@ -135,7 +209,11 @@ class MatAgentBenchmark:
         if trials_per_task == 0:
             raise ValueError("Number of trials per task must be greater than 0")
 
-        # Validate and set k_values
+        if session_id is None:
+            session_id = (
+                f"session_{datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
+            )
+
         if k_values is None:
             k_values = list(range(1, trials_per_task + 1))
         elif isinstance(k_values, int):
@@ -143,31 +221,35 @@ class MatAgentBenchmark:
         elif isinstance(k_values, list) and max(k_values) > trials_per_task:
             raise ValueError("k value is greater than the number of trials")
 
+        task_results, start_task_idx, start_trial = self._resume_checkpoint(
+            session_id, task_ids, trials_per_task
+        )
         logger.info(
             f"Running benchmark on tasks: {task_ids} with {trials_per_task} trials per task"
         )
 
-        task_results: dict[str, TaskTrialResults] = {}
-
-        for task_id in task_ids:
+        for _i, task_id in enumerate(task_ids[start_task_idx:], start=start_task_idx):
             logger.info(f"Running task {task_id}")
+            if task_id not in task_results:
+                task_trials = TaskTrialResults(task_id=task_id)
+                task_results[task_id] = task_trials
+            else:
+                task_trials = task_results[task_id]
 
-            # Create container for this task's trials
-            task_trials = TaskTrialResults(task_id=task_id)
-
-            for _ in range(trials_per_task):
-                # Get answer from agent
-                answer, messages = self.agent.run_agent(self.interface, task_id)
-                # Submit and store result
-                result = self.interface.submit_answer(task_id, answer)
-                task_trials.trials.append(result)
-
-                if verbose:
-                    save_agent_messages(
-                        messages, task_id, self.agent.__class__.__name__
-                    )
-
-            # Store all trials for this task
-            task_results[task_id] = task_trials
+            for j in range(start_trial, trials_per_task):
+                try:
+                    answer, messages = self.agent.run_agent(self.interface, task_id)
+                    result = self.interface.submit_answer(task_id, answer)
+                    task_trials.trials.append(result)
+                    if verbose:
+                        save_agent_messages(
+                            messages, task_id, self.agent.__class__.__name__
+                        )
+                    self._save_checkpoint(session_id, task_results, task_id, j + 1)
+                except Exception as e:
+                    logger.error(f"Error during benchmark: {e}")
+                    self._save_checkpoint(session_id, task_results, task_id, j)
+                    raise
+            start_trial = 0
 
         return BenchmarkResult(task_results=task_results, k=k_values)
