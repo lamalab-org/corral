@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pickle
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -200,7 +201,7 @@ class MatAgentBenchmark:
             k_values: list of k values, for which pass metrics are calculated. Default to [1, 2, 3, ..., trials_per_task]
             verbose: Whether to save agent messages
             session_id: Unique ID for this benchmark session, used for checkpointing.
-                If None, it will be an empty string, and the checkpoint will be saved as checkpoint_{agent_name}_.pkl
+                If None, a timestamp-based ID is generated.
         """
         if task_ids is None:
             task_ids = self.interface.get_available_tasks()
@@ -209,7 +210,9 @@ class MatAgentBenchmark:
             raise ValueError("Number of trials per task must be greater than 0")
 
         if session_id is None:
-            session_id = ""
+            session_id = (
+                f"session_{datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
+            )
 
         if k_values is None:
             k_values = list(range(1, trials_per_task + 1))
