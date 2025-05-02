@@ -11,11 +11,11 @@ def setup_litellm():
     litellm.set_verbose = True
 
 
-def run_benchmark(model: str = "gpt-4o", task_ids: list | None = None):
+def run_benchmark(model: str = "gpt-4o", task_ids: list | None = None, temperature: float = 0.0):
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = LLMPlanner(model=model)
+    agent = LLMPlanner(model=model, temperature=temperature)
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark
