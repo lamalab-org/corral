@@ -186,6 +186,7 @@ class Environment(ABC):
 
     def __init__(self, task_id: str):
         self.task_id = task_id
+        self.chained_tasks = False
         self.tools: dict[str, Tool] = {}
         self.trial_states: dict[str, TaskState] = {}
         self.trial_counter = -1

@@ -115,9 +115,9 @@ class TaskGroupEnvironment(Environment):
             str, Tool
         ],  # here this is a dict with keys as name for tools, and values are tool objects. eg:  "get_structure_from_mp_text": get_structure_from_mp_text,
         taskgroup_common_tools: dict[str, Tool] | None = None,
+        chained_tasks: bool = True,
     ):
         self.task_group = task_group
-        self.task_id = task_id
         self.subtask_specific_tools = (
             subtask_specific_tools  # tools specific to only the subtask
         )
@@ -132,7 +132,8 @@ class TaskGroupEnvironment(Environment):
 
         # Initialize tools and environment
         self.tools = {}
-        super().__init__(f"{task_group.group_id}_{task_id}")
+        self.task_id = f"{task_group.group_id}_{task_id}"
+        self.chained_tasks = chained_tasks
 
         # Add required tools for the task
         for tool_name in self.current_task.tools:
@@ -292,6 +293,9 @@ if __name__ == "__main__":
             "CORRAL_TASKS_PATH",
             Path(__file__).parent / "tasks" / "catalysis_tasks.json",
         )
+        chained_tasks = (
+            os.environ.get("CORRAL_DEPENDENCY_CHAIN", "false").lower() == "true"
+        )
 
     # Get server settings from environment if provided
     host = os.environ.get("CORRAL_HOST", "0.0.0.0")
@@ -314,6 +318,7 @@ if __name__ == "__main__":
         task_json_path=tasks_json_path,
         taskgroup_common_tools=fs_tools,
         work_dir=work_dir,
+        chained_tasks=chained_tasks,
     )
 
     logger.info("\nCreated Environments:")
