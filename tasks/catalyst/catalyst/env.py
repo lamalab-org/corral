@@ -235,6 +235,7 @@ def create_environments(
     task_json_path: str | Path,
     taskgroup_common_tools: dict[str, Tool] | None = None,
     work_dir: str = BASE_WORK_DIR,
+    chained_tasks: bool = False,
 ) -> dict[str, TaskGroupEnvironment]:
     """Create environments for tasks defined in a JSON file
 
@@ -279,6 +280,7 @@ def create_environments(
             task_group=task_group,
             subtask_specific_tools=subtask_specific_tools,
             taskgroup_common_tools=taskgroup_common_tools,
+            chained_tasks=chained_tasks,
         )
 
     return environments
