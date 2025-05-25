@@ -15,6 +15,13 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         """Get list of available task IDs"""
         return list(environments.keys())
 
+    @app.get("/dependency_chain")
+    def get_dependency_chain_setting():
+        has_dependency_chain = any(
+            getattr(env, "chained_tasks", False) for env in environments.values()
+        )
+        return {"dependency_chain": has_dependency_chain}
+
     @app.get("/tasks/{task_id}/prompt")
     def get_task_prompt(task_id: str):
         """Get the task prompt for the agent"""

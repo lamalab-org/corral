@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 import pickle
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -18,15 +15,6 @@ from corral.report import (
 from corral.utils import save_agent_messages
 
 
-@dataclass
-class TaskResult:
-    """Result of a task submission"""
-
-    score: float
-    state: dict[str, Any]
-    tool_statistics: dict[str, Any]
-
-
 class BenchmarkInterface:
     """General interface for interacting with benchmark server"""
 
@@ -38,6 +26,14 @@ class BenchmarkInterface:
         response = requests.get(f"{self.base_url}/tasks")
         response.raise_for_status()
         return response.json()
+
+    def supports_dependency_chain(self) -> bool:
+        try:
+            response = requests.get(f"{self.base_url}/dependency_chain")
+            response.raise_for_status()
+            return response.json()["dependency_chain"]
+        except Exception:
+            return False
 
     def get_available_tools_for_task(self, task_id: str) -> str:
         """Get list of available tools for a task"""
