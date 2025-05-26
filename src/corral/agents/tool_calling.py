@@ -1,12 +1,20 @@
+import datetime
 import importlib.resources
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
 from promptstore import PromptStore
 
 from corral.agents.prompt_utils import get_prompt
-from corral.agents.utils import LiteLLMMessage, _build_user_content, llm_call
+from corral.agents.utils import (
+    LiteLLMMessage,
+    _build_user_content,
+    convert_to_openai_tool_format,
+    llm_call,
+)
 from corral.evaluate import BenchmarkInterface
 
 
@@ -31,6 +39,7 @@ class ToolCallingAgent:
         user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide` and `examples` as variables.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
+        agent_id (str, optional): The ID of the agent. If not provided, a unique ID will be generated.
         kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
@@ -43,6 +52,7 @@ class ToolCallingAgent:
         user_prompt: str | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
+        agent_id: str | None = None,
         **kwargs,
     ):
         """Initialize the agent"""
@@ -50,11 +60,17 @@ class ToolCallingAgent:
         self.max_iterations = max_iterations
         self.api_endpoint = api_endpoint
         self.temperature = temperature
+        self.agent_id = (
+            agent_id
+            or f"tool_agent-{datetime.datetime.now(tz=datetime.timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        )
+
         if prompt_store:
             self.store = prompt_store
         else:
             with importlib.resources.path("corral.agents", "") as style_path:
                 self.store = PromptStore(f"{style_path}/prompts")
+
         self.kwargs = kwargs
 
         self.system_prompt = (
@@ -84,77 +100,30 @@ class ToolCallingAgent:
         """
         messages: list[LiteLLMMessage] = []
         if self.system_prompt:
-            messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
+            messages.append(
+                LiteLLMMessage(
+                    role="system",
+                    content=self.system_prompt,
+                    name=f"system_{self.agent_id}",
+                )
+            )
         user_content = _build_user_content(
             agent="tool_calling",
             user_prompt=self.user_prompt,
             task_guide=task_guide,
             examples=examples,
         )
-        messages.append(LiteLLMMessage(role="user", content=user_content))
+        messages.append(
+            LiteLLMMessage(
+                role="user", content=user_content, name=f"user_{self.agent_id}"
+            )
+        )
 
         # History is meant to be the conversation history, so we add it to the messages
         if history:
             messages.extend(history)
 
         return messages
-
-    def convert_to_openai_tool_format(self, tools_dict: dict) -> list:
-        """
-        Convert a dictionary of tools into the OpenAI tool calling format.
-
-        Args:
-            tools_dict (dict): Dictionary with a 'tools' list containing tool specifications
-
-        Returns:
-            list: List of tools in OpenAI tool calling format
-        """
-        openai_tools = []
-
-        for tool in tools_dict["tools"]:
-            function = {
-                "name": tool["name"],
-                "description": tool["description"],
-                "parameters": {"type": "object", "properties": {}, "required": []},
-            }
-
-            for arg in tool["arguments"]:
-                arg_type = arg["type"]
-                if arg_type == "str":
-                    arg_type = "string"
-                elif arg_type == "bool":
-                    arg_type = "boolean"
-                elif arg_type in ["int", "float"]:
-                    arg_type = "number"
-                elif arg_type == "list[str]":
-                    arg_type = "array"
-                    property_entry = {
-                        "type": arg_type,
-                        "description": arg["description"],
-                        "items": {"type": "string"},
-                    }
-                    function["parameters"]["properties"][arg["name"]] = property_entry
-
-                    if arg["required"]:
-                        function["parameters"]["required"].append(arg["name"])
-
-                    continue
-                else:
-                    raise ValueError(f"Invalid argument type: {arg_type}")
-
-                property_entry = {"type": arg_type, "description": arg["description"]}
-
-                if arg["choices"]:
-                    property_entry["enum"] = arg["choices"]
-
-                function["parameters"]["properties"][arg["name"]] = property_entry
-
-                if arg["required"]:
-                    function["parameters"]["required"].append(arg["name"])
-
-            openai_tools.append({"type": "function", "function": function})
-
-        return openai_tools
 
     def run_agent(
         self,
@@ -164,22 +133,11 @@ class ToolCallingAgent:
         task_prompt: str | None = None,
         examples: list[str] | None = None,
     ) -> tuple[str, list[LiteLLMMessage]]:
-        """Run the agent to solve the task
-
-        Args:
-            interface (BenchmarkInterface): The interface to use.
-            task_id (str): The task ID to solve.
-            history (list[LiteLLMMessage], optional): The history items to include. Defaults to None.
-            task_prompt (str, optional): The task prompt to use. `task_prompt` is intended to be a plan or description about the task, that should always be provided when this agent is called as a subagent of a main orchestrator. Defaults to None.
-            examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
-
-        Returns:
-            tuple[str, List[LiteLLMMessage]]: The final answer and messages.
-        """
+        """Run the agent to solve the task"""
         if history is None:
             history = []
 
-        tools = self.convert_to_openai_tool_format(
+        tools = convert_to_openai_tool_format(
             interface.get_available_tools_for_task(task_id)
         )
         if task_prompt is None:
@@ -192,49 +150,77 @@ class ToolCallingAgent:
         )
 
         for _i in range(self.max_iterations):
-            llm_response = llm_call(
-                model=self.model,
-                messages=messages,
-                tools=tools,
-                temperature=self.temperature,
-                api_endpoint=self.api_endpoint,
-                **self.kwargs,
-            )
+            try:
+                llm_response = llm_call(
+                    model=self.model,
+                    messages=messages,
+                    tools=tools,
+                    temperature=self.temperature,
+                    api_endpoint=self.api_endpoint,
+                    **self.kwargs,
+                )
 
-            content = llm_response.content
-            if content:
-                messages.append(LiteLLMMessage(role="assistant", content=content))
-                if "Final Answer:" in content:
-                    return content, messages
-
-            tool_calls = llm_response.tool_calls
-            if tool_calls:
-                messages.append(llm_response)
-                for called_tool in tool_calls:
-                    action = Action(
-                        tool_name=called_tool.function.name,
-                        arguments=json.loads(called_tool.function.arguments),
+                content = llm_response.content
+                if content:
+                    final_answer_match = re.search(
+                        r"Final Answer:\s*(.*)", content, re.IGNORECASE
                     )
-                    function_call = interface.execute_tool(
-                        task_id, action.tool_name, action.arguments
-                    )
-                    result = str(function_call.result)
-                    if result is None:
-                        result = function_call.error
+                    if final_answer_match:
+                        messages.append(
+                            LiteLLMMessage(
+                                role="assistant",
+                                content=content,
+                                name=f"assistant_{self.agent_id}",
+                            )
+                        )
+                        return final_answer_match.group(1).strip(), messages
 
-                    function_name = str(called_tool.function.name)
+                tool_calls = llm_response.tool_calls
+                if tool_calls:
+                    messages.append(llm_response)
 
+                    for called_tool in tool_calls:
+                        action = Action(
+                            tool_name=called_tool.function.name,
+                            arguments=json.loads(called_tool.function.arguments),
+                        )
+                        try:
+                            function_call = interface.execute_tool(
+                                task_id, action.tool_name, action.arguments, messages
+                            )
+                            result = str(function_call.result)
+                            if result is None:
+                                result = function_call.error
+                        except Exception as e:
+                            result = str(e)
+
+                        function_name = str(called_tool.function.name)
+
+                        messages.append(
+                            LiteLLMMessage(
+                                role="tool",
+                                tool_call_id=called_tool.id,
+                                content=result,
+                                name=function_name + f"_{self.agent_id}",
+                            )
+                        )
+                else:
                     messages.append(
                         LiteLLMMessage(
-                            tool_call_id=called_tool.id,
-                            role="tool",
-                            content=result,
-                            name=function_name,
+                            role="assistant",
+                            content=llm_response.content,
+                            name=f"assistant_{self.agent_id}",
                         )
                     )
-            else:
+            except Exception as e:
+                # Append error message but continue with the next iteration
+                logger.error(f"Error during agent iteration: {e}")
                 messages.append(
-                    LiteLLMMessage(role="assistant", content=llm_response.content)
+                    LiteLLMMessage(
+                        role="system",
+                        content=f"Error during tool execution: {e!s}",
+                        name=f"system_{self.agent_id}",
+                    )
                 )
 
         return "Error solving the task. Maximum iterations reached.", messages

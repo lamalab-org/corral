@@ -1,5 +1,6 @@
+import datetime
 import importlib.resources
-import json
+import re
 
 from promptstore import PromptStore
 
@@ -8,7 +9,6 @@ from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.agents.utils import LiteLLMMessage, _build_user_content, llm_call
 from corral.evaluate import BenchmarkInterface
-from corral.utils import serialize_messages
 
 
 class LLMPlanner:
@@ -26,18 +26,20 @@ class LLMPlanner:
         temperature (float, optional): The temperature to use for sampling.
                 Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
+        agent_id (str, optional): The ID of the agent. If not provided, a unique ID will be generated.
         kwargs: Additional keyword arguments to pass to the LiteLLM API for all LLM calls
     """
 
     def __init__(
         self,
         model: str = "gpt-4",
-        max_iterations: int = 5,
+        max_iterations: int = 3,
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
+        agent_id: str | None = None,
         **kwargs,
     ):
         """Initialize the agent"""
@@ -45,6 +47,11 @@ class LLMPlanner:
         self.max_iterations = max_iterations
         self.api_endpoint = api_endpoint
         self.temperature = temperature
+        self.agent_id = (
+            agent_id
+            or f"llm_planner_agent-{datetime.datetime.now(tz=datetime.timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        )
+
         if prompt_store:
             self.store = prompt_store
         else:
@@ -96,8 +103,18 @@ class LLMPlanner:
 
         messages: list[LiteLLMMessage] = []
         if self.system_prompt:
-            messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
-        messages.append(LiteLLMMessage(role="user", content=user_content))
+            messages.append(
+                LiteLLMMessage(
+                    role="system",
+                    content=self.system_prompt,
+                    name=f"system_{self.agent_id}",
+                )
+            )
+        messages.append(
+            LiteLLMMessage(
+                role="user", content=user_content, name=f"user_{self.agent_id}"
+            )
+        )
 
         if tool_usage:
             agent = ToolCallingAgent(
@@ -119,7 +136,7 @@ class LLMPlanner:
             )
 
         for _i in range(self.max_iterations):
-            plan = llm_call(
+            content = llm_call(
                 model=self.model,
                 messages=messages,
                 temperature=self.temperature,
@@ -129,28 +146,39 @@ class LLMPlanner:
 
             messages.append(
                 LiteLLMMessage(
-                    role="assistant", content=plan, name="high-level-planner"
+                    role="assistant", content=content, name="assistant_{self.agent_id}"
                 )
             )
+            if content is None:
+                continue
 
-            if "Final Answer:" in plan:
-                final_answer = plan.split("Final Answer:")[1].strip()
-                return final_answer, messages
+            if content:
+                final_answer_match = re.search(
+                    r"Final Answer:\s*(.*)", content, re.IGNORECASE
+                )
+                if final_answer_match:
+                    messages.append(
+                        LiteLLMMessage(
+                            role="assistant",
+                            content=content,
+                            name=f"assistant_{self.agent_id}",
+                        )
+                    )
+                    return final_answer_match.group(1).strip(), messages
 
             final_answer, low_level_planner_messages = agent.run_agent(
                 interface=interface,
                 task_id=task_id,
-                task_prompt=plan,
+                task_prompt=content,
             )
-
-            serialized_messages = serialize_messages(low_level_planner_messages)
 
             messages.append(
                 LiteLLMMessage(
-                    role="assistant",
-                    content=f"Answer submitted by the executor: {final_answer}.\nMessages by the executor:\n{json.dumps(serialized_messages, indent=2)}",
-                    name="low-level-planner",
+                    role="user",
+                    content=f"Answer submitted by the executor: {final_answer}.\nMessages by the executor:\n\n",
+                    name=f"user_{self.agent_id}",
                 )
             )
+            messages.extend(low_level_planner_messages)
 
         return "Error: Maximum iterations reached", messages

@@ -393,7 +393,6 @@ def embed_text(
         )
         return all_embeddings
 
-    # For smaller inputs, process normally
     try:
         result_embeddings = embedding(
             model=model,
@@ -722,7 +721,11 @@ def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
         if isinstance(msg, dict):
             message_dict = msg.copy()
         else:
-            message_dict = {"role": msg.role, "content": msg.content}
+            role_value = msg.role
+            if hasattr(role_value, "value"):  # Handle enum types
+                role_value = role_value.value
+
+            message_dict = {"role": role_value, "content": msg.content}
 
             if hasattr(msg, "tool_call_id") and msg.tool_call_id:
                 message_dict["tool_call_id"] = msg.tool_call_id
