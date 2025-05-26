@@ -174,8 +174,7 @@ def convert_sd_to_vector_db(
             smiles_list.append(smiles)
 
             properties = {
-                prop_name: mol.GetProp(prop_name)
-                for prop_name in mol.GetPropNames()
+                prop_name: mol.GetProp(prop_name) for prop_name in mol.GetPropNames()
             }
             # Parse NMR data
             nmr_data = parse_nmr_properties(properties)
@@ -202,21 +201,26 @@ def convert_sd_to_vector_db(
     logger.info(f"Successfully read {len(entries)} molecules from SD file")
 
     documents = []
-    metadatas = []
+    smiles = []
 
     for entry_data in entries:
-        smiles = entry_data.split("\n")[0].replace("SMILES: ", "")
+        smiles_ = entry_data.split("\n")[0].replace("SMILES: ", "")
+        if not isinstance(smiles_, str):
+            continue
 
+        smiles.append(smiles_)
         documents.append(entry_data)
-        metadatas.append({"smiles": smiles})
+
+    logger.info(f"Total unique SMILES found: {len(smiles)}")
+    logger.info(f"Total entries processed: {len(documents)}")
 
     result = create_vector_database(
         chunks=documents,
         collection_name=collection_name,
         path=str(db_path),
-        chunk_size=8192,
+        chunk_size=1024,
         update_mode="recreate",
-        metadatas=metadatas,  # Add SMILES as metadata
+        chemical=smiles,
     )
 
     logger.info(f"Created vector database at {db_path}")

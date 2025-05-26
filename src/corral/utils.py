@@ -49,26 +49,32 @@ def vector_database_search(
     collection_name: str = "default_collection",
     path: str | None = None,
     top_k: int = 5,
-    metadata_only: bool = False,
+    model: str = "openai/text-embedding-3-large",
+    chemical_model: str | None = None,
 ) -> list[dict]:
     """Retrieve the top 5 most similar instructions from a vector database based on the query.
+    If a chemical model is provided, it will use that model to generate embeddings instead of the text embedding model.
 
     Args:
         query (str): The search query to find similar instructions
         collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
         path (str, optional): The path to the vector database directory. Defaults to None, which uses "vector_db" in the current directory.
         top_k (int, optional): The number of similar instructions to retrieve. Default is 5.
-        metadata_only (bool, optional): If True, retrieves only metadata without document content. Default is False.
+        model (str, optional): The model to use for embedding. Default is "openai/text-embedding-3-large".
+        chemical_model (str, optional): The model to use for chemical embeddings. If provided, it will use this model instead of the text embedding model. Default is None.
 
     Returns:
-        list[dict]: A list of dictionaries containing the top 5 most similar instructions with their content and metadata
+        list[dict]: A list of dictionaries containing the top similar instructions with their content and metadata
 
     Raises:
         RuntimeError: If the specified collection doesn't exist
     """
-    query_embedding = embed_text(
-        chunks=[query],
-    )[0]
+    chemical = False
+    if chemical_model:
+        model = chemical_model
+        chemical = True
+
+    query_embedding = embed_text(chunks=[query], model=model, chemical=chemical)[0]
 
     persist_directory = Path(Path.cwd()) / "vector_db" if path is None else Path(path)
 
@@ -87,11 +93,7 @@ def vector_database_search(
                 f"Collection '{collection_name}' does not exist: {e!s}"
             ) from e
 
-        include = (
-            ["metadatas", "distances"]
-            if metadata_only
-            else ["documents", "metadatas", "distances"]
-        )
+        include = ["documents", "metadatas", "distances"]
 
         results = collection.query(
             query_embeddings=[query_embedding], n_results=top_k, include=include
@@ -104,10 +106,8 @@ def vector_database_search(
                 "id": results["ids"][0][i],
                 "metadata": results["metadatas"][0][i],
                 "similarity_score": 1 - results["distances"][0][i],
+                "content": results["documents"][0][i],
             }
-
-            if not metadata_only and "documents" in results:
-                result_item["content"] = results["documents"][0][i]
 
             formatted_results.append(result_item)
 
@@ -264,7 +264,10 @@ def _setup_collection(
 
 
 def _validate_inputs(
-    chunks: list[str], update_mode: str, metadatas: list[dict] | None
+    chunks: list[str],
+    update_mode: str,
+    metadatas: list[dict] | None,
+    chemical: list[str] | None,
 ) -> None:
     """Validate inputs for the create_vector_database function."""
     logger.info(f"Creating vector database with {len(chunks)} chunks")
@@ -272,6 +275,11 @@ def _validate_inputs(
     if metadatas is not None and len(metadatas) != len(chunks):
         raise ValueError(
             f"Length of metadata ({len(metadatas)}) must match length of chunks ({len(chunks)})"
+        )
+
+    if isinstance(chemical, list) and len(chemical) != len(chunks):
+        raise ValueError(
+            f"Length of chemical flags ({len(chemical)}) must match length of chunks ({len(chunks)})"
         )
 
     if update_mode not in ["recreate", "append", "upsert"]:
@@ -377,8 +385,13 @@ def create_vector_database(
     chunk_size: int = 8192,
     update_mode: str = "recreate",
     metadatas: list[dict] | None = None,
+    model: str = "openai/text-embedding-3-large",
+    chemical: list[str] | None = None,
+    chemical_model: str = "huggingface/ibm-research/MoLFormer-XL-both-10pct",
 ) -> str:
-    """Create or update a vector database from text instructions.
+    """Create or update a vector database from text instructions. If chemical data is provided,
+    it will be used to generate embeddings instead of the text chunks. The database will be build
+    with the chemical embeddings as the primary vectors, and the original text will be stored in metadata.
 
     Args:
         chunks (list[str]): The text instructions to be stored in the vector database
@@ -389,35 +402,58 @@ def create_vector_database(
                     "append" adds new chunks to existing collection, "upsert" updates existing chunks and
                     adds new ones. Default is "recreate".
         metadatas (list[dict], optional): Metadata for each chunk. Default is None.
+        model (str, optional): The model to use for embedding. Default is "openai/text-embedding-3-large".
+        chemical (list[str], optional): List of chemical data to embed separately. Default is None.
+        chemical_model (str, optional): The model to use for chemical embeddings. Default is "huggingface/ibm-research/MoLFormer-XL-both-10pct".
 
     Returns:
         str: A message indicating the success of the operation
-
-    Raises:
-        ValueError: If update_mode is invalid or if metadata length doesn't match chunks length
-        RuntimeError: If there's an error during database operations
     """
     try:
         # Validate inputs
-        _validate_inputs(chunks, update_mode, metadatas)
+        _validate_inputs(chunks, update_mode, metadatas, chemical)
 
         # Setup database environment
         persist_directory, client = _setup_database_environment(path)
-
-        # Process chunks for embedding
-        processed_chunks = _tokenize_and_split_chunks(chunks, chunk_size)
-        logger.info(
-            f"Processed {len(chunks)} chunks into {len(processed_chunks)} chunks after tokenization and splitting"
-        )
 
         # Setup collection based on update mode
         collection, operation, collection_exists = _setup_collection(
             client, collection_name, update_mode
         )
 
-        # Generate embeddings
-        logger.info(f"Generating embeddings for {len(processed_chunks)} chunks")
-        embeddings = embed_text(chunks=processed_chunks)
+        # Initialize metadata if none provided
+        if metadatas is None:
+            metadatas = [{} for _ in range(len(chunks))]
+
+        # If chemical is provided, invert the storage approach
+        if chemical is not None:
+            processed_chunks = chunks
+            # Generate chemical embeddings as the primary vectors
+            logger.info(f"Generating chemical embeddings for {len(chemical)} items")
+            primary_embeddings = embed_text(
+                chunks=chemical, model=chemical_model, chemical=True
+            )
+
+            # Store original text in metadata for reference
+            for i, chunk in enumerate(chunks):
+                if i < len(metadatas):
+                    metadatas[i]["text"] = chunk
+
+            logger.info(
+                "Added original text to metadata, using chemical embeddings as primary"
+            )
+        else:
+            # Process chunks for embedding
+            processed_chunks = _tokenize_and_split_chunks(chunks, chunk_size)
+            logger.info(
+                f"Processed {len(chunks)} chunks into {len(processed_chunks)} chunks after tokenization and splitting"
+            )
+
+            # Standard approach - text embeddings are primary
+            logger.info(
+                f"Generating text embeddings for {len(processed_chunks)} chunks"
+            )
+            primary_embeddings = embed_text(chunks=processed_chunks, model=model)
 
         # Process and add documents in batches
         start_id = (
@@ -428,10 +464,18 @@ def create_vector_database(
 
         # Process in batches and add to collection
         _process_chunks_in_batches(
-            collection, processed_chunks, embeddings, start_id, update_mode, metadatas
+            collection,
+            processed_chunks,
+            primary_embeddings,
+            start_id,
+            update_mode,
+            metadatas,
         )
 
-        return f"Successfully {operation} vector database with {len(processed_chunks)} instructions in collection '{collection_name}'."
+        # Log which embeddings are primary
+        embedded_type = "text" if chemical is None else "chemical"
+
+        return f"Successfully {operation} vector database with {len(processed_chunks)} instructions in collection '{collection_name}' using {embedded_type} as primary embeddings."
 
     except Exception as e:
         logger.error(f"Error creating/updating vector database: {e!s}", exc_info=True)
@@ -443,16 +487,16 @@ def create_vector_database(
     wait=wait_exponential(multiplier=1, min=2, max=30),
     retry=retry_if_exception_type((ConnectionError, TimeoutError)),
 )
-def embed_text(
-    chunks: list, model: str = "openai/text-embedding-3-large"
-) -> list[list[float]]:
+def embed_text(chunks: list, model: str, chemical=True) -> list[list[float]]:
     """
     Embed a list of text chunks using the specified model with automatic retries.
     If the list is large (>2048 chunks), it will process them in smaller batches.
+    When chemical=True, uses MoLFormer for chemical embeddings.
 
     Args:
         chunks (list): List of text chunks to embed
-        model (str, optional): Model to use for embeddings. Default: "openai/text-embedding-3-large"
+        model (str): Model to use for embeddings
+        chemical (bool, optional): Whether to use chemical embedding model. Default is True.
 
     Returns:
         list[list[float]]: List of embeddings for each chunk
@@ -469,7 +513,9 @@ def embed_text(
         logger.error("Invalid input: chunks must be a non-empty list of strings")
         raise ValueError("Input must be a non-empty list of strings")
 
-    logger.info(f"Embedding {len(chunks)} text chunks using model: {model}")
+    logger.info(
+        f"Embedding {len(chunks)} {'chemical' if chemical else 'text'} chunks using model: {model}"
+    )
 
     BATCH_SIZE = 2048  # This is a configuration from LiteLLM:
     # https://docs.litellm.ai/docs/embedding/supported_embedding#required-fields
@@ -482,10 +528,10 @@ def embed_text(
         # Process chunks in batches
         for i in range(0, len(chunks), BATCH_SIZE):
             batch = chunks[i : i + BATCH_SIZE]
-            logger.info("Processing batched chunks)")
+            logger.info("Processing batched chunks")
 
             try:
-                batch_embeddings = embed_text(batch, model=model)
+                batch_embeddings = embed_text(batch, model=model, chemical=chemical)
                 all_embeddings.extend(batch_embeddings)
             except Exception as e:
                 logger.error(f"Error in batch {i//BATCH_SIZE + 1}: {e!s}")
@@ -496,7 +542,40 @@ def embed_text(
         )
         return all_embeddings
 
-    # For smaller inputs, process normally
+    # For chemical embeddings, use MoLFormer
+    if chemical:
+        try:
+            import torch
+            from transformers import AutoModel, AutoTokenizer
+
+            logger.info("Using MoLFormer model for chemical embeddings")
+
+            # Load model & tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
+            molformer_model = AutoModel.from_pretrained(
+                model, deterministic_eval=True, trust_remote_code=True
+            )
+
+            # Tokenization
+            inputs = tokenizer(
+                chunks, padding=True, truncation=True, return_tensors="pt"
+            )
+
+            # Inference
+            with torch.no_grad():
+                outputs = molformer_model(**inputs)
+
+            # Extract embeddings
+            embeddings = outputs.pooler_output.tolist()  # Convert to list format
+
+            logger.info(f"Successfully generated {len(embeddings)} chemical embeddings")
+            return embeddings
+
+        except Exception as e:
+            logger.error(f"Error generating chemical embeddings: {e!s}", exc_info=True)
+            raise RuntimeError(f"Failed to generate chemical embeddings: {e!s}") from e
+
+    # For text embeddings, use litellm as before
     try:
         result_embeddings = embedding(
             model=model,

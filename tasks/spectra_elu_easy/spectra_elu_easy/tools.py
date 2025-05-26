@@ -224,14 +224,12 @@ def search_by_smiles(smiles, top_k=10):
     collection_name = "nmrshiftdb2"
     db_path = Path(__file__).resolve().parents[3] / "vector_databases" / "nmrshiftdb2"
 
-    query = f"SMILES: {smiles}"
-
     return vector_database_search(
-        query=query,
+        query=smiles,
         collection_name=collection_name,
         path=db_path,
         top_k=top_k,
-        metadata_only=True,
+        chemical_model="huggingface/ibm-research/MoLFormer-XL-both-10pct",
     )
 
 
