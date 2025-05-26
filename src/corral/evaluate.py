@@ -28,6 +28,7 @@ class BenchmarkInterface:
         return response.json()
 
     def supports_dependency_chain(self) -> bool:
+        """Check if the environment supports dependency chaining"""
         try:
             response = requests.get(f"{self.base_url}/dependency_chain")
             response.raise_for_status()

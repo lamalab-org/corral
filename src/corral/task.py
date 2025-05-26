@@ -34,6 +34,7 @@ class TaskGroup:
     tasks: dict[str, TaskDefinition]
     results: dict[str, Any] = field(default_factory=dict)
     scores: dict[str, float] = field(default_factory=dict)
+    chained_tasks: bool = field(default=False)  # Whether tasks can depend on each other
 
     def get_task_input(self, task_id: str) -> dict[str, Any]:
         """Get input for a task either from other tasks or initial input"""

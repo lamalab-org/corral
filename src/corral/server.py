@@ -17,10 +17,11 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
 
     @app.get("/dependency_chain")
     def get_dependency_chain_setting():
-        has_dependency_chain = any(
+        """Get whether chained tasks is enabled for any environment"""
+        has_chained_tasks = any(
             getattr(env, "chained_tasks", False) for env in environments.values()
         )
-        return {"dependency_chain": has_dependency_chain}
+        return {"dependency_chain": has_chained_tasks}
 
     @app.get("/tasks/{task_id}/prompt")
     def get_task_prompt(task_id: str):
