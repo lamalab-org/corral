@@ -32,6 +32,8 @@ if "CORRAL_WORK_DIR" not in os.environ:
     raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
 BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
 
+CHAINED_TASKS = os.environ["CHAINED_TASKS"].lower() == "true"
+
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     "mp_structure": check_mp_structure,
@@ -115,7 +117,6 @@ class TaskGroupEnvironment(Environment):
             str, Tool
         ],  # here this is a dict with keys as name for tools, and values are tool objects. eg:  "get_structure_from_mp_text": get_structure_from_mp_text,
         taskgroup_common_tools: dict[str, Tool] | None = None,
-        chained_tasks: bool = True,
     ):
         self.task_group = task_group
         self.subtask_specific_tools = (
@@ -132,8 +133,10 @@ class TaskGroupEnvironment(Environment):
 
         # Initialize tools and environment
         self.tools = {}
-        self.task_id = f"{task_group.group_id}_{task_id}"
-        self.chained_tasks = chained_tasks
+        combined_task_id = f"{task_group.group_id}_{task_id}"
+        super().__init__(combined_task_id)
+
+        self.chained_tasks = task_group.chained_tasks
 
         # Add required tools for the task
         for tool_name in self.current_task.tools:
@@ -273,6 +276,9 @@ def create_environments(
     subtask_specific_tools = create_tools()
 
     # Create environments for all tasks
+
+    task_group = TaskGroup(group_id=group_id, tasks=tasks, chained_tasks=chained_tasks)
+
     environments = {}
     for task_id in task_group.tasks:
         environments[task_id] = TaskGroupEnvironment(
@@ -280,7 +286,6 @@ def create_environments(
             task_group=task_group,
             subtask_specific_tools=subtask_specific_tools,
             taskgroup_common_tools=taskgroup_common_tools,
-            chained_tasks=chained_tasks,
         )
 
     return environments
@@ -294,9 +299,6 @@ if __name__ == "__main__":
         tasks_json_path = os.environ.get(
             "CORRAL_TASKS_PATH",
             Path(__file__).parent / "tasks" / "catalysis_tasks.json",
-        )
-        chained_tasks = (
-            os.environ.get("CORRAL_DEPENDENCY_CHAIN", "false").lower() == "true"
         )
 
     # Get server settings from environment if provided
@@ -320,7 +322,7 @@ if __name__ == "__main__":
         task_json_path=tasks_json_path,
         taskgroup_common_tools=fs_tools,
         work_dir=work_dir,
-        chained_tasks=chained_tasks,
+        chained_tasks=CHAINED_TASKS,
     )
 
     logger.info("\nCreated Environments:")

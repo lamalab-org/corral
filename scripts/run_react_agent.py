@@ -14,7 +14,9 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "anthropic/claude-3-7-sonnet-20250219", task_ids: list | None = None, temperature: float = 0.0
+    model: str = "anthropic/claude-3-7-sonnet-20250219",
+    task_ids: list | None = None,
+    temperature: float = 0.0,
 ):
     """Run the benchmark with specified model and tasks"""
 
@@ -24,7 +26,7 @@ def run_benchmark(
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
-    result = runner.bench(task_ids, trials_per_task=1, k_values=[1], verbose=True)
+    result = runner.bench(task_ids, trials_per_task=2, k_values=[1], verbose=True)
     result.generate_report("results.json")
 
     logger.info("Benchmark completed")
