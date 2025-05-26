@@ -13,7 +13,6 @@ import modal
 import numpy as np
 import requests
 import tiktoken
-from chembench.baseline import Generation, Generations
 from litellm import embedding
 from loguru import logger
 from modal import App, Image, Mount, Secret, Volume
@@ -29,412 +28,6 @@ from corral.agents.utils import LiteLLMMessage
 from corral.base import ModalTool, Tool, ToolArgument
 
 MODAL_TOOL_REGISTRY = {}
-
-
-class Model:
-    def __init__(self, name: str = "Dummy Model"):
-        self.name = name
-
-    def generate(self, prompts: list[str], **_kwargs):
-        generations = []
-        for _prompt in prompts:
-            generation = None
-            generations.append([Generation(text=generation)])
-
-        return Generations(generations=generations)
-
-
-def vector_database_search(
-    query: str,
-    collection_name: str = "default_collection",
-    path: str | None = None,
-    top_k: int = 5,
-) -> list[dict]:
-    """Retrieve the top 5 most similar instructions from a vector database based on the query.
-
-    Args:
-        query (str): The search query to find similar instructions
-        collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
-        path (str, optional): The path to the vector database directory. Defaults to None, which uses "vector_db" in the current directory.
-        top_k (int, optional): The number of similar instructions to retrieve. Default is 5.
-
-    Returns:
-        list[dict]: A list of dictionaries containing the top 5 most similar instructions with their content and metadata
-
-    Raises:
-        RuntimeError: If the specified collection doesn't exist
-    """
-    query_embedding = embed_text(
-        chunks=[query],
-    )[0]
-
-    persist_directory = Path(Path.cwd()) / "vector_db" if path is None else Path(path)
-
-    if not persist_directory.exists():
-        raise RuntimeError(
-            f"Vector database directory '{persist_directory}' does not exist. Please create the vector database first."
-        )
-
-    try:
-        client = chromadb.PersistentClient(path=str(persist_directory))
-
-        try:
-            collection = client.get_collection(name=collection_name)
-        except Exception as e:
-            raise RuntimeError(
-                f"Collection '{collection_name}' does not exist: {e!s}"
-            ) from e
-
-        results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
-
-        formatted_results = []
-        for _i, (doc, doc_id, distance) in enumerate(
-            zip(
-                results["documents"][0],
-                results["ids"][0],
-                results["distances"][0],
-                strict=False,
-            )
-        ):
-            similarity_score = 1 - distance
-
-            formatted_results.append(
-                {
-                    "content": doc,
-                    "metadata": {"id": doc_id},
-                    "similarity_score": similarity_score,
-                }
-            )
-
-        return formatted_results
-
-    except Exception as e:
-        raise RuntimeError(f"Error querying vector database: {e!s}") from e
-
-
-def _tokenize_and_split_chunks(
-    chunks: list[str], chunk_size: int, batch_size: int = 2
-) -> list[str]:
-    """
-    Tokenize each chunk and split any chunks that exceed the specified token limit.
-    Process chunks in batches to reduce memory usage.
-    The chunking is done with a 20% chunk size overlap to ensure no information is lost.
-    In addition the chunking is done naively, i.e. it does not look for sentence boundaries.
-
-    Args:
-        chunks (list[str]): List of text chunks to process
-        chunk_size (int): Maximum number of tokens per chunk
-        batch_size (batch_size): Number of chunks to process in each batch. Default is 2.
-
-    Returns:
-        list[str]: List of processed chunks, each within the specified token limit
-
-    Raises:
-        ValueError: If chunk_size is less than 1
-    """
-
-    logger.info(
-        f"Tokenizing and splitting {len(chunks)} chunks with max size {chunk_size} tokens"
-    )
-    chunks = [str(chunk) for chunk in chunks]
-
-    encoding = tiktoken.get_encoding("o200k_base")
-    target_size = int(0.8 * chunk_size)
-    processed_chunks = []
-
-    try:
-        for batch_idx in range(0, len(chunks), batch_size):
-            gc.collect()
-
-            batch = chunks[batch_idx : batch_idx + batch_size]
-            logger.debug(
-                f"Processing batch {batch_idx//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}"
-            )
-
-            batch_results = []
-            for chunk_idx, chunk in enumerate(batch):
-                tokens = encoding.encode(chunk)
-
-                if len(tokens) <= chunk_size:
-                    batch_results.append(chunk)
-                    logger.debug(
-                        f"Chunk {batch_idx + chunk_idx + 1} is within token limit ({len(tokens)}/{chunk_size})"
-                    )
-                    del tokens
-                    continue
-
-                logger.debug(
-                    f"Chunk {batch_idx + chunk_idx + 1} exceeds token limit ({len(tokens)}/{chunk_size}), splitting..."
-                )
-
-                start_idx = 0
-                sub_chunk_count = 0
-
-                while start_idx < len(tokens):
-                    end_idx = min(start_idx + target_size, len(tokens))
-
-                    logger.debug(
-                        f"Sub-chunk {sub_chunk_count+1}: Processing from token {start_idx} to {end_idx} ({end_idx-start_idx} tokens)"
-                    )
-
-                    sub_chunk = encoding.decode(tokens[start_idx:end_idx])
-                    batch_results.append(sub_chunk)
-                    sub_chunk_count += 1
-
-                    if end_idx >= len(tokens):
-                        break
-
-                    old_start_idx = start_idx
-                    overlap = min(100, end_idx - start_idx)  # Fixed small overlap
-                    start_idx = end_idx - overlap
-
-                    logger.debug(
-                        f"Sub-chunk {sub_chunk_count}: Added {len(sub_chunk)} chars, moved start_idx from {old_start_idx} to {start_idx} (overlap: {overlap} tokens)"
-                    )
-
-                    if start_idx <= old_start_idx:
-                        logger.error(
-                            f"Loop not progressing! start_idx={start_idx}, old_start_idx={old_start_idx}, end_idx={end_idx}"
-                        )
-                        logger.error(
-                            "Breaking infinite loop, please check the algorithm logic"
-                        )
-                        break
-
-                logger.debug(
-                    f"Split chunk {batch_idx + chunk_idx + 1} into {sub_chunk_count} smaller chunks"
-                )
-                del tokens
-            processed_chunks.extend(batch_results)
-            del batch_results
-            del batch
-            gc.collect()
-    except Exception as e:
-        logger.error(f"Error during tokenization and splitting: {e}")
-        raise
-    finally:
-        gc.collect()
-
-    logger.info(
-        f"Completed tokenization and splitting: {len(chunks)} input chunks → {len(processed_chunks)} output chunks"
-    )
-    return processed_chunks
-
-
-def create_vector_database(
-    chunks: list[str],
-    collection_name: str = "default_collection",
-    path: str | None = None,
-    chunk_size: int = 8192,
-    update_mode: str = "recreate",
-) -> str:
-    """Create or update a vector database from text instructions.
-
-    Args:
-        chunks (list[str]): The text instructions to be stored in the vector database
-        collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
-        path (str, optional): Path to store the vector database. Default is "vector_db" in the current directory.
-        chunk_size (int, optional): Maximum number of tokens per chunk. Default is 8192.
-        update_mode (str, optional): How to handle existing collections: "recreate" deletes and recreates the collection,
-                    "append" adds new chunks to existing collection, "upsert" updates existing chunks and
-                    adds new ones. Default is "recreate".
-
-    Returns:
-        str: A message indicating the success of the operation
-
-    Raises:
-        ValueError: If OPENAI_API_KEY environment variable is not set or update_mode is invalid
-    """
-    logger.info(
-        f"Creating vector database with {len(chunks)} chunks in collection '{collection_name}'"
-    )
-
-    if update_mode not in ["recreate", "append", "upsert"]:
-        raise ValueError("update_mode must be one of: 'recreate', 'append', 'upsert'")
-
-    persist_directory = Path(Path.cwd()) / "vector_db" if path is None else Path(path)
-
-    persist_directory.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Using persist directory: {persist_directory}")
-
-    processed_chunks = _tokenize_and_split_chunks(chunks, chunk_size)
-    logger.info(
-        f"Processed {len(chunks)} chunks into {len(processed_chunks)} chunks after tokenization and splitting"
-    )
-
-    client = chromadb.PersistentClient(path=str(persist_directory))
-
-    try:
-        collection_list = client.list_collections()
-        collection_exists = collection_name in collection_list
-
-        logger.debug(f"Available collections: {collection_list}")
-        logger.debug(f"Collection '{collection_name}' exists: {collection_exists}")
-
-        if update_mode == "recreate" and collection_exists:
-            logger.info(
-                f"Collection '{collection_name}' already exists, deleting before recreation"
-            )
-            client.delete_collection(name=collection_name)
-            collection = client.create_collection(name=collection_name)
-            logger.info(f"Created collection '{collection_name}'")
-        elif not collection_exists:
-            logger.info(
-                f"Collection '{collection_name}' does not exist, creating new collection"
-            )
-            collection = client.create_collection(name=collection_name)
-            logger.info(f"Created new collection '{collection_name}'")
-        else:
-            logger.info(
-                f"Using existing collection '{collection_name}' for {update_mode} operation"
-            )
-            collection = client.get_collection(name=collection_name)
-
-        logger.info(f"Generating embeddings for {len(processed_chunks)} chunks")
-        embeddings = embed_text(
-            chunks=processed_chunks,
-        )
-
-        # For recreate or new collection, use sequential IDs
-        if update_mode == "recreate" or not collection_exists:
-            ids = [f"id_{i}" for i in range(len(processed_chunks))]
-            logger.info(
-                f"Adding {len(processed_chunks)} documents with embeddings to collection"
-            )
-            collection.add(
-                embeddings=embeddings,
-                documents=processed_chunks,
-                ids=ids,
-            )
-            operation = "created"
-        # For append mode, get existing IDs to avoid conflicts
-        else:
-            try:
-                existing_count = collection.count()
-                start_id = existing_count
-                ids = [
-                    f"id_{i}" for i in range(start_id, start_id + len(processed_chunks))
-                ]
-
-                if update_mode == "append":
-                    logger.info(
-                        f"Appending {len(processed_chunks)} documents with embeddings to collection"
-                    )
-                    collection.add(
-                        embeddings=embeddings,
-                        documents=processed_chunks,
-                        ids=ids,
-                    )
-                    operation = "updated (appended)"
-                elif update_mode == "upsert":
-                    logger.info(
-                        f"Upserting {len(processed_chunks)} documents with embeddings to collection"
-                    )
-                    collection.upsert(
-                        embeddings=embeddings,
-                        documents=processed_chunks,
-                        ids=ids,
-                    )
-                    operation = "updated (upserted)"
-            except Exception as e:
-                logger.error(f"Error during {update_mode} operation: {e!s}")
-                raise RuntimeError(
-                    f"Error during {update_mode} operation: {e!s}"
-                ) from e
-
-        return f"Successfully {operation} vector database with {len(processed_chunks)} instructions in collection '{collection_name}'."
-
-    except Exception as e:
-        logger.error(f"Error creating/updating vector database: {e!s}", exc_info=True)
-        raise RuntimeError(f"Error creating/updating vector database: {e!s}") from e
-
-
-@retry(
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=2, max=30),
-    retry=retry_if_exception_type((ConnectionError, TimeoutError)),
-)
-def embed_text(
-    chunks: list, model: str = "openai/text-embedding-3-large"
-) -> list[list[float]]:
-    """
-    Embed a list of text chunks using the specified model with automatic retries.
-    If the list is large (>2048 chunks), it will process them in smaller batches.
-
-    Args:
-        chunks (list): List of text chunks to embed
-        model (str, optional): Model to use for embeddings. Default: "openai/text-embedding-3-large"
-
-    Returns:
-        list[list[float]]: List of embeddings for each chunk
-
-    Raises:
-        ValueError: If chunks is not a non-empty list of strings
-        RuntimeError: If embeddings fail after multiple retries
-    """
-    if (
-        not chunks
-        or not isinstance(chunks, list)
-        or not all(isinstance(chunk, str) for chunk in chunks)
-    ):
-        logger.error("Invalid input: chunks must be a non-empty list of strings")
-        raise ValueError("Input must be a non-empty list of strings")
-
-    logger.info(f"Embedding {len(chunks)} text chunks using model: {model}")
-
-    BATCH_SIZE = 2048  # This is a configuration from LiteLLM:
-    # https://docs.litellm.ai/docs/embedding/supported_embedding#required-fields
-
-    # Process in batches if the input is large
-    if len(chunks) > BATCH_SIZE:
-        logger.info(f"Input size exceeds {BATCH_SIZE} chunks, processing in batches")
-        all_embeddings = []
-
-        # Process chunks in batches
-        for i in range(0, len(chunks), BATCH_SIZE):
-            batch = chunks[i : i + BATCH_SIZE]
-            logger.info("Processing batched chunks)")
-
-            try:
-                batch_embeddings = embed_text(batch, model=model)
-                all_embeddings.extend(batch_embeddings)
-            except Exception as e:
-                logger.error(f"Error in batch {i//BATCH_SIZE + 1}: {e!s}")
-                raise
-
-        logger.info(
-            f"Successfully generated {len(all_embeddings)} embeddings across all batches"
-        )
-        return all_embeddings
-
-    # For smaller inputs, process normally
-    try:
-        result_embeddings = embedding(
-            model=model,
-            input=chunks,
-        )
-        logger.info(
-            f"Successfully generated {len(result_embeddings['data'])} embeddings"
-        )
-        return [item["embedding"] for item in result_embeddings["data"]]
-    except Exception as e:
-        logger.error(f"Error generating embeddings: {e!s}", exc_info=True)
-        raise RuntimeError(f"Failed to generate embeddings: {e!s}") from e
-
-
-def chunk_text(text: str) -> list[str]:
-    """
-    Split a long text into smaller chunks based on the number of lines.
-    Args:
-        text (str): The text to be split into chunks
-
-    Returns:
-        list[str]: A list of text chunks, each containing a single line
-    """
-    if not text or not isinstance(text, str):
-        raise ValueError("Input must be a non-empty string")
-
-    return [chunk.strip() for chunk in text.split("\n")]
 
 
 def format_type_annotation(annotation):
@@ -1000,3 +593,396 @@ def web_search(query: str, num_results: int = 5) -> list[dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error while performing search: {e!s}", exc_info=True)
         return []
+
+
+def vector_database_search(
+    query: str,
+    collection_name: str = "default_collection",
+    path: str | None = None,
+    top_k: int = 5,
+) -> list[dict]:
+    """Retrieve the top 5 most similar instructions from a vector database based on the query.
+
+    Args:
+        query (str): The search query to find similar instructions
+        collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
+        path (str, optional): The path to the vector database directory. Defaults to None, which uses "vector_db" in the current directory.
+        top_k (int, optional): The number of similar instructions to retrieve. Default is 5.
+
+    Returns:
+        list[dict]: A list of dictionaries containing the top 5 most similar instructions with their content and metadata
+
+    Raises:
+        RuntimeError: If the specified collection doesn't exist
+    """
+    query_embedding = embed_text(
+        chunks=[query],
+    )[0]
+
+    persist_directory = Path(Path.cwd()) / "vector_db" if path is None else Path(path)
+
+    if not persist_directory.exists():
+        raise RuntimeError(
+            f"Vector database directory '{persist_directory}' does not exist. Please create the vector database first."
+        )
+
+    try:
+        client = chromadb.PersistentClient(path=str(persist_directory))
+
+        try:
+            collection = client.get_collection(name=collection_name)
+        except Exception as e:
+            raise RuntimeError(
+                f"Collection '{collection_name}' does not exist: {e!s}"
+            ) from e
+
+        results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
+
+        formatted_results = []
+        for _i, (doc, doc_id, distance) in enumerate(
+            zip(
+                results["documents"][0],
+                results["ids"][0],
+                results["distances"][0],
+                strict=False,
+            )
+        ):
+            similarity_score = 1 - distance
+
+            formatted_results.append(
+                {
+                    "content": doc,
+                    "metadata": {"id": doc_id},
+                    "similarity_score": similarity_score,
+                }
+            )
+
+        return formatted_results
+
+    except Exception as e:
+        raise RuntimeError(f"Error querying vector database: {e!s}") from e
+
+
+def _tokenize_and_split_chunks(
+    chunks: list[str], chunk_size: int, batch_size: int = 2
+) -> list[str]:
+    """
+    Tokenize each chunk and split any chunks that exceed the specified token limit.
+    Process chunks in batches to reduce memory usage.
+    The chunking is done with a 20% chunk size overlap to ensure no information is lost.
+    In addition the chunking is done naively, i.e. it does not look for sentence boundaries.
+
+    Args:
+        chunks (list[str]): List of text chunks to process
+        chunk_size (int): Maximum number of tokens per chunk
+        batch_size (batch_size): Number of chunks to process in each batch. Default is 2.
+
+    Returns:
+        list[str]: List of processed chunks, each within the specified token limit
+
+    Raises:
+        ValueError: If chunk_size is less than 1
+    """
+
+    logger.info(
+        f"Tokenizing and splitting {len(chunks)} chunks with max size {chunk_size} tokens"
+    )
+    chunks = [str(chunk) for chunk in chunks]
+
+    encoding = tiktoken.get_encoding("o200k_base")
+    target_size = int(0.8 * chunk_size)
+    processed_chunks = []
+
+    try:
+        for batch_idx in range(0, len(chunks), batch_size):
+            gc.collect()
+
+            batch = chunks[batch_idx : batch_idx + batch_size]
+            logger.debug(
+                f"Processing batch {batch_idx//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}"
+            )
+
+            batch_results = []
+            for chunk_idx, chunk in enumerate(batch):
+                tokens = encoding.encode(chunk)
+
+                if len(tokens) <= chunk_size:
+                    batch_results.append(chunk)
+                    logger.debug(
+                        f"Chunk {batch_idx + chunk_idx + 1} is within token limit ({len(tokens)}/{chunk_size})"
+                    )
+                    del tokens
+                    continue
+
+                logger.debug(
+                    f"Chunk {batch_idx + chunk_idx + 1} exceeds token limit ({len(tokens)}/{chunk_size}), splitting..."
+                )
+
+                start_idx = 0
+                sub_chunk_count = 0
+
+                while start_idx < len(tokens):
+                    end_idx = min(start_idx + target_size, len(tokens))
+
+                    logger.debug(
+                        f"Sub-chunk {sub_chunk_count+1}: Processing from token {start_idx} to {end_idx} ({end_idx-start_idx} tokens)"
+                    )
+
+                    sub_chunk = encoding.decode(tokens[start_idx:end_idx])
+                    batch_results.append(sub_chunk)
+                    sub_chunk_count += 1
+
+                    if end_idx >= len(tokens):
+                        break
+
+                    old_start_idx = start_idx
+                    overlap = min(100, end_idx - start_idx)  # Fixed small overlap
+                    start_idx = end_idx - overlap
+
+                    logger.debug(
+                        f"Sub-chunk {sub_chunk_count}: Added {len(sub_chunk)} chars, moved start_idx from {old_start_idx} to {start_idx} (overlap: {overlap} tokens)"
+                    )
+
+                    if start_idx <= old_start_idx:
+                        logger.error(
+                            f"Loop not progressing! start_idx={start_idx}, old_start_idx={old_start_idx}, end_idx={end_idx}"
+                        )
+                        logger.error(
+                            "Breaking infinite loop, please check the algorithm logic"
+                        )
+                        break
+
+                logger.debug(
+                    f"Split chunk {batch_idx + chunk_idx + 1} into {sub_chunk_count} smaller chunks"
+                )
+                del tokens
+            processed_chunks.extend(batch_results)
+            del batch_results
+            del batch
+            gc.collect()
+    except Exception as e:
+        logger.error(f"Error during tokenization and splitting: {e}")
+        raise
+    finally:
+        gc.collect()
+
+    logger.info(
+        f"Completed tokenization and splitting: {len(chunks)} input chunks → {len(processed_chunks)} output chunks"
+    )
+    return processed_chunks
+
+
+def create_vector_database(
+    chunks: list[str],
+    collection_name: str = "default_collection",
+    path: str | None = None,
+    chunk_size: int = 8192,
+    update_mode: str = "recreate",
+) -> str:
+    """Create or update a vector database from text instructions.
+
+    Args:
+        chunks (list[str]): The text instructions to be stored in the vector database
+        collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
+        path (str, optional): Path to store the vector database. Default is "vector_db" in the current directory.
+        chunk_size (int, optional): Maximum number of tokens per chunk. Default is 8192.
+        update_mode (str, optional): How to handle existing collections: "recreate" deletes and recreates the collection,
+                    "append" adds new chunks to existing collection, "upsert" updates existing chunks and
+                    adds new ones. Default is "recreate".
+
+    Returns:
+        str: A message indicating the success of the operation
+
+    Raises:
+        ValueError: If OPENAI_API_KEY environment variable is not set or update_mode is invalid
+    """
+    logger.info(
+        f"Creating vector database with {len(chunks)} chunks in collection '{collection_name}'"
+    )
+
+    if update_mode not in ["recreate", "append", "upsert"]:
+        raise ValueError("update_mode must be one of: 'recreate', 'append', 'upsert'")
+
+    persist_directory = Path(Path.cwd()) / "vector_db" if path is None else Path(path)
+
+    persist_directory.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Using persist directory: {persist_directory}")
+
+    processed_chunks = _tokenize_and_split_chunks(chunks, chunk_size)
+    logger.info(
+        f"Processed {len(chunks)} chunks into {len(processed_chunks)} chunks after tokenization and splitting"
+    )
+
+    client = chromadb.PersistentClient(path=str(persist_directory))
+
+    try:
+        collection_list = client.list_collections()
+        collection_exists = collection_name in collection_list
+
+        logger.debug(f"Available collections: {collection_list}")
+        logger.debug(f"Collection '{collection_name}' exists: {collection_exists}")
+
+        if update_mode == "recreate" and collection_exists:
+            logger.info(
+                f"Collection '{collection_name}' already exists, deleting before recreation"
+            )
+            client.delete_collection(name=collection_name)
+            collection = client.create_collection(name=collection_name)
+            logger.info(f"Created collection '{collection_name}'")
+        elif not collection_exists:
+            logger.info(
+                f"Collection '{collection_name}' does not exist, creating new collection"
+            )
+            collection = client.create_collection(name=collection_name)
+            logger.info(f"Created new collection '{collection_name}'")
+        else:
+            logger.info(
+                f"Using existing collection '{collection_name}' for {update_mode} operation"
+            )
+            collection = client.get_collection(name=collection_name)
+
+        logger.info(f"Generating embeddings for {len(processed_chunks)} chunks")
+        embeddings = embed_text(
+            chunks=processed_chunks,
+        )
+
+        # For recreate or new collection, use sequential IDs
+        if update_mode == "recreate" or not collection_exists:
+            ids = [f"id_{i}" for i in range(len(processed_chunks))]
+            logger.info(
+                f"Adding {len(processed_chunks)} documents with embeddings to collection"
+            )
+            collection.add(
+                embeddings=embeddings,
+                documents=processed_chunks,
+                ids=ids,
+            )
+            operation = "created"
+        # For append mode, get existing IDs to avoid conflicts
+        else:
+            try:
+                existing_count = collection.count()
+                start_id = existing_count
+                ids = [
+                    f"id_{i}" for i in range(start_id, start_id + len(processed_chunks))
+                ]
+
+                if update_mode == "append":
+                    logger.info(
+                        f"Appending {len(processed_chunks)} documents with embeddings to collection"
+                    )
+                    collection.add(
+                        embeddings=embeddings,
+                        documents=processed_chunks,
+                        ids=ids,
+                    )
+                    operation = "updated (appended)"
+                elif update_mode == "upsert":
+                    logger.info(
+                        f"Upserting {len(processed_chunks)} documents with embeddings to collection"
+                    )
+                    collection.upsert(
+                        embeddings=embeddings,
+                        documents=processed_chunks,
+                        ids=ids,
+                    )
+                    operation = "updated (upserted)"
+            except Exception as e:
+                logger.error(f"Error during {update_mode} operation: {e!s}")
+                raise RuntimeError(
+                    f"Error during {update_mode} operation: {e!s}"
+                ) from e
+
+        return f"Successfully {operation} vector database with {len(processed_chunks)} instructions in collection '{collection_name}'."
+
+    except Exception as e:
+        logger.error(f"Error creating/updating vector database: {e!s}", exc_info=True)
+        raise RuntimeError(f"Error creating/updating vector database: {e!s}") from e
+
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+)
+def embed_text(
+    chunks: list, model: str = "openai/text-embedding-3-large"
+) -> list[list[float]]:
+    """
+    Embed a list of text chunks using the specified model with automatic retries.
+    If the list is large (>2048 chunks), it will process them in smaller batches.
+
+    Args:
+        chunks (list): List of text chunks to embed
+        model (str, optional): Model to use for embeddings. Default: "openai/text-embedding-3-large"
+
+    Returns:
+        list[list[float]]: List of embeddings for each chunk
+
+    Raises:
+        ValueError: If chunks is not a non-empty list of strings
+        RuntimeError: If embeddings fail after multiple retries
+    """
+    if (
+        not chunks
+        or not isinstance(chunks, list)
+        or not all(isinstance(chunk, str) for chunk in chunks)
+    ):
+        logger.error("Invalid input: chunks must be a non-empty list of strings")
+        raise ValueError("Input must be a non-empty list of strings")
+
+    logger.info(f"Embedding {len(chunks)} text chunks using model: {model}")
+
+    BATCH_SIZE = 2048  # This is a configuration from LiteLLM:
+    # https://docs.litellm.ai/docs/embedding/supported_embedding#required-fields
+
+    # Process in batches if the input is large
+    if len(chunks) > BATCH_SIZE:
+        logger.info(f"Input size exceeds {BATCH_SIZE} chunks, processing in batches")
+        all_embeddings = []
+
+        # Process chunks in batches
+        for i in range(0, len(chunks), BATCH_SIZE):
+            batch = chunks[i : i + BATCH_SIZE]
+            logger.info("Processing batched chunks)")
+
+            try:
+                batch_embeddings = embed_text(batch, model=model)
+                all_embeddings.extend(batch_embeddings)
+            except Exception as e:
+                logger.error(f"Error in batch {i//BATCH_SIZE + 1}: {e!s}")
+                raise
+
+        logger.info(
+            f"Successfully generated {len(all_embeddings)} embeddings across all batches"
+        )
+        return all_embeddings
+
+    # For smaller inputs, process normally
+    try:
+        result_embeddings = embedding(
+            model=model,
+            input=chunks,
+        )
+        logger.info(
+            f"Successfully generated {len(result_embeddings['data'])} embeddings"
+        )
+        return [item["embedding"] for item in result_embeddings["data"]]
+    except Exception as e:
+        logger.error(f"Error generating embeddings: {e!s}", exc_info=True)
+        raise RuntimeError(f"Failed to generate embeddings: {e!s}") from e
+
+
+def chunk_text(text: str) -> list[str]:
+    """
+    Split a long text into smaller chunks based on the number of lines.
+    Args:
+        text (str): The text to be split into chunks
+
+    Returns:
+        list[str]: A list of text chunks, each containing a single line
+    """
+    if not text or not isinstance(text, str):
+        raise ValueError("Input must be a non-empty string")
+
+    return [chunk.strip() for chunk in text.split("\n")]
