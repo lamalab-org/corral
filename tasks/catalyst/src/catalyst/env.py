@@ -107,49 +107,84 @@ def load_tasks_from_json(
 
 
 class TaskGroupEnvironment(Environment):
-    """Environment that works with a task group"""
+    """Environment that works with a task group - simple composition approach"""
 
     def __init__(
         self,
         task_id: str,
         task_group: TaskGroup,
-        subtask_specific_tools: dict[
-            str, Tool
-        ],  # here this is a dict with keys as name for tools, and values are tool objects. eg:  "get_structure_from_mp_text": get_structure_from_mp_text,
+        subtask_specific_tools: dict[str, Tool],
+        base_work_dir: str,
         taskgroup_common_tools: dict[str, Tool] | None = None,
     ):
         self.task_group = task_group
-        self.subtask_specific_tools = (
-            subtask_specific_tools  # tools specific to only the subtask
-        )
-        self.taskgroup_common_tools = (
-            taskgroup_common_tools or {}
-        )  # tools common to all subtasks
+        self.subtask_specific_tools = subtask_specific_tools
+        self.taskgroup_common_tools = taskgroup_common_tools or {}
 
         if task_id not in task_group.tasks:
             raise ValueError(f"Task {task_id} not found in task group")
 
         self.current_task = task_group.tasks[task_id]
 
-        # Initialize tools and environment
-        self.tools = {}
-        combined_task_id = f"{task_group.group_id}_{task_id}"
-        super().__init__(combined_task_id)
+        super().__init__(
+            f"{task_group.group_id}_{task_id}",
+            base_work_dir=base_work_dir,
+            chained_tasks=task_group.chained_tasks,
+        )
 
-        self.chained_tasks = task_group.chained_tasks
+        logger.info(
+            f"DEBUG: TaskGroupEnvironment {task_id}: chained_tasks={self.chained_tasks}"
+        )
 
-        # Add required tools for the task
+        # Add tools
+        self._add_task_tools()
+        self._setup_file_tools()
+
+    def _add_task_tools(self):
+        """Add required tools for the task"""
         for tool_name in self.current_task.tools:
-            if tool_name in subtask_specific_tools:
-                self.add_tool(subtask_specific_tools[tool_name])
+            if tool_name in self.subtask_specific_tools:
+                self.add_tool(self.subtask_specific_tools[tool_name])
             else:
                 logger.warning(
-                    f"Tool {tool_name} required for task {task_id} not found"
+                    f"Tool {tool_name} required for task {self.task_id} not found"
                 )
 
-        # Add all file system tools
         for tool in self.taskgroup_common_tools.values():
             self.add_tool(tool)
+
+    def _setup_file_tools(self):
+        """Setup file tools for current workspace"""
+        if self.current_work_dir:
+            logger.info(
+                f"DEBUG: Setting up FSManager with base_path: {self.current_work_dir}"
+            )
+            # Create new FSManager for current workspace
+            fs_manager = FSManager("file", base_path=self.current_work_dir)
+
+            # Add/update file tools
+            self.tools.update(
+                {
+                    "list_files": ListFilesTool(fs_manager),
+                    "read_file": ReadFileTool(fs_manager),
+                    "write_file": WriteFileTool(fs_manager),
+                    "file_info": FileInfoTool(fs_manager),
+                    "cat_files": CatFilesTool(fs_manager),
+                    "copy_file": CopyFileTool(fs_manager),
+                }
+            )
+            logger.info(
+                f"DEBUG: File tools setup complete for workspace: {self.current_work_dir}"
+            )
+        else:
+            logger.warning("DEBUG: No current_work_dir set, skipping file tools setup")
+
+    def reset_state(self) -> str:
+        """Reset state and update file tools for new workspace"""
+        trial_id = super().reset_state()
+        # Recreate file tools for new workspace
+        self._setup_file_tools()
+        return trial_id
 
     def get_task_prompt(self) -> str:
         """Generate the task prompt for the current task"""
@@ -177,17 +212,12 @@ Required submission format:
         # Display initial input data
         if self.current_task.initial_input:
             for key, value in self.current_task.initial_input.items():
-                if key != "work_dir":  # Skip work_dir to avoid cluttering the prompt
+                if key != "work_dir":
                     prompt += f"- {key}: {value}\n"
 
-        # Add IO tools description for saving results
-        prompt += "\nIMPORTANT: You have access to filesystem tools which allow you to read and write files. Also, you can retry many times to get the correct answer. "
-        prompt += "Since some task results will be used in subsequent tasks, make sure to save your results using appropriate filenames. "
-        prompt += (
-            "This will help you reference and retrieve these files in later tasks."
-        )
-        work_dir = self.current_task.initial_input.get("work_dir", "")
-        prompt += f"\nWorking directory: {work_dir}\n ONLY use these working directory files. Do not use any other files.\n"
+        # Add workspace info
+        if self.current_work_dir:
+            prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n"
 
         # Add note about dependencies
         if self.current_task.input_from_tasks:
@@ -202,7 +232,6 @@ Required submission format:
 
             prompt += f"\n\nThis task uses output from tasks: {', '.join(status)}"
 
-        logger.info(f"Task prompt for {self.task_id}:\n{prompt}")
         return prompt
 
     def score(self) -> float:
@@ -252,6 +281,7 @@ def create_environments(
     """
 
     logger.info(f"Creating environments from {task_json_path} with work_dir {work_dir}")
+    logger.info(f"Chained tasks setting: {chained_tasks}")
 
     # Load tasks from JSON
     tasks = load_tasks_from_json(task_json_path, work_dir)
@@ -259,7 +289,7 @@ def create_environments(
     # Create task group
     group_id = Path(task_json_path).stem  # Use filename (without extension) as group ID
     logger.info(f"Creating task group with ID: {group_id}")
-    task_group = TaskGroup(group_id=group_id, tasks=tasks)
+    task_group = TaskGroup(group_id=group_id, tasks=tasks, chained_tasks=chained_tasks)
 
     # Print task dependencies for reference
     logger.info("\nTask Dependencies:")
@@ -277,8 +307,6 @@ def create_environments(
 
     # Create environments for all tasks
 
-    task_group = TaskGroup(group_id=group_id, tasks=tasks, chained_tasks=chained_tasks)
-
     environments = {}
     for task_id in task_group.tasks:
         environments[task_id] = TaskGroupEnvironment(
@@ -286,6 +314,7 @@ def create_environments(
             task_group=task_group,
             subtask_specific_tools=subtask_specific_tools,
             taskgroup_common_tools=taskgroup_common_tools,
+            base_work_dir=work_dir,
         )
 
     return environments
@@ -306,21 +335,9 @@ if __name__ == "__main__":
     port = int(os.environ.get("CORRAL_PORT", "8000"))
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)
-    fs_manager = FSManager("file", base_path=work_dir)
-
-    fs_tools = {
-        "list_files": ListFilesTool(fs_manager),
-        "read_file": ReadFileTool(fs_manager),
-        "write_file": WriteFileTool(fs_manager),
-        "file_info": FileInfoTool(fs_manager),
-        "cat_files": CatFilesTool(fs_manager),
-        "copy_file": CopyFileTool(fs_manager),
-    }
-
     # Create environments
     environments = create_environments(
         task_json_path=tasks_json_path,
-        taskgroup_common_tools=fs_tools,
         work_dir=work_dir,
         chained_tasks=CHAINED_TASKS,
     )

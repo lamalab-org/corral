@@ -1,6 +1,8 @@
+import os
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 
@@ -97,3 +99,33 @@ class TaskGroup:
             dep_task_id in self.results and self.results[dep_task_id] is not None
             for dep_task_id in task.input_from_tasks
         )
+
+
+class WorkspaceStrategy(Enum):
+    """Different workspace isolation strategies"""
+
+    NONE = "none"
+    SHARED = "shared"
+    TASK_LEVEL = "task_level"
+    TRIAL_LEVEL = "trial_level"
+    CHAIN_AWARE = "chain_aware"
+
+    @classmethod
+    def from_env(cls, default=None) -> "WorkspaceStrategy":
+        """Get workspace strategy from environment variable"""
+        env_value = os.environ.get("CORRAL_WORKSPACE_STRATEGY", "").lower()
+
+        strategy_map = {
+            "none": cls.NONE,
+            "shared": cls.SHARED,
+            "task": cls.TASK_LEVEL,
+            "task_level": cls.TASK_LEVEL,
+            "trial": cls.TRIAL_LEVEL,
+            "trial_level": cls.TRIAL_LEVEL,
+            "chain_aware": cls.CHAIN_AWARE,
+            "auto": cls.CHAIN_AWARE,
+        }
+
+        if default is None:
+            default = cls.CHAIN_AWARE
+        return strategy_map.get(env_value, default)
