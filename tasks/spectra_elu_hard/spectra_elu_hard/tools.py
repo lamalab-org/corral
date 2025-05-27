@@ -11,13 +11,7 @@ from rdkit.Chem import rdMolDescriptors
 
 from corral.base import Tool
 from corral.io import (
-    CatFilesTool,
-    CopyFileTool,
-    FileInfoTool,
     FSManager,
-    ListFilesTool,
-    ReadFileTool,
-    WriteFileTool,
 )
 from corral.utils import (
     create_vector_database,
@@ -215,7 +209,7 @@ def simulate_spectra(smiles: str) -> dict[str, str]:
 
 
 @tool
-def search_by_smiles(smiles, top_k=10):
+def search_by_smiles(smiles: str, top_k: int = 10) -> list[dict[str, Any]]:
     """
     Search the NMRShift database for entries matching or chemically similar to the given SMILES.
 
@@ -243,6 +237,9 @@ def retrieve_protons_shifts() -> list[dict[str, str]]:
     """
     Retrieve the proton shifts ranges for hydrocarbons.
     All chemical shifts (delta) are reported in parts per million (ppm) relative to tetramethylsilane (TMS) as the reference standard.
+
+    Args:
+        None
 
     Returns:
         list: A list of dictionaries containing the proton chemical shifts ranges relative to TMS
@@ -284,6 +281,9 @@ def retrieve_aromatic_protons_shifts() -> list[dict[str, str]]:
     relative to unsubstituted benzene. Positive values indicate downfield shifts (deshielding),
     while negative values indicate upfield shifts (shielding).
     All shifts are relative to tetramethylsilane (TMS) as the reference standard.
+
+    Args:
+        None
 
     Returns:
         list: A list of dictionaries containing the substituent effects on proton chemical shifts in aromatic rings
@@ -334,6 +334,9 @@ def retrieve_carbon_shifts() -> list[dict[str, str]]:
     All chemical shifts (deltas) are reported in parts per million (ppm) relative to tetramethylsilane (TMS) as the reference standard.
     These values can be used to interpret 13C NMR spectra and identify carbon environments in unknown compounds.
 
+    Args:
+        None
+
     Returns:
         list: A list of dictionaries containing the carbon chemical shifts ranges for different functional groups
     """
@@ -367,16 +370,20 @@ def retrieve_carbon_shifts() -> list[dict[str, str]]:
 def create_tools() -> dict[str, Tool]:
     """Create a dictionary of all available tools for the agent environment"""
     Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
-    fs_manager = FSManager("file", base_path=BASE_WORK_DIR)
+    fs_manager = FSManager("file", base_path=BASE_WORK_DIR)  # noqa: F841
     return {
-        "list_files": ListFilesTool(fs_manager),
-        "read_file": ReadFileTool(fs_manager),
-        "write_file": WriteFileTool(fs_manager),
-        "file_info": FileInfoTool(fs_manager),
-        "cat_files": CatFilesTool(fs_manager),
-        "copy_file": CopyFileTool(fs_manager),
-        "enhanced_brave_search": online_search,
+        # "list_files": ListFilesTool(fs_manager),
+        # "read_file": ReadFileTool(fs_manager),
+        # "write_file": WriteFileTool(fs_manager),
+        # "file_info": FileInfoTool(fs_manager),
+        # "cat_files": CatFilesTool(fs_manager),
+        # "copy_file": CopyFileTool(fs_manager),
+        # "enhanced_brave_search": online_search,
         "relevant_pubchem_sections": relevant_pubchem_sections,
         "get_formula_from_smiles": get_formula_from_smiles,
         "simulate_spectra": simulate_spectra,
+        "retrieve_protons_shifts": retrieve_protons_shifts,
+        "retrieve_aromatic_protons_shifts": retrieve_aromatic_protons_shifts,
+        "retrieve_carbon_shifts": retrieve_carbon_shifts,
+        "search_by_smiles": search_by_smiles,
     }
