@@ -230,35 +230,48 @@ def _setup_collection(
     client: chromadb.PersistentClient, collection_name: str, update_mode: str
 ) -> tuple[Any, str, bool]:
     """Setup the collection based on the update mode and return it with operation status."""
-    collection_list = client.list_collections()
-    collection_exists = collection_name in collection_list
     operation = "created"  # Default operation status
+    collection_exists = False
 
-    logger.debug(f"Available collections: {collection_list}")
+    # Get list of collection names instead of collection objects
+    collection_names = [col.name for col in client.list_collections()]
+    collection_exists = collection_name in collection_names
+
+    logger.debug(f"Available collections: {collection_names}")
     logger.debug(f"Collection '{collection_name}' exists: {collection_exists}")
 
-    if update_mode == "recreate" and collection_exists:
-        logger.info(
-            f"Collection '{collection_name}' already exists, deleting before recreation"
-        )
-        client.delete_collection(name=collection_name)
-        collection = client.create_collection(name=collection_name)
-        logger.info(f"Created collection '{collection_name}'")
-    elif not collection_exists:
-        logger.info(
-            f"Collection '{collection_name}' does not exist, creating new collection"
-        )
-        collection = client.create_collection(name=collection_name)
-        logger.info(f"Created new collection '{collection_name}'")
-    else:
-        logger.info(
-            f"Using existing collection '{collection_name}' for {update_mode} operation"
-        )
-        collection = client.get_collection(name=collection_name)
-        if update_mode == "append":
-            operation = "updated (appended)"
-        elif update_mode == "upsert":
-            operation = "updated (upserted)"
+    try:
+        if update_mode == "recreate" and collection_exists:
+            logger.info(
+                f"Collection '{collection_name}' already exists, deleting before recreation"
+            )
+            client.delete_collection(name=collection_name)
+            # Create a small delay to ensure deletion completes
+            import time
+
+            time.sleep(0.5)
+            collection = client.create_collection(name=collection_name)
+            logger.info(f"Recreated collection '{collection_name}'")
+        elif not collection_exists:
+            logger.info(
+                f"Collection '{collection_name}' does not exist, creating new collection"
+            )
+            collection = client.create_collection(name=collection_name)
+            logger.info(f"Created new collection '{collection_name}'")
+        else:
+            logger.info(
+                f"Using existing collection '{collection_name}' for {update_mode} operation"
+            )
+            collection = client.get_collection(name=collection_name)
+            if update_mode == "append":
+                operation = "updated (appended)"
+            elif update_mode == "upsert":
+                operation = "updated (upserted)"
+    except Exception as e:
+        logger.error(f"Error setting up collection: {e!s}")
+        raise RuntimeError(
+            f"Error setting up collection '{collection_name}': {e!s}"
+        ) from e
 
     return collection, operation, collection_exists
 
@@ -387,7 +400,7 @@ def create_vector_database(
     metadatas: list[dict] | None = None,
     model: str = "openai/text-embedding-3-large",
     chemical: list[str] | None = None,
-    chemical_model: str = "huggingface/ibm-research/MoLFormer-XL-both-10pct",
+    chemical_model: str = "ibm-research/MoLFormer-XL-both-10pct",
 ) -> str:
     """Create or update a vector database from text instructions. If chemical data is provided,
     it will be used to generate embeddings instead of the text chunks. The database will be build
@@ -404,7 +417,7 @@ def create_vector_database(
         metadatas (list[dict], optional): Metadata for each chunk. Default is None.
         model (str, optional): The model to use for embedding. Default is "openai/text-embedding-3-large".
         chemical (list[str], optional): List of chemical data to embed separately. Default is None.
-        chemical_model (str, optional): The model to use for chemical embeddings. Default is "huggingface/ibm-research/MoLFormer-XL-both-10pct".
+        chemical_model (str, optional): The model to use for chemical embeddings. Default is "ibm-research/MoLFormer-XL-both-10pct".
 
     Returns:
         str: A message indicating the success of the operation

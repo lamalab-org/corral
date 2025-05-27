@@ -229,7 +229,7 @@ def search_by_smiles(smiles, top_k=10):
         collection_name=collection_name,
         path=db_path,
         top_k=top_k,
-        chemical_model="huggingface/ibm-research/MoLFormer-XL-both-10pct",
+        chemical_model="ibm-research/MoLFormer-XL-both-10pct",
     )
 
 
