@@ -303,7 +303,7 @@ class MatAgentBenchmark:
             for j in range(start_trial, trials_per_task):
                 try:
                     answer, messages = self.agent.run_agent(self.interface, task_id)
-                    result = self.interface.submit_answer(task_id, answer, messages)
+                    result = self.interface.submit_answer(task_id, answer)
                     task_trials.trials.append(result)
                     if verbose:
                         save_agent_messages(
