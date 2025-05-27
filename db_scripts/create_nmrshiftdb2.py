@@ -14,7 +14,12 @@ def parse_nmr_properties(properties):
     Parse NMR properties from a dictionary into a clean format.
 
     Args:
-        properties (dict): Dictionary of properties from an RDKit molecule
+        properties (dict): Dictionary of properties from an RDKit molecule. The keys should include:
+            - "INChI key" or "INChI" for SMILES
+            - "Solvent" for solvent information
+            - "Field Strength [MHz]" for field strength
+            - "Temperature [K]" for temperature
+            - "Spectrum 13C" and "Spectrum 1H" for NMR spectra
 
     Returns:
         dict: Dictionary with 'smiles', '13C_NMR', and '1H_NMR' keys or None if no spectra

@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 import chromadb
 import modal
+import more_itertools
 import numpy as np
 import requests
 import tiktoken
@@ -355,34 +356,40 @@ def _process_chunks_in_batches(
         f"Processing {len(processed_chunks)} documents with embeddings in batches of {BATCH_SIZE}"
     )
 
-    # Process in batches to reduce memory usage
-    for batch_idx in range(0, len(processed_chunks), BATCH_SIZE):
-        batch_end = min(batch_idx + BATCH_SIZE, len(processed_chunks))
-        batch_chunks = processed_chunks[batch_idx:batch_end]
-        batch_embeddings = embeddings[batch_idx:batch_end]
-        batch_ids = [
-            f"id_{i}" for i in range(start_id + batch_idx, start_id + batch_end)
-        ]
-        batch_metadatas = (
-            metadatas[batch_idx:batch_end] if metadatas is not None else None
+    total_batches = (len(processed_chunks) + BATCH_SIZE - 1) // BATCH_SIZE
+    metadata_chunks = (
+        more_itertools.chunked(metadatas, BATCH_SIZE)
+        if metadatas is not None
+        else [None] * total_batches
+    )
+
+    for batch_idx, (chunk_batch, embedding_batch, metadata_batch) in enumerate(
+        zip(
+            more_itertools.chunked(processed_chunks, BATCH_SIZE),
+            more_itertools.chunked(embeddings, BATCH_SIZE),
+            metadata_chunks,
+            strict=False,
         )
+    ):
+        batch_ids = [
+            f"id_{start_id + total_processed + i}" for i in range(len(chunk_batch))
+        ]
 
         logger.info(
-            f"Processing batch {batch_idx//BATCH_SIZE + 1}/{(len(processed_chunks) + BATCH_SIZE - 1)//BATCH_SIZE} "
-            f"({batch_end - batch_idx} documents)"
+            f"Processing batch {batch_idx + 1}/{total_batches} "
+            f"({len(chunk_batch)} documents)"
         )
 
-        # Add documents using appropriate method based on update mode
         _add_documents_to_collection(
             collection,
             update_mode,
-            batch_embeddings,
-            batch_chunks,
+            embedding_batch,
+            chunk_batch,
             batch_ids,
-            batch_metadatas,
+            metadata_batch,
         )
 
-        total_processed += batch_end - batch_idx
+        total_processed += len(chunk_batch)
         logger.info(f"Processed {total_processed}/{len(processed_chunks)} documents")
 
         # Force garbage collection between batches
