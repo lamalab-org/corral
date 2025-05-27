@@ -26,15 +26,12 @@ hf_cache_vol = Volume.from_name("huggingface-cache", create_if_missing=True)
 
 
 @tool
-def enhanced_brave_search(
-    query: str, num_results: int = 5, min_similarity: float = 0.75
-) -> list[dict]:
+def enhanced_brave_search(query: str, num_results: int = 5) -> list[dict]:
     """Perform a web search using Brave Search, then filter and rank results using embeddings.
 
     Args:
         query (str): The search query string
         num_results (int, optional): Maximum number of results to return. Defaults to 5
-        min_similarity (float, optional): Minimum similarity score threshold. Defaults to 0.75
 
     Returns:
         list[dict]: A list of dictionaries containing the most relevant search results
@@ -46,7 +43,6 @@ def enhanced_brave_search(
     return web_search(
         query=query,
         num_results=num_results,
-        min_similarity=min_similarity,
     )
 
 
@@ -374,7 +370,7 @@ def decimer_molecule_extraction(image_path: str) -> str:
         str: String containing the extracted molecule information
     """
     decimer_remote = modal.Function.from_name(
-        "rxnenv", "molecule_image_extraction_decimer"
+        "chemenv", "molecule_image_extraction_decimer"
     )
     with Path(image_path).open("rb") as f:
         image_bytes = f.read()
@@ -403,7 +399,7 @@ def molscribe_molecule_extraction(image_path: str) -> dict[str, Any]:
         str: String containing the extracted molecule information
     """
     molscribe_remote = modal.Function.from_name(
-        "rxnenv", "molecule_image_extraction_molscribe"
+        "chemenv", "molecule_image_extraction_molscribe"
     )
     with Path(image_path).open("rb") as f:
         image_bytes = f.read()
@@ -444,7 +440,7 @@ def rxnscribe_reaction_extraction(image_path: str) -> list[dict]:
     Returns:
         list[dict]: List of dictionaries containing the extracted reaction information
     """
-    rxnscribe_remote = modal.Function.from_name("rxnenv", "rxn_schema_extraction")
+    rxnscribe_remote = modal.Function.from_name("chemenv", "rxn_schema_extraction")
     with Path(image_path).open("rb") as f:
         image_bytes = f.read()
 

@@ -931,16 +931,25 @@ def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
             if hasattr(msg, "name") and msg.name:
                 message_dict["name"] = msg.name
             if hasattr(msg, "tool_calls") and msg.tool_calls:
-                message_dict["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in msg.tool_calls
-                ]
+                message_dict["tool_calls"] = []
+                for tc in msg.tool_calls:
+                    if isinstance(tc, dict):
+                        tool_call = {
+                            "id": tc.get("id"),
+                            "function": {
+                                "name": tc.get("function", {}).get("name"),
+                                "arguments": tc.get("function", {}).get("arguments"),
+                            },
+                        }
+                    else:
+                        tool_call = {
+                            "id": tc.id,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                    message_dict["tool_calls"].append(tool_call)
 
         serializable_messages.append(message_dict)
 
@@ -1105,15 +1114,12 @@ def make_brave_search_request(query: str, api_key: str) -> list[dict[str, Any]]:
     ]
 
 
-def web_search(
-    query: str, num_results: int = 5, min_similarity: float = 0.75
-) -> list[dict[str, Any]]:
+def web_search(query: str, num_results: int = 5) -> list[dict[str, Any]]:
     """Perform a web search using Brave Search, then filter and rank results using embeddings.
 
     Args:
         query (str): The search query string
         num_results (int, optional): Maximum number of results to return. Defaults to 5
-        min_similarity (float, optional): Minimum similarity score threshold. Defaults to 0.75
 
     Returns:
         list[dict]: A list of dictionaries containing the most relevant search results
@@ -1123,7 +1129,7 @@ def web_search(
         ValueError: If BRAVE_SEARCH_API_KEY environment variable is not set
     """
     logger.info(
-        f"Starting web search for query: '{query}' with parameters: num_results={num_results}, min_similarity={min_similarity}"
+        f"Starting web search for query: '{query}' with parameters: num_results={num_results}"
     )
 
     api_key = os.getenv("BRAVE_SEARCH_API_KEY")
@@ -1170,15 +1176,9 @@ def web_search(
                 }
             )
 
-        logger.info(f"Filtering results with similarity threshold {min_similarity}")
-        filtered_results = [
-            r for r in results_with_scores if r["similarity_score"] >= min_similarity
-        ]
-        logger.info(f"{len(filtered_results)} results passed the similarity threshold")
-
         logger.info("Sorting results by similarity score")
         sorted_results = sorted(
-            filtered_results, key=lambda x: x["similarity_score"], reverse=True
+            results_with_scores, key=lambda x: x["similarity_score"], reverse=True
         )
 
         final_results = sorted_results[:num_results]
