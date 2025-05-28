@@ -24,10 +24,9 @@ class FSManager:
         path_obj = Path(path)
         if path_obj.is_absolute():
             return str(path_obj)
-        else:
-            # Relative path - resolve against base_path
-            resolved = self.base_path / path_obj
-            return str(resolved)
+        # Relative path - resolve against base_path
+        resolved = self.base_path / path_obj
+        return str(resolved)
 
     def list_files(self, path: str, recursive: bool = False) -> list[str]:
         """List files in a directory"""
