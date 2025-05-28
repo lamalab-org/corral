@@ -14,7 +14,7 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "anthropic/claude-3-7-sonnet-20250219",
+    model: str = "openai/gpt-4o",
     task_ids: list | None = None,
     temperature: float = 0.0,
 ):
@@ -26,8 +26,10 @@ def run_benchmark(
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
-    result = runner.bench(task_ids, trials_per_task=2, k_values=[1], verbose=True)
-    result.generate_report("results.json")
+    result = runner.bench(
+        task_ids, trials_per_task=5, k_values=[1, 2, 3, 4, 5], verbose=True
+    )
+    result.generate_report("results_ocp_passk5.json")
 
     logger.info("Benchmark completed")
 
