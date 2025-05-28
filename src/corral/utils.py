@@ -71,7 +71,7 @@ def vector_database_search(
         RuntimeError: If the specified collection doesn't exist
     """
     chemical = False
-    if chemical_model:
+    if chemical_model is not None:
         model = chemical_model
         chemical = True
 
@@ -507,7 +507,7 @@ def create_vector_database(
     wait=wait_exponential(multiplier=1, min=2, max=30),
     retry=retry_if_exception_type((ConnectionError, TimeoutError)),
 )
-def embed_text(chunks: list, model: str, chemical=True) -> list[list[float]]:
+def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
     """
     Embed a list of text chunks using the specified model with automatic retries.
     If the list is large (>2048 chunks), it will process them in smaller batches.
@@ -516,7 +516,7 @@ def embed_text(chunks: list, model: str, chemical=True) -> list[list[float]]:
     Args:
         chunks (list): List of text chunks to embed
         model (str): Model to use for embeddings
-        chemical (bool, optional): Whether to use chemical embedding model. Default is True.
+        chemical (bool, optional): Whether to use chemical embedding model. Default is False.
 
     Returns:
         list[list[float]]: List of embeddings for each chunk

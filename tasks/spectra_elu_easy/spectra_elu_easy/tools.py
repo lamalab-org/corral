@@ -223,6 +223,8 @@ def search_by_smiles(smiles: str, top_k: int = 10) -> list[dict[str, Any]]:
     collection_name = "nmrshiftdb2"
     db_path = Path(__file__).resolve().parents[3] / "vector_databases" / "nmrshiftdb2"
 
+    top_k = int(top_k) if not isinstance(top_k, int) else top_k
+
     return vector_database_search(
         query=smiles,
         collection_name=collection_name,
