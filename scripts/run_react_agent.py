@@ -29,7 +29,7 @@ def run_benchmark(
     result = runner.bench(
         task_ids, trials_per_task=5, k_values=[1, 2, 3, 4, 5], verbose=True
     )
-    result.generate_report("results_ocp_passk5.json")
+    result.generate_report("results_test.json")
 
     logger.info("Benchmark completed")
 
