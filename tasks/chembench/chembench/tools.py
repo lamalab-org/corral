@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import gc
 import uuid
 from pathlib import Path
@@ -260,23 +258,6 @@ def get_number_of_isomers(compound: str) -> str:
     return remote_call(function_name="get_number_isomers_pubchem", env_name="chemenv")(
         compound=compound
     )
-
-
-@tool
-def get_compound_isomers(compound: str) -> list:
-    """
-    Returns the isomers of a given compound based on the compounds with the same empirical formula in PubChem as `compound`.
-    Note that this implies that this number is not exhaustive
-
-    Args:
-        compound (str): The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
-
-    Returns:
-        list: The isomers of the compound.
-    """
-    return remote_call(
-        function_name="get_compound_isomers_pubchem", env_name="chemenv"
-    )(compound=compound)
 
 
 @tool
