@@ -73,7 +73,7 @@ class TaskState:
     score: float | None = None
     submitted_answer: str | None = None
     feedback: str | None = None
-    start_time: datetime = field(default_factory=datetime.now)
+    start_time: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     end_time: datetime | None = None
 
     def get_tool_statistics(self) -> dict[str, Any]:
@@ -93,6 +93,12 @@ class TaskState:
                 if status != ToolCallStatus.SUCCESS
             },
         }
+
+    def get_duration(self) -> float | None:
+        """Get trial duration in seconds"""
+        if self.end_time and self.start_time:
+            return (self.end_time - self.start_time).total_seconds()
+        return None
 
 
 class Tool:

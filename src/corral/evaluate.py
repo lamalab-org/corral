@@ -98,6 +98,12 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()
 
+    def get_trial_state(self, task_id: str, trial_id: str) -> dict[str, Any]:
+        """Get specific trial state"""
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/trials/{trial_id}")
+        response.raise_for_status()
+        return response.json()["trial_state"]
+
 
 class Agent(Protocol):
     """Protocol defining what an agent must implement"""
@@ -142,6 +148,7 @@ class MatAgentBenchmark:
     ) -> BenchmarkResult:
         """Run benchmark with simplified checkpointing strategies"""
 
+        benchmark_start_time = datetime.now(tz=timezone.utc)
         if task_ids is None:
             task_ids = self.interface.get_available_tasks()
 
@@ -184,7 +191,11 @@ class MatAgentBenchmark:
                 task_ids, trials_per_task, task_results, session_id, verbose
             )
 
-        return BenchmarkResult(task_results=task_results, k=k_values)
+        benchmark_end_time = datetime.now(tz=timezone.utc)
+        benchmark_duration = (benchmark_end_time - benchmark_start_time).total_seconds()
+        return BenchmarkResult(
+            task_results=task_results, k=k_values, total_duration=benchmark_duration
+        )
 
     def _run_with_task_level_checkpointing(
         self,
@@ -354,14 +365,63 @@ class MatAgentBenchmark:
             logger.info(
                 f"Running trial {len(task_trials.trials) + 1} for task {task_id}"
             )
+
+            # Record trial start time for fallback
+            trial_start_time = datetime.now(tz=timezone.utc)
+
+            # Run the agent
             answer, messages = self.agent.run_agent(self.interface, task_id)
+
+            # Submit answer and get result
             result = self.interface.submit_answer(task_id, answer)
+
+            # Get duration from the completed trial state
+            duration = None
+            try:
+                # Use the interface method to get the completed trial state
+                finished_trial_id = str(
+                    int(result.trial_id) - 1
+                )  # -1 because after submitting, the trial_id is incremented
+                trial_state = self.interface.get_trial_state(task_id, finished_trial_id)
+                start_time_str = trial_state.get("start_time")
+                end_time_str = trial_state.get("end_time")
+
+                if start_time_str and end_time_str:
+                    # Parse datetime strings
+                    start_time = datetime.fromisoformat(
+                        start_time_str.replace("Z", "+00:00")
+                    )
+                    end_time = datetime.fromisoformat(
+                        end_time_str.replace("Z", "+00:00")
+                    )
+
+                    # Calculate duration using TaskState logic
+                    duration = (end_time - start_time).total_seconds()
+                    logger.info(f"Retrieved duration from trial state: {duration:.2f}s")
+                else:
+                    logger.warning(f"Missing timing info in trial {result.trial_id}")
+            except Exception as e:
+                logger.warning(f"Error fetching trial duration: {e}")
+
+            # Fallback to trial-level timing if TaskState duration is not available
+            if duration is None:
+                trial_end_time = datetime.now(tz=timezone.utc)
+                duration = (trial_end_time - trial_start_time).total_seconds()
+                logger.info(f"Using fallback duration: {duration:.2f}s")
+
+            # Set duration on the result
+            result.duration = duration
+
+            # Add result to trials
             task_trials.trials.append(result)
 
+            # Save agent messages if verbose mode is enabled
             if verbose:
                 save_agent_messages(messages, task_id, self.agent.__class__.__name__)
 
-            logger.info(f"Trial completed for {task_id}, score: {result.score}")
+            logger.info(
+                f"Trial completed for {task_id}, score: {result.score}, duration: {duration:.2f}s"
+            )
             return True
 
         except KeyboardInterrupt:
