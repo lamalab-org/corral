@@ -165,11 +165,9 @@ class MatAgentBenchmark:
         if dependency_chain is None:
             dependency_chain = self.interface.supports_dependency_chain()
 
-        # Initialize task results
-        task_results = {}
-        for task_id in task_ids:
-            task_results[task_id] = TaskTrialResults(task_id=task_id)
-
+        task_results = {
+            task_id: TaskTrialResults(task_id=task_id) for task_id in task_ids
+        }
         logger.info(
             f"Running benchmark: {len(task_ids)} tasks with {trials_per_task} trials each"
         )
