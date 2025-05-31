@@ -1,4 +1,3 @@
-import importlib.resources
 import json
 import re
 from dataclasses import dataclass
@@ -7,12 +6,10 @@ from typing import Any
 from loguru import logger
 from promptstore import PromptStore
 
-from corral.agents.prompt_utils import get_prompt
+from corral.agents.base_agent import BaseAgent
 from corral.agents.utils import (
     LiteLLMMessage,
-    _build_user_content,
     convert_to_openai_tool_format,
-    llm_call,
 )
 from corral.evaluate import BenchmarkInterface
 
@@ -25,7 +22,7 @@ class Action:
     arguments: dict[str, Any]
 
 
-class ToolCallingAgent:
+class ToolCallingAgent(BaseAgent):
     """
     Agent that uses native function calling from the providers to solve the task
 
@@ -43,7 +40,7 @@ class ToolCallingAgent:
 
     def __init__(
         self,
-        model: str = "gpt-4",
+        model: str = "openai/gpt-4",
         max_iterations: int = 10,
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
@@ -53,60 +50,20 @@ class ToolCallingAgent:
         **kwargs,
     ):
         """Initialize the agent"""
-        self.model = model
-        self.max_iterations = max_iterations
-        self.api_endpoint = api_endpoint
-        self.temperature = temperature
-        if prompt_store:
-            self.store = prompt_store
-        else:
-            with importlib.resources.path("corral.agents", "") as style_path:
-                self.store = PromptStore(f"{style_path}/prompts")
-        self.kwargs = kwargs
-
-        self.system_prompt = (
-            get_prompt(
-                self.store, system_prompt, "400fcecf-f5f2-464b-aff5-8a4377c9685c"
-            ).fill({})
-            if system_prompt is None
-            else system_prompt
+        user_prompt_id = "fe04453b-5469-4611-bba6-6d81487df787"
+        super().__init__(
+            model=model,
+            max_iterations=max_iterations,
+            api_endpoint=api_endpoint,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            prompt_store=prompt_store,
+            user_prompt_id=user_prompt_id,
+            **kwargs,
         )
 
-        self.user_prompt = get_prompt(
-            self.store, user_prompt, "fe04453b-5469-4611-bba6-6d81487df787"
-        )
-
-    def create_prompt(
-        self, task_guide: str | list, history: list[LiteLLMMessage], examples: list[str]
-    ) -> list[LiteLLMMessage]:
-        """Create the initial prompt messages for the agent
-
-        Args:
-            task_guide (str): The task guide to use.
-            history (list[LiteLLMMessage]): The history items to include.
-            examples (list[str]): The few-shot examples to include.
-
-        Returns:
-            List[LiteLLMMessage]: The prompt messages.
-        """
-        messages: list[LiteLLMMessage] = []
-        if self.system_prompt:
-            messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
-        user_content = _build_user_content(
-            agent="tool_calling",
-            user_prompt=self.user_prompt,
-            task_guide=task_guide,
-            examples=examples,
-        )
-        messages.append(LiteLLMMessage(role="user", content=user_content))
-
-        # History is meant to be the conversation history, so we add it to the messages
-        if history:
-            messages.extend(history)
-
-        return messages
-
-    def run_agent(
+    def run(
         self,
         interface: BenchmarkInterface,
         task_id: str,
@@ -114,7 +71,18 @@ class ToolCallingAgent:
         task_prompt: str | None = None,
         examples: list[str] | None = None,
     ) -> tuple[str, list[LiteLLMMessage]]:
-        """Run the agent to solve the task"""
+        """Run the agent to solve the task
+
+        Args:
+            interface (BenchmarkInterface): The interface to use
+            task_id (str): The task ID to solve
+            history (list[LiteLLMMessage]], optional): The history items to include. Defaults to None.
+            task_prompt (str, optional): The task prompt to use. Defaults to None.
+            examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
+
+        Returns:
+            Tuple[str, list[LiteLLMMessage]]: The final answer and messages
+        """
         if history is None:
             history = []
 
@@ -127,19 +95,16 @@ class ToolCallingAgent:
             task_guide = task_prompt
 
         messages = self.create_prompt(
-            task_guide=task_guide, history=history, examples=examples
+            task_guide=task_guide,
+            history=None,
+            examples=examples,
+            agent_type="tool_calling",
         )
+        messages.extend(history)
 
         for _i in range(self.max_iterations):
             try:
-                llm_response = llm_call(
-                    model=self.model,
-                    messages=messages,
-                    tools=tools,
-                    temperature=self.temperature,
-                    api_endpoint=self.api_endpoint,
-                    **self.kwargs,
-                )
+                llm_response = self.get_llm_response(messages, tools)
 
                 content = llm_response.content
                 if content:
@@ -167,7 +132,7 @@ class ToolCallingAgent:
                             )
                             result = str(function_call.result)
                             if result is None:
-                                result = function_call.error
+                                result = str(function_call.error)
                         except Exception as e:
                             result = str(e)
 

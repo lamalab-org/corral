@@ -22,7 +22,7 @@ class StringPrompt:
 def get_prompt(
     store: PromptStore,
     prompt_input: str | None | Any,
-    default_uuid: str,
+    default_uuid: str | None,
 ) -> Any:
     """Get prompt from store or create a string prompt.
 

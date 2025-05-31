@@ -15,7 +15,6 @@ from corral.report import (
     TaskTrialResults,
     ToolResponse,
 )
-from corral.utils import save_agent_messages
 
 
 @dataclass
@@ -238,13 +237,11 @@ class MatAgentBenchmark:
 
             for j in range(start_trial, trials_per_task):
                 try:
-                    answer, messages = self.agent.run_agent(self.interface, task_id)
+                    answer = self.agent.run_agent(
+                        self.interface, task_id, verbose=verbose
+                    )
                     result = self.interface.submit_answer(task_id, answer)
                     task_trials.trials.append(result)
-                    if verbose:
-                        save_agent_messages(
-                            messages, task_id, self.agent.__class__.__name__
-                        )
                     self._save_checkpoint(session_id, task_results, task_id, j + 1)
                 except Exception as e:
                     logger.error(f"Error during benchmark: {e}")

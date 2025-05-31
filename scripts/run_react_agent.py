@@ -2,7 +2,7 @@ import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
-from corral.agents.react import ReActAgent
+from corral.agents import ReActAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 
 load_dotenv("../.env", override=True)
@@ -14,7 +14,9 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "anthropic/claude-3-7-sonnet-20250219", task_ids: list | None = None, temperature: float = 0.0
+    model: str = "anthropic/claude-3-7-sonnet-20250219",
+    task_ids: list | None = None,
+    temperature: float = 0.0,
 ):
     """Run the benchmark with specified model and tasks"""
 

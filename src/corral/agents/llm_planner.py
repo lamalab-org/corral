@@ -1,17 +1,13 @@
-import importlib.resources
-import json
-
 from promptstore import PromptStore
 
-from corral.agents.prompt_utils import get_prompt
+from corral.agents.base_agent import BaseAgent
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
-from corral.agents.utils import LiteLLMMessage, _build_user_content, llm_call
+from corral.agents.utils import LiteLLMMessage
 from corral.evaluate import BenchmarkInterface
-from corral.utils import serialize_messages
 
 
-class LLMPlanner:
+class LLMPlanner(BaseAgent):
     """Agent that uses the LLM planner to generate plans.
     Then the low-level planner is called to execute the plan.
     Based on https://arxiv.org/abs/2212.04088
@@ -31,7 +27,7 @@ class LLMPlanner:
 
     def __init__(
         self,
-        model: str = "gpt-4",
+        model: str = "openai/gpt-4o",
         max_iterations: int = 5,
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
@@ -41,33 +37,25 @@ class LLMPlanner:
         **kwargs,
     ):
         """Initialize the agent"""
-        self.model = model
-        self.max_iterations = max_iterations
-        self.api_endpoint = api_endpoint
-        self.temperature = temperature
-        if prompt_store:
-            self.store = prompt_store
-        else:
-            with importlib.resources.path("corral.agents", "") as style_path:
-                self.store = PromptStore(f"{style_path}/prompts")
-        self.kwargs = kwargs
-        self.system_prompt = (
-            get_prompt(
-                self.store, system_prompt, "400fcecf-f5f2-464b-aff5-8a4377c9685c"
-            ).fill({})
-            if system_prompt is None
-            else system_prompt
+        user_prompt_id = "1c7f064f-9a3b-40f5-a555-94e551722d50"
+        super().__init__(
+            model=model,
+            max_iterations=max_iterations,
+            api_endpoint=api_endpoint,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            prompt_store=prompt_store,
+            user_prompt_id=user_prompt_id,
+            **kwargs,
         )
 
-        self.user_prompt = get_prompt(
-            self.store, user_prompt, "1c7f064f-9a3b-40f5-a555-94e551722d50"
-        )
-
-    def run_agent(
+    def run(
         self,
         interface: BenchmarkInterface,
         task_id: str,
-        tool_usage: bool = False,
+        history: list[LiteLLMMessage] | None = None,
+        task_prompt: str | None = None,
         examples: list[str] | None = None,
     ) -> tuple[str, list[LiteLLMMessage]]:
         """Run the LLM planner agent
@@ -75,29 +63,34 @@ class LLMPlanner:
         Args:
             interface (BenchmarkInterface): The benchmark interface to use
             task_id (str): The task ID to solve
+            history (List[LiteLLMMessage], optional): The history items to include. Defaults to None.
+            task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
-            tool_usage (bool, optional): Whether to use tool calling or not. Defaults to False.
 
         Returns:
             Tuple[str, List[LiteLLMMessage]]: The final answer and messages
         """
         tools = interface.get_available_tools_for_task(task_id)
 
-        task_guide = interface.get_task_prompt(task_id)
+        if task_prompt is None:
+            task_guide = interface.get_task_prompt(task_id)
+        else:
+            task_guide = task_prompt
 
-        user_content = _build_user_content(
-            agent="llm_planner",
-            user_prompt=self.user_prompt,
+        tool_usage = (
+            False  # Default to False, could be passed as a parameter in the future
+        )
+
+        messages = self.create_prompt(
             task_guide=task_guide,
-            iterations=self.max_iterations,
+            history=None,
             examples=examples,
+            agent_type="llm_planner",
             tools=tools,
         )
 
-        messages: list[LiteLLMMessage] = []
-        if self.system_prompt:
-            messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
-        messages.append(LiteLLMMessage(role="user", content=user_content))
+        if history:
+            messages.extend(history)
 
         if tool_usage:
             agent = ToolCallingAgent(
@@ -119,13 +112,7 @@ class LLMPlanner:
             )
 
         for _i in range(self.max_iterations):
-            plan = llm_call(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                api_endpoint=self.api_endpoint,
-                **self.kwargs,
-            ).content
+            plan = self.get_llm_response(messages).content
 
             messages.append(
                 LiteLLMMessage(
@@ -145,14 +132,13 @@ class LLMPlanner:
                 task_prompt=plan,
             )
 
-            serialized_messages = serialize_messages(low_level_planner_messages)
-
             messages.append(
                 LiteLLMMessage(
                     role="assistant",
-                    content=f"Answer submitted by the executor: {final_answer}.\nMessages by the executor:\n{json.dumps(serialized_messages, indent=2)}",
+                    content=f"Answer submitted by the executor: {final_answer}.\nMessages by the executor:",
                     name="low-level-planner",
                 )
             )
+            messages.extend(low_level_planner_messages)
 
         return "Error: Maximum iterations reached", messages
