@@ -222,7 +222,7 @@ class BaseAgent(ABC):
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         verbose: bool = False,
-    ) -> tuple[str, list[LiteLLMMessage]]:
+    ) -> str:
         """Run the agent to solve a task
 
         This method is a wrapper around run to provide a consistent interface
@@ -236,7 +236,7 @@ class BaseAgent(ABC):
             verbose (bool, optional): Whether to save agent messages. Defaults to False.
 
         Returns:
-            Tuple[str, list[LiteLLMMessage]]: The final answer and messages
+            str: The final answer from the agent
         """
         try:
             final_answer, messages = self.run(
@@ -268,7 +268,7 @@ class BaseAgent(ABC):
 
         except openai.RateLimitError as e:
             logger.error(f"Rate limit exceeded: {e}")
-            return "", [LiteLLMMessage(role="error", content=str(e))]
+            return str(e)
 
         except Exception as e:
             raise ValueError(f"Error running agent: {e}") from e
