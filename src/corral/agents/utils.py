@@ -17,7 +17,6 @@ from tenacity import (
 RETRY_EXCEPTIONS = (
     openai.APITimeoutError,
     openai.APIConnectionError,
-    openai.RateLimitError,
     openai.APIError,
     openai.APIStatusError,
     openai.InternalServerError,
@@ -100,6 +99,11 @@ def llm_call(
             response = litellm.completion(**params)
 
         return response.choices[0].message
+
+    except openai.RateLimitError as e:
+        logger.error(f"Rate limit exceeded: {e}")
+        error_message = str(e)
+        return Message(content=error_message, role="assistant", tool_calls=[])
 
     except Exception as e:
         raise ValueError(f"Error in LiteLLM API call: {e}") from e

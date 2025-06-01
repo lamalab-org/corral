@@ -3,7 +3,6 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any
 
-import openai
 from loguru import logger
 from promptstore import PromptStore
 
@@ -247,13 +246,18 @@ class BaseAgent(ABC):
                 logger.error(f"Error in agent response: {final_answer}")
                 return final_answer, messages
 
-            prompt = self.extractor_prompt.fill(
-                {
-                    "answer": final_answer,
-                    "message": messages[-1]["content"],
-                }
-            )
+        except Exception as e:
+            logger.error(f"Error running agent: {e}")
+            raise e
 
+        prompt = self.extractor_prompt.fill(
+            {
+                "answer": final_answer,
+                "message": messages[-1]["content"],
+            }
+        )
+
+        try:
             answer = llm_call(
                 model=self.model,
                 messages=[LiteLLMMessage(role="user", content=prompt)],
@@ -266,9 +270,6 @@ class BaseAgent(ABC):
 
             return answer.content
 
-        except openai.RateLimitError as e:
-            logger.error(f"Rate limit exceeded: {e}")
-            return str(e)
-
         except Exception as e:
-            raise ValueError(f"Error running agent: {e}") from e
+            logger.error(f"Error extracting final answer: {e}")
+            return final_answer
