@@ -100,13 +100,8 @@ def llm_call(
 
         return response.choices[0].message
 
-    except openai.RateLimitError as e:
-        logger.error(f"Rate limit exceeded: {e}")
-        error_message = str(e)
-        return Message(content=error_message, role="assistant", tool_calls=[])
-
     except Exception as e:
-        raise ValueError(f"Error in LiteLLM API call: {e}") from e
+        raise e
 
 
 def format_examples(examples: list[str] | None) -> str:

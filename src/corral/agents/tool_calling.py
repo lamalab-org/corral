@@ -33,33 +33,43 @@ class ToolCallingAgent(BaseAgent):
         system_prompt (str, optional): The system prompt to use.
             Defaults to "You are a helpful AI assistant that solves tasks step by step."
         user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide` and `examples` as variables.
+        extractor_prompt (str, optional): The prompt to use for the low-level planner. Defaults to None.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
+        system_prompt_id (str, optional): The ID of the system prompt to use. Defaults to "400fcecf-f5f2-464b-aff5-8a4377c9685c".
+        user_prompt_id (str, optional): The ID of the user prompt to use. Defaults to "fe04453b-5469-4611-bba6-6d81487df787".
+        extractor_prompt_id (str, optional): The ID of the extractor prompt to use. Defaults to "9d37e4a0-26c5-438a-ba1b-a273388fcded".
         kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
     def __init__(
         self,
-        model: str = "openai/gpt-4",
+        model: str = "openai/gpt-4o",
         max_iterations: int = 10,
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
+        extractor_prompt: str | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
+        system_prompt_id: str = "400fcecf-f5f2-464b-aff5-8a4377c9685c",
+        user_prompt_id: str | None = "fe04453b-5469-4611-bba6-6d81487df787",
+        extractor_prompt_id: str | None = "9d37e4a0-26c5-438a-ba1b-a273388fcded",
         **kwargs,
     ):
         """Initialize the agent"""
-        user_prompt_id = "fe04453b-5469-4611-bba6-6d81487df787"
         super().__init__(
             model=model,
             max_iterations=max_iterations,
             api_endpoint=api_endpoint,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            extractor_prompt=extractor_prompt,
             temperature=temperature,
             prompt_store=prompt_store,
+            system_prompt_id=system_prompt_id,
             user_prompt_id=user_prompt_id,
+            extractor_prompt_id=extractor_prompt_id,
             **kwargs,
         )
 
@@ -67,10 +77,10 @@ class ToolCallingAgent(BaseAgent):
         self,
         interface: BenchmarkInterface,
         task_id: str,
-        history: list[LiteLLMMessage] | None = None,
+        history: list[LiteLLMMessage],
         task_prompt: str | None = None,
         examples: list[str] | None = None,
-    ) -> tuple[str, list[LiteLLMMessage]]:
+    ) -> str:
         """Run the agent to solve the task
 
         Args:
@@ -81,11 +91,8 @@ class ToolCallingAgent(BaseAgent):
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
 
         Returns:
-            Tuple[str, list[LiteLLMMessage]]: The final answer and messages
+            str: The final answer to the task
         """
-        if history is None:
-            history = []
-
         tools = convert_to_openai_tool_format(
             interface.get_available_tools_for_task(task_id)
         )
@@ -94,17 +101,16 @@ class ToolCallingAgent(BaseAgent):
         else:
             task_guide = task_prompt
 
-        messages = self.create_prompt(
+        self.messages = self.create_prompt(
             task_guide=task_guide,
-            history=None,
+            history=history,
             examples=examples,
             agent_type="tool_calling",
         )
-        messages.extend(history)
 
         for _i in range(self.max_iterations):
             try:
-                llm_response = self.get_llm_response(messages, tools)
+                llm_response = self.get_llm_response(tools)
 
                 content = llm_response.content
                 if content:
@@ -112,14 +118,14 @@ class ToolCallingAgent(BaseAgent):
                         r"Final Answer:\s*(.*)", content, re.IGNORECASE
                     )
                     if final_answer_match:
-                        messages.append(
+                        self.messages.append(
                             LiteLLMMessage(role="assistant", content=content)
                         )
-                        return final_answer_match.group(1).strip(), messages
+                        return final_answer_match.group(1).strip()
 
                 tool_calls = llm_response.tool_calls
                 if tool_calls:
-                    messages.append(llm_response)
+                    self.messages.append(llm_response)
 
                     for called_tool in tool_calls:
                         action = Action(
@@ -138,7 +144,7 @@ class ToolCallingAgent(BaseAgent):
 
                         function_name = str(called_tool.function.name)
 
-                        messages.append(
+                        self.messages.append(
                             LiteLLMMessage(
                                 role="tool",
                                 tool_call_id=called_tool.id,
@@ -147,17 +153,17 @@ class ToolCallingAgent(BaseAgent):
                             )
                         )
                 else:
-                    messages.append(
+                    self.messages.append(
                         LiteLLMMessage(role="assistant", content=llm_response.content)
                     )
             except Exception as e:
                 # Append error message but continue with the next iteration
                 logger.error(f"Error during agent iteration: {e}")
-                messages.append(
+                self.messages.append(
                     LiteLLMMessage(
                         role="system",
                         content=f"Error during tool execution: {e!s}",
                     )
                 )
 
-        return "Error solving the task. Maximum iterations reached.", messages
+        return "Error solving the task. Maximum iterations reached."

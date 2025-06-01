@@ -3,6 +3,8 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any
 
+import openai
+from litellm.types.utils import Message
 from loguru import logger
 from promptstore import PromptStore
 
@@ -33,6 +35,9 @@ class BaseAgent(ABC):
         user_prompt (str, optional): The user prompt to use. Different for each agent type.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
+        system_prompt_id (str): The ID of the system prompt to use from the prompt store.
+        user_prompt_id (str, optional): The ID of the user prompt to use from the prompt store. Defaults to None.
+        extractor_prompt_id (str, optional): The ID of the extractor prompt to use from the prompt store. Defaults to None.
         kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
@@ -56,6 +61,7 @@ class BaseAgent(ABC):
         self.max_iterations = max_iterations
         self.api_endpoint = api_endpoint
         self.temperature = temperature
+        self.messages = []
 
         if prompt_store:
             self.store = prompt_store
@@ -83,9 +89,7 @@ class BaseAgent(ABC):
         else:
             self.extractor_prompt = extractor_prompt
 
-    def get_llm_response(
-        self, messages: list[LiteLLMMessage], tools: dict[str, Any] | None = None
-    ) -> Any:
+    def get_llm_response(self, tools: dict[str, Any] | None = None) -> Any:
         """Get response from the LLM using LiteLLM
 
         Args:
@@ -95,22 +99,42 @@ class BaseAgent(ABC):
         Returns:
             Any: The response from the LLM
         """
-        return llm_call(
-            model=self.model,
-            messages=messages,
-            tools=tools,
-            temperature=self.temperature,
-            api_endpoint=self.api_endpoint,
-            **self.kwargs,
-        )
+        try:
+            return llm_call(
+                model=self.model,
+                messages=self.messages,
+                tools=tools,
+                temperature=self.temperature,
+                api_endpoint=self.api_endpoint,
+                **self.kwargs,
+            )
 
-    def create_prompt(self, task_guide: str | list, **kwargs) -> list[LiteLLMMessage]:
+        except openai.RateLimitError as e:
+            logger.error(f"Rate limit exceeded: {e}")
+
+            while self.messages and self.messages[-1]["role"] != "assistant":
+                self.messages.pop()
+
+            error_message = f"RateLimitError: {e!s}"
+
+            return Message(role="user", content=error_message, tool_calls=[])
+
+        except Exception as e:
+            logger.error(f"Error getting LLM response: {e}")
+            raise e
+
+    def create_prompt(
+        self,
+        task_guide: str | list,
+        history: list[LiteLLMMessage] | None = None,
+        **kwargs,
+    ) -> list[LiteLLMMessage]:
         """Create prompt for LLM including context and history
 
         Args:
             task_guide (Union[str, list]): The task guide or prompt to use
+            history (list[LiteLLMMessage], optional): Message history to include. Defaults to None.
             **kwargs: Additional keyword arguments that can include:
-                - history (list[LiteLLMMessage]): The history of messages
                 - examples (list[str]): Few-shot examples to include
                 - agent_type (str): Type of agent for building user content. Defaults to "base"
                 - tools (str): Available tools for the task
@@ -119,6 +143,10 @@ class BaseAgent(ABC):
             List[LiteLLMMessage]: The prepared messages for the LLM
         """
         messages: list[LiteLLMMessage] = []
+
+        if history:
+            messages.extend(history)
+
         if self.system_prompt:
             messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
 
@@ -161,11 +189,9 @@ class BaseAgent(ABC):
         }
 
         if agent_type == "react":
-            history = kwargs.get("history", [])
             base_kwargs["task_guide"] += (
                 f" To solve the task you have available the next tools:\n\n{tools}"
             )
-            base_kwargs["history"] = json.dumps(history)
         elif agent_type == "tool_calling":
             pass
         elif agent_type == "llm_planner":
@@ -195,7 +221,7 @@ class BaseAgent(ABC):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
-    ) -> tuple[str, list[LiteLLMMessage]]:
+    ) -> str:
         """
         Run the agent to solve a task
 
@@ -209,7 +235,7 @@ class BaseAgent(ABC):
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
 
         Returns:
-            Tuple[str, list[LiteLLMMessage]]: The final answer and messages
+            str: The final answer from the agent
         """
         raise NotImplementedError("Subclasses must implement run_agent()")
 
@@ -237,14 +263,15 @@ class BaseAgent(ABC):
         Returns:
             str: The final answer from the agent
         """
+        if history is None:
+            history = []
+
         try:
-            final_answer, messages = self.run(
-                interface, task_id, history, task_prompt, examples
-            )
+            final_answer = self.run(interface, task_id, history, task_prompt, examples)
 
             if "Error" in final_answer:
                 logger.error(f"Error in agent response: {final_answer}")
-                return final_answer, messages
+                return final_answer
 
         except Exception as e:
             logger.error(f"Error running agent: {e}")
@@ -253,7 +280,7 @@ class BaseAgent(ABC):
         prompt = self.extractor_prompt.fill(
             {
                 "answer": final_answer,
-                "message": messages[-1]["content"],
+                "message": self.messages[-1]["content"],
             }
         )
 
@@ -266,7 +293,7 @@ class BaseAgent(ABC):
                 **self.kwargs,
             )
             if verbose:
-                save_agent_messages(messages, task_id, self.__class__.__name__)
+                save_agent_messages(self.messages, task_id, self.__class__.__name__)
 
             return answer.content
 

@@ -37,8 +37,12 @@ class ReActAgent(BaseAgent):
         system_prompt (str, optional): The system prompt to use.
             Defaults to "You are a helpful AI assistant that solves tasks step by step."
         user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide`, `history` and `examples` as variables.
+        extractor_prompt (str, optional): The prompt to use for the low-level planner. Defaults to None.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
+        system_prompt_id (str, optional): The ID of the system prompt to use. Defaults to "400fcecf-f5f2-464b-aff5-8a4377c9685c".
+        user_prompt_id (str, optional): The ID of the user prompt to use. Defaults to "d880c4d3-fe60-4cf4-813b-2008076cd595".
+        extractor_prompt_id (str, optional): The ID of the extractor prompt to use. Defaults to "9d37e4a0-26c5-438a-ba1b-a273388fcded".
         kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
@@ -49,21 +53,27 @@ class ReActAgent(BaseAgent):
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
+        extractor_prompt: str | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
+        system_prompt_id: str = "400fcecf-f5f2-464b-aff5-8a4377c9685c",
+        user_prompt_id: str | None = "d880c4d3-fe60-4cf4-813b-2008076cd595",
+        extractor_prompt_id: str | None = "9d37e4a0-26c5-438a-ba1b-a273388fcded",
         **kwargs,
     ):
         """Initialize the agent"""
-        user_prompt_id = "d880c4d3-fe60-4cf4-813b-2008076cd595"
         super().__init__(
             model=model,
             max_iterations=max_iterations,
             api_endpoint=api_endpoint,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            extractor_prompt=extractor_prompt,
             temperature=temperature,
             prompt_store=prompt_store,
+            system_prompt_id=system_prompt_id,
             user_prompt_id=user_prompt_id,
+            extractor_prompt_id=extractor_prompt_id,
             **kwargs,
         )
 
@@ -98,10 +108,10 @@ class ReActAgent(BaseAgent):
         self,
         interface: BenchmarkInterface,
         task_id: str,
-        history: list[LiteLLMMessage] | None = None,
+        history: list[LiteLLMMessage],
         task_prompt: str | None = None,
         examples: list[str] | None = None,
-    ) -> tuple[str, list[LiteLLMMessage]]:
+    ) -> str:
         """Main ReAct loop implementation
 
         Args:
@@ -112,16 +122,14 @@ class ReActAgent(BaseAgent):
             examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
 
         Returns:
-            tuple[str, list[LiteLLMMessage]]:: The final answer and messages history
+            str: The final answer to the task
         """
-        if history is None:
-            history = []
         if task_prompt is None:
             task_guide = interface.get_task_guide(task_id)
         else:
             task_guide = task_prompt
 
-        messages = self.create_prompt(
+        self.messages = self.create_prompt(
             task_guide=task_guide,
             history=history,
             examples=examples,
@@ -130,7 +138,7 @@ class ReActAgent(BaseAgent):
 
         for _iteration in range(self.max_iterations):
             # Create prompt and get LLM response
-            llm_response = self.get_llm_response(messages).content
+            llm_response = self.get_llm_response().content
 
             # Parse response
             thought, actions = self.parse_llm_response(llm_response)
@@ -140,19 +148,19 @@ class ReActAgent(BaseAgent):
             final_answer_match = re.search(r"Final Answer: (.*)", llm_response)
 
             if final_answer_match:
-                messages.append(
+                self.messages.append(
                     LiteLLMMessage(
                         role="assistant",
                         content=f"{thought_prefix}Final Answer: {final_answer_match.group(1)}",
                     )
                 )
-                return final_answer_match.group(1).strip(), messages
+                return final_answer_match.group(1).strip()
 
             # Execute tools if actions exist
             if actions:
                 for action in actions:
                     action_content = f"{thought_prefix}Action: {action.tool_name}\nAction Input: {json.dumps(action.arguments)}"
-                    messages.append(
+                    self.messages.append(
                         LiteLLMMessage(role="assistant", content=action_content)
                     )
 
@@ -167,7 +175,7 @@ class ReActAgent(BaseAgent):
                         else f"Error: {tool_response.error}"
                     )
 
-                    messages.append(
+                    self.messages.append(
                         LiteLLMMessage(
                             role="user",
                             content=observation,
@@ -179,7 +187,4 @@ class ReActAgent(BaseAgent):
             if not thought and actions is None:
                 break
 
-        return (
-            "Error solving the task: unable to complete it in the iteration limit",
-            messages,
-        )
+        return ("Error solving the task: unable to complete it in the iteration limit",)
