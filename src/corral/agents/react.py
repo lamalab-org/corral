@@ -187,4 +187,4 @@ class ReActAgent(BaseAgent):
             if not thought and actions is None:
                 break
 
-        return ("Error solving the task: unable to complete it in the iteration limit",)
+        return "Error solving the task: unable to complete it in the iteration limit"
