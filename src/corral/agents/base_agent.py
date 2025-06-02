@@ -112,8 +112,14 @@ class BaseAgent(ABC):
         except openai.RateLimitError as e:
             logger.error(f"Rate limit exceeded: {e}")
 
-            while self.messages and self.messages[-1]["role"] != "assistant":
-                self.messages.pop()
+            for message in reversed(self.messages):
+                if message["role"] != "assistant":
+                    if "content" in message:
+                        content = str(message["content"])
+                        if len(content) > 100:
+                            message["content"] = content[:100] + "..."
+                else:
+                    break
 
             error_message = f"RateLimitError: {e!s}"
 
