@@ -11,7 +11,7 @@ class FSManager:
     """A file-system abstraction layer using fsspec.
     This object is created with a given protocol (e.g., "file", "s3", "ftp")"""
 
-    def __init__(self, protocol: str = "file", app: Optional[str] = None, **kwargs):
+    def __init__(self, protocol: str = "file", app: str | None = None, **kwargs):
         self.protocol = protocol
         self.fs = fsspec.filesystem(protocol, **kwargs)
         self.app = app
