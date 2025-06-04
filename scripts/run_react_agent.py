@@ -14,7 +14,7 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "openai/gpt-4o",
+    model: str = "anthropic/claude-3-7-sonnet-20250219",
     task_ids: list | None = None,
     temperature: float = 0.0,
 ):
