@@ -474,7 +474,9 @@ def generate_reconstructed_slab(
     return json.dumps(output, indent=2)
 
 
+####################################
 ### Tools relevant for ocp - hard
+####################################
 
 
 @tool
@@ -627,30 +629,159 @@ def get_bulk_polymorphs_data_to_file(
 
 
 @tool
-def sort_and_get_first_from_json(polymorph_data_json: str) -> str:
+def sort_and_get_first_from_json(
+    polymorph_data_json: str, sort_key: str, return_key: str
+) -> str:
     """
     From a JSON string, sort the data based on a given key and return the first element of the specified key.
 
     Args:
-        json_data: JSON string containing the data to be sorted.
+        polymorph_data_json: JSON string containing the data to be sorted.
         sort_key: Key to sort the data by.
         return_key: Key of the first element to return after sorting.
 
     Returns:
         Value of the specified return_key from the first element after sorting.
     """
+    data = json.loads(polymorph_data_json)
 
-    def sort_and_get_first(json_data: str, sort_key: str, return_key: str) -> any:
-        data = json.loads(json_data)
+    # Sort the data based on the given key
+    sorted_data = sorted(data, key=lambda x: x[sort_key])
 
-        # Sort the data based on the given key
-        sorted_data = sorted(data, key=lambda x: x[sort_key])
+    # Return the value of the specified key from the first element
+    return sorted_data[0][return_key]
 
-        # Return the value of the specified key from the first element
-        return sorted_data[0][return_key]
 
-    # Example usage for polymorph data
-    return sort_and_get_first(polymorph_data_json, "energy_above_hull", "cif")
+def select_polymorphs_with_strategy(
+    polymorphs_data: str,
+    selection_strategy: str = "diverse_energy",
+    max_polymorphs: int = 5,
+    energy_threshold: float = 0.5,
+    is_path: bool = False,
+) -> str:
+    """
+    Select polymorphs based on a strategy (diverse_energy, most_stable, or diverse_structure).
+    diverse_energy selects polymorphs with diverse energies,
+    most_stable selects the most stable ones, and diverse_structure selects polymorphs with different space groups.
+
+    Args:
+        polymorphs_data: JSON string or file path with polymorph data
+        selection_strategy: Strategy for selection ("diverse_energy", "most_stable", "diverse_structure")
+        max_polymorphs: Maximum number of polymorphs to select
+        energy_threshold: Maximum energy above hull (eV/atom)
+        is_path: If True, polymorphs_data is treated as a file path
+
+    Returns:
+        JSON string with selected polymorphs
+    """
+    if is_path:
+        with Path(polymorphs_data).open("r") as f:
+            polymorphs = json.loads(f.read())
+    else:
+        polymorphs = json.loads(polymorphs_data)
+
+    # Filter by energy threshold
+    filtered = [p for p in polymorphs if p["energy_above_hull"] <= energy_threshold]
+
+    if selection_strategy == "most_stable":
+        # Sort by energy above hull, take most stable
+        selected = sorted(filtered, key=lambda x: x["energy_above_hull"])[
+            :max_polymorphs
+        ]
+
+    elif selection_strategy == "diverse_energy":
+        # Select polymorphs with diverse energies
+        sorted_polymorphs = sorted(filtered, key=lambda x: x["energy_above_hull"])
+        selected = []
+        if sorted_polymorphs:
+            step = max(1, len(sorted_polymorphs) // max_polymorphs)
+            for i in range(0, min(len(sorted_polymorphs), max_polymorphs * step), step):
+                selected.append(sorted_polymorphs[i])
+
+    elif selection_strategy == "diverse_structure":
+        # Select polymorphs with different space groups
+        selected = []
+        seen_space_groups = set()
+        for p in sorted(filtered, key=lambda x: x["energy_above_hull"]):
+            if (
+                p["space_group"] not in seen_space_groups
+                and len(selected) < max_polymorphs
+            ):
+                selected.append(p)
+                seen_space_groups.add(p["space_group"])
+
+    else:
+        # Default: take first max_polymorphs
+        selected = filtered[:max_polymorphs]
+
+    return json.dumps(selected, indent=2)
+
+
+def select_polymorphs_with_strategy_to_file(
+    polymorphs_data: str,
+    save_path: str,
+    selection_strategy: str = "diverse_energy",
+    max_polymorphs: int = 5,
+    energy_threshold: float = 0.5,
+    is_path: bool = False,
+) -> str:
+    """
+    Select polymorphs based on a strategy (diverse_energy, most_stable, or diverse_structure). and save results to a file.
+    diverse_energy selects polymorphs with diverse energies,
+    most_stable selects the most stable ones, and diverse_structure selects polymorphs with different space groups.
+
+    Args:
+        polymorphs_data: JSON string or file path with polymorph data
+        save_path: Path where to save the selected polymorphs JSON
+        selection_strategy: Strategy for selection ("diverse_energy", "most_stable", "diverse_structure")
+        max_polymorphs: Maximum number of polymorphs to select
+        energy_threshold: Maximum energy above hull (eV/atom)
+        is_path: If True, polymorphs_data is treated as a file path
+
+    Returns:
+        Path to the saved JSON file
+    """
+    if is_path:
+        with Path(polymorphs_data).open("r") as f:
+            polymorphs = json.loads(f.read())
+    else:
+        polymorphs = json.loads(polymorphs_data)
+
+    # Filter by energy threshold
+    filtered = [p for p in polymorphs if p["energy_above_hull"] <= energy_threshold]
+
+    if selection_strategy == "most_stable":
+        selected = sorted(filtered, key=lambda x: x["energy_above_hull"])[
+            :max_polymorphs
+        ]
+
+    elif selection_strategy == "diverse_energy":
+        sorted_polymorphs = sorted(filtered, key=lambda x: x["energy_above_hull"])
+        selected = []
+        if sorted_polymorphs:
+            step = max(1, len(sorted_polymorphs) // max_polymorphs)
+            for i in range(0, min(len(sorted_polymorphs), max_polymorphs * step), step):
+                selected.append(sorted_polymorphs[i])
+
+    elif selection_strategy == "diverse_structure":
+        selected = []
+        seen_space_groups = set()
+        for p in sorted(filtered, key=lambda x: x["energy_above_hull"]):
+            if (
+                p["space_group"] not in seen_space_groups
+                and len(selected) < max_polymorphs
+            ):
+                selected.append(p)
+                seen_space_groups.add(p["space_group"])
+
+    else:
+        selected = filtered[:max_polymorphs]
+
+    # Save to file
+    with Path(save_path).open("w") as f:
+        json.dump(selected, f, indent=2)
+
+    return save_path
 
 
 @tool
