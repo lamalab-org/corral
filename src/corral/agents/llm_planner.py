@@ -1,18 +1,14 @@
-from __future__ import annotations
-
 import importlib.resources
 import json
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from corral.evaluate import BenchmarkInterface
 from promptstore import PromptStore
 
 from corral.agents.prompt_utils import get_prompt
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
-from corral.agents.utils import LiteLLMMessage, llm_call
-from corral.utils import format_examples, serialize_messages
+from corral.agents.utils import LiteLLMMessage, _build_user_content, llm_call
+from corral.evaluate import BenchmarkInterface
+from corral.utils import serialize_messages
 
 
 class LLMPlanner:
@@ -88,19 +84,20 @@ class LLMPlanner:
         tools = interface.get_available_tools_for_task(task_id)
 
         task_guide = interface.get_task_prompt(task_id)
-        prompt = self.user_prompt.fill(
-            {
-                "tools": json.dumps(tools),
-                "task_guide": task_guide,
-                "iterations": self.max_iterations,
-                "examples": format_examples(examples),
-            },
+
+        user_content = _build_user_content(
+            agent="llm_planner",
+            user_prompt=self.user_prompt,
+            task_guide=task_guide,
+            iterations=self.max_iterations,
+            examples=examples,
+            tools=tools,
         )
 
         messages: list[LiteLLMMessage] = []
         if self.system_prompt:
             messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
-        messages.append(LiteLLMMessage(role="user", content=prompt))
+        messages.append(LiteLLMMessage(role="user", content=user_content))
 
         if tool_usage:
             agent = ToolCallingAgent(
@@ -135,6 +132,8 @@ class LLMPlanner:
                     role="assistant", content=plan, name="high-level-planner"
                 )
             )
+            if plan is None:
+                continue
 
             if "Final Answer:" in plan:
                 final_answer = plan.split("Final Answer:")[1].strip()

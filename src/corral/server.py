@@ -1,4 +1,8 @@
+from collections.abc import Mapping
+
+import uvicorn
 from fastapi import FastAPI, HTTPException
+from loguru import logger
 
 from corral.base import Environment, ToolRequest
 
@@ -24,6 +28,13 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
         return {"prompt": environments[task_id].get_environment_guide()}
+
+    @app.get("/tasks/{task_id}/tools/guide")
+    def get_tools_guide(task_id: str):
+        """Get the tools guide for the agent"""
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return {"prompt": environments[task_id].get_tools_guide()}
 
     @app.get("/tasks/{task_id}/tools")
     def get_available_tools(task_id: str):
@@ -115,3 +126,18 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
     # add endpoint for scoring the task
 
     return app
+
+
+def run_server(
+    environments: Mapping[str, Environment], host: str = "0.0.0.0", port: int = 8000
+):
+    """Run the benchmark server with the provided environments
+
+    Args:
+        environments: dictionary of environments
+        host: Server host
+        port: Server port
+    """
+    app = create_benchmark_server(dict(environments))
+    logger.info(f"Starting server on {host}:{port}")
+    uvicorn.run(app, host=host, port=port)

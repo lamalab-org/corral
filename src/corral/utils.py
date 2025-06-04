@@ -1,18 +1,25 @@
 import gc
 import inspect
 import json
+import os
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Union, get_args, get_origin, get_type_hints
+from typing import Any, Optional, Union, get_args, get_origin, get_type_hints
+from urllib.parse import quote
 
 import chromadb
+import modal
+import more_itertools
+import numpy as np
+import requests
 import tiktoken
+from chembench.baseline import Generation, Generations
 from litellm import embedding
 from loguru import logger
 from modal import App, Image, Mount, Secret, Volume
+from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 from tenacity import (
-    before_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
@@ -25,25 +32,50 @@ from corral.base import ModalTool, Tool, ToolArgument
 MODAL_TOOL_REGISTRY = {}
 
 
+class Model:
+    def __init__(self, name: str = "Dummy Model"):
+        self.name = name
+
+    def generate(self, prompts: list[str], **_kwargs):
+        generations = []
+        for _prompt in prompts:
+            generation = None
+            generations.append([Generation(text=generation)])
+
+        return Generations(generations=generations)
+
+
 def vector_database_search(
-    query: str, collection_name: str = "default_collection", path: str | None = None
+    query: str,
+    collection_name: str = "default_collection",
+    path: str | None = None,
+    top_k: int = 5,
+    model: str = "openai/text-embedding-3-large",
+    chemical_model: str | None = None,
 ) -> list[dict]:
     """Retrieve the top 5 most similar instructions from a vector database based on the query.
+    If a chemical model is provided, it will use that model to generate embeddings instead of the text embedding model.
 
     Args:
         query (str): The search query to find similar instructions
         collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
-        path (str): The path to the vector database directory. Defaults to None, which uses "vector_db" in the current directory.
+        path (str, optional): The path to the vector database directory. Defaults to None, which uses "vector_db" in the current directory.
+        top_k (int, optional): The number of similar instructions to retrieve. Default is 5.
+        model (str, optional): The model to use for embedding. Default is "openai/text-embedding-3-large".
+        chemical_model (str, optional): The model to use for chemical embeddings. If provided, it will use this model instead of the text embedding model. Default is None.
 
     Returns:
-        list[dict]: A list of dictionaries containing the top 5 most similar instructions with their content and metadata
+        list[dict]: A list of dictionaries containing the top similar instructions with their content and metadata
 
     Raises:
         RuntimeError: If the specified collection doesn't exist
     """
-    query_embedding = embed_text(
-        chunks=[query],
-    )[0]
+    chemical = False
+    if chemical_model is not None:
+        model = chemical_model
+        chemical = True
+
+    query_embedding = embed_text(chunks=[query], model=model, chemical=chemical)[0]
 
     persist_directory = Path(Path.cwd()) / "vector_db" if path is None else Path(path)
 
@@ -62,26 +94,23 @@ def vector_database_search(
                 f"Collection '{collection_name}' does not exist: {e!s}"
             ) from e
 
-        results = collection.query(query_embeddings=[query_embedding], n_results=5)
+        include = ["documents", "metadatas", "distances"]
+
+        results = collection.query(
+            query_embeddings=[query_embedding], n_results=top_k, include=include
+        )
 
         formatted_results = []
-        for _i, (doc, doc_id, distance) in enumerate(
-            zip(
-                results["documents"][0],
-                results["ids"][0],
-                results["distances"][0],
-                strict=False,
-            )
-        ):
-            similarity_score = 1 - distance
 
-            formatted_results.append(
-                {
-                    "content": doc,
-                    "metadata": {"id": doc_id},
-                    "similarity_score": similarity_score,
-                }
-            )
+        for i in range(len(results["ids"][0])):
+            result_item = {
+                "id": results["ids"][0][i],
+                "metadata": results["metadatas"][0][i],
+                "similarity_score": 1 - results["distances"][0][i],
+                "content": results["documents"][0][i],
+            }
+
+            formatted_results.append(result_item)
 
         return formatted_results
 
@@ -113,6 +142,8 @@ def _tokenize_and_split_chunks(
     logger.info(
         f"Tokenizing and splitting {len(chunks)} chunks with max size {chunk_size} tokens"
     )
+    chunks = [str(chunk) for chunk in chunks]
+
     encoding = tiktoken.get_encoding("o200k_base")
     target_size = int(0.8 * chunk_size)
     processed_chunks = []
@@ -196,64 +227,32 @@ def _tokenize_and_split_chunks(
     return processed_chunks
 
 
-def create_vector_database(
-    chunks: list[str],
-    collection_name: str = "default_collection",
-    path: str | None = None,
-    chunk_size: int = 8192,
-    update_mode: str = "recreate",
-) -> str:
-    """Create or update a vector database from text instructions.
+def _setup_collection(
+    client: chromadb.PersistentClient, collection_name: str, update_mode: str
+) -> tuple[Any, str, bool]:
+    """Setup the collection based on the update mode and return it with operation status."""
+    operation = "created"  # Default operation status
+    collection_exists = False
 
-    Args:
-        chunks (list[str]): The text instructions to be stored in the vector database
-        collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
-        path (str, optional): Path to store the vector database. Default is "vector_db" in the current directory.
-        chunk_size (int, optional): Maximum number of tokens per chunk. Default is 8192.
-        update_mode (str, optional): How to handle existing collections: "recreate" deletes and recreates the collection,
-                    "append" adds new chunks to existing collection, "upsert" updates existing chunks and
-                    adds new ones. Default is "recreate".
+    # Get list of collection names instead of collection objects
+    collection_names = [col.name for col in client.list_collections()]
+    collection_exists = collection_name in collection_names
 
-    Returns:
-        str: A message indicating the success of the operation
-
-    Raises:
-        ValueError: If OPENAI_API_KEY environment variable is not set or update_mode is invalid
-    """
-    logger.info(
-        f"Creating vector database with {len(chunks)} chunks in collection '{collection_name}'"
-    )
-
-    if update_mode not in ["recreate", "append", "upsert"]:
-        raise ValueError("update_mode must be one of: 'recreate', 'append', 'upsert'")
-
-    persist_directory = Path(Path.cwd()) / "vector_db" if path is None else Path(path)
-
-    persist_directory.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Using persist directory: {persist_directory}")
-
-    processed_chunks = _tokenize_and_split_chunks(chunks, chunk_size)
-    logger.info(
-        f"Processed {len(chunks)} chunks into {len(processed_chunks)} chunks after tokenization and splitting"
-    )
-
-    client = chromadb.PersistentClient(path=str(persist_directory))
+    logger.debug(f"Available collections: {collection_names}")
+    logger.debug(f"Collection '{collection_name}' exists: {collection_exists}")
 
     try:
-        # Get list of collections and check if our collection exists
-        collection_list = [col.name for col in client.list_collections()]
-        collection_exists = collection_name in collection_list
-
-        logger.debug(f"Available collections: {collection_list}")
-        logger.debug(f"Collection '{collection_name}' exists: {collection_exists}")
-
         if update_mode == "recreate" and collection_exists:
             logger.info(
                 f"Collection '{collection_name}' already exists, deleting before recreation"
             )
             client.delete_collection(name=collection_name)
+            # Create a small delay to ensure deletion completes
+            import time
+
+            time.sleep(0.5)
             collection = client.create_collection(name=collection_name)
-            logger.info(f"Created collection '{collection_name}'")
+            logger.info(f"Recreated collection '{collection_name}'")
         elif not collection_exists:
             logger.info(
                 f"Collection '{collection_name}' does not exist, creating new collection"
@@ -265,60 +264,238 @@ def create_vector_database(
                 f"Using existing collection '{collection_name}' for {update_mode} operation"
             )
             collection = client.get_collection(name=collection_name)
+            if update_mode == "append":
+                operation = "updated (appended)"
+            elif update_mode == "upsert":
+                operation = "updated (upserted)"
+    except Exception as e:
+        logger.error(f"Error setting up collection: {e!s}")
+        raise RuntimeError(
+            f"Error setting up collection '{collection_name}': {e!s}"
+        ) from e
 
-        logger.info(f"Generating embeddings for {len(processed_chunks)} chunks")
-        embeddings = embed_text(
-            chunks=processed_chunks,
+    return collection, operation, collection_exists
+
+
+def _validate_inputs(
+    chunks: list[str],
+    update_mode: str,
+    metadatas: list[dict] | None,
+    chemical: list[str] | None,
+) -> None:
+    """Validate inputs for the create_vector_database function."""
+    logger.info(f"Creating vector database with {len(chunks)} chunks")
+
+    if metadatas is not None and len(metadatas) != len(chunks):
+        raise ValueError(
+            f"Length of metadata ({len(metadatas)}) must match length of chunks ({len(chunks)})"
         )
 
-        # For recreate or new collection, use sequential IDs
-        if update_mode == "recreate" or not collection_exists:
-            ids = [f"id_{i}" for i in range(len(processed_chunks))]
-            logger.info(
-                f"Adding {len(processed_chunks)} documents with embeddings to collection"
+    if isinstance(chemical, list) and len(chemical) != len(chunks):
+        raise ValueError(
+            f"Length of chemical flags ({len(chemical)}) must match length of chunks ({len(chunks)})"
+        )
+
+    if update_mode not in ["recreate", "append", "upsert"]:
+        raise ValueError("update_mode must be one of: 'recreate', 'append', 'upsert'")
+
+
+def _setup_database_environment(
+    path: str | None,
+) -> tuple[Path, chromadb.PersistentClient]:
+    """Setup the vector database environment and return the directory and client."""
+    persist_directory = Path(Path.cwd()) / "vector_db" if path is None else Path(path)
+    persist_directory.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Using persist directory: {persist_directory}")
+
+    return persist_directory, chromadb.PersistentClient(path=str(persist_directory))
+
+
+def _add_documents_to_collection(
+    collection,
+    update_mode: str,
+    batch_embeddings: list[list[float]],
+    batch_chunks: list[str],
+    batch_ids: list[str],
+    batch_metadatas: list[dict] | None,
+) -> None:
+    """Add documents to the collection using the appropriate method based on update mode."""
+    try:
+        if update_mode == "upsert":
+            collection.upsert(
+                embeddings=batch_embeddings,
+                documents=batch_chunks,
+                ids=batch_ids,
+                metadatas=batch_metadatas,
             )
+        else:  # For both "recreate" and "append" modes
             collection.add(
-                embeddings=embeddings,
-                documents=processed_chunks,
-                ids=ids,
+                embeddings=batch_embeddings,
+                documents=batch_chunks,
+                ids=batch_ids,
+                metadatas=batch_metadatas,
             )
-            operation = "created"
-        # For append mode, get existing IDs to avoid conflicts
+    except Exception as e:
+        logger.error(f"Error during {update_mode} operation: {e!s}")
+        raise RuntimeError(f"Error during {update_mode} operation: {e!s}") from e
+
+
+def _process_chunks_in_batches(
+    collection,
+    processed_chunks: list[str],
+    embeddings: list[list[float]],
+    start_id: int,
+    update_mode: str,
+    metadatas: list[dict] | None,
+) -> int:
+    """Process chunks in batches to add them to the collection."""
+    BATCH_SIZE = 1000
+    total_processed = 0
+
+    logger.info(
+        f"Processing {len(processed_chunks)} documents with embeddings in batches of {BATCH_SIZE}"
+    )
+
+    total_batches = (len(processed_chunks) + BATCH_SIZE - 1) // BATCH_SIZE
+    metadata_chunks = (
+        more_itertools.chunked(metadatas, BATCH_SIZE)
+        if metadatas is not None
+        else [None] * total_batches
+    )
+
+    for batch_idx, (chunk_batch, embedding_batch, metadata_batch) in enumerate(
+        zip(
+            more_itertools.chunked(processed_chunks, BATCH_SIZE),
+            more_itertools.chunked(embeddings, BATCH_SIZE),
+            metadata_chunks,
+            strict=False,
+        )
+    ):
+        batch_ids = [
+            f"id_{start_id + total_processed + i}" for i in range(len(chunk_batch))
+        ]
+
+        logger.info(
+            f"Processing batch {batch_idx + 1}/{total_batches} "
+            f"({len(chunk_batch)} documents)"
+        )
+
+        _add_documents_to_collection(
+            collection,
+            update_mode,
+            embedding_batch,
+            chunk_batch,
+            batch_ids,
+            metadata_batch,
+        )
+
+        total_processed += len(chunk_batch)
+        logger.info(f"Processed {total_processed}/{len(processed_chunks)} documents")
+
+        # Force garbage collection between batches
+        gc.collect()
+
+    return total_processed
+
+
+def create_vector_database(
+    chunks: list[str],
+    collection_name: str = "default_collection",
+    path: str | None = None,
+    chunk_size: int = 8192,
+    update_mode: str = "recreate",
+    metadatas: list[dict] | None = None,
+    model: str = "openai/text-embedding-3-large",
+    chemical: list[str] | None = None,
+    chemical_model: str = "ibm-research/MoLFormer-XL-both-10pct",
+) -> str:
+    """Create or update a vector database from text instructions. If chemical data is provided,
+    it will be used to generate embeddings instead of the text chunks. The database will be build
+    with the chemical embeddings as the primary vectors, and the original text will be stored in metadata.
+
+    Args:
+        chunks (list[str]): The text instructions to be stored in the vector database
+        collection_name (str, optional): The name of the collection in the vector database. Default is "default_collection".
+        path (str, optional): Path to store the vector database. Default is "vector_db" in the current directory.
+        chunk_size (int, optional): Maximum number of tokens per chunk. Default is 8192.
+        update_mode (str, optional): How to handle existing collections: "recreate" deletes and recreates the collection,
+                    "append" adds new chunks to existing collection, "upsert" updates existing chunks and
+                    adds new ones. Default is "recreate".
+        metadatas (list[dict], optional): Metadata for each chunk. Default is None.
+        model (str, optional): The model to use for embedding. Default is "openai/text-embedding-3-large".
+        chemical (list[str], optional): List of chemical data to embed separately. Default is None.
+        chemical_model (str, optional): The model to use for chemical embeddings. Default is "ibm-research/MoLFormer-XL-both-10pct".
+
+    Returns:
+        str: A message indicating the success of the operation
+    """
+    try:
+        # Validate inputs
+        _validate_inputs(chunks, update_mode, metadatas, chemical)
+
+        # Setup database environment
+        persist_directory, client = _setup_database_environment(path)
+
+        # Setup collection based on update mode
+        collection, operation, collection_exists = _setup_collection(
+            client, collection_name, update_mode
+        )
+
+        # Initialize metadata if none provided
+        if metadatas is None:
+            metadatas = [{} for _ in range(len(chunks))]
+
+        # If chemical is provided, invert the storage approach
+        if chemical is not None:
+            processed_chunks = chunks
+            # Generate chemical embeddings as the primary vectors
+            logger.info(f"Generating chemical embeddings for {len(chemical)} items")
+            primary_embeddings = embed_text(
+                chunks=chemical, model=chemical_model, chemical=True
+            )
+
+            # Store original text in metadata for reference
+            for i, chunk in enumerate(chunks):
+                if i < len(metadatas):
+                    metadatas[i]["text"] = chunk
+
+            logger.info(
+                "Added original text to metadata, using chemical embeddings as primary"
+            )
         else:
-            try:
-                existing_count = collection.count()
-                start_id = existing_count
-                ids = [
-                    f"id_{i}" for i in range(start_id, start_id + len(processed_chunks))
-                ]
+            # Process chunks for embedding
+            processed_chunks = _tokenize_and_split_chunks(chunks, chunk_size)
+            logger.info(
+                f"Processed {len(chunks)} chunks into {len(processed_chunks)} chunks after tokenization and splitting"
+            )
 
-                if update_mode == "append":
-                    logger.info(
-                        f"Appending {len(processed_chunks)} documents with embeddings to collection"
-                    )
-                    collection.add(
-                        embeddings=embeddings,
-                        documents=processed_chunks,
-                        ids=ids,
-                    )
-                    operation = "updated (appended)"
-                elif update_mode == "upsert":
-                    logger.info(
-                        f"Upserting {len(processed_chunks)} documents with embeddings to collection"
-                    )
-                    collection.upsert(
-                        embeddings=embeddings,
-                        documents=processed_chunks,
-                        ids=ids,
-                    )
-                    operation = "updated (upserted)"
-            except Exception as e:
-                logger.error(f"Error during {update_mode} operation: {e!s}")
-                raise RuntimeError(
-                    f"Error during {update_mode} operation: {e!s}"
-                ) from e
+            # Standard approach - text embeddings are primary
+            logger.info(
+                f"Generating text embeddings for {len(processed_chunks)} chunks"
+            )
+            primary_embeddings = embed_text(chunks=processed_chunks, model=model)
 
-        return f"Successfully {operation} vector database with {len(processed_chunks)} instructions in collection '{collection_name}'."
+        # Process and add documents in batches
+        start_id = (
+            0
+            if update_mode == "recreate" or not collection_exists
+            else collection.count()
+        )
+
+        # Process in batches and add to collection
+        _process_chunks_in_batches(
+            collection,
+            processed_chunks,
+            primary_embeddings,
+            start_id,
+            update_mode,
+            metadatas,
+        )
+
+        # Log which embeddings are primary
+        embedded_type = "text" if chemical is None else "chemical"
+
+        return f"Successfully {operation} vector database with {len(processed_chunks)} instructions in collection '{collection_name}' using {embedded_type} as primary embeddings."
 
     except Exception as e:
         logger.error(f"Error creating/updating vector database: {e!s}", exc_info=True)
@@ -329,17 +506,17 @@ def create_vector_database(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=2, max=30),
     retry=retry_if_exception_type((ConnectionError, TimeoutError)),
-    before=before_log(logger, "INFO"),
-    after=before_log(logger, "INFO"),
 )
-def embed_text(
-    chunks: list, model: str = "openai/text-embedding-3-large"
-) -> list[list[float]]:
+def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
     """
     Embed a list of text chunks using the specified model with automatic retries.
+    If the list is large (>2048 chunks), it will process them in smaller batches.
+    When chemical=True, uses MoLFormer for chemical embeddings.
+
     Args:
         chunks (list): List of text chunks to embed
-        model (str, optional): Model to use for embeddings. Default: "openai/text-embedding-3-large"
+        model (str): Model to use for embeddings
+        chemical (bool, optional): Whether to use chemical embedding model. Default is False.
 
     Returns:
         list[list[float]]: List of embeddings for each chunk
@@ -356,8 +533,69 @@ def embed_text(
         logger.error("Invalid input: chunks must be a non-empty list of strings")
         raise ValueError("Input must be a non-empty list of strings")
 
-    logger.info(f"Embedding {len(chunks)} text chunks using model: {model}")
+    logger.info(
+        f"Embedding {len(chunks)} {'chemical' if chemical else 'text'} chunks using model: {model}"
+    )
 
+    BATCH_SIZE = 2048  # This is a configuration from LiteLLM:
+    # https://docs.litellm.ai/docs/embedding/supported_embedding#required-fields
+
+    # Process in batches if the input is large
+    if len(chunks) > BATCH_SIZE:
+        logger.info(f"Input size exceeds {BATCH_SIZE} chunks, processing in batches")
+        all_embeddings = []
+
+        # Process chunks in batches
+        for i in range(0, len(chunks), BATCH_SIZE):
+            batch = chunks[i : i + BATCH_SIZE]
+            logger.info("Processing batched chunks")
+
+            try:
+                batch_embeddings = embed_text(batch, model=model, chemical=chemical)
+                all_embeddings.extend(batch_embeddings)
+            except Exception as e:
+                logger.error(f"Error in batch {i//BATCH_SIZE + 1}: {e!s}")
+                raise
+
+        logger.info(
+            f"Successfully generated {len(all_embeddings)} embeddings across all batches"
+        )
+        return all_embeddings
+
+    # For chemical embeddings, use MoLFormer
+    if chemical:
+        try:
+            import torch
+            from transformers import AutoModel, AutoTokenizer
+
+            logger.info("Using MoLFormer model for chemical embeddings")
+
+            # Load model & tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
+            molformer_model = AutoModel.from_pretrained(
+                model, deterministic_eval=True, trust_remote_code=True
+            )
+
+            # Tokenization
+            inputs = tokenizer(
+                chunks, padding=True, truncation=True, return_tensors="pt"
+            )
+
+            # Inference
+            with torch.no_grad():
+                outputs = molformer_model(**inputs)
+
+            # Extract embeddings
+            embeddings = outputs.pooler_output.tolist()  # Convert to list format
+
+            logger.info(f"Successfully generated {len(embeddings)} chemical embeddings")
+            return embeddings
+
+        except Exception as e:
+            logger.error(f"Error generating chemical embeddings: {e!s}", exc_info=True)
+            raise RuntimeError(f"Failed to generate chemical embeddings: {e!s}") from e
+
+    # For text embeddings, use litellm as before
     try:
         result_embeddings = embedding(
             model=model,
@@ -471,6 +709,11 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
         arg_name, arg_desc = line.split(":", 1)
         arg_name = arg_name.strip()
         arg_desc = arg_desc.strip()
+
+        # Extract bare parameter name without the type annotation in parentheses
+        # This handles formats like "query (str): Description"
+        if "(" in arg_name and ")" in arg_name:
+            arg_name = arg_name.split("(")[0].strip()
 
         # Parse choices if specified in format (choices: [val1, val2, ...])
         choices = None
@@ -688,16 +931,25 @@ def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
             if hasattr(msg, "name") and msg.name:
                 message_dict["name"] = msg.name
             if hasattr(msg, "tool_calls") and msg.tool_calls:
-                message_dict["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in msg.tool_calls
-                ]
+                message_dict["tool_calls"] = []
+                for tc in msg.tool_calls:
+                    if isinstance(tc, dict):
+                        tool_call = {
+                            "id": tc.get("id"),
+                            "function": {
+                                "name": tc.get("function", {}).get("name"),
+                                "arguments": tc.get("function", {}).get("arguments"),
+                            },
+                        }
+                    else:
+                        tool_call = {
+                            "id": tc.id,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                    message_dict["tool_calls"].append(tool_call)
 
         serializable_messages.append(message_dict)
 
@@ -747,3 +999,192 @@ def save_agent_messages(
         )
 
     return file_path
+
+
+def remote_call(function_name: str, env_name: str = "chemenv"):
+    """
+    Decorator to call a function in a remote environment.
+    This decorator is used to call a function in a remote environment
+    using the Modal library.
+
+    Args:
+        function_name (str): The name of the function to call
+        env_name (str): The name of the environment to use
+
+    Returns:
+        Callable: A wrapper function that calls the remote function
+    """
+
+    def wrapper(**kwargs) -> str:
+        remote = modal.Function.from_name(env_name, function_name)
+        return remote.remote(**kwargs)
+
+    return wrapper
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(
+        (requests.exceptions.RequestException, requests.exceptions.HTTPError)
+    ),
+)
+def make_api_request(
+    url: str,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    params: dict[str, Any] | None = None,
+    json_data: dict[str, Any] | None = None,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """
+    Make an API request with retry capabilities.
+
+    Args:
+        url (str): The API endpoint URL
+        method (str, optional): HTTP method (GET, POST, PUT, etc.). Defaults to "GET".
+        headers (dict[str, str], optional): Request headers. Defaults to None.
+        params (dict[str, Any], optional): URL parameters. Defaults to None.
+        json_data (dict[str, Any], optional): JSON data for POST/PUT requests. Defaults to None.
+        verbose (bool, optional): Whether to print verbose output. Defaults to False.
+
+    Returns:
+        dict[str, Any]: JSON response from the API
+
+    Raises:
+        requests.exceptions.RequestException: If the request fails after retries
+    """
+    method = method.upper()
+    url = quote(url, safe=":/?&=")
+    logger.info(f"Making {method} request to {url}")
+
+    if verbose:
+        logger.debug(f"Headers: {headers}")
+        logger.debug(f"Params: {params}")
+        if json_data:
+            logger.debug(f"JSON data: {json_data}")
+
+    response = requests.request(
+        method=method, url=url, headers=headers, params=params, json=json_data
+    )
+
+    if verbose:
+        logger.debug(f"Response status code: {response.status_code}")
+        logger.debug(f"Response content: {response.text[:500]}...")
+
+    response.raise_for_status()
+    return response.json()
+
+
+def make_brave_search_request(query: str, api_key: str) -> list[dict[str, Any]]:
+    """
+    Make a request to the Brave Search API using the general API request function.
+
+    Args:
+        query (str): The search query string
+        api_key (str): The Brave Search API key
+
+    Returns:
+        list[dict[str, Any]]: List of search results
+
+    Raises:
+        requests.exceptions.RequestException: If the request fails after retries
+    """
+    headers = {"X-Subscription-Token": api_key, "Accept": "application/json"}
+
+    params = {"q": query}
+
+    logger.info(f"Making Brave Search API request for query: '{query}'")
+
+    data = make_api_request(
+        url="https://api.search.brave.com/res/v1/web/search",
+        method="GET",
+        headers=headers,
+        params=params,
+        verbose=True,
+    )
+
+    return [
+        {
+            "title": web_result.get("title", ""),
+            "snippet": web_result.get("description", ""),
+            "link": web_result.get("url", ""),
+        }
+        for web_result in data.get("web", {}).get("results", [])
+    ]
+
+
+def web_search(query: str, num_results: int = 5) -> list[dict[str, Any]]:
+    """Perform a web search using Brave Search, then filter and rank results using embeddings.
+
+    Args:
+        query (str): The search query string
+        num_results (int, optional): Maximum number of results to return. Defaults to 5
+
+    Returns:
+        list[dict]: A list of dictionaries containing the most relevant search results
+        with their content and metadata, sorted by similarity score
+
+    Raises:
+        ValueError: If BRAVE_SEARCH_API_KEY environment variable is not set
+    """
+    logger.info(
+        f"Starting web search for query: '{query}' with parameters: num_results={num_results}"
+    )
+
+    api_key = os.getenv("BRAVE_SEARCH_API_KEY")
+    if not api_key:
+        logger.error("BRAVE_SEARCH_API_KEY environment variable is not set")
+        raise ValueError(
+            "BRAVE_SEARCH_API_KEY environment variable is required but not set"
+        )
+
+    try:
+        logger.info("Making Brave Search API request")
+        initial_results = make_brave_search_request(query, api_key)
+
+        if not initial_results:
+            logger.warning("No results returned from Brave Search API")
+            return []
+
+        logger.info(
+            f"Retrieved {len(initial_results)} initial results from Brave Search"
+        )
+
+        logger.info("Generating query embedding")
+        query_embedding = np.array(embed_text(chunks=[query])[0]).reshape(1, -1)
+        result_texts = [f"{r['title']}: {r['snippet']}" for r in initial_results]
+        logger.info("Generating result embeddings")
+        result_embeddings = np.array(embed_text(chunks=result_texts))
+
+        logger.info("Calculating similarity scores")
+        similarity_scores = sklearn_cosine_similarity(
+            query_embedding, result_embeddings
+        ).flatten()
+
+        logger.info("Processing results with similarity scores")
+        results_with_scores = []
+        for i, result in enumerate(initial_results):
+            similarity = float(similarity_scores[i])
+
+            results_with_scores.append(
+                {
+                    "title": result["title"],
+                    "snippet": result["snippet"],
+                    "link": result["link"],
+                    "similarity_score": similarity,
+                }
+            )
+
+        logger.info("Sorting results by similarity score")
+        sorted_results = sorted(
+            results_with_scores, key=lambda x: x["similarity_score"], reverse=True
+        )
+
+        final_results = sorted_results[:num_results]
+        logger.info(f"Returning {len(final_results)} final results")
+        return final_results
+
+    except Exception as e:
+        logger.error(f"Error while performing search: {e!s}", exc_info=True)
+        return []

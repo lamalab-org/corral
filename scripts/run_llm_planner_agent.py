@@ -11,16 +11,16 @@ def setup_litellm():
     litellm.set_verbose = True
 
 
-def run_benchmark(model: str = "gpt-4o", task_ids: list | None = None):
+def run_benchmark(model: str = "gpt-4o", task_ids: list | None = None, temperature: float = 0.0):
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = LLMPlanner(model=model)
+    agent = LLMPlanner(model=model, temperature=temperature)
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
-    result = runner.bench(task_ids, trials_per_task=2, k_values=[1, 2], verbose=True)
+    result = runner.bench(task_ids, trials_per_task=1, k_values=[1], verbose=True)
     result.generate_report("results.json")
 
     logger.info("Benchmark completed")
