@@ -480,7 +480,9 @@ def generate_reconstructed_slab(
 @tool
 def get_bulk_polymorphs_data(composition: str) -> str:
     """
-    Query the Materials Project database to find polymorphs for a given composition.
+    Query the Materials Project database to find polymorphs for a given composition. This function returns
+    a JSON string containing polymorph data including MP IDs, structures (CIF),  structures (CIF), energies above hull, formation_energy_per_atom, band gaps, densities,
+    volumes, number of sites, symmetry, and stability. The results are sorted by energy above hull.
 
     Args:
         composition: Chemical composition (e.g., 'TiO2')
@@ -543,6 +545,85 @@ def get_bulk_polymorphs_data(composition: str) -> str:
         polymorph_data = sorted(polymorph_data, key=lambda x: x["energy_above_hull"])
 
         return json.dumps(polymorph_data, indent=2)
+
+
+def get_bulk_polymorphs_data_to_file(
+    composition: str, save_path: str | None = None
+) -> str:
+    """
+    Query the Materials Project database to find polymorphs for a given composition. This function saves the data to a JSON file to the give path.
+    The data includes MP IDs, structures (CIF), energies above hull, formation_energy_per_atom, band gaps, densities,
+    volumes, number of sites, symmetry, and stability. The results are sorted by energy above hull.
+
+    Args:
+        composition: Chemical composition (e.g., 'TiO2')
+        save_path: Path to save the JSON file (optional)
+        api_key: Materials Project API key (optional if set in environment)
+
+    Returns:
+        Path to the saved JSON file containing polymorph data.
+    """
+
+    from mp_api.client import MPRester
+
+    if save_path is None:
+        raise ValueError("save_path must be provided to save the JSON data")
+
+    # Use provided API key or get from environment
+    mp_api_key = os.getenv("MP_API_KEY")
+    if not mp_api_key:
+        raise ValueError(
+            "Materials Project API key not provided and not found in environment"
+        )
+
+    with MPRester(mp_api_key) as mpr:
+        # Query for materials with the given composition
+        docs = mpr.materials.summary.search(
+            formula=composition,
+            fields=[
+                "material_id",
+                "structure",
+                "energy_above_hull",
+                "formation_energy_per_atom",
+                "band_gap",
+                "density",
+                "volume",
+                "nsites",
+                "symmetry",
+                "is_stable",
+            ],
+        )
+
+        # Convert structures to CIF for easy storage
+        polymorph_data = []
+        for doc in docs:
+            structure_cif = doc.structure.to(fmt="cif")
+
+            polymorph_data.append(
+                {
+                    "material_id": doc.material_id,
+                    "cif": structure_cif,
+                    "energy_above_hull": doc.energy_above_hull,
+                    "formation_energy_per_atom": doc.formation_energy_per_atom,
+                    "band_gap": doc.band_gap,
+                    "density": doc.density,
+                    "volume": doc.volume,
+                    "nsites": doc.nsites,
+                    "space_group": doc.symmetry.symbol,
+                    "is_stable": doc.is_stable,
+                }
+            )
+
+        # Sort by energy above hull (stability)
+        polymorph_data = sorted(polymorph_data, key=lambda x: x["energy_above_hull"])
+        json_str = json.dumps(polymorph_data, indent=2)
+
+        # Save to file if path is provided
+        if save_path:
+            with Path(save_path).open("w") as f:
+                f.write(json_str)
+
+        return save_path
 
 
 @tool
