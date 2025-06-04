@@ -13,6 +13,7 @@ class TaskDefinition:
     tools: list[str]
     scoring_fn: Callable[[dict | str], float]
     submission_format: dict[str, str]
+    scoring_inputs: dict[str, Any] = field(default_factory=dict)
     # Either use output from another task or custom input
     input_from_tasks: list[str] = field(
         default_factory=list
