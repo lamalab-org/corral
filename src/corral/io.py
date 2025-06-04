@@ -1,5 +1,6 @@
 import json
 import re
+from pathlib import Path
 
 import fsspec
 
@@ -10,43 +11,66 @@ class FSManager:
     """A file-system abstraction layer using fsspec.
     This object is created with a given protocol (e.g., "file", "s3", "ftp")"""
 
-    def __init__(self, protocol: str = "file", **kwargs):
+    def __init__(self, protocol: str = "file", base_path: str = "./", **kwargs):
         self.protocol = protocol
+        self.base_path = Path(base_path) if base_path else None
         self.fs = fsspec.filesystem(protocol, **kwargs)
+
+    def _resolve_path(self, path: str) -> str:
+        """Resolve a relative path against the base_path"""
+        if self.base_path is None:
+            return path
+
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            return str(path_obj)
+        # Relative path - resolve against base_path
+        resolved = self.base_path / path_obj
+        return str(resolved)
 
     def list_files(self, path: str, recursive: bool = False) -> list[str]:
         """List files in a directory"""
         try:
-            return self.fs.ls(path, detail=False, recursive=recursive)
+            resolved_path = self._resolve_path(path)
+            return self.fs.ls(resolved_path, detail=False, recursive=recursive)
         except Exception as e:
-            raise RuntimeError(f"Error listing files: {e}") from e
+            raise RuntimeError(f"Error listing files in {path}: {e}") from e
 
     def read_file(self, path: str) -> str:
         """Read contents of a file"""
         try:
-            with self.fs.open(path, "r") as f:
+            resolved_path = self._resolve_path(path)
+            with self.fs.open(resolved_path, "r") as f:
                 return f.read()
         except Exception as e:
-            raise RuntimeError(f"Error reading files: {e}") from e
+            raise RuntimeError(f"Error reading file {path}: {e}") from e
 
     def write_file(self, path: str, content: str) -> None:
         """Write content to a file"""
         try:
-            with self.fs.open(path, "w") as f:
+            resolved_path = self._resolve_path(path)
+            # Ensure directory exists
+            resolved_path_obj = Path(resolved_path)
+            resolved_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+            with self.fs.open(resolved_path, "w") as f:
                 f.write(content)
         except Exception as e:
-            raise RuntimeError(f"Error writing files: {e}") from e
+            raise RuntimeError(f"Error writing file {path}: {e}") from e
 
     def file_info(self, path: str) -> dict:
         """Get file information"""
         try:
-            return self.fs.info(path)
+            resolved_path = self._resolve_path(path)
+            return self.fs.info(resolved_path)
         except Exception as e:
-            raise RuntimeError(f"Error getting file info: {e}") from e
+            raise RuntimeError(f"Error getting file info for {path}: {e}") from e
 
     def copy_file(self, source: str, destination: str) -> None:
         try:
-            self.fs.copy(source, destination)
+            resolved_source = self._resolve_path(source)
+            resolved_dest = self._resolve_path(destination)
+            self.fs.copy(resolved_source, resolved_dest)
         except Exception as e:
             raise RuntimeError(
                 f"Error copying from {source} to {destination}: {e}"
@@ -54,24 +78,22 @@ class FSManager:
 
     def move_file(self, source: str, destination: str) -> None:
         try:
+            resolved_source = self._resolve_path(source)
+            resolved_dest = self._resolve_path(destination)
             # fsspec does not always provide a move method; if not, copy then remove.
-            self.fs.mv(source, destination)
+            self.fs.mv(resolved_source, resolved_dest)
         except Exception:
             self.copy_file(source, destination)
-            self.fs.rm(source)
+            self.fs.rm(resolved_source)
 
     def mkdir(self, path: str, create_parents: bool = False) -> None:
-        """Create a directory at the given path.
-
-        If create_parents is True and the backend supports it, create all missing parent directories.
-        """
+        """Create a directory at the given path."""
         try:
+            resolved_path = self._resolve_path(path)
             if create_parents and hasattr(self.fs, "mkdirs"):
-                # Many fsspec implementations support mkdirs.
-                # If not available, fall back to calling mkdir for each missing part.
-                self.fs.mkdirs(path, exist_ok=True)
+                self.fs.mkdirs(resolved_path, exist_ok=True)
             else:
-                self.fs.mkdir(path)
+                self.fs.mkdir(resolved_path)
         except Exception as e:
             raise RuntimeError(f"Error creating directory {path}: {e}") from e
 

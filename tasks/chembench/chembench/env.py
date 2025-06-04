@@ -24,6 +24,7 @@ from tools import (
     smiles_to_name,
 )
 
+from chembench.baseline import Generation, Generations
 from chembench.evaluate import ChemBenchmark
 from chembench.prompter import PrompterBuilder
 from chembench.task import Task
@@ -38,7 +39,6 @@ from corral.io import (
     WriteFileTool,
 )
 from corral.server import create_benchmark_server
-from corral.utils import Model
 
 load_dotenv("../.env", override=True)
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
@@ -62,6 +62,19 @@ _CHEMBENCH_TOOLS = [
     search_clinical_trials_by_drug,
     search_materials_compatibility,
 ]
+
+
+class Model:
+    def __init__(self, name: str = "Dummy Model"):
+        self.name = name
+
+    def generate(self, prompts: list[str], **_kwargs):
+        generations = []
+        for _prompt in prompts:
+            generation = None
+            generations.append([Generation(text=generation)])
+
+        return Generations(generations=generations)
 
 
 class ChemBenchEnvironment(Environment):
