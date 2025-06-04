@@ -151,7 +151,19 @@ def relevant_pubchem_sections(
 
         chunks = process_pubchem_json(full_record)
 
-        create_vector_database(chunks=chunks, collection_name=collection_name)
+        # Create metadata for each chunk
+        metadatas = [
+            {
+                "name": chunk.get("name", ""),
+                "root_path": chunk.get("root_path", ""),
+                "source": "pubchem",
+            }
+            for chunk in chunks
+        ]
+
+        create_vector_database(
+            chunks=chunks, collection_name=collection_name, metadatas=metadatas
+        )
         return vector_database_search(
             query=query, collection_name=collection_name, top_k=top_k
         )
