@@ -1,5 +1,6 @@
 import importlib.resources
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -121,7 +122,7 @@ class ToolCallingAgent:
             interface.get_available_tools_for_task(task_id)
         )
         if task_prompt is None:
-            task_guide = interface.get_task_prompt(task_id)
+            task_guide = interface.get_task_guide(task_id)
         else:
             task_guide = task_prompt
 
@@ -140,12 +141,15 @@ class ToolCallingAgent:
                     **self.kwargs,
                 )
 
-                final_answer_match = re.search(r"Final Answer: (.*)", llm_response)
-
                 content = llm_response.content
                 if content:
-                    if final_answer_match in content:
-                        messages.append(LiteLLMMessage(role="assistant", content=content))
+                    final_answer_match = re.search(
+                        r"Final Answer:\s*(.*)", content, re.IGNORECASE
+                    )
+                    if final_answer_match:
+                        messages.append(
+                            LiteLLMMessage(role="assistant", content=content)
+                        )
                         return final_answer_match.group(1).strip(), messages
 
                 tool_calls = llm_response.tool_calls
