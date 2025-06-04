@@ -138,7 +138,6 @@ class MatAgentBenchmark:
         k_values: int | list[int] | None = None,
         verbose: bool | None = False,
         session_id: str | None = None,
-        dependency_chain: bool | None = None,
     ) -> BenchmarkResult:
         """Run benchmark"""
 
@@ -162,8 +161,7 @@ class MatAgentBenchmark:
             raise ValueError("k value is greater than the number of trials")
 
         # Check dependency chain setting
-        if dependency_chain is None:
-            dependency_chain = self.interface.supports_dependency_chain()
+        dependency_chain = self.interface.supports_dependency_chain()
 
         # Initialize or load task results from checkpoint
         task_results = self._initialize_task_results(task_ids, session_id)
@@ -174,11 +172,11 @@ class MatAgentBenchmark:
         logger.info(f"Dependency chain: {dependency_chain}")
 
         if dependency_chain:
-            self._run_with_trial_level_checkpointing(
+            self._run_chained_execution(
                 task_ids, trials_per_task, task_results, session_id, verbose
             )
         else:
-            self._run_with_task_level_checkpointing(
+            self._run_independent_execution(
                 task_ids, trials_per_task, task_results, session_id, verbose
             )
 
@@ -188,10 +186,9 @@ class MatAgentBenchmark:
         self, task_ids: list[str], session_id: str
     ) -> dict[str, TaskTrialResults]:
         """Initialize task results, loading from checkpoint if available"""
-        checkpoint = self._load_checkpoint_file(session_id)
+        checkpoint = self._load_checkpoint(session_id)
 
         if checkpoint and "task_results" in checkpoint:
-            # Load existing results from checkpoint
             task_results = checkpoint["task_results"]
             logger.info(
                 f"Loaded existing results from checkpoint for {len(task_results)} tasks"
@@ -203,27 +200,26 @@ class MatAgentBenchmark:
                     task_results[task_id] = TaskTrialResults(task_id=task_id)
         else:
             # Initialize fresh results
-            task_results = {}
-            for task_id in task_ids:
-                task_results[task_id] = TaskTrialResults(task_id=task_id)
+            task_results = {
+                task_id: TaskTrialResults(task_id=task_id) for task_id in task_ids
+            }
 
         return task_results
 
-    def _run_with_task_level_checkpointing(
+    def _run_independent_execution(
         self,
         task_ids: list[str],
         trials_per_task: int,
         task_results: dict,
         session_id: str,
-        verbose: bool | None = False,
+        verbose: bool = False,
     ) -> None:
-        """Run benchmark with task-level checkpointing (dependency_chain=False)"""
+        """Run trials independently - complete all trials for each task"""
 
-        # Load completed tasks from checkpoint
-        checkpoint = self._load_checkpoint_file(session_id)
-        completed_tasks = set()
-        if checkpoint and checkpoint.get("type") == "task_level":
-            completed_tasks = set(checkpoint.get("completed_tasks", []))
+        checkpoint = self._load_checkpoint(session_id)
+        completed_tasks = (
+            set(checkpoint.get("completed_tasks", [])) if checkpoint else set()
+        )
 
         remaining_tasks = [
             task_id
@@ -233,7 +229,7 @@ class MatAgentBenchmark:
         ]
 
         logger.info(
-            f"Task-level checkpointing: {len(completed_tasks)} completed, {len(remaining_tasks)} remaining"
+            f"Independent execution: {len(completed_tasks)} completed, {len(remaining_tasks)} remaining"
         )
 
         for task_id in remaining_tasks:
@@ -244,51 +240,42 @@ class MatAgentBenchmark:
                 f"=== Running {remaining_trials} remaining trials for task {task_id} ==="
             )
 
-            # Run remaining trials for this task
-            for trial_num in range(remaining_trials):
+            # Complete all remaining trials for this task
+            for trial_num in range(current_trials, trials_per_task):
                 success = self._run_single_trial(
                     task_id, task_results[task_id], verbose
                 )
                 if not success:
                     logger.error(
-                        f"Task {task_id} failed on trial {current_trials + trial_num + 1}, stopping this task"
+                        f"Task {task_id} failed on trial {trial_num + 1}, stopping this task"
                     )
                     break
 
-            # If we completed all trials successfully, mark task as done
+            # Mark task as completed if we finished all trials
             if len(task_results[task_id].trials) == trials_per_task:
                 completed_tasks.add(task_id)
-                self._save_task_level_checkpoint(
-                    session_id, completed_tasks, task_results
-                )
-                logger.info(f"Task {task_id} completed successfully")
-            else:
-                # Save partial progress
-                self._save_task_level_checkpoint(
-                    session_id, completed_tasks, task_results
-                )
 
-    def _run_with_trial_level_checkpointing(
+            # Save progress after each task
+            self._save_checkpoint(
+                session_id, task_results, completed_tasks=list(completed_tasks)
+            )
+
+    def _run_chained_execution(
         self,
         task_ids: list[str],
         trials_per_task: int,
         task_results: dict,
         session_id: str,
-        verbose: bool | None = False,
+        verbose: bool = False,
     ) -> None:
-        """Run benchmark with trial-level checkpointing (dependency_chain=True)"""
+        """Run trials in lockstep - complete one trial across all tasks before next trial"""
 
-        # Load completed trials from checkpoint
-        checkpoint = self._load_checkpoint_file(session_id)
-        completed_trials = 0
-        if checkpoint and checkpoint.get("type") == "trial_level":
-            completed_trials = checkpoint.get("completed_trials", 0)
+        checkpoint = self._load_checkpoint(session_id)
+        completed_trials = checkpoint.get("completed_trials", 0) if checkpoint else 0
 
-        logger.info(
-            f"Trial-level checkpointing: starting from trial {completed_trials + 1}"
-        )
+        logger.info(f"Chained execution: starting from trial {completed_trials + 1}")
 
-        # Start from the next trial after completed ones
+        # Run trials in lockstep across all tasks
         for trial_num in range(completed_trials, trials_per_task):
             logger.info(
                 f"=== Starting trial {trial_num + 1}/{trials_per_task} for ALL tasks ==="
@@ -296,7 +283,7 @@ class MatAgentBenchmark:
 
             trial_success = True
 
-            # Run this trial for all tasks
+            # Run this trial for each task in sequence
             for task_id in task_ids:
                 success = self._run_single_trial(
                     task_id, task_results[task_id], verbose
@@ -308,47 +295,36 @@ class MatAgentBenchmark:
                     trial_success = False
                     break  # Stop this trial round
 
-            if not trial_success:
+            if trial_success:
+                # All tasks completed this trial successfully
+                self._save_checkpoint(
+                    session_id, task_results, completed_trials=trial_num + 1
+                )
+                logger.info(
+                    f"Trial {trial_num + 1} completed successfully for all tasks"
+                )
+            else:
+                # Save progress but don't increment completed_trials (will restart this trial)
+                self._save_checkpoint(
+                    session_id, task_results, completed_trials=trial_num
+                )
                 logger.error(
                     f"Trial {trial_num + 1} failed, will restart from this trial"
                 )
-                # Save current progress even on failure
-                self._save_trial_level_checkpoint(session_id, trial_num, task_results)
-                break  # Don't increment completed_trials, will restart this trial
+                break
 
-            # All tasks completed this trial successfully
-            self._save_trial_level_checkpoint(session_id, trial_num + 1, task_results)
-            logger.info(f"Trial {trial_num + 1} completed successfully for all tasks")
-
-    # Task-level checkpoint methods
-    def _save_task_level_checkpoint(
-        self, session_id: str, completed_tasks: set[str], task_results: dict
+    def _save_checkpoint(
+        self, session_id: str, task_results: dict, **extra_data
     ) -> None:
-        """Save task-level checkpoint with results"""
+        """Save unified checkpoint format"""
         checkpoint = {
-            "type": "task_level",
-            "completed_tasks": list(completed_tasks),
             "task_results": task_results,
             "session_id": session_id,
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            **extra_data,  # completed_tasks (list) for independent, completed_trials (int) for chained
         }
         self._save_checkpoint_file(session_id, checkpoint)
 
-    # Trial-level checkpoint methods
-    def _save_trial_level_checkpoint(
-        self, session_id: str, completed_trials: int, task_results: dict
-    ) -> None:
-        """Save trial-level checkpoint with results"""
-        checkpoint = {
-            "type": "trial_level",
-            "completed_trials": completed_trials,
-            "task_results": task_results,
-            "session_id": session_id,
-            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-        }
-        self._save_checkpoint_file(session_id, checkpoint)
-
-    # Common checkpoint file operations
     def _save_checkpoint_file(self, session_id: str, checkpoint: dict) -> None:
         """Save checkpoint to file with atomic write"""
         checkpoint_path = self._get_checkpoint_path(session_id)
@@ -365,7 +341,7 @@ class MatAgentBenchmark:
                 temp_path.unlink()
             raise
 
-    def _load_checkpoint_file(self, session_id: str) -> dict | None:
+    def _load_checkpoint(self, session_id: str) -> dict | None:
         """Load checkpoint from file"""
         checkpoint_path = self._get_checkpoint_path(session_id)
         if checkpoint_path.exists():
@@ -380,7 +356,7 @@ class MatAgentBenchmark:
         self,
         task_id: str,
         task_trials: TaskTrialResults,
-        verbose: bool | None = False,
+        verbose: bool = False,
     ) -> bool:
         """Run a single trial for a task. Returns True if successful, False otherwise."""
         try:
