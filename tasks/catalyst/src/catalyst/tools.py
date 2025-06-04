@@ -1020,6 +1020,126 @@ def enumerate_slabs_for_list_of_miller_index(
 
 
 @tool
+def select_slabs_with_strategy(
+    slabs_json: str,
+    selection_strategy: str = "diverse_miller",
+    max_slabs_per_polymorph: int = 3,
+) -> str:
+    """
+    Select slabs based on strategy (diverse_miller, high_coordination, or large_surface).
+    diverse_miller selects slabs with different Miller indices,
+    high_coordination selects slabs with higher number of surface sites,
+    large_surface selects slabs with largest surface areas.
+
+    Args:
+        slabs_json: JSON string with slab data
+        selection_strategy: Strategy ("diverse_miller", "high_coordination", "large_surface")
+        max_slabs_per_polymorph: Maximum slabs to select per polymorph
+
+    Returns:
+        JSON string with selected slabs
+    """
+    slabs = json.loads(slabs_json)
+
+    if selection_strategy == "diverse_miller":
+        # Select slabs with different Miller indices
+        selected = {}
+        miller_indices_seen = set()
+        for slab_id, slab_data in slabs.items():
+            miller_tuple = tuple(slab_data["miller_index"])
+            if (
+                miller_tuple not in miller_indices_seen
+                and len(selected) < max_slabs_per_polymorph
+            ):
+                selected[slab_id] = slab_data
+                miller_indices_seen.add(miller_tuple)
+
+    elif selection_strategy == "large_surface":
+        # Select slabs with largest surface areas
+        sorted_slabs = sorted(slabs.items(), key=lambda x: x[1]["area"], reverse=True)
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    elif selection_strategy == "high_coordination":
+        # Select slabs with higher number of surface sites (proxy for coordination)
+        sorted_slabs = sorted(
+            slabs.items(), key=lambda x: x[1]["num_sites"], reverse=True
+        )
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    else:
+        # Default: take first max_slabs_per_polymorph
+        selected = dict(list(slabs.items())[:max_slabs_per_polymorph])
+
+    return json.dumps(selected, indent=2)
+
+
+def select_slabs_with_strategy_to_file(
+    slabs_data: str,
+    save_path: str,
+    selection_strategy: str = "diverse_miller",
+    max_slabs_per_polymorph: int = 3,
+    is_path: bool = False,
+) -> str:
+    """
+    Select slabs based on strategy (diverse_miller, high_coordination, or large_surface).
+    diverse_miller selects slabs with different Miller indices,
+    high_coordination selects slabs with higher number of surface sites,
+    large_surface selects slabs with largest surface areas.
+
+    Args:
+        slabs_data: JSON string or file path with slab data
+        save_path: Path where to save the selected slabs JSON
+        selection_strategy: Strategy ("diverse_miller", "high_coordination", "large_surface")
+        max_slabs_per_polymorph: Maximum slabs to select per polymorph
+        is_path: If True, slabs_data is treated as a file path
+
+    Returns:
+        Path to the saved JSON file
+    """
+    # Load slabs data
+    if is_path:
+        with Path(slabs_data).open("r") as f:
+            slabs = json.loads(f.read())
+    else:
+        slabs = json.loads(slabs_data)
+
+    if selection_strategy == "diverse_miller":
+        # Select slabs with different Miller indices
+        selected = {}
+        miller_indices_seen = set()
+        for slab_id, slab_data in slabs.items():
+            miller_tuple = tuple(slab_data["miller_index"])
+            if (
+                miller_tuple not in miller_indices_seen
+                and len(selected) < max_slabs_per_polymorph
+            ):
+                selected[slab_id] = slab_data
+                miller_indices_seen.add(miller_tuple)
+
+    elif selection_strategy == "large_surface":
+        # Select slabs with largest surface areas
+        sorted_slabs = sorted(slabs.items(), key=lambda x: x[1]["area"], reverse=True)
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    elif selection_strategy == "high_coordination":
+        # Select slabs with higher number of surface sites (proxy for coordination)
+        sorted_slabs = sorted(
+            slabs.items(), key=lambda x: x[1]["num_sites"], reverse=True
+        )
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    else:
+        # Default: take first max_slabs_per_polymorph
+        selected = dict(list(slabs.items())[:max_slabs_per_polymorph])
+
+    # Save to file
+    with Path(save_path).open("w") as f:
+        json.dump(selected, f, indent=2)
+
+    return save_path
+
+
+@tool
 def generate_adsorbate_slab_configs(
     slab_cif: str, adsorbate_cif: str, adsorption_sites_json: str, height: float = 1.8
 ) -> str:
