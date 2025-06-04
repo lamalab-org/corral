@@ -3,18 +3,27 @@ import re
 from pathlib import Path
 
 import fsspec
+import modal
 
 from corral.base import Tool, ToolArgument
 
 
 class FSManager:
     """A file-system abstraction layer using fsspec.
-    This object is created with a given protocol (e.g., "file", "s3", "ftp")"""
+    This object is created with a given protocol (e.g., "file", "s3", "ftp")
+    with optional Modal integration and base path resolution."""
 
-    def __init__(self, protocol: str = "file", base_path: str = "./", **kwargs):
+    def __init__(
+        self,
+        protocol: str = "file",
+        base_path: str = "./",
+        app: str | None = None,
+        **kwargs,
+    ):
         self.protocol = protocol
         self.base_path = Path(base_path) if base_path else None
         self.fs = fsspec.filesystem(protocol, **kwargs)
+        self.app = app
 
     def _resolve_path(self, path: str) -> str:
         """Resolve a relative path against the base_path"""
@@ -32,6 +41,9 @@ class FSManager:
         """List files in a directory"""
         try:
             resolved_path = self._resolve_path(path)
+            if self.app:
+                list_files_ = modal.Function.lookup(self.app, "list_files")
+                return list_files_.remote(resolved_path, recursive)
             return self.fs.ls(resolved_path, detail=False, recursive=recursive)
         except Exception as e:
             raise RuntimeError(f"Error listing files in {path}: {e}") from e
@@ -40,6 +52,9 @@ class FSManager:
         """Read contents of a file"""
         try:
             resolved_path = self._resolve_path(path)
+            if self.app:
+                read_file_ = modal.Function.lookup(self.app, "read_file")
+                return read_file_.remote(resolved_path)
             with self.fs.open(resolved_path, "r") as f:
                 return f.read()
         except Exception as e:
@@ -49,12 +64,16 @@ class FSManager:
         """Write content to a file"""
         try:
             resolved_path = self._resolve_path(path)
-            # Ensure directory exists
-            resolved_path_obj = Path(resolved_path)
-            resolved_path_obj.parent.mkdir(parents=True, exist_ok=True)
+            if self.app:
+                write_file_ = modal.Function.lookup(self.app, "write_file")
+                write_file_.remote(resolved_path, content)
+            else:
+                # Ensure directory exists
+                resolved_path_obj = Path(resolved_path)
+                resolved_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
-            with self.fs.open(resolved_path, "w") as f:
-                f.write(content)
+                with self.fs.open(resolved_path, "w") as f:
+                    f.write(content)
         except Exception as e:
             raise RuntimeError(f"Error writing file {path}: {e}") from e
 
@@ -62,6 +81,9 @@ class FSManager:
         """Get file information"""
         try:
             resolved_path = self._resolve_path(path)
+            if self.app:
+                file_info_ = modal.Function.lookup(self.app, "file_info")
+                return file_info_.remote(resolved_path)
             return self.fs.info(resolved_path)
         except Exception as e:
             raise RuntimeError(f"Error getting file info for {path}: {e}") from e
@@ -70,7 +92,11 @@ class FSManager:
         try:
             resolved_source = self._resolve_path(source)
             resolved_dest = self._resolve_path(destination)
-            self.fs.copy(resolved_source, resolved_dest)
+            if self.app:
+                copy_file_ = modal.Function.lookup(self.app, "copy_file")
+                copy_file_.remote(resolved_source, resolved_dest)
+            else:
+                self.fs.copy(resolved_source, resolved_dest)
         except Exception as e:
             raise RuntimeError(
                 f"Error copying from {source} to {destination}: {e}"
@@ -80,29 +106,48 @@ class FSManager:
         try:
             resolved_source = self._resolve_path(source)
             resolved_dest = self._resolve_path(destination)
-            # fsspec does not always provide a move method; if not, copy then remove.
-            self.fs.mv(resolved_source, resolved_dest)
-        except Exception:
-            self.copy_file(source, destination)
-            self.fs.rm(resolved_source)
+            if self.app:
+                move_file_ = modal.Function.lookup(self.app, "move_file")
+                move_file_.remote(resolved_source, resolved_dest)
+            else:
+                # fsspec does not always provide a move method; if not, copy then remove.
+                try:
+                    self.fs.mv(resolved_source, resolved_dest)
+                except Exception:
+                    self.copy_file(source, destination)
+                    self.fs.rm(resolved_source)
+        except Exception as e:
+            raise RuntimeError(
+                f"Error moving from {source} to {destination}: {e}"
+            ) from e
 
     def mkdir(self, path: str, create_parents: bool = False) -> None:
         """Create a directory at the given path."""
         try:
             resolved_path = self._resolve_path(path)
-            if create_parents and hasattr(self.fs, "mkdirs"):
-                self.fs.mkdirs(resolved_path, exist_ok=True)
+            if self.app:
+                mkdir_ = modal.Function.lookup(self.app, "mkdir")
+                mkdir_.remote(resolved_path, create_parents)
             else:
-                self.fs.mkdir(resolved_path)
+                if create_parents and hasattr(self.fs, "mkdirs"):
+                    self.fs.mkdirs(resolved_path, exist_ok=True)
+                else:
+                    self.fs.mkdir(resolved_path)
         except Exception as e:
             raise RuntimeError(f"Error creating directory {path}: {e}") from e
 
     def cat_files(self, paths: list[str], separator: str = "\n") -> str:
         """Concatenate the contents of multiple files with the given separator."""
+        resolved_paths = [self._resolve_path(path) for path in paths]
+        if self.app:
+            cat_files_ = modal.Function.lookup(self.app, "cat_files")
+            return cat_files_.remote(resolved_paths, separator)
+
         contents = []
-        for path in paths:
+        for path in resolved_paths:
             try:
-                contents.append(self.read_file(path))
+                with self.fs.open(path, "r") as f:
+                    contents.append(f.read())
             except Exception as e:
                 raise RuntimeError(f"Error reading file {path}: {e}") from e
         return separator.join(contents)
