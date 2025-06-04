@@ -85,13 +85,6 @@ class TaskEnvironment(Environment):
             for key, value in self.current_task.initial_input.items():
                 prompt += f"- {key}: {value}\n"
 
-        # Add IO tools description for saving results
-        prompt += "\nIMPORTANT: You have access to filesystem tools which allow you to read and write files. Also, you can retry many times to get the correct answer.\n"
-        prompt += "Since some task results will be used in subsequent tasks, make sure to save your results using appropriate filenames.\n"
-        prompt += (
-            "This will help you reference and retrieve these files in later tasks."
-        )
-
         # Add note about dependencies
         if self.current_task.input_from_tasks:
             status = []

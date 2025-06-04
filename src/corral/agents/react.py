@@ -128,7 +128,6 @@ class ReActAgent:
         task_guide: str | list,
         history: list[LiteLLMMessage],
         examples: list[str] | None,
-        tools: str,
     ) -> list[LiteLLMMessage]:
         """Create prompt for LLM including context and history"""
         messages: list[LiteLLMMessage] = []
@@ -144,7 +143,6 @@ class ReActAgent:
             user_prompt=self.user_prompt,
             task_guide=task_guide,
             history=history,
-            tools=tools,
             examples=examples,
         )
 
@@ -180,12 +178,11 @@ class ReActAgent:
         if history is None:
             history = []
         if task_prompt is None:
-            task_guide = interface.get_task_prompt(task_id)
-            tools = interface.get_tools_guide(task_id)
+            task_guide = interface.get_task_guide(task_id)
         else:
             task_guide = task_prompt
 
-        messages = self.create_prompt(task_guide, history, examples, tools)
+        messages = self.create_prompt(task_guide, history, examples)
 
         for _iteration in range(self.max_iterations):
             # Create prompt and get LLM response

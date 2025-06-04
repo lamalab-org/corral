@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import gc
 import uuid
 from pathlib import Path
@@ -22,15 +20,12 @@ from corral.utils import (
 
 
 @tool
-def enhanced_brave_search(
-    query: str, num_results: int = 5, min_similarity: float = 0.75
-) -> list[dict]:
+def enhanced_brave_search(query: str, num_results: int = 5) -> list[dict]:
     """Perform a web search using Brave Search, then filter and rank results using embeddings.
 
     Args:
         query (str): The search query string
         num_results (int, optional): Maximum number of results to return. Defaults to 5
-        min_similarity (float, optional): Minimum similarity score threshold. Defaults to 0.75
 
     Returns:
         list[dict]: A list of dictionaries containing the most relevant search results
@@ -42,7 +37,6 @@ def enhanced_brave_search(
     return web_search(
         query=query,
         num_results=num_results,
-        min_similarity=min_similarity,
     )
 
 
@@ -166,13 +160,13 @@ def smiles_to_name(compound: str) -> str:
     Returns the IUPAC name of a compound given its SMILES representation.
 
     Args:
-        compound (str): The SMILES representation of the compound.
+        smiles (str): The SMILES representation of the compound.
 
     Returns:
         str: The IUPAC name of the compound.
     """
     return remote_call(function_name="get_iupac_name", env_name="chemenv")(
-        compound=compound
+        smiles=compound
     )
 
 
@@ -182,13 +176,13 @@ def get_smiles_from_name(compound: str) -> str:
     Returns the SMILES representation of a compound given its IUPAC name.
 
     Args:
-        compound (str): The IUPAC name of the compound.
+        name (str): The IUPAC name of the compound.
 
     Returns:
         str: The SMILES representation of the compound.
     """
     return remote_call(function_name="get_smiles_from_name", env_name="chemenv")(
-        compound=compound
+        name=compound
     )
 
 
@@ -239,13 +233,13 @@ def get_element_info(element: str) -> str:
     and block.
 
     Args:
-        element (str): The symbol of the chemical element, e.g., "H" for Hydrogen.
+        identifier (str): The symbol of the chemical element, e.g., "H" for Hydrogen.
 
     Returns:
         str: Information about the element.
     """
     return remote_call(function_name="get_element_info", env_name="chemenv")(
-        element=element
+        identifier=element
     )
 
 
@@ -264,23 +258,6 @@ def get_number_of_isomers(compound: str) -> str:
     return remote_call(function_name="get_number_isomers_pubchem", env_name="chemenv")(
         compound=compound
     )
-
-
-@tool
-def get_compound_isomers(compound: str) -> list:
-    """
-    Returns the isomers of a given compound based on the compounds with the same empirical formula in PubChem as `compound`.
-    Note that this implies that this number is not exhaustive
-
-    Args:
-        compound (str): The compound to search for. It can be a SMILES string, a PubChem CID, or InChI notation.
-
-    Returns:
-        list: The isomers of the compound.
-    """
-    return remote_call(
-        function_name="get_compound_isomers_pubchem", env_name="chemenv"
-    )(compound=compound)
 
 
 @tool
@@ -352,7 +329,7 @@ def simulate_spectra(smiles: str) -> dict[str, str]:
     """
     Simulate 1H NMR, 13C NMR, and IR spectra for a given molecule using its SMILES string.
     If some of the spectra are not available, the function will return None for those spectra.
-    Use this to complement the PubChem data.
+    Use this to complement the PubChem data, or to provide an estimate of the spectra for a compound.
 
     Args:
         smiles (str): The SMILES representation of the compound.
