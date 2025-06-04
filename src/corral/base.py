@@ -186,10 +186,9 @@ class ModalTool(Tool):
 class Environment(ABC):
     """Base class for task environments"""
 
-    def __init__(self, task_id: str, base_work_dir: str, chained_tasks: bool = False):
+    def __init__(self, task_id: str, base_work_dir: str):
         self.task_id = task_id
         self.base_work_dir = base_work_dir
-        self.chained_tasks = chained_tasks
         self.tools: dict[str, Tool] = {}
         self.trial_states: dict[str, TaskState] = {}
         self.trial_counter = -1
@@ -228,16 +227,9 @@ class Environment(ABC):
 
     def _create_trial_workspace(self, trial_id: str) -> str:
         """Create workspace directory for this trial"""
-        if self.chained_tasks:
-            # For chained tasks: one folder per trial (shared across all tasks in chain)
-            workspace = Path(self.base_work_dir) / f"trial_{trial_id}"
-        else:
-            # For independent tasks: one folder per task per trial
-            workspace = Path(self.base_work_dir) / f"{self.task_id}_trial_{trial_id}"
-
-        logger.info(f"DEBUG: Creating workspace: {workspace}")
+        workspace = Path(self.base_work_dir) / f"{self.task_id}_trial_{trial_id}"
+        logger.info(f"Creating workspace: {workspace}")
         workspace.mkdir(parents=True, exist_ok=True)
-        logger.info(f"DEBUG: Workspace created successfully: {workspace}")
         return str(workspace)
 
     def get_current_work_dir(self) -> str:
