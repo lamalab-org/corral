@@ -1,8 +1,6 @@
-import os
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
 
@@ -37,6 +35,13 @@ class TaskGroup:
     results: dict[str, Any] = field(default_factory=dict)
     scores: dict[str, float] = field(default_factory=dict)
     chained_tasks: bool = field(default=False)  # Whether tasks can depend on each other
+
+    def __post_init__(self):
+        """Auto-detect if tasks are chained"""
+        if not self.chained_tasks:  # Only auto-detect if not explicitly set
+            self.chained_tasks = any(
+                task.input_from_tasks for task in self.tasks.values()
+            )
 
     def get_task_input(self, task_id: str) -> dict[str, Any]:
         """Get input for a task either from other tasks or initial input"""
@@ -99,33 +104,3 @@ class TaskGroup:
             dep_task_id in self.results and self.results[dep_task_id] is not None
             for dep_task_id in task.input_from_tasks
         )
-
-
-class WorkspaceStrategy(Enum):
-    """Different workspace isolation strategies"""
-
-    NONE = "none"
-    SHARED = "shared"
-    TASK_LEVEL = "task_level"
-    TRIAL_LEVEL = "trial_level"
-    CHAIN_AWARE = "chain_aware"
-
-    @classmethod
-    def from_env(cls, default=None) -> "WorkspaceStrategy":
-        """Get workspace strategy from environment variable"""
-        env_value = os.environ.get("CORRAL_WORKSPACE_STRATEGY", "").lower()
-
-        strategy_map = {
-            "none": cls.NONE,
-            "shared": cls.SHARED,
-            "task": cls.TASK_LEVEL,
-            "task_level": cls.TASK_LEVEL,
-            "trial": cls.TRIAL_LEVEL,
-            "trial_level": cls.TRIAL_LEVEL,
-            "chain_aware": cls.CHAIN_AWARE,
-            "auto": cls.CHAIN_AWARE,
-        }
-
-        if default is None:
-            default = cls.CHAIN_AWARE
-        return strategy_map.get(env_value, default)
