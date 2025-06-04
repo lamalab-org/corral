@@ -37,7 +37,10 @@ if __name__ == "__main__":
     setup_litellm()
 
     try:
-        run_benchmark()
+        # model = "groq/llama-3.3-70b-versatile"
+        # model = "claude-3-5-sonnet-20240620"
+        model = "gpt-4o"
+        run_benchmark(model=model)
 
     except Exception as e:
         logger.error(f"Benchmark failed: {e!s}")
