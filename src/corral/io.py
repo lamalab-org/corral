@@ -153,6 +153,28 @@ class FSManager:
         return separator.join(contents)
 
 
+class ReadFileTool(Tool):
+    """Tool for reading file contents"""
+
+    def __init__(self, fs_manager: FSManager):
+        super().__init__(
+            name="read_file",
+            description="Read the contents of a file into a string",
+            arguments=[
+                ToolArgument(
+                    name="path",
+                    type="str",
+                    description="Path to the file to read",
+                    required=True,
+                )
+            ],
+        )
+        self.fs_manager = fs_manager
+
+    def execute(self, **kwargs) -> str:
+        return self.fs_manager.read_file(kwargs["path"])
+
+
 class ListFilesTool(Tool):
     """Tool for listing files in a directory"""
 
@@ -183,28 +205,6 @@ class ListFilesTool(Tool):
             kwargs["path"], kwargs.get("recursive", False)
         )
         return json.dumps({"files": files}, indent=2)
-
-
-class ReadFileTool(Tool):
-    """Tool for reading file contents"""
-
-    def __init__(self, fs_manager: FSManager):
-        super().__init__(
-            name="read_file",
-            description="Read the contents of a file into a string",
-            arguments=[
-                ToolArgument(
-                    name="path",
-                    type="str",
-                    description="Path to the file to read",
-                    required=True,
-                )
-            ],
-        )
-        self.fs_manager = fs_manager
-
-    def execute(self, **kwargs) -> str:
-        return self.fs_manager.read_file(kwargs["path"])
 
 
 class WriteFileTool(Tool):
