@@ -224,7 +224,7 @@ def add_adsorbate_to_slab_text(
     slab_cif: str,
     adsorbate_cif: str,
     height: float = 2.0,
-    site: list[float] = None,
+    site: list[float] | None = None,
 ) -> str:
     """
     Place an adsorbate (given as a CIF string) on a slab at a specified adsorption site.
@@ -637,6 +637,69 @@ def get_bulk_polymorphs_data_to_file(
                 f.write(json_str)
 
         return save_path
+
+
+@tool
+def batch_retrieve_polymorphs(
+    compositions: list[str],
+    max_energy_above_hull: float = 0.5,
+    max_per_composition: int = 10,
+    save_directory: str = "polymorph_data",
+) -> str:
+    """
+    Retrieve polymorphs for multiple compositions in batch.
+
+    Args:
+        compositions: List of chemical compositions
+        max_energy_above_hull: Maximum energy above hull to include
+        max_per_composition: Maximum polymorphs per composition
+        save_directory: Directory to save individual composition files
+
+    Returns:
+        JSON string with batch retrieval results
+    """
+    from pathlib import Path
+
+    # Create save directory
+    Path(save_directory).mkdir(exist_ok=True)
+
+    results = {
+        "successful_compositions": [],
+        "failed_compositions": [],
+        "total_polymorphs": 0,
+        "composition_files": {},
+    }
+
+    for composition in compositions:
+        try:
+            # Get polymorphs for this composition
+            polymorphs_json = get_bulk_polymorphs_data(composition)
+            polymorphs = json.loads(polymorphs_json)
+
+            # Filter by energy and limit count
+            filtered_polymorphs = [
+                p
+                for p in polymorphs
+                if p.get("energy_above_hull", 999) <= max_energy_above_hull
+            ][:max_per_composition]
+
+            if filtered_polymorphs:
+                # Save to individual file
+                save_path = Path(save_directory) / f"{composition}_polymorphs.json"
+                with save_path.open("w") as f:
+                    json.dump(filtered_polymorphs, f, indent=2)
+
+                results["successful_compositions"].append(composition)
+                results["composition_files"][composition] = str(save_path)
+                results["total_polymorphs"] += len(filtered_polymorphs)
+            else:
+                results["failed_compositions"].append(composition)
+
+        except Exception as e:
+            results["failed_compositions"].append(composition)
+            logger.error(f"Failed to retrieve polymorphs for {composition}: {e}")
+
+    return json.dumps(results, indent=2)
 
 
 @tool
@@ -3370,6 +3433,7 @@ def create_ml_tools() -> dict[str, Tool]:
     """Create all available ML tools"""
     return {
         "get_structure_from_mp_text": get_structure_from_mp_text,
+        "batch_retrieve_polymorphs": batch_retrieve_polymorphs,
         "get_bulk_polymorphs_data": get_bulk_polymorphs_data,
         "get_bulk_polymorphs_data_to_file": get_bulk_polymorphs_data_to_file,
         "sort_and_get_first_from_json": sort_and_get_first_from_json,
