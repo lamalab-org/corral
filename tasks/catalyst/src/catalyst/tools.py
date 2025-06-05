@@ -1,9 +1,19 @@
 import json
 import os
+import pickle
+import subprocess
+import sys
+import tempfile
+import traceback
 from pathlib import Path
 
+import joblib
+import numpy as np  # Import numpy
+import pandas as pd
+import xgboost as xgb
 from dotenv import load_dotenv
 from loguru import logger
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from tool_utils import (
     find_surface_atoms_with_voronoi,
     load_structure,
@@ -717,6 +727,383 @@ def select_polymorphs_with_strategy(
     return json.dumps(selected, indent=2)
 
 
+@tool
+def execute_python_code(
+    python_code: str,
+    input_data: str | None = None,
+    save_output_to: str | None = None,
+    timeout: int = 300,
+) -> str:
+    """Executes Python code in a sandboxed environment.
+
+    This function runs a given Python code string as a subprocess, providing
+    a secure way to execute dynamic code. It supports injecting input data,
+    capturing standard output and errors, and saving structured results to a file.
+
+    Args:
+        python_code: A string containing the Python code to be executed.
+        input_data: An optional JSON string. If provided, it will be loaded
+                    into a Python variable named `input_data` within the
+                    executed script, allowing the script to process external data.
+                    Defaults to None.
+        save_output_to: An optional file path (string) where the captured
+                        execution result (e.g., `output`, `result`, etc., from the
+                        executed script) will be saved as a JSON file. Defaults to None.
+        timeout: The maximum time in seconds the subprocess is allowed to run.
+                 If the execution exceeds this limit, a `TimeoutExpired` error
+                 will be returned. Defaults to 300 seconds.
+
+    Returns:
+        A JSON string detailing the execution outcome. This includes:
+        - `success` (bool): True if the process completed without error and
+                            returned a 0 exit code, False otherwise.
+        - `stdout` (str): The standard output from the executed Python script,
+                          excluding the `EXECUTION_RESULT` marker.
+        - `stderr` (str): Any error messages or warnings printed to standard error.
+        - `return_code` (int): The exit code of the subprocess. A value of 0
+                               typically indicates success.
+        - `execution_result` (dict): A dictionary containing variables captured
+                                    from the executed script (e.g., `output`,
+                                    `result`, `filtered_data`, `processed_data`,
+                                    `dataset`). If no such variables are found,
+                                    this will be an empty dictionary.
+        - `saved_to` (str or None): The path where the `execution_result` was
+                                    saved, if `save_output_to` was provided
+                                    and execution was successful.
+        - `error` (str, optional): A descriptive error message if execution failed
+                                   or timed out.
+        - `traceback` (str, optional): The Python traceback in case of an exception
+                                       within the `execute_python_code` function
+                                       or the executed script.
+
+    Raises:
+        (Implicitly handled and returned in the JSON result):
+        - `subprocess.TimeoutExpired`: If the execution exceeds the specified timeout.
+        - `Exception`: For various issues like invalid `python_code`, file I/O errors,
+                       or unexpected subprocess behavior.
+    """
+    try:
+        from pathlib import Path  # Ensure Path is imported before use
+
+        # Create a temporary file for the code
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+            # Prepare the code with input data if provided
+            full_code = ""
+            if input_data:
+                full_code += "import json\n"
+                full_code += f"input_data = json.loads('''{input_data}''')\n"
+
+            full_code += python_code
+
+            # Add output capture
+            full_code += "\n\n"
+            full_code += "import json\n"
+            full_code += "result = {}\n"
+            full_code += "for var_name in ['output', 'result', 'filtered_data', 'processed_data', 'dataset']:\n"
+            full_code += "    if var_name in locals():\n"
+            full_code += "        result[var_name] = locals()[var_name]\n"
+            full_code += "        break\n"
+            full_code += "print('EXECUTION_RESULT:', json.dumps(result))\n"
+
+            f.write(full_code)
+            temp_file = f.name
+
+        # Execute the code
+        process = subprocess.run(
+            [sys.executable, temp_file],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=Path.cwd(),
+            check=False,
+        )
+
+        # Clean up
+        Path(temp_file).unlink()
+
+        # Parse output
+        stdout_lines = process.stdout.strip().split("\n")
+        execution_result = {}  # Initialize as empty dict
+        output_lines = []
+
+        from contextlib import suppress
+
+        for line in stdout_lines:
+            if line.startswith("EXECUTION_RESULT:"):
+                with suppress(json.JSONDecodeError):
+                    execution_result = json.loads(
+                        line[17:]
+                    )  # Remove 'EXECUTION_RESULT:' prefix
+            else:
+                output_lines.append(line)
+
+        # Save output if requested
+        saved_path = None
+        if save_output_to and execution_result:  # Only save if there's a result to save
+            try:
+                with Path(save_output_to).open("w") as f:
+                    json.dump(execution_result, f, indent=2)
+                saved_path = save_output_to
+            except Exception as e:
+                logger.error(f"Failed to save output to {save_output_to}: {e}")
+
+        result = {
+            "success": process.returncode == 0,
+            "stdout": "\n".join(output_lines),
+            "stderr": process.stderr,
+            "return_code": process.returncode,
+            "execution_result": execution_result,
+            "saved_to": saved_path,
+        }
+
+        return json.dumps(result, indent=2)
+
+    except subprocess.TimeoutExpired:
+        # Ensure temp file is cleaned up even on timeout
+        from pathlib import Path
+
+        if "temp_file" in locals() and Path(temp_file).exists():
+            Path(temp_file).unlink()
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Code execution timed out after {timeout} seconds",
+                "stdout": "",  # Include empty stdout/stderr for consistency
+                "stderr": "",
+                "return_code": -1,  # A common indicator for timeout
+                "execution_result": {},
+            }
+        )
+    except Exception as e:
+        # Ensure temp file is cleaned up on general exception
+        if "temp_file" in locals() and Path(temp_file).exists():
+            Path(temp_file).unlink()
+        return json.dumps(
+            {
+                "success": False,
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "stdout": "",  # Include empty stdout/stderr for consistency
+                "stderr": "",
+                "return_code": -1,  # A common indicator for general error
+                "execution_result": {},
+            }
+        )
+
+
+def execute_python_script(
+    script_path: str,
+    args: list | None = None,
+    timeout: int = 600,
+    working_dir: str | None = None,
+) -> str:
+    """
+    Execute a Python script file. The function takes the path to the script,
+    optional command-line arguments, and a timeout. It captures the output,
+    standard error, and return code of the execution. The results are returned
+    as a JSON string.
+
+    Args:
+        script_path: Path to the Python script file
+        args: Optional list of command-line arguments
+        timeout: Timeout in seconds (default 600)
+        working_dir: Working directory for execution
+
+    Returns:
+        JSON string with execution results
+    """
+    try:
+        if not Path.exists(script_path):
+            return json.dumps(
+                {"success": False, "error": f"Script file not found: {script_path}"}
+            )
+
+        # Prepare command
+        cmd = [sys.executable, script_path]
+        if args:
+            cmd.extend(str(arg) for arg in args)
+
+        # Execute
+        process = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=working_dir or Path.cwd(),
+            check=False,
+        )
+
+        result = {
+            "success": process.returncode == 0,
+            "stdout": process.stdout,
+            "stderr": process.stderr,
+            "return_code": process.returncode,
+            "command": " ".join(cmd),
+        }
+
+        return json.dumps(result, indent=2)
+
+    except subprocess.TimeoutExpired:
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Script execution timed out after {timeout} seconds",
+            }
+        )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def execute_python_code_given_code(code: str) -> str:
+    """
+    Executes a given Python code string.
+    This is a placeholder and should be replaced with your actual implementation.
+    """
+    try:
+        # Create a dictionary to hold local variables during execution
+        exec_globals = {}
+        exec_locals = {}
+        exec(code, exec_globals, exec_locals)
+        # Assuming the filtering code will produce a 'output' variable
+        return json.dumps(
+            {"success": True, "execution_result": {"output": exec_locals.get("output")}}
+        )
+    except Exception as e:
+        return json.dumps(
+            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+        )
+
+
+@tool
+def filter_json_with_strategy(
+    input_json_path: str,
+    output_json_path: str,
+    custom_code: str | None = None,
+) -> str:
+    """
+        Filters JSON data from an input file and saves the results to an output file
+        using a custom Python filtering logic.
+
+        This function reads a JSON file, applies a custom Python script to filter its
+        contents, and then writes the filtered data to a new JSON file. The custom
+        filtering code is executed in an isolated environment where the input JSON
+        data is available as a variable named 'data'. The filtering logic should
+        produce a result in a variable named 'filtered_data'.
+
+        Args:
+            input_json_path: The file path to the input JSON data.
+            output_json_path: The file path where the filtered JSON data will be saved.
+            custom_code: A string containing Python code that defines the filtering logic.
+                         This code should expect the input data in a variable named
+                         'data' and store its filtered result in a variable named
+                         'filtered_data'.
+
+        Returns:
+            A JSON string indicating the status of the filtering operation.
+            If successful, it includes 'success' (True), 'original_count',
+            'filtered_count', 'output_path', and 'reduction_percentage'.
+            If unsuccessful, it includes 'success' (False), 'error', and 'details'
+            (or 'traceback' for exceptions during file operations).
+
+        Raises:
+            FileNotFoundError: If `input_json_path` does not exist.
+            json.JSONDecodeError: If the input file is not a valid JSON.
+            Exception: For any other errors during file operations or code execution.
+
+        Example:
+            # Assuming input json file contains a list of dictionaries like:
+            # [
+            #   {"material_id": "mp-1143", "band_gap": 5.85},
+            #   {"material_id": "mp-752826", "band_gap": 4.17}
+            # ]
+
+            input_file = "input.json"
+            output_file = "output_filtered.json"
+
+            # Example 1: Filter materials with a band_gap greater than 5.0
+            custom_filter_code = \"\"\"
+    filtered_data = [item for item in data if item.get("band_gap", 0) > 5.0]
+    \"\"\"
+            result = filter_json_with_strategy(input_file, output_file, custom_filter_code)
+            print(result)
+            # Expected output (simplified):
+            # {
+            #   "success": true,
+            #   "original_count": 2,
+            #   "filtered_count": 1,
+            #   "output_path": "output_filtered.json",
+            #   "reduction_percentage": 50.0
+            # }
+    """
+    try:
+        with Path(input_json_path).open("r") as f:
+            data = json.load(f)
+
+        # The custom_code expects 'data' to be available and should produce 'filtered_data'
+        filter_code = f"""
+import json
+
+# Input data is available as 'data'
+data = {json.dumps(data)}
+
+# Custom filtering logic
+{custom_code}
+
+# Result should be stored in 'filtered_data'
+output = filtered_data
+"""
+
+        exec_result = execute_python_code_given_code(filter_code)
+        exec_data = json.loads(exec_result)
+
+        if exec_data["success"] and exec_data["execution_result"]:
+            filtered_data = exec_data["execution_result"].get("output", [])
+        else:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Custom filtering code failed",
+                    "details": exec_data,
+                },
+                indent=2,
+            )
+
+        # Save filtered data
+        with Path(output_json_path).open("w") as f:
+            json.dump(filtered_data, f, indent=2)
+
+        result = {
+            "success": True,
+            "original_count": len(data),
+            "filtered_count": len(filtered_data),
+            "output_path": output_json_path,
+            "reduction_percentage": (1 - len(filtered_data) / len(data)) * 100
+            if data
+            else 0,
+        }
+
+        return json.dumps(result, indent=2)
+
+    except FileNotFoundError:
+        return json.dumps(
+            {"success": False, "error": f"Input file not found: {input_json_path}"},
+            indent=2,
+        )
+    except json.JSONDecodeError:
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Invalid JSON format in file: {input_json_path}",
+            },
+            indent=2,
+        )
+    except Exception as e:
+        return json.dumps(
+            {"success": False, "error": str(e), "traceback": traceback.format_exc()},
+            indent=2,
+        )
+
+
 def select_polymorphs_with_strategy_to_file(
     polymorphs_data: str,
     save_path: str,
@@ -1279,6 +1666,573 @@ def get_mp_surface_properties(material_id: str) -> str:
             return json.dumps({"error": f"Error fetching surface properties: {e!s}"})
 
 
+"""
+Dataset preparation tools for different ML model types.
+"""
+
+
+def prepare_tabular_dataset(
+    polymorphs_json_path: str,
+    output_path: str,
+    target_property: str = "formation_energy_per_atom",
+    feature_engineering: str = "basic",
+    test_split: float = 0.2,
+    normalize: bool = True,
+) -> str:
+    """
+    Prepare tabular dataset for traditional ML models (XGBoost, Random Forest, etc.).
+
+    Args:
+        polymorphs_json_path: Path to polymorphs JSON file
+        output_path: Base path for saving dataset files
+        target_property: Property to predict (formation_energy_per_atom, energy_above_hull, band_gap)
+        feature_engineering: Feature engineering strategy ('basic', 'advanced', 'custom')
+        test_split: Fraction for test set
+        normalize: Whether to normalize features
+
+    Returns:
+        JSON string with dataset preparation results
+    """
+    try:
+        # Load polymorphs data
+        with Path(polymorphs_json_path).open("r") as f:
+            polymorphs = json.load(f)
+
+        if not isinstance(polymorphs, list):
+            return json.dumps(
+                {"success": False, "error": "Input must be list of polymorphs"}
+            )
+
+        # Extract features and targets
+        features_list = []
+        targets = []
+        metadata = []
+
+        for poly in polymorphs:
+            if target_property not in poly or poly[target_property] is None:
+                continue
+
+            # Basic features
+            features = {
+                "density": poly.get("density", 0),
+                "volume": poly.get("volume", 0),
+                "nsites": poly.get("nsites", 0),
+                "band_gap": poly.get("band_gap", 0),
+                "energy_above_hull": poly.get("energy_above_hull", 0),
+            }
+
+            # Advanced features from crystal structure
+            if feature_engineering in ["advanced", "custom"]:
+                try:
+                    from pymatgen.analysis.structure_analyzer import SpacegroupAnalyzer
+                    from pymatgen.core import Structure
+
+                    structure = Structure.from_str(poly["cif"], fmt="cif")
+
+                    # Structural features
+                    features.update(
+                        {
+                            "lattice_a": structure.lattice.a,
+                            "lattice_b": structure.lattice.b,
+                            "lattice_c": structure.lattice.c,
+                            "lattice_alpha": structure.lattice.alpha,
+                            "lattice_beta": structure.lattice.beta,
+                            "lattice_gamma": structure.lattice.gamma,
+                            "lattice_volume": structure.lattice.volume,
+                            "num_species": len(structure.composition.elements),
+                            "packing_efficiency": structure.density
+                            / structure.lattice.volume
+                            * len(structure),
+                        }
+                    )
+
+                    # Space group features
+                    sg_analyzer = SpacegroupAnalyzer(structure)
+                    features["space_group_number"] = (
+                        sg_analyzer.get_space_group_number()
+                    )
+                    features["crystal_system"] = sg_analyzer.get_crystal_system()
+
+                    # Composition features
+                    composition = structure.composition
+                    features["num_elements"] = len(composition.elements)
+                    features["electronegativity_diff"] = (
+                        max([e.X for e in composition.elements])
+                        - min([e.X for e in composition.elements])
+                        if len(composition.elements) > 1
+                        else 0
+                    )
+
+                except Exception:
+                    logger.info(
+                        f"Warning: Could not extract advanced features for {poly.get('material_id', 'unknown')}"
+                    )
+                    continue
+
+            features_list.append(features)
+            targets.append(poly[target_property])
+            metadata.append(
+                {
+                    "material_id": poly.get("material_id", "unknown"),
+                    "composition": poly.get("composition", "unknown"),
+                    "space_group": poly.get("space_group", "unknown"),
+                }
+            )
+
+        if len(features_list) == 0:
+            return json.dumps({"success": False, "error": "No valid samples found"})
+
+        # Convert to DataFrame
+        df_features = pd.DataFrame(features_list)
+        df_targets = pd.Series(targets)
+        df_metadata = pd.DataFrame(metadata)
+
+        # Handle categorical features
+        categorical_columns = (
+            ["crystal_system"] if feature_engineering in ["advanced", "custom"] else []
+        )
+        for col in categorical_columns:
+            if col in df_features.columns:
+                df_features[col] = pd.Categorical(df_features[col]).codes
+
+        # Handle missing values
+        df_features = df_features.fillna(df_features.mean())
+
+        # Split data
+        from sklearn.model_selection import train_test_split
+
+        indices = np.arange(len(df_features))
+        train_idx, test_idx = train_test_split(
+            indices, test_size=test_split, random_state=42
+        )
+
+        X_train, X_test = df_features.iloc[train_idx], df_features.iloc[test_idx]
+        y_train, y_test = df_targets.iloc[train_idx], df_targets.iloc[test_idx]
+        metadata_train, metadata_test = (
+            df_metadata.iloc[train_idx],
+            df_metadata.iloc[test_idx],
+        )
+
+        # Normalize if requested
+        if normalize:
+            from sklearn.preprocessing import StandardScaler
+
+            scaler = StandardScaler()
+            X_train_scaled = pd.DataFrame(
+                scaler.fit_transform(X_train),
+                columns=X_train.columns,
+                index=X_train.index,
+            )
+            X_test_scaled = pd.DataFrame(
+                scaler.transform(X_test), columns=X_test.columns, index=X_test.index
+            )
+
+            # Save scaler
+            scaler_path = f"{output_path}_scaler.pkl"
+            with Path(scaler_path).open("wb") as f:
+                pickle.dump(scaler, f)
+        else:
+            X_train_scaled, X_test_scaled = X_train, X_test
+            scaler_path = None
+
+        # Save datasets
+        train_path = f"{output_path}_train.csv"
+        test_path = f"{output_path}_test.csv"
+
+        # Combine features and targets for saving
+        train_data = X_train_scaled.copy()
+        train_data[target_property] = y_train
+        train_data.to_csv(train_path, index=False)
+
+        test_data = X_test_scaled.copy()
+        test_data[target_property] = y_test
+        test_data.to_csv(test_path, index=False)
+
+        # Save metadata
+        metadata_path = f"{output_path}_metadata.json"
+        dataset_info = {
+            "target_property": target_property,
+            "feature_engineering": feature_engineering,
+            "normalize": normalize,
+            "train_samples": len(X_train),
+            "test_samples": len(X_test),
+            "features": list(df_features.columns),
+            "feature_count": len(df_features.columns),
+            "train_path": train_path,
+            "test_path": test_path,
+            "scaler_path": scaler_path,
+            "train_metadata": metadata_train.to_dict("records"),
+            "test_metadata": metadata_test.to_dict("records"),
+        }
+
+        with Path(metadata_path).open("w") as f:
+            json.dump(dataset_info, f, indent=2)
+
+        return json.dumps(
+            {
+                "success": True,
+                "train_path": train_path,
+                "test_path": test_path,
+                "metadata_path": metadata_path,
+                "scaler_path": scaler_path,
+                "dataset_info": dataset_info,
+            },
+            indent=2,
+        )
+
+    except Exception as e:
+        return json.dumps(
+            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+        )
+
+
+def prepare_neural_network_dataset(
+    polymorphs_json_path: str,
+    output_path: str,
+    target_property: str = "formation_energy_per_atom",
+    sequence_features: bool = False,
+    embedding_features: bool = True,
+    test_split: float = 0.2,
+) -> str:
+    """
+    Prepare dataset for neural network models with embeddings and sequence features.
+
+    Args:
+        polymorphs_json_path: Path to polymorphs JSON file
+        output_path: Base path for saving dataset files
+        target_property: Property to predict
+        sequence_features: Whether to create sequence-based features
+        embedding_features: Whether to create embedding features
+        test_split: Fraction for test set
+
+    Returns:
+        JSON string with dataset preparation results
+    """
+    try:
+        # Load polymorphs data
+        with Path(polymorphs_json_path).open("r") as f:
+            polymorphs = json.load(f)
+
+        # Prepare neural network specific features
+        nn_features = []
+        targets = []
+        metadata = []
+
+        for poly in polymorphs:
+            if target_property not in poly or poly[target_property] is None:
+                continue
+
+            try:
+                from pymatgen.core import Structure
+
+                structure = Structure.from_str(poly["cif"], fmt="cif")
+
+                # Base features
+                features = {
+                    "structural": [
+                        structure.density,
+                        structure.volume,
+                        len(structure),
+                        len(structure.composition.elements),
+                        structure.lattice.a,
+                        structure.lattice.b,
+                        structure.lattice.c,
+                        structure.lattice.alpha,
+                        structure.lattice.beta,
+                        structure.lattice.gamma,
+                    ]
+                }
+
+                # Element embeddings
+                if embedding_features:
+                    element_properties = []
+                    for element in structure.composition.elements:
+                        element_properties.extend(
+                            [
+                                element.atomic_radius or 0,
+                                element.X,  # electronegativity
+                                element.atomic_mass,
+                                element.number,
+                                element.row,
+                                element.group,
+                            ]
+                        )
+
+                    # Pad or truncate to fixed size (max 5 elements * 6 properties = 30)
+                    element_properties = element_properties[:30]
+                    element_properties.extend([0] * (30 - len(element_properties)))
+                    features["elements"] = element_properties
+
+                # Sequence features (atomic positions)
+                if sequence_features:
+                    positions = structure.frac_coords.flatten()
+                    # Limit to first 150 coordinates (50 atoms * 3 coords)
+                    positions = positions[:150]
+                    positions = np.pad(positions, (0, max(0, 150 - len(positions))))
+                    features["positions"] = positions.tolist()
+
+                nn_features.append(features)
+                targets.append(poly[target_property])
+                metadata.append(
+                    {
+                        "material_id": poly.get("material_id", "unknown"),
+                        "composition": poly.get("composition", "unknown"),
+                    }
+                )
+
+            except Exception as e:
+                logger.info(
+                    f"Warning: Could not process {poly.get('material_id', 'unknown')}: {e}"
+                )
+                continue
+
+        if len(nn_features) == 0:
+            return json.dumps({"success": False, "error": "No valid samples found"})
+
+        # Split data
+        from sklearn.model_selection import train_test_split
+
+        indices = np.arange(len(nn_features))
+        train_idx, test_idx = train_test_split(
+            indices, test_size=test_split, random_state=42
+        )
+
+        train_features = [nn_features[i] for i in train_idx]
+        test_features = [nn_features[i] for i in test_idx]
+        train_targets = [targets[i] for i in train_idx]
+        test_targets = [targets[i] for i in test_idx]
+        train_metadata = [metadata[i] for i in train_idx]
+        test_metadata = [metadata[i] for i in test_idx]
+
+        # Save as NPZ files for neural networks
+        train_path = f"{output_path}_train.npz"
+        test_path = f"{output_path}_test.npz"
+
+        # Prepare arrays
+        train_data = {"targets": np.array(train_targets), "metadata": train_metadata}
+        test_data = {"targets": np.array(test_targets), "metadata": test_metadata}
+
+        # Add feature arrays
+        for feature_type in ["structural", "elements", "positions"]:
+            if feature_type in train_features[0]:
+                train_data[feature_type] = np.array(
+                    [f[feature_type] for f in train_features]
+                )
+                test_data[feature_type] = np.array(
+                    [f[feature_type] for f in test_features]
+                )
+
+        np.savez(train_path, **train_data)
+        np.savez(test_path, **test_data)
+
+        # Save dataset info
+        metadata_path = f"{output_path}_metadata.json"
+        dataset_info = {
+            "target_property": target_property,
+            "sequence_features": sequence_features,
+            "embedding_features": embedding_features,
+            "train_samples": len(train_features),
+            "test_samples": len(test_features),
+            "feature_types": list(train_features[0].keys()),
+            "train_path": train_path,
+            "test_path": test_path,
+        }
+
+        with Path(metadata_path).open("w") as f:
+            json.dump(dataset_info, f, indent=2)
+
+        return json.dumps(
+            {
+                "success": True,
+                "train_path": train_path,
+                "test_path": test_path,
+                "metadata_path": metadata_path,
+                "dataset_info": dataset_info,
+            },
+            indent=2,
+        )
+
+    except Exception as e:
+        import traceback
+
+        return json.dumps(
+            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+        )
+
+
+def prepare_graph_dataset(
+    polymorphs_json_path: str,
+    output_path: str,
+    target_property: str = "formation_energy_per_atom",
+    cutoff_radius: float = 5.0,
+    test_split: float = 0.2,
+) -> str:
+    """
+    Prepare graph dataset for Graph Neural Networks (GNNs).
+
+    Args:
+        polymorphs_json_path: Path to polymorphs JSON file
+        output_path: Base path for saving dataset files
+        target_property: Property to predict
+        cutoff_radius: Cutoff radius for graph edges (Angstroms)
+        test_split: Fraction for test set
+
+    Returns:
+        JSON string with dataset preparation results
+    """
+    try:
+        # Load polymorphs data
+        with Path(polymorphs_json_path).open("r") as f:
+            polymorphs = json.load(f)
+
+        graphs = []
+        targets = []
+        metadata = []
+
+        for poly in polymorphs:
+            if target_property not in poly or poly[target_property] is None:
+                continue
+
+            try:
+                from pymatgen.core import Structure
+
+                structure = Structure.from_str(poly["cif"], fmt="cif")
+
+                # Create graph representation
+                # Nodes: atoms with features
+                # Edges: bonds within cutoff radius
+
+                node_features = []
+                edge_indices = []
+                edge_features = []
+
+                # Node features (atomic properties)
+                for _i, site in enumerate(structure.sites):
+                    element = site.specie
+                    node_features.append(
+                        [
+                            element.atomic_radius or 1.0,
+                            element.X,  # electronegativity
+                            element.atomic_mass,
+                            element.number,
+                            float(element.row),
+                            float(element.group),
+                            site.coords[0],
+                            site.coords[1],
+                            site.coords[2],  # coordinates
+                        ]
+                    )
+
+                # Edge features (distances and angles)
+                for i, _site_i in enumerate(structure.sites):
+                    for j, _site_j in enumerate(structure.sites):
+                        if i != j:
+                            distance = structure.get_distance(i, j)
+                            if distance <= cutoff_radius:
+                                edge_indices.append([i, j])
+                                edge_features.append(
+                                    [distance, 1.0 / distance]
+                                )  # distance and inverse distance
+
+                graph_data = {
+                    "node_features": node_features,
+                    "edge_indices": edge_indices,
+                    "edge_features": edge_features,
+                    "num_nodes": len(node_features),
+                    "num_edges": len(edge_indices),
+                }
+
+                graphs.append(graph_data)
+                targets.append(poly[target_property])
+                metadata.append(
+                    {
+                        "material_id": poly.get("material_id", "unknown"),
+                        "composition": poly.get("composition", "unknown"),
+                        "num_atoms": len(structure),
+                    }
+                )
+
+            except Exception as e:
+                logger.info(
+                    f"Warning: Could not create graph for {poly.get('material_id', 'unknown')}: {e}"
+                )
+                continue
+
+        if len(graphs) == 0:
+            return json.dumps({"success": False, "error": "No valid graphs created"})
+
+        # Split data
+        from sklearn.model_selection import train_test_split
+
+        indices = np.arange(len(graphs))
+        train_idx, test_idx = train_test_split(
+            indices, test_size=test_split, random_state=42
+        )
+
+        train_graphs = [graphs[i] for i in train_idx]
+        test_graphs = [graphs[i] for i in test_idx]
+        train_targets = [targets[i] for i in train_idx]
+        test_targets = [targets[i] for i in test_idx]
+        train_metadata = [metadata[i] for i in train_idx]
+        test_metadata = [metadata[i] for i in test_idx]
+
+        # Save graph datasets
+        train_path = f"{output_path}_train_graphs.json"
+        test_path = f"{output_path}_test_graphs.json"
+
+        train_data = {
+            "graphs": train_graphs,
+            "targets": train_targets,
+            "metadata": train_metadata,
+        }
+
+        test_data = {
+            "graphs": test_graphs,
+            "targets": test_targets,
+            "metadata": test_metadata,
+        }
+
+        with Path(train_path).open("w") as f:
+            json.dump(train_data, f, indent=2)
+
+        with Path(test_path).open("w") as f:
+            json.dump(test_data, f, indent=2)
+
+        # Save dataset info
+        metadata_path = f"{output_path}_metadata.json"
+        dataset_info = {
+            "target_property": target_property,
+            "cutoff_radius": cutoff_radius,
+            "train_samples": len(train_graphs),
+            "test_samples": len(test_graphs),
+            "avg_nodes_per_graph": np.mean([g["num_nodes"] for g in graphs]),
+            "avg_edges_per_graph": np.mean([g["num_edges"] for g in graphs]),
+            "train_path": train_path,
+            "test_path": test_path,
+        }
+
+        with Path(metadata_path).open("w") as f:
+            json.dump(dataset_info, f, indent=2)
+
+        return json.dumps(
+            {
+                "success": True,
+                "train_path": train_path,
+                "test_path": test_path,
+                "metadata_path": metadata_path,
+                "dataset_info": dataset_info,
+            },
+            indent=2,
+        )
+
+    except Exception as e:
+        import traceback
+
+        return json.dumps(
+            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+        )
+
+
 @tool
 def get_mp_thermo_data(material_id: str) -> str:
     """
@@ -1344,6 +2298,124 @@ def get_mp_thermo_data(material_id: str) -> str:
 
         return json.dumps(thermo_data, indent=2)
 
+
+## NL training models
+
+
+@tool
+def train_xgboost_model(
+    train_data_path: str,
+    test_data_path: str,
+    model_save_path: str,
+    target_column: str = "formation_energy_per_atom",
+    hyperparameters: dict | None = None,
+) -> str:
+    """
+    Train XGBoost model for formation energy prediction. The input data should be in CSV format with features and target column.
+
+    Args:a
+        train_data_path: Path to training CSV file
+        test_data_path: Path to test CSV file
+        model_save_path: Path to save trained model
+        target_column: Name of target column
+        hyperparameters: XGBoost hyperparameters
+
+    Returns:
+        JSON string with training results and metrics
+    """
+    try:
+        # Load data
+        train_df = pd.read_csv(train_data_path)
+        test_df = pd.read_csv(test_data_path)
+
+        # Separate features and targets
+        X_train = train_df.drop(columns=[target_column])
+        y_train = train_df[target_column]
+        X_test = test_df.drop(columns=[target_column])
+        y_test = test_df[target_column]
+
+        # Default hyperparameters
+        default_params = {
+            "n_estimators": 100,
+            "max_depth": 6,
+            "learning_rate": 0.1,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "random_state": 42,
+        }
+
+        if hyperparameters:
+            default_params.update(hyperparameters)
+
+        # Train model
+        model = xgb.XGBRegressor(**default_params)
+        model.fit(X_train, y_train)
+
+        # Make predictions
+        y_pred_train = model.predict(X_train)
+        y_pred_test = model.predict(X_test)
+
+        # Calculate metrics
+        train_metrics = {
+            "mae": float(mean_absolute_error(y_train, y_pred_train)),
+            "rmse": float(np.sqrt(mean_squared_error(y_train, y_pred_train))),
+            "r2": float(r2_score(y_train, y_pred_train)),
+        }
+
+        test_metrics = {
+            "mae": float(mean_absolute_error(y_test, y_pred_test)),
+            "rmse": float(np.sqrt(mean_squared_error(y_test, y_pred_test))),
+            "r2": float(r2_score(y_test, y_pred_test)),
+        }
+
+        # Feature importance - Convert float32 to standard float
+        feature_importance = {
+            col: float(importance)
+            for col, importance in zip(
+                X_train.columns, model.feature_importances_, strict=False
+            )
+        }
+
+        # Save model
+        joblib.dump(model, model_save_path)
+
+        # Save predictions
+        predictions_path = model_save_path.replace(".pkl", "_predictions.json")
+        predictions = {
+            "train_predictions": y_pred_train.tolist(),
+            "test_predictions": y_pred_test.tolist(),
+            "train_targets": y_train.tolist(),
+            "test_targets": y_test.tolist(),
+        }
+
+        with Path(predictions_path).open("w") as f:
+            json.dump(predictions, f, indent=2)
+
+        result = {
+            "success": True,
+            "model_type": "xgboost",
+            "model_path": model_save_path,
+            "predictions_path": predictions_path,
+            "train_metrics": train_metrics,
+            "test_metrics": test_metrics,
+            "feature_importance": feature_importance,
+            "hyperparameters": default_params,
+            "train_samples": len(X_train),
+            "test_samples": len(X_test),
+            "features": list(X_train.columns),
+        }
+
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        import traceback
+
+        return json.dumps(
+            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+        )
+
+
+###
 
 # tools to relax and get energy using mlff
 # tool to compute adsorption energy
