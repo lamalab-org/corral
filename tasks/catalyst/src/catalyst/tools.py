@@ -728,6 +728,55 @@ def select_polymorphs_with_strategy(
 
 
 @tool
+def consolidate_polymorph_datasets(
+    composition_files: dict[str, str],
+    output_path: str = "consolidated_polymorphs.json",
+) -> str:
+    """
+    Consolidate multiple polymorph files into a single dataset and save it to a JSON file.
+
+    Args:
+        composition_files: Dictionary mapping compositions to file paths
+        output_path: Path for consolidated dataset
+
+    Returns:
+        JSON string with consolidation results
+    """
+    all_polymorphs = []
+    stats = {
+        "total_polymorphs": 0,
+        "compositions_included": 0,
+        "average_per_composition": 0,
+    }
+
+    for composition, file_path in composition_files.items():
+        try:
+            with Path(file_path).open() as f:
+                polymorphs = json.load(f)
+
+            # Add composition information to each polymorph
+            for polymorph in polymorphs:
+                polymorph["source_composition"] = composition
+            stats["compositions_included"] += 1
+
+        except Exception as e:
+            logger.error(f"Failed to process {composition} from {file_path}: {e}")
+
+    stats["total_polymorphs"] = len(all_polymorphs)
+    stats["average_per_composition"] = stats["total_polymorphs"] / max(
+        1, stats["compositions_included"]
+    )
+
+    # Save consolidated dataset
+    with Path(output_path).open("w") as f:
+        json.dump(all_polymorphs, f, indent=2)
+
+    return json.dumps(
+        {"success": True, "output_path": output_path, "statistics": stats}, indent=2
+    )
+
+
+@tool
 def execute_python_code(
     python_code: str,
     input_data: str | None = None,
@@ -2413,6 +2462,158 @@ def train_xgboost_model(
         return json.dumps(
             {"success": False, "error": str(e), "traceback": traceback.format_exc()}
         )
+
+
+@tool
+def evaluate_xgboost_model(
+    model_path: str,
+    test_data_path: str,
+    target_column: str = "formation_energy_per_atom",
+    detailed_analysis: bool = True,
+) -> str:
+    """
+    Evaluate a trained XGBoost model with comprehensive metrics.
+
+    Args:
+        model_path: Path to saved XGBoost model
+        test_data_path: Path to test data CSV
+        target_column: Name of target column
+        detailed_analysis: Whether to include detailed analysis
+
+    Returns:
+        JSON string with evaluation results
+    """
+    import joblib
+    import numpy as np
+    import pandas as pd
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+    try:
+        # Load model and test data
+        model = joblib.load(model_path)
+        test_df = pd.read_csv(test_data_path)
+
+        X_test = test_df.drop(columns=[target_column])
+        y_test = test_df[target_column]
+
+        # Make predictions
+        y_pred = model.predict(X_test)
+
+        # Basic metrics
+        metrics = {
+            "mae": float(mean_absolute_error(y_test, y_pred)),
+            "rmse": float(np.sqrt(mean_squared_error(y_test, y_pred))),
+            "r2": float(r2_score(y_test, y_pred)),
+            "mape": float(np.mean(np.abs((y_test - y_pred) / y_test)) * 100),
+            "test_samples": len(y_test),
+        }
+
+        if detailed_analysis:
+            # Prediction ranges
+            metrics["prediction_range"] = {
+                "min": float(y_pred.min()),
+                "max": float(y_pred.max()),
+                "std": float(y_pred.std()),
+            }
+
+            # Error analysis
+            errors = y_test - y_pred
+            metrics["error_analysis"] = {
+                "mean_error": float(errors.mean()),
+                "error_std": float(errors.std()),
+                "max_positive_error": float(errors.max()),
+                "max_negative_error": float(errors.min()),
+            }
+
+            # Feature importance
+            if hasattr(model, "feature_importances_"):
+                feature_importance = dict(
+                    zip(X_test.columns, model.feature_importances_, strict=False)
+                )
+                # Convert numpy float32 to Python float
+                metrics["feature_importance"] = {
+                    k: float(v)
+                    for k, v in sorted(
+                        feature_importance.items(), key=lambda x: x[1], reverse=True
+                    )[:10]
+                }
+
+        return json.dumps({"success": True, "evaluation_metrics": metrics}, indent=2)
+
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, indent=2)
+
+
+@tool
+def perform_cross_validation(
+    train_data_path: str,
+    target_column: str = "formation_energy_per_atom",
+    cv_folds: int = 5,
+    hyperparameters: dict | None = None,
+) -> str:
+    """
+    Perform cross-validation on the dataset to assess model stability.
+
+    Args:
+        train_data_path: Path to training data CSV
+        target_column: Name of target column
+        cv_folds: Number of cross-validation folds
+        hyperparameters: XGBoost hyperparameters
+
+    Returns:
+        JSON string with cross-validation results
+    """
+    import pandas as pd
+    import xgboost as xgb
+    from sklearn.model_selection import KFold, cross_val_score
+
+    try:
+        # Load data
+        train_df = pd.read_csv(train_data_path)
+        X = train_df.drop(columns=[target_column])
+        y = train_df[target_column]
+
+        # Default hyperparameters
+        default_params = {
+            "n_estimators": 100,
+            "max_depth": 6,
+            "learning_rate": 0.1,
+            "random_state": 42,
+        }
+        if hyperparameters:
+            default_params.update(hyperparameters)
+
+        # Create model
+        model = xgb.XGBRegressor(**default_params)
+
+        # Cross-validation
+        kfold = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+
+        # R2 scores
+        r2_scores = cross_val_score(model, X, y, cv=kfold, scoring="r2")
+
+        # MAE scores (note: sklearn returns negative MAE, so we negate)
+        mae_scores = -cross_val_score(
+            model, X, y, cv=kfold, scoring="neg_mean_absolute_error"
+        )
+
+        results = {
+            "cv_folds": cv_folds,
+            "r2_scores": r2_scores.tolist(),
+            "mae_scores": mae_scores.tolist(),
+            "r2_mean": float(r2_scores.mean()),
+            "r2_std": float(r2_scores.std()),
+            "mae_mean": float(mae_scores.mean()),
+            "mae_std": float(mae_scores.std()),
+            "hyperparameters": default_params,
+        }
+
+        return json.dumps(
+            {"success": True, "cross_validation_results": results}, indent=2
+        )
+
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, indent=2)
 
 
 ###
