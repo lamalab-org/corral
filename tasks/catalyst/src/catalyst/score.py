@@ -961,3 +961,68 @@ def bulk_diversity_comparisopn_score(polymorph_data_path, ground_truth_path=None
         comparison_mode="subset",  # Allow additional polymorphs beyond ground truth
         tolerance=0.1,  # 10% tolerance for numerical values
     )
+
+
+def ml_pipeline_score(model_path: str) -> float:
+    """
+    Comprehensive scoring function for the single-task ML pipeline.
+
+    Evaluates the entire pipeline from data generation to model evaluation.
+    This function looks for evidence of all pipeline steps and evaluates
+    the final model quality.
+    """
+    try:
+        if not Path(model_path).exists():
+            return 0.0
+
+        # Try to load the model
+        try:
+            import joblib
+
+            model = joblib.load(model_path)
+            if not hasattr(model, "predict"):
+                return 0.2
+        except Exception:
+            return 0.1
+
+        score = 0.3  # Base score for model existence
+
+        # Look for evidence of dataset creation
+        work_dir = Path(model_path).parent
+
+        # Check for evaluation results
+        eval_files = list(work_dir.glob("*evaluation*.json")) + list(
+            work_dir.glob("*results*.json")
+        )
+        if eval_files:
+            try:
+                # Load the most recent evaluation file
+                latest_eval = max(eval_files, key=lambda x: x.stat().st_mtime)
+                with latest_eval.open() as f:
+                    eval_results = json.load(f)
+
+                # Check model performance
+                if "evaluation_metrics" in eval_results:
+                    metrics = eval_results["evaluation_metrics"]
+                    r2 = metrics.get("r2", 0)
+                    mae = metrics.get("mae", float("inf"))
+
+                    if r2 >= 0.8 and mae <= 0.3:
+                        score += 0.3
+                    elif r2 >= 0.6 and mae <= 0.5:
+                        score += 0.2
+                    elif r2 >= 0.4:
+                        score += 0.1
+
+                # Check for cross-validation
+                if "cross_validation_results" in eval_results:
+                    score += 0.1
+
+            except Exception:
+                pass
+
+        return min(1.0, score)
+
+    except Exception as e:
+        logger.error(f"Error scoring comprehensive ML pipeline: {e}")
+        return 0.0

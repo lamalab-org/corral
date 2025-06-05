@@ -224,7 +224,7 @@ def add_adsorbate_to_slab_text(
     slab_cif: str,
     adsorbate_cif: str,
     height: float = 2.0,
-    site: list[float] | None = None,
+    site: list[float] = None,
 ) -> str:
     """
     Place an adsorbate (given as a CIF string) on a slab at a specified adsorption site.
@@ -559,6 +559,7 @@ def get_bulk_polymorphs_data(composition: str) -> str:
         return json.dumps(polymorph_data, indent=2)
 
 
+@tool
 def get_bulk_polymorphs_data_to_file(
     composition: str, save_path: str | None = None
 ) -> str:
@@ -662,6 +663,7 @@ def sort_and_get_first_from_json(
     return sorted_data[0][return_key]
 
 
+@tool
 def select_polymorphs_with_strategy(
     polymorphs_data: str,
     selection_strategy: str = "diverse_energy",
@@ -940,6 +942,7 @@ def execute_python_code(
         )
 
 
+@tool
 def execute_python_script(
     script_path: str,
     args: list | None = None,
@@ -1153,6 +1156,7 @@ output = filtered_data
         )
 
 
+@tool
 def select_polymorphs_with_strategy_to_file(
     polymorphs_data: str,
     save_path: str,
@@ -1332,6 +1336,22 @@ def find_all_unique_slabs_upto_millerindex(
     center_slab: bool = True,
     max_normal_search: int = 10,
 ) -> str:
+    """
+    Generates all unique slabs for a given bulk structure up to specified Miller indices.
+
+    Args:
+        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
+        from_path: Boolean indicating if the input is a file path
+        max_index: Maximum Miller index to consider (1, 2, or 3)
+        min_slab_size: Minimum slab thickness in Angstroms
+        min_vacuum_size: Minimum vacuum size in Angstroms
+        center_slab: If True, centers the slab in the vacuum region
+        max_normal_search: Maximum number of normals to search for slab generation
+
+    Returns:
+        JSON dictionary with slab IDs as keys and their properties as values.
+             Each value contains Miller index, termination, CIF string, area, number of sites, and slab thickness.
+    """
     from pymatgen.core.surface import generate_all_slabs
 
     bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
@@ -1372,6 +1392,24 @@ def find_all_unique_slabs_upto_millerindex_to_file(
     center_slab: bool = True,
     max_normal_search: int = 10,
 ) -> str:
+    """
+    Generates all unique slabs for a given bulk structure up to specified Miller indices
+    and saves the results to a JSON file.
+
+    Args:
+        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
+        out_put_path: Path where to save the JSON output
+        from_path: Boolean indicating if the input is a file path
+        max_index: Maximum Miller index to consider (1, 2, or 3)
+        min_slab_size: Minimum slab thickness in Angstroms
+        min_vacuum_size: Minimum vacuum size in Angstroms
+        center_slab: If True, centers the slab in the vacuum region
+        max_normal_search: Maximum number of normals to search for slab generation
+
+    Returns:
+        str: Message indicating where the slabs data has been written.
+    """
+
     from pymatgen.core.surface import generate_all_slabs
 
     bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
@@ -1509,6 +1547,7 @@ def select_slabs_with_strategy(
     return json.dumps(selected, indent=2)
 
 
+@tool
 def select_slabs_with_strategy_to_file(
     slabs_data: str,
     save_path: str,
@@ -1720,6 +1759,7 @@ Dataset preparation tools for different ML model types.
 """
 
 
+@tool
 def prepare_tabular_dataset(
     polymorphs_json_path: str,
     output_path: str,
@@ -1935,6 +1975,7 @@ def prepare_tabular_dataset(
         )
 
 
+@tool
 def prepare_neural_network_dataset(
     polymorphs_json_path: str,
     output_path: str,
@@ -2109,6 +2150,7 @@ def prepare_neural_network_dataset(
         )
 
 
+@tool
 def prepare_graph_dataset(
     polymorphs_json_path: str,
     output_path: str,
@@ -3321,4 +3363,25 @@ def create_tools() -> dict[str, Tool]:
         # OCP training
         "save_structures_to_db": save_structures_to_db,
         "add_descriptor_column_to_db": add_descriptor_column_to_db,
+    }
+
+
+def create_ml_tools() -> dict[str, Tool]:
+    """Create all available ML tools"""
+    return {
+        "get_structure_from_mp_text": get_structure_from_mp_text,
+        "get_bulk_polymorphs_data": get_bulk_polymorphs_data,
+        "get_bulk_polymorphs_data_to_file": get_bulk_polymorphs_data_to_file,
+        "sort_and_get_first_from_json": sort_and_get_first_from_json,
+        "select_polymorphs_with_strategy": select_polymorphs_with_strategy,
+        "consolidate_polymorph_datasets": consolidate_polymorph_datasets,
+        "execute_python_code": execute_python_code,
+        "execute_python_script": execute_python_script,
+        "filter_json_with_strategy": filter_json_with_strategy,
+        "select_polymorphs_with_strategy_to_file": select_polymorphs_with_strategy_to_file,
+        "prepare_tabular_dataset": prepare_tabular_dataset,
+        "prepare_neural_network_dataset": prepare_neural_network_dataset,
+        "train_xgboost_model": train_xgboost_model,
+        "evaluate_xgboost_model": evaluate_xgboost_model,
+        "perform_cross_validation": perform_cross_validation,
     }
