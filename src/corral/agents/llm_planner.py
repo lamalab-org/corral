@@ -8,25 +8,54 @@ from corral.evaluate import BenchmarkInterface
 
 
 class LLMPlanner(BaseAgent):
-    """Agent that uses the LLM planner to generate plans.
-    Then the low-level planner is called to execute the plan.
+    """
+    Agent that uses hierarchical planning to solve tasks.
     Based on https://arxiv.org/abs/2212.04088
 
+    The LLMPlanner works in two stages:
+    1. **High-level planning**: Generates step-by-step plans using the LLM
+    2. **Low-level execution**: Delegates plan execution to ReActAgent or ToolCallingAgent
+
+    This approach allows for better task decomposition and more structured problem-solving.
+
+    ## Required Prompt Fields
+
+    The user prompt for LLMPlanner must contain the following Jinja template fields:
+    - **{{task_guide}}**: The main task instructions and description
+    - **{{tools}}**: JSON string containing available tools and their descriptions
+    - **{{iterations}}**: Maximum number of iterations as a string
+    - **{{examples}}**: Few-shot examples formatted as a string (optional, can be empty)
+
+    ### Default User Prompt Template:
+    The default prompt (ID: "1c7f064f-9a3b-40f5-a555-94e551722d50") expects:
+
+    ### Custom Prompt Requirements:
+    If providing a custom user_prompt, it must:
+    1. Include {{task_guide}} placeholder for task instructions
+    2. Include {{tools}} placeholder for available tools (JSON format)
+    3. Include {{iterations}} placeholder for iteration limit
+    4. Include {{examples}} placeholder for few-shot examples
+    5. Instruct the agent to create step-by-step plans
+    6. Specify "Final Answer:" format for completion
+    7. Support Jinja templating with .fill() method
+
     Args:
-        model (str): The model to use for running the agent
+        model (str): The model to use for running the agent. Defaults to "openai/gpt-4o".
         max_iterations (int, optional): The maximum number of iterations to plan. Defaults to 10.
         api_endpoint (str, optional): The API endpoint URL for the LLM provider (e.g., OpenAI, VLLM, or self-hosted models) to handle tool/function calling requests. Defaults to None.
-        system_prompt (str, optional): The system prompt to use.
-            Defaults to "You are a helpful AI assistant that solves tasks step by step."
-        user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide`, `tools`, `iterations` and `examples`. `examples` is thought to include few-shot guide.
-        extractor_prompt (str, optional): The prompt to use for the low-level planner. Defaults to None.
-        temperature (float, optional): The temperature to use for sampling.
-                Defaults to 0.7.
+        system_prompt (str | Any, optional): The system prompt to use. Can be a string, PromptStore ID, or prompt object
+            that implements .fill() method. Defaults to "You are a helpful AI assistant that solves tasks step by step."
+        user_prompt (str | Any, optional): The user prompt template. Must contain {{task_guide}}, {{tools}},
+            {{iterations}}, and {{examples}} fields for hierarchical planning functionality.
+            Can be a string, PromptStore ID, or prompt object that implements .fill() method.
+        extractor_prompt (str | Any, optional): The prompt to use for extracting final answers. Can be a string,
+            PromptStore ID, or prompt object that implements .fill() method. Defaults to None.
+        temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         system_prompt_id (str, optional): The ID of the system prompt to use. Defaults to "400fcecf-f5f2-464b-aff5-8a4377c9685c".
         user_prompt_id (str, optional): The ID of the user prompt to use. Defaults to "1c7f064f-9a3b-40f5-a555-94e551722d50".
         extractor_prompt_id (str, optional): The ID of the extractor prompt to use. Defaults to "9d37e4a0-26c5-438a-ba1b-a273388fcded".
-        kwargs: Additional keyword arguments to pass to the LiteLLM API for all LLM calls
+        **kwargs: Additional keyword arguments to pass to the LiteLLM API for all LLM calls
     """
 
     def __init__(

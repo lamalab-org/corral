@@ -27,23 +27,46 @@ class Action:
 
 class ReActAgent(BaseAgent):
     """
-    Agent that uses the ReAct framework to solve tasks
+    Agent that uses the ReAct framework to solve tasks.
     Based on https://arxiv.org/abs/2210.03629
 
+    The ReAct agent follows a "Thought-Action-Observation" loop, where it reasons about
+    the task, executes tools, and observes results before continuing to the next step.
+
+    ## Required Prompt Fields
+
+    The user prompt for ReActAgent must contain the following Jinja template fields:
+    - **{{task_guide}}**: The main task instructions and description
+    - **{{examples}}**: Few-shot examples formatted as a string (optional, can be empty)
+
+    ### Default User Prompt Template:
+    The default prompt (ID: "d880c4d3-fe60-4cf4-813b-2008076cd595") expects:
+
+    ### Custom Prompt Requirements:
+    If providing a custom user_prompt, it must:
+    1. Include {{task_guide}} placeholder for task instructions
+    2. Include {{examples}} placeholder for few-shot examples
+    3. Instruct the agent to use "Thought:", "Action:", "Action Input:" format
+    4. Specify "Final Answer:" format for completion
+    5. Support Jinja templating with .fill() method
+
     Args:
-        model (str): The model to use for running the agent
+        model (str): The model to use for running the agent. Defaults to "openai/gpt-4o".
         max_iterations (int, optional): The maximum number of iterations to run. Defaults to 10.
         api_endpoint (str, optional): The API endpoint URL for the LLM provider (e.g., OpenAI, VLLM, or self-hosted models) to handle tool/function calling requests. Defaults to None.
-        system_prompt (str, optional): The system prompt to use.
-            Defaults to "You are a helpful AI assistant that solves tasks step by step."
-        user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide`, `history` and `examples` as variables.
-        extractor_prompt (str, optional): The prompt to use for the low-level planner. Defaults to None.
+        system_prompt (str | Any, optional): The system prompt to use. Can be a string, PromptStore ID, or prompt object
+            that implements .fill() method. Defaults to "You are a helpful AI assistant that solves tasks step by step."
+        user_prompt (str | Any, optional): The user prompt template. Must contain {{task_guide}} and {{examples}} fields.
+            Can be a string, PromptStore ID, or prompt object that implements .fill() method.
+            Defaults to ReAct-formatted prompt with Thought-Action-Observation structure.
+        extractor_prompt (str | Any, optional): The prompt to use for extracting final answers. Can be a string,
+            PromptStore ID, or prompt object that implements .fill() method. Defaults to None.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         system_prompt_id (str, optional): The ID of the system prompt to use. Defaults to "400fcecf-f5f2-464b-aff5-8a4377c9685c".
         user_prompt_id (str, optional): The ID of the user prompt to use. Defaults to "d880c4d3-fe60-4cf4-813b-2008076cd595".
         extractor_prompt_id (str, optional): The ID of the extractor prompt to use. Defaults to "9d37e4a0-26c5-438a-ba1b-a273388fcded".
-        kwargs: Additional keyword arguments to pass to the LiteLLM API
+        **kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
     def __init__(
@@ -51,9 +74,9 @@ class ReActAgent(BaseAgent):
         model: str = "openai/gpt-4o",
         max_iterations: int = 10,
         api_endpoint: str | None = None,
-        system_prompt: str | None = None,
-        user_prompt: str | None = None,
-        extractor_prompt: str | None = None,
+        system_prompt: str | Any | None = None,
+        user_prompt: str | Any | None = None,
+        extractor_prompt: str | Any | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
         system_prompt_id: str = "400fcecf-f5f2-464b-aff5-8a4377c9685c",
