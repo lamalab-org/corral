@@ -31,9 +31,6 @@ from corral.task import TaskDefinition, TaskGroup
 if "CORRAL_WORK_DIR" not in os.environ:
     raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
 BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
-
-CHAINED_TASKS = os.environ["CHAINED_TASKS"].lower() == "true"
-
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     "mp_structure": check_mp_structure,
@@ -127,13 +124,7 @@ class TaskGroupEnvironment(Environment):
         self.current_task = task_group.tasks[task_id]
 
         super().__init__(
-            f"{task_group.group_id}_{task_id}",
-            base_work_dir=base_work_dir,
-            chained_tasks=task_group.chained_tasks,
-        )
-
-        logger.info(
-            f"DEBUG: TaskGroupEnvironment {task_id}: chained_tasks={self.chained_tasks}"
+            f"{task_group.group_id}_{task_id}", base_work_dir=base_work_dir
         )
 
         # Add tools
@@ -267,7 +258,6 @@ def create_environments(
     task_json_path: str | Path,
     taskgroup_common_tools: dict[str, Tool] | None = None,
     work_dir: str = BASE_WORK_DIR,
-    chained_tasks: bool = False,
 ) -> dict[str, TaskGroupEnvironment]:
     """Create environments for tasks defined in a JSON file
 
@@ -281,7 +271,6 @@ def create_environments(
     """
 
     logger.info(f"Creating environments from {task_json_path} with work_dir {work_dir}")
-    logger.info(f"Chained tasks setting: {chained_tasks}")
 
     # Load tasks from JSON
     tasks = load_tasks_from_json(task_json_path, work_dir)
@@ -289,7 +278,7 @@ def create_environments(
     # Create task group
     group_id = Path(task_json_path).stem  # Use filename (without extension) as group ID
     logger.info(f"Creating task group with ID: {group_id}")
-    task_group = TaskGroup(group_id=group_id, tasks=tasks, chained_tasks=chained_tasks)
+    task_group = TaskGroup(group_id=group_id, tasks=tasks)
 
     # Print task dependencies for reference
     logger.info("\nTask Dependencies:")
@@ -339,7 +328,6 @@ if __name__ == "__main__":
     environments = create_environments(
         task_json_path=tasks_json_path,
         work_dir=work_dir,
-        chained_tasks=CHAINED_TASKS,
     )
 
     logger.info("\nCreated Environments:")
