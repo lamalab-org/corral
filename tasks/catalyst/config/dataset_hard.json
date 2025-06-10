@@ -1,49 +1,22 @@
 {
-  "generate_oxide_composition_list": {
-    "name": "Generate Oxide Composition List",
-    "description": "Generate a diverse list of oxide compositions for dataset creation. Focus on binary and ternary oxides with common oxide-forming elements. Include both simple oxides (TiO2, Al2O3) and more complex ternary systems (BaTiO3, SrTiO3). The goal is to create a balanced set that covers different structural families and formation energy ranges.",
-    "tools": ["generate_oxide_compositions"],
-    "scoring_function": "composition_list_quality",
-    "submission_format": "/path/to/oxide_compositions.json",
-    "initial_input": {
-      "max_compositions": 20,
-      "include_ternary": true,
-      "common_only": false
-    }
-  },
 
   "batch_retrieve_oxide_polymorphs": {
     "name": "Batch Retrieve Oxide Polymorphs",
-    "description": "Retrieve polymorphs for all oxide compositions from Materials Project database. For each composition, collect multiple polymorphs including both stable and metastable structures (energy above hull < 0.3 eV/atom). Focus on structural diversity while maintaining reasonable dataset size by limiting polymorphs per composition.",
-    "tools": ["batch_retrieve_polymorphs", "validate_dataset_quality"],
-    "scoring_function": "polymorph_retrieval_success",
-    "submission_format": "/path/to/batch_retrieval_results.json",
+    "description": "Generate a diverse list of oxide compositions for dataset creation. Focus on binary and ternary oxides with common oxide-forming elements.Retrieve polymorphs for all oxide compositions from Materials Project database. For each composition, collect multiple polymorphs including both stable and metastable structures (energy above hull < 0.3 eV/atom). Focus on structural diversity while maintaining reasonable dataset size by limiting polymorphs per composition. Consolidate all individual polymorph files into a single comprehensive dataset. Add composition-based features and validate data quality including completeness, duplicate detection, and target variable distribution. Ensure the dataset is suitable for machine learning with proper feature engineering.",
+    "tools": ["batch_retrieve_polymorphs","execute_python_code","execute_python_script", "filter_json_with_strategy","select_polymorphs_with_strategy_to_file", "consolidate_polymorph_datasets", "select_polymorphs_with_strategy","get_bulk_polymorphs_data","sort_and_get_first_from_json", "get_bulk_polymorphs_data_to_file"],
+    "scoring_function": "score_polymorph_dataset",
+    "submission_format": "/path/to/polymorph_data.json",
     "input_from_tasks": ["generate_oxide_composition_list"],
     "initial_input": {
       "max_energy_above_hull": 0.3,
-      "max_per_composition": 8,
-      "save_directory": "oxide_polymorph_data"
+      "max_per_composition": 8
     }
   },
-
-  "consolidate_and_validate_dataset": {
-    "name": "Consolidate and Validate Dataset",
-    "description": "Consolidate all individual polymorph files into a single comprehensive dataset. Add composition-based features and validate data quality including completeness, duplicate detection, and target variable distribution. Ensure the dataset is suitable for machine learning with proper feature engineering.",
-    "tools": ["consolidate_polymorph_datasets", "validate_dataset_quality"],
-    "scoring_function": "dataset_consolidation_quality",
-    "submission_format": "/path/to/consolidated_dataset.json",
-    "input_from_tasks": ["batch_retrieve_oxide_polymorphs"],
-    "initial_input": {
-      "output_path": "consolidated_oxide_dataset.json",
-      "add_composition_features": true
-    }
-  },
-
   "prepare_ml_ready_dataset": {
     "name": "Prepare ML-Ready Dataset",
     "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits, and normalized values. Extract structural features, composition features, and ensure proper handling of categorical variables. Create both training and test sets with appropriate data preprocessing.",
-    "tools": ["prepare_tabular_dataset"],
-    "scoring_function": "ml_dataset_preparation_quality",
+    "tools": ["prepare_tabular_dataset","execute_python_code","execute_python_script"],
+    "scoring_function": "ml_dataset_preparation_quality_binary",
     "submission_format": "/path/to/ml_dataset_metadata.json",
     "input_from_tasks": ["consolidate_and_validate_dataset"],
     "initial_input": {
@@ -54,12 +27,11 @@
       "output_path": "oxide_ml_dataset"
     }
   },
-
   "train_xgboost_formation_energy_model": {
     "name": "Train XGBoost Formation Energy Model",
     "description": "Train an XGBoost regression model to predict formation energies of oxide polymorphs. Use the prepared dataset with optimized hyperparameters for oxide materials. Focus on achieving good generalization performance across different oxide families and structural types.",
-    "tools": ["train_xgboost_model"],
-    "scoring_function": "model_training_success",
+    "tools": ["train_xgboost_model","execute_python_code","execute_python_script"],
+    "scoring_function": "model_training_success_binary",
     "submission_format": "/path/to/trained_xgboost_model.pkl",
     "input_from_tasks": ["prepare_ml_ready_dataset"],
     "initial_input": {
@@ -75,12 +47,11 @@
       }
     }
   },
-
   "evaluate_model_performance": {
     "name": "Evaluate Model Performance",
     "description": "Comprehensively evaluate the trained XGBoost model using test set metrics, cross-validation, and detailed error analysis. Assess model generalization capability, feature importance, and prediction reliability across different oxide compositions and structural families.",
-    "tools": ["evaluate_xgboost_model", "perform_cross_validation"],
-    "scoring_function": "model_evaluation_completeness",
+    "tools": ["evaluate_xgboost_model", "perform_cross_validation","execute_python_code","execute_python_script"],
+    "scoring_function": "model_evaluation_completeness_binary",
     "submission_format": "/path/to/model_evaluation_results.json",
     "input_from_tasks": ["train_xgboost_formation_energy_model", "prepare_ml_ready_dataset"],
     "initial_input": {

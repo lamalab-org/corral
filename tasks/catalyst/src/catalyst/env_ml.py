@@ -5,7 +5,15 @@ from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
-from score import ml_pipeline_score
+from score import (
+    composition_list_quality,
+    ml_dataset_preparation_quality_binary,
+    ml_pipeline_score,
+    model_evaluation_completeness_binary,
+    model_training_success_binary,
+    polymorph_retrieval_success,
+    score_polymorph_dataset,
+)
 from tools import create_ml_tools
 
 from corral.base import Environment, Tool
@@ -28,6 +36,12 @@ BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     "ml_pipeline_score": ml_pipeline_score,
+    "model_training_success_binary": model_training_success_binary,
+    "model_evaluation_completeness_binary": model_evaluation_completeness_binary,
+    "polymorph_retrieval_success": polymorph_retrieval_success,
+    "score_polymorph_dataset": score_polymorph_dataset,
+    "ml_dataset_preparation_quality_binary": ml_dataset_preparation_quality_binary,
+    "composition_list_quality": composition_list_quality,
 }
 
 
@@ -197,7 +211,7 @@ Required submission format:
 
         # Add workspace info
         if self.current_work_dir:
-            prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n"
+            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir}. when using tools use this path\n"
 
         # Add note about dependencies
         if self.current_task.input_from_tasks:

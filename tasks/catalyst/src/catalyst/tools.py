@@ -1,6 +1,5 @@
 import json
 import os
-import pickle
 import subprocess
 import sys
 import tempfile
@@ -639,6 +638,75 @@ def get_bulk_polymorphs_data_to_file(
         return save_path
 
 
+def get_bulk_polymorphs_data_func(composition: str) -> str:
+    """
+    Query the Materials Project database to find polymorphs for a given composition. This function returns
+    a JSON string containing polymorph data including MP IDs, structures (CIF),  structures (CIF), energies above hull, formation_energy_per_atom, band gaps, densities,
+    volumes, number of sites, symmetry, and stability. The results are sorted by energy above hull.
+
+    Args:
+        composition: Chemical composition (e.g., 'TiO2')
+        api_key: Materials Project API key (optional if set in environment)
+
+    Returns:
+        JSON string containing polymorph data including MP IDs, structures (CIF),
+        energies above hull, formation_energy_per_atom, band gaps, densities,
+        volumes, number of sites, symmetry, and stability. (sorted by energy above hull)
+    """
+
+    from mp_api.client import MPRester
+
+    # Use provided API key or get from environment
+    mp_api_key = os.getenv("MP_API_KEY")
+    if not mp_api_key:
+        raise ValueError(
+            "Materials Project API key not provided and not found in environment"
+        )
+
+    with MPRester(mp_api_key) as mpr:
+        # Query for materials with the given composition
+        docs = mpr.materials.summary.search(
+            formula=composition,
+            fields=[
+                "material_id",
+                "structure",
+                "energy_above_hull",
+                "formation_energy_per_atom",
+                "band_gap",
+                "density",
+                "volume",
+                "nsites",
+                "symmetry",
+                "is_stable",
+            ],
+        )
+
+        # Convert structures to CIF for easy storage
+        polymorph_data = []
+        for doc in docs:
+            structure_cif = doc.structure.to(fmt="cif")
+
+            polymorph_data.append(
+                {
+                    "material_id": doc.material_id,
+                    "cif": structure_cif,
+                    "energy_above_hull": doc.energy_above_hull,
+                    "formation_energy_per_atom": doc.formation_energy_per_atom,
+                    "band_gap": doc.band_gap,
+                    "density": doc.density,
+                    "volume": doc.volume,
+                    "nsites": doc.nsites,
+                    "space_group": doc.symmetry.symbol,
+                    "is_stable": doc.is_stable,
+                }
+            )
+
+        # Sort by energy above hull (stability)
+        polymorph_data = sorted(polymorph_data, key=lambda x: x["energy_above_hull"])
+
+        return json.dumps(polymorph_data, indent=2)
+
+
 @tool
 def batch_retrieve_polymorphs(
     compositions: list[str],
@@ -673,7 +741,7 @@ def batch_retrieve_polymorphs(
     for composition in compositions:
         try:
             # Get polymorphs for this composition
-            polymorphs_json = get_bulk_polymorphs_data(composition)
+            polymorphs_json = get_bulk_polymorphs_data_func(composition)
             polymorphs = json.loads(polymorphs_json)
 
             # Filter by energy and limit count
@@ -822,19 +890,36 @@ def consolidate_polymorph_datasets(
             # Add composition information to each polymorph
             for polymorph in polymorphs:
                 polymorph["source_composition"] = composition
+
+            # Extend the all_polymorphs list with the polymorphs from the current file
+            all_polymorphs.extend(polymorphs)
+
             stats["compositions_included"] += 1
 
+        except FileNotFoundError:
+            logger.warning(
+                f"File not found for {composition} at {file_path}. Skipping."
+            )
+        except json.JSONDecodeError:
+            logger.error(f"Failed to decode JSON from {file_path}. Skipping.")
         except Exception as e:
             logger.error(f"Failed to process {composition} from {file_path}: {e}")
 
     stats["total_polymorphs"] = len(all_polymorphs)
-    stats["average_per_composition"] = stats["total_polymorphs"] / max(
-        1, stats["compositions_included"]
-    )
+    if stats["compositions_included"] > 0:
+        stats["average_per_composition"] = (
+            stats["total_polymorphs"] / stats["compositions_included"]
+        )
+    else:
+        stats["average_per_composition"] = 0
 
     # Save consolidated dataset
-    with Path(output_path).open("w") as f:
-        json.dump(all_polymorphs, f, indent=2)
+    try:
+        with Path(output_path).open("w") as f:
+            json.dump(all_polymorphs, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save consolidated dataset to {output_path}: {e}")
+        return json.dumps({"success": False, "error": str(e)}, indent=2)
 
     return json.dumps(
         {"success": True, "output_path": output_path, "statistics": stats}, indent=2
@@ -1832,7 +1917,7 @@ def prepare_tabular_dataset(
     normalize: bool = True,
 ) -> str:
     """
-    Prepare tabular dataset for traditional ML models (XGBoost, Random Forest, etc.).
+    Prepare tabular dataset for traditional ML models (XGBoost, Random Forest, etc.) from json files create using consolidate polymorph tool.
 
     Args:
         polymorphs_json_path: Path to polymorphs JSON file
@@ -1845,6 +1930,13 @@ def prepare_tabular_dataset(
     Returns:
         JSON string with dataset preparation results
     """
+    import json
+    import pickle
+    from pathlib import Path
+
+    import numpy as np
+    import pandas as pd
+
     try:
         # Load polymorphs data
         with Path(polymorphs_json_path).open("r") as f:

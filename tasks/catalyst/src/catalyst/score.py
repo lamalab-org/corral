@@ -3,6 +3,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
+import joblib
 from loguru import logger
 from pymatgen.core import Structure
 
@@ -1026,3 +1027,415 @@ def ml_pipeline_score(model_path: str) -> float:
     except Exception as e:
         logger.error(f"Error scoring comprehensive ML pipeline: {e}")
         return 0.0
+
+
+def composition_list_quality(compositions_path: str) -> float:
+    """
+    Score the quality of generated oxide composition list.
+
+    Criteria:
+    - At least 15 valid oxide compositions
+    - Diverse element coverage (at least 8 different elements)
+    - Valid chemical formulas
+    - Mix of binary and ternary oxides
+    """
+    import re
+
+    try:
+        if not Path(compositions_path).exists():
+            return 0.0
+
+        with Path(compositions_path).open() as f:
+            data = json.load(f)
+
+        compositions = data.get("compositions", [])
+
+        if len(compositions) < 10:
+            return 0
+
+        # Check for valid oxide formulas
+        valid_oxides = []
+        elements_found = set()
+        binary_count = 0
+        ternary_count = 0
+
+        for comp in compositions:
+            # Check if it contains oxygen and valid elements
+            if re.search(r"O\d*$", comp) or "O" in comp:
+                # Extract elements (simple pattern)
+                elements = re.findall(r"[A-Z][a-z]?", comp)
+                if "O" in elements:
+                    valid_oxides.append(comp)
+                    elements_found.update(elem for elem in elements if elem != "O")
+
+                    # Count binary vs ternary
+                    non_oxygen = [e for e in elements if e != "O"]
+                    if len(non_oxygen) == 1:
+                        binary_count += 1
+                    elif len(non_oxygen) >= 2:
+                        ternary_count += 1
+
+        # Scoring criteria
+        valid_ratio = len(valid_oxides) / len(compositions)
+        has_both_types = binary_count > 0 and ternary_count > 0
+
+        if valid_ratio > 0.5 and has_both_types:
+            return 1.0
+
+    except Exception as e:
+        logger.error(f"Error scoring composition list: {e}")
+        return 0.0
+
+
+def polymorph_retrieval_success(retrieval_results_path: str) -> float:
+    """
+    Score the success of batch polymorph retrieval.
+
+    Criteria:
+    - At least 80% of compositions have polymorphs retrieved
+    - Total polymorphs >= 50
+    - Reasonable distribution across compositions
+    """
+    try:
+        if not Path(retrieval_results_path).exists():
+            return 0.0
+
+        with Path(retrieval_results_path).open() as f:
+            results = json.load(f)
+
+        successful = len(results.get("successful_compositions", []))
+        failed = len(results.get("failed_compositions", []))
+        total_compositions = successful + failed
+        total_polymorphs = results.get("total_polymorphs", 0)
+
+        if total_compositions == 0:
+            return 0.0
+
+        success_rate = successful / total_compositions
+
+        score = 0.0
+
+        # Success rate scoring
+        if success_rate >= 0.8:
+            score += 0.4
+        elif success_rate >= 0.6:
+            score += 0.3
+        elif success_rate >= 0.4:
+            score += 0.2
+
+        # Total polymorphs scoring
+        if total_polymorphs >= 100:
+            score += 0.3
+        elif total_polymorphs >= 50:
+            score += 0.2
+        elif total_polymorphs >= 20:
+            score += 0.1
+
+        # Distribution check (average polymorphs per successful composition)
+        if successful > 0:
+            avg_per_comp = total_polymorphs / successful
+            if 3 <= avg_per_comp <= 10:
+                score += 0.3
+            elif 2 <= avg_per_comp <= 12:
+                score += 0.2
+
+        return min(1.0, score)
+
+    except Exception as e:
+        logger.error(f"Error scoring polymorph retrieval: {e}")
+        return 0.0
+
+
+def score_polymorph_dataset(
+    consolidated_json_path: str,
+) -> float:
+    """
+    Analyzes a consolidated JSON file of polymorphs to identify if there are
+    compositions with multiple polymorphs.
+
+    Args:
+        consolidated_json_path: Path to the consolidated JSON file
+                                (e.g., created by consolidate_polymorph_datasets).
+
+    Returns:
+        A float: 1.0 if at least one composition with multiple polymorphs is found,
+        otherwise 0.0. Returns 0.0 if the file is not found or an error occurs.
+    """
+    try:
+        # Check if the consolidated JSON file exists
+        # We need Path imported to check for file existence
+        from pathlib import Path
+
+        consolidated_json_file = Path(consolidated_json_path)
+        if not consolidated_json_file.exists():
+            logger.error(
+                f"Consolidated JSON file not found at: {consolidated_json_path}"
+            )
+            return 0.0
+
+        with consolidated_json_file.open("r") as f:
+            all_polymorphs_data = json.load(f)
+
+        # Dictionary to store polymorphs grouped by composition
+        polymorphs_by_composition = {}
+        for polymorph in all_polymorphs_data:
+            composition = polymorph.get("source_composition")
+            if composition:
+                if composition not in polymorphs_by_composition:
+                    polymorphs_by_composition[composition] = []
+                polymorphs_by_composition[composition].append(polymorph)
+            else:
+                logger.warning(
+                    f"Polymorph without 'source_composition' found: {polymorph.get('material_id', 'N/A')}"
+                )
+
+        # Check if any composition has multiple polymorphs
+        for polymorphs in polymorphs_by_composition.values():
+            if len(polymorphs) > 1:
+                # If we find at least one composition with multiple polymorphs, return 1.0
+                return 1.0
+
+        # If the loop completes and no composition with multiple polymorphs is found
+        return 0.0
+
+    except Exception as e:
+        logger.error(f"Error in score_polymorph_dataset: {e}", exc_info=True)
+        return 0.0
+
+
+def ml_dataset_preparation_quality_binary(ml_metadata_path: str) -> int:
+    """
+    Scores the quality of ML dataset preparation as binary (0 for fail, 1 for pass).
+
+    A dataset preparation passes (1) if it meets the following criteria:
+    - Both train and test files exist.
+    - Sufficient sample sizes: at least 40 training samples and 10 test samples.
+    - A reasonable number of features: at least 10 features.
+
+    Args:
+        ml_metadata_path: Path to the ML dataset metadata JSON file.
+
+    Returns:
+        1 if the dataset preparation quality meets the defined passing criteria,
+        0 otherwise (including errors).
+    """
+    try:
+        if not Path(ml_metadata_path).exists():
+            logger.info(f"Metadata file not found: {ml_metadata_path}")
+            return 0
+
+        with Path(ml_metadata_path).open() as f:
+            metadata = json.load(f)
+
+        # Criteria 1: Check train/test files exist
+        train_path = metadata.get("train_path", "")
+        test_path = metadata.get("test_path", "")
+        if not (
+            train_path
+            and Path(train_path).exists()
+            and test_path
+            and Path(test_path).exists()
+        ):
+            logger.info(
+                "Binary check failed: Train or test files are missing or paths are empty."
+            )
+            # Added more specific logging for clarity
+            if not train_path:
+                logger.info("train_path is empty in metadata.")
+            elif not Path(train_path).exists():
+                logger.info("Train file does not exist at: {train_path}")
+            if not test_path:
+                logger.info("test_path is empty in metadata.")
+            elif not Path(test_path).exists():
+                logger.info("Test file does not exist at: {test_path}")
+
+            return 0
+
+        # Criteria 2: Check sufficient sample sizes
+        train_samples = metadata.get("train_samples", 0)
+        test_samples = metadata.get("test_samples", 0)
+        if not (train_samples >= 40 and test_samples >= 10):
+            logger.info(
+                f"Binary check failed: Insufficient sample sizes (Train: {train_samples}, Test: {test_samples})."
+            )
+            return 0
+
+        # Criteria 3: Check reasonable feature count
+        feature_count = metadata.get("feature_count", 0)
+        if not (feature_count >= 10):
+            logger.info(
+                f"Binary check failed: Insufficient feature count ({feature_count})."
+            )
+            return 0
+
+        logger.info("Binary check passed: ML dataset preparation quality is good.")
+        return 1
+
+    except json.JSONDecodeError:
+        logger.error(f"Error: Invalid JSON format in {ml_metadata_path}")
+        return 0
+    except Exception as e:
+        logger.error(f"Error scoring ML dataset preparation quality: {e}")
+        return 0
+
+
+def model_training_success_binary(model_path: str) -> int:
+    """
+    Scores the success of XGBoost model training as binary (0 for fail, 1 for pass).
+
+    Model training passes (1) if it meets the following criteria:
+    - A valid model file exists and can be loaded.
+    - Associated training results indicate successful training.
+    - Reasonable performance metrics: R-squared (r2) >= 0.6 and Mean Absolute Error (mae) <= 0.5.
+
+    Args:
+        model_path: Path to the trained model file (e.g., .pkl).
+
+    Returns:
+        1 if the model training success meets the defined passing criteria,
+        0 otherwise (including errors).
+    """
+    try:
+        if not Path(model_path).exists():
+            logger.info(f"Model file not found: {model_path}")
+            return 0
+
+        # Criteria 1: Try to load the model
+        try:
+            model = joblib.load(model_path)
+            if not hasattr(model, "predict"):
+                logger.info(
+                    "Binary check failed: Loaded model does not have a 'predict' method."
+                )
+                return 0
+        except Exception as e:
+            logger.info(
+                f"Binary check failed: Could not load the model from {model_path}. Error: {e}"
+            )
+            return 0
+
+        # Criteria 2 & 3: Look for associated results file and check metrics
+        results_path = str(model_path).replace(".pkl", "_training_results.json")
+        if not Path(results_path).exists():
+            results_path = str(model_path).replace(
+                ".pkl", "_predictions.json"
+            )  # Try alternative naming
+
+        if Path(results_path).exists():
+            try:
+                with Path(results_path).open() as f:
+                    results = json.load(f)
+
+                test_metrics = results.get("test_metrics", {})
+                test_r2 = test_metrics.get("r2", 0)
+                test_mae = test_metrics.get("mae", float("inf"))
+
+                if not (test_r2 >= 0.5 and test_mae <= 0.5):
+                    logger.info(
+                        f"Binary check failed: Performance metrics below threshold (R2: {test_r2}, MAE: {test_mae})."
+                    )
+                    return 0
+            except json.JSONDecodeError:
+                logger.info(
+                    f"Binary check failed: Invalid JSON in results file: {results_path}"
+                )
+                return 0
+            except Exception as e:
+                logger.info(
+                    f"Binary check failed: Error processing results file {results_path}. Error: {e}"
+                )
+                return 0
+        else:
+            logger.info(
+                "Binary check failed: No associated training results file found."
+            )
+            return 0
+
+        logger.info("Binary check passed: Model training success criteria met.")
+        return 1
+
+    except Exception as e:
+        logger.error(f"Error scoring model training success: {e}")
+        return 0
+
+
+def model_evaluation_completeness_binary(evaluation_results_path: str) -> int:
+    """
+    Scores the completeness of model evaluation as binary (0 for fail, 1 for pass).
+
+    Model evaluation completeness passes (1) if it meets the following criteria:
+    - An evaluation results file exists.
+    - All required basic evaluation metrics (mae, rmse, r2) are present.
+    - Performance quality: R-squared (r2) in evaluation metrics is at least 0.7.
+    - Cross-validation results are present, including mean and standard deviation for r2.
+    - Feature importance analysis is included in the evaluation metrics.
+    - Detailed analysis is present (error_analysis and prediction_range).
+
+    Args:
+        evaluation_results_path: Path to the model evaluation results JSON file.
+
+    Returns:
+        1 if the model evaluation completeness meets the defined passing criteria,
+        0 otherwise (including errors).
+    """
+    try:
+        if not Path(evaluation_results_path).exists():
+            logger.info(f"Evaluation results file not found: {evaluation_results_path}")
+            return 0
+
+        with Path(evaluation_results_path).open() as f:
+            results = json.load(f)
+
+        # Criteria 1 & 2: Check for basic evaluation metrics and all required metrics
+        if "evaluation_metrics" not in results:
+            logger.info("Binary check failed: 'evaluation_metrics' not found.")
+            return 0
+        metrics = results["evaluation_metrics"]
+        required_metrics = ["mae", "rmse", "r2"]
+        if not all(metric in metrics for metric in required_metrics):
+            logger.info(
+                "Binary check failed: Not all required metrics (mae, rmse, r2) are present."
+            )
+            return 0
+
+        # Criteria 3: Check performance quality (r2 >= 0.7)
+        if not ("r2" in metrics and metrics["r2"] >= 0.7):
+            logger.info(
+                f"Binary check failed: R2 ({metrics.get('r2', 'N/A')}) is below 0.7."
+            )
+            return 0
+
+        # Criteria 4: Check for cross-validation results
+        if "cross_validation_results" not in results:
+            logger.info("Binary check failed: 'cross_validation_results' not found.")
+            return 0
+        cv_results = results["cross_validation_results"]
+        if not ("r2_mean" in cv_results and "r2_std" in cv_results):
+            logger.info(
+                "Binary check failed: Cross-validation results missing 'r2_mean' or 'r2_std'."
+            )
+            return 0
+
+        # Criteria 5: Check for feature importance
+        if "feature_importance" not in metrics:
+            logger.info(
+                "Binary check failed: 'feature_importance' not found in evaluation metrics."
+            )
+            return 0
+
+        # Criteria 6: Check for detailed analysis
+        if not ("error_analysis" in metrics and "prediction_range" in metrics):
+            logger.info(
+                "Binary check failed: Detailed analysis (error_analysis or prediction_range) missing."
+            )
+            return 0
+
+        logger.info("Binary check passed: Model evaluation completeness criteria met.")
+        return 1
+
+    except json.JSONDecodeError:
+        logger.error(f"Error: Invalid JSON format in {evaluation_results_path}")
+        return 0
+    except Exception as e:
+        logger.error(f"Error scoring model evaluation completeness: {e}")
+        return 0
