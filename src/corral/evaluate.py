@@ -147,8 +147,6 @@ class MatAgentBenchmark:
     ) -> BenchmarkResult:
         """Run benchmark"""
 
-        benchmark_start_time = datetime.now(tz=timezone.utc)
-
         if task_ids is None:
             task_ids = self.interface.get_available_tasks()
 
@@ -187,11 +185,8 @@ class MatAgentBenchmark:
             self._run_independent_execution(
                 task_ids, trials_per_task, task_results, session_id, verbose
             )
-        benchmark_end_time = datetime.now(tz=timezone.utc)
-        benchmark_duration = (benchmark_end_time - benchmark_start_time).total_seconds()
-        return BenchmarkResult(
-            task_results=task_results, k=k_values, total_duration=benchmark_duration
-        )
+
+        return BenchmarkResult(task_results=task_results, k=k_values)
 
     def _initialize_task_results(
         self, task_ids: list[str], session_id: str

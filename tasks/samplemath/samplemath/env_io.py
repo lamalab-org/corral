@@ -10,9 +10,10 @@ from corral.io import (
     ListFilesTool,
     ReadFileTool,
     WriteFileTool,
+    MkdirTool,
+    CatFilesTool
 )
 from corral.server import create_benchmark_server
-
 
 class MathEnvironment(Environment):
     def __init__(
@@ -28,7 +29,7 @@ class MathEnvironment(Environment):
         # The answer file path can be made configurable.
         # Here we use a virtual file path if using the local ("file") protocol,
         self.answer_file = os.environ.get(
-            "BASE_IO_PATH", f"/corral_tmp/{task_id}_answer.txt"
+            "BASE_IO_PATH", f"./corral_tmp/{task_id}_answer.txt"
         )
 
         # Initialize environment with the given task id.
@@ -46,6 +47,8 @@ class MathEnvironment(Environment):
         self.add_tool(io_tools["list_files"])
         self.add_tool(io_tools["file_info"])
         self.add_tool(io_tools["copy_file"])
+        self.add_tool(io_tools["cat_files"])
+        self.add_tool(io_tools["mkdir"])
 
     def get_task_prompt(self) -> str:
         return (
@@ -91,6 +94,8 @@ def create_tools(fs_manager: FSManager) -> dict[str, Tool]:
         "write_file": WriteFileTool(fs_manager),
         "file_info": FileInfoTool(fs_manager),
         "copy_file": CopyFileTool(fs_manager),
+        "mkdir": MkdirTool(fs_manager),
+        "cat_files": CatFilesTool(fs_manager)
     }
 
 
@@ -109,28 +114,28 @@ if __name__ == "__main__":
             68,
             io_tools=io_tools,
         ),
-        "math_2": MathEnvironment(
-            "math_2",
-            "What is 12 * 8? Solve this and write the answer to the designated file.",
-            96,
-            io_tools=io_tools,
-        ),
-        "math_3": MathEnvironment(
-            "math_3",
-            "What is 99 * 63 * 999 * 111?",
-            691614693,
-            io_tools=io_tools,
-        ),
-        "math_4": MathEnvironment(
-            "math_4",
-            (
-                "What is twenty one thousand four hundred and seventy three * "
-                "twenty one thousand four hundred and seventy three? "
-                "Solve this and write the answer to the designated file."
-            ),
-            4666829,
-            io_tools=io_tools,
-        ),
+        # "math_2": MathEnvironment(
+        #     "math_2",
+        #     "What is 12 * 8? Solve this and write the answer to the designated file.",
+        #     96,
+        #     io_tools=io_tools,
+        # ),
+        # "math_3": MathEnvironment(
+        #     "math_3",
+        #     "What is 99 * 63 * 999 * 111?",
+        #     691614693,
+        #     io_tools=io_tools,
+        # ),
+        # "math_4": MathEnvironment(
+        #     "math_4",
+        #     (
+        #         "What is twenty one thousand four hundred and seventy three * "
+        #         "twenty one thousand four hundred and seventy three? "
+        #         "Solve this and write the answer to the designated file."
+        #     ),
+        #     4666829,
+        #     io_tools=io_tools,
+        # ),
     }
 
     with app.run():

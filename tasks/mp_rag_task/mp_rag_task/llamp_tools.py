@@ -148,7 +148,7 @@ arxiv = ArxivQueryRun(api_wrapper=ArxivAPIWrapper())
 
 class MPTool(Tool):
     name: str | None = None
-    api_wrapper = MPAPIWrapper(mpApiKey=os.getenv("MP_API_KEY"))
+    api_wrapper = MPAPIWrapper(mpApiKey=os.getenv("MP_API_KEY", ""))
 
     def __init__(self, **kwargs):
         arguments = pydantic_schema_to_tool_arguments(self.args_schema)
@@ -157,7 +157,7 @@ class MPTool(Tool):
             description=self.description,
             arguments=arguments,
         )
-        mp_api_key = os.getenv("MP_API_KEY", kwargs.get("mp_api_key"))
+        mp_api_key = os.getenv("MP_API_KEY", kwargs.get("mp_api_key", ""))
         self.api_wrapper.set_api_key(mp_api_key)
 
     def execute(self, **query_params):

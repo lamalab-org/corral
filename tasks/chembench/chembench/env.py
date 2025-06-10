@@ -7,7 +7,6 @@ from loguru import logger
 from tools import (
     enhanced_brave_search,
     get_c_nmr_spectra_pubchem,
-    get_compound_isomers,
     get_element_info,
     get_formula_from_smiles,
     get_functional_groups,
@@ -53,7 +52,6 @@ _CHEMBENCH_TOOLS = [
     get_formula_from_smiles,
     get_element_info,
     get_number_of_isomers,
-    get_compound_isomers,
     get_ghs_classification_pubchem,
     get_ms_spectra_pubchem,
     get_h_nmr_spectra_pubchem,

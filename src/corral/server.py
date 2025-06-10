@@ -17,9 +17,11 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
 
     @app.get("/dependency_chain")
     def get_dependency_chain_setting():
-        """Get whether chained tasks is enabled for any environment"""
         has_chained_tasks = any(
-            getattr(env, "chained_tasks", False) for env in environments.values()
+            hasattr(env, "task_group")
+            and env.task_group
+            and env.task_group.chained_tasks
+            for env in environments.values()
         )
         return {"dependency_chain": has_chained_tasks}
 
