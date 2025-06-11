@@ -778,7 +778,7 @@ def create_tools() -> dict[str, Tool]:
         # "file_info": FileInfoTool(fs_manager),
         # "cat_files": CatFilesTool(fs_manager),
         # "copy_file": CopyFileTool(fs_manager),
-        # "enhanced_brave_search": online_search,
+        # "online_search": online_search,
         "relevant_pubchem_sections": relevant_pubchem_sections,
         "get_formula_from_smiles": get_formula_from_smiles,
         "simulate_spectra": simulate_spectra,

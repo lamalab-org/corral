@@ -26,7 +26,7 @@ hf_cache_vol = Volume.from_name("huggingface-cache", create_if_missing=True)
 
 
 @tool
-def enhanced_brave_search(query: str, num_results: int = 5) -> list[dict]:
+def online_search(query: str, num_results: int = 5) -> list[dict]:
     r"""[BRIEF] Perform a web search using Brave Search, then filter and rank results using embeddings. [\BRIEF]
 
     [DETAILED] This tool performs a web search using Brave Search API,
@@ -59,7 +59,7 @@ def enhanced_brave_search(query: str, num_results: int = 5) -> list[dict]:
     [SYNTACTICAL] Usage examples:
     [
         `online_search("What is the chemical formula of caffeine?", num_results=10)`,
-        `online_search("What is the chemical formula of aspirin?", num_results=7)`
+        `online_search("What is the chemical formula of aspirin?", num_results=7)`,
         `online_search("What is the boiling point of water?", num_results=5)`,
         `online_search("What is the molecular weight of glucose?", num_results=10)`,
         `online_search("What is the structure of benzene?", num_results=5)`,

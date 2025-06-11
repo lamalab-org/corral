@@ -14,10 +14,10 @@ from tools import (
     crop_plot_with_labels,
     decimer_molecule_extraction,
     deplot_image_extractor,
-    enhanced_brave_search,
     extract_table_text,
     llm_vision_expert,
     molscribe_molecule_extraction,
+    online_search,
     rxnscribe_reaction_extraction,
     search_lab_safety,
     search_ms_guide,
@@ -97,7 +97,7 @@ def create_embedding_datasets():
 
 _MACBENCH_TOOLS = [
     search_lab_safety,
-    enhanced_brave_search,
+    online_search,
     search_ms_guide,
     search_nmr_guide,
     llm_vision_expert,
