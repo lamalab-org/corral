@@ -3,7 +3,7 @@ from promptstore import PromptStore
 from corral.agents.base_agent import BaseAgent
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
-from corral.agents.utils import LiteLLMMessage
+from corral.agents.utils import LiteLLMMessage, format_examples
 from corral.evaluate import BenchmarkInterface
 
 
@@ -124,7 +124,6 @@ class LLMPlanner(BaseAgent):
             task_guide=task_guide,
             history=history,
             examples=examples,
-            agent_type="llm_planner",
             tools=tools,
         )
 
@@ -177,3 +176,68 @@ class LLMPlanner(BaseAgent):
             self.messages.extend(low_level_planner_messages)
 
         return "Error: Maximum iterations reached"
+
+    def create_prompt(
+        self,
+        task_guide: str | list,
+        history: list[LiteLLMMessage] | None = None,
+        **kwargs,
+    ) -> list[LiteLLMMessage]:
+        """Create prompt for LLM including context and history
+
+        Args:
+            task_guide (Union[str, list]): The task guide or prompt to use
+            history (list[LiteLLMMessage], optional): Message history to include. Defaults to None.
+            **kwargs: Additional keyword arguments that can include:
+                - examples (list[str]): Few-shot examples to include
+
+        Returns:
+            List[LiteLLMMessage]: The prepared messages for the LLM
+        """
+        messages: list[LiteLLMMessage] = []
+
+        if history:
+            messages.extend(history)
+
+        if self.system_prompt:
+            messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
+
+        user_content = self._build_user_content(task_guide=task_guide, **kwargs)
+
+        messages.append(LiteLLMMessage(role="user", content=user_content))
+
+        return messages
+
+    def _build_user_content(self, task_guide: str | list, **kwargs) -> str:
+        """
+        Fill the user prompt with the required parameters for ToolCalling agent.
+
+        Args:
+            task_guide (Union[str, str]): Task guide used for describing the environment task
+            **kwargs: Additional keyword arguments that can include:
+                - examples (list[str]): The examples to use
+
+        Returns:
+            str: The filled user prompt
+        """
+        examples = kwargs.get("examples", None)
+
+        base_kwargs = {
+            "task_guide": task_guide,
+            "examples": format_examples(examples),
+            "tools": kwargs.get("tools", []),
+            "iterations": str(self.max_iterations),
+        }
+
+        if isinstance(task_guide, list):
+            user_prompt_text = self.user_prompt.fill(base_kwargs)
+            user_content = [{"type": "text", "text": user_prompt_text}]
+            user_content.extend(task_guide)
+            return user_content
+        elif isinstance(task_guide, str):
+            base_kwargs["task_guide"] = task_guide
+            return self.user_prompt.fill(base_kwargs)
+        else:
+            raise ValueError(
+                f"task_guide should be str or list, got {type(task_guide)}"
+            )

@@ -1,5 +1,4 @@
 import importlib.resources
-import json
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -11,7 +10,6 @@ from promptstore import PromptStore
 from corral.agents.prompt_utils import get_prompt
 from corral.agents.utils import (
     LiteLLMMessage,
-    format_examples,
     llm_call,
     save_agent_messages,
 )
@@ -198,96 +196,6 @@ class BaseAgent(ABC):
         except Exception as e:
             logger.error(f"Error getting LLM response: {e}")
             raise e
-
-    def create_prompt(
-        self,
-        task_guide: str | list,
-        history: list[LiteLLMMessage] | None = None,
-        **kwargs,
-    ) -> list[LiteLLMMessage]:
-        """Create prompt for LLM including context and history
-
-        Args:
-            task_guide (Union[str, list]): The task guide or prompt to use
-            history (list[LiteLLMMessage], optional): Message history to include. Defaults to None.
-            **kwargs: Additional keyword arguments that can include:
-                - examples (list[str]): Few-shot examples to include
-                - agent_type (str): Type of agent for building user content. Defaults to "base"
-                - tools (str): Available tools for the task
-
-        Returns:
-            List[LiteLLMMessage]: The prepared messages for the LLM
-        """
-        messages: list[LiteLLMMessage] = []
-
-        if history:
-            messages.extend(history)
-
-        if self.system_prompt:
-            messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
-
-        user_content = self._build_user_content(task_guide=task_guide, **kwargs)
-
-        messages.append(LiteLLMMessage(role="user", content=user_content))
-
-        return messages
-
-    def _build_user_content(self, task_guide: str | list, **kwargs) -> list | str:
-        """
-        Fill the user prompt with the required parameters, managing the different types of agents.
-        Additionally, it manages the case when the task_guide is a list of messages.
-
-        Args:
-            task_guide (Union[str, List]): Task guide used for describing the environment task
-            user_prompt (Prompt): The user prompt to use
-            agent (str): The type of agent being prompted
-            **kwargs: Additional keyword arguments that can include:
-                - tools (str): The tools to use
-                - examples (list[str]): The examples to use
-                - history (list[LiteLLMMessage]): The history items to include
-                - iterations (int): The number of iterations
-
-        Returns:
-            Union[List, str]: The filled user prompt
-        """
-        agent_type = kwargs.get("agent_type", None)
-        if agent_type is None:
-            raise ValueError("Agent type must be specified in kwargs")
-
-        LIST_PROMPT = "The task is to correctly answer the question with an image specified below."
-
-        tools = kwargs.get("tools", None)
-        examples = kwargs.get("examples", None)
-
-        base_kwargs = {
-            "task_guide": LIST_PROMPT,
-            "examples": format_examples(examples),
-        }
-
-        if agent_type == "react":
-            base_kwargs["task_guide"] += (
-                f" To solve the task you have available the next tools:\n\n{tools}"
-            )
-        elif agent_type == "tool_calling":
-            pass
-        elif agent_type == "llm_planner":
-            base_kwargs["tools"] = json.dumps(tools)
-            base_kwargs["iterations"] = str(self.max_iterations)
-        else:
-            raise ValueError(f"Unknown agent type: {agent_type}")
-
-        if isinstance(task_guide, list):
-            user_prompt_text = self.user_prompt.fill(base_kwargs)
-            user_content = [{"type": "text", "text": user_prompt_text}]
-            user_content.extend(task_guide)
-            return user_content
-        elif isinstance(task_guide, str):
-            base_kwargs["task_guide"] = task_guide
-            return self.user_prompt.fill(base_kwargs)
-        else:
-            raise ValueError(
-                f"task_guide should be str or list, got {type(task_guide)}"
-            )
 
     @abstractmethod
     def run(
