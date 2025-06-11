@@ -7,10 +7,10 @@ from loguru import logger
 from promptstore import PromptStore
 
 from corral.agents.base_agent import BaseAgent
+from corral.agents.prompt_utils import create_prompt
 from corral.agents.utils import (
     LiteLLMMessage,
     convert_to_openai_tool_format,
-    format_examples,
 )
 from corral.evaluate import BenchmarkInterface
 
@@ -102,7 +102,7 @@ class ToolCallingAgent(BaseAgent):
         self,
         interface: BenchmarkInterface,
         task_id: str,
-        history: list[LiteLLMMessage],
+        history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
     ) -> str:
@@ -126,7 +126,9 @@ class ToolCallingAgent(BaseAgent):
         else:
             task_guide = task_prompt
 
-        self.messages = self.create_prompt(
+        self.messages = create_prompt(
+            system_prompt=self.system_prompt,
+            user_prompt=self.user_prompt,
             task_guide=task_guide,
             history=history,
             examples=examples,
@@ -190,67 +192,12 @@ class ToolCallingAgent(BaseAgent):
                     )
                 )
 
-        return "Error solving the task. Maximum iterations reached."
-
-    def create_prompt(
-        self,
-        task_guide: str | list,
-        history: list[LiteLLMMessage] | None = None,
-        **kwargs,
-    ) -> list[LiteLLMMessage]:
-        """Create prompt for LLM including context and history
-
-        Args:
-            task_guide (Union[str, list]): The task guide or prompt to use
-            history (list[LiteLLMMessage], optional): Message history to include. Defaults to None.
-            **kwargs: Additional keyword arguments that can include:
-                - examples (list[str]): Few-shot examples to include
-
-        Returns:
-            List[LiteLLMMessage]: The prepared messages for the LLM
-        """
-        messages: list[LiteLLMMessage] = []
-
-        if history:
-            messages.extend(history)
-
-        if self.system_prompt:
-            messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
-
-        user_content = self._build_user_content(task_guide=task_guide, **kwargs)
-
-        messages.append(LiteLLMMessage(role="user", content=user_content))
-
-        return messages
-
-    def _build_user_content(self, task_guide: str | list, **kwargs) -> str:
-        """
-        Fill the user prompt with the required parameters for ToolCalling agent.
-
-        Args:
-            task_guide (Union[str, str]): Task guide used for describing the environment task
-            **kwargs: Additional keyword arguments that can include:
-                - examples (list[str]): The examples to use
-
-        Returns:
-            str: The filled user prompt
-        """
-        examples = kwargs.get("examples", None)
-
-        base_kwargs = {
-            "task_guide": task_guide,
-            "examples": format_examples(examples),
-        }
-
-        if isinstance(task_guide, list):
-            user_prompt_text = self.user_prompt.fill(base_kwargs)
-            user_content = [{"type": "text", "text": user_prompt_text}]
-            user_content.extend(task_guide)
-            return user_content
-        elif isinstance(task_guide, str):
-            base_kwargs["task_guide"] = task_guide
-            return self.user_prompt.fill(base_kwargs)
-        else:
-            raise ValueError(
-                f"task_guide should be str or list, got {type(task_guide)}"
+        self.messages.append(
+            LiteLLMMessage(
+                role="assistant",
+                content="Error: Maximum iterations reached without finding a final answer.",
+                name="tool-calling-error",
             )
+        )
+
+        return "Error solving the task. Maximum iterations reached."

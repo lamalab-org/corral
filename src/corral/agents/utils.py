@@ -56,7 +56,7 @@ def llm_call(
     model: str,
     messages: list[LiteLLMMessage],
     temperature: float,
-    tools: dict[str, Any] | None = None,
+    tools: list[dict[str, Any]] | None = None,
     api_endpoint: str | None = None,
     **kwargs,
 ) -> Message:

@@ -157,7 +157,7 @@ class BaseAgent(ABC):
         else:
             self.extractor_prompt = extractor_prompt
 
-    def get_llm_response(self, tools: dict[str, Any] | None = None) -> Any:
+    def get_llm_response(self, tools: list[dict[str, Any]] | None = None) -> Any:
         """Get response from the LLM using LiteLLM
 
         Args:
@@ -253,6 +253,9 @@ class BaseAgent(ABC):
         try:
             final_answer = self.run(interface, task_id, history, task_prompt, examples)
 
+            if verbose:
+                save_agent_messages(self.messages, task_id, self.__class__.__name__)
+
             if "Error" in final_answer:
                 logger.error(f"Error in agent response: {final_answer}")
                 return final_answer
@@ -276,8 +279,6 @@ class BaseAgent(ABC):
                 api_endpoint=self.api_endpoint,
                 **self.kwargs,
             )
-            if verbose:
-                save_agent_messages(self.messages, task_id, self.__class__.__name__)
 
             return answer.content
 
