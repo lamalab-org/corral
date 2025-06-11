@@ -35,6 +35,14 @@ class TaskGroup:
     tasks: dict[str, TaskDefinition]
     results: dict[str, Any] = field(default_factory=dict)
     scores: dict[str, float] = field(default_factory=dict)
+    chained_tasks: bool = field(default=False)  # Whether tasks can depend on each other
+
+    def __post_init__(self):
+        """Auto-detect if tasks are chained"""
+        if not self.chained_tasks:  # Only auto-detect if not explicitly set
+            self.chained_tasks = any(
+                task.input_from_tasks for task in self.tasks.values()
+            )
 
     def get_task_input(self, task_id: str) -> dict[str, Any]:
         """Get input for a task either from other tasks or initial input"""

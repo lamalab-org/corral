@@ -4,8 +4,10 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum, StrEnum
+from pathlib import Path
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel
 
 
@@ -184,8 +186,9 @@ class ModalTool(Tool):
 class Environment(ABC):
     """Base class for task environments"""
 
-    def __init__(self, task_id: str):
+    def __init__(self, task_id: str, base_work_dir: str):
         self.task_id = task_id
+        self.base_work_dir = base_work_dir
         self.tools: dict[str, Tool] = {}
         self.trial_states: dict[str, TaskState] = {}
         self.trial_counter = -1
@@ -210,6 +213,11 @@ class Environment(ABC):
         self.trial_counter += 1
         new_trial_id = str(self.trial_counter)
 
+        if self.base_work_dir:
+            self.current_work_dir = self._create_trial_workspace(new_trial_id)
+        else:
+            self.current_work_dir = None
+
         self.state = TaskState(
             task_id=self.task_id,
             trial_id=new_trial_id,
@@ -217,18 +225,16 @@ class Environment(ABC):
         )
         return self.state.trial_id
 
-    def get_unique_trail_identifier(self) -> str:
-        """
-        Generate a combined identifier using task_id, trial_id, and a timestamp.
+    def _create_trial_workspace(self, trial_id: str) -> str:
+        """Create workspace directory for this trial"""
+        workspace = Path(self.base_work_dir) / f"{self.task_id}_trial_{trial_id}"
+        logger.info(f"Creating workspace: {workspace}")
+        workspace.mkdir(parents=True, exist_ok=True)
+        return str(workspace)
 
-        Returns:
-            A string combining task_id, trial_id, and timestamp in format: "{task_id}_{trial_id}_{timestamp}"
-        """
-        if not hasattr(self, "state") or self.state is None:
-            return f"{self.task_id}_no_trial_{datetime.now(tz=timezone.utc).strftime('%m%d%H%M')}"
-
-        timestamp = datetime.now(tz=timezone.utc).strftime("%m%d%H%M")
-        return f"{self.task_id}_{self.state.trial_id}_{timestamp}"
+    def get_current_work_dir(self) -> str:
+        """Get the current working directory for this trial"""
+        return self.current_work_dir or self.base_work_dir or ""
 
     @abstractmethod
     def get_task_prompt(self) -> str | list[dict]:

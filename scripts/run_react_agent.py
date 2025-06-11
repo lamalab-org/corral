@@ -26,8 +26,8 @@ def run_benchmark(
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
-    result = runner.bench(task_ids, trials_per_task=1, k_values=[1], verbose=True)
-    result.generate_report("results.json")
+    result = runner.bench(task_ids, trials_per_task=2, k_values=[1, 2], verbose=True)
+    result.generate_report("results_ocp_passk5.json")
 
     logger.info("Benchmark completed")
 
@@ -37,7 +37,10 @@ if __name__ == "__main__":
     setup_litellm()
 
     try:
-        run_benchmark()
+        # model = "groq/llama-3.3-70b-versatile"
+        # model = "claude-3-5-sonnet-20240620"
+        model = "gpt-4o"
+        run_benchmark(model=model)
 
     except Exception as e:
         logger.error(f"Benchmark failed: {e!s}")
