@@ -1,4 +1,5 @@
 import pickle
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -147,6 +148,7 @@ class MatAgentBenchmark:
     ) -> BenchmarkResult:
         """Run benchmark"""
 
+        benchmark_start_time = time.time()
         if task_ids is None:
             task_ids = self.interface.get_available_tasks()
 
@@ -185,8 +187,12 @@ class MatAgentBenchmark:
             self._run_independent_execution(
                 task_ids, trials_per_task, task_results, session_id, verbose
             )
+        benchmark_end_time = time.time()
+        total_duration = benchmark_end_time - benchmark_start_time
 
-        return BenchmarkResult(task_results=task_results, k=k_values)
+        return BenchmarkResult(
+            task_results=task_results, k=k_values, total_duration=total_duration
+        )
 
     def _initialize_task_results(
         self, task_ids: list[str], session_id: str
