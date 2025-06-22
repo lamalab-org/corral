@@ -98,6 +98,12 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()
 
+    def get_trial_state(self, task_id: str, trial_id: str) -> dict[str, Any]:
+        """Get specific trial state"""
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/trials/{trial_id}")
+        response.raise_for_status()
+        return response.json()["trial_state"]
+
 
 class Agent(Protocol):
     """Protocol defining what an agent must implement"""
@@ -365,12 +371,17 @@ class MatAgentBenchmark:
             )
             answer, messages = self.agent.run_agent(self.interface, task_id)
             result = self.interface.submit_answer(task_id, answer)
+            duration = result.state.get("duration")
+            result.duration = duration
+
             task_trials.trials.append(result)
 
             if verbose:
                 save_agent_messages(messages, task_id, self.agent.__class__.__name__)
 
-            logger.info(f"Trial completed for {task_id}, score: {result.score}")
+            logger.info(
+                f"Trial completed for {task_id}, score: {result.score}, duration: {duration:.2f}s"
+            )
             return True
 
         except KeyboardInterrupt:

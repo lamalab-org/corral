@@ -85,6 +85,9 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         state_dict = env.state.__dict__  # Get state as dict
         tool_statistics = env.state.get_tool_statistics()
 
+        duration = env.state.get_duration()
+        state_dict["duration"] = duration
+
         # Add detailed tool calls to the statistics
         tool_statistics["tool_calls"] = [
             {

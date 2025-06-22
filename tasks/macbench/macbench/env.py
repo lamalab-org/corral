@@ -4,6 +4,7 @@ from typing import Any
 
 import chromadb
 import uvicorn
+from chembench.baseline import Generation, Generations
 from chembench.evaluate import ChemBenchmark
 from chembench.prompter import PrompterBuilder
 from chembench.task import Task
@@ -36,7 +37,6 @@ from corral.io import (
 )
 from corral.server import create_benchmark_server
 from corral.utils import (
-    Model,
     chunk_text,
     create_vector_database,
 )
@@ -44,6 +44,19 @@ from corral.utils import (
 current_file_dir = Path(__file__).parent
 store = PromptStore(current_file_dir / "prompts")
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
+
+
+class Model:
+    def __init__(self, name: str = "Dummy Model"):
+        self.name = name
+
+    def generate(self, prompts: list[str], **_kwargs):
+        generations = []
+        for _prompt in prompts:
+            generation = None
+            generations.append([Generation(text=generation)])
+
+        return Generations(generations=generations)
 
 
 def process_collection(collections, collection_name, prompt_id, transform):

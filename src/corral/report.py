@@ -42,6 +42,7 @@ class TaskTrailResult:
     score: float
     state: dict[str, Any]  # TODO replace Any with specific types
     tool_statistics: dict[str, Any]  # TODO replace Any with specific types
+    duration: float | None = None
 
     @property
     def success(self) -> bool:
@@ -70,6 +71,7 @@ class BenchmarkResult:
 
     task_results: dict[str, TaskTrialResults]
     k: list[int] = field(default_factory=lambda: [1])
+    total_duration: float | None = None
 
     @property
     def all_task_ids(self) -> list[str]:
@@ -89,6 +91,27 @@ class BenchmarkResult:
             for task_trials in self.task_results.values()
             for result in task_trials.trials
         ]
+
+    def task_average_duration(self, task_id: str) -> float | None:
+        """Calculate average trial duration for a task"""
+        if task_id not in self.task_results:
+            raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
+
+        trials = self.task_results[task_id].trials
+        durations = [t.duration for t in trials if t.duration is not None]
+
+        return mean(durations) if durations else None
+
+    def overall_average_duration(self) -> float | None:
+        """Calculate overall average trial duration across all tasks"""
+        all_durations = []
+        for task_trials in self.task_results.values():
+            durations = [
+                t.duration for t in task_trials.trials if t.duration is not None
+            ]
+            all_durations.extend(durations)
+
+        return mean(all_durations) if all_durations else None
 
     def average_score(self) -> float:
         """Calculate average score across all results"""
@@ -240,6 +263,12 @@ class BenchmarkResult:
         summary_table.add_row(
             "Overall Success Rate", f"{self.overall_success_rate():.3f}"
         )
+        if self.total_duration:
+            summary_table.add_row("Total Benchmark Time", f"{self.total_duration:.2f}s")
+
+        avg_duration = self.overall_average_duration()
+        if avg_duration:
+            summary_table.add_row("Avg Trial Duration", f"{avg_duration:.2f}s")
         for k_val in self.k:
             summary_table.add_row(f"Pass@{k_val}", f"{pass_at_k_results[k_val]:.3f}")
             summary_table.add_row(f"Pass^{k_val}", f"{pass_hat_k_results[k_val]:.3f}")
@@ -256,6 +285,7 @@ class BenchmarkResult:
         task_table.add_column("Trial ID", style="yellow")
         task_table.add_column("Score", style="cyan")
         task_table.add_column("Success", style="white")
+        task_table.add_column("Duration (s)", style="green")
 
         # Add columns for each k value
         for k_val in self.k:
@@ -266,13 +296,18 @@ class BenchmarkResult:
         task_success_rate = self.task_success_rate(task_id)
         pass_at_values = [f"{self.task_pass_at_k(task_id, k):.3f}" for k in self.k]
         pass_hat_values = [f"{self.task_pass_hat_k(task_id, k):.3f}" for k in self.k]
+        avg_duration = self.task_average_duration(task_id)
+        duration_str = f"{avg_duration:.2f}" if avg_duration else "-"
 
-        # Flatten the lists for adding to the table
+        # Build the overall metrics row
         metrics_row = [
             "Overall",
             f"{self._calculate_task_average_score(task_id):.3f}",
             f"{task_success_rate:.3f}",
+            duration_str,  # Add duration to the overall row
         ]
+
+        # Add pass@k and pass^k values
         for i in range(len(self.k)):
             metrics_row.append(pass_at_values[i])
             metrics_row.append(pass_hat_values[i])
@@ -281,10 +316,12 @@ class BenchmarkResult:
 
         # Add individual trial rows
         for trial in self.task_results[task_id].trials:
+            duration_str = f"{trial.duration:.2f}" if trial.duration else "-"
             trial_row = [
                 trial.trial_id,
                 f"{trial.score:.3f}",
                 "✓" if trial.success else "✗",
+                duration_str,  # Add duration to trial row
             ]
 
             # Add placeholder values for pass@k and pass^k (not applicable for individual trials)
@@ -373,7 +410,7 @@ class BenchmarkResult:
                     f"pass^{k}": value for k, value in pass_hat_k_results.items()
                 }
 
-                # Create report data
+                # Create report data with timing information
                 report_data = {
                     "metrics": {
                         "average_score": self.average_score(),
@@ -381,9 +418,20 @@ class BenchmarkResult:
                         **pass_at_k_dict,
                         **pass_hat_k_dict,
                         "total_tasks": self.total_tasks,
-                    },
-                    "task_results": {},
+                    }
                 }
+
+                # Add timing metrics to overall metrics
+                if self.total_duration:
+                    report_data["metrics"]["total_benchmark_duration"] = (
+                        self.total_duration
+                    )
+
+                avg_duration = self.overall_average_duration()
+                if avg_duration:
+                    report_data["metrics"]["average_trial_duration"] = avg_duration
+
+                report_data["task_results"] = {}
 
                 # Add task-specific results
                 for task_id in self.all_task_ids:
@@ -412,6 +460,10 @@ class BenchmarkResult:
                             "success": trial.success,
                         }
 
+                        # Add duration if available
+                        if trial.duration is not None:
+                            trial_data["duration"] = trial.duration
+
                         # Add tool calls data if available
                         if "tool_calls" in trial.tool_statistics:
                             trial_data["tool_calls"] = [
@@ -437,7 +489,7 @@ class BenchmarkResult:
 
                         trials_data.append(trial_data)
 
-                    report_data["task_results"][task_id] = {
+                    task_result_data = {
                         "success_rate": self.task_success_rate(task_id),
                         "average_score": self._calculate_task_average_score(task_id),
                         **task_pass_at_k_dict,
@@ -445,12 +497,20 @@ class BenchmarkResult:
                         "trials": trials_data,
                     }
 
+                    # Add task-level timing metrics
+                    task_avg_duration = self.task_average_duration(task_id)
+                    if task_avg_duration:
+                        task_result_data["average_duration"] = task_avg_duration
+
+                    report_data["task_results"][task_id] = task_result_data
+
                 with Path(report_path).open("w") as f:
                     json.dump(report_data, f, indent=2)
                 logger.info(f"Saved detailed report to: {report_path}")
             except Exception as e:
                 logger.error(f"Error saving report file: {e}")
                 raise
+
         from rich.console import Console
         from rich.panel import Panel
 

@@ -12,7 +12,7 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "gpt-4o", task_ids: list | None = None, temperature: float = 0.0
+    model: str = "openai/gpt-4o", task_ids: list | None = None, temperature: float = 0.0
 ):
     """Run the benchmark with specified model and tasks"""
 
@@ -25,7 +25,7 @@ def run_benchmark(
     result = runner.bench(
         task_ids, trials_per_task=5, k_values=[1, 2, 3, 4, 5], verbose=True
     )
-    result.generate_report("results_ml_toolcalling_gpt.json")
+    result.generate_report("results.json")
 
     logger.info("Benchmark completed")
 
