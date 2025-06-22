@@ -2072,7 +2072,7 @@ def prepare_tabular_dataset(
             )
 
             # Save scaler
-            scaler_path = f"{output_path}_scaler.pkl"
+            scaler_path = f"{output_path}/scaler.pkl"
             with Path(scaler_path).open("wb") as f:
                 pickle.dump(scaler, f)
         else:
@@ -2080,8 +2080,8 @@ def prepare_tabular_dataset(
             scaler_path = None
 
         # Save datasets
-        train_path = f"{output_path}_train.csv"
-        test_path = f"{output_path}_test.csv"
+        train_path = f"{output_path}/train.csv"
+        test_path = f"{output_path}/test.csv"
 
         # Combine features and targets for saving
         train_data = X_train_scaled.copy()
@@ -2093,7 +2093,7 @@ def prepare_tabular_dataset(
         test_data.to_csv(test_path, index=False)
 
         # Save metadata
-        metadata_path = f"{output_path}_metadata.json"
+        metadata_path = f"{output_path}/metadata.json"
         dataset_info = {
             "target_property": target_property,
             "feature_engineering": feature_engineering,
@@ -2637,10 +2637,14 @@ def train_xgboost_model(
         with Path(predictions_path).open("w") as f:
             json.dump(predictions, f, indent=2)
 
-        result = {
+        training_results_path = model_save_path.replace(
+            ".pkl", "_training_results.json"
+        )
+        training_results = {
             "success": True,
             "model_type": "xgboost",
             "model_path": model_save_path,
+            "results_path": training_results_path,
             "predictions_path": predictions_path,
             "train_metrics": train_metrics,
             "test_metrics": test_metrics,
@@ -2650,8 +2654,10 @@ def train_xgboost_model(
             "test_samples": len(X_test),
             "features": list(X_train.columns),
         }
+        with Path(training_results_path).open("w") as f:
+            json.dump(training_results, f, indent=2)
 
-        return json.dumps(result, indent=2)
+        return json.dumps(training_results, indent=2)
 
     except Exception as e:
         import traceback

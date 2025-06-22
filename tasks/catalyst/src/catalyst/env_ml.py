@@ -126,9 +126,7 @@ class TaskGroupEnvironment(Environment):
 
         self.current_task = task_group.tasks[task_id]
 
-        super().__init__(
-            f"{task_group.group_id}_{task_id}", base_work_dir=base_work_dir
-        )
+        super().__init__(f"{task_id}", base_work_dir=base_work_dir)
 
         # Add tools
         self._add_task_tools()

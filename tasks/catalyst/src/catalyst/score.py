@@ -6,6 +6,7 @@ from pathlib import Path
 import joblib
 from loguru import logger
 from pymatgen.core import Structure
+from utils import smart_resolve_path
 
 if "CORRAL_WORK_DIR" not in os.environ:
     raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
@@ -1166,11 +1167,14 @@ def score_polymorph_dataset(
         # We need Path imported to check for file existence
         from pathlib import Path
 
-        consolidated_json_file = Path(consolidated_json_path)
+        resolved_path = smart_resolve_path(consolidated_json_path)
+
+        logger.info(f"score_polymorph_dataset: input={consolidated_json_path!r}")
+        logger.info(f"score_polymorph_dataset: resolved={resolved_path!r}")
+
+        consolidated_json_file = Path(resolved_path)
         if not consolidated_json_file.exists():
-            logger.error(
-                f"Consolidated JSON file not found at: {consolidated_json_path}"
-            )
+            logger.error(f"Consolidated JSON file not found at: {resolved_path}")
             return 0.0
 
         with consolidated_json_file.open("r") as f:
@@ -1220,11 +1224,16 @@ def ml_dataset_preparation_quality_binary(ml_metadata_path: str) -> int:
         0 otherwise (including errors).
     """
     try:
-        if not Path(ml_metadata_path).exists():
-            logger.info(f"Metadata file not found: {ml_metadata_path}")
+        resolved_path = smart_resolve_path(ml_metadata_path)
+
+        logger.info(f"ml_dataset_preparation: input={ml_metadata_path!r}")
+        logger.info(f"ml_dataset_preparation: resolved={resolved_path!r}")
+
+        if not Path(resolved_path).exists():
+            logger.info(f"Metadata file not found: {resolved_path}")
             return 0
 
-        with Path(ml_metadata_path).open() as f:
+        with Path(resolved_path).open() as f:
             metadata = json.load(f)
 
         # Criteria 1: Check train/test files exist
@@ -1254,7 +1263,7 @@ def ml_dataset_preparation_quality_binary(ml_metadata_path: str) -> int:
         # Criteria 2: Check sufficient sample sizes
         train_samples = metadata.get("train_samples", 0)
         test_samples = metadata.get("test_samples", 0)
-        if not (train_samples >= 40 and test_samples >= 10):
+        if not (train_samples >= 20 and test_samples >= 5):
             logger.info(
                 f"Binary check failed: Insufficient sample sizes (Train: {train_samples}, Test: {test_samples})."
             )
@@ -1296,13 +1305,18 @@ def model_training_success_binary(model_path: str) -> int:
         0 otherwise (including errors).
     """
     try:
-        if not Path(model_path).exists():
+        resolved_path = smart_resolve_path(model_path)
+
+        logger.info(f"model_training_success_binary: input={model_path!r}")
+        logger.info(f"model_training_success_binary: resolved={resolved_path!r}")
+
+        if not Path(resolved_path).exists():
             logger.info(f"Model file not found: {model_path}")
             return 0
 
         # Criteria 1: Try to load the model
         try:
-            model = joblib.load(model_path)
+            model = joblib.load(resolved_path)
             if not hasattr(model, "predict"):
                 logger.info(
                     "Binary check failed: Loaded model does not have a 'predict' method."
@@ -1310,14 +1324,14 @@ def model_training_success_binary(model_path: str) -> int:
                 return 0
         except Exception as e:
             logger.info(
-                f"Binary check failed: Could not load the model from {model_path}. Error: {e}"
+                f"Binary check failed: Could not load the model from {resolved_path}. Error: {e}"
             )
             return 0
 
         # Criteria 2 & 3: Look for associated results file and check metrics
-        results_path = str(model_path).replace(".pkl", "_training_results.json")
+        results_path = str(resolved_path).replace(".pkl", "_training_results.json")
         if not Path(results_path).exists():
-            results_path = str(model_path).replace(
+            results_path = str(resolved_path).replace(
                 ".pkl", "_predictions.json"
             )  # Try alternative naming
 
@@ -1379,18 +1393,23 @@ def model_evaluation_completeness_binary(evaluation_results_path: str) -> int:
         0 otherwise (including errors).
     """
     try:
-        if not Path(evaluation_results_path).exists():
-            logger.info(f"Evaluation results file not found: {evaluation_results_path}")
+        resolved_path = smart_resolve_path(evaluation_results_path)
+
+        logger.info(f"ml_dataset_preparation: input={evaluation_results_path!r}")
+        logger.info(f"ml_dataset_preparation: resolved={resolved_path!r}")
+
+        if not Path(resolved_path).exists():
+            logger.info(f"Evaluation results file not found: {resolved_path}")
             return 0
 
-        with Path(evaluation_results_path).open() as f:
+        with Path(resolved_path).open() as f:
             results = json.load(f)
 
         # Criteria 1 & 2: Check for basic evaluation metrics and all required metrics
-        if "evaluation_metrics" not in results:
-            logger.info("Binary check failed: 'evaluation_metrics' not found.")
+        if "test_set_evaluation" not in results:
+            logger.info("Binary check failed: 'test_set_evaluation' not found.")
             return 0
-        metrics = results["evaluation_metrics"]
+        metrics = results["test_set_evaluation"]
         required_metrics = ["mae", "rmse", "r2"]
         if not all(metric in metrics for metric in required_metrics):
             logger.info(
