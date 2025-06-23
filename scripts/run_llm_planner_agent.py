@@ -11,7 +11,9 @@ def setup_litellm():
     litellm.set_verbose = True
 
 
-def run_benchmark(model: str = "gpt-4o", task_ids: list | None = None, temperature: float = 0.0):
+def run_benchmark(
+    model: str = "gpt-4o", task_ids: list | None = None, temperature: float = 0.0
+):
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()

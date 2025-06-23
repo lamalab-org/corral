@@ -2,10 +2,8 @@ import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
-from corral.agents.react import ReActAgent
+from corral.agents.llm_planner import LLMPlanner
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
-
-load_dotenv("../.env", override=True)
 
 
 def setup_litellm():
@@ -14,14 +12,12 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "anthropic/claude-3-7-sonnet-20250219",
-    task_ids: list | None = None,
-    temperature: float = 0.0,
+    model: str = "gpt-4o", task_ids: list | None = None, temperature: float = 0.0
 ):
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
+    agent = LLMPlanner(model=model, temperature=temperature, max_iterations=20)
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark
@@ -29,7 +25,7 @@ def run_benchmark(
     result = runner.bench(
         task_ids, trials_per_task=5, k_values=[1, 2, 3, 4, 5], verbose=True
     )
-    result.generate_report("results_ml_.json")
+    result.generate_report("results_planner.json")
 
     logger.info("Benchmark completed")
 
@@ -39,10 +35,7 @@ if __name__ == "__main__":
     setup_litellm()
 
     try:
-        # model = "groq/llama-3.3-70b-versatile"
-        # model = "claude-3-5-sonnet-20240620"
-        model = "gpt-4o"
-        run_benchmark(model=model)
+        run_benchmark()
 
     except Exception as e:
         logger.error(f"Benchmark failed: {e!s}")

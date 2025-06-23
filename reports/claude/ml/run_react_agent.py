@@ -29,7 +29,7 @@ def run_benchmark(
     result = runner.bench(
         task_ids, trials_per_task=5, k_values=[1, 2, 3, 4, 5], verbose=True
     )
-    result.generate_report("results_ml_.json")
+    result.generate_report("results_react.json")
 
     logger.info("Benchmark completed")
 
@@ -41,7 +41,7 @@ if __name__ == "__main__":
     try:
         # model = "groq/llama-3.3-70b-versatile"
         # model = "claude-3-5-sonnet-20240620"
-        model = "gpt-4o"
+        model = "anthropic/claude-3-7-sonnet-20250219"
         run_benchmark(model=model)
 
     except Exception as e:

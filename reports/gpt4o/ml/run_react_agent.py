@@ -29,7 +29,7 @@ def run_benchmark(
     result = runner.bench(
         task_ids, trials_per_task=5, k_values=[1, 2, 3, 4, 5], verbose=True
     )
-    result.generate_report("results_ml_.json")
+    result.generate_report("results_react.json")
 
     logger.info("Benchmark completed")
 
