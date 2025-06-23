@@ -12,7 +12,6 @@ from corral.report import (
     TaskTrialResults,
     ToolResponse,
 )
-from corral.utils import save_agent_messages
 
 
 class BenchmarkInterface:
@@ -36,7 +35,7 @@ class BenchmarkInterface:
         except Exception:
             return False
 
-    def get_available_tools_for_task(self, task_id: str) -> str:
+    def get_available_tools_for_task(self, task_id: str) -> dict[str, Any]:
         """Get list of available tools for a task"""
         response = requests.get(f"{self.base_url}/tasks/{task_id}/tools")
         response.raise_for_status()
@@ -369,15 +368,14 @@ class MatAgentBenchmark:
             logger.info(
                 f"Running trial {len(task_trials.trials) + 1} for task {task_id}"
             )
-            answer, messages = self.agent.run_agent(self.interface, task_id)
+            answer, messages = self.agent.run_agent(
+                self.interface, task_id, verbose=verbose
+            )
             result = self.interface.submit_answer(task_id, answer)
             duration = result.state.get("duration")
             result.duration = duration
 
             task_trials.trials.append(result)
-
-            if verbose:
-                save_agent_messages(messages, task_id, self.agent.__class__.__name__)
 
             logger.info(
                 f"Trial completed for {task_id}, score: {result.score}, duration: {duration:.2f}s"

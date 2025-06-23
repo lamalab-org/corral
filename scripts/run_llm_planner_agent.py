@@ -2,7 +2,7 @@ import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
-from corral.agents.llm_planner import LLMPlanner
+from corral.agents import LLMPlanner
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 
 

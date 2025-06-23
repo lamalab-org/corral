@@ -1,11 +1,12 @@
 import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, TypedDict
 
 import litellm
 import openai
 from litellm.types.utils import Message
 from loguru import logger
-from promptstore import Prompt
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -16,15 +17,9 @@ from tenacity import (
 RETRY_EXCEPTIONS = (
     openai.APITimeoutError,
     openai.APIConnectionError,
-    openai.RateLimitError,
     openai.APIError,
     openai.APIStatusError,
     openai.InternalServerError,
-)
-
-
-LIST_PROMPT = (
-    "The task is to correctly answer the question with an image specified below."
 )
 
 
@@ -61,7 +56,7 @@ def llm_call(
     model: str,
     messages: list[LiteLLMMessage],
     temperature: float,
-    tools: dict[str, Any] | None = None,
+    tools: list[dict[str, Any]] | None = None,
     api_endpoint: str | None = None,
     **kwargs,
 ) -> Message:
@@ -106,7 +101,7 @@ def llm_call(
         return response.choices[0].message
 
     except Exception as e:
-        raise ValueError(f"Error in LiteLLM API call: {e}") from e
+        raise e
 
 
 def format_examples(examples: list[str] | None) -> str:
@@ -123,64 +118,6 @@ def format_examples(examples: list[str] | None) -> str:
     else:
         example_prompt = f"To help you in understanding this task, the next {len(examples)} examples are provided:\n\n"
         return example_prompt + "\n\n".join(examples)
-
-
-def _build_user_content(
-    agent: str,
-    user_prompt: Prompt,
-    task_guide: str | list,
-    tools: str = "",
-    examples: list[str] | None = None,
-    history: list[LiteLLMMessage] | None = None,
-    iterations: int = 0,
-) -> list | str:
-    """
-    Fill the user prompt with the required parameters, managing the different types of agents.
-    Additionally, it manages the case when the task_guide is a list of messages.
-
-    Args:
-        agent (str): The type of agent being prompted. Important to know the variables to fill.
-        user_prompt (Prompt): The user prompt to use.
-        task_guide (str | list): Task guide used for describing the environment task.
-        tools (str, optional): The tools to use. Defaults to an empty string.
-        examples (List[str], optional): The examples to use. Defaults to None.
-        history (List[LiteLLMMessage], optional): The history items to include. Defaults to None.
-        iterations (int, optional): The number of iterations. Defaults to 0.
-
-    Returns:
-        list | str: The filled user prompt.
-    """
-    if history is None:
-        history = []
-
-    base_kwargs = {
-        "task_guide": LIST_PROMPT,
-        "examples": format_examples(examples),
-    }
-
-    if agent == "react":
-        base_kwargs["task_guide"] += (
-            f" To solve the task you have available the next tools:\n\n{tools}"
-        )
-        base_kwargs["history"] = json.dumps(history)
-    elif agent == "tool_calling":
-        pass
-    elif agent == "llm_planner":
-        base_kwargs["tools"] = json.dumps(tools)
-        base_kwargs["iterations"] = str(iterations)
-    else:
-        raise ValueError(f"Unknown agent type: {agent}")
-
-    if isinstance(task_guide, list):
-        user_prompt_text = user_prompt.fill(base_kwargs)
-        user_content = [{"type": "text", "text": user_prompt_text}]
-        user_content.extend(task_guide)
-        return user_content
-    elif isinstance(task_guide, str):
-        base_kwargs["task_guide"] = task_guide
-        return user_prompt.fill(base_kwargs)
-    else:
-        raise ValueError(f"task_guide should be str or list, got {type(task_guide)}")
 
 
 def convert_dict_arg(arg: dict) -> dict:
@@ -251,3 +188,95 @@ def convert_to_openai_tool_format(tools_dict: dict) -> list:
         openai_tools.append({"type": "function", "function": function})
 
     return openai_tools
+
+
+def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
+    """
+    Serialize LiteLLMMessage objects to a format that can be saved to a JSON file.
+
+    Args:
+        messages (List[LiteLLMMessage]): The messages to serialize.
+
+    Returns:
+        List[Dict]: The serialized messages.
+    """
+    serializable_messages = []
+    for msg in messages:
+        if isinstance(msg, dict):
+            message_dict = msg.copy()
+        else:
+            message_dict = {"role": msg.role, "content": msg.content}
+
+            if hasattr(msg, "tool_call_id") and msg.tool_call_id:
+                message_dict["tool_call_id"] = msg.tool_call_id
+            if hasattr(msg, "name") and msg.name:
+                message_dict["name"] = msg.name
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                message_dict["tool_calls"] = []
+                for tc in msg.tool_calls:
+                    if isinstance(tc, dict):
+                        tool_call = {
+                            "id": tc.get("id"),
+                            "function": {
+                                "name": tc.get("function", {}).get("name"),
+                                "arguments": tc.get("function", {}).get("arguments"),
+                            },
+                        }
+                    else:
+                        tool_call = {
+                            "id": tc.id,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                    message_dict["tool_calls"].append(tool_call)
+
+        serializable_messages.append(message_dict)
+
+    return serializable_messages
+
+
+def save_agent_messages(
+    messages: list[LiteLLMMessage],
+    task_id: str,
+    agent_name: str,
+    output_dir: str = "agent_logs",
+) -> str:
+    """Save agent conversation to a JSON file for logging and analysis purposes.
+
+    This function handles both regular dictionaries and LiteLLMMessage objects,
+    properly serializing them for storage.
+
+    Args:
+        messages (list[LiteLLMMessage]): List of message objects (LiteLLMMessages or dictionaries)
+        task_id (str): The ID of the task being solved
+        agent_name (str): The name of the agent that generated the messages
+        output_dir (str, optional): Directory to save the logs (will be created if it doesn't exist). Default is "agent_logs".
+
+    Returns:
+        str: Path to the saved file
+    """
+    Path(output_dir).mkdir(exist_ok=True, parents=True)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"{task_id}_{timestamp}.json"
+    file_path = Path(output_dir) / filename
+
+    # Convert messages to serializable format
+    serializable_messages = serialize_messages(messages)
+
+    # Write to file with metadata and pretty formatting
+    with Path(file_path).open("w") as f:
+        json.dump(
+            {
+                "task_id": task_id,
+                "agent": agent_name,
+                "timestamp": timestamp,
+                "messages": serializable_messages,
+            },
+            f,
+            indent=2,
+        )
+
+    return file_path
