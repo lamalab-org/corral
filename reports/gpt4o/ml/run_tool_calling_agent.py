@@ -2,7 +2,7 @@ import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
-from corral.agents.llm_planner import LLMPlanner
+from corral.agents import ToolCallingAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 
 
@@ -17,7 +17,7 @@ def run_benchmark(
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = LLMPlanner(model=model, temperature=temperature, max_iterations=20)
+    agent = ToolCallingAgent(model=model, temperature=temperature)
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark
@@ -25,7 +25,7 @@ def run_benchmark(
     result = runner.bench(
         task_ids, trials_per_task=5, k_values=[1, 2, 3, 4, 5], verbose=True
     )
-    result.generate_report("results_planner.json")
+    result.generate_report("results_toolcalling.json")
 
     logger.info("Benchmark completed")
 

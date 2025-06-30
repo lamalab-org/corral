@@ -21,7 +21,7 @@ def run_benchmark(
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
+    agent = ReActAgent(model=model, max_iterations=5, temperature=temperature)
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark

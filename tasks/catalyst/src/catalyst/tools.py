@@ -940,7 +940,8 @@ def execute_python_code(
     capturing standard output and errors, and saving structured results to a file.
 
     Args:
-        python_code: A string containing the Python code to be executed.
+        python_code: A string containing the Python code to be executed. For best results, assign your main output to a variable named
+                'result', 'output' in the code.
         input_data: An optional JSON string. If provided, it will be loaded
                     into a Python variable named `input_data` within the
                     executed script, allowing the script to process external data.
@@ -982,8 +983,6 @@ def execute_python_code(
                        or unexpected subprocess behavior.
     """
     try:
-        from pathlib import Path  # Ensure Path is imported before use
-
         # Create a temporary file for the code
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             # Prepare the code with input data if provided
@@ -995,17 +994,46 @@ def execute_python_code(
             full_code += python_code
 
             # Add output capture
+            # Add output capture
             full_code += "\n\n"
             full_code += "import json\n"
-            full_code += "result = {}\n"
-            full_code += "for var_name in ['output', 'result', 'filtered_data', 'processed_data', 'dataset']:\n"
+            full_code += "result_ = {}\n"
+            full_code += "# Try to capture from preferred variable names first\n"
+            full_code += "preferred_vars = ['output', 'result', 'filtered_data', 'processed_data', 'dataset']\n"
+            full_code += "captured = False\n"
+            full_code += "for var_name in preferred_vars:\n"
             full_code += "    if var_name in locals():\n"
-            full_code += "        result[var_name] = locals()[var_name]\n"
+            full_code += "        result_[var_name] = locals()[var_name]\n"
+            full_code += "        captured = True\n"
             full_code += "        break\n"
-            full_code += "print('EXECUTION_RESULT:', json.dumps(result))\n"
+            full_code += "\n"
+            full_code += "# Fallback: capture any user-defined variables (excluding built-ins and imports)\n"
+            full_code += "if not captured:\n"
+            full_code += "    import types\n"
+            full_code += "    excluded = {'__builtins__', '__name__', '__doc__', '__package__', '__loader__', '__spec__', '__annotations__', '__cached__', '__file__'}\n"
+            full_code += "    local_vars = dict(locals())  # Create a snapshot to avoid RuntimeError\n"
+            full_code += "    \n"
+            full_code += "    def is_json_serializable(obj):\n"
+            full_code += "        try:\n"
+            full_code += "            json.dumps(obj)\n"
+            full_code += "            return True\n"
+            full_code += "        except (TypeError, ValueError):\n"
+            full_code += "            return False\n"
+            full_code += "    \n"
+            full_code += "    for var_name, var_value in local_vars.items():\n"
+            full_code += "        if (not var_name.startswith('_') and \n"
+            full_code += "            var_name not in excluded and \n"
+            full_code += "            var_name not in ['json', 'types', 'result_', 'preferred_vars', 'captured', 'excluded', 'local_vars', 'is_json_serializable'] and\n"
+            full_code += "            not isinstance(var_value, types.ModuleType) and\n"
+            full_code += "            not callable(var_value) and\n"
+            full_code += "            is_json_serializable(var_value)):\n"
+            full_code += "            result_[var_name] = var_value\n"
+            full_code += "print('EXECUTION_RESULT:', json.dumps(result_))\n"
 
             f.write(full_code)
             temp_file = f.name
+
+        from pathlib import Path
 
         # Execute the code
         process = subprocess.run(
