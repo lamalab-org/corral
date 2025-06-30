@@ -58,8 +58,9 @@ def llm_call(
     temperature: float,
     tools: list[dict[str, Any]] | None = None,
     api_endpoint: str | None = None,
+    return_usage: bool = False,
     **kwargs,
-) -> Message:
+) -> Message | tuple[Message, dict[str, Any]]:
     """
     Call LiteLLM API with or without tools based on parameters
 
@@ -69,10 +70,11 @@ def llm_call(
         temperature (float): The temperature to use.
         tools (Dict[str, Any], optional): The tools to use. If provided, will use tool calling.
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
+        return_usage (bool, optional): If True, returns tuple of (message, usage_info). Defaults to False.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
 
     Returns:
-        Message: The response from the LiteLLM API.
+        Message | tuple[Message, dict]: The response from the LiteLLM API, optionally with usage info.
     """
     try:
         params = {
@@ -98,7 +100,24 @@ def llm_call(
         else:
             response = litellm.completion(**params)
 
-        return response.choices[0].message
+        message = response.choices[0].message
+
+        if return_usage:
+            # Extract usage information from the response
+            usage_info = {
+                "prompt_tokens": getattr(response.usage, "prompt_tokens", 0)
+                if response.usage
+                else 0,
+                "completion_tokens": getattr(response.usage, "completion_tokens", 0)
+                if response.usage
+                else 0,
+                "total_tokens": getattr(response.usage, "total_tokens", 0)
+                if response.usage
+                else 0,
+            }
+            return message, usage_info
+
+        return message
 
     except Exception as e:
         raise e

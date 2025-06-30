@@ -362,12 +362,12 @@ class MatAgentBenchmark:
             logger.info(
                 f"Running trial {len(task_trials.trials) + 1} for task {task_id}"
             )
-            answer, messages = self.agent.run_agent(self.interface, task_id)
+            answer, token_usage = self.agent.run_agent(
+                self.interface, task_id, verbose=verbose
+            )
+            logger.info(f"Agent answer: {answer} (tokens: {token_usage})")
             result = self.interface.submit_answer(task_id, answer)
             task_trials.trials.append(result)
-
-            if verbose:
-                save_agent_messages(messages, task_id, self.agent.__class__.__name__)
 
             logger.info(f"Trial completed for {task_id}, score: {result.score}")
             return True

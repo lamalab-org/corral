@@ -208,10 +208,6 @@ class ReActAgent(BaseAgent):
                         )
                     )
 
-            # If no action or thought was parsed, break the loop
-            if not thought and actions is None:
-                break
-
         self.messages.append(
             LiteLLMMessage(
                 role="assistant",

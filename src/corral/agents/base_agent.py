@@ -2,6 +2,7 @@ import importlib.resources
 from abc import ABC, abstractmethod
 from typing import Any
 
+import litellm
 import openai
 from litellm.types.utils import Message
 from loguru import logger
@@ -30,6 +31,7 @@ class BaseAgent(ABC):
     objects that support a `.fill()` method for parameter substitution.**
 
     ### Prompt Types:
+
     - **system_prompt**: Sets the agent's behavior and role (e.g., "You are a helpful AI assistant")
     - **user_prompt**: Contains the main task instructions with placeholders for dynamic content
     - **extractor_prompt**: Used to extract and clean final answers from agent responses.
@@ -91,12 +93,11 @@ class BaseAgent(ABC):
         max_iterations (int, optional): The maximum number of iterations (number of LLM calls) to run. Defaults to 10.
         api_endpoint (str, optional): The API endpoint URL for the LLM provider
             (e.g., OpenAI, VLLM, or self-hosted models) to handle requests. Defaults to None.
-        system_prompt (str | Any, optional): The system prompt to use. Can be a string, PromptStore ID, or prompt object
+        system_prompt (str | Any, optional): The system prompt to use. Can be a string or prompt object
             that implements .fill() method. If None, uses default system prompt. Must support Jinja templating.
-        user_prompt (str | Any, optional): The user prompt to use. Can be a string, PromptStore ID, or prompt object
+        user_prompt (str | Any, optional): The user prompt to use. Can be a string or prompt object
             that implements .fill() method. Different templates are used for each agent type. Must support Jinja templating.
-        extractor_prompt (str | Any, optional): The extractor prompt for cleaning final answers. Can be a string,
-            PromptStore ID, or prompt object that implements .fill() method. Must support Jinja templating.
+        extractor_prompt (str | Any, optional): The extractor prompt for cleaning final answers. Can be a string or prompt object that implements .fill() method. Must support Jinja templating.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use for managing templated prompts.
             If None, uses default store from package resources.
@@ -130,6 +131,7 @@ class BaseAgent(ABC):
         self.api_endpoint = api_endpoint
         self.temperature = temperature
         self.messages = []
+        self.token_usage = []  # Track token usage per LLM call
 
         if prompt_store:
             self.store = prompt_store
@@ -161,24 +163,29 @@ class BaseAgent(ABC):
         """Get response from the LLM using LiteLLM
 
         Args:
-            messages (list[LiteLLMMessage]): The messages to send to the LLM
             tools (dict[str, Any], optional): Optional tools/functions for function calling
 
         Returns:
             Any: The response from the LLM
         """
         try:
-            return llm_call(
+            response, usage_info = llm_call(
                 model=self.model,
                 messages=self.messages,
                 tools=tools,
                 temperature=self.temperature,
                 api_endpoint=self.api_endpoint,
+                return_usage=True,
                 **self.kwargs,
             )
 
-        except openai.RateLimitError as e:
-            logger.error(f"Rate limit exceeded: {e}")
+            # Track token usage
+            self.token_usage.append(usage_info)
+
+            return response
+
+        except (openai.RateLimitError, litellm.ContextWindowExceededError) as e:
+            logger.error(f"API error: {e}")
 
             for message in reversed(self.messages):
                 if message["role"] != "assistant":
@@ -189,7 +196,7 @@ class BaseAgent(ABC):
                 else:
                     break
 
-            error_message = f"RateLimitError: {e!s}"
+            error_message = f"{type(e).__name__}: {e!s}"
 
             return Message(role="user", content=error_message, tool_calls=[])
 
@@ -247,6 +254,8 @@ class BaseAgent(ABC):
         Returns:
             str: The final answer from the agent
         """
+        self.reset_token_usage()
+
         if history is None:
             history = []
 
@@ -280,8 +289,34 @@ class BaseAgent(ABC):
                 **self.kwargs,
             )
 
-            return answer.content
+            token_usage = self.get_total_token_usage()
+
+            return answer.content, token_usage
 
         except Exception as e:
             logger.error(f"Error extracting final answer: {e}")
             return final_answer
+
+    def get_total_token_usage(self) -> dict[str, int]:
+        """Calculate total token usage across all LLM calls
+
+        Returns:
+            dict[str, int]: Dictionary with prompt_tokens, completion_tokens, and total_tokens
+        """
+        total_prompt_tokens = sum(
+            usage.get("prompt_tokens", 0) for usage in self.token_usage
+        )
+        total_completion_tokens = sum(
+            usage.get("completion_tokens", 0) for usage in self.token_usage
+        )
+        total_tokens = sum(usage.get("total_tokens", 0) for usage in self.token_usage)
+
+        return {
+            "prompt_tokens": total_prompt_tokens,
+            "completion_tokens": total_completion_tokens,
+            "total_tokens": total_tokens,
+        }
+
+    def reset_token_usage(self) -> None:
+        """Reset token usage tracking"""
+        self.token_usage = []

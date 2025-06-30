@@ -188,7 +188,7 @@ class ToolCallingAgent(BaseAgent):
                 self.messages.append(
                     LiteLLMMessage(
                         role="system",
-                        content=f"Error during tool execution: {e!s}",
+                        content=f"Error during agent iteration: {e!s}",
                     )
                 )
 
