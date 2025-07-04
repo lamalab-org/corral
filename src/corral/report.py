@@ -43,6 +43,7 @@ class TaskTrailResult:
     state: dict[str, Any]  # TODO replace Any with specific types
     tool_statistics: dict[str, Any]  # TODO replace Any with specific types
     duration: float | None = None
+    token_usage: dict[str, Any] | None = None
 
     @property
     def success(self) -> bool:
@@ -123,6 +124,51 @@ class BenchmarkResult:
             all_durations.extend(durations)
 
         return sum(all_durations) if all_durations else None
+
+    def total_token_usage(self) -> dict[str, Any]:
+        """Calculate total token usage across all trials"""
+        total_tokens = {}
+
+        for task_trials in self.task_results.values():
+            for trial in task_trials.trials:
+                if trial.token_usage:
+                    for key, value in trial.token_usage.items():
+                        if isinstance(value, (int | float)):
+                            total_tokens[key] = total_tokens.get(key, 0) + value
+                        elif isinstance(value, dict):
+                            if key not in total_tokens:
+                                total_tokens[key] = {}
+                            for sub_key, sub_value in value.items():
+                                if isinstance(sub_value, (int | float)):
+                                    total_tokens[key][sub_key] = (
+                                        total_tokens[key].get(sub_key, 0) + sub_value
+                                    )
+
+        return total_tokens
+
+    def task_total_token_usage(self, task_id: str) -> dict[str, Any]:
+        """Calculate total token usage for a specific task"""
+        if task_id not in self.task_results:
+            raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
+
+        task_tokens = {}
+        trials = self.task_results[task_id].trials
+
+        for trial in trials:
+            if trial.token_usage:
+                for key, value in trial.token_usage.items():
+                    if isinstance(value, (int | float)):
+                        task_tokens[key] = task_tokens.get(key, 0) + value
+                    elif isinstance(value, dict):
+                        if key not in task_tokens:
+                            task_tokens[key] = {}
+                        for sub_key, sub_value in value.items():
+                            if isinstance(sub_value, (int | float)):
+                                task_tokens[key][sub_key] = (
+                                    task_tokens[key].get(sub_key, 0) + sub_value
+                                )
+
+        return task_tokens
 
     def total_tool_calls(self) -> dict[str, int]:
         """Calculate total successful and failed tool calls across all trials"""
@@ -303,6 +349,17 @@ class BenchmarkResult:
         )
         summary_table.add_row("Failed Tool Calls", str(tool_call_stats["failed"]))
 
+        # Add token usage statistics
+        total_tokens = self.total_token_usage()
+        if total_tokens:
+            summary_table.add_row("--- Token Usage ---", "")
+            for key, value in total_tokens.items():
+                if isinstance(value, dict):
+                    for sub_key, sub_value in value.items():
+                        summary_table.add_row(f"{key}.{sub_key}", str(sub_value))
+                else:
+                    summary_table.add_row(key, str(value))
+
         # Add duration metrics
         if self.total_duration:
             summary_table.add_row("Total Benchmark Time", f"{self.total_duration:.2f}s")
@@ -334,6 +391,7 @@ class BenchmarkResult:
         task_table.add_column("Score", style="cyan")
         task_table.add_column("Success", style="white")
         task_table.add_column("Duration (s)", style="green")
+        task_table.add_column("Tokens", style="orange")
 
         # Add columns for each k value
         for k_val in self.k:
@@ -347,12 +405,16 @@ class BenchmarkResult:
         avg_duration = self.task_average_duration(task_id)
         duration_str = f"{avg_duration:.2f}" if avg_duration else "-"
 
+        task_tokens = self.task_total_token_usage(task_id)
+        token_str = str(task_tokens.get("total", "-")) if task_tokens else "-"
+
         # Build the overall metrics row
         metrics_row = [
             "Overall",
             f"{self._calculate_task_average_score(task_id):.3f}",
             f"{task_success_rate:.3f}",
-            duration_str,  # Add duration to the overall row
+            duration_str,
+            token_str,
         ]
 
         # Add pass@k and pass^k values
@@ -365,11 +427,15 @@ class BenchmarkResult:
         # Add individual trial rows
         for trial in self.task_results[task_id].trials:
             duration_str = f"{trial.duration:.2f}" if trial.duration else "-"
+            token_str = (
+                str(trial.token_usage.get("total", "-")) if trial.token_usage else "-"
+            )
             trial_row = [
                 trial.trial_id,
                 f"{trial.score:.3f}",
                 "✓" if trial.success else "✗",
-                duration_str,  # Add duration to trial row
+                duration_str,
+                token_str,
             ]
 
             # Add placeholder values for pass@k and pass^k (not applicable for individual trials)
@@ -461,6 +527,9 @@ class BenchmarkResult:
                 # Get tool call statistics
                 tool_call_stats = self.total_tool_calls()
 
+                # Get token usage statistics
+                total_tokens = self.total_token_usage()
+
                 # Create report data with timing information
                 report_data = {
                     "metrics": {
@@ -472,6 +541,7 @@ class BenchmarkResult:
                         "total_tool_calls": tool_call_stats["total"],
                         "successful_tool_calls": tool_call_stats["successful"],
                         "failed_tool_calls": tool_call_stats["failed"],
+                        "total_token_usage": total_tokens,
                     }
                 }
 
@@ -524,6 +594,10 @@ class BenchmarkResult:
                         if trial.duration is not None:
                             trial_data["duration"] = trial.duration
 
+                        # Add token usage if available
+                        if trial.token_usage is not None:
+                            trial_data["token_usage"] = trial.token_usage
+
                         # Add tool calls data if available
                         if "tool_calls" in trial.tool_statistics:
                             trial_data["tool_calls"] = [
@@ -555,6 +629,7 @@ class BenchmarkResult:
                         **task_pass_at_k_dict,
                         **task_pass_hat_k_dict,
                         "trials": trials_data,
+                        "total_token_usage": self.task_total_token_usage(task_id),
                     }
 
                     # Add task-level timing metrics
