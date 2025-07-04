@@ -43,7 +43,7 @@ class TaskTrailResult:
     state: dict[str, Any]  # TODO replace Any with specific types
     tool_statistics: dict[str, Any]  # TODO replace Any with specific types
     duration: float | None = None
-    token_usage: dict[str, Any] | None = None
+    token_usage: dict[str, int] | None = None
 
     @property
     def success(self) -> bool:
@@ -125,50 +125,32 @@ class BenchmarkResult:
 
         return sum(all_durations) if all_durations else None
 
-    def total_token_usage(self) -> dict[str, Any]:
-        """Calculate total token usage across all trials"""
+    def _sum_token_usage(self, trials) -> dict[str, int]:
+        """Helper method to sum token usage across trials"""
         total_tokens = {}
-
-        for task_trials in self.task_results.values():
-            for trial in task_trials.trials:
-                if trial.token_usage:
-                    for key, value in trial.token_usage.items():
-                        if isinstance(value, (int | float)):
-                            total_tokens[key] = total_tokens.get(key, 0) + value
-                        elif isinstance(value, dict):
-                            if key not in total_tokens:
-                                total_tokens[key] = {}
-                            for sub_key, sub_value in value.items():
-                                if isinstance(sub_value, (int | float)):
-                                    total_tokens[key][sub_key] = (
-                                        total_tokens[key].get(sub_key, 0) + sub_value
-                                    )
-
-        return total_tokens
-
-    def task_total_token_usage(self, task_id: str) -> dict[str, Any]:
-        """Calculate total token usage for a specific task"""
-        if task_id not in self.task_results:
-            raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
-
-        task_tokens = {}
-        trials = self.task_results[task_id].trials
 
         for trial in trials:
             if trial.token_usage:
                 for key, value in trial.token_usage.items():
-                    if isinstance(value, (int | float)):
-                        task_tokens[key] = task_tokens.get(key, 0) + value
-                    elif isinstance(value, dict):
-                        if key not in task_tokens:
-                            task_tokens[key] = {}
-                        for sub_key, sub_value in value.items():
-                            if isinstance(sub_value, (int | float)):
-                                task_tokens[key][sub_key] = (
-                                    task_tokens[key].get(sub_key, 0) + sub_value
-                                )
+                    total_tokens[key] = total_tokens.get(key, 0) + value
 
-        return task_tokens
+        return total_tokens
+
+    def total_token_usage(self) -> dict[str, int]:
+        """Calculate total token usage across all trials"""
+        all_trials = []
+        for task_trials in self.task_results.values():
+            all_trials.extend(task_trials.trials)
+
+        return self._sum_token_usage(all_trials)
+
+    def task_total_token_usage(self, task_id: str) -> dict[str, int]:
+        """Calculate total token usage for a specific task"""
+        if task_id not in self.task_results:
+            raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
+
+        trials = self.task_results[task_id].trials
+        return self._sum_token_usage(trials)
 
     def total_tool_calls(self) -> dict[str, int]:
         """Calculate total successful and failed tool calls across all trials"""
