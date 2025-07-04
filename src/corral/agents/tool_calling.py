@@ -122,7 +122,7 @@ class ToolCallingAgent:
             interface.get_available_tools_for_task(task_id)
         )
         if task_prompt is None:
-            task_guide = interface.get_task_guide(task_id)
+            task_guide = interface.get_task_prompt(task_id)
         else:
             task_guide = task_prompt
 
