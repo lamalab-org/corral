@@ -629,19 +629,100 @@ def add_adsorbate_to_slab_text(
     height: float = 2.0,
     site: list[float] | None = None,
 ) -> str:
-    """
-    Place an adsorbate (given as a CIF string) on a slab at a specified adsorption site.
-    If no site is specified, choose one from the top sites automatically.
+    """[BRIEF] Place an adsorbate molecule on a surface slab at a specified adsorption site. [/BRIEF]
+
+    [DETAILED] This tool combines a surface slab with an adsorbate molecule by placing the
+    adsorbate at a specific binding site on the surface. It handles the geometric placement
+    of the molecule at the correct height above the surface and ensures proper structural
+    integration. This is essential for creating realistic surface-adsorbate systems for
+    computational studies of catalysis, adsorption energetics, and surface reactivity. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to create a surface-adsorbate system
+    - Recommended for systematic studies of different binding sites or orientations
+    - Avoid when you need complex multi-adsorbate systems or surface reconstructions
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Parses the slab CIF structure to identify the surface geometry
+    - Loads the adsorbate as a molecular structure (handles both XYZ and CIF formats)
+    - Uses AdsorbateSiteFinder to place the adsorbate at the specified site
+    - Adjusts the vertical position according to the specified height parameter
+    - Combines the structures into a single CIF-formatted output
+    - Automatically selects a top site if no specific site is provided
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First obtain slab from choose_slab_text and adsorbate from get_structure_from_mp_text [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to place the adsorbate on the surface [/CURRENT]
+    3. [FOLLOW_UP] Use the combined structure for further analysis or optimization [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - add_adsorbate_to_slab_text(slab_cif, co2_cif, 2.0, [0.0, 0.0, 0.9])
+    - add_adsorbate_to_slab_text(slab_cif, molecule_cif, 1.5)  # Auto-select top site
+    - add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)      # Default height and site
+    [/SYNTACTICAL]
 
     Args:
-        slab_cif: CIF string of the slab.
-        adsorbate_cif: CIF string of the adsorbate.
-        height: Height (Å) above the slab surface where the adsorbate should be placed.
-        site: Optional fractional coordinate [x, y, z] for placement.
-            If None, the first top site will be used.
+        slab_cif: [BRIEF] CIF string of the surface slab structure. [/BRIEF]
+                 [DETAILED] A properly formatted CIF string containing the surface slab structure
+                 on which the adsorbate will be placed. This should be a two-dimensional periodic
+                 structure with a well-defined surface and vacuum region. The slab provides the
+                 substrate for molecular adsorption. [/DETAILED]
+                 [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
+                 [EXAMPLES] Examples: CIF string from choose_slab_text output [/EXAMPLES]
+
+        adsorbate_cif: [BRIEF] CIF string of the adsorbate molecule structure. [/BRIEF]
+                      [DETAILED] A CIF or XYZ formatted string containing the molecular structure
+                      of the adsorbate to be placed on the surface. This can be a small molecule
+                      like CO2, H2O, or more complex organic molecules. The tool will attempt to
+                      parse both CIF and XYZ formats automatically. [/DETAILED]
+                      [SYNTACTIC] Format: "Valid CIF or XYZ format string with molecular structure" [/SYNTACTIC]
+                      [EXAMPLES] Examples: CIF string from get_structure_from_mp_text for molecules [/EXAMPLES]
+
+        height: [BRIEF] Height in Angstroms above the surface for adsorbate placement. Defaults to 2.0. [/BRIEF]
+               [DETAILED] The vertical distance above the surface at which the adsorbate will be
+               placed. This parameter controls the initial separation between the adsorbate and
+               the surface atoms. Typical values range from 1.5 to 3.0 Å depending on the
+               molecular size and expected binding interaction. [/DETAILED]
+               [SYNTACTIC] Format: positive float representing distance in Angstroms [/SYNTACTIC]
+               [EXAMPLES] Examples: 1.5 (close to slab), 2.0, 2.5 (distant from molecule) [/EXAMPLES]
+
+        site: [BRIEF] Optional fractional coordinates for adsorbate placement. [/BRIEF]
+             [DETAILED] A list of three floating-point numbers representing the fractional
+             coordinates [x, y, z] where the adsorbate should be placed. If not provided,
+             the tool will automatically select the first available top site. These coordinates
+             should typically come from choose_adsorption_site_text output. [/DETAILED]
+             [SYNTACTIC] Format: list of three floats [x, y, z] or None [/SYNTACTIC]
+             [EXAMPLES] Examples: [0.0, 0.0, 0.9], [0.5, 0.5, 0.9], None (auto-select) [/EXAMPLES]
 
     Returns:
-        str: CIF string of the combined (adsorbate+slab) structure.
+        str: [BRIEF] CIF string of the combined surface-adsorbate structure. [/BRIEF]
+             [DETAILED] A properly formatted CIF string containing the combined structure
+             with the adsorbate placed on the surface at the specified position and height.
+             This structure includes both the original slab atoms and the adsorbate atoms,
+             properly integrated into a single periodic structure. [/DETAILED]
+             [EXAMPLES] Example output: CIF string with both slab and adsorbate atoms [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When CIF strings are malformed or adsorbate cannot be parsed [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid CIF format, unsupported molecule format, or structural issues [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify CIF formats and ensure adsorbate is a valid molecular structure [/ERROR_RECOVERY]
+        StructureError: [ERROR_WHEN] When adsorbate placement fails due to geometric constraints [/ERROR_WHEN]
+                       [ERROR_DETAILS] Site coordinates outside unit cell, insufficient surface area, or placement conflicts [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Check site coordinates are within [0,1] range and surface has adequate space [/ERROR_RECOVERY]
+        RuntimeError: [ERROR_WHEN] When no adsorption sites are found on the surface [/ERROR_WHEN]
+                     [ERROR_DETAILS] Surface structure lacks identifiable binding sites [/ERROR_DETAILS]
+                     [ERROR_RECOVERY] Verify slab structure has proper surface termination and geometry [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Does not optimize adsorbate orientation or conformation
+    - Cannot handle multiple adsorbates or complex binding modes
+    - Limited to simple geometric placement without chemical bonding
+    - Does not account for surface relaxation or reconstruction upon adsorption
+    [/LIMITATIONS]
     """
     from pymatgen.analysis.adsorption import AdsorbateSiteFinder
     from pymatgen.core import Molecule, Structure
