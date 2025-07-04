@@ -779,7 +779,7 @@ def generate_reconstructed_slab(
 
     [PROCEDURAL] When to use this tool:
     - Best suited for materials known to undergo significant surface rearrangements
-    - If slab has no adsorption site, after reconstruction it would fix the structure
+    - If the slab has no adsorption site, reconstruction may introduce suitable sites.
     - Essential for accurate modeling of catalytic surfaces with complex structures
     - Recommended for systematic studies of reconstruction effects on surface properties
     - Avoid for simple surface terminations (use enumerate_slabs_text instead)
