@@ -22,11 +22,10 @@ RETRY_EXCEPTIONS = (
     openai.InternalServerError,
 )
 
-
 TYPE_MAPPING = {
     "str": "string",
     "bool": "boolean",
-    "int": "number",
+    "int": "integer",
     "float": "number",
     "list[str]": "array",
 }
@@ -58,8 +57,9 @@ def llm_call(
     temperature: float,
     tools: list[dict[str, Any]] | None = None,
     api_endpoint: str | None = None,
+    return_usage: bool = False,
     **kwargs,
-) -> Message:
+) -> Message | tuple[Message, dict[str, Any]]:
     """
     Call LiteLLM API with or without tools based on parameters
 
@@ -69,10 +69,11 @@ def llm_call(
         temperature (float): The temperature to use.
         tools (Dict[str, Any], optional): The tools to use. If provided, will use tool calling.
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
+        return_usage (bool, optional): If True, returns tuple of (message, usage_info). Defaults to False.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
 
     Returns:
-        Message: The response from the LiteLLM API.
+        Message | tuple[Message, dict]: The response from the LiteLLM API, optionally with usage info.
     """
     try:
         params = {
@@ -98,7 +99,24 @@ def llm_call(
         else:
             response = litellm.completion(**params)
 
-        return response.choices[0].message
+        message = response.choices[0].message
+
+        if return_usage:
+            # Extract usage information from the response
+            usage_info = {
+                "prompt_tokens": getattr(response.usage, "prompt_tokens", 0)
+                if response.usage
+                else 0,
+                "completion_tokens": getattr(response.usage, "completion_tokens", 0)
+                if response.usage
+                else 0,
+                "total_tokens": getattr(response.usage, "total_tokens", 0)
+                if response.usage
+                else 0,
+            }
+            return message, usage_info
+
+        return message
 
     except Exception as e:
         raise e
@@ -131,19 +149,39 @@ def convert_dict_arg(arg: dict) -> dict:
             f"Argument type is missing for argument: {arg.get('name', 'unknown')}"
         )
 
-    mapped_type = TYPE_MAPPING.get(arg_type)
-    if not mapped_type:
-        raise ValueError(
-            f"Unsupported argument type: {arg_type} for argument: {arg.get('name')}"
-        )
+    if arg_type == "str":
+        prop = {"type": "string", "description": arg.get("description", "")}
+    elif arg_type == "bool":
+        prop = {"type": "boolean", "description": arg.get("description", "")}
+    elif arg_type == "int":
+        prop = {
+            "type": "integer",  # More specific than "number"
+            "description": arg.get("description", ""),
+        }
+    elif arg_type == "float":
+        prop = {"type": "number", "description": arg.get("description", "")}
+    elif arg_type == "list[str]":
+        # Very explicit array schema to prevent character-by-character parsing
+        prop = {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": f"{arg.get('description', '')} - Provide as array of complete strings, e.g., [\"Li2O3\", \"CaCO3\"]",
+            "minItems": 1,
+        }
+    else:
+        # Fallback for unknown types
+        prop = {
+            "type": "string",
+            "description": f"{arg.get('description', '')} (type: {arg_type})",
+        }
 
-    prop = {"type": mapped_type, "description": arg.get("description", "")}
-
-    if mapped_type == "array":
-        prop["items"] = {"type": "string"}
-
+    # Add choices/enum if specified
     if arg.get("choices"):
         prop["enum"] = arg["choices"]
+
+    # Add default if specified
+    if arg.get("default") is not None:
+        prop["default"] = arg["default"]
 
     return prop
 
@@ -182,7 +220,7 @@ def convert_to_openai_tool_format(tools_dict: dict) -> list:
                 property_entry = convert_dict_arg(arg)
                 function["parameters"]["properties"][arg["name"]] = property_entry
 
-                if arg.get("required", False):
+                if arg.get("required", True):
                     function["parameters"]["required"].append(arg["name"])
 
         openai_tools.append({"type": "function", "function": function})
