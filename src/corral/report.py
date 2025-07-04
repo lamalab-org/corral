@@ -113,6 +113,37 @@ class BenchmarkResult:
 
         return mean(all_durations) if all_durations else None
 
+    def overall_total_duration(self) -> float | None:
+        """Calculate total duration across all trials"""
+        all_durations = []
+        for task_trials in self.task_results.values():
+            durations = [
+                t.duration for t in task_trials.trials if t.duration is not None
+            ]
+            all_durations.extend(durations)
+
+        return sum(all_durations) if all_durations else None
+
+    def total_tool_calls(self) -> dict[str, int]:
+        """Calculate total successful and failed tool calls across all trials"""
+        successful_calls = 0
+        failed_calls = 0
+
+        for task_trials in self.task_results.values():
+            for trial in task_trials.trials:
+                if "tool_calls" in trial.tool_statistics:
+                    for tool_call in trial.tool_statistics["tool_calls"]:
+                        if tool_call.get("status") == "success":
+                            successful_calls += 1
+                        else:
+                            failed_calls += 1
+
+        return {
+            "successful": successful_calls,
+            "failed": failed_calls,
+            "total": successful_calls + failed_calls,
+        }
+
     def average_score(self) -> float:
         """Calculate average score across all results"""
 
@@ -263,12 +294,29 @@ class BenchmarkResult:
         summary_table.add_row(
             "Overall Success Rate", f"{self.overall_success_rate():.3f}"
         )
+
+        # Add tool call statistics
+        tool_call_stats = self.total_tool_calls()
+        summary_table.add_row("Total Tool Calls", str(tool_call_stats["total"]))
+        summary_table.add_row(
+            "Successful Tool Calls", str(tool_call_stats["successful"])
+        )
+        summary_table.add_row("Failed Tool Calls", str(tool_call_stats["failed"]))
+
+        # Add duration metrics
         if self.total_duration:
             summary_table.add_row("Total Benchmark Time", f"{self.total_duration:.2f}s")
+
+        total_trial_duration = self.overall_total_duration()
+        if total_trial_duration:
+            summary_table.add_row(
+                "Total Trial Duration", f"{total_trial_duration:.2f}s"
+            )
 
         avg_duration = self.overall_average_duration()
         if avg_duration:
             summary_table.add_row("Avg Trial Duration", f"{avg_duration:.2f}s")
+
         for k_val in self.k:
             summary_table.add_row(f"Pass@{k_val}", f"{pass_at_k_results[k_val]:.3f}")
             summary_table.add_row(f"Pass^{k_val}", f"{pass_hat_k_results[k_val]:.3f}")
@@ -410,6 +458,9 @@ class BenchmarkResult:
                     f"pass^{k}": value for k, value in pass_hat_k_results.items()
                 }
 
+                # Get tool call statistics
+                tool_call_stats = self.total_tool_calls()
+
                 # Create report data with timing information
                 report_data = {
                     "metrics": {
@@ -418,6 +469,9 @@ class BenchmarkResult:
                         **pass_at_k_dict,
                         **pass_hat_k_dict,
                         "total_tasks": self.total_tasks,
+                        "total_tool_calls": tool_call_stats["total"],
+                        "successful_tool_calls": tool_call_stats["successful"],
+                        "failed_tool_calls": tool_call_stats["failed"],
                     }
                 }
 
@@ -425,6 +479,12 @@ class BenchmarkResult:
                 if self.total_duration:
                     report_data["metrics"]["total_benchmark_duration"] = (
                         self.total_duration
+                    )
+
+                total_trial_duration = self.overall_total_duration()
+                if total_trial_duration:
+                    report_data["metrics"]["total_trial_duration"] = (
+                        total_trial_duration
                     )
 
                 avg_duration = self.overall_average_duration()
