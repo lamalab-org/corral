@@ -6,8 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any
-from typing import Optional
-# from corral.io import FSManager
+
 from loguru import logger
 from pydantic import BaseModel
 
@@ -187,7 +186,7 @@ class ModalTool(Tool):
 class Environment(ABC):
     """Base class for task environments"""
 
-    def __init__(self, task_id: str, base_work_dir: str, fs_manager = None):
+    def __init__(self, task_id: str, base_work_dir: str, fs_manager=None):
         self.task_id = task_id
         self.base_work_dir = base_work_dir
         self.tools: dict[str, Tool] = {}
