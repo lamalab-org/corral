@@ -226,18 +226,96 @@ def enumerate_slabs_text(
     min_slab_size: float = 12,
     min_vacuum_size: float = 5,
 ) -> str:
-    """
-    Enumerate possible slabs from a bulk structure (given as CIF text) using SlabGenerator.
-    Returns a JSON string mapping slab indices to CIF strings.
+    """[BRIEF] Enumerate all possible surface slab terminations from a bulk structure and return as JSON. [/BRIEF]
+
+    [DETAILED] This tool generates all possible surface terminations for a given bulk crystal structure
+    along specified Miller indices. Unlike creating a single slab, this tool explores different ways
+    to terminate the surface, which is crucial for materials with complex structures or multiple
+    chemically distinct layers. Each termination represents a different surface chemistry and reactivity,
+    making this tool essential for comprehensive surface studies. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to explore all possible surface terminations for a material
+    - Best suited for complex materials with multiple distinct atomic layers
+    - Recommended for systematic surface studies and comparing different surface chemistries
+    - Avoid when you only need a single, well-defined surface (use create_slab_from_structure_text instead)
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Parses the bulk CIF structure to create a pymatgen Structure object
+    - Uses SlabGenerator to systematically create all possible surface terminations
+    - Generates multiple slabs with different atomic arrangements at the surface
+    - Applies structural sorting and standardization to each slab
+    - Returns all slabs as a JSON dictionary with indexed keys for easy selection
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First obtain bulk structure using get_structure_from_mp_text [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to enumerate all possible slab terminations [/CURRENT]
+    3. [FOLLOW_UP] Use choose_slab_text to select a specific termination from the results [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - enumerate_slabs_text(cif_string, (1,1,1), 12, 5)
+    - enumerate_slabs_text(cif_string, (1,0,0), 15, 10)
+    - enumerate_slabs_text(cif_string)  # Uses default parameters
+    [/SYNTACTICAL]
 
     Args:
-        bulk_cif: Bulk structure in CIF string format.
-        miller_index: Miller index (e.g. (1,1,1)).
-        min_slab_size: Minimum slab thickness (Å).
-        min_vacuum_size: Minimum vacuum layer (Å).
+        bulk_cif: [BRIEF] Bulk crystal structure in CIF string format. [/BRIEF]
+                 [DETAILED] A properly formatted CIF string containing the bulk crystal structure
+                 from which surface slabs will be generated. This should be a three-dimensional
+                 periodic structure with well-defined atomic positions and lattice parameters.
+                 The structure will be analyzed to determine all possible surface terminations. [/DETAILED]
+                 [SYNTACTIC] Format: "Valid CIF format string with complete structural information" [/SYNTACTIC]
+                 [EXAMPLES] Examples: CIF string from Materials Project structures [/EXAMPLES]
+
+        miller_index: [BRIEF] Miller indices for surface orientation. Defaults to (1,1,1). [/BRIEF]
+                     [DETAILED] A tuple of three integers specifying the crystallographic plane along
+                     which all surface terminations will be generated. This determines the surface
+                     orientation but allows for different terminations along the same plane. Different
+                     Miller indices will produce different surface structures and properties. [/DETAILED]
+                     [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
+                     [EXAMPLES] Examples: (1,1,1), (1,0,0), (1,1,0) [/EXAMPLES]
+
+        min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 12. [/BRIEF]
+                      [DETAILED] The minimum thickness of each slab in the direction perpendicular
+                      to the surface plane. This ensures that all generated slabs have sufficient
+                      bulk-like character while exposing different surface terminations. Affects
+                      both the structural accuracy and computational requirements. [/DETAILED]
+                      [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
+                      [EXAMPLES] Examples: 10.0 (for thin slab), 12.0 (standard), 15.0 (for thick slab) [/EXAMPLES]
+
+        min_vacuum_size: [BRIEF] Minimum vacuum layer thickness in Angstroms. Defaults to 5. [/BRIEF]
+                        [DETAILED] The minimum vacuum space above each surface to prevent interactions
+                        between periodic images. This parameter is applied to all generated slabs
+                        and is crucial for accurate surface calculations. Larger values reduce
+                        spurious interactions but increase computational cost. [/DETAILED]
+                        [SYNTACTIC] Format: positive float representing vacuum thickness in Angstroms [/SYNTACTIC]
+                        [EXAMPLES] Examples: 5.0, 10.0, 15.0 [/EXAMPLES]
 
     Returns:
-        str: JSON dictionary: {"slab_0": "<cif_string>", "slab_1": "<cif_string>", ...}
+        str: [BRIEF] JSON string mapping slab indices to their CIF representations. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing a dictionary where keys are slab
+             identifiers (e.g., "slab_0", "slab_1") and values are the corresponding CIF
+             strings for each surface termination. This format allows easy selection and
+             comparison of different surface terminations. [/DETAILED]
+             [EXAMPLES] Example output: '{"slab_0": "CIF content...", "slab_1": "CIF content...", ...}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When CIF string is malformed or parameters are invalid [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid CIF format, negative size parameters, or incompatible Miller indices [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify CIF format and ensure all parameters are positive numbers [/ERROR_RECOVERY]
+        StructureError: [ERROR_WHEN] When slab generation fails for the given structure [/ERROR_WHEN]
+                       [ERROR_DETAILS] Structure not compatible with specified Miller indices or size constraints [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Try different Miller indices or adjust size parameters [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Does not perform surface relaxation or optimization
+    - May generate many similar terminations for high-symmetry structures
+    - Limited to periodic slab models without defects or reconstructions
+    [/LIMITATIONS]
     """
     import json
 
