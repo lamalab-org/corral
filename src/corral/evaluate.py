@@ -1,5 +1,4 @@
 import pickle
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -13,7 +12,6 @@ from corral.report import (
     TaskTrialResults,
     ToolResponse,
 )
-from corral.utils import save_agent_messages
 
 
 class BenchmarkInterface:
@@ -37,7 +35,7 @@ class BenchmarkInterface:
         except Exception:
             return False
 
-    def get_available_tools_for_task(self, task_id: str) -> str:
+    def get_available_tools_for_task(self, task_id: str) -> dict[str, Any]:
         """Get list of available tools for a task"""
         response = requests.get(f"{self.base_url}/tasks/{task_id}/tools")
         response.raise_for_status()
@@ -148,7 +146,6 @@ class MatAgentBenchmark:
     ) -> BenchmarkResult:
         """Run benchmark"""
 
-        benchmark_start_time = time.time()
         if task_ids is None:
             task_ids = self.interface.get_available_tasks()
 
@@ -187,12 +184,8 @@ class MatAgentBenchmark:
             self._run_independent_execution(
                 task_ids, trials_per_task, task_results, session_id, verbose
             )
-        benchmark_end_time = time.time()
-        total_duration = benchmark_end_time - benchmark_start_time
 
-        return BenchmarkResult(
-            task_results=task_results, k=k_values, total_duration=total_duration
-        )
+        return BenchmarkResult(task_results=task_results, k=k_values)
 
     def _initialize_task_results(
         self, task_ids: list[str], session_id: str
@@ -375,15 +368,12 @@ class MatAgentBenchmark:
             logger.info(
                 f"Running trial {len(task_trials.trials) + 1} for task {task_id}"
             )
-            answer, messages = self.agent.run_agent(self.interface, task_id)
+            answer = self.agent.run_agent(self.interface, task_id, verbose=verbose)
             result = self.interface.submit_answer(task_id, answer)
             duration = result.state.get("duration")
             result.duration = duration
 
             task_trials.trials.append(result)
-
-            if verbose:
-                save_agent_messages(messages, task_id, self.agent.__class__.__name__)
 
             logger.info(
                 f"Trial completed for {task_id}, score: {result.score}, duration: {duration:.2f}s"

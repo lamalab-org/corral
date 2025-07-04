@@ -113,85 +113,36 @@ class BenchmarkResult:
 
         return mean(all_durations) if all_durations else None
 
-    def task_average_successful_calls(self, task_id: str) -> float:
-        """Calculate average successful calls per trial for a specific task"""
-        if task_id not in self.task_results:
-            raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
-
-        trials = self.task_results[task_id].trials
-        if not trials:
-            raise NoResultsError(f"No trials available for task ID '{task_id}'.")
-
-        successful_calls = [
-            trial.tool_statistics.get("successful_calls", 0) for trial in trials
-        ]
-        return sum(successful_calls) / len(trials)
-
-    def task_average_failed_calls(self, task_id: str) -> float:
-        """Calculate average failed calls per trial for a specific task"""
-        if task_id not in self.task_results:
-            raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
-
-        trials = self.task_results[task_id].trials
-        if not trials:
-            raise NoResultsError(f"No trials available for task ID '{task_id}'.")
-
-        failed_calls = [
-            trial.tool_statistics.get("failed_calls", 0) for trial in trials
-        ]
-        return sum(failed_calls) / len(trials)
-
-    def task_average_total_calls(self, task_id: str) -> float:
-        """Calculate average total calls per trial for a specific task"""
-        if task_id not in self.task_results:
-            raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
-
-        trials = self.task_results[task_id].trials
-        if not trials:
-            raise NoResultsError(f"No trials available for task ID '{task_id}'.")
-
-        total_calls = [trial.tool_statistics.get("total_calls", 0) for trial in trials]
-        return sum(total_calls) / len(trials)
-
-    def overall_average_successful_calls(self) -> float:
-        """Calculate overall average successful calls per trial across all tasks"""
-        all_successful_calls = []
+    def overall_total_duration(self) -> float | None:
+        """Calculate total duration across all trials"""
+        all_durations = []
         for task_trials in self.task_results.values():
-            successful_calls = [
-                trial.tool_statistics.get("successful_calls", 0)
-                for trial in task_trials.trials
+            durations = [
+                t.duration for t in task_trials.trials if t.duration is not None
             ]
-            all_successful_calls.extend(successful_calls)
+            all_durations.extend(durations)
 
-        return (
-            sum(all_successful_calls) / len(all_successful_calls)
-            if all_successful_calls
-            else 0
-        )
+        return sum(all_durations) if all_durations else None
 
-    def overall_average_failed_calls(self) -> float:
-        """Calculate overall average failed calls per trial across all tasks"""
-        all_failed_calls = []
+    def total_tool_calls(self) -> dict[str, int]:
+        """Calculate total successful and failed tool calls across all trials"""
+        successful_calls = 0
+        failed_calls = 0
+
         for task_trials in self.task_results.values():
-            failed_calls = [
-                trial.tool_statistics.get("failed_calls", 0)
-                for trial in task_trials.trials
-            ]
-            all_failed_calls.extend(failed_calls)
+            for trial in task_trials.trials:
+                if "tool_calls" in trial.tool_statistics:
+                    for tool_call in trial.tool_statistics["tool_calls"]:
+                        if tool_call.get("status") == "success":
+                            successful_calls += 1
+                        else:
+                            failed_calls += 1
 
-        return sum(all_failed_calls) / len(all_failed_calls) if all_failed_calls else 0
-
-    def overall_average_total_calls(self) -> float:
-        """Calculate overall average total calls per trial across all tasks"""
-        all_total_calls = []
-        for task_trials in self.task_results.values():
-            total_calls = [
-                trial.tool_statistics.get("total_calls", 0)
-                for trial in task_trials.trials
-            ]
-            all_total_calls.extend(total_calls)
-
-        return sum(all_total_calls) / len(all_total_calls) if all_total_calls else 0
+        return {
+            "successful": successful_calls,
+            "failed": failed_calls,
+            "total": successful_calls + failed_calls,
+        }
 
     def average_score(self) -> float:
         """Calculate average score across all results"""
@@ -344,23 +295,28 @@ class BenchmarkResult:
             "Overall Success Rate", f"{self.overall_success_rate():.3f}"
         )
 
-        # Add call metrics
+        # Add tool call statistics
+        tool_call_stats = self.total_tool_calls()
+        summary_table.add_row("Total Tool Calls", str(tool_call_stats["total"]))
         summary_table.add_row(
-            "Avg Successful Calls", f"{self.overall_average_successful_calls():.2f}"
+            "Successful Tool Calls", str(tool_call_stats["successful"])
         )
-        summary_table.add_row(
-            "Avg Failed Calls", f"{self.overall_average_failed_calls():.2f}"
-        )
-        summary_table.add_row(
-            "Avg Total Calls", f"{self.overall_average_total_calls():.2f}"
-        )
+        summary_table.add_row("Failed Tool Calls", str(tool_call_stats["failed"]))
 
+        # Add duration metrics
         if self.total_duration:
             summary_table.add_row("Total Benchmark Time", f"{self.total_duration:.2f}s")
+
+        total_trial_duration = self.overall_total_duration()
+        if total_trial_duration:
+            summary_table.add_row(
+                "Total Trial Duration", f"{total_trial_duration:.2f}s"
+            )
 
         avg_duration = self.overall_average_duration()
         if avg_duration:
             summary_table.add_row("Avg Trial Duration", f"{avg_duration:.2f}s")
+
         for k_val in self.k:
             summary_table.add_row(f"Pass@{k_val}", f"{pass_at_k_results[k_val]:.3f}")
             summary_table.add_row(f"Pass^{k_val}", f"{pass_hat_k_results[k_val]:.3f}")
@@ -378,9 +334,6 @@ class BenchmarkResult:
         task_table.add_column("Score", style="cyan")
         task_table.add_column("Success", style="white")
         task_table.add_column("Duration (s)", style="green")
-        task_table.add_column("Successful Calls", style="blue")
-        task_table.add_column("Failed Calls", style="red")
-        task_table.add_column("Total Calls", style="magenta")
 
         # Add columns for each k value
         for k_val in self.k:
@@ -399,10 +352,7 @@ class BenchmarkResult:
             "Overall",
             f"{self._calculate_task_average_score(task_id):.3f}",
             f"{task_success_rate:.3f}",
-            duration_str,
-            f"{self.task_average_successful_calls(task_id):.2f}",
-            f"{self.task_average_failed_calls(task_id):.2f}",
-            f"{self.task_average_total_calls(task_id):.2f}",
+            duration_str,  # Add duration to the overall row
         ]
 
         # Add pass@k and pass^k values
@@ -415,18 +365,11 @@ class BenchmarkResult:
         # Add individual trial rows
         for trial in self.task_results[task_id].trials:
             duration_str = f"{trial.duration:.2f}" if trial.duration else "-"
-            successful_calls = trial.tool_statistics.get("successful_calls", 0)
-            failed_calls = trial.tool_statistics.get("failed_calls", 0)
-            total_calls = trial.tool_statistics.get("total_calls", 0)
-
             trial_row = [
                 trial.trial_id,
                 f"{trial.score:.3f}",
                 "✓" if trial.success else "✗",
-                duration_str,
-                str(successful_calls),
-                str(failed_calls),
-                str(total_calls),
+                duration_str,  # Add duration to trial row
             ]
 
             # Add placeholder values for pass@k and pass^k (not applicable for individual trials)
@@ -515,17 +458,20 @@ class BenchmarkResult:
                     f"pass^{k}": value for k, value in pass_hat_k_results.items()
                 }
 
+                # Get tool call statistics
+                tool_call_stats = self.total_tool_calls()
+
                 # Create report data with timing information
                 report_data = {
                     "metrics": {
                         "average_score": self.average_score(),
                         "overall_success_rate": self.overall_success_rate(),
-                        "average_successful_calls": self.overall_average_successful_calls(),
-                        "average_failed_calls": self.overall_average_failed_calls(),
-                        "average_total_calls": self.overall_average_total_calls(),
                         **pass_at_k_dict,
                         **pass_hat_k_dict,
                         "total_tasks": self.total_tasks,
+                        "total_tool_calls": tool_call_stats["total"],
+                        "successful_tool_calls": tool_call_stats["successful"],
+                        "failed_tool_calls": tool_call_stats["failed"],
                     }
                 }
 
@@ -533,6 +479,12 @@ class BenchmarkResult:
                 if self.total_duration:
                     report_data["metrics"]["total_benchmark_duration"] = (
                         self.total_duration
+                    )
+
+                total_trial_duration = self.overall_total_duration()
+                if total_trial_duration:
+                    report_data["metrics"]["total_trial_duration"] = (
+                        total_trial_duration
                     )
 
                 avg_duration = self.overall_average_duration()
@@ -600,11 +552,6 @@ class BenchmarkResult:
                     task_result_data = {
                         "success_rate": self.task_success_rate(task_id),
                         "average_score": self._calculate_task_average_score(task_id),
-                        "average_successful_calls": self.task_average_successful_calls(
-                            task_id
-                        ),
-                        "average_failed_calls": self.task_average_failed_calls(task_id),
-                        "average_total_calls": self.task_average_total_calls(task_id),
                         **task_pass_at_k_dict,
                         **task_pass_hat_k_dict,
                         "trials": trials_data,
