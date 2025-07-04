@@ -103,26 +103,24 @@ class BenchmarkResult:
 
         return mean(durations) if durations else None
 
-    def overall_average_duration(self) -> float | None:
-        """Calculate overall average trial duration across all tasks"""
+    def _collect_all_durations(self) -> list[float]:
+        """Helper method to collect all non-None durations across all trials"""
         all_durations = []
         for task_trials in self.task_results.values():
             durations = [
                 t.duration for t in task_trials.trials if t.duration is not None
             ]
             all_durations.extend(durations)
+        return all_durations
 
+    def overall_average_duration(self) -> float | None:
+        """Calculate overall average trial duration across all tasks"""
+        all_durations = self._collect_all_durations()
         return mean(all_durations) if all_durations else None
 
     def overall_total_duration(self) -> float | None:
         """Calculate total duration across all trials"""
-        all_durations = []
-        for task_trials in self.task_results.values():
-            durations = [
-                t.duration for t in task_trials.trials if t.duration is not None
-            ]
-            all_durations.extend(durations)
-
+        all_durations = self._collect_all_durations()
         return sum(all_durations) if all_durations else None
 
     def _sum_token_usage(self, trials) -> dict[str, int]:
