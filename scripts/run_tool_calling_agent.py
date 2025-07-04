@@ -2,7 +2,7 @@ import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
-from corral.agents.tool_calling import ToolCallingAgent
+from corral.agents import ToolCallingAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 import os
 
@@ -15,7 +15,6 @@ def run_benchmark(model: str = "gpt-4o", task_ids: list | None = None, temperatu
     """Run the benchmark wsith specified model and tasks"""
 
     os.makedirs(work_dir, exist_ok=True)
-
 
     interface = BenchmarkInterface()
     agent = ToolCallingAgent(model=model, max_iterations=20 , temperature=temperature)
