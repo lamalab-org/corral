@@ -2,10 +2,8 @@ import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
-from corral.agents.react import ReActAgent
+from corral.agents import ToolCallingAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
-
-load_dotenv("../.env", override=True)
 
 
 def setup_litellm():
@@ -21,7 +19,7 @@ def run_benchmark(
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
+    agent = ToolCallingAgent(model=model, max_iterations=20, temperature=temperature)
     runner = MatAgentBenchmark(interface, agent)
 
     # Run benchmark
@@ -29,7 +27,7 @@ def run_benchmark(
     result = runner.bench(
         task_ids, trials_per_task=5, k_values=[1, 2, 3, 4, 5], verbose=True
     )
-    result.generate_report("results_react.json")
+    result.generate_report("results_toolcalling.json")
 
     logger.info("Benchmark completed")
 
@@ -39,8 +37,7 @@ if __name__ == "__main__":
     setup_litellm()
 
     try:
-        model = "anthropic/claude-3-7-sonnet-20250219"
-        run_benchmark(model=model)
+        run_benchmark()
 
     except Exception as e:
         logger.error(f"Benchmark failed: {e!s}")

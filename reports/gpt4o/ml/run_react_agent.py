@@ -14,7 +14,7 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "anthropic/claude-3-7-sonnet-20250219",
+    model: str = "gpt-4o",
     task_ids: list | None = None,
     temperature: float = 0.0,
 ):
@@ -39,8 +39,6 @@ if __name__ == "__main__":
     setup_litellm()
 
     try:
-        # model = "groq/llama-3.3-70b-versatile"
-        # model = "claude-3-5-sonnet-20240620"
         model = "gpt-4o"
         run_benchmark(model=model)
 

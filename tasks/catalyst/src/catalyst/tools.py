@@ -14,8 +14,12 @@ from dotenv import load_dotenv
 from loguru import logger
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from tool_utils import (
+    ensure_directory_exists,
     find_surface_atoms_with_voronoi,
+    generate_output_capture_code,
     load_structure,
+    parse_execution_output,
+    safe_convert_timeout,
     set_fixed_atom_constraints,
     standardize_bulk,
     tile_atoms,
@@ -728,6 +732,11 @@ def batch_retrieve_polymorphs(
     """
     from pathlib import Path
 
+    if isinstance(max_energy_above_hull, str):
+        max_energy_above_hull = float(max_energy_above_hull)
+    if isinstance(max_per_composition, str):
+        max_per_composition = int(max_per_composition)
+
     # Create save directory
     Path(save_directory).mkdir(exist_ok=True)
 
@@ -940,15 +949,16 @@ def execute_python_code(
     capturing standard output and errors, and saving structured results to a file.
 
     Args:
-        python_code: A string containing the Python code to be executed. For best results, assign your main output to a variable named
-                'result', 'output' in the code.
+        python_code: A string containing the Python code to be executed.
+                    For best results, assign your main output to a variable named
+                    'result' or 'output'. The tool will also attempt to capture
+                    other user-defined variables as fallback.
         input_data: An optional JSON string. If provided, it will be loaded
                     into a Python variable named `input_data` within the
                     executed script, allowing the script to process external data.
                     Defaults to None.
         save_output_to: An optional file path (string) where the captured
-                        execution result (e.g., `output`, `result`, etc., from the
-                        executed script) will be saved as a JSON file. Defaults to None.
+                        execution result will be saved as a JSON file. Defaults to None.
         timeout: The maximum time in seconds the subprocess is allowed to run.
                  If the execution exceeds this limit, a `TimeoutExpired` error
                  will be returned. Defaults to 300 seconds.
@@ -963,27 +973,30 @@ def execute_python_code(
         - `return_code` (int): The exit code of the subprocess. A value of 0
                                typically indicates success.
         - `execution_result` (dict): A dictionary containing variables captured
-                                    from the executed script (e.g., `output`,
-                                    `result`, `filtered_data`, `processed_data`,
-                                    `dataset`). If no such variables are found,
-                                    this will be an empty dictionary.
+                                    from the executed script. If no suitable variables
+                                    are found, this will be an empty dictionary.
         - `saved_to` (str or None): The path where the `execution_result` was
                                     saved, if `save_output_to` was provided
                                     and execution was successful.
         - `error` (str, optional): A descriptive error message if execution failed
                                    or timed out.
-        - `traceback` (str, optional): The Python traceback in case of an exception
-                                       within the `execute_python_code` function
-                                       or the executed script.
-
-    Raises:
-        (Implicitly handled and returned in the JSON result):
-        - `subprocess.TimeoutExpired`: If the execution exceeds the specified timeout.
-        - `Exception`: For various issues like invalid `python_code`, file I/O errors,
-                       or unexpected subprocess behavior.
+        - `traceback` (str, optional): The Python traceback in case of an exception.
     """
+    import json
+    import subprocess
+    import sys
+    import traceback
+    from pathlib import Path
+
     try:
-        # Create a temporary file for the code
+        # Ensure timeout is valid
+        timeout = safe_convert_timeout(timeout)
+
+        # Create directory if needed
+        if save_output_to:
+            ensure_directory_exists(save_output_to)
+
+        # Create temporary file for the code
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             # Prepare the code with input data if provided
             full_code = ""
@@ -992,48 +1005,10 @@ def execute_python_code(
                 full_code += f"input_data = json.loads('''{input_data}''')\n"
 
             full_code += python_code
-
-            # Add output capture
-            # Add output capture
-            full_code += "\n\n"
-            full_code += "import json\n"
-            full_code += "result_ = {}\n"
-            full_code += "# Try to capture from preferred variable names first\n"
-            full_code += "preferred_vars = ['output', 'result', 'filtered_data', 'processed_data', 'dataset']\n"
-            full_code += "captured = False\n"
-            full_code += "for var_name in preferred_vars:\n"
-            full_code += "    if var_name in locals():\n"
-            full_code += "        result_[var_name] = locals()[var_name]\n"
-            full_code += "        captured = True\n"
-            full_code += "        break\n"
-            full_code += "\n"
-            full_code += "# Fallback: capture any user-defined variables (excluding built-ins and imports)\n"
-            full_code += "if not captured:\n"
-            full_code += "    import types\n"
-            full_code += "    excluded = {'__builtins__', '__name__', '__doc__', '__package__', '__loader__', '__spec__', '__annotations__', '__cached__', '__file__'}\n"
-            full_code += "    local_vars = dict(locals())  # Create a snapshot to avoid RuntimeError\n"
-            full_code += "    \n"
-            full_code += "    def is_json_serializable(obj):\n"
-            full_code += "        try:\n"
-            full_code += "            json.dumps(obj)\n"
-            full_code += "            return True\n"
-            full_code += "        except (TypeError, ValueError):\n"
-            full_code += "            return False\n"
-            full_code += "    \n"
-            full_code += "    for var_name, var_value in local_vars.items():\n"
-            full_code += "        if (not var_name.startswith('_') and \n"
-            full_code += "            var_name not in excluded and \n"
-            full_code += "            var_name not in ['json', 'types', 'result_', 'preferred_vars', 'captured', 'excluded', 'local_vars', 'is_json_serializable'] and\n"
-            full_code += "            not isinstance(var_value, types.ModuleType) and\n"
-            full_code += "            not callable(var_value) and\n"
-            full_code += "            is_json_serializable(var_value)):\n"
-            full_code += "            result_[var_name] = var_value\n"
-            full_code += "print('EXECUTION_RESULT:', json.dumps(result_))\n"
+            full_code += generate_output_capture_code()
 
             f.write(full_code)
             temp_file = f.name
-
-        from pathlib import Path
 
         # Execute the code
         process = subprocess.run(
@@ -1049,30 +1024,19 @@ def execute_python_code(
         Path(temp_file).unlink()
 
         # Parse output
-        stdout_lines = process.stdout.strip().split("\n")
-        execution_result = {}  # Initialize as empty dict
-        output_lines = []
-
-        from contextlib import suppress
-
-        for line in stdout_lines:
-            if line.startswith("EXECUTION_RESULT:"):
-                with suppress(json.JSONDecodeError):
-                    execution_result = json.loads(
-                        line[17:]
-                    )  # Remove 'EXECUTION_RESULT:' prefix
-            else:
-                output_lines.append(line)
+        execution_result, output_lines = parse_execution_output(process.stdout)
 
         # Save output if requested
         saved_path = None
-        if save_output_to and execution_result:  # Only save if there's a result to save
+        if save_output_to and execution_result:
             try:
                 with Path(save_output_to).open("w") as f:
                     json.dump(execution_result, f, indent=2)
                 saved_path = save_output_to
             except Exception as e:
-                logger.error(f"Failed to save output to {save_output_to}: {e}")
+                logger.warning(
+                    f"Warning: Failed to save output to {save_output_to}: {e}"
+                )
 
         result = {
             "success": process.returncode == 0,
@@ -1086,7 +1050,6 @@ def execute_python_code(
         return json.dumps(result, indent=2)
 
     except subprocess.TimeoutExpired:
-        # Ensure temp file is cleaned up even on timeout
         from pathlib import Path
 
         if "temp_file" in locals() and Path(temp_file).exists():
@@ -1095,14 +1058,13 @@ def execute_python_code(
             {
                 "success": False,
                 "error": f"Code execution timed out after {timeout} seconds",
-                "stdout": "",  # Include empty stdout/stderr for consistency
+                "stdout": "",
                 "stderr": "",
-                "return_code": -1,  # A common indicator for timeout
+                "return_code": -1,
                 "execution_result": {},
             }
         )
     except Exception as e:
-        # Ensure temp file is cleaned up on general exception
         if "temp_file" in locals() and Path(temp_file).exists():
             Path(temp_file).unlink()
         return json.dumps(
@@ -1110,9 +1072,9 @@ def execute_python_code(
                 "success": False,
                 "error": str(e),
                 "traceback": traceback.format_exc(),
-                "stdout": "",  # Include empty stdout/stderr for consistency
+                "stdout": "",
                 "stderr": "",
-                "return_code": -1,  # A common indicator for general error
+                "return_code": -1,
                 "execution_result": {},
             }
         )
