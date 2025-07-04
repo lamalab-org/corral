@@ -433,15 +433,73 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
 
 @tool
 def get_adsorption_sites_text(slab_cif: str) -> str:
-    """
-    Determine possible adsorption sites on a slab.
-    Returns a JSON string that contains lists of binding sites (e.g. top, bridge, hollow).
+    """[BRIEF] Identify and classify all possible adsorption sites on a surface slab. [/BRIEF]
+
+    [DETAILED] This tool analyzes a surface slab structure to identify and classify potential
+    adsorption sites where molecules can bind. It uses geometric and chemical analysis to
+    determine different types of binding sites such as top sites (above surface atoms),
+    bridge sites (between two atoms), and hollow sites (in multi-atom depressions). This
+    analysis is fundamental for understanding surface reactivity and designing catalysts. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to identify all possible adsorption sites on a surface
+    - Best suited for systematic studies of surface reactivity and catalysis
+    - Essential for understanding how molecules interact with surfaces
+    - Recommended before placing adsorbates to understand binding options
+    - Avoid when you already know the specific binding site coordinates
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Parses the slab CIF structure to identify surface atoms
+    - Uses AdsorbateSiteFinder to geometrically analyze the surface topology
+    - Classifies sites based on coordination environment (top, bridge, hollow)
+    - Calculates fractional coordinates for each potential binding site
+    - Returns sites organized by type in a JSON format for easy selection
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First obtain a slab structure using choose_slab_text or create_slab_from_structure_text [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to identify all adsorption sites on the surface [/CURRENT]
+    3. [FOLLOW_UP] Use choose_adsorption_site_text to select a specific site for adsorbate placement [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - get_adsorption_sites_text(slab_cif_string)
+    - get_adsorption_sites_text(output_from_choose_slab_text)
+    [/SYNTACTICAL]
 
     Args:
-        slab_cif: CIF string of the slab.
+        slab_cif: [BRIEF] CIF string of the surface slab structure. [/BRIEF]
+                 [DETAILED] A properly formatted CIF string containing the surface slab structure
+                 with atomic positions, lattice parameters, and surface geometry. This should be
+                 a two-dimensional periodic structure with a well-defined surface and vacuum
+                 region. The structure is analyzed to identify potential adsorption sites. [/DETAILED]
+                 [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
+                 [EXAMPLES] Examples: CIF string from choose_slab_text or create_slab_from_structure_text [/EXAMPLES]
 
     Returns:
-        str: JSON dictionary of adsorption sites. (list of fractional coordinates)
+        str: [BRIEF] JSON string containing classified adsorption sites with fractional coordinates. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing a dictionary where keys are site types
+             (e.g., "top", "bridge", "hollow") and values are lists of fractional coordinates
+             for each site of that type. Each coordinate is a list of three numbers [x, y, z]
+             representing the fractional position within the unit cell. [/DETAILED]
+             [EXAMPLES] Example output: '{"top": [[0.0, 0.0, 0.9], [0.5, 0.5, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When the CIF string is malformed or doesn't represent a valid slab [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid CIF format, missing surface atoms, or improper slab structure [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify CIF format and ensure it represents a proper surface slab [/ERROR_RECOVERY]
+        StructureError: [ERROR_WHEN] When the slab structure cannot be analyzed for adsorption sites [/ERROR_WHEN]
+                       [ERROR_DETAILS] Insufficient surface area, unclear surface definition, or geometric issues [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Check slab structure quality and surface termination [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Does not account for surface relaxation or reconstruction effects
+    - Cannot predict relative binding strengths or preferences
+    - Limited to geometric analysis without chemical bonding considerations
+    - May not identify all possible sites for large or complex molecules
+    [/LIMITATIONS]
     """
     import json
 
@@ -469,16 +527,90 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
 def choose_adsorption_site_text(
     adsorption_sites_json: str, site_type: str, index: int = 0
 ) -> list[float]:
-    """
-    Selects one adsorption site from the JSON dictionary of sites (by its type and index) and returns its fractional coordinates.
+    """[BRIEF] Select a specific adsorption site from classified sites by type and index. [/BRIEF]
+
+    [DETAILED] This tool selects one specific adsorption site from a collection of classified
+    sites based on the site type (top, bridge, hollow) and index within that type.
+    This selection is crucial for systematic studies of different
+    binding environments and their effects on adsorption energetics. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use after identifying all possible adsorption site to select a specific binding site
+    - Best suited for systematic comparison of different site types
+    - Essential for placing adsorbates at specific coordination environments
+    - Recommended when studying site-specific reactivity or selectivity
+    - Avoid when you need to place adsorbates at multiple sites simultaneously
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Parses the JSON string containing classified adsorption sites
+    - Locates the specified site type in the dictionary
+    - Selects the site at the specified index within that type
+    - Returns the fractional coordinates as a list of three floats
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First run get_adsorption_sites_text to identify available sites [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to select a specific site by type and index [/CURRENT]
+    3. [FOLLOW_UP] Use the coordinates with add_adsorbate_to_slab_text for molecule placement [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - choose_adsorption_site_text(sites_json, "top", 0)    # First top site
+    - choose_adsorption_site_text(sites_json, "bridge", 1) # Second bridge site
+    - choose_adsorption_site_text(sites_json, "hollow", 0) # First hollow site
+    [/SYNTACTICAL]
 
     Args:
-        adsorption_sites_json: JSON string mapping site types to lists of fractional coordinates.
-        site_type: Type of the site (e.g. "top", "bridge", "hollow").
-        index: Index of the site to select (default 0).
+        adsorption_sites_json: [BRIEF] JSON string mapping site types to lists of fractional coordinates. [/BRIEF]
+                              [DETAILED] A JSON-formatted string containing a dictionary where keys are
+                              site types (e.g., "top", "bridge", "hollow") and values are lists of
+                              fractional coordinates. This should be the output from get_adsorption_sites_text.
+                              Each coordinate is a list of three numbers representing position within the unit cell. [/DETAILED]
+                              [SYNTACTIC] Format: 'Valid JSON string with site type keys and coordinate list values' [/SYNTACTIC]
+                              [EXAMPLES] Examples: '{"top": [[0.0, 0.0, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}' [/EXAMPLES]
+
+        site_type: [BRIEF] Type of adsorption site to select. [/BRIEF]
+                  [DETAILED] The type of binding site to select from the available options. Common
+                  types include "top" (above surface atoms), "bridge" (between two atoms), and
+                  "hollow" (in multi-atom depressions). The type must exist in the JSON dictionary
+                  and determines the coordination environment of the selected site. [/DETAILED]
+                  [SYNTACTIC] Format: string matching available site types [/SYNTACTIC]
+                  [EXAMPLES] Examples: "top" (on-top), "bridge" (between atoms), "hollow" (in depression) [/EXAMPLES]
+
+        index: [BRIEF] Index of the site within the specified type. Defaults to 0. [/BRIEF]
+              [DETAILED] The numerical index of the site to select from the list of sites
+              of the specified type. Index 0 selects the first site, index 1 the second,
+              and so on. The index must be within the range of available sites for the
+              specified type. [/DETAILED]
+              [SYNTACTIC] Format: non-negative integer [/SYNTACTIC]
+              [EXAMPLES] Examples: 0 (first site), 1 (second site), 2 (third site) [/EXAMPLES]
 
     Returns:
-        list: Fractional coordinates of the selected site.
+        list[float]: [BRIEF] Fractional coordinates of the selected adsorption site. [/BRIEF]
+                    [DETAILED] A list of three floating-point numbers representing the fractional
+                    coordinates [x, y, z] of the selected adsorption site within the unit cell.
+                    These coordinates can be used directly for adsorbate placement and represent
+                    the optimal binding position for the specified site type. [/DETAILED]
+                    [EXAMPLES] Example output: [0.0, 0.0, 0.9] or [0.25, 0.25, 0.85] [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When the specified site type is not found in the JSON [/ERROR_WHEN]
+                   [ERROR_DETAILS] The site_type key does not exist in the JSON dictionary [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Check available site types in the JSON or use a valid type [/ERROR_RECOVERY]
+        IndexError: [ERROR_WHEN] When the specified index is out of range for the site type [/ERROR_WHEN]
+                   [ERROR_DETAILS] The index is greater than or equal to the number of sites of that type [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Check the number of available sites for the specified type [/ERROR_RECOVERY]
+        JSONDecodeError: [ERROR_WHEN] When the adsorption_sites_json string is not valid JSON [/ERROR_WHEN]
+                        [ERROR_DETAILS] Malformed JSON string or incorrect format [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Verify JSON format and ensure it's output from get_adsorption_sites_text [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Cannot evaluate the relative quality or stability of different sites
+    - Limited to sites identified by get_adsorption_sites_text
+    - Cannot modify or optimize the selected site coordinates
+    [/LIMITATIONS]
     """
     import json
 
