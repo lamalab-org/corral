@@ -72,7 +72,7 @@ def get_structure_from_mp_text(mp_id: str) -> str:
                         [ERROR_RECOVERY] Check internet connection and MP_API_KEY environment variable [/ERROR_RECOVERY]
         KeyError: [ERROR_WHEN] When the specified MP ID is not found in the database [/ERROR_WHEN]
                  [ERROR_DETAILS] Invalid or non-existent material ID provided [/ERROR_DETAILS]
-                 [ERROR_RECOVERY] Verify MP ID exists on Materials Project website or check MP ID suntax[/ERROR_RECOVERY]
+                 [ERROR_RECOVERY] Verify MP ID exists on Materials Project website or check MP ID syntax[/ERROR_RECOVERY]
         AuthenticationError: [ERROR_WHEN] When API key is invalid or missing [/ERROR_WHEN]
                              [ERROR_DETAILS] MP_API_KEY environment variable not set or expired [/ERROR_DETAILS]
                              [ERROR_RECOVERY] Obtain valid API key from Materials Project and set environment variable [/ERROR_RECOVERY]
