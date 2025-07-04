@@ -103,18 +103,105 @@ def create_slab_from_structure_text(
     min_vacuum_size: int = 5,
     primitive: bool = True,
 ) -> str:
-    """
-    Create a slab from a structure given as CIF-formatted string. Returns slab as CIF string.
+    """[BRIEF] Create a surface slab from a bulk crystal structure with specified Miller indices and dimensions. [/BRIEF]
+
+    [DETAILED] This tool generates a surface slab by cleaving a bulk crystal structure along a specified
+    crystallographic plane. It creates a two-dimensional periodic surface model suitable for surface
+    chemistry calculations, catalysis studies, and adsorption analysis. The tool automatically handles
+    the creation of vacuum space above the surface and ensures proper termination of the crystal structure.
+    This is essential for computational surface science studies. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to create a single slab from a bulk structure with known Miller indices
+    - Best suited for straightforward surface generation without need for multiple terminations
+    - Recommended when you have specific requirements for slab thickness and vacuum spacing
+    - Avoid when you need to explore multiple possible surface terminations (use enumerate_slabs_text instead)
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Parses the input CIF structure to create a pymatgen Structure object
+    - Uses SlabGenerator to cleave the structure along specified Miller indices
+    - Creates a slab with the specified minimum thickness and vacuum spacing
+    - Reorients the slab to have the surface normal along the c-axis
+    - Sorts atomic positions for consistent structure representation
+    - Converts the final slab structure back to CIF format
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First obtain bulk structure using get_structure_from_mp_text or using other tools that return single struucture CIF [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to create slab from bulk structure [/CURRENT]
+    3. [FOLLOW_UP] Use output with adsorption site tools like get_adsorption_sites_text [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - create_slab_from_structure_text(cif_string, (1,1,1), 12, 5, True)
+    - create_slab_from_structure_text(cif_string, (1,0,0), 15, 10, False)
+    - create_slab_from_structure_text(cif_string)  # Uses defaults
+    [/SYNTACTICAL]
 
     Args:
-        structure_cif: CIF content (structure) as text.
-        miller_index: Miller index to cleave the slab.
-        min_slab_size: Minimum slab thickness.
-        min_vacuum_size: Vacuum distance needed.
-        primitive: Whether to create a primitive cell slab.
+        structure_cif: [BRIEF] CIF content string of the bulk crystal structure. [/BRIEF]
+                      [DETAILED] A properly formatted CIF string containing the bulk crystal structure
+                      data including lattice parameters, atomic positions, and space group information.
+                      This structure will be cleaved to create the surface. [/DETAILED]
+                      [SYNTACTIC] Format: "Valid CIF format string with atomic coordinates and lattice parameters" [/SYNTACTIC]
+                      [EXAMPLES] Examples: CIF string from get_structure_from_mp_text output [/EXAMPLES]
+
+        miller_index: [BRIEF] Miller indices for the surface plane. Defaults to (1,1,1). [/BRIEF]
+                     [DETAILED] A tuple of three integers specifying the crystallographic plane along
+                     which the structure will be cleaved. These indices define the surface orientation
+                     and determine the atomic arrangement at the surface. Common choices include (1,1,1),
+                     (1,0,0), and (1,1,0) for different surface orientations. [/DETAILED]
+                     [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
+                     [EXAMPLES] Examples: (1,1,1), (1,0,0), (1,1,0) [/EXAMPLES]
+
+        min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 12. [/BRIEF]
+                      [DETAILED] The minimum thickness of the slab in the direction perpendicular to
+                      the surface plane. This parameter ensures that the slab has sufficient bulk-like
+                      character in the center while exposing the desired surface. Larger values provide
+                      more accurate representation of bulk properties but increase computational cost. [/DETAILED]
+                      [SYNTACTIC] Format: positive integer representing thickness in Angstroms [/SYNTACTIC]
+                      [EXAMPLES] Examples: 12, 15, 8[/EXAMPLES]
+
+        min_vacuum_size: [BRIEF] Minimum vacuum spacing in Angstroms. Defaults to 5. [/BRIEF]
+                        [DETAILED] The minimum vacuum space above the surface to prevent interactions
+                        between periodic images in surface calculations. This parameter is crucial for
+                        accurate surface energy calculations and adsorption studies. Larger values
+                        reduce spurious interactions but increase computational requirements. [/DETAILED]
+                        [SYNTACTIC] Format: positive integer representing vacuum thickness in Angstroms [/SYNTACTIC]
+                        [EXAMPLES] Examples: 5 (minimal), 10 (standard), 15 (large) [/EXAMPLES]
+
+        primitive: [BRIEF] Whether to create a primitive cell slab. Defaults to True. [/BRIEF]
+                  [DETAILED] Controls whether to use the primitive cell or conventional cell for
+                  slab generation. Primitive cells have the minimum number of atoms while maintaining
+                  the essential symmetry, leading to smaller, more efficient computational models.
+                  Setting to False uses the conventional cell which may be larger but more intuitive. [/DETAILED]
+                  [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                  [EXAMPLES] Examples: True, False [/EXAMPLES]
 
     Returns:
-        Slab CIF content as string.
+        str: [BRIEF] CIF content string of the generated surface slab. [/BRIEF]
+             [DETAILED] A CIF-formatted string containing the surface slab structure with the
+             specified Miller indices, thickness, and vacuum spacing. The structure is oriented
+             with the surface normal along the c-axis and includes all necessary crystallographic
+             information for surface calculations. [/DETAILED]
+             [EXAMPLES] Example output: CIF string with slab structure having surface atoms and vacuum region [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When CIF string is malformed or Miller indices are invalid [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid CIF format, zero Miller indices, or incompatible surface [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify CIF format and choose valid Miller indices for the crystal system [/ERROR_RECOVERY]
+        StructureError: [ERROR_WHEN] When slab generation fails due to structural issues [/ERROR_WHEN]
+                       [ERROR_DETAILS] Insufficient slab thickness or problematic surface termination [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Increase min_slab_size or try different Miller indices [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - May not handle complex surface reconstructions or relaxations
+    - Does not optimize atomic positions
+    - Limited to simple surface terminations without defects
+    - Cannot account for surface segregation or compositional changes
+    [/LIMITATIONS]
     """
     from pymatgen.core import Structure
     from pymatgen.core.surface import SlabGenerator
