@@ -1,3 +1,4 @@
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from copy import deepcopy
@@ -6,8 +7,7 @@ from datetime import datetime, timezone
 from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any
-from typing import Optional
-# from corral.io import FSManager
+
 from loguru import logger
 from pydantic import BaseModel
 
@@ -53,6 +53,7 @@ class ToolCall:
     result: str | None
     status: ToolCallStatus
     error_message: str | None
+    duration: float | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
 
@@ -74,7 +75,7 @@ class TaskState:
     score: float | None = None
     submitted_answer: str | None = None
     feedback: str | None = None
-    start_time: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    start_time: datetime = field(default_factory=datetime.now)
     end_time: datetime | None = None
 
     def get_tool_statistics(self) -> dict[str, Any]:
@@ -94,12 +95,6 @@ class TaskState:
                 if status != ToolCallStatus.SUCCESS
             },
         }
-
-    def get_duration(self) -> float | None:
-        """Get trial duration in seconds"""
-        if self.end_time and self.start_time:
-            return (self.end_time - self.start_time).total_seconds()
-        return None
 
 
 class Tool:
@@ -193,7 +188,7 @@ class ModalTool(Tool):
 class Environment(ABC):
     """Base class for task environments"""
 
-    def __init__(self, task_id: str, base_work_dir: str, fs_manager = None):
+    def __init__(self, task_id: str, base_work_dir: str, fs_manager=None):
         self.task_id = task_id
         self.base_work_dir = base_work_dir
         self.tools: dict[str, Tool] = {}
@@ -215,8 +210,6 @@ class Environment(ABC):
     def reset_state(self) -> str:
         """Reset the environment state with a new trial id and fresh TaskState and return finished trail id."""
         if hasattr(self, "state") and self.state is not None:
-            if self.state.is_completed and self.state.end_time is None:
-                self.state.end_time = datetime.now(tz=timezone.utc)
             archived_snapshot = self.save_current_state()
             self.trial_states[self.state.trial_id] = archived_snapshot
 
@@ -315,14 +308,17 @@ class Environment(ABC):
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
         """Execute a tool and record the call with enhanced error handling"""
+        start_time = time.perf_counter()
         # Check if tool exists
         if tool_name not in self.tools:
+            duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
                 arguments=arguments,
                 result=None,
                 status=ToolCallStatus.INVALID_TOOL,
                 error_message=f"Tool {tool_name} not found",
+                duration=duration,
             )
             self.state.tool_calls.append(tool_call)
             return tool_call
@@ -332,12 +328,14 @@ class Environment(ABC):
         # Validate arguments
         is_valid, error_message = tool.validate_arguments(arguments)
         if not is_valid:
+            duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
                 arguments=arguments,
                 result=None,
                 status=ToolCallStatus.INVALID_ARGS,
                 error_message=error_message,
+                duration=duration,
             )
             self.state.tool_calls.append(tool_call)
             return tool_call
@@ -345,20 +343,24 @@ class Environment(ABC):
         # Execute tool
         try:
             result = tool.execute(**arguments)
+            duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
                 arguments=arguments,
                 result=result,
                 status=ToolCallStatus.SUCCESS,
                 error_message=None,
+                duration=duration,
             )
         except Exception as e:
+            duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
                 arguments=arguments,
                 result=None,
                 status=ToolCallStatus.EXECUTION_ERROR,
                 error_message=str(e),
+                duration=duration,
             )
 
         self.state.tool_calls.append(tool_call)
@@ -370,6 +372,5 @@ class Environment(ABC):
         score = self.score()  # Using existing abstract score method
         self.state.score = score
         self.state.is_completed = True
-        if self.state.end_time is None:
-            self.state.end_time = datetime.now(tz=timezone.utc)
+        self.state.end_time = datetime.now(tz=timezone.utc)
         return score

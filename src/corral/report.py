@@ -93,6 +93,28 @@ class BenchmarkResult:
             for result in task_trials.trials
         ]
 
+    def total_tool_execution_duration(self) -> float:
+        """Calculate total tool execution duration across all trials and tasks"""
+        total_duration = 0.0
+
+        for task_trials in self.task_results.values():
+            for trial in task_trials.trials:
+                if "tool_calls" in trial.tool_statistics:
+                    for tool_call in trial.tool_statistics["tool_calls"]:
+                        if tool_call.get("duration") is not None:
+                            total_duration += tool_call["duration"]
+
+        return total_duration
+
+    def get_trial_tool_execution_duration(self, trial: "TaskTrailResult") -> float:
+        """Helper method to get tool execution duration for a trial"""
+        duration = 0.0
+        if "tool_calls" in trial.tool_statistics:
+            for tool_call in trial.tool_statistics["tool_calls"]:
+                if tool_call.get("duration") is not None:
+                    duration += tool_call["duration"]
+        return duration
+
     def task_average_duration(self, task_id: str) -> float | None:
         """Calculate average trial duration for a task"""
         if task_id not in self.task_results:
@@ -103,24 +125,26 @@ class BenchmarkResult:
 
         return mean(durations) if durations else None
 
-    def _collect_all_durations(self) -> list[float]:
-        """Helper method to collect all non-None durations across all trials"""
+    def overall_average_duration(self) -> float | None:
+        """Calculate overall average trial duration across all tasks"""
         all_durations = []
         for task_trials in self.task_results.values():
             durations = [
                 t.duration for t in task_trials.trials if t.duration is not None
             ]
             all_durations.extend(durations)
-        return all_durations
 
-    def overall_average_duration(self) -> float | None:
-        """Calculate overall average trial duration across all tasks"""
-        all_durations = self._collect_all_durations()
         return mean(all_durations) if all_durations else None
 
     def overall_total_duration(self) -> float | None:
         """Calculate total duration across all trials"""
-        all_durations = self._collect_all_durations()
+        all_durations = []
+        for task_trials in self.task_results.values():
+            durations = [
+                t.duration for t in task_trials.trials if t.duration is not None
+            ]
+            all_durations.extend(durations)
+
         return sum(all_durations) if all_durations else None
 
     def _sum_token_usage(self, trials) -> dict[str, int]:
@@ -354,9 +378,17 @@ class BenchmarkResult:
         if avg_duration:
             summary_table.add_row("Avg Trial Duration", f"{avg_duration:.2f}s")
 
+        # Add tool execution duration metric
+        total_tool_duration = self.total_tool_execution_duration()
+        summary_table.add_row(
+            "Total Tool Execution Duration", f"{total_tool_duration:.3f}s"
+        )
+
+        # Add pass@k and pass^k metrics
         for k_val in self.k:
             summary_table.add_row(f"Pass@{k_val}", f"{pass_at_k_results[k_val]:.3f}")
             summary_table.add_row(f"Pass^{k_val}", f"{pass_hat_k_results[k_val]:.3f}")
+
         return summary_table
 
     def _build_task_table(self, task_id: str) -> Table:
@@ -372,6 +404,7 @@ class BenchmarkResult:
         task_table.add_column("Success", style="white")
         task_table.add_column("Duration (s)", style="green")
         task_table.add_column("Tokens", style="orange")
+        task_table.add_column("Tool Duration (s)", style="blue")  # New column
 
         # Add columns for each k value
         for k_val in self.k:
@@ -395,6 +428,7 @@ class BenchmarkResult:
             f"{task_success_rate:.3f}",
             duration_str,
             token_str,
+            "-",  # No overall tool duration for task level
         ]
 
         # Add pass@k and pass^k values
@@ -410,12 +444,15 @@ class BenchmarkResult:
             token_str = (
                 str(trial.token_usage.get("total", "-")) if trial.token_usage else "-"
             )
+            trial_tool_duration = self.get_trial_tool_execution_duration(trial)
+
             trial_row = [
                 trial.trial_id,
                 f"{trial.score:.3f}",
                 "✓" if trial.success else "✗",
                 duration_str,
                 token_str,
+                f"{trial_tool_duration:.3f}",  # Tool duration for this trial
             ]
 
             # Add placeholder values for pass@k and pass^k (not applicable for individual trials)
@@ -468,16 +505,29 @@ class BenchmarkResult:
         tool_calls_table.add_column("Arguments", style="cyan")
         tool_calls_table.add_column("Result", style="green")
         tool_calls_table.add_column("Status", style="magenta")
+        tool_calls_table.add_column("Duration (s)", style="blue")  # New column
 
         for trial in self.task_results[task_id].trials:
             if "tool_calls" in trial.tool_statistics:
                 for tool_call in trial.tool_statistics["tool_calls"]:
+                    duration_str = (
+                        f"{tool_call['duration']:.3f}"
+                        if tool_call.get("duration") is not None
+                        else "-"
+                    )
+
+                    # Truncate result if too long
+                    result_str = str(tool_call["result"])
+                    if len(result_str) > 50:
+                        result_str = result_str[:47] + "..."
+
                     tool_calls_table.add_row(
                         trial.trial_id,
                         tool_call["tool_name"],
                         str(tool_call["arguments"]),
-                        str(tool_call["result"]),
+                        result_str,
                         tool_call["status"],
+                        duration_str,  # Add duration
                     )
         return tool_calls_table
 
@@ -522,6 +572,8 @@ class BenchmarkResult:
                         "successful_tool_calls": tool_call_stats["successful"],
                         "failed_tool_calls": tool_call_stats["failed"],
                         "total_token_usage": total_tokens,
+                        # Add duration metric
+                        "total_tool_execution_duration": self.total_tool_execution_duration(),
                     }
                 }
 
@@ -568,6 +620,9 @@ class BenchmarkResult:
                             "trial_id": trial.trial_id,
                             "score": trial.score,
                             "success": trial.success,
+                            "tool_execution_duration": self.get_trial_tool_execution_duration(
+                                trial
+                            ),  # Add this
                         }
 
                         # Add duration if available
@@ -587,6 +642,9 @@ class BenchmarkResult:
                                     "result": tool_call["result"],
                                     "status": tool_call["status"],
                                     "error_message": tool_call.get("error_message"),
+                                    "duration": tool_call.get(
+                                        "duration"
+                                    ),  # Make sure this is included
                                     "timestamp": tool_call.get("timestamp"),
                                 }
                                 for tool_call in trial.tool_statistics["tool_calls"]
@@ -625,7 +683,6 @@ class BenchmarkResult:
             except Exception as e:
                 logger.error(f"Error saving report file: {e}")
                 raise
-
         from rich.console import Console
         from rich.panel import Panel
 
