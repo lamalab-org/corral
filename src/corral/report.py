@@ -364,6 +364,7 @@ class BenchmarkResult:
                 else:
                     summary_table.add_row(key, str(value))
 
+        summary_table.add_row("--- Time Usage ---", "")
         # Add duration metrics
         if self.total_duration:
             summary_table.add_row("Total Benchmark Time", f"{self.total_duration:.2f}s")
@@ -383,7 +384,7 @@ class BenchmarkResult:
         summary_table.add_row(
             "Total Tool Execution Duration", f"{total_tool_duration:.3f}s"
         )
-
+        summary_table.add_row("--- Pass Metrics ---", "")
         # Add pass@k and pass^k metrics
         for k_val in self.k:
             summary_table.add_row(f"Pass@{k_val}", f"{pass_at_k_results[k_val]:.3f}")
@@ -403,7 +404,7 @@ class BenchmarkResult:
         task_table.add_column("Score", style="cyan")
         task_table.add_column("Success", style="white")
         task_table.add_column("Duration (s)", style="green")
-        task_table.add_column("Tokens", style="orange")
+        task_table.add_column("Tokens", style="green")
         task_table.add_column("Tool Duration (s)", style="blue")  # New column
 
         # Add columns for each k value
