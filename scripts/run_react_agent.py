@@ -2,7 +2,7 @@ import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
-from corral.agents.react import ReActAgent
+from corral.agents import ReActAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 
 load_dotenv("../.env", override=True)
