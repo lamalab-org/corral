@@ -80,28 +80,21 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
+
+        # 1. Submit answer and score
         score = env.submit_answer(answer["answer"])
 
-        state_dict = env.state.__dict__  # Get state as dict
-        tool_statistics = env.state.get_tool_statistics()
+        # 2. Get completed trial data (before any reset)
+        completed_trial = env.get_completed_trial_data()
 
-        # Add detailed tool calls to the statistics
-        tool_statistics["tool_calls"] = [
-            {
-                "tool_name": call.tool_name,
-                "arguments": call.arguments,
-                "result": call.result,
-                "status": call.status.value,  # Convert enum to string
-                "error_message": call.error_message,
-                "duration": call.duration,
-                "timestamp": call.timestamp.isoformat() if call.timestamp else None,
-            }
-            for call in env.state.tool_calls
-        ]
-        state_dict["tool_statistics"] = tool_statistics
-        finished_trail = env.reset_state()  # Reset the state for the next trail
+        # 3. Reset for next trial
+        finished_trial_id = env.reset_state()
 
-        return {"score": score, "state": state_dict, "trial_id": finished_trail}
+        return {
+            "score": score,
+            "state": completed_trial["state"],
+            "trial_id": finished_trial_id,
+        }
 
     @app.get("/tasks/{task_id}/status")
     def get_task_status(task_id: str):
