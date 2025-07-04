@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any
-
+from typing import Optional
+# from corral.io import FSManager
 from loguru import logger
 from pydantic import BaseModel
 
@@ -192,12 +193,13 @@ class ModalTool(Tool):
 class Environment(ABC):
     """Base class for task environments"""
 
-    def __init__(self, task_id: str, base_work_dir: str):
+    def __init__(self, task_id: str, base_work_dir: str, fs_manager = None):
         self.task_id = task_id
         self.base_work_dir = base_work_dir
         self.tools: dict[str, Tool] = {}
         self.trial_states: dict[str, TaskState] = {}
         self.trial_counter = -1
+        self.fs_manager = fs_manager
         self.reset_state()
 
     def save_current_state(self) -> TaskState:
@@ -237,7 +239,10 @@ class Environment(ABC):
         """Create workspace directory for this trial"""
         workspace = Path(self.base_work_dir) / f"{self.task_id}_trial_{trial_id}"
         logger.info(f"Creating workspace: {workspace}")
-        workspace.mkdir(parents=True, exist_ok=True)
+        if self.fs_manager:
+            self.fs_manager.mkdir(str(workspace), create_parents=True)
+        else:
+            workspace.mkdir(parents=True, exist_ok=True)
         return str(workspace)
 
     def get_current_work_dir(self) -> str:
