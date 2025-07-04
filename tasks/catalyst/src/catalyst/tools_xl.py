@@ -345,15 +345,82 @@ def enumerate_slabs_text(
 
 @tool
 def choose_slab_text(slabs_json: str, index: int = 0) -> str:
-    """
-    Selects one slab from the JSON dictionary of slabs (by its index) and returns its CIF string.
+    """[BRIEF] Select a specific slab from a JSON dictionary of enumerated slabs by index. [/BRIEF]
+
+    [DETAILED] This tool selects one surface slab from a collection of enumerated slabs based on
+    its index number. It's designed to work with the output from enumerate_slabs_text, allowing
+    users to choose a specific surface termination for further analysis. This selection process
+    is crucial for focusing on the most relevant or interesting surface termination for catalysis
+    or adsorption studies. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use after enumerate_slabs_text to select a specific surface termination
+    - Best suited for systematic exploration of different surface terminations
+    - Could be useful for workflows that require a single slab for adsorption or catalysis studies
+    - Recommended when you need to compare results from different surface terminations
+    - One can randomly pick index to select a slab from the enumerated list if they want to randomly pick a slab
+    - Avoid when you only need one slab (use create_slab_from_structure_text directly)
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Parses the JSON string containing multiple slab structures
+    - Locates the slab with the specified index key (e.g., "slab_0", "slab_1")
+    - Extracts the CIF string for the selected slab
+    - Returns the CIF content ready for use in subsequent tools
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First run enumerate_slabs_text to generate multiple slab terminations [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to select a specific slab by index [/CURRENT]
+    3. [FOLLOW_UP] Use the selected slab with adsorption tools like get_adsorption_sites_text [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - choose_slab_text(slabs_json, 0)  # Select first slab
+    - choose_slab_text(slabs_json, 1)  # Select second slab
+    - choose_slab_text(slabs_json)     # Select first slab (default)
+    [/SYNTACTICAL]
 
     Args:
-        slabs_json: JSON string mapping slab keys to CIF strings.
-        index: Index of the slab to select (default 0).
+        slabs_json: [BRIEF] JSON string mapping slab keys to CIF strings. [/BRIEF]
+                   [DETAILED] A JSON-formatted string containing a dictionary where keys are
+                   slab identifiers (e.g., "slab_0", "slab_1") and values are the corresponding
+                   CIF strings. This should be the output from enumerate_slabs_text tool. The
+                   JSON structure must be valid and contain at least one slab entry. [/DETAILED]
+                   [SYNTACTIC] Format: 'Valid JSON string with "slab_X" keys and CIF string values' [/SYNTACTIC]
+                   [EXAMPLES] Examples: '{"slab_0": "CIF content...", "slab_1": "CIF content..."}' [/EXAMPLES]
+
+        index: [BRIEF] Index of the slab to select. Defaults to 0. [/BRIEF]
+              [DETAILED] The numerical index of the slab to select from the JSON dictionary.
+              This corresponds to the enumeration order from enumerate_slabs_text, where
+              index 0 is the first slab, index 1 is the second, and so on. The tool will
+              look for a key named "slab_{index}" in the JSON dictionary. [/DETAILED]
+              [SYNTACTIC] Format: non-negative integer [/SYNTACTIC]
+              [EXAMPLES] Examples: 0 (first slab), 1 (second slab), 2 (third slab) [/EXAMPLES]
 
     Returns:
-        str: CIF string for the selected slab.
+        str: [BRIEF] CIF string for the selected slab. [/BRIEF]
+             [DETAILED] A properly formatted CIF string containing the structure data for
+             the selected slab. This includes atomic positions, lattice parameters, and
+             all necessary crystallographic information. The CIF can be used directly
+             with other structure analysis tools. [/DETAILED]
+             [EXAMPLES] Example output: CIF string with selected slab structure [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When the specified slab index is not found in the JSON [/ERROR_WHEN]
+                   [ERROR_DETAILS] The key "slab_{index}" does not exist in the JSON dictionary [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Check available slab indices in the JSON or use a valid index [/ERROR_RECOVERY]
+        JSONDecodeError: [ERROR_WHEN] When the slabs_json string is not valid JSON [/ERROR_WHEN]
+                        [ERROR_DETAILS] Malformed JSON string or incorrect format [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Verify JSON format and ensure it's output from enumerate_slabs_text [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Cannot validate the quality or stability of the selected slab
+    - Does not provide information about surface termination characteristics
+    - Limited to slabs generated by enumerate_slabs_text tool
+    - Cannot modify or optimize the selected slab structure
+    [/LIMITATIONS]
     """
     import json
 
