@@ -1135,6 +1135,26 @@ def get_bulk_polymorphs_data_func(composition: str) -> str:
         return json.dumps(polymorph_data, indent=2)
 
 
+def execute_python_code_given_code(code: str) -> str:
+    """
+    Executes a given Python code string.
+    This is a placeholder and should be replaced with your actual implementation.
+    """
+    try:
+        # Create a dictionary to hold local variables during execution
+        exec_globals = {}
+        exec_locals = {}
+        exec(code, exec_globals, exec_locals)
+        # Assuming the filtering code will produce a 'output' variable
+        return json.dumps(
+            {"success": True, "execution_result": {"output": exec_locals.get("output")}}
+        )
+    except Exception as e:
+        return json.dumps(
+            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+        )
+
+
 @tool
 def get_bulk_polymorphs_data(composition: str) -> str:
     """[BRIEF] Query Materials Project database to find all polymorphs for a given chemical composition. [/BRIEF]
@@ -1579,20 +1599,101 @@ def batch_retrieve_polymorphs(
     return json.dumps(results, indent=2)
 
 
+# sort of like a distractor tool
 @tool
 def sort_and_get_first_from_json(
     polymorph_data_json: str, sort_key: str, return_key: str
 ) -> str:
-    """
-    From a JSON string, sort the data based on a given key and return the first element of the specified key.
+    """[BRIEF] Sort JSON data by specified key and return the first element's specified value. [/BRIEF]
+
+    [DETAILED] This utility tool provides flexible sorting and extraction capabilities for JSON data,
+    particularly useful for materials data analysis where you need to identify optimal structures
+    based on specific criteria. It enables quick identification of the best material according to
+    any numerical property, such as finding the most stable phase, highest band gap material, or
+    densest structure. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to quickly identify the best material from a dataset
+    - Best suited for extracting optimal values from sorted lists
+    - Recommended for picking materials with desired properties like lowest energy, highest band gap, etc.
+    - Avoid when you need multiple values or complex filtering criteria
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Parses JSON string into Python data structure
+    - Applies sorting based on specified key using numerical comparison
+    - Extracts the first element after sorting (best/optimal value)
+    - Returns the specified property value from the optimal element
+    - Handles various data types and provides robust error handling
+    - To find the right keys from polymorph data maybe use io tools or python tools
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First obtain JSON data from polymorph retrieval tools [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to identify optimal material based on specific criteria [/CURRENT]
+    3. [FOLLOW_UP] Use the returned value for further analysis or material selection [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - sort_and_get_first_from_json(polymorphs_json, "energy_above_hull", "material_id")
+    - sort_and_get_first_from_json(polymorphs_json, "band_gap", "cif")
+    - sort_and_get_first_from_json(polymorphs_json, "density", "formation_energy_per_atom")
+    [/SYNTACTICAL]
 
     Args:
-        polymorph_data_json: JSON string containing the data to be sorted.
-        sort_key: Key to sort the data by.
-        return_key: Key of the first element to return after sorting.
+        polymorph_data_json: [BRIEF] JSON string containing the data to be sorted. [/BRIEF]
+                            [DETAILED] A JSON-formatted string containing a list of dictionaries,
+                            each representing a material or structure with various properties.
+                            The data should be structured consistently with numerical values
+                            for the sorting key. This is typically output from polymorph
+                            retrieval tools. [/DETAILED]
+                            [SYNTACTIC] Format: "Valid JSON string containing list of dictionaries" [/SYNTACTIC]
+                            [EXAMPLES] Examples: JSON from get_bulk_polymorphs_data output [/EXAMPLES]
+
+        sort_key: [BRIEF] Property name to sort the data by. [/BRIEF]
+                 [DETAILED] The dictionary key name that will be used for sorting the data.
+                 This should correspond to a numerical property in the JSON data. The sorting
+                 is performed in ascending order, so the first element will have the smallest
+                 value for this property. Common keys include energy_above_hull, band_gap,
+                 density, formation_energy_per_atom. [/DETAILED]
+                 [SYNTACTIC] Format: "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
+                 [EXAMPLES] Examples: "energy_above_hull", "band_gap", "density"[/EXAMPLES]
+
+        return_key: [BRIEF] Property name to return from the first element after sorting. [/BRIEF]
+                   [DETAILED] The dictionary key name for the value that should be returned
+                   from the first (optimal) element after sorting. This allows extraction
+                   of any property from the optimal structure, such as material_id for
+                   identification, cif for structure, or any other calculated property. [/DETAILED]
+                   [SYNTACTIC] Format: "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
+                   [EXAMPLES] Examples: "material_id", "cif", "formation_energy_per_atom"[/EXAMPLES]
 
     Returns:
-        Value of the specified return_key from the first element after sorting.
+        str: [BRIEF] Value of the specified return_key from the first element after sorting. [/BRIEF]
+             [DETAILED] The value corresponding to the return_key from the material that has
+             the smallest value for the sort_key. This could be a string (like material_id
+             or CIF), a number (like energy or band gap), or any other data type stored
+             in the JSON. The returned value represents the optimal material according
+             to the specified sorting criterion. [/DETAILED]
+             [EXAMPLES] Example outputs: "mp-2657" (material ID), "1.23" (energy value), CIF structure string [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        JSONDecodeError: [ERROR_WHEN] When the polymorph_data_json string is not valid JSON [/ERROR_WHEN]
+                        [ERROR_DETAILS] Malformed JSON string or incorrect format [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Verify JSON format and ensure proper string escaping [/ERROR_RECOVERY]
+        KeyError: [ERROR_WHEN] When sort_key or return_key is not found in the data [/ERROR_WHEN]
+                 [ERROR_DETAILS] Specified keys don't exist in the JSON data dictionaries [/ERROR_DETAILS]
+                 [ERROR_RECOVERY] Check available keys in the JSON data and use valid key names [/ERROR_RECOVERY]
+        IndexError: [ERROR_WHEN] When the JSON data is empty or contains no elements [/ERROR_WHEN]
+                   [ERROR_DETAILS] Empty list or no valid data after parsing [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Ensure JSON data contains at least one element [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Only returns the first element after sorting (single optimal result)
+    - Sorting is performed in ascending order only
+    - Does not handle complex sorting criteria or multiple keys
+    - May not work properly with non-numerical sort keys
+    [/LIMITATIONS]
     """
     data = json.loads(polymorph_data_json)
 
@@ -1611,20 +1712,114 @@ def select_polymorphs_with_strategy(
     energy_threshold: float = 0.5,
     is_path: bool = False,
 ) -> str:
-    """
-    Select polymorphs based on a strategy (diverse_energy, most_stable, or diverse_structure).
-    diverse_energy selects polymorphs with diverse energies,
-    most_stable selects the most stable ones, and diverse_structure selects polymorphs with different space groups.
+    """[BRIEF] Select polymorphs using strategic criteria for systematic materials analysis. [/BRIEF]
+
+    [DETAILED] This tool implements intelligent selection strategies for polymorph datasets, enabling
+    systematic reduction of large materials databases while preserving important structural and
+    energetic diversity. The input can be json polymorph data as string or path to json file of polymorph data.
+    It supports multiple selection algorithms designed for different research
+    objectives, from stability-focused studies to comprehensive structural surveys. This is crucial
+    for managing computational resources and focusing analysis on the most relevant materials. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to systematically reduce large polymorph datasets
+    - Essential for creating representative training sets for machine learning
+    - Recommended for comparative studies requiring diverse structural examples
+    - Avoid when you need all available data or have specific material requirements
+    - Avoid when you have a custom logic for selection (use custom Python code instead)
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Applies energy threshold filtering to focus on accessible phases
+    - Implements multiple selection algorithms based on different criteria
+    - "diverse_energy" spreads selection across energy range for representative sampling
+    - "most_stable" prioritizes thermodynamically favored phases
+    - "diverse_structure" ensures different space groups are represented
+    - Returns optimized subset maintaining important characteristics
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First obtain polymorph data using get_bulk_polymorphs_data or batch_retrieve_polymorphs [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to select representative subset based on strategy [/CURRENT]
+    3. [FOLLOW_UP] Use selected polymorphs for slab generation, ML dataset preparation, or detailed analysis. You can even use this multiple times to prepare a set with different strategies [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - select_polymorphs_with_strategy(polymorphs_json, "most_stable", 3, 0.3, False)
+    - select_polymorphs_with_strategy("data/polymorphs.json", "diverse_structure", 5, 0.5, True)
+    - select_polymorphs_with_strategy(polymorphs_json, "diverse_energy", 8, 0.8, False)
+    [/SYNTACTICAL]
 
     Args:
-        polymorphs_data: JSON string or file path with polymorph data
-        selection_strategy: Strategy for selection ("diverse_energy", "most_stable", "diverse_structure")
-        max_polymorphs: Maximum number of polymorphs to select
-        energy_threshold: Maximum energy above hull (eV/atom)
-        is_path: If True, polymorphs_data is treated as a file path
+        polymorphs_data: [BRIEF] JSON string or file path containing polymorph data. [/BRIEF]
+                        [DETAILED] Either a JSON-formatted string containing polymorph data or a file path
+                        to a JSON file, depending on the is_path parameter. The data should contain
+                        polymorphs with properties like energy_above_hull, space_group, and other
+                        structural/energetic information. This is typically output from polymorph
+                        retrieval tools. [/DETAILED]
+                        [SYNTACTIC] Format: "JSON string or valid file path" [/SYNTACTIC]
+                        [EXAMPLES] Examples: JSON string from get_bulk_polymorphs_data, "data/polymorphs.json" [/EXAMPLES]
+
+        selection_strategy: [BRIEF] Strategy for polymorph selection. Defaults to "diverse_energy". [/BRIEF]
+                           [DETAILED] The algorithm used for selecting polymorphs from the dataset.
+                           "diverse_energy" selects polymorphs distributed across the energy range
+                           for representative sampling. "most_stable" prioritizes the most
+                           thermodynamically stable phases. "diverse_structure" ensures different
+                           space groups are represented to capture structural diversity. [/DETAILED]
+                           [SYNTACTIC] Format: "diverse_energy", "most_stable", or "diverse_structure" [/SYNTACTIC]
+                           [EXAMPLES] Examples: "most_stable" (stability focus), "diverse_structure" (structural diversity), "diverse_energy" (energy sampling) [/EXAMPLES]
+
+        max_polymorphs: [BRIEF] Maximum number of polymorphs to select. Defaults to 5. [/BRIEF]
+                       [DETAILED] The maximum number of polymorphs to include in the final selection.
+                       This parameter controls the size of the resulting dataset and should be chosen
+                       based on computational resources and analysis requirements. Larger values
+                       provide more comprehensive coverage but increase processing time and
+                       computational cost. [/DETAILED]
+                       [SYNTACTIC] Format: positive integer [/SYNTACTIC]
+                       [EXAMPLES] Examples: 3 (focused), 5 (standard), 10 (comprehensive) [/EXAMPLES]
+
+        energy_threshold: [BRIEF] Maximum energy above hull in eV/atom. Defaults to 0.5. [/BRIEF]
+                         [DETAILED] Energy threshold above the convex hull for including polymorphs
+                         in the selection process. Only phases with energy above hull less than
+                         or equal to this value will be considered. This pre-filtering step ensures
+                         that only thermodynamically accessible phases are included in the analysis. [/DETAILED]
+                         [SYNTACTIC] Format: positive float representing energy in eV/atom [/SYNTACTIC]
+                         [EXAMPLES] Examples: 0.1 (very stable), 0.5 (moderate), 1.0 (include metastable) [/EXAMPLES]
+
+        is_path: [BRIEF] Whether polymorphs_data is a file path. Defaults to False. [/BRIEF]
+                [DETAILED] Boolean flag indicating whether the polymorphs_data parameter should
+                be treated as a file path (True) or as a JSON string (False). When True, the
+                tool will read the JSON data from the specified file. When False, it will
+                parse the data directly from the string. [/DETAILED]
+                [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                [EXAMPLES] Examples: True (file path), False (JSON string) [/EXAMPLES]
 
     Returns:
-        JSON string with selected polymorphs
+        str: [BRIEF] JSON string containing selected polymorphs based on the specified strategy. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing the selected subset of polymorphs,
+             maintaining the same data structure as the input but with reduced number of entries.
+             The selection preserves important characteristics according to the chosen strategy
+             while reducing dataset size for efficient processing. [/DETAILED]
+             [EXAMPLES] Example output: JSON string with 3-10 selected polymorphs based on strategy [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When invalid selection strategy is specified [/ERROR_WHEN]
+                   [ERROR_DETAILS] Strategy name not recognized or invalid parameters [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Use valid strategy names: "diverse_energy", "most_stable", "diverse_structure" [/ERROR_RECOVERY]
+        FileNotFoundError: [ERROR_WHEN] When is_path=True but file doesn't exist [/ERROR_WHEN]
+                          [ERROR_DETAILS] Specified file path cannot be found or accessed [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Check file path and ensure file exists [/ERROR_RECOVERY]
+        JSONDecodeError: [ERROR_WHEN] When polymorphs_data contains invalid JSON [/ERROR_WHEN]
+                        [ERROR_DETAILS] Malformed JSON string or corrupted file [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Verify JSON format and data integrity [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Selection strategies are predefined and not customizable
+    - Energy threshold applies uniformly to all polymorphs
+    - Does not consider complex multi-objective optimization
+    - May not preserve specific structural features of interest
+    [/LIMITATIONS]
     """
     if is_path:
         with Path(polymorphs_data).open("r") as f:
@@ -1674,15 +1869,86 @@ def consolidate_polymorph_datasets(
     composition_files: dict[str, str],
     output_path: str = "consolidated_polymorphs.json",
 ) -> str:
-    """
-    Consolidate multiple polymorph files into a single dataset and save it to a JSON file.
+    """[BRIEF] Consolidate multiple polymorph JSON files into a single comprehensive dataset. [/BRIEF]
+
+    [DETAILED] This tool combines multiple polymorph datasets from different compositions into a
+    unified dataset suitable for dataset preperation and machine learning applications. It handles
+    data integration and provides comprehensive statistics about
+    the consolidated dataset. Often you have multiple polumorph json file and you want to combine them. You can use this tool to combine them [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to combine multiple datasets
+    - Best suited for building comprehensive materials databases
+    - Recommended for for combining results from batch_retrieve_polymorphs
+    - Avoid when you need to maintain composition-specific organization
+    - AVoid when you have a single polymorph file or no files to combine
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Reads multiple JSON files specified in the composition_files dictionary
+    - Merges data while maintaining source composition information
+    - Adds provenance metadata to track data origins
+    - Provides comprehensive statistics about the consolidated dataset
+    - Handles missing files and corrupted data gracefully
+    - Saves the consolidated dataset to a specified output file
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First use batch_retrieve_polymorphs to create multiple composition files or run get_bulk_polymorphs_data multiple times to ahve data for multiple composition [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to consolidate separate files into unified dataset [/CURRENT]
+    3. [FOLLOW_UP] Use prepare_tabular_dataset or prepare_neural_network_dataset for ML preparation [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - consolidate_polymorph_datasets({"TiO2": "data/tio2.json", "SiO2": "data/sio2.json"})
+    - consolidate_polymorph_datasets(composition_files_dict, "materials_database.json")
+    - consolidate_polymorph_datasets(batch_results["composition_files"], "consolidated.json")
+    [/SYNTACTICAL]
 
     Args:
-        composition_files: Dictionary mapping compositions to file paths
-        output_path: Path for consolidated dataset
+        composition_files: [BRIEF] Dictionary mapping compositions to their JSON file paths. [/BRIEF]
+                          [DETAILED] A dictionary where keys are composition names/formulas and values
+                          are file paths to their corresponding JSON files containing polymorph data.
+                          This is typically the output from batch_retrieve_polymorphs. The tool will
+                          attempt to read each file and integrate the data while maintaining composition
+                          information. [/DETAILED]
+                          [SYNTACTIC] Format: '{"composition1": "path1.json", "composition2": "path2.json", ...}' [/SYNTACTIC]
+                          [EXAMPLES] Examples: {"TiO2": "data/tio2_polymorphs.json", "SiO2": "data/sio2_polymorphs.json"} [/EXAMPLES]
+
+        output_path: [BRIEF] Path for the consolidated dataset file. Defaults to "consolidated_polymorphs.json". [/BRIEF]
+                    [DETAILED] File path where the consolidated dataset will be saved. The file will
+                    contain all polymorphs from all compositions in a single JSON structure with
+                    added source composition information. The directory will be created if it doesn't
+                    exist. Using .json extension is recommended for clarity. [/DETAILED]
+                    [SYNTACTIC] Format: "Valid file path with .json extension" [/SYNTACTIC]
+                    [EXAMPLES] Examples: "consolidated_polymorphs.json", "data/all_materials.json", "datasets/complete_set.json" [/EXAMPLES]
 
     Returns:
-        JSON string with consolidation results
+        str: [BRIEF] JSON string with consolidation results and comprehensive statistics. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing consolidation status, output file path,
+             and detailed statistics including total number of polymorphs, number of compositions
+             successfully included, average polymorphs per composition, and any processing errors.
+             This enables quality control and assessment of the consolidation process. [/DETAILED]
+             [EXAMPLES] Example output: '{"success": true, "output_path": "consolidated.json", "statistics": {"total_polymorphs": 150, "compositions_included": 15, ...}}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        FileNotFoundError: [ERROR_WHEN] When one or more input files cannot be found [/ERROR_WHEN]
+                          [ERROR_DETAILS] File paths in composition_files dictionary are invalid [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Check file paths and ensure all files exist [/ERROR_RECOVERY]
+        JSONDecodeError: [ERROR_WHEN] When input files contain invalid JSON [/ERROR_WHEN]
+                        [ERROR_DETAILS] Corrupted or malformed JSON in input files [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Verify JSON format of input files [/ERROR_RECOVERY]
+        IOError: [ERROR_WHEN] When unable to write to output path [/ERROR_WHEN]
+                [ERROR_DETAILS] Output path is not writable or directory doesn't exist [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Check write permissions and ensure output directory exists [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Memory usage scales with total dataset size
+    - Does not perform deduplication of identical structures
+    - May not handle very large individual files efficiently
+    - Does not validate data consistency across files
+    [/LIMITATIONS]
     """
     all_polymorphs = []
     stats = {
@@ -1742,45 +2008,102 @@ def execute_python_code(
     save_output_to: str | None = None,
     timeout: int = 300,
 ) -> str:
-    """Executes Python code in a sandboxed environment.
+    """[BRIEF] Execute Python code in a secure environment with data input/output capabilities. [/BRIEF]
 
-    This function runs a given Python code string as a subprocess, providing
-    a secure way to execute dynamic code. It supports injecting input data,
-    capturing standard output and errors, and saving structured results to a file.
+    [DETAILED] This tool provides a secure execution environment for custom Python code, essential for
+    data analysis, custom calculations, and algorithm development in materials science workflows. It
+    supports data injection, output capture, and file saving capabilities while maintaining security
+    through process isolation and timeout controls. This enables flexible custom analysis. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to execute custom Python analysis or calculations
+    - Best suited for data processing and custom algorithm development
+    - Essential for implementing custom filtering, analysis, or transformation logic
+    - Recommended for prototyping and testing analysis workflows
+    - Avoid for simple operations that can be done with existing tools
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Creates isolated subprocess environment for secure code execution
+    - Injects input data as JSON-parsed variable if provided
+    - Captures standard output, error streams, and execution results
+    - Implements timeout protection to prevent infinite loops
+    - Extracts variables from executed code for result capture
+    - Saves results to file if requested for persistence
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Prepare input data and ensure code is syntactically correct [/PREREQUISITE]
+    2. [CURRENT] Execute custom Python code with data processing or analysis [/CURRENT]
+    3. [FOLLOW_UP] Use captured results for further analysis or save to files [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - execute_python_code("result = sum([1, 2, 3, 4, 5])", None, None, 30)
+    - execute_python_code("filtered_data = [x for x in input_data if x > 0.5]", json_data, "output.json")
+    - execute_python_code("import numpy as np; result = np.mean(input_data)", array_data, None, 60)
+    [/SYNTACTICAL]
 
     Args:
-        python_code: A string containing the Python code to be executed.
-                    For best results, assign your main output to a variable named
-                    'result' or 'output'. The tool will also attempt to capture
-                    other user-defined variables as fallback.
-        input_data: An optional JSON string. If provided, it will be loaded
-                    into a Python variable named `input_data` within the
-                    executed script, allowing the script to process external data.
-                    Defaults to None.
-        save_output_to: An optional file path (string) where the captured
-                        execution result will be saved as a JSON file. Defaults to None.
-        timeout: The maximum time in seconds the subprocess is allowed to run.
-                 If the execution exceeds this limit, a `TimeoutExpired` error
-                 will be returned. Defaults to 300 seconds.
+        python_code: [BRIEF] Python code string to be executed. [/BRIEF]
+                    [DETAILED] A string containing valid Python code to be executed in thes
+                    environment. For best results, assign your main output to a variable named
+                    'result' or 'output'. The code can import standard libraries and perform
+                    complex calculations. The tool will attempt to capture user-defined variables
+                    as execution results. [/DETAILED]
+                    [SYNTACTIC] Format: "Valid Python code string" [/SYNTACTIC]
+                    [EXAMPLES] Examples: "result = 2 + 2", "import json; result = json.loads(data)", "filtered = [x for x in data if x > threshold]" [/EXAMPLES]
+
+        input_data: [BRIEF] Optional JSON string to inject as input_data variable. [/BRIEF]
+                   [DETAILED] An optional JSON string that will be loaded into a Python variable
+                   named 'input_data' within the executed script. This allows the script to
+                   process external data. The JSON will be parsed and made available as a Python
+                   object (dict, list, etc.) depending on the JSON structure. [/DETAILED]
+                   [SYNTACTIC] Format: "Valid JSON string or None" [/SYNTACTIC]
+                   [EXAMPLES] Examples: '{"data": [1, 2, 3]}', '[1, 2, 3, 4, 5]', '{"threshold": 0.5, "values": [...]}' [/EXAMPLES]
+
+        save_output_to: [BRIEF] Optional file path to save execution results. [/BRIEF]
+                       [DETAILED] An optional file path where the captured execution results will
+                       be saved as a JSON file. If provided and execution is successful, the
+                       results will be written to this file for persistence and later use.
+                       The directory will be created if it doesn't exist. [/DETAILED]
+                       [SYNTACTIC] Format: "Valid file path or None" [/SYNTACTIC]
+                       [EXAMPLES] Examples: "results.json", "output/analysis_results.json", "data/processed_output.json" [/EXAMPLES]
+
+        timeout: [BRIEF] Maximum execution time in seconds. Defaults to 300. [/BRIEF]
+                [DETAILED] The maximum time in seconds the subprocess is allowed to run before
+                being terminated. This prevents infinite loops and runaway processes from
+                consuming system resources. If the execution exceeds this limit, a timeout
+                error will be returned. Choose appropriate values based on expected computation time. [/DETAILED]
+                [SYNTACTIC] Format: positive integer representing seconds [/SYNTACTIC]
+                [EXAMPLES] Examples: 30 (quick calculations), 300 (standard), 1800 (long processing) [/EXAMPLES]
 
     Returns:
-        A JSON string detailing the execution outcome. This includes:
-        - `success` (bool): True if the process completed without error and
-                            returned a 0 exit code, False otherwise.
-        - `stdout` (str): The standard output from the executed Python script,
-                          excluding the `EXECUTION_RESULT` marker.
-        - `stderr` (str): Any error messages or warnings printed to standard error.
-        - `return_code` (int): The exit code of the subprocess. A value of 0
-                               typically indicates success.
-        - `execution_result` (dict): A dictionary containing variables captured
-                                    from the executed script. If no suitable variables
-                                    are found, this will be an empty dictionary.
-        - `saved_to` (str or None): The path where the `execution_result` was
-                                    saved, if `save_output_to` was provided
-                                    and execution was successful.
-        - `error` (str, optional): A descriptive error message if execution failed
-                                   or timed out.
-        - `traceback` (str, optional): The Python traceback in case of an exception.
+        str: [BRIEF] JSON string with detailed execution results and captured output. [/BRIEF]
+             [DETAILED] A comprehensive JSON string containing execution status, standard output,
+             error messages, return code, captured execution results, and file save status.
+             The execution_result field contains variables captured from the executed code.
+             This enables full visibility into the execution process and results. [/DETAILED]
+             [EXAMPLES] Example output: '{"success": true, "execution_result": {"result": 10}, "stdout": "...", "stderr": "", "return_code": 0}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        TimeoutExpired: [ERROR_WHEN] When code execution exceeds the specified timeout [/ERROR_WHEN]
+                       [ERROR_DETAILS] Process terminated due to timeout limit [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Increase timeout value or optimize code for faster execution [/ERROR_RECOVERY]
+        SyntaxError: [ERROR_WHEN] When the Python code contains syntax errors [/ERROR_WHEN]
+                    [ERROR_DETAILS] Invalid Python syntax in the code string [/ERROR_DETAILS]
+                    [ERROR_RECOVERY] Check code syntax and fix any errors [/ERROR_RECOVERY]
+        RuntimeError: [ERROR_WHEN] When code execution fails due to runtime errors [/ERROR_WHEN]
+                     [ERROR_DETAILS] Errors during code execution such as undefined variables [/ERROR_DETAILS]
+                     [ERROR_RECOVERY] Debug code logic and ensure all required variables are defined [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Limited to Python standard library and commonly available packages
+    - Cannot access external network resources or file system outside working directory
+    - Cannot install new packages during execution
+    - Does not persist state between executions
+    [/LIMITATIONS]
     """
     import json
     import subprocess
@@ -1887,20 +2210,102 @@ def execute_python_script(
     timeout: int = 600,
     working_dir: str | None = None,
 ) -> str:
-    """
-    Execute a Python script file. The function takes the path to the script,
-    optional command-line arguments, and a timeout. It captures the output,
-    standard error, and return code of the execution. The results are returned
-    as a JSON string.
+    """[BRIEF] Execute a Python script file with arguments in a controlled environment. [/BRIEF]
+
+    [DETAILED] This tool executes existing Python script files with command-line arguments, providing
+    a controlled environment for running complex analysis workflows, data processing pipelines, or
+    computational simulations. It captures all output streams and provides comprehensive execution
+    monitoring with timeout protection. This is essential for integrating existing Python scripts
+    into automated workflows and materials analysis pipelines. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to execute existing Python scripts with specific arguments. You can also use io tool to write a script and then execute it.
+    - Best suited for running complex analysis workflows or simulations
+    - Essential for integrating external Python tools into automated pipelines
+    - Recommended for batch processing and computational workflows
+    - Avoid for simple code execution (use execute_python_code instead)
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Validates script file existence and accessibility
+    - Constructs command with script path and provided arguments
+    - Executes script in subprocess with timeout protection
+    - Captures standard output, error streams, and return codes
+    - Provides comprehensive execution monitoring and error reporting
+    - Supports custom working directory for script execution
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Ensure script file exists and is executable with proper dependencies [/PREREQUISITE]
+    2. [CURRENT] Execute script with appropriate arguments and timeout [/CURRENT]
+    3. [FOLLOW_UP] Process script output and results for further analysis. Can be used to process json script as required [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - execute_python_script("analysis.py", ["--input", "data.json", "--output", "results.json"], 300)
+    - execute_python_script("simulation.py", ["--steps", "1000", "--temp", "300"], 1800, "/path/to/workdir")
+    - execute_python_script("processing.py", None, 600, None)
+    [/SYNTACTICAL]
 
     Args:
-        script_path: Path to the Python script file
-        args: Optional list of command-line arguments
-        timeout: Timeout in seconds (default 600)
-        working_dir: Working directory for execution
+        script_path: [BRIEF] Path to the Python script file to execute. [/BRIEF]
+                    [DETAILED] Complete file path to the Python script that should be executed.
+                    The script must exist and be readable. The path can be relative to the
+                    current working directory or absolute. The script should be a valid Python
+                    file with appropriate shebang or run using the Python interpreter. [/DETAILED]
+                    [SYNTACTIC] Format: "Valid file path to Python script" [/SYNTACTIC]
+                    [EXAMPLES] Examples: "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/EXAMPLES]
+
+        args: [BRIEF] Optional list of command-line arguments for the script. [/BRIEF]
+             [DETAILED] A list of strings representing command-line arguments to pass to the script.
+             These arguments will be passed to the script in the order provided. Common arguments
+             include input files, output paths, configuration parameters, and processing options.
+             If None, the script will be executed without arguments. [/DETAILED]
+             [SYNTACTIC] Format: ["arg1", "arg2", "arg3", ...] or None [/SYNTACTIC]
+             [EXAMPLES] Examples: ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/EXAMPLES]
+
+        timeout: [BRIEF] Maximum execution time in seconds. Defaults to 600. [/BRIEF]
+                [DETAILED] The maximum time in seconds the script is allowed to run before being
+                terminated. This prevents runaway processes and ensures resource management.
+                Choose appropriate values based on expected script execution time. For
+                computational simulations, longer timeouts may be necessary. [/DETAILED]
+                [SYNTACTIC] Format: positive integer representing seconds [/SYNTACTIC]
+                [EXAMPLES] Examples: 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/EXAMPLES]
+
+        working_dir: [BRIEF] Optional working directory for script execution. [/BRIEF]
+                    [DETAILED] The directory from which the script should be executed. This affects
+                    relative path resolution and file I/O operations within the script. If None,
+                    the current working directory will be used. This is useful when scripts
+                    expect to run from specific directories or access relative files. [/DETAILED]
+                    [SYNTACTIC] Format: "Valid directory path or None" [/SYNTACTIC]
+                    [EXAMPLES] Examples: "/path/to/project", "data/analysis", None [/EXAMPLES]
 
     Returns:
-        JSON string with execution results
+        str: [BRIEF] JSON string with comprehensive execution results and monitoring data. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing execution status, captured output streams,
+             error messages, return code, and the complete command that was executed. This provides
+             full visibility into the script execution process and enables debugging and monitoring
+             of automated workflows. [/DETAILED]
+             [EXAMPLES] Example output: '{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        FileNotFoundError: [ERROR_WHEN] When the specified script file doesn't exist [/ERROR_WHEN]
+                          [ERROR_DETAILS] Script path is invalid or file is not accessible [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Verify script path exists and is readable [/ERROR_RECOVERY]
+        TimeoutExpired: [ERROR_WHEN] When script execution exceeds the specified timeout [/ERROR_WHEN]
+                       [ERROR_DETAILS] Script terminated due to timeout limit [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Increase timeout value or optimize script performance [/ERROR_RECOVERY]
+        PermissionError: [ERROR_WHEN] When script file lacks execute permissions [/ERROR_WHEN]
+                        [ERROR_DETAILS] Insufficient permissions to execute the script [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Check file permissions and ensure script is executable [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Cannot modify script execution environment beyond working directory
+    - Limited to Python scripts and available system Python installation
+    - No real-time output streaming during execution
+    - Cannot interact with scripts requiring user input
+    [/LIMITATIONS]
     """
     try:
         if not Path.exists(script_path):
@@ -1944,86 +2349,103 @@ def execute_python_script(
         return json.dumps({"success": False, "error": str(e)})
 
 
-def execute_python_code_given_code(code: str) -> str:
-    """
-    Executes a given Python code string.
-    This is a placeholder and should be replaced with your actual implementation.
-    """
-    try:
-        # Create a dictionary to hold local variables during execution
-        exec_globals = {}
-        exec_locals = {}
-        exec(code, exec_globals, exec_locals)
-        # Assuming the filtering code will produce a 'output' variable
-        return json.dumps(
-            {"success": True, "execution_result": {"output": exec_locals.get("output")}}
-        )
-    except Exception as e:
-        return json.dumps(
-            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
-        )
-
-
 @tool
 def filter_json_with_strategy(
     input_json_path: str,
     output_json_path: str,
     custom_code: str | None = None,
 ) -> str:
-    """
-        Filters JSON data from an input file and saves the results to an output file
-        using a custom Python filtering logic.
+    """[BRIEF] Filter JSON data using custom Python code and save results to a new file. [/BRIEF]
 
-        This function reads a JSON file, applies a custom Python script to filter its
-        contents, and then writes the filtered data to a new JSON file. The custom
-        filtering code is executed in an isolated environment where the input JSON
-        data is available as a variable named 'data'. The filtering logic should
-        produce a result in a variable named 'filtered_data'.
+    [DETAILED] This tool provides flexible JSON data filtering capabilities using custom Python logic,
+    essential for data preprocessing, quality control, and custom analysis workflows. It enables
+    sophisticated filtering operations that go beyond simple threshold-based selection, allowing
+    for complex multi-criteria filtering, data validation, and custom transformations. This is
+    crucial for preparing datasets for analysis and machine learning applications. [/DETAILED]
 
-        Args:
-            input_json_path: The file path to the input JSON data.
-            output_json_path: The file path where the filtered JSON data will be saved.
-            custom_code: A string containing Python code that defines the filtering logic.
-                         This code should expect the input data in a variable named
-                         'data' and store its filtered result in a variable named
-                         'filtered_data'.
+    [PROCEDURAL] When to use this tool:
+    - Use when you need custom filtering logic beyond standard threshold-based selection
+    - Best suited for complex multi-criteria filtering and data validation
+    - Essential for data preprocessing and quality control workflows
+    - Recommended for custom data transformations and analysis pipelines
+    - Avoid for simple filtering operations that can be done with existing tools
+    [/PROCEDURAL]
 
-        Returns:
-            A JSON string indicating the status of the filtering operation.
-            If successful, it includes 'success' (True), 'original_count',
-            'filtered_count', 'output_path', and 'reduction_percentage'.
-            If unsuccessful, it includes 'success' (False), 'error', and 'details'
-            (or 'traceback' for exceptions during file operations).
+    [CONTEXTUAL] How this tool works:
+    - Loads JSON data from input file into a 'data' variable
+    - Executes custom Python code in an isolated environment
+    - Expects filtering logic to produce results in a 'filtered_data' variable
+    - Saves filtered results to output file with comprehensive statistics
+    - Provides detailed reporting on filtering effectiveness and data reduction
+    - Use io tools or python tool to see the  keys from json if required
+    [/CONTEXTUAL]
 
-        Raises:
-            FileNotFoundError: If `input_json_path` does not exist.
-            json.JSONDecodeError: If the input file is not a valid JSON.
-            Exception: For any other errors during file operations or code execution.
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Ensure input JSON file exists and custom filtering code is prepared [/PREREQUISITE]
+    2. [CURRENT] Apply custom filtering logic to process and filter JSON data [/CURRENT]
+    3. [FOLLOW_UP] Use filtered data for further analysis, ML preparation for example use prepare_tabular_dataset to prepare datset from the output file [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
 
-        Example:
-            # Assuming input json file contains a list of dictionaries like:
-            # [
-            #   {"material_id": "mp-1143", "band_gap": 5.85},
-            #   {"material_id": "mp-752826", "band_gap": 4.17}
-            # ]
+    [SYNTACTICAL] Usage examples:
+    - filter_json_with_strategy("input.json", "output.json", "filtered_data = [x for x in data if x['energy'] < 0.5]")
+    - filter_json_with_strategy("materials.json", "stable.json", "filtered_data = [x for x in data if x['is_stable']]")
+    - filter_json_with_strategy("polymorphs.json", "filtered.json", "filtered_data = [x for x in data if x['band_gap'] > 1.0 and x['density'] < 5.0]")
+    [/SYNTACTICAL]
 
-            input_file = "input.json"
-            output_file = "output_filtered.json"
+    Args:
+        input_json_path: [BRIEF] Path to the input JSON file to be filtered. [/BRIEF]
+                        [DETAILED] Complete file path to the JSON file containing the data to be filtered.
+                        The file should contain valid JSON data, typically a list of dictionaries
+                        representing materials or structures with various properties. The file must
+                        be readable and contain well-formed JSON. [/DETAILED]
+                        [SYNTACTIC] Format: "Valid file path to JSON file" [/SYNTACTIC]
+                        [EXAMPLES] Examples: "data/materials.json", "polymorphs/all_structures.json", "input/dataset.json" [/EXAMPLES]
 
-            # Example 1: Filter materials with a band_gap greater than 5.0
-            custom_filter_code = \"\"\"
-    filtered_data = [item for item in data if item.get("band_gap", 0) > 5.0]
-    \"\"\"
-            result = filter_json_with_strategy(input_file, output_file, custom_filter_code)
-            print(result)
-            # Expected output (simplified):
-            # {
-            #   "success": true,
-            #   "original_count": 2,
-            #   "filtered_count": 1,
-            #   "output_path": "output_filtered.json",
-            #   "reduction_percentage": 50.0
-            # }
+        output_json_path: [BRIEF] Path where filtered JSON data will be saved. [/BRIEF]
+                         [DETAILED] Complete file path where the filtered JSON data will be written.
+                         The directory will be created if it doesn't exist. The output file will
+                         contain the filtered subset of the input data in the same JSON format.
+                         Using .json extension is recommended for clarity. [/DETAILED]
+                         [SYNTACTIC] Format: "Valid file path with .json extension" [/SYNTACTIC]
+                         [EXAMPLES] Examples: "output/filtered_materials.json", "results/stable_phases.json", "processed/selected_data.json" [/EXAMPLES]
+
+        custom_code: [BRIEF] Python code string defining the filtering logic. [/BRIEF]
+                    [DETAILED] A string containing Python code that defines the filtering logic.
+                    The code should expect the input data in a variable named 'data' and store
+                    the filtered results in a variable named 'filtered_data'. The code can use
+                    any Python constructs including list comprehensions, complex conditions,
+                    and data transformations. [/DETAILED]
+                    [SYNTACTIC] Format: "Valid Python code string with 'data' input and 'filtered_data' output" [/SYNTACTIC]
+                    [EXAMPLES] Examples: "filtered_data = [x for x in data if x['energy'] < threshold]", "filtered_data = [x for x in data if x.get('stable', False)]" [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] JSON string with filtering results and comprehensive statistics. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing filtering status, original and filtered
+             data counts, output file path, and percentage reduction achieved. This provides
+             comprehensive information about the filtering operation's effectiveness and enables
+             quality control of the data processing pipeline. [/DETAILED]
+             [EXAMPLES] Example output: '{"success": true, "original_count": 100, "filtered_count": 25, "output_path": "filtered.json", "reduction_percentage": 75.0}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        FileNotFoundError: [ERROR_WHEN] When the input JSON file doesn't exist [/ERROR_WHEN]
+                          [ERROR_DETAILS] Input file path is invalid or file is not accessible [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Verify input file path exists and is readable [/ERROR_RECOVERY]
+        JSONDecodeError: [ERROR_WHEN] When the input file contains invalid JSON [/ERROR_WHEN]
+                        [ERROR_DETAILS] Malformed JSON in the input file [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Verify JSON format and fix any syntax errors [/ERROR_RECOVERY]
+        SyntaxError: [ERROR_WHEN] When the custom filtering code contains syntax errors [/ERROR_WHEN]
+                    [ERROR_DETAILS] Invalid Python syntax in the custom_code parameter [/ERROR_DETAILS]
+                    [ERROR_RECOVERY] Check and fix Python syntax in the filtering code [/ERROR_RECOVERY]
+        RuntimeError: [ERROR_WHEN] When the custom filtering code fails during execution [/ERROR_WHEN]
+                     [ERROR_DETAILS] Runtime errors in the filtering logic [/ERROR_DETAILS]
+                     [ERROR_RECOVERY] Debug filtering code and ensure all variables are properly defined [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Custom code execution is isolated and cannot import external libraries
+    - Cannot validate filtered data structure or content
+    - Limited error reporting for complex filtering logic
+    [/LIMITATIONS]
     """
     try:
         with Path(input_json_path).open("r") as f:
@@ -2092,604 +2514,6 @@ output = filtered_data
             {"success": False, "error": str(e), "traceback": traceback.format_exc()},
             indent=2,
         )
-
-
-@tool
-def select_polymorphs_with_strategy_to_file(
-    polymorphs_data: str,
-    save_path: str,
-    selection_strategy: str = "diverse_energy",
-    max_polymorphs: int = 5,
-    energy_threshold: float = 0.5,
-    is_path: bool = False,
-) -> str:
-    """
-    Select polymorphs based on a strategy (diverse_energy, most_stable, or diverse_structure). and save results to a file.
-    diverse_energy selects polymorphs with diverse energies,
-    most_stable selects the most stable ones, and diverse_structure selects polymorphs with different space groups.
-
-    Args:
-        polymorphs_data: JSON string or file path with polymorph data
-        save_path: Path where to save the selected polymorphs JSON
-        selection_strategy: Strategy for selection ("diverse_energy", "most_stable", "diverse_structure")
-        max_polymorphs: Maximum number of polymorphs to select
-        energy_threshold: Maximum energy above hull (eV/atom)
-        is_path: If True, polymorphs_data is treated as a file path
-
-    Returns:
-        Path to the saved JSON file
-    """
-    if is_path:
-        with Path(polymorphs_data).open("r") as f:
-            polymorphs = json.loads(f.read())
-    else:
-        polymorphs = json.loads(polymorphs_data)
-
-    # Filter by energy threshold
-    filtered = [p for p in polymorphs if p["energy_above_hull"] <= energy_threshold]
-
-    if selection_strategy == "most_stable":
-        selected = sorted(filtered, key=lambda x: x["energy_above_hull"])[
-            :max_polymorphs
-        ]
-
-    elif selection_strategy == "diverse_energy":
-        sorted_polymorphs = sorted(filtered, key=lambda x: x["energy_above_hull"])
-        selected = []
-        if sorted_polymorphs:
-            step = max(1, len(sorted_polymorphs) // max_polymorphs)
-            for i in range(0, min(len(sorted_polymorphs), max_polymorphs * step), step):
-                selected.append(sorted_polymorphs[i])
-
-    elif selection_strategy == "diverse_structure":
-        selected = []
-        seen_space_groups = set()
-        for p in sorted(filtered, key=lambda x: x["energy_above_hull"]):
-            if (
-                p["space_group"] not in seen_space_groups
-                and len(selected) < max_polymorphs
-            ):
-                selected.append(p)
-                seen_space_groups.add(p["space_group"])
-
-    else:
-        selected = filtered[:max_polymorphs]
-
-    # Save to file
-    with Path(save_path).open("w") as f:
-        json.dump(selected, f, indent=2)
-
-    return save_path
-
-
-@tool
-def process_slab_ocdata_style(
-    slab_cif: str,
-    bulk_cif: str,
-    min_xy_size: float = 8.0,
-    apply_constraints: bool = True,
-) -> str:
-    """
-    Applies ocdata-style processing to a raw slab CIF string:
-    1. Tags surface atoms based on height and coordination relative to the bulk.
-    2. Tiles the slab to meet a minimum lateral (XY) size.
-    3. (Optional) Applies constraints to fix bulk-like atoms (tag=0).
-
-    Requires the original bulk structure for accurate surface atom tagging.
-
-    Args:
-        slab_cif: CIF string of the raw slab structure (typically from pymatgen generation).
-        bulk_cif: CIF string of the original bulk structure used for coordination reference.
-        min_xy_size: Minimum lateral size (Å) the slab should span after tiling.
-        apply_constraints: If True, applies FixAtoms constraints to non-surface atoms (tag=0).
-
-    Returns:
-        str: CIF string of the processed (tagged, tiled, constrained) slab.
-    """
-    from pymatgen.core import Structure
-    from pymatgen.io.ase import AseAtomsAdaptor
-
-    try:
-        # Load structures
-        slab_struct_pmg = load_structure(slab_cif)
-        slab_atoms_ase = AseAtomsAdaptor.get_atoms(slab_struct_pmg)
-
-        bulk_struct_pmg = load_structure(bulk_cif)
-        # Standardize bulk *before* getting ASE atoms for consistent coordination check
-        standardized_bulk_pmg = standardize_bulk(bulk_struct_pmg)
-        standardized_bulk_ase = AseAtomsAdaptor.get_atoms(standardized_bulk_pmg)
-
-        # 1. Tag Surface Atoms
-        tags = find_surface_atoms_with_voronoi(standardized_bulk_ase, slab_atoms_ase)
-        slab_atoms_ase.set_tags(tags)
-
-        # 2. Tile the Tagged Slab
-        tiled_atoms_ase = tile_atoms(slab_atoms_ase, min_xy_size)
-
-        # 3. Apply Constraints (Optional)
-        final_atoms_ase = tiled_atoms_ase
-        if apply_constraints:
-            final_atoms_ase = set_fixed_atom_constraints(tiled_atoms_ase)
-
-        # 4. Convert back to CIF
-        final_struct_pmg = Structure.from_ase_atoms(final_atoms_ase)
-        return final_struct_pmg.to(fmt="cif")
-
-    except Exception as e:
-        return f"ERROR: Slab processing failed - {e}"
-
-
-@tool
-def get_symmetrically_distinct_miller_indices_from_bulk(
-    bulk_structure_path_or_string: str, from_path: bool = False, max_miller: int = 2
-) -> list:
-    """
-    Get symmetrically distinct Miller indices for a bulk structure.
-
-    Args:
-        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
-        from_path: Boolean indicating if the input is a file path
-        max_miller: Maximum Miller index to consider (1, 2, or 3)
-
-    Returns:
-        List of symmetrically distinct Miller indices
-    """
-    # Load the bulk structure from a CIF file or string
-
-    from pymatgen.core.surface import get_symmetrically_distinct_miller_indices
-
-    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
-
-    return get_symmetrically_distinct_miller_indices(bulk_structure, max_miller)
-
-
-@tool
-def enumerate_all_possible_miller_indices(max_miller: int = 2) -> list:
-    """
-    Generate all possible Miller indices up to a given maximum.
-
-    Args:
-        max_miller: Maximum Miller index to consider (1, 2, or 3)
-
-    Returns:
-        List of tuples representing all possible Miller indices
-    """
-    mill_list = []
-    for i in range(max_miller + 1):
-        for j in range(max_miller + 1):
-            for k in range(max_miller + 1):
-                if i == 0 and j == 0 and k == 0:
-                    continue  # Skip (0,0,0)
-                mill_list.append((i, j, k))
-    return mill_list
-
-
-@tool
-def find_all_unique_slabs_upto_millerindex(
-    bulk_structure_path_or_string: str,
-    from_path: bool = False,
-    max_index: int = 2,
-    min_slab_size: float = 8,
-    min_vacuum_size: float = 15,
-    center_slab: bool = True,
-    max_normal_search: int = 10,
-) -> str:
-    """
-    Generates all unique slabs for a given bulk structure up to specified Miller indices.
-
-    Args:
-        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
-        from_path: Boolean indicating if the input is a file path
-        max_index: Maximum Miller index to consider (1, 2, or 3)
-        min_slab_size: Minimum slab thickness in Angstroms
-        min_vacuum_size: Minimum vacuum size in Angstroms
-        center_slab: If True, centers the slab in the vacuum region
-        max_normal_search: Maximum number of normals to search for slab generation
-
-    Returns:
-        JSON dictionary with slab IDs as keys and their properties as values.
-             Each value contains Miller index, termination, CIF string, area, number of sites, and slab thickness.
-    """
-    from pymatgen.core.surface import generate_all_slabs
-
-    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
-
-    slabs = generate_all_slabs(
-        bulk_structure,
-        max_index=max_index,
-        min_slab_size=min_slab_size,
-        min_vacuum_size=min_vacuum_size,
-        center_slab=center_slab,
-        max_normal_search=max_normal_search,
-    )
-    slabs_dict = {}
-    for i, slab in enumerate(slabs):
-        slab_id = (
-            f"{slab.miller_index[0]}{slab.miller_index[1]}{slab.miller_index[2]}_{i}"
-        )
-        slabs_dict[slab_id] = {
-            "miller_index": slab.miller_index,
-            "termination": i,
-            "cif": slab.to(fmt="cif"),
-            "area": slab.surface_area,
-            "num_sites": len(slab),
-            "slab_thickness": slab.thickness,
-        }
-
-    return json.dumps(slabs_dict, indent=2)
-
-
-@tool
-def find_all_unique_slabs_upto_millerindex_to_file(
-    bulk_structure_path_or_string: str,
-    out_put_path: str,
-    from_path: bool = False,
-    max_index: int = 2,
-    min_slab_size: float = 8,
-    min_vacuum_size: float = 15,
-    center_slab: bool = True,
-    max_normal_search: int = 10,
-) -> str:
-    """
-    Generates all unique slabs for a given bulk structure up to specified Miller indices
-    and saves the results to a JSON file.
-
-    Args:
-        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
-        out_put_path: Path where to save the JSON output
-        from_path: Boolean indicating if the input is a file path
-        max_index: Maximum Miller index to consider (1, 2, or 3)
-        min_slab_size: Minimum slab thickness in Angstroms
-        min_vacuum_size: Minimum vacuum size in Angstroms
-        center_slab: If True, centers the slab in the vacuum region
-        max_normal_search: Maximum number of normals to search for slab generation
-
-    Returns:
-        str: Message indicating where the slabs data has been written.
-    """
-
-    from pymatgen.core.surface import generate_all_slabs
-
-    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
-
-    slabs = generate_all_slabs(
-        bulk_structure,
-        max_index=max_index,
-        min_slab_size=min_slab_size,
-        min_vacuum_size=min_vacuum_size,
-        center_slab=center_slab,
-        max_normal_search=max_normal_search,
-    )
-    slabs_dict = {}
-    for i, slab in enumerate(slabs):
-        slab_id = (
-            f"{slab.miller_index[0]}{slab.miller_index[1]}{slab.miller_index[2]}_{i}"
-        )
-        slabs_dict[slab_id] = {
-            "miller_index": slab.miller_index,
-            "termination": i,
-            "cif": slab.to(fmt="cif"),
-            "area": slab.surface_area,
-            "num_sites": len(slab),
-            "slab_thickness": slab.thickness,
-        }
-
-    with Path(out_put_path).open("w") as f:
-        json.dump(slabs_dict, f, indent=2)
-    return f"Slabs data written to {out_put_path}"
-
-
-@tool
-def enumerate_slabs_for_list_of_miller_index(
-    bulk_structure_path_or_string: str,
-    from_path: bool = False,
-    miller_index_list: list[tuple] | None = None,
-    min_slab_size: float = 12,
-    min_vacuum_size: float = 5,
-) -> str:
-    """
-    Generates slabs for a given bulk structure and specified Miller indices.
-
-    Args:
-        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
-        from_path: Boolean indicating if the input is a file path
-        miller_index_list: List of Miller indices to generate slabs for (e.g., [(1, 1, 1), (2, 0, 0)])
-        min_slab_size: Minimum slab thickness in Angstroms
-        min_vacuum_size: Minimum vacuum size in Angstroms
-
-    Returns:
-        str: JSON dictionary: {"slab_0": "<cif_string>", "slab_1": "<cif_string>", ...}
-    """
-    import json
-
-    from pymatgen.core import Structure
-    from pymatgen.core.surface import SlabGenerator
-
-    if miller_index_list is None:
-        raise ValueError("Miller indexes should be defined")
-
-    if from_path:
-        bulk_structure = Structure.from_file(bulk_structure_path_or_string)
-    else:
-        bulk_structure = Structure.from_str(bulk_structure_path_or_string, fmt="cif")
-
-    slabs_dict = {}
-    for millers in miller_index_list:
-        slab_gen = SlabGenerator(
-            bulk_structure, millers, min_slab_size, min_vacuum_size
-        )
-        slabs = slab_gen.get_slabs()  # returns a list of Slab objects
-        for i, slab in enumerate(slabs):
-            # We use get_orthogonal_c_slab() ensures that the slab lattice is reoriented in c axis for easier adsorption placement.
-            # get_sorted_structure() variations in atom ordering that might occur due to how the slab was originally created.
-            slab_clean = (
-                slab.get_sorted_structure()
-                # slab.get_orthogonal_c_slab().get_sorted_structure()
-            )
-            slabs_dict[f"slab_{i}_{millers}"] = slab_clean.to(fmt="cif")
-
-    return json.dumps(slabs_dict, indent=2)
-
-
-@tool
-def select_slabs_with_strategy(
-    slabs_json: str,
-    selection_strategy: str = "diverse_miller",
-    max_slabs_per_polymorph: int = 3,
-) -> str:
-    """
-    Select slabs based on strategy (diverse_miller, high_coordination, or large_surface).
-    diverse_miller selects slabs with different Miller indices,
-    high_coordination selects slabs with higher number of surface sites,
-    large_surface selects slabs with largest surface areas.
-
-    Args:
-        slabs_json: JSON string with slab data
-        selection_strategy: Strategy ("diverse_miller", "high_coordination", "large_surface")
-        max_slabs_per_polymorph: Maximum slabs to select per polymorph
-
-    Returns:
-        JSON string with selected slabs
-    """
-    slabs = json.loads(slabs_json)
-
-    if selection_strategy == "diverse_miller":
-        # Select slabs with different Miller indices
-        selected = {}
-        miller_indices_seen = set()
-        for slab_id, slab_data in slabs.items():
-            miller_tuple = tuple(slab_data["miller_index"])
-            if (
-                miller_tuple not in miller_indices_seen
-                and len(selected) < max_slabs_per_polymorph
-            ):
-                selected[slab_id] = slab_data
-                miller_indices_seen.add(miller_tuple)
-
-    elif selection_strategy == "large_surface":
-        # Select slabs with largest surface areas
-        sorted_slabs = sorted(slabs.items(), key=lambda x: x[1]["area"], reverse=True)
-        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
-
-    elif selection_strategy == "high_coordination":
-        # Select slabs with higher number of surface sites (proxy for coordination)
-        sorted_slabs = sorted(
-            slabs.items(), key=lambda x: x[1]["num_sites"], reverse=True
-        )
-        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
-
-    else:
-        # Default: take first max_slabs_per_polymorph
-        selected = dict(list(slabs.items())[:max_slabs_per_polymorph])
-
-    return json.dumps(selected, indent=2)
-
-
-@tool
-def select_slabs_with_strategy_to_file(
-    slabs_data: str,
-    save_path: str,
-    selection_strategy: str = "diverse_miller",
-    max_slabs_per_polymorph: int = 3,
-    is_path: bool = False,
-) -> str:
-    """
-    Select slabs based on strategy (diverse_miller, high_coordination, or large_surface).
-    diverse_miller selects slabs with different Miller indices,
-    high_coordination selects slabs with higher number of surface sites,
-    large_surface selects slabs with largest surface areas.
-
-    Args:
-        slabs_data: JSON string or file path with slab data
-        save_path: Path where to save the selected slabs JSON
-        selection_strategy: Strategy ("diverse_miller", "high_coordination", "large_surface")
-        max_slabs_per_polymorph: Maximum slabs to select per polymorph
-        is_path: If True, slabs_data is treated as a file path
-
-    Returns:
-        Path to the saved JSON file
-    """
-    # Load slabs data
-    if is_path:
-        with Path(slabs_data).open("r") as f:
-            slabs = json.loads(f.read())
-    else:
-        slabs = json.loads(slabs_data)
-
-    if selection_strategy == "diverse_miller":
-        # Select slabs with different Miller indices
-        selected = {}
-        miller_indices_seen = set()
-        for slab_id, slab_data in slabs.items():
-            miller_tuple = tuple(slab_data["miller_index"])
-            if (
-                miller_tuple not in miller_indices_seen
-                and len(selected) < max_slabs_per_polymorph
-            ):
-                selected[slab_id] = slab_data
-                miller_indices_seen.add(miller_tuple)
-
-    elif selection_strategy == "large_surface":
-        # Select slabs with largest surface areas
-        sorted_slabs = sorted(slabs.items(), key=lambda x: x[1]["area"], reverse=True)
-        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
-
-    elif selection_strategy == "high_coordination":
-        # Select slabs with higher number of surface sites (proxy for coordination)
-        sorted_slabs = sorted(
-            slabs.items(), key=lambda x: x[1]["num_sites"], reverse=True
-        )
-        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
-
-    else:
-        # Default: take first max_slabs_per_polymorph
-        selected = dict(list(slabs.items())[:max_slabs_per_polymorph])
-
-    # Save to file
-    with Path(save_path).open("w") as f:
-        json.dump(selected, f, indent=2)
-
-    return save_path
-
-
-@tool
-def generate_adsorbate_slab_configs(
-    slab_cif: str, adsorbate_cif: str, adsorption_sites_json: str, height: float = 1.8
-) -> str:
-    """
-    Generate configurations of adsorbates on slab at different adsorption sites.
-
-    Args:
-        slab_cif: CIF string of the slab
-        adsorbate_cif: CIF string of the adsorbate molecule
-        adsorption_sites_json: JSON string with adsorption sites information
-        height: Height in Angstroms for initial adsorbate placement
-
-    Returns:
-        JSON string mapping site identifiers to adsorbate+slab configurations
-    """
-    from pymatgen.analysis.adsorption import AdsorbateSiteFinder
-    from pymatgen.core import Molecule, Structure
-
-    # Load structures
-    slab = Structure.from_str(slab_cif, fmt="cif")
-
-    # Try to load adsorbate as a molecule or structure
-    try:
-        adsorbate_struct = Structure.from_str(adsorbate_cif, fmt="cif")
-        adsorbate = Molecule(
-            species=adsorbate_struct.species,
-            coords=list(adsorbate_struct.cart_coords),
-            charge=0,
-        )
-    except Exception as e:
-        raise ValueError(f"Could not parse adsorbate: {e}") from e
-
-    # Parse adsorption sites
-    adsorption_sites = json.loads(adsorption_sites_json)
-
-    # Generate configs for different sites
-    configs = {}
-    finder = AdsorbateSiteFinder(slab)
-
-    for site_type, sites in adsorption_sites.items():
-        # For each site type (top, bridge, hollow), select a few sites
-        max_sites = min(3, len(sites))  # Limit to 3 sites per type
-
-        for i in range(max_sites):
-            site = sites[i]
-            site_coords = site if isinstance(site, list) else list(site)
-
-            try:
-                # Add adsorbate to the slab
-                ads_slab = finder.add_adsorbate(adsorbate, site_coords, height)
-
-                # Add to configs
-                config_id = f"{site_type}_{i}"
-                configs[config_id] = {
-                    "site_type": site_type,
-                    "site_index": i,
-                    "site_coords": site_coords,
-                    "height": height,
-                    "cif": ads_slab.to(fmt="cif"),
-                }
-            except Exception:
-                # Skip sites that cause errors
-                continue
-
-    return json.dumps(configs, indent=2)
-
-
-@tool
-def get_mp_surface_properties(material_id: str) -> str:
-    """
-    Get surface properties for a specific material from the Materials Project. (Material ID, Formula,
-    Weighted Surface Energy, Weighted Surface Energy (eV/Å^2), Surface Anisotropy, Shape Factor,
-    Has Reconstructed)
-
-    Args:
-        material_id: Materials Project ID (e.g., "mp-149")
-        api_key: Materials Project API key (optional if set in environment)
-
-    Returns:
-        JSON string with surface properties
-    """
-    from mp_api.client import MPRester
-
-    # Use provided API key or get from environment
-    mp_api_key = os.getenv("MP_API_KEY")
-    if not mp_api_key:
-        raise ValueError(
-            "Materials Project API key not provided and not found in environment"
-        )
-
-    with MPRester(mp_api_key) as mpr:
-        # Get surface properties
-        try:
-            surface_docs = mpr.summary.search(
-                material_ids=[material_id],
-                fields=[
-                    "material_id",
-                    "formula_pretty",
-                    "weighted_surface_energy",
-                    "weighted_surface_energy_EV_PER_ANG2",
-                    "surface_anisotropy",
-                    "shape_factor",
-                    "has_reconstructed",
-                ],
-            )
-
-            if not surface_docs:
-                return json.dumps(
-                    {"error": f"No surface properties found for {material_id}"}
-                )
-
-            surface_data = []
-            for doc in surface_docs:
-                data = {
-                    "material_id": doc.material_id,
-                    "formula_pretty": doc.formula_pretty,
-                }
-
-                # Add surface properties if available
-                if hasattr(doc, "weighted_surface_energy"):
-                    data["weighted_surface_energy"] = doc.weighted_surface_energy
-                if hasattr(doc, "weighted_surface_energy_EV_PER_ANG2"):
-                    data["weighted_surface_energy_EV_PER_ANG2"] = (
-                        doc.weighted_surface_energy_EV_PER_ANG2
-                    )
-                if hasattr(doc, "surface_anisotropy"):
-                    data["surface_anisotropy"] = doc.surface_anisotropy
-                if hasattr(doc, "shape_factor"):
-                    data["shape_factor"] = doc.shape_factor
-                if hasattr(doc, "has_reconstructed"):
-                    data["has_reconstructed"] = doc.has_reconstructed
-
-                surface_data.append(data)
-
-            return json.dumps(surface_data, indent=2)
-        except Exception as e:
-            return json.dumps({"error": f"Error fetching surface properties: {e!s}"})
 
 
 """
@@ -3346,18 +3170,107 @@ def train_xgboost_model(
     target_column: str = "formation_energy_per_atom",
     hyperparameters: dict | None = None,
 ) -> str:
-    """
-    Train XGBoost model for formation energy prediction. The input data should be in CSV format with features and target column.
+    """[BRIEF] Train XGBoost regression model for materials property prediction with comprehensive evaluation. [/BRIEF]
 
-    Args:a
-        train_data_path: Path to training CSV file
-        test_data_path: Path to test CSV file
-        model_save_path: Path to save trained model
-        target_column: Name of target column
-        hyperparameters: XGBoost hyperparameters
+    [DETAILED] This tool implements comprehensive XGBoost model training for materials property prediction,
+    including hyperparameter management, model evaluation, and result persistence. XGBoost is particularly
+    effective for materials informatics due to its ability to handle complex non-linear relationships
+    and provide feature importance insights. The tool provides complete training pipeline with automatic
+    evaluation metrics and model persistence for production use. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need robust regression models for materials property prediction
+    - Best suited for structured/tabular materials data with engineered features
+    - Essential for establishing baseline models and feature importance analysis
+    - Recommended for problems requiring interpretable machine learning models
+    - Avoid for graph-structured data or when deep learning is more appropriate
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Loads training and test data from CSV files with proper feature/target separation
+    - Applies XGBoost regression with optimized hyperparameters
+    - Performs training with automatic validation and metric calculation
+    - Generates comprehensive evaluation including MAE, RMSE, R², and feature importance
+    - Saves trained model and detailed results for future use and analysis
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First prepare tabular dataset using prepare_tabular_dataset [/PREREQUISITE]
+    2. [CURRENT] Train XGBoost model with optimized hyperparameters [/CURRENT]
+    3. [FOLLOW_UP] Use evaluate_xgboost_model for detailed analysis or model for predictions [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - train_xgboost_model("train.csv", "test.csv", "model.pkl", "formation_energy_per_atom")
+    - train_xgboost_model("train.csv", "test.csv", "model.pkl", "band_gap", {"n_estimators": 200})
+    - train_xgboost_model("data/train.csv", "data/test.csv", "models/xgb_model.pkl", "energy")
+    [/SYNTACTICAL]
+
+    Args:
+        train_data_path: [BRIEF] Path to training data CSV file. [/BRIEF]
+                        [DETAILED] Complete file path to the CSV file containing training data with
+                        features and target column. The file should have a header row with column names
+                        and be properly formatted with numerical features. This is typically output
+                        from prepare_tabular_dataset tool. [/DETAILED]
+                        [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
+                        [EXAMPLES] Examples: "data/train.csv", "datasets/materials_train.csv", "ml_data/train_features.csv" [/EXAMPLES]
+
+        test_data_path: [BRIEF] Path to test data CSV file. [/BRIEF]
+                       [DETAILED] Complete file path to the CSV file containing test data with the same
+                       structure as training data. Used for independent model evaluation and performance
+                       assessment. Should have identical column structure to training data. [/DETAILED]
+                       [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
+                       [EXAMPLES] Examples: "data/test.csv", "datasets/materials_test.csv", "ml_data/test_features.csv" [/EXAMPLES]
+
+        model_save_path: [BRIEF] Path to save the trained model file. [/BRIEF]
+                        [DETAILED] Complete file path where the trained XGBoost model will be saved using
+                        joblib serialization. The model can be loaded later for predictions or further
+                        analysis. Using .pkl extension is recommended for clarity. [/DETAILED]
+                        [SYNTACTIC] Format: "Valid file path with .pkl extension" [/SYNTACTIC]
+                        [EXAMPLES] Examples: "models/xgb_model.pkl", "trained_models/formation_energy_model.pkl", "results/model.pkl" [/EXAMPLES]
+
+        target_column: [BRIEF] Name of the target column for prediction. Defaults to "formation_energy_per_atom". [/BRIEF]
+                      [DETAILED] The column name in the CSV files that contains the target values to predict.
+                      This column will be separated from features during training. Common targets include
+                      formation energy, band gap, bulk modulus, and other materials properties. [/DETAILED]
+                      [SYNTACTIC] Format: "String matching column name in CSV files" [/SYNTACTIC]
+                      [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
+
+        hyperparameters: [BRIEF] Optional dictionary of XGBoost hyperparameters. [/BRIEF]
+                        [DETAILED] Dictionary containing XGBoost hyperparameters to override default values.
+                        Can include parameters like n_estimators, max_depth, learning_rate, subsample, etc.
+                        If None, optimized default parameters will be used. Proper hyperparameter tuning
+                        can significantly improve model performance. [/DETAILED]
+                        [SYNTACTIC] Format: '{"param_name": value, ...} or None' [/SYNTACTIC]
+                        [EXAMPLES] Examples: {"n_estimators": 200, "max_depth": 8}, {"learning_rate": 0.05}, None [/EXAMPLES]
 
     Returns:
-        JSON string with training results and metrics
+        str: [BRIEF] JSON string with comprehensive training results and model performance metrics. [/BRIEF]
+             [DETAILED] A detailed JSON-formatted string containing training success status, model performance
+             metrics (MAE, RMSE, R²), feature importance rankings, hyperparameters used, dataset information,
+             and file paths for saved model and results. This enables comprehensive model evaluation and
+             comparison. [/DETAILED]
+             [EXAMPLES] Example output: '{"success": true, "test_metrics": {"mae": 0.12, "rmse": 0.18, "r2": 0.85}, "feature_importance": {...}, "model_path": "model.pkl"}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        FileNotFoundError: [ERROR_WHEN] When training or test data files don't exist [/ERROR_WHEN]
+                          [ERROR_DETAILS] Invalid file paths or missing CSV files [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Verify file paths exist and contain properly formatted CSV data [/ERROR_RECOVERY]
+        KeyError: [ERROR_WHEN] When target column is not found in the data [/ERROR_WHEN]
+                 [ERROR_DETAILS] Specified target column doesn't exist in CSV files [/ERROR_DETAILS]
+                 [ERROR_RECOVERY] Check column names in CSV files and use valid target column name [/ERROR_RECOVERY]
+        ValueError: [ERROR_WHEN] When data contains invalid values or format issues [/ERROR_WHEN]
+                   [ERROR_DETAILS] Non-numerical data in features or target, or insufficient data [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Ensure data is properly preprocessed and contains sufficient samples [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Requires tabular data format with numerical features
+    - Model performance depends on feature engineering quality
+    - May not capture complex non-linear relationships as well as deep learning
+    - Hyperparameter tuning requires domain expertise for optimal results
+    - Memory usage scales with dataset size and tree complexity
+    [/LIMITATIONS]
     """
     try:
         # Load data
@@ -3607,6 +3520,609 @@ def perform_cross_validation(
 
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)}, indent=2)
+
+
+########################
+# Distractor tools
+########################
+
+
+@tool
+def select_polymorphs_with_strategy_to_file(
+    polymorphs_data: str,
+    save_path: str,
+    selection_strategy: str = "diverse_energy",
+    max_polymorphs: int = 5,
+    energy_threshold: float = 0.5,
+    is_path: bool = False,
+) -> str:
+    """
+    Select polymorphs based on a strategy (diverse_energy, most_stable, or diverse_structure). and save results to a file.
+    diverse_energy selects polymorphs with diverse energies,
+    most_stable selects the most stable ones, and diverse_structure selects polymorphs with different space groups.
+
+    Args:
+        polymorphs_data: JSON string or file path with polymorph data
+        save_path: Path where to save the selected polymorphs JSON
+        selection_strategy: Strategy for selection ("diverse_energy", "most_stable", "diverse_structure")
+        max_polymorphs: Maximum number of polymorphs to select
+        energy_threshold: Maximum energy above hull (eV/atom)
+        is_path: If True, polymorphs_data is treated as a file path
+
+    Returns:
+        Path to the saved JSON file
+    """
+    if is_path:
+        with Path(polymorphs_data).open("r") as f:
+            polymorphs = json.loads(f.read())
+    else:
+        polymorphs = json.loads(polymorphs_data)
+
+    # Filter by energy threshold
+    filtered = [p for p in polymorphs if p["energy_above_hull"] <= energy_threshold]
+
+    if selection_strategy == "most_stable":
+        selected = sorted(filtered, key=lambda x: x["energy_above_hull"])[
+            :max_polymorphs
+        ]
+
+    elif selection_strategy == "diverse_energy":
+        sorted_polymorphs = sorted(filtered, key=lambda x: x["energy_above_hull"])
+        selected = []
+        if sorted_polymorphs:
+            step = max(1, len(sorted_polymorphs) // max_polymorphs)
+            for i in range(0, min(len(sorted_polymorphs), max_polymorphs * step), step):
+                selected.append(sorted_polymorphs[i])
+
+    elif selection_strategy == "diverse_structure":
+        selected = []
+        seen_space_groups = set()
+        for p in sorted(filtered, key=lambda x: x["energy_above_hull"]):
+            if (
+                p["space_group"] not in seen_space_groups
+                and len(selected) < max_polymorphs
+            ):
+                selected.append(p)
+                seen_space_groups.add(p["space_group"])
+
+    else:
+        selected = filtered[:max_polymorphs]
+
+    # Save to file
+    with Path(save_path).open("w") as f:
+        json.dump(selected, f, indent=2)
+
+    return save_path
+
+
+@tool
+def process_slab_ocdata_style(
+    slab_cif: str,
+    bulk_cif: str,
+    min_xy_size: float = 8.0,
+    apply_constraints: bool = True,
+) -> str:
+    """
+    Applies ocdata-style processing to a raw slab CIF string:
+    1. Tags surface atoms based on height and coordination relative to the bulk.
+    2. Tiles the slab to meet a minimum lateral (XY) size.
+    3. (Optional) Applies constraints to fix bulk-like atoms (tag=0).
+
+    Requires the original bulk structure for accurate surface atom tagging.
+
+    Args:
+        slab_cif: CIF string of the raw slab structure (typically from pymatgen generation).
+        bulk_cif: CIF string of the original bulk structure used for coordination reference.
+        min_xy_size: Minimum lateral size (Å) the slab should span after tiling.
+        apply_constraints: If True, applies FixAtoms constraints to non-surface atoms (tag=0).
+
+    Returns:
+        str: CIF string of the processed (tagged, tiled, constrained) slab.
+    """
+    from pymatgen.core import Structure
+    from pymatgen.io.ase import AseAtomsAdaptor
+
+    try:
+        # Load structures
+        slab_struct_pmg = load_structure(slab_cif)
+        slab_atoms_ase = AseAtomsAdaptor.get_atoms(slab_struct_pmg)
+
+        bulk_struct_pmg = load_structure(bulk_cif)
+        # Standardize bulk *before* getting ASE atoms for consistent coordination check
+        standardized_bulk_pmg = standardize_bulk(bulk_struct_pmg)
+        standardized_bulk_ase = AseAtomsAdaptor.get_atoms(standardized_bulk_pmg)
+
+        # 1. Tag Surface Atoms
+        tags = find_surface_atoms_with_voronoi(standardized_bulk_ase, slab_atoms_ase)
+        slab_atoms_ase.set_tags(tags)
+
+        # 2. Tile the Tagged Slab
+        tiled_atoms_ase = tile_atoms(slab_atoms_ase, min_xy_size)
+
+        # 3. Apply Constraints (Optional)
+        final_atoms_ase = tiled_atoms_ase
+        if apply_constraints:
+            final_atoms_ase = set_fixed_atom_constraints(tiled_atoms_ase)
+
+        # 4. Convert back to CIF
+        final_struct_pmg = Structure.from_ase_atoms(final_atoms_ase)
+        return final_struct_pmg.to(fmt="cif")
+
+    except Exception as e:
+        return f"ERROR: Slab processing failed - {e}"
+
+
+@tool
+def get_symmetrically_distinct_miller_indices_from_bulk(
+    bulk_structure_path_or_string: str, from_path: bool = False, max_miller: int = 2
+) -> list:
+    """
+    Get symmetrically distinct Miller indices for a bulk structure.
+
+    Args:
+        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
+        from_path: Boolean indicating if the input is a file path
+        max_miller: Maximum Miller index to consider (1, 2, or 3)
+
+    Returns:
+        List of symmetrically distinct Miller indices
+    """
+    # Load the bulk structure from a CIF file or string
+
+    from pymatgen.core.surface import get_symmetrically_distinct_miller_indices
+
+    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
+
+    return get_symmetrically_distinct_miller_indices(bulk_structure, max_miller)
+
+
+@tool
+def enumerate_all_possible_miller_indices(max_miller: int = 2) -> list:
+    """
+    Generate all possible Miller indices up to a given maximum.
+
+    Args:
+        max_miller: Maximum Miller index to consider (1, 2, or 3)
+
+    Returns:
+        List of tuples representing all possible Miller indices
+    """
+    mill_list = []
+    for i in range(max_miller + 1):
+        for j in range(max_miller + 1):
+            for k in range(max_miller + 1):
+                if i == 0 and j == 0 and k == 0:
+                    continue  # Skip (0,0,0)
+                mill_list.append((i, j, k))
+    return mill_list
+
+
+@tool
+def find_all_unique_slabs_upto_millerindex(
+    bulk_structure_path_or_string: str,
+    from_path: bool = False,
+    max_index: int = 2,
+    min_slab_size: float = 8,
+    min_vacuum_size: float = 15,
+    center_slab: bool = True,
+    max_normal_search: int = 10,
+) -> str:
+    """
+    Generates all unique slabs for a given bulk structure up to specified Miller indices.
+
+    Args:
+        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
+        from_path: Boolean indicating if the input is a file path
+        max_index: Maximum Miller index to consider (1, 2, or 3)
+        min_slab_size: Minimum slab thickness in Angstroms
+        min_vacuum_size: Minimum vacuum size in Angstroms
+        center_slab: If True, centers the slab in the vacuum region
+        max_normal_search: Maximum number of normals to search for slab generation
+
+    Returns:
+        JSON dictionary with slab IDs as keys and their properties as values.
+             Each value contains Miller index, termination, CIF string, area, number of sites, and slab thickness.
+    """
+    from pymatgen.core.surface import generate_all_slabs
+
+    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
+
+    slabs = generate_all_slabs(
+        bulk_structure,
+        max_index=max_index,
+        min_slab_size=min_slab_size,
+        min_vacuum_size=min_vacuum_size,
+        center_slab=center_slab,
+        max_normal_search=max_normal_search,
+    )
+    slabs_dict = {}
+    for i, slab in enumerate(slabs):
+        slab_id = (
+            f"{slab.miller_index[0]}{slab.miller_index[1]}{slab.miller_index[2]}_{i}"
+        )
+        slabs_dict[slab_id] = {
+            "miller_index": slab.miller_index,
+            "termination": i,
+            "cif": slab.to(fmt="cif"),
+            "area": slab.surface_area,
+            "num_sites": len(slab),
+            "slab_thickness": slab.thickness,
+        }
+
+    return json.dumps(slabs_dict, indent=2)
+
+
+@tool
+def find_all_unique_slabs_upto_millerindex_to_file(
+    bulk_structure_path_or_string: str,
+    out_put_path: str,
+    from_path: bool = False,
+    max_index: int = 2,
+    min_slab_size: float = 8,
+    min_vacuum_size: float = 15,
+    center_slab: bool = True,
+    max_normal_search: int = 10,
+) -> str:
+    """
+    Generates all unique slabs for a given bulk structure up to specified Miller indices
+    and saves the results to a JSON file.
+
+    Args:
+        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
+        out_put_path: Path where to save the JSON output
+        from_path: Boolean indicating if the input is a file path
+        max_index: Maximum Miller index to consider (1, 2, or 3)
+        min_slab_size: Minimum slab thickness in Angstroms
+        min_vacuum_size: Minimum vacuum size in Angstroms
+        center_slab: If True, centers the slab in the vacuum region
+        max_normal_search: Maximum number of normals to search for slab generation
+
+    Returns:
+        str: Message indicating where the slabs data has been written.
+    """
+
+    from pymatgen.core.surface import generate_all_slabs
+
+    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
+
+    slabs = generate_all_slabs(
+        bulk_structure,
+        max_index=max_index,
+        min_slab_size=min_slab_size,
+        min_vacuum_size=min_vacuum_size,
+        center_slab=center_slab,
+        max_normal_search=max_normal_search,
+    )
+    slabs_dict = {}
+    for i, slab in enumerate(slabs):
+        slab_id = (
+            f"{slab.miller_index[0]}{slab.miller_index[1]}{slab.miller_index[2]}_{i}"
+        )
+        slabs_dict[slab_id] = {
+            "miller_index": slab.miller_index,
+            "termination": i,
+            "cif": slab.to(fmt="cif"),
+            "area": slab.surface_area,
+            "num_sites": len(slab),
+            "slab_thickness": slab.thickness,
+        }
+
+    with Path(out_put_path).open("w") as f:
+        json.dump(slabs_dict, f, indent=2)
+    return f"Slabs data written to {out_put_path}"
+
+
+@tool
+def enumerate_slabs_for_list_of_miller_index(
+    bulk_structure_path_or_string: str,
+    from_path: bool = False,
+    miller_index_list: list[tuple] | None = None,
+    min_slab_size: float = 12,
+    min_vacuum_size: float = 5,
+) -> str:
+    """
+    Generates slabs for a given bulk structure and specified Miller indices.
+
+    Args:
+        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
+        from_path: Boolean indicating if the input is a file path
+        miller_index_list: List of Miller indices to generate slabs for (e.g., [(1, 1, 1), (2, 0, 0)])
+        min_slab_size: Minimum slab thickness in Angstroms
+        min_vacuum_size: Minimum vacuum size in Angstroms
+
+    Returns:
+        str: JSON dictionary: {"slab_0": "<cif_string>", "slab_1": "<cif_string>", ...}
+    """
+    import json
+
+    from pymatgen.core import Structure
+    from pymatgen.core.surface import SlabGenerator
+
+    if miller_index_list is None:
+        raise ValueError("Miller indexes should be defined")
+
+    if from_path:
+        bulk_structure = Structure.from_file(bulk_structure_path_or_string)
+    else:
+        bulk_structure = Structure.from_str(bulk_structure_path_or_string, fmt="cif")
+
+    slabs_dict = {}
+    for millers in miller_index_list:
+        slab_gen = SlabGenerator(
+            bulk_structure, millers, min_slab_size, min_vacuum_size
+        )
+        slabs = slab_gen.get_slabs()  # returns a list of Slab objects
+        for i, slab in enumerate(slabs):
+            # We use get_orthogonal_c_slab() ensures that the slab lattice is reoriented in c axis for easier adsorption placement.
+            # get_sorted_structure() variations in atom ordering that might occur due to how the slab was originally created.
+            slab_clean = (
+                slab.get_sorted_structure()
+                # slab.get_orthogonal_c_slab().get_sorted_structure()
+            )
+            slabs_dict[f"slab_{i}_{millers}"] = slab_clean.to(fmt="cif")
+
+    return json.dumps(slabs_dict, indent=2)
+
+
+@tool
+def select_slabs_with_strategy(
+    slabs_json: str,
+    selection_strategy: str = "diverse_miller",
+    max_slabs_per_polymorph: int = 3,
+) -> str:
+    """
+    Select slabs based on strategy (diverse_miller, high_coordination, or large_surface).
+    diverse_miller selects slabs with different Miller indices,
+    high_coordination selects slabs with higher number of surface sites,
+    large_surface selects slabs with largest surface areas.
+
+    Args:
+        slabs_json: JSON string with slab data
+        selection_strategy: Strategy ("diverse_miller", "high_coordination", "large_surface")
+        max_slabs_per_polymorph: Maximum slabs to select per polymorph
+
+    Returns:
+        JSON string with selected slabs
+    """
+    slabs = json.loads(slabs_json)
+
+    if selection_strategy == "diverse_miller":
+        # Select slabs with different Miller indices
+        selected = {}
+        miller_indices_seen = set()
+        for slab_id, slab_data in slabs.items():
+            miller_tuple = tuple(slab_data["miller_index"])
+            if (
+                miller_tuple not in miller_indices_seen
+                and len(selected) < max_slabs_per_polymorph
+            ):
+                selected[slab_id] = slab_data
+                miller_indices_seen.add(miller_tuple)
+
+    elif selection_strategy == "large_surface":
+        # Select slabs with largest surface areas
+        sorted_slabs = sorted(slabs.items(), key=lambda x: x[1]["area"], reverse=True)
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    elif selection_strategy == "high_coordination":
+        # Select slabs with higher number of surface sites (proxy for coordination)
+        sorted_slabs = sorted(
+            slabs.items(), key=lambda x: x[1]["num_sites"], reverse=True
+        )
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    else:
+        # Default: take first max_slabs_per_polymorph
+        selected = dict(list(slabs.items())[:max_slabs_per_polymorph])
+
+    return json.dumps(selected, indent=2)
+
+
+@tool
+def select_slabs_with_strategy_to_file(
+    slabs_data: str,
+    save_path: str,
+    selection_strategy: str = "diverse_miller",
+    max_slabs_per_polymorph: int = 3,
+    is_path: bool = False,
+) -> str:
+    """
+    Select slabs based on strategy (diverse_miller, high_coordination, or large_surface).
+    diverse_miller selects slabs with different Miller indices,
+    high_coordination selects slabs with higher number of surface sites,
+    large_surface selects slabs with largest surface areas.
+
+    Args:
+        slabs_data: JSON string or file path with slab data
+        save_path: Path where to save the selected slabs JSON
+        selection_strategy: Strategy ("diverse_miller", "high_coordination", "large_surface")
+        max_slabs_per_polymorph: Maximum slabs to select per polymorph
+        is_path: If True, slabs_data is treated as a file path
+
+    Returns:
+        Path to the saved JSON file
+    """
+    # Load slabs data
+    if is_path:
+        with Path(slabs_data).open("r") as f:
+            slabs = json.loads(f.read())
+    else:
+        slabs = json.loads(slabs_data)
+
+    if selection_strategy == "diverse_miller":
+        # Select slabs with different Miller indices
+        selected = {}
+        miller_indices_seen = set()
+        for slab_id, slab_data in slabs.items():
+            miller_tuple = tuple(slab_data["miller_index"])
+            if (
+                miller_tuple not in miller_indices_seen
+                and len(selected) < max_slabs_per_polymorph
+            ):
+                selected[slab_id] = slab_data
+                miller_indices_seen.add(miller_tuple)
+
+    elif selection_strategy == "large_surface":
+        # Select slabs with largest surface areas
+        sorted_slabs = sorted(slabs.items(), key=lambda x: x[1]["area"], reverse=True)
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    elif selection_strategy == "high_coordination":
+        # Select slabs with higher number of surface sites (proxy for coordination)
+        sorted_slabs = sorted(
+            slabs.items(), key=lambda x: x[1]["num_sites"], reverse=True
+        )
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    else:
+        # Default: take first max_slabs_per_polymorph
+        selected = dict(list(slabs.items())[:max_slabs_per_polymorph])
+
+    # Save to file
+    with Path(save_path).open("w") as f:
+        json.dump(selected, f, indent=2)
+
+    return save_path
+
+
+@tool
+def generate_adsorbate_slab_configs(
+    slab_cif: str, adsorbate_cif: str, adsorption_sites_json: str, height: float = 1.8
+) -> str:
+    """
+    Generate configurations of adsorbates on slab at different adsorption sites.
+
+    Args:
+        slab_cif: CIF string of the slab
+        adsorbate_cif: CIF string of the adsorbate molecule
+        adsorption_sites_json: JSON string with adsorption sites information
+        height: Height in Angstroms for initial adsorbate placement
+
+    Returns:
+        JSON string mapping site identifiers to adsorbate+slab configurations
+    """
+    from pymatgen.analysis.adsorption import AdsorbateSiteFinder
+    from pymatgen.core import Molecule, Structure
+
+    # Load structures
+    slab = Structure.from_str(slab_cif, fmt="cif")
+
+    # Try to load adsorbate as a molecule or structure
+    try:
+        adsorbate_struct = Structure.from_str(adsorbate_cif, fmt="cif")
+        adsorbate = Molecule(
+            species=adsorbate_struct.species,
+            coords=list(adsorbate_struct.cart_coords),
+            charge=0,
+        )
+    except Exception as e:
+        raise ValueError(f"Could not parse adsorbate: {e}") from e
+
+    # Parse adsorption sites
+    adsorption_sites = json.loads(adsorption_sites_json)
+
+    # Generate configs for different sites
+    configs = {}
+    finder = AdsorbateSiteFinder(slab)
+
+    for site_type, sites in adsorption_sites.items():
+        # For each site type (top, bridge, hollow), select a few sites
+        max_sites = min(3, len(sites))  # Limit to 3 sites per type
+
+        for i in range(max_sites):
+            site = sites[i]
+            site_coords = site if isinstance(site, list) else list(site)
+
+            try:
+                # Add adsorbate to the slab
+                ads_slab = finder.add_adsorbate(adsorbate, site_coords, height)
+
+                # Add to configs
+                config_id = f"{site_type}_{i}"
+                configs[config_id] = {
+                    "site_type": site_type,
+                    "site_index": i,
+                    "site_coords": site_coords,
+                    "height": height,
+                    "cif": ads_slab.to(fmt="cif"),
+                }
+            except Exception:
+                # Skip sites that cause errors
+                continue
+
+    return json.dumps(configs, indent=2)
+
+
+@tool
+def get_mp_surface_properties(material_id: str) -> str:
+    """
+    Get surface properties for a specific material from the Materials Project. (Material ID, Formula,
+    Weighted Surface Energy, Weighted Surface Energy (eV/Å^2), Surface Anisotropy, Shape Factor,
+    Has Reconstructed)
+
+    Args:
+        material_id: Materials Project ID (e.g., "mp-149")
+        api_key: Materials Project API key (optional if set in environment)
+
+    Returns:
+        JSON string with surface properties
+    """
+    from mp_api.client import MPRester
+
+    # Use provided API key or get from environment
+    mp_api_key = os.getenv("MP_API_KEY")
+    if not mp_api_key:
+        raise ValueError(
+            "Materials Project API key not provided and not found in environment"
+        )
+
+    with MPRester(mp_api_key) as mpr:
+        # Get surface properties
+        try:
+            surface_docs = mpr.summary.search(
+                material_ids=[material_id],
+                fields=[
+                    "material_id",
+                    "formula_pretty",
+                    "weighted_surface_energy",
+                    "weighted_surface_energy_EV_PER_ANG2",
+                    "surface_anisotropy",
+                    "shape_factor",
+                    "has_reconstructed",
+                ],
+            )
+
+            if not surface_docs:
+                return json.dumps(
+                    {"error": f"No surface properties found for {material_id}"}
+                )
+
+            surface_data = []
+            for doc in surface_docs:
+                data = {
+                    "material_id": doc.material_id,
+                    "formula_pretty": doc.formula_pretty,
+                }
+
+                # Add surface properties if available
+                if hasattr(doc, "weighted_surface_energy"):
+                    data["weighted_surface_energy"] = doc.weighted_surface_energy
+                if hasattr(doc, "weighted_surface_energy_EV_PER_ANG2"):
+                    data["weighted_surface_energy_EV_PER_ANG2"] = (
+                        doc.weighted_surface_energy_EV_PER_ANG2
+                    )
+                if hasattr(doc, "surface_anisotropy"):
+                    data["surface_anisotropy"] = doc.surface_anisotropy
+                if hasattr(doc, "shape_factor"):
+                    data["shape_factor"] = doc.shape_factor
+                if hasattr(doc, "has_reconstructed"):
+                    data["has_reconstructed"] = doc.has_reconstructed
+
+                surface_data.append(data)
+
+            return json.dumps(surface_data, indent=2)
+        except Exception as e:
+            return json.dumps({"error": f"Error fetching surface properties: {e!s}"})
 
 
 ###
