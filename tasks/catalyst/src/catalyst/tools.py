@@ -1065,6 +1065,76 @@ def generate_reconstructed_slab(
 ####################################
 
 
+# utility function
+def get_bulk_polymorphs_data_func(composition: str) -> str:
+    """
+    Query the Materials Project database to find polymorphs for a given composition. This function returns
+    a JSON string containing polymorph data including MP IDs, structures (CIF),  structures (CIF), energies above hull, formation_energy_per_atom, band gaps, densities,
+    volumes, number of sites, symmetry, and stability. The results are sorted by energy above hull.
+
+    Args:
+        composition: Chemical composition (e.g., 'TiO2')
+        api_key: Materials Project API key (optional if set in environment)
+
+    Returns:
+        JSON string containing polymorph data including MP IDs, structures (CIF),
+        energies above hull, formation_energy_per_atom, band gaps, densities,
+        volumes, number of sites, symmetry, and stability. (sorted by energy above hull)
+    """
+
+    from mp_api.client import MPRester
+
+    # Use provided API key or get from environment
+    mp_api_key = os.getenv("MP_API_KEY")
+    if not mp_api_key:
+        raise ValueError(
+            "Materials Project API key not provided and not found in environment"
+        )
+
+    with MPRester(mp_api_key) as mpr:
+        # Query for materials with the given composition
+        docs = mpr.materials.summary.search(
+            formula=composition,
+            fields=[
+                "material_id",
+                "structure",
+                "energy_above_hull",
+                "formation_energy_per_atom",
+                "band_gap",
+                "density",
+                "volume",
+                "nsites",
+                "symmetry",
+                "is_stable",
+            ],
+        )
+
+        # Convert structures to CIF for easy storage
+        polymorph_data = []
+        for doc in docs:
+            structure_cif = doc.structure.to(fmt="cif")
+
+            polymorph_data.append(
+                {
+                    "material_id": doc.material_id,
+                    "cif": structure_cif,
+                    "energy_above_hull": doc.energy_above_hull,
+                    "formation_energy_per_atom": doc.formation_energy_per_atom,
+                    "band_gap": doc.band_gap,
+                    "density": doc.density,
+                    "volume": doc.volume,
+                    "nsites": doc.nsites,
+                    "space_group": doc.symmetry.symbol,
+                    "is_stable": doc.is_stable,
+                }
+            )
+
+        # Sort by energy above hull (stability)
+        polymorph_data = sorted(polymorph_data, key=lambda x: x["energy_above_hull"])
+
+        return json.dumps(polymorph_data, indent=2)
+
+
 @tool
 def get_bulk_polymorphs_data(composition: str) -> str:
     """[BRIEF] Query Materials Project database to find all polymorphs for a given chemical composition. [/BRIEF]
@@ -1198,20 +1268,94 @@ def get_bulk_polymorphs_data(composition: str) -> str:
 def get_bulk_polymorphs_data_to_file(
     composition: str, save_path: str | None = None
 ) -> str:
+    """[BRIEF] Query Materials Project for polymorphs and save comprehensive data to a JSON file to give path. [/BRIEF]
+
+     [DETAILED] This tool performs the same comprehensive polymorph retrieval as get_bulk_polymorphs_data
+     but saves the results directly to a JSON file for persistent storage and later analysis.
+    This tool retrieves comprehensive polymorph data from the Materials Project database
+    for a specific chemical composition. Polymorphs are different crystal structures with the same
+    chemical formula but different atomic arrangements, leading to distinct physical and chemical
+    properties. This tool could be relevant for retrieving structures of the same compoisition.
+    Apart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull,
+    formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved.
+    The result is then saved a JSON file at the specified save_path.
+    The file-based approach allows for efficient handling of large datasets and facilitates
+    saving context of llm. [/DETAILED]
+
+     [PROCEDURAL] When to use this tool:
+     - Use when you need to explore all known structural variants of a single material composition.
+     - Suitable for identifying thermodynamically stable and metastable phases and other properties like band gap, density, volume, number of sites, space group of the structure.
+     - Use when you need to store polymorph data for later analysis or sharing or if you want to save context of llm.
+     - Best suited for building persistent datasets and material databases
+     - Highly recommended if the number of polymorphs for a compoisition could be very big
+     - Avoid when you only need temporary data access (use get_bulk_polymorphs_data instead)
+     - Avoid when you only need a single, well-known structure (use get_structure_from_mp_text instead)
+     - Avoid when you need data for multiple composition (use batch_retrieve_polymorphs instead)
+     [/PROCEDURAL]
+
+     [CONTEXTUAL] How this tool works:
+     - Connects to Materials Project API using authentication credentials
+     - Searches for all materials matching the specified chemical composition
+     - Retrieves comprehensive data including energetics, structural, and electronic properties
+     - Converts crystal structures to CIF format for compatibility with other tools
+     - Sorts results by energy above hull (thermodynamic stability) for easy analysis
+     - Saves results to specified file path in JSON format with proper formatting
+     - Ensures data persistence and enables later processing by other tools
+     - Validates file path and creates directories as needed
+     [/CONTEXTUAL]
+
+     [WORKFLOW_INTEGRATION] Typical workflow integration:
+     1. [PREREQUISITE] Ensure you need to retrieve data for only one composition and there is no better tool  [/PREREQUISITE]
+     2. [CURRENT] Apply this tool to retrieve and save polymorph data and save to a file[/CURRENT]
+     3. [FOLLOW_UP] Use consolidate_polymorph_datasets to combine multiple files of different composition or prepare_tabular_dataset[/FOLLOW_UP]
+     [/WORKFLOW_INTEGRATION]
+
+     [SYNTACTICAL] Usage examples:
+     - get_bulk_polymorphs_data_to_file("TiO2", "data/tio2_polymorphs.json")
+     - get_bulk_polymorphs_data_to_file("SiO2", "temp_path/silica_phases.json")
+     - get_bulk_polymorphs_data_to_file("Al2O3", "datasets/alumina_structures.json")
+     [/SYNTACTICAL]
+
+     Args:
+         composition: [BRIEF] Chemical composition formula. [/BRIEF]
+                     [DETAILED] Chemical formula specifying the composition for which polymorphs
+                     should be retrieved and saved. Should follow standard chemical notation with
+                     element symbols and subscripts. The tool will find all known crystal structures
+                     with this exact composition in the Materials Project database. [/DETAILED]
+                     [SYNTACTIC] Format: "Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)" [/SYNTACTIC]
+                     [EXAMPLES] Examples: "TiO2" (titanium dioxide), "SiO2" (silicon dioxide), "Fe2O3" (iron oxide) [/EXAMPLES]
+
+         save_path: [BRIEF] File path where JSON data will be saved. [/BRIEF]
+                   [DETAILED] Complete file path including filename and extension where the polymorph
+                   data will be saved. The path should be writable and the directory will be created
+                   if it doesn't exist. Using .json extension is recommended for clarity. If None,
+                   the tool will raise an error as the file path is required. [/DETAILED]
+                   [SYNTACTIC] Format: "Valid file path with .json extension" [/SYNTACTIC]
+                   [EXAMPLES] Examples: "data/tio2_polymorphs.json", "save_path/tio2_polymorphs.json", "results/Cu2O_polymorphsides.json" [/EXAMPLES]
+
+     Returns:
+         str: [BRIEF] File path where the polymorph data was saved. [/BRIEF]
+              [DETAILED] Returns the exact file path where the JSON data was successfully written.
+              This path can be used by subsequent tools for data loading and processing. The file
+              contains comprehensive polymorph data in JSON format, sorted by thermodynamic stability. [/DETAILED]
+              [EXAMPLES] Example output: "data/tio2_polymorphs.json" [/EXAMPLES]
+
+     [RAISES] Exceptions:
+         ValueError: [ERROR_WHEN] When save_path is None or API key is not available [/ERROR_WHEN]
+                    [ERROR_DETAILS] Either save_path parameter is not provided or MP_API_KEY environment variable is missing [/ERROR_DETAILS]
+                    [ERROR_RECOVERY] Provide valid save_path. If  MP_API_KEY is not set, tool might not work and use a different tool [/ERROR_RECOVERY]
+         IOError: [ERROR_WHEN] When unable to write to the specified file path [/ERROR_WHEN]
+                 [ERROR_DETAILS] File path is not writable or directory doesn't exist [/ERROR_DETAILS]
+                 [ERROR_RECOVERY] Check file permissions and ensure directory exists [/ERROR_RECOVERY]
+     [/RAISES]
+
+     [LIMITATIONS] Known limitations:
+     - Requires writable file system access
+     - Limited to materials available in the Materials Project database
+     - Can retrieve polymorphs only for one composition at a time
+     - Does not validate file format compatibility with other tools
+     [/LIMITATIONS]
     """
-    Query the Materials Project database to find polymorphs for a given composition. This function saves the data to a JSON file to the give path.
-    The data includes MP IDs, structures (CIF), energies above hull, formation_energy_per_atom, band gaps, densities,
-    volumes, number of sites, symmetry, and stability. The results are sorted by energy above hull.
-
-    Args:
-        composition: Chemical composition (e.g., 'TiO2')
-        save_path: Path to save the JSON file (optional)
-        api_key: Materials Project API key (optional if set in environment)
-
-    Returns:
-        Path to the saved JSON file containing polymorph data.
-    """
-
     from mp_api.client import MPRester
 
     if save_path is None:
@@ -1274,75 +1418,6 @@ def get_bulk_polymorphs_data_to_file(
         return save_path
 
 
-def get_bulk_polymorphs_data_func(composition: str) -> str:
-    """
-    Query the Materials Project database to find polymorphs for a given composition. This function returns
-    a JSON string containing polymorph data including MP IDs, structures (CIF),  structures (CIF), energies above hull, formation_energy_per_atom, band gaps, densities,
-    volumes, number of sites, symmetry, and stability. The results are sorted by energy above hull.
-
-    Args:
-        composition: Chemical composition (e.g., 'TiO2')
-        api_key: Materials Project API key (optional if set in environment)
-
-    Returns:
-        JSON string containing polymorph data including MP IDs, structures (CIF),
-        energies above hull, formation_energy_per_atom, band gaps, densities,
-        volumes, number of sites, symmetry, and stability. (sorted by energy above hull)
-    """
-
-    from mp_api.client import MPRester
-
-    # Use provided API key or get from environment
-    mp_api_key = os.getenv("MP_API_KEY")
-    if not mp_api_key:
-        raise ValueError(
-            "Materials Project API key not provided and not found in environment"
-        )
-
-    with MPRester(mp_api_key) as mpr:
-        # Query for materials with the given composition
-        docs = mpr.materials.summary.search(
-            formula=composition,
-            fields=[
-                "material_id",
-                "structure",
-                "energy_above_hull",
-                "formation_energy_per_atom",
-                "band_gap",
-                "density",
-                "volume",
-                "nsites",
-                "symmetry",
-                "is_stable",
-            ],
-        )
-
-        # Convert structures to CIF for easy storage
-        polymorph_data = []
-        for doc in docs:
-            structure_cif = doc.structure.to(fmt="cif")
-
-            polymorph_data.append(
-                {
-                    "material_id": doc.material_id,
-                    "cif": structure_cif,
-                    "energy_above_hull": doc.energy_above_hull,
-                    "formation_energy_per_atom": doc.formation_energy_per_atom,
-                    "band_gap": doc.band_gap,
-                    "density": doc.density,
-                    "volume": doc.volume,
-                    "nsites": doc.nsites,
-                    "space_group": doc.symmetry.symbol,
-                    "is_stable": doc.is_stable,
-                }
-            )
-
-        # Sort by energy above hull (stability)
-        polymorph_data = sorted(polymorph_data, key=lambda x: x["energy_above_hull"])
-
-        return json.dumps(polymorph_data, indent=2)
-
-
 @tool
 def batch_retrieve_polymorphs(
     compositions: list[str],
@@ -1350,17 +1425,110 @@ def batch_retrieve_polymorphs(
     max_per_composition: int = 10,
     save_directory: str = "polymorph_data",
 ) -> str:
-    """
-    Retrieve polymorphs for multiple compositions in batch.
+    """[BRIEF] Retrieve polymorphs for multiple chemical compositions efficiently in batch mode and save it to given directory as json. [/BRIEF]
+
+    [DETAILED] This tool performs polymorph retrieval for multiple chemical compositions
+    simultaneouslys. The tool applies energy and count filters to focus on thermodynamically relevant phases.
+    This tool retrieves comprehensive polymorph data from the Materials Project database
+    for each chemical composition and save in the user inputted save_directory. Polymorphs are different crystal structures with the same
+    chemical formula but different atomic arrangements, leading to distinct physical and chemical
+    properties. This tool could be relevant for retrieving structures of the same compoisition for multiple composition.
+    Apart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull,
+    formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved.
+    The result is then saved a JSON file at the specified directory in the format <composition>_polymorphs.json.
+    [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to systematically explore multiple chemical compositions
+    - Best suited for high-throughput materials screening and dataset preperation
+    - Use when you need to store polymorph data for later analysis or sharing or if you want to save context of llm.
+    - Best suited for building persistent datasets and material databases
+    - Avoid when you only need detailed analysis of a single composition
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Iterates through list of compositions using robust error handling
+    - Connects to Materials Project API using authentication credentials
+    - Searches for all materials matching the specified chemical composition
+    - Retrieves comprehensive data including energetics, structural, and electronic properties
+    - Converts crystal structures to CIF format for compatibility with other tools
+    - Applies energy filtering to focus on thermodynamically accessible phases
+    - Limits number of structures per composition to prevent data explosion
+    - Creates organized directory structure for systematic data storage
+    - Provides comprehensive success/failure reporting for quality control
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE]Ensure you need to retrieve data for more than one composition and there is no better tool  [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to retrieve polymorphs for multiple compositions [/CURRENT]
+    3. [FOLLOW_UP] Use consolidate_polymorph_datasets to combine results or select_polymorphs_with_strategy for filtering [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - batch_retrieve_polymorphs(["TiO2", "SiO2", "Al2O3"], 0.3, 5, "oxides_data")
+    - batch_retrieve_polymorphs(["CaTiO3", "SrTiO3", "BaTiO3"], 0.5, 10, "perovskites")
+    - batch_retrieve_polymorphs(["FeO", "Fe2O3", "Fe3O4"], 0.2, 8, "iron_oxides")
+    [/SYNTACTICAL]
 
     Args:
-        compositions: List of chemical compositions
-        max_energy_above_hull: Maximum energy above hull to include
-        max_per_composition: Maximum polymorphs per composition
-        save_directory: Directory to save individual composition files
+        compositions: [BRIEF] List of chemical compositions to retrieve. [/BRIEF]
+                     [DETAILED] List of chemical formulas for which polymorphs should be retrieved.
+                     Each composition should follow standard chemical notation. The tool will process
+                     each composition independently and provide detailed success/failure reporting.
+                     Large lists are supported but may take significant time to process. [/DETAILED]
+                     [SYNTACTIC] Format: ["composition1", "composition2", ...] [/SYNTACTIC]
+                     [EXAMPLES] Examples: ["TiO2", "SiO2", "Al2O3"], ["CaTiO3", "SrTiO3"], ["FeO", "Fe2O3"] [/EXAMPLES]
+
+        max_energy_above_hull: [BRIEF] Maximum energy above hull threshold in eV/atom. Defaults to 0.5. [/BRIEF]
+                              [DETAILED] Energy threshold above the convex hull for including polymorphs.
+                              Only phases with energy above hull less than or equal to this value will
+                              be included. This filters out highly unstable phases while retaining
+                              potentially accessible metastable phases. Lower values give more stable
+                              phases but may miss interesting metastable structures. [/DETAILED]
+                              [SYNTACTIC] Format: positive float representing energy in eV/atom [/SYNTACTIC]
+                              [EXAMPLES] Examples: 0.1 (very stable), 0.5 (standard), 1.0 (include metastable) [/EXAMPLES]
+
+        max_per_composition: [BRIEF] Maximum number of polymorphs per composition. Defaults to 10. [/BRIEF]
+                            [DETAILED] Maximum number of polymorphs to retrieve for each composition,
+                            taken from the most stable phases first. This prevents data explosion for
+                            compositions with many known phases while ensuring the most important
+                            structures are captured. Higher values provide more comprehensive coverage
+                            but increase dataset size and processing time. [/DETAILED]
+                            [SYNTACTIC] Format: positive integer [/SYNTACTIC]
+                            [EXAMPLES] Examples: 5 (focused), 10 (standard), 20 (comprehensive) [/EXAMPLES]
+
+        save_directory: [BRIEF] Directory path for saving individual composition files. Defaults to "polymorph_data". [/BRIEF]
+                       [DETAILED] Base directory where individual JSON files for each composition will be saved.
+                       The directory will be created if it doesn't exist. Each composition will have its own
+                       JSON file named with the composition formula. This organization facilitates easy
+                       data management and selective loading of specific compositions. [/DETAILED]
+                       [SYNTACTIC] Format: "Valid directory path" [/SYNTACTIC]
+                       [EXAMPLES] Examples: "data/polymorphs", "materials/oxides", "results/batch_data" [/EXAMPLES]
 
     Returns:
-        JSON string with batch retrieval results
+        str: [BRIEF] JSON string with batch retrieval results and statistics. [/BRIEF]
+             [DETAILED] A comprehensive JSON report containing lists of successfully processed and
+             failed compositions, total number of polymorphs retrieved, file paths for each composition,
+             and summary statistics. This enables quality control and tracking of the batch processing
+             workflow. [/DETAILED]
+             [EXAMPLES] Example output: '{"successful_compositions": ["TiO2", "SiO2"], "failed_compositions": ["BadFormula"], "total_polymorphs": 15, "composition_files": {...}}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When parameters are invalid (negative energy, zero max_per_composition) [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid parameter values or missing API key [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Check parameter values and ensure MP_API_KEY is set [/ERROR_RECOVERY]
+        IOError: [ERROR_WHEN] When unable to create save directory or write files [/ERROR_WHEN]
+                [ERROR_DETAILS] Directory creation failed or insufficient write permissions [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Check directory permissions and available disk space [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Requires writable file system access
+    - Limited to materials available in the Materials Project database
+    - Processing time scales linearly with number of compositions
+    - Individual composition failures don't stop the entire batch
+    - Does not validate file format compatibility with other tools
+    [/LIMITATIONS]
     """
     from pathlib import Path
 
