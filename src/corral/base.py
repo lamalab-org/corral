@@ -1,3 +1,4 @@
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from copy import deepcopy
@@ -52,14 +53,15 @@ class ToolCall:
     result: str | None
     status: ToolCallStatus
     error_message: str | None
-    timestamp: datetime = field(default_factory=datetime.now)
+    duration: float | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
 
 @dataclass
 class LLMMessage:
     role: Role  # 'agent' or 'environment'
     content: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
 
 @dataclass
@@ -73,7 +75,7 @@ class TaskState:
     score: float | None = None
     submitted_answer: str | None = None
     feedback: str | None = None
-    start_time: datetime = field(default_factory=datetime.now)
+    start_time: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     end_time: datetime | None = None
 
     def get_tool_statistics(self) -> dict[str, Any]:
@@ -306,14 +308,17 @@ class Environment(ABC):
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
         """Execute a tool and record the call with enhanced error handling"""
+        start_time = time.perf_counter()
         # Check if tool exists
         if tool_name not in self.tools:
+            duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
                 arguments=arguments,
                 result=None,
                 status=ToolCallStatus.INVALID_TOOL,
                 error_message=f"Tool {tool_name} not found",
+                duration=duration,
             )
             self.state.tool_calls.append(tool_call)
             return tool_call
@@ -323,12 +328,14 @@ class Environment(ABC):
         # Validate arguments
         is_valid, error_message = tool.validate_arguments(arguments)
         if not is_valid:
+            duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
                 arguments=arguments,
                 result=None,
                 status=ToolCallStatus.INVALID_ARGS,
                 error_message=error_message,
+                duration=duration,
             )
             self.state.tool_calls.append(tool_call)
             return tool_call
@@ -336,20 +343,24 @@ class Environment(ABC):
         # Execute tool
         try:
             result = tool.execute(**arguments)
+            duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
                 arguments=arguments,
                 result=result,
                 status=ToolCallStatus.SUCCESS,
                 error_message=None,
+                duration=duration,
             )
         except Exception as e:
+            duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
                 arguments=arguments,
                 result=None,
                 status=ToolCallStatus.EXECUTION_ERROR,
                 error_message=str(e),
+                duration=duration,
             )
 
         self.state.tool_calls.append(tool_call)
@@ -363,3 +374,43 @@ class Environment(ABC):
         self.state.is_completed = True
         self.state.end_time = datetime.now(tz=timezone.utc)
         return score
+
+    def get_completed_trial_data(self) -> dict:
+        """Get all data for the completed trial"""
+        # Calculate duration
+        duration = None
+        if self.state.start_time and self.state.end_time:
+            duration = (self.state.end_time - self.state.start_time).total_seconds()
+
+        # Build state dict with all needed data
+        state_data = {
+            "task_id": self.state.task_id,
+            "trial_id": self.state.trial_id,
+            "is_completed": self.state.is_completed,
+            "score": self.state.score,
+            "submitted_answer": self.state.submitted_answer,
+            "duration": duration,
+            "tool_statistics": self._get_complete_tool_statistics(),
+        }
+
+        return {"trial_id": self.state.trial_id, "state": state_data}
+
+    def _get_complete_tool_statistics(self) -> dict:
+        """Get complete tool statistics including individual tool calls"""
+        stats = self.state.get_tool_statistics()
+
+        # Add individual tool calls with duration
+        stats["tool_calls"] = [
+            {
+                "tool_name": call.tool_name,
+                "arguments": call.arguments,
+                "result": call.result,
+                "status": call.status.value,
+                "error_message": call.error_message,
+                "duration": call.duration,
+                "timestamp": call.timestamp.isoformat() if call.timestamp else None,
+            }
+            for call in self.state.tool_calls
+        ]
+
+        return stats
