@@ -368,10 +368,13 @@ class MatAgentBenchmark:
             logger.info(
                 f"Running trial {len(task_trials.trials) + 1} for task {task_id}"
             )
-            answer = self.agent.run_agent(self.interface, task_id, verbose=verbose)
+            answer, token_usage = self.agent.run_agent(
+                self.interface, task_id, verbose=verbose
+            )
             result = self.interface.submit_answer(task_id, answer)
             duration = result.state.get("duration")
             result.duration = duration
+            result.token_usage = token_usage
 
             task_trials.trials.append(result)
 

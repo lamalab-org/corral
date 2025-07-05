@@ -1,173 +1,433 @@
 import json
+import os
+import sys
+from collections.abc import Callable
+from pathlib import Path
 
-import uvicorn
 from loguru import logger
-from tools import UnitConverterTool, app, calculator, number_converter
+from tools import calculator, number_converter
 
-from corral.base import Environment, TaskDefinition, TaskGroup, Tool
-from corral.server import create_benchmark_server
+from corral.base import Environment, Tool
+from corral.io import (
+    CatFilesTool,
+    CopyFileTool,
+    FileInfoTool,
+    FSManager,
+    ListFilesTool,
+    ReadFileTool,
+    WriteFileTool,
+)
+from corral.server import run_server
+from corral.task import TaskDefinition, TaskGroup
+
+# Base working directory
+if "CORRAL_WORK_DIR" not in os.environ:
+    raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
+BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
 
 
-class TaskEnvironment(Environment):
-    """Environment that works with a task group"""
+def addition_score(expected_answer: float | None = None):
+    """Factory function that returns a scoring function for addition tasks"""
+
+    def score_fn(result: str) -> float:
+        """Score an addition task with expected answer validation"""
+        try:
+            # Handle string submissions
+            if isinstance(result, str):
+                result = result.strip()
+                # Try to parse as JSON first
+                try:
+                    parsed_result = json.loads(result)
+                    if isinstance(parsed_result, dict) and "answer" in parsed_result:
+                        answer = float(parsed_result["answer"])
+                    else:
+                        # If not a dict with answer, treat the whole thing as the answer
+                        answer = float(result)
+                except json.JSONDecodeError:
+                    # If not JSON, treat as direct numerical answer
+                    answer = float(result)
+            else:
+                # If already parsed
+                if isinstance(result, dict) and "answer" in result:
+                    answer = float(result["answer"])
+                else:
+                    answer = float(result)
+
+            if expected_answer is not None:
+                # Check if answer matches expected value (within tolerance)
+                return 1.0 if abs(answer - expected_answer) < 0.001 else 0.0
+            else:
+                # Just check if it's a valid number
+                return 1.0
+
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(
+                f"Error parsing result for addition_score: {e}, result was: {result}"
+            )
+            return 0.0
+
+    return score_fn
+
+
+def multiplication_score(expected_answer: float | None = None):
+    """Factory function that returns a scoring function for multiplication tasks"""
+
+    def score_fn(result: str) -> float:
+        """Score a multiplication task with expected answer validation"""
+        try:
+            # Handle string submissions
+            if isinstance(result, str):
+                result = result.strip()
+                # Try to parse as JSON first
+                try:
+                    parsed_result = json.loads(result)
+                    if isinstance(parsed_result, dict) and "answer" in parsed_result:
+                        answer = float(parsed_result["answer"])
+                    else:
+                        # If not a dict with answer, treat the whole thing as the answer
+                        answer = float(result)
+                except json.JSONDecodeError:
+                    # If not JSON, treat as direct numerical answer
+                    answer = float(result)
+            else:
+                # If already parsed
+                if isinstance(result, dict) and "answer" in result:
+                    answer = float(result["answer"])
+                else:
+                    answer = float(result)
+
+            if expected_answer is not None:
+                # Check if answer matches expected value (within tolerance)
+                return 1.0 if abs(answer - expected_answer) < 0.001 else 0.0
+            else:
+                # Just check if it's a valid number
+                return 1.0
+
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(
+                f"Error parsing result for multiplication_score: {e}, result was: {result}"
+            )
+            return 0.0
+
+    return score_fn
+
+
+# Registry of scoring functions
+SCORING_FUNCTIONS = {
+    "addition_score": addition_score,
+    "multiplication_score": multiplication_score,
+}
+
+
+def get_scoring_function(name: str, params: dict | None = None) -> Callable:
+    """Get a scoring function by name from the registry, with optional parameters"""
+    fn = SCORING_FUNCTIONS.get(name)
+    if fn is None:
+        raise ValueError(f"Scoring function '{name}' not found in the registry")
+
+    # If it's a factory function (i.e., takes arguments), call with params
+    if params:
+        try:
+            return fn(**params)
+        except Exception as e:
+            raise ValueError(
+                f"Error initializing scoring function '{name}' with params {params}: {e}"
+            ) from e
+    else:
+        return fn
+
+
+def load_tasks_from_json(
+    json_path: str | Path, work_dir: str
+) -> dict[str, TaskDefinition]:
+    """Load task definitions from a JSON file.
+
+    Args:
+        json_path: Path to the JSON file containing task definitions
+        work_dir: Working directory to use for task execution
+
+    Returns:
+        dictionary of task definitions keyed by task ID
+    """
+    if not Path(json_path).exists():
+        raise FileNotFoundError(f"Task definition file not found: {json_path}")
+
+    with Path(json_path).open() as f:
+        task_data = json.load(f)
+
+    tasks = {}
+    for task_id, task_info in task_data.items():
+        # Get the scoring function by name from the registry
+        scoring_fn_name = task_info.get("scoring_function", "default")
+        scoring_params = task_info.get("scoring_params", {})
+        scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
+
+        # Add work_dir to initial input if not already present
+        initial_input = task_info.get("initial_input", {}).copy()
+        if "work_dir" not in initial_input:
+            initial_input["work_dir"] = work_dir
+
+        tasks[task_id] = TaskDefinition(
+            name=task_info["name"],
+            description=task_info["description"],
+            tools=task_info.get("tools", []),
+            scoring_fn=scoring_fn,
+            submission_format=task_info.get("submission_format", ""),
+            input_from_tasks=task_info.get("input_from_tasks", []),
+            initial_input=initial_input,
+        )
+
+    return tasks
+
+
+class TaskGroupEnvironment(Environment):
+    """Environment that works with a task group - simple composition approach"""
 
     def __init__(
-        self, task_id: str, task_group: TaskGroup, available_tools: dict[str, Tool]
+        self,
+        task_id: str,
+        task_group: TaskGroup,
+        subtask_specific_tools: dict[str, Tool],
+        base_work_dir: str,
+        taskgroup_common_tools: dict[str, Tool] | None = None,
     ):
         self.task_group = task_group
-        self.task_id = task_id  # Individual task ID within the group
-        self.available_tools = available_tools
+        self.subtask_specific_tools = subtask_specific_tools
+        self.taskgroup_common_tools = taskgroup_common_tools or {}
 
         if task_id not in task_group.tasks:
             raise ValueError(f"Task {task_id} not found in task group")
 
+        self.raw_task_id = task_id
         self.current_task = task_group.tasks[task_id]
 
-        # Initialize tools and environment
-        self.tools = {}
-        super().__init__(f"{task_group.group_id}_{task_id}")
+        super().__init__(
+            f"{task_group.group_id}_{task_id}", base_work_dir=base_work_dir
+        )
 
-        # Add required tools
+        # Add tools
+        self._add_task_tools()
+        self._setup_file_tools()
+
+    def _add_task_tools(self):
+        """Add required tools for the task"""
         for tool_name in self.current_task.tools:
-            if tool_name in available_tools:
-                self.add_tool(available_tools[tool_name])
+            if tool_name in self.subtask_specific_tools:
+                self.add_tool(self.subtask_specific_tools[tool_name])
+            else:
+                logger.warning(
+                    f"Tool {tool_name} required for task {self.task_id} not found"
+                )
+
+        for tool in self.taskgroup_common_tools.values():
+            self.add_tool(tool)
+
+    def _setup_file_tools(self):
+        """Setup file tools for current workspace"""
+        if self.current_work_dir:
+            logger.info(
+                f"DEBUG: Setting up FSManager with base_path: {self.current_work_dir}"
+            )
+            # Create new FSManager for current workspace
+            fs_manager = FSManager("file", base_path=self.current_work_dir)
+
+            # Add/update file tools
+            self.tools.update(
+                {
+                    "list_files": ListFilesTool(fs_manager),
+                    "read_file": ReadFileTool(fs_manager),
+                    "write_file": WriteFileTool(fs_manager),
+                    "file_info": FileInfoTool(fs_manager),
+                    "cat_files": CatFilesTool(fs_manager),
+                    "copy_file": CopyFileTool(fs_manager),
+                }
+            )
+            logger.info(
+                f"DEBUG: File tools setup complete for workspace: {self.current_work_dir}"
+            )
+        else:
+            logger.warning("DEBUG: No current_work_dir set, skipping file tools setup")
+
+    def reset_state(self) -> str:
+        """Reset state and update file tools for new workspace"""
+        trial_id = super().reset_state()
+        # Recreate file tools for new workspace
+        self._setup_file_tools()
+        return trial_id
 
     def get_task_prompt(self) -> str:
-        _input_data = self.task_group.get_task_input(self.task_id)
+        """Generate the task prompt for the current task"""
+        _combined_input = self.task_group.get_task_input(self.task_id)
 
         prompt = f"""Task: {self.current_task.name}
-Description: {self.current_task.description}
+    Description: {self.current_task.description}
 
-Required submission format:
-"""
-        for key, desc in self.current_task.submission_format.items():
-            prompt += f"- {key}: {desc}\n"
+    Required submission format:
+    {self.current_task.submission_format}
+
+    """
 
         prompt += "\nAvailable input data:\n"
 
-        if (
-            self.current_task.input_from_task
-            and self.current_task.input_from_task in self.task_group.results
-        ):
-            # If this task depends on a previous task, show its result
-            previous_result = self.task_group.results[self.current_task.input_from_task]
-            if isinstance(previous_result, dict) and "answer" in previous_result:
-                prompt += f"Previous task result: {previous_result['answer']}\n"
-            else:
-                prompt += f"Previous task result: {previous_result}\n"
+        # Debug: Log the task group results
+        logger.info(f"DEBUG: Task group results: {self.task_group.results}")
+        logger.info(
+            f"DEBUG: Current task dependencies: {self.current_task.input_from_tasks}"
+        )
 
+        # Display input data from dependencies
+        for dep_task_id in self.current_task.input_from_tasks:
+            logger.info(f"DEBUG: Checking dependency {dep_task_id}")
+            if dep_task_id in self.task_group.results:
+                dep_result = self.task_group.results[dep_task_id]
+                logger.info(f"DEBUG: Found result for {dep_task_id}: {dep_result}")
+                if isinstance(dep_result, dict) and "answer" in dep_result:
+                    prompt += f"- Input from {dep_task_id}: {dep_result['answer']}\n"
+                else:
+                    prompt += f"- Input from {dep_task_id}: {dep_result}\n"
+            else:
+                logger.warning(f"DEBUG: No result found for dependency {dep_task_id}")
+                prompt += f"- Input from {dep_task_id}: NOT YET AVAILABLE\n"
+
+        # Display initial input data
         if self.current_task.initial_input:
             for key, value in self.current_task.initial_input.items():
-                prompt += f"- {key}: {value}\n"
+                if key != "work_dir":
+                    prompt += f"- {key}: {value}\n"
 
-        if self.current_task.input_from_task:
-            status = (
-                "available"
-                if self.current_task.input_from_task in self.task_group.results
-                else "not yet available"
-            )
-            prompt += f"\nThis task uses output from task: {self.current_task.input_from_task} ({status})"
+        # Add workspace info
+        if self.current_work_dir:
+            prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n"
 
+        # Add note about dependencies
+        if self.current_task.input_from_tasks:
+            status = []
+            for dep_id in self.current_task.input_from_tasks:
+                status_text = (
+                    "available"
+                    if dep_id in self.task_group.results
+                    else "not yet available"
+                )
+                status.append(f"{dep_id} ({status_text})")
+
+            prompt += f"\n\nThis task uses output from tasks: {', '.join(status)}"
+
+        logger.info(f"DEBUG: Generated prompt for {self.task_id}:\n{prompt}")
         return prompt
 
     def score(self) -> float:
         """Score the submitted answer"""
         if not self.state.submitted_answer:
+            logger.warning(f"No submission found for task {self.task_id}")
             return 0.0
 
         try:
-            # Clean the submission - take only the numerical answer part
-            submission_str = self.state.submitted_answer.strip()
-            logger.info(f"Raw submission: {submission_str}")  # Debug logger.info
+            # Get and log the raw submission
+            answer_value = self.state.submitted_answer.strip()
+            logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
 
-            # Try to parse as JSON first
-            try:
-                submission = json.loads(submission_str)
-            except json.JSONDecodeError:
-                # If not valid JSON, try to create a simple answer dict
-                submission = {"answer": submission_str}
+            # Call the scoring function with the raw answer
+            score = self.current_task.scoring_fn(answer_value)
 
             # Store result in task group
-            logger.info(f"Parsed submission: {submission}")  # Debug logger.info
-            score = self.current_task.scoring_fn(submission)
-            self.task_group.store_result(self.task_id, submission, score)
+            self.task_group.store_result(
+                self.raw_task_id, {"answer": answer_value}, score
+            )
+            logger.info(f"Task {self.task_id} scored: {score}")
 
             return score
+
         except Exception as e:
-            logger.info(f"Error scoring submission for task {self.task_id}: {e!s}")
-            logger.info(f"Submission was: {self.state.submitted_answer}")
+            logger.error(
+                f"Error scoring submission for task {self.task_id}: {e!s}",
+                exc_info=True,
+            )
+            logger.error(f"Submission was: {self.state.submitted_answer!r}")
             return 0.0
 
 
-def create_environments() -> dict[str, Environment]:
-    """Create environments for catalysis tasks"""
+def create_environments(
+    task_json_path: str | Path,
+    taskgroup_common_tools: dict[str, Tool] | None = None,
+    work_dir: str = BASE_WORK_DIR,
+) -> dict[str, TaskGroupEnvironment]:
+    """Create environments for tasks defined in a JSON file
 
-    def score_addition(result: dict) -> float:
-        score = 0.0
-        if "answer" in result:
-            try:
-                _answer = float(result["answer"])
-                score = 1.0
-            except ValueError:
-                pass
-        return score
+    Args:
+        task_json_path: Path to the JSON file with task definitions
+        taskgroup_common_tools: dictionary of Tools which are common for subtasks, for example file system tools
+        work_dir: Working directory for task execution
+
+    Returns:
+        dictionary of environments keyed by task ID
+    """
+
+    logger.info(f"Creating environments from {task_json_path} with work_dir {work_dir}")
+
+    # Load tasks from JSON
+    tasks = load_tasks_from_json(task_json_path, work_dir)
 
     # Create task group
-    task_group = TaskGroup(
-        group_id="simple_math",
-        tasks={
-            "task1": TaskDefinition(
-                name="First Addition",
-                description="What is 3 + 5? Return your answer as a number.",
-                tools=["calculator"],
-                scoring_fn=score_addition,
-                submission_format={"answer": "numerical result (example: 8)"},
-                initial_input={"x": 3, "y": 5},
-            ),
-            "task2": TaskDefinition(
-                name="Second Addition",
-                description="Take the result from the previous task and add 4 to it. Return your answer as a number.",
-                tools=["calculator"],
-                scoring_fn=score_addition,
-                submission_format={"answer": "numerical result (example: 12)"},
-                input_from_task="task1",
-            ),
-        },
-    )
+    group_id = Path(task_json_path).stem  # Use filename (without extension) as group ID
+    logger.info(f"Creating task group with ID: {group_id}")
+    task_group = TaskGroup(group_id=group_id, tasks=tasks)
 
-    # logger.info task dependencies for reference
+    # Print task dependencies for reference
     logger.info("\nTask Dependencies:")
     for task_id, deps in task_group.get_task_dependencies().items():
         logger.info(f"- {task_id}: depends on {deps}")
 
-    # Create environments for all tasks
-    available_tools = {
-        "calculator": calculator,
-        "unit_converter": UnitConverterTool(),
-        "number_converter": number_converter,
-    }
-    environments = {}
+    # Print ordering of tasks
+    ordered_tasks = task_group.get_ordered_tasks()
+    logger.info("\nTask Execution Order:")
+    for i, task_id in enumerate(ordered_tasks):
+        logger.info(f"{i+1}. {task_id}")
 
+    # Create environments for all tasks
+
+    environments = {}
     for task_id in task_group.tasks:
-        # All environments share the same task group instance
-        environments[task_id] = TaskEnvironment(
-            task_id=task_id, task_group=task_group, available_tools=available_tools
+        environments[task_id] = TaskGroupEnvironment(
+            task_id=task_id,
+            task_group=task_group,
+            subtask_specific_tools={
+                "calculator": calculator,
+                "number_converter": number_converter,
+            },
+            taskgroup_common_tools=taskgroup_common_tools,
+            base_work_dir=work_dir,
         )
 
     return environments
 
 
 if __name__ == "__main__":
-    # Create all environments
-    environments = create_environments()
+    # Determine tasks file path
+    if len(sys.argv) > 1:
+        tasks_json_path = sys.argv[1]
+    else:
+        tasks_json_path = os.environ.get(
+            "CORRAL_TASKS_PATH",
+            Path(__file__).parent / "tasks" / "catalysis_tasks.json",
+        )
+
+    # Get server settings from environment if provided
+    host = os.environ.get("CORRAL_HOST", "0.0.0.0")
+    port = int(os.environ.get("CORRAL_PORT", "8000"))
+    work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
+    Path(work_dir).mkdir(parents=True, exist_ok=True)
+    # Create environments
+    environments = create_environments(
+        task_json_path=tasks_json_path,
+        work_dir=work_dir,
+    )
 
     logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
         logger.info(f"- {env_id}")
         logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_from_task:
-            logger.info(f"  Depends on: {env.current_task.input_from_task}")
+        if env.current_task.input_from_tasks:
+            logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
 
-    # Create and run server
-    app = create_benchmark_server(environments)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Run server
+    run_server(environments, host, port)
