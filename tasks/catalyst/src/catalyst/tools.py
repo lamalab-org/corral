@@ -3170,27 +3170,23 @@ def train_xgboost_model(
     target_column: str = "formation_energy_per_atom",
     hyperparameters: dict | None = None,
 ) -> str:
-    """[BRIEF] Train XGBoost regression model for materials property prediction with comprehensive evaluation. [/BRIEF]
+    """[BRIEF] Train XGBoost regression model for property prediction with evaluation. [/BRIEF]
 
     [DETAILED] This tool implements comprehensive XGBoost model training for materials property prediction,
-    including hyperparameter management, model evaluation, and result persistence. XGBoost is particularly
-    effective for materials informatics due to its ability to handle complex non-linear relationships
-    and provide feature importance insights. The tool provides complete training pipeline with automatic
-    evaluation metrics and model persistence for production use. [/DETAILED]
+    including hyperparameter management, model evaluation. The tool provides complete training pipeline with automatic
+    evaluation metrics and save the model to the give path. The model takes as input csv file for train and test dataset [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - Use when you need robust regression models for materials property prediction
+    - Use when you need regression models for materials property prediction
     - Best suited for structured/tabular materials data with engineered features
-    - Essential for establishing baseline models and feature importance analysis
-    - Recommended for problems requiring interpretable machine learning models
-    - Avoid for graph-structured data or when deep learning is more appropriate
+    - We can vary the hyperparamters to optimize performance metrics
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
     - Loads training and test data from CSV files with proper feature/target separation
-    - Applies XGBoost regression with optimized hyperparameters
+    - Applies XGBoost regression with hyperparameters
     - Performs training with automatic validation and metric calculation
-    - Generates comprehensive evaluation including MAE, RMSE, R², and feature importance
+    - Generates comprehensive evaluation including MAE, RMSE, R2, and feature importance
     - Saves trained model and detailed results for future use and analysis
     [/CONTEXTUAL]
 
@@ -3247,7 +3243,7 @@ def train_xgboost_model(
     Returns:
         str: [BRIEF] JSON string with comprehensive training results and model performance metrics. [/BRIEF]
              [DETAILED] A detailed JSON-formatted string containing training success status, model performance
-             metrics (MAE, RMSE, R²), feature importance rankings, hyperparameters used, dataset information,
+             metrics (MAE, RMSE, R2), feature importance rankings, hyperparameters used, dataset information,
              and file paths for saved model and results. This enables comprehensive model evaluation and
              comparison. [/DETAILED]
              [EXAMPLES] Example output: '{"success": true, "test_metrics": {"mae": 0.12, "rmse": 0.18, "r2": 0.85}, "feature_importance": {...}, "model_path": "model.pkl"}' [/EXAMPLES]
@@ -3265,11 +3261,10 @@ def train_xgboost_model(
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
-    - Requires tabular data format with numerical features
+    - Requires tabular data format (csv) with numerical features
     - Model performance depends on feature engineering quality
     - May not capture complex non-linear relationships as well as deep learning
-    - Hyperparameter tuning requires domain expertise for optimal results
-    - Memory usage scales with dataset size and tree complexity
+    - Hyperparameter tuning requires multiple runs
     [/LIMITATIONS]
     """
     try:
@@ -3377,17 +3372,105 @@ def evaluate_xgboost_model(
     target_column: str = "formation_energy_per_atom",
     detailed_analysis: bool = True,
 ) -> str:
-    """
-    Evaluate a trained XGBoost model with comprehensive metrics.
+    """[BRIEF] Evaluate trained XGBoost model with comprehensive performance metrics and detailed analysis. [/BRIEF]
+
+    [DETAILED] This tool provides thorough evaluation of trained XGBoost models with comprehensive metrics
+    and detailed analysis capabilities. It generates standard regression metrics (MAE, RMSE, R2, MAPE),
+    error analysis (mean error, error standard deviation, max positive/negative errors), prediction
+    ranges (min, max, standard deviation), and top feature importance rankings essential for model validation
+    and deployment decisions. The tool supports both basic and detailed analysis modes, enabling quick assessments
+    or in-depth model understanding for research and production applications. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need comprehensive evaluation of trained XGBoost models
+    - Best suited for model validation and performance assessment workflows
+    - Essential for comparing different models or hyperparameter configurations
+    - Recommended for generating model performance reports and insights
+    - Avoid when you only need basic metrics (use simpler evaluation functions)
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Loads trained XGBoost model from serialized file
+    - Processes test data with identical structure to training data
+    - Calculates comprehensive regression metrics (MAE, RMSE, R2, MAPE)
+    - Performs detailed error analysis including prediction ranges and distributions
+    - Extracts and ranks feature importance for model interpretability
+    - Provides statistical analysis of prediction quality and model behavior
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First train model using train_xgboost_model and prepare test data [/PREREQUISITE]
+    2. [CURRENT] Apply comprehensive evaluation to assess model performance [/CURRENT]
+    3. [FOLLOW_UP] Use results for model comparison, hyperparameter tuning, or deployment decisions [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - evaluate_xgboost_model("trained_model.pkl", "test_data.csv", "formation_energy_per_atom", True)
+    - evaluate_xgboost_model("models/xgb_model.pkl", "data/test.csv", "band_gap", False)
+    - evaluate_xgboost_model("model.pkl", "test.csv", "energy", True)
+    [/SYNTACTICAL]
 
     Args:
-        model_path: Path to saved XGBoost model
-        test_data_path: Path to test data CSV
-        target_column: Name of target column
-        detailed_analysis: Whether to include detailed analysis
+        model_path: [BRIEF] Path to the saved XGBoost model file. [/BRIEF]
+                   [DETAILED] Complete file path to the serialized XGBoost model created by train_xgboost_model
+                   or similar training functions. The model should be saved using joblib or pickle and contain
+                   a trained XGBoost regressor ready for evaluation. The file must be readable and contain
+                   a valid model object. [/DETAILED]
+                   [SYNTACTIC] Format: "Valid file path to .pkl model file" [/SYNTACTIC]
+                   [EXAMPLES] Examples: "models/xgb_model.pkl", "trained_models/formation_energy_model.pkl", "model.pkl" [/EXAMPLES]
+
+        test_data_path: [BRIEF] Path to test data CSV file with same structure as training data. [/BRIEF]
+                       [DETAILED] Complete file path to CSV file containing test data with identical column
+                       structure to the training data used for model creation. Must include both feature
+                       columns and the target column for evaluation. The data should be preprocessed
+                       consistently with the training data. [/DETAILED]
+                       [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
+                       [EXAMPLES] Examples: "data/test.csv", "datasets/materials_test.csv", "evaluation/test_data.csv" [/EXAMPLES]
+
+        target_column: [BRIEF] Name of the target column for evaluation. Defaults to "formation_energy_per_atom". [/BRIEF]
+                      [DETAILED] The column name in the test CSV that contains the true values for comparison
+                      with model predictions. This should match the target column used during training.
+                      Common targets include formation energy, band gap, and other materials properties. [/DETAILED]
+                      [SYNTACTIC] Format: "String matching column name in test CSV" [/SYNTACTIC]
+                      [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
+
+        detailed_analysis: [BRIEF] Whether to include detailed analysis and feature importance. Defaults to True. [/BRIEF]
+                          [DETAILED] Boolean flag controlling the depth of analysis performed. When True, includes
+                          prediction ranges (min, max, std), error analysis (mean error, error std, max errors),
+                          and top 10 feature importance rankings. When False, provides only basic metrics
+                          (MAE, RMSE, R2, MAPE) for quick assessment. Detailed analysis is recommended for thorough
+                          model evaluation and interpretation. [/DETAILED]
+                          [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                          [EXAMPLES] Examples: True (comprehensive analysis), False (basic metrics only) [/EXAMPLES]
 
     Returns:
-        JSON string with evaluation results
+        str: [BRIEF] JSON string with comprehensive evaluation metrics and analysis results. [/BRIEF]
+             [DETAILED] A detailed JSON-formatted string containing evaluation success status, comprehensive
+             performance metrics (MAE, RMSE, R2, MAPE), prediction statistics (min/max/std), error analysis
+             (mean error, error std, max positive/negative errors), and top 10 feature importance rankings
+             when detailed analysis is enabled. This provides complete model assessment
+             for validation and comparison purposes. [/DETAILED]
+             [EXAMPLES] Example output: '{"success": true, "evaluation_metrics": {"mae": 0.15, "rmse": 0.22, "r2": 0.83, "mape": 3.45, "feature_importance": {...}}}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        FileNotFoundError: [ERROR_WHEN] When model file or test data file doesn't exist [/ERROR_WHEN]
+                          [ERROR_DETAILS] Invalid file paths or missing files [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Verify file paths exist and are accessible [/ERROR_RECOVERY]
+        KeyError: [ERROR_WHEN] When target column is not found in test data [/ERROR_WHEN]
+                 [ERROR_DETAILS] Specified target column doesn't exist in CSV [/ERROR_DETAILS]
+                 [ERROR_RECOVERY] Check column names in test data and use valid target column [/ERROR_RECOVERY]
+        ValueError: [ERROR_WHEN] When model and data are incompatible or contain invalid values [/ERROR_WHEN]
+                   [ERROR_DETAILS] Feature mismatch between model and data, or non-numerical values [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Ensure test data has same features as training data and proper preprocessing [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Requires identical feature structure between training and test data
+    - Cannot evaluate model performance on different target variables
+    - Feature importance interpretation depends on training data characteristics
+    - May not capture model performance on out-of-distribution data
+    - MAPE metric becomes unreliable when target values are close to zero
+    [/LIMITATIONS]
     """
     import joblib
     import numpy as np
@@ -3457,17 +3540,101 @@ def perform_cross_validation(
     cv_folds: int = 5,
     hyperparameters: dict | None = None,
 ) -> str:
-    """
-    Perform cross-validation on the dataset to assess model stability.
+    """[BRIEF] Perform k-fold cross-validation to assess model stability and generalization performance. [/BRIEF]
+
+    [DETAILED] This tool implements comprehensive k-fold cross-validation for XGBoost models to assess
+    model  generalization capability, and robustness across different data splits. Cross-validation
+    provides more reliable performance estimates than single train/test splits by evaluating model performance
+    across multiple data partitions. This is essential for hyperparameter tuning, model comparison, and
+    ensuring reliable performance estimates for materials property prediction models. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need robust estimates of model performance and stability
+    - Best suited for hyperparameter tuning and model comparison workflows
+    - Essential for assessing model generalization before final deployment
+    - Recommended for small to medium datasets where train/test splits may be unreliable
+    - Avoid for very large datasets where computational cost becomes prohibitive
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Implements k-fold cross-validation with stratified data splitting
+    - Trains XGBoost models on k-1 folds and evaluates on the held-out fold
+    - Calculates performance metrics (R2, MAE) across all folds
+    - Provides statistical analysis including mean performance and variance
+    - Uses consistent hyperparameters across all folds for fair comparison
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First prepare training data using prepare_tabular_dataset and train a model using train_xgboost_model [/PREREQUISITE]
+    2. [CURRENT] Apply cross-validation to assess model stability and performance [/CURRENT]
+    3. [FOLLOW_UP] Use results for hyperparameter optimization or proceed to train_xgboost_model [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - perform_cross_validation("train_data.csv", "formation_energy_per_atom", 5, None)
+    - perform_cross_validation("data/train.csv", "band_gap", 10, {"n_estimators": 200})
+    - perform_cross_validation("training.csv", "energy", 3, {"max_depth": 8, "learning_rate": 0.05})
+    [/SYNTACTICAL]
 
     Args:
-        train_data_path: Path to training data CSV
-        target_column: Name of target column
-        cv_folds: Number of cross-validation folds
-        hyperparameters: XGBoost hyperparameters
+        train_data_path: [BRIEF] Path to training data CSV file. [/BRIEF]
+                        [DETAILED] Complete file path to CSV file containing training data with features and
+                        target column. The file should have a header row and be properly formatted for machine
+                        learning. This data will be split into k folds for cross-validation, so it should
+                        represent the complete training dataset. [/DETAILED]
+                        [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
+                        [EXAMPLES] Examples: "data/train.csv", "datasets/materials_train.csv", "ml_data/training_features.csv" [/EXAMPLES]
+
+        target_column: [BRIEF] Name of the target column for prediction. Defaults to "formation_energy_per_atom". [/BRIEF]
+                      [DETAILED] The column name in the CSV that contains the target values for prediction.
+                      This column will be separated from features during cross-validation. Should match the
+                      target used in subsequent training workflows. Common targets include formation energy,
+                      band gap, and other materials properties. [/DETAILED]
+                      [SYNTACTIC] Format: "String matching column name in CSV file" [/SYNTACTIC]
+                      [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
+
+        cv_folds: [BRIEF] Number of cross-validation folds. Defaults to 5. [/BRIEF]
+                 [DETAILED] The number of folds to use for k-fold cross-validation. Higher values provide
+                 more robust estimates but increase computational cost. Common choices are 5 or 10 folds.
+                 The value should be chosen based on dataset size - smaller datasets benefit from more
+                 folds while larger datasets can use fewer folds. [/DETAILED]
+                 [SYNTACTIC] Format: positive integer between 2 and dataset_size [/SYNTACTIC]
+                 [EXAMPLES] Examples: 5 (standard), 10 (robust), 3 (quick assessment) [/EXAMPLES]
+
+        hyperparameters: [BRIEF] Optional XGBoost hyperparameters for cross-validation. [/BRIEF]
+                        [DETAILED] Dictionary containing XGBoost hyperparameters to use across all cross-validation
+                        folds. If None, optimized default parameters will be used. Consistent hyperparameters
+                        across folds ensure fair comparison and reliable performance estimates. Useful for
+                        testing specific hyperparameter configurations. [/DETAILED]
+                        [SYNTACTIC] Format: '{"param_name": value, ...} or None' [/SYNTACTIC]
+                        [EXAMPLES] Examples: {"n_estimators": 150, "max_depth": 7}, {"learning_rate": 0.05}, None [/EXAMPLES]
 
     Returns:
-        JSON string with cross-validation results
+        str: [BRIEF] JSON string with comprehensive cross-validation results and statistical analysis. [/BRIEF]
+             [DETAILED] A detailed JSON-formatted string containing cross-validation success status,
+             individual fold scores, statistical summaries (mean, standard deviation), hyperparameters used,
+             and performance stability assessment. This enables comprehensive evaluation of model robustness
+             and generalization capability. [/DETAILED]
+             [EXAMPLES] Example output: '{"success": true, "cross_validation_results": {"r2_mean": 0.85, "r2_std": 0.03, "mae_mean": 0.12, "mae_std": 0.02, ...}}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        FileNotFoundError: [ERROR_WHEN] When training data file doesn't exist [/ERROR_WHEN]
+                          [ERROR_DETAILS] Invalid file path or missing CSV file [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Verify file path exists and contains properly formatted CSV data [/ERROR_RECOVERY]
+        KeyError: [ERROR_WHEN] When target column is not found in the data [/ERROR_WHEN]
+                 [ERROR_DETAILS] Specified target column doesn't exist in CSV file [/ERROR_DETAILS]
+                 [ERROR_RECOVERY] Check column names in CSV file and use valid target column name [/ERROR_RECOVERY]
+        ValueError: [ERROR_WHEN] When cv_folds is invalid or data contains invalid values [/ERROR_WHEN]
+                   [ERROR_DETAILS] cv_folds less than 2, greater than dataset size, or non-numerical data [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Use valid cv_folds value and ensure data is properly preprocessed [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Computational cost scales linearly with number of folds
+    - May not be suitable for very large datasets due to memory constraints
+    - Assumes data is suitable for random splitting (no temporal or spatial dependencies)
+    - Cannot assess performance on truly out-of-distribution data
+    [/LIMITATIONS]
     """
     import pandas as pd
     import xgboost as xgb
@@ -4123,15 +4290,6 @@ def get_mp_surface_properties(material_id: str) -> str:
             return json.dumps(surface_data, indent=2)
         except Exception as e:
             return json.dumps({"error": f"Error fetching surface properties: {e!s}"})
-
-
-###
-
-# tools to relax and get energy using mlff
-# tool to compute adsorption energy
-
-
-## OCP - training  creating a dataset and training ML model
 
 
 @tool
