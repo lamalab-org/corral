@@ -32,14 +32,14 @@ def get_structure_from_mp_text(mp_id: str) -> str:
 
     [CONTEXTUAL] How this tool works:
     - Connects to Materials Project API using authentication key
-    - Searches for the specified material ID in the database
+    - Searches for the specified material ID (MP ID) in the database (MP ID is given as input parameter or if other tools are available to search for MP ID, then use those tools)
     - Retrieves the pymatgen Structure object containing atomic positions and lattice parameters
     - Converts the structure to CIF format string for compatibility with other tools
     - Returns standardized crystallographic data suitable for further processing
     [/CONTEXTUAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure MP_API_KEY environment variable is set with valid Materials Project API key [/PREREQUISITE]
+    1. [PREREQUISITE] Ensure that the other more specific tools are not suitable and you dont have to retrieve multiple strucutres[/PREREQUISITE]
     2. [CURRENT] Apply this tool with a valid MP ID to retrieve bulk structure [/CURRENT]
     3. [FOLLOW_UP] Use the CIF output with slab generation tools like enumerate_slabs_text to create slab structures [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
@@ -79,7 +79,7 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
-    - Requires valid Materials Project API key and internet connection
+    - Requires valid Materials Project API key to be set and internet connection
     - Limited to materials available in the Materials Project database
     - May not include the most recent experimental structures
     [/LIMITATIONS]
@@ -312,6 +312,7 @@ def enumerate_slabs_text(
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
+    - This tool might generate really many slabs.
     - Does not perform surface relaxation or optimization
     - May generate many similar terminations for high-symmetry structures
     - Limited to periodic slab models without defects or reconstructions
@@ -371,7 +372,7 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
     1. [PREREQUISITE] First run enumerate_slabs_text to generate multiple slab terminations [/PREREQUISITE]
-    2. [CURRENT] Apply this tool to select a specific slab by index [/CURRENT]
+    2. [CURRENT] Apply this tool to select a specific slab by index. Can be coupled with io tools or python execution tools to figure out which index to use depending on the task, for example, filter based on miller index[/CURRENT]
     3. [FOLLOW_UP] Use the selected slab with adsorption tools like get_adsorption_sites_text [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
