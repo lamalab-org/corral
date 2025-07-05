@@ -38,7 +38,7 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     - Returns standardized crystallographic data suitable for further processing
     [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
     1. [PREREQUISITE] Ensure that the other more specific tools are not suitable and you dont have to retrieve multiple strucutres[/PREREQUISITE]
     2. [CURRENT] Apply this tool with a valid MP ID to retrieve bulk structure [/CURRENT]
     3. [FOLLOW_UP] Use the CIF output with slab generation tools like enumerate_slabs_text to create slab structures [/FOLLOW_UP]
@@ -127,7 +127,7 @@ def create_slab_from_structure_text(
     - Converts the final slab structure back to CIF format
     [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
     1. [PREREQUISITE] First obtain bulk structure using get_structure_from_mp_text or using other tools that return single struucture CIF [/PREREQUISITE]
     2. [CURRENT] Apply this tool to create slab from bulk structure [/CURRENT]
     3. [FOLLOW_UP] Use output with adsorption site tools like get_adsorption_sites_text [/FOLLOW_UP]
@@ -249,7 +249,7 @@ def enumerate_slabs_text(
     - Returns all slabs as a JSON dictionary with indexed keys for easy selection
     [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
     1. [PREREQUISITE] First obtain bulk structure using get_structure_from_mp_text [/PREREQUISITE]
     2. [CURRENT] Apply this tool to enumerate all possible slab terminations [/CURRENT]
     3. [FOLLOW_UP] Use choose_slab_text to select a specific termination from the results [/FOLLOW_UP]
@@ -370,7 +370,7 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
     - Returns the CIF content ready for use in subsequent tools
     [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
     1. [PREREQUISITE] First run enumerate_slabs_text to generate multiple slab terminations [/PREREQUISITE]
     2. [CURRENT] Apply this tool to select a specific slab by index. Can be coupled with io tools or python execution tools to figure out which index to use depending on the task, for example, filter based on miller index[/CURRENT]
     3. [FOLLOW_UP] Use the selected slab with adsorption tools like get_adsorption_sites_text [/FOLLOW_UP]
@@ -458,7 +458,7 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
     - Returns sites organized by type in a JSON format for easy selection
     [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
     1. [PREREQUISITE] First obtain a slab structure using choose_slab_text or create_slab_from_structure_text [/PREREQUISITE]
     2. [CURRENT] Apply this tool to identify all adsorption sites on the surface [/CURRENT]
     3. [FOLLOW_UP] Use choose_adsorption_site_text to select a specific site for adsorbate placement [/FOLLOW_UP]
@@ -550,7 +550,7 @@ def choose_adsorption_site_text(
     - Returns the fractional coordinates as a list of three floats
     [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
     1. [PREREQUISITE] First run get_adsorption_sites_text to identify available sites [/PREREQUISITE]
     2. [CURRENT] Apply this tool to select a specific site by type and index [/CURRENT]
     3. [FOLLOW_UP] Use the coordinates with add_adsorbate_to_slab_text for molecule placement [/FOLLOW_UP]
@@ -653,7 +653,7 @@ def add_adsorbate_to_slab_text(
     - Automatically selects a top site if no specific site is provided
     [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
     1. [PREREQUISITE] First obtain slab from choose_slab_text and adsorbate from get_structure_from_mp_text [/PREREQUISITE]
     2. [CURRENT] Apply this tool to place the adsorbate on the surface [/CURRENT]
     3. [FOLLOW_UP] Use the combined structure for further analysis or optimization [/FOLLOW_UP]
@@ -795,7 +795,7 @@ def generate_reconstructed_slab(
     - Validates and optimizes the resulting surface structures
     [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
     1. [PREREQUISITE] First obtain bulk structure using get_structure_from_mp_text [/PREREQUISITE]
     2. [CURRENT] Apply this tool with detailed reconstruction instructions [/CURRENT]
     3. [FOLLOW_UP] Use the reconstructed surface for adsorption studies or analysis [/FOLLOW_UP]
