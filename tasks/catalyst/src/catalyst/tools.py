@@ -32,7 +32,7 @@ def get_structure_from_mp_text(mp_id: str) -> str:
 
     [CONTEXTUAL] How this tool works:
     - Connects to Materials Project API using authentication key
-    - Searches for the specified material ID (MP ID) in the database (MP ID is given as input parameter or if other tools are available to search for MP ID, then use those tools)
+    - Searches for the specified material ID (MP ID) in the database (MP ID is given as input parameter or if other tools are available to search for MP ID based on available information, then use those tools)
     - Retrieves the pymatgen Structure object containing atomic positions and lattice parameters
     - Converts the structure to CIF format string for compatibility with other tools
     - Returns standardized crystallographic data suitable for further processing
