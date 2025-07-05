@@ -37,6 +37,19 @@ class FSManager:
         resolved = self.base_path / path_obj
         return str(resolved)
 
+    def _resolve_path(self, path: str) -> str:
+        """Resolve a relative path against the base_path"""
+        if self.base_path is None:
+            return path
+
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            return str(path_obj)
+        else:
+            # Relative path - resolve against base_path
+            resolved = self.base_path / path_obj
+            return str(resolved)
+
     def list_files(self, path: str, recursive: bool = False) -> list[str]:
         """List files in a directory"""
         try:

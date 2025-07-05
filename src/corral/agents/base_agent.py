@@ -214,6 +214,7 @@ class BaseAgent(ABC):
         examples: list[str] | None = None,
     ) -> str:
         """
+
         Run the agent to solve a task
 
         This method must be implemented by all subclasses
@@ -238,7 +239,7 @@ class BaseAgent(ABC):
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         verbose: bool = False,
-    ) -> str:
+    ) -> tuple[str, dict[str, int]]:
         """Run the agent to solve a task
 
         This method is a wrapper around run to provide a consistent interface
@@ -267,11 +268,11 @@ class BaseAgent(ABC):
 
             if "Error" in final_answer:
                 logger.error(f"Error in agent response: {final_answer}")
-                return final_answer
+                return final_answer, self.get_total_token_usage()
 
         except Exception as e:
             logger.error(f"Error running agent: {e}")
-            raise e
+            return f"Error running agent: {e}", self.get_total_token_usage()
 
         prompt = self.extractor_prompt.fill(
             {
@@ -289,13 +290,11 @@ class BaseAgent(ABC):
                 **self.kwargs,
             )
 
-            token_usage = self.get_total_token_usage()
-
-            return answer.content, token_usage
+            return answer.content, self.get_total_token_usage()
 
         except Exception as e:
             logger.error(f"Error extracting final answer: {e}")
-            return final_answer
+            return final_answer, self.get_total_token_usage()
 
     def get_total_token_usage(self) -> dict[str, int]:
         """Calculate total token usage across all LLM calls
