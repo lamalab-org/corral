@@ -794,123 +794,118 @@ def generate_reconstructed_slab(
 ) -> str:
     """[BRIEF] Generate surface slabs with complex reconstructions from bulk structures using detailed instructions. [/BRIEF]
 
-        [DETAILED] This tool creates reconstructed surface slabs that go beyond simple
-        terminations to include complex surface arrangements, atomic rearrangements, and
-        compositional changes. Surface reconstructions are crucial for understanding real
-        surface behavior as many materials undergo significant structural changes when cleaved
-        to create surfaces. This tool handles sophisticated reconstruction patterns including
-        atomic additions, removals, and rearrangements based on experimental observations. [/DETAILED]
+    [DETAILED] This tool creates reconstructed surface slabs that go beyond simple
+    terminations to include complex surface arrangements, atomic rearrangements, and
+    compositional changes. Surface reconstructions are crucial for understanding real
+    surface behavior as many materials undergo significant structural changes when cleaved
+    to create surfaces. This tool handles sophisticated reconstruction patterns including
+    atomic additions, removals, and rearrangements based on experimental observations. [/DETAILED]
 
-        [PROCEDURAL] When to use this tool:
-        - Best suited for materials known to undergo significant surface rearrangements
-        - If the slab has no adsorption site, reconstruction may introduce suitable sites.
-        - Essential for accurate modeling of catalytic surfaces with complex structures
-        - Recommended for systematic studies of reconstruction effects on surface properties
-        - Avoid for simple surface terminations (use enumerate_slabs_text instead)
-        [/PROCEDURAL]
+    [PROCEDURAL] When to use this tool:
+    - Best suited for materials known to undergo significant surface rearrangements
+    - If the slab has no adsorption site, reconstruction may introduce suitable sites.
+    - Essential for accurate modeling of catalytic surfaces with complex structures
+    - Recommended for systematic studies of reconstruction effects on surface properties
+    - Avoid for simple surface terminations (use enumerate_slabs_text instead)
+    [/PROCEDURAL]
 
-        [CONTEXTUAL] How this tool works:
-        - Parses the bulk structure and validates Miller indices for the crystal system
-        - Interprets complex reconstruction instructions in JSON format
-        - Uses ReconstructionGenerator to apply transformation matrices and structural changes
-        - Implements atomic additions, removals, and rearrangements as specified
-        - Generates either a single reconstruction or all possible variants
-        - Validates and optimizes the resulting surface structures
-        [/CONTEXTUAL]
+    [CONTEXTUAL] How this tool works:
+    - Parses the bulk structure and validates Miller indices for the crystal system
+    - Interprets complex reconstruction instructions in JSON format
+    - Uses ReconstructionGenerator to apply transformation matrices and structural changes
+    - Implements atomic additions, removals, and rearrangements as specified
+    - Generates either a single reconstruction or all possible variants
+    - Validates and optimizes the resulting surface structures
+    [/CONTEXTUAL]
 
-        [WORKFLOW_INTEGRATION] Typical workflow integration example:
-        1. [PREREQUISITE] First obtain bulk structure using get_structure_from_mp_text [/PREREQUISITE]
-        2. [CURRENT] Apply this tool with detailed reconstruction instructions [/CURRENT]
-        3. [FOLLOW_UP] Use the reconstructed surface for adsorption studies or analysis [/FOLLOW_UP]
-        [/WORKFLOW_INTEGRATION]
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] First obtain bulk structure using get_structure_from_mp_text [/PREREQUISITE]
+    2. [CURRENT] Apply this tool with detailed reconstruction instructions [/CURRENT]
+    3. [FOLLOW_UP] Use the reconstructed surface for adsorption studies or analysis [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
 
-        [SYNTACTICAL] Usage examples:
-        - generate_reconstructed_slab(bulk_cif, (1,1,1), 12, 5, instructions_json, False)
-        - generate_reconstructed_slab(bulk_cif, (1,0,0), 15, 10, instructions_json, True)
-        [/SYNTACTICAL]
+    [SYNTACTICAL] Usage examples:
+    - generate_reconstructed_slab(bulk_cif, (1,1,1), 12, 5, instructions_json, False)
+    - generate_reconstructed_slab(bulk_cif, (1,0,0), 15, 10, instructions_json, True)
+    [/SYNTACTICAL]
 
-        Args:
-            bulk_cif: [BRIEF] CIF string of the bulk crystal structure. [/BRIEF]
-                     [DETAILED] A properly formatted CIF string containing the bulk crystal structure
-                     that will be used as the starting point for reconstruction. This should be a
-                     three-dimensional periodic structure with well-defined symmetry and atomic
-                     positions. The bulk structure provides the template for surface generation. [/DETAILED]
-                     [SYNTACTIC] Format: "Valid CIF format string with bulk crystal structure" [/SYNTACTIC]
-                     [EXAMPLES] Examples: CIF string from Materials Project database [/EXAMPLES]
+    Args:
+        bulk_cif: [BRIEF] CIF string of the bulk crystal structure. [/BRIEF]
+                 [DETAILED] A properly formatted CIF string containing the bulk crystal structure
+                 that will be used as the starting point for reconstruction. This should be a
+                 three-dimensional periodic structure with well-defined symmetry and atomic
+                 positions. The bulk structure provides the template for surface generation. [/DETAILED]
+                 [SYNTACTIC] Format: "Valid CIF format string with bulk crystal structure" [/SYNTACTIC]
+                 [EXAMPLES] Examples: CIF string from Materials Project database [/EXAMPLES]
 
-            miller_index: [BRIEF] Miller indices for the surface orientation. [/BRIEF]
-                         [DETAILED] A tuple of three integers specifying the crystallographic plane
-                         along which the reconstruction will be performed. These indices must be
-                         compatible with the crystal system and determine the base surface geometry
-                         before reconstruction modifications are applied. [/DETAILED]
-                         [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
-                         [EXAMPLES] Examples: (1,1,1) (close-packed), (1,0,0) (square), (1,1,0) (rectangular) [/EXAMPLES]
+        miller_index: [BRIEF] Miller indices for the surface orientation. [/BRIEF]
+                     [DETAILED] A tuple of three integers specifying the crystallographic plane
+                     along which the reconstruction will be performed. These indices must be
+                     compatible with the crystal system and determine the base surface geometry
+                     before reconstruction modifications are applied. [/DETAILED]
+                     [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
+                     [EXAMPLES] Examples: (1,1,1) (close-packed), (1,0,0) (square), (1,1,0) (rectangular) [/EXAMPLES]
 
-            min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. [/BRIEF]
-                          [DETAILED] The minimum thickness of the slab before reconstruction modifications
-                          are applied. This ensures adequate bulk-like behavior in the center of the
-                          slab while providing sufficient surface area for reconstruction. Larger
-                          values improve accuracy but increase computational cost. [/DETAILED]
-                          [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
-                          [EXAMPLES] Examples: 12.0 (standard), 15.0 (thick), 10.0 (thin) [/EXAMPLES]
+        min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. [/BRIEF]
+                      [DETAILED] The minimum thickness of the slab before reconstruction modifications
+                      are applied. This ensures adequate bulk-like behavior in the center of the
+                      slab while providing sufficient surface area for reconstruction. Larger
+                      values improve accuracy but increase computational cost. [/DETAILED]
+                      [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
+                      [EXAMPLES] Examples: 12.0 (standard), 15.0 (thick), 10.0 (thin) [/EXAMPLES]
 
-            min_vacuum_size: [BRIEF] Minimum vacuum layer thickness in Angstroms. [/BRIEF]
-                            [DETAILED] The minimum vacuum space above the reconstructed surface to
-                            prevent interactions between periodic images. This parameter is crucial
-                            for accurate surface calculations and should be larger for reconstructions
-                            with significant surface protrusions or modifications. [/DETAILED]
-                            [SYNTACTIC] Format: positive float representing vacuum thickness in Angstroms [/SYNTACTIC]
-                            [EXAMPLES] Examples: 10.0 (standard), 15.0 (large), 5.0 (minimal) [/EXAMPLES]
+        min_vacuum_size: [BRIEF] Minimum vacuum layer thickness in Angstroms. [/BRIEF]
+                        [DETAILED] The minimum vacuum space above the reconstructed surface to
+                        prevent interactions between periodic images. This parameter is crucial
+                        for accurate surface calculations and should be larger for reconstructions
+                        with significant surface protrusions or modifications. [/DETAILED]
+                        [SYNTACTIC] Format: positive float representing vacuum thickness in Angstroms [/SYNTACTIC]
+                        [EXAMPLES] Examples: 10.0 (standard), 15.0 (large), 5.0 (minimal) [/EXAMPLES]
 
-            reconstruction_instructions: [BRIEF] JSON string containing detailed reconstruction parameters. [/BRIEF]
-                                       [DETAILED] A comprehensive JSON string specifying all aspects of
-                                       the reconstruction including transformation matrices, atomic
-                                       additions/removals, and structural parameters. Must include
-                                       required fields like name, transformation_matrix, and modification
-                                       instructions. See the tool's source code for detailed format. [/DETAILED]
-                                       [SYNTACTIC] Format: "Valid JSON string with reconstruction parameters" [/SYNTACTIC]
-                                       [EXAMPLES] Examples: JSON with transformation matrix and atomic modifications [/EXAMPLES]
+        reconstruction_instructions: [BRIEF] JSON string containing detailed reconstruction parameters. [/BRIEF]
+                                   [DETAILED] A comprehensive JSON string specifying all aspects of
+                                   the reconstruction including transformation matrices, atomic
+                                   additions/removals, and structural parameters. Must include
+                                   required fields like name, transformation_matrix, and modification
+                                   instructions. See the tool's source code for detailed format. [/DETAILED]
+                                   [SYNTACTIC] Format: "Valid JSON string with reconstruction parameters" [/SYNTACTIC]
+                                   [EXAMPLES] Examples: JSON with transformation matrix and atomic modifications [/EXAMPLES]
 
-            return_all_variants: [BRIEF] Whether to return all reconstruction variants. Defaults to False. [/BRIEF]
-                               [DETAILED] Controls whether to return a single CIF string (False) or a
-                               comprehensive JSON with all possible reconstruction variants and metadata
-                               (True). When True, provides detailed information about each variant
-                               including structural parameters and characteristics. [/DETAILED]
-                               [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
-                               [EXAMPLES] Examples: False (single CIF), True (all variants with metadata) [/EXAMPLES]
+        return_all_variants: [BRIEF] Whether to return all reconstruction variants. Defaults to False. [/BRIEF]
+                           [DETAILED] Controls whether to return a single CIF string (False) or a
+                           comprehensive JSON with all possible reconstruction variants and metadata
+                           (True). When True, provides detailed information about each variant
+                           including structural parameters and characteristics. [/DETAILED]
+                           [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                           [EXAMPLES] Examples: False (single CIF), True (all variants with metadata) [/EXAMPLES]
 
-        Returns:
-    <<<<<<< HEAD
-            str: Either a single CIF string (if return_all_variants=False) or a
-                JSON string with all variants and metadata (if return_all_variants=True)
-    =======
-            str: [BRIEF] CIF string of reconstructed slab or JSON with all variants depending on return_all_variants. [/BRIEF]
-                 [DETAILED] Either a single CIF-formatted string containing the reconstructed surface
-                 structure (if return_all_variants=False) or a comprehensive JSON string with all
-                 variants, metadata, and structural information (if return_all_variants=True). The
-                 JSON format includes detailed characterization of each variant. [/DETAILED]
-                 [EXAMPLES] Example output: CIF string with reconstructed surface or JSON with multiple variants [/EXAMPLES]
+    Returns:
+        str: [BRIEF] CIF string of reconstructed slab or JSON with all variants depending on return_all_variants. [/BRIEF]
+             [DETAILED] Either a single CIF-formatted string containing the reconstructed surface
+             structure (if return_all_variants=False) or a comprehensive JSON string with all
+             variants, metadata, and structural information (if return_all_variants=True). The
+             JSON format includes detailed characterization of each variant. [/DETAILED]
+             [EXAMPLES] Example output: CIF string with reconstructed surface or JSON with multiple variants [/EXAMPLES]
 
-        [RAISES] Exceptions:
-            ValueError: [ERROR_WHEN] When reconstruction parameters are invalid or incompatible [/ERROR_WHEN]
-                       [ERROR_DETAILS] Invalid JSON format, missing required fields, or incompatible parameters [/ERROR_DETAILS]
-                       [ERROR_RECOVERY] Verify JSON format and ensure all required fields are present [/ERROR_RECOVERY]
-            StructureError: [ERROR_WHEN] When reconstruction fails due to structural incompatibilities [/ERROR_WHEN]
-                           [ERROR_DETAILS] Invalid transformation matrix, incompatible surface orientation, or atomic placement issues [/ERROR_DETAILS]
-                           [ERROR_RECOVERY] Check transformation matrix and atomic modification parameters [/ERROR_RECOVERY]
-            ReconstructionError: [ERROR_WHEN] When the reconstruction process fails to generate valid structures [/ERROR_WHEN]
-                                [ERROR_DETAILS] Complex reconstruction instructions cannot be implemented [/ERROR_DETAILS]
-                                [ERROR_RECOVERY] Simplify reconstruction instructions or try different parameters [/ERROR_RECOVERY]
-        [/RAISES]
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When reconstruction parameters are invalid or incompatible [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid JSON format, missing required fields, or incompatible parameters [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify JSON format and ensure all required fields are present [/ERROR_RECOVERY]
+        StructureError: [ERROR_WHEN] When reconstruction fails due to structural incompatibilities [/ERROR_WHEN]
+                       [ERROR_DETAILS] Invalid transformation matrix, incompatible surface orientation, or atomic placement issues [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Check transformation matrix and atomic modification parameters [/ERROR_RECOVERY]
+        ReconstructionError: [ERROR_WHEN] When the reconstruction process fails to generate valid structures [/ERROR_WHEN]
+                            [ERROR_DETAILS] Complex reconstruction instructions cannot be implemented [/ERROR_DETAILS]
+                            [ERROR_RECOVERY] Simplify reconstruction instructions or try different parameters [/ERROR_RECOVERY]
+    [/RAISES]
 
-        [LIMITATIONS] Known limitations:
-        - Cannot predict the thermodynamic stability of reconstructions
-        - Limited to predefined reconstruction patterns and transformations
-        - Does not account for temperature or environmental effects on reconstruction
-        - May not capture all possible reconstruction variants for complex systems
-        - Requires detailed prior knowledge of reconstruction parameters
-        [/LIMITATIONS]
-    >>>>>>> 4fe0f708ad59da2928cc851cb49e64e429ca339b
+    [LIMITATIONS] Known limitations:
+    - Cannot predict the thermodynamic stability of reconstructions
+    - Limited to predefined reconstruction patterns and transformations
+    - Does not account for temperature or environmental effects on reconstruction
+    - May not capture all possible reconstruction variants for complex systems
+    - Requires detailed prior knowledge of reconstruction parameters
+    [/LIMITATIONS]
     """
     import json
     from copy import deepcopy
@@ -1066,27 +1061,86 @@ def generate_reconstructed_slab(
 
 
 ####################################
-### Tools relevant for ocp - hard
+### Tools relevant for ml training
 ####################################
 
 
 @tool
 def get_bulk_polymorphs_data(composition: str) -> str:
-    """
-    Query the Materials Project database to find polymorphs for a given composition. This function returns
-    a JSON string containing polymorph data including MP IDs, structures (CIF),  structures (CIF), energies above hull, formation_energy_per_atom, band gaps, densities,
-    volumes, number of sites, symmetry, and stability. The results are sorted by energy above hull.
+    """[BRIEF] Query Materials Project database to find all polymorphs for a given chemical composition. [/BRIEF]
+
+    [DETAILED] This tool retrieves comprehensive polymorph data from the Materials Project database
+    for a specific chemical composition. Polymorphs are different crystal structures with the same
+    chemical formula but different atomic arrangements, leading to distinct physical and chemical
+    properties. This tool could be relevant for retrieving structures of the same compoisition.
+    Apart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull,
+    formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to explore all known structural variants of a single material composition
+    - Suitable for identifying thermodynamically stable and metastable phases and other properties like band gap, density, volume, number of sites, space group of the structure.
+    - Recommended for retrieving structure and Materials Project ID (MP ID), CIF structure, energy above hull,
+    formation energy per atom, band gap, density, volume, number of sites, space group of one single compoisition
+    - Avoid when you only need a single, well-known structure (use get_structure_from_mp_text instead)
+    - Avoid when you need data for multiple composition (use batch_retrieve_polymorphs instead)
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Connects to Materials Project API using authentication credentials
+    - Searches for all materials matching the specified chemical composition
+    - Retrieves comprehensive data including energetics, structural, and electronic properties
+    - Converts crystal structures to CIF format for compatibility with other tools
+    - Sorts results by energy above hull (thermodynamic stability) for easy analysis
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Ensure you need to retrieve data for only one composition and there is no better tool [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to retrieve all polymorphs for a composition [/CURRENT]
+    3. [FOLLOW_UP] Use select_polymorphs_with_strategy to filter results or batch_retrieve_polymorphs for multiple compositions [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - get_bulk_polymorphs_data("TiO2")  # Titanium dioxide polymorphs
+    - get_bulk_polymorphs_data("SiO2")  # Silicon dioxide polymorphs
+    - get_bulk_polymorphs_data("Al2O3") # Aluminum oxide polymorphs
+    [/SYNTACTICAL]
 
     Args:
-        composition: Chemical composition (e.g., 'TiO2')
-        api_key: Materials Project API key (optional if set in environment)
+        composition: [BRIEF] Chemical composition formula. [/BRIEF]
+                    [DETAILED] Chemical formula specifying the composition for which polymorphs
+                    should be retrieved. Should follow standard chemical notation with element
+                    symbols. The tool will find all known crystal structures
+                    with this exact composition in the Materials Project database. [/DETAILED]
+                    [SYNTACTIC] Format: "Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)" [/SYNTACTIC]
+                    [EXAMPLES] Examples: "TiO2" (rutile, anatase, brookite), "SiO2" (quartz, cristobalite), "Fe2O3" (hematite, maghemite) [/EXAMPLES]
 
     Returns:
-        JSON string containing polymorph data including MP IDs, structures (CIF),
-        energies above hull, formation_energy_per_atom, band gaps, densities,
-        volumes, number of sites, symmetry, and stability. (sorted by energy above hull)
-    """
+        str: [BRIEF] JSON string containing comprehensive polymorph data sorted by stability. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing a list of dictionaries, each representing
+             a polymorph with properties including Materials Project ID, CIF structure, energy above hull,
+             formation energy per atom, band gap, density, volume, number of sites, space group, and
+             stability information. Results are sorted by energy above hull for easy identification
+             of the most stable phases. [/DETAILED]
+             [EXAMPLES] Example output: '[{"material_id": "mp-2657", "cif": "...", "energy_above_hull": 0.0, "formation_energy_per_atom": -4.2, ...}]' [/EXAMPLES]
 
+    [RAISES] Exceptions:
+        KeyError: [ERROR_WHEN] When the specified compoisiton is not found in the database [/ERROR_WHEN]
+            [ERROR_DETAILS] Invalid or non-existent material composition is provided [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify if the composition is valid[/ERROR_RECOVERY]
+        ValueError: [ERROR_WHEN] When Materials Project API key is not available [/ERROR_WHEN]
+                   [ERROR_DETAILS] MP_API_KEY environment variable not set or invalid [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] If API key is not set, the tool might not work, hence choose some other tool [/ERROR_RECOVERY]
+        ConnectionError: [ERROR_WHEN] When unable to connect to Materials Project API [/ERROR_WHEN]
+                        [ERROR_DETAILS] Network connectivity issues or API server downtime [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Check internet connection if not working the tool might not work, hence choose some other tool [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Limited to materials available in the Materials Project database
+    - Requires valid API key and internet connection
+    - Can retrieve polymorphs only for one composition at a time
+    [/LIMITATIONS]
+    """
     from mp_api.client import MPRester
 
     # Use provided API key or get from environment
