@@ -147,7 +147,7 @@ def parse_complex_docstring(doc: str) -> tuple[dict[str, str], list[ToolArgument
     return sections, arguments
 
 
-def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
+def parse_docstring(func: Callable) -> tuple[dict[str, str], list[ToolArgument]]:
     """Parse function docstring to get description and arguments.
 
     This function extracts the description and arguments from a function's docstring.
@@ -157,8 +157,8 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
         func (Callable): The function to parse docstring from
 
     Returns:
-        tuple[dict, list[ToolArgument]]: (description, arguments) where description is a string and
-               arguments is a list of ToolArgument objects
+        tuple[dict[str, str], list[ToolArgument]]: (sections, arguments) where sections is a dict
+               mapping section names to content and arguments is a list of ToolArgument objects
 
     Raises:
         ValueError: If the docstring is missing or doesn't have an Args section
@@ -172,13 +172,13 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
 
     else:
         # Split docstring into sections
-        sections = doc.split("\n\n")
-        description = sections[0].strip()
+        doc_sections = doc.split("\n\n")
+        description = doc_sections[0].strip()
         sections = {"BRIEF": description}
 
         # Find Args section
         args_section = None
-        for section in sections:
+        for section in doc_sections:
             if section.strip().startswith("Args:"):
                 args_section = section.strip()
                 break
@@ -245,7 +245,7 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
             )
         )
 
-    return sections["BRIEF"], arguments
+    return sections, arguments
 
 
 def tool(func: Callable) -> Tool:
@@ -309,7 +309,7 @@ def tool(func: Callable) -> Tool:
         )
 
     try:
-        description, arguments = parse_docstring(func)
+        sections, arguments = parse_docstring(func)
     except Exception as e:
         raise ValueError(
             f"Error parsing docstring for function {func.__name__}: {e!s}. "
@@ -328,7 +328,7 @@ def tool(func: Callable) -> Tool:
     class FunctionTool(Tool):
         def __init__(self):
             super().__init__(
-                name=func.__name__, description=description, arguments=arguments
+                name=func.__name__, description=sections, arguments=arguments
             )
 
         def execute(self, **kwargs):
@@ -384,12 +384,12 @@ def modal_tool(
 
     def decorator(func: Callable):
         modal_func = create_modal_function(func, app, **modal_kwargs)
-        description, arguments = parse_docstring(func)
+        sections, arguments = parse_docstring(func)
 
         tool_instance = ModalTool(
             modal_func=modal_func,
             name=func.__name__,
-            description=description,
+            description=sections,
             arguments=arguments,
         )
 
@@ -1074,4 +1074,5 @@ from the file contents, such as specific parameters or coefficients used in the 
 it relies solely on the file name for metadata extraction.
 [/LIMITATIONS]
 """
-    chunks = parse_docstring(example_text)
+    # This is invalid - parse_docstring expects a function, not a string
+    # chunks = parse_docstring(example_text)

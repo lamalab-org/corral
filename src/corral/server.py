@@ -46,12 +46,21 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Task not found")
         return {"prompt": environments[task_id].get_tools_guide()}
 
-    @app.get("/tasks/{task_id}/tools")
-    def get_available_tools(task_id: str):
-        """Get available tools for this task"""
+    @app.post("/tasks/{task_id}/tools")
+    def get_available_tools(task_id: str, keywords: dict):
+        """Get available tools with concatenated section descriptions"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
-        return {"tools": environments[task_id].get_available_tools()}
+
+        keyword_list = keywords.get("keywords", ["BRIEF"])
+        if not keyword_list:
+            raise HTTPException(status_code=400, detail="Keywords list is required")
+
+        return {
+            "tools": environments[task_id].get_available_tools_with_sections(
+                keyword_list
+            )
+        }
 
     @app.post("/tasks/{task_id}/tools/execute")
     def execute_tool(task_id: str, request: ToolRequest):

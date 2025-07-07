@@ -1,11 +1,17 @@
-from promptstore import PromptStore
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from promptstore import PromptStore
+
+    from corral.evaluate import BenchmarkInterface
 
 from corral.agents.base_agent import BaseAgent
 from corral.agents.prompt_utils import create_prompt
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.agents.utils import LiteLLMMessage
-from corral.evaluate import BenchmarkInterface
 
 
 class LLMPlanner(BaseAgent):
@@ -97,6 +103,7 @@ class LLMPlanner(BaseAgent):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
+        sections: list[str] | None = None,
     ) -> str:
         """Run the LLM planner agent
 
@@ -106,11 +113,12 @@ class LLMPlanner(BaseAgent):
             history (List[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
+            sections (list[str], optional): List of sections describing the level of detail in the tools description. Defaults to None.
 
         Returns:
             str: The final answer to the task
         """
-        tools = interface.get_available_tools_for_task(task_id)
+        tools = interface.get_available_tools_for_task(task_id, sections)
 
         if task_prompt is None:
             task_guide = interface.get_task_prompt(task_id)

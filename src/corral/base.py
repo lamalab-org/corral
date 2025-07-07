@@ -105,9 +105,20 @@ class Tool:
     TODO: add descriptions of the arguments of the class, i.e., name, description, arguments
     """
 
-    def __init__(self, name: str, description: str, arguments: list[ToolArgument]):
+    def __init__(
+        self,
+        name: str,
+        description: str | dict[str, str],
+        arguments: list[ToolArgument],
+    ):
         self.name = name
-        self.description = description
+        # Handle both old string format and new sections dict format
+        if isinstance(description, dict):
+            self.sections = description
+            self.description = description.get("BRIEF", "")
+        else:
+            self.sections = {"BRIEF": description}
+            self.description = description
         self.arguments = arguments
 
     def validate_arguments(
@@ -171,7 +182,7 @@ class ModalTool(Tool):
         self,
         modal_func: Callable,
         name: str,
-        description: str,
+        description: str | dict[str, str],
         arguments: list[ToolArgument],
     ):
         super().__init__(
@@ -254,23 +265,34 @@ class Environment(ABC):
         """Add a tool to the environment"""
         self.tools[tool.name] = tool
 
-    def get_available_tools(self) -> list[dict[str, str | list[ToolArgument]]]:
-        """Get list of available tools with their descriptions and arguments.
+    def get_available_tools(
+        self, keywords: list[str]
+    ) -> list[dict[str, str | list[ToolArgument]]]:
+        """Get list of available tools with concatenated section descriptions.
+
+        Args:
+            keywords (list[str]): List of section keywords to concatenate for descriptions
 
         Returns:
             list[dict[str, str | list[ToolArgument]]]: A list of dictionaries where each dictionary contains:
                 - 'name': the tool's name as a string.
-                - 'description': a string describing the tool.
-                - 'arguments': a list of ToolArgument objects representing the tool's arguments.
+                - 'description': concatenated sections specified by keywords, joined by double newlines.
+                - 'arguments': a string of comma-separated argument names.
         """
-        return [
-            {
-                "name": t.name,
-                "description": t.description,
-                "arguments": ", ".join(arg.name for arg in t.arguments),
-            }
-            for t in self.tools.values()
-        ]
+        tools_info = []
+        for tool in self.tools.values():
+            # Get concatenated description using the existing method
+            description = self.get_tool_description_by_keyword(tool.name, keywords)
+
+            tools_info.append(
+                {
+                    "name": tool.name,
+                    "description": description,
+                    "arguments": ", ".join(arg.name for arg in tool.arguments),
+                }
+            )
+
+        return tools_info
 
     def get_tools_guide(self) -> str:
         """Generate a guide for the available tools"""
@@ -305,6 +327,45 @@ class Environment(ABC):
 
 {tools_guide}
 """
+
+    def get_tool_description_by_keyword(
+        self, tool_name: str, keyword: str | list[str]
+    ) -> str:
+        """Get specific section(s) of a tool's description by keyword(s).
+
+        Args:
+            tool_name (str): The name of the tool
+            keyword (Union[str, list[str]]): The keyword/section(s) to retrieve (e.g., 'BRIEF', 'DETAILED', 'EXAMPLES')
+                                           If a list is provided, sections are concatenated with double newlines
+                                           If "ALL" is included in keywords, all sections are returned
+
+        Returns:
+            str: The requested section content(s), or an error message if not found
+        """
+        if tool_name not in self.tools:
+            return f"Tool '{tool_name}' not found"
+
+        tool = self.tools[tool_name]
+        if not hasattr(tool, "sections") or not isinstance(tool.sections, dict):
+            return f"Tool '{tool_name}' does not have sectioned documentation"
+
+        # Handle single keyword (backward compatibility)
+        keywords = [keyword] if isinstance(keyword, str) else keyword
+
+        # Handle "ALL" keyword - return all sections
+        if "ALL" in keywords:
+            sections_content = list(tool.sections.values())
+            return "\n\n".join(sections_content)
+
+        # Validate all keywords exist
+        missing_keywords = [k for k in keywords if k not in tool.sections]
+        if missing_keywords:
+            available_keywords = list(tool.sections.keys())
+            return f"Keyword(s) {missing_keywords} not found for tool '{tool_name}'. Available keywords: {available_keywords}"
+
+        # Get and concatenate sections
+        sections_content = [tool.sections[k] for k in keywords]
+        return "\n\n".join(sections_content)
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
         """Execute a tool and record the call with enhanced error handling"""

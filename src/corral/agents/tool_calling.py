@@ -105,6 +105,7 @@ class ToolCallingAgent(BaseAgent):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
+        sections: list[str] | None = None,
     ) -> str:
         """Run the agent to solve the task
 
@@ -114,12 +115,13 @@ class ToolCallingAgent(BaseAgent):
             history (list[LiteLLMMessage]], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
+            sections (list[str], optional): List of sections describing the level of detail in the tools description. Defaults to None.
 
         Returns:
             str: The final answer to the task
         """
         tools = convert_to_openai_tool_format(
-            interface.get_available_tools_for_task(task_id)
+            interface.get_available_tools_for_task(task_id, sections)
         )
         if task_prompt is None:
             task_guide = interface.get_task_prompt(task_id)

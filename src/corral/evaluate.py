@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pickle
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,11 +37,17 @@ class BenchmarkInterface:
         except Exception:
             return False
 
-    def get_available_tools_for_task(self, task_id: str) -> dict[str, Any]:
+    def get_available_tools_for_task(
+        self, task_id: str, sections: list[str] | None = None
+    ) -> dict[str, Any]:
         """Get list of available tools for a task"""
-        response = requests.get(f"{self.base_url}/tasks/{task_id}/tools")
+        # Send keywords in request body as expected by server
+        keywords = sections if sections is not None else ["BRIEF"]
+        data = {"keywords": keywords}
+
+        response = requests.post(f"{self.base_url}/tasks/{task_id}/tools", json=data)
         response.raise_for_status()
-        return response.json()
+        return response.json()["tools"]
 
     def get_task_guide(self, task_id: str) -> str:
         """Get complete guide for task including tools"""
@@ -234,9 +242,7 @@ class MatAgentBenchmark:
         ]
 
         logger.info(
-            f"Independent execution: {
-                len(completed_tasks)} completed, {
-                len(remaining_tasks)} remaining"
+            f"Independent execution: {len(completed_tasks)} completed, {len(remaining_tasks)} remaining"
         )
 
         for task_id in remaining_tasks:
