@@ -4,7 +4,7 @@ import os
 import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, Optional, Union, get_args, get_origin, get_type_hints
+from typing import Any, Union, get_args, get_origin, get_type_hints
 from urllib.parse import quote
 
 import chromadb
@@ -28,224 +28,333 @@ from corral.base import ModalTool, Tool, ToolArgument
 MODAL_TOOL_REGISTRY = {}
 
 
-def format_type_annotation(annotation):
-    """Formats type annotations to readable strings."""
+def format_type_annotation(annotation) -> str:
+    """Formats type annotations to readable strings with proper error handling."""
+    try:
+        # Handle None type
+        if annotation is type(None):
+            return "None"
 
-    # Handle basic types
-    if isinstance(annotation, type):
-        return "None" if annotation is type(None) else annotation.__name__
-    # Handle new-style union (str | int)
-    if isinstance(annotation, type | type(None)):
-        return annotation.__name__
+        # Handle basic types
+        if isinstance(annotation, type):
+            return annotation.__name__
 
-    # Handle new-style unions using '|'
-    if get_origin(annotation) is Union:
-        args = [format_type_annotation(arg) for arg in get_args(annotation)]
-        return " | ".join(args).replace("NoneType", "None")
+        # Handle typing constructs
+        origin = get_origin(annotation)
+        args = get_args(annotation)
 
-    # Handle old-style unions (Union[str, int])
-    if hasattr(annotation, "__origin__") and annotation.__origin__ is Union:
-        args = [format_type_annotation(arg) for arg in annotation.__args__]
-        return " | ".join(args).replace("NoneType", "None")
+        # Handle Union types (including Optional which is Union[T, None])
+        if origin is Union:
+            # Handle Optional[T] which is Union[T, None]
+            if len(args) == 2 and type(None) in args:
+                non_none_type = args[0] if args[1] is type(None) else args[1]
+                return f"{format_type_annotation(non_none_type)} | None"
+            else:
+                # Handle regular Union[T, U, ...]
+                formatted_args = [format_type_annotation(arg) for arg in args]
+                return " | ".join(formatted_args)
 
-    # Handle Optional (which is Union[T, None])
-    if annotation is Optional:
-        return f"{format_type_annotation(annotation.__args__[0])} | None"
+        # Handle generic types like List[str], Dict[str, int], etc.
+        if origin is not None:
+            origin_name = getattr(origin, "__name__", str(origin))
+            if args:
+                formatted_args = [format_type_annotation(arg) for arg in args]
+                return f"{origin_name}[{', '.join(formatted_args)}]"
+            return origin_name
 
-    # Handle generic types like list, dict, etc.
-    if hasattr(annotation, "__origin__"):
-        origin = format_type_annotation(annotation.__origin__)
-        args = ", ".join(format_type_annotation(arg) for arg in annotation.__args__)
-        return f"{origin}[{args}]"
+        # Handle Python 3.10+ union syntax (str | int)
+        # Check if this is a union type using the new syntax
+        if hasattr(annotation, "__class__") and "UnionType" in str(
+            annotation.__class__
+        ):
+            # Extract the union args manually
+            union_str = str(annotation)
+            return union_str.replace(" | ", " | ")
 
-    # Fallback to string representation for unknown types
-    return str(annotation)
+        # Fallback to string representation for unknown types
+        return str(annotation).replace("typing.", "")
 
-
-keywords = [
-    "BRIEF",
-    "DETAILED",
-    "PROCEDURAL",
-    "WORKFLOW_INTEGRATION",
-    "CONTEXTUAL",
-    "SYNTACTICAL",
-    "RAISES",
-    "LIMITATIONS",
-    "EXAMPLES",
-]
-
-
-def regex_parsing_docstring_sections(doc_without_sections: str):
-    """Extracts sections from a docstring based on predefined keywords."""
-    keyword_pattern = "|".join(re.escape(keyword) for keyword in keywords)
-    keyword_regex = re.compile(rf"\[({keyword_pattern})\](.*?)\[/\1\]", re.DOTALL)
-    matches = keyword_regex.findall(doc_without_sections)
-    return [(match[0], match[1].strip()) for match in matches]
+    except Exception as e:
+        logger.warning(f"Could not format type annotation {annotation}: {e}")
+        return str(annotation)
 
 
-def parse_arguments(args_content: str) -> list[ToolArgument]:
-    """Parse the Args section of a docstring to extract arguments."""
-    arguments = []
-    lines = args_content.strip().splitlines()
-    current_arg = None
-    arg_pattern = re.compile(r"^\s*\w+\s*\([^)]+\)\s*:")
-    for _i, line in enumerate(lines):
-        if current_arg is None or arg_pattern.match(line):
-            if current_arg is not None:
-                arguments.append(current_arg)
-            current_arg = line.strip()
+def extract_tagged_content(text: str, tag: str) -> str | None:
+    """Extract content from a specific tagged section with error handling"""
+    try:
+        pattern = rf"\[{re.escape(tag)}\](.*?)\[/{re.escape(tag)}\]"
+        match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+        return match.group(1).strip() if match else None
+    except Exception as e:
+        logger.warning(f"Error extracting tagged content for tag '{tag}': {e}")
+        return None
+
+
+def extract_main_description_from_complex_docstring(docstring: str) -> str:
+    """Extract main description from complex docstring with tagged sections"""
+    try:
+        # First try to get BRIEF section
+        brief = extract_tagged_content(docstring, "BRIEF")
+        if brief:
+            return brief
+
+        # If no BRIEF, get content before first tagged section or Args section
+        lines = docstring.strip().split("\n")
+        description_lines = []
+
+        for line in lines:
+            line_text = line.strip()
+            # Stop at first tagged section or Args section
+            if line_text.startswith(("[", "Args:")):
+                break
+            if line_text:
+                description_lines.append(line_text)
+
+        return (
+            " ".join(description_lines)
+            if description_lines
+            else "No description available"
+        )
+
+    except Exception as e:
+        logger.warning(f"Error extracting main description: {e}")
+        return "No description available"
+
+
+def parse_argument_from_lines(arg_lines: list[str]) -> dict[str, Any]:
+    """Parse a single argument from its lines with improved error handling"""
+    if not arg_lines:
+        return {}
+
+    try:
+        # First line should contain "arg_name: description"
+        first_line = arg_lines[0]
+        if ":" not in first_line:
+            return {}
+
+        # Extract argument name and start of description
+        colon_pos = first_line.find(":")
+        arg_name_part = first_line[:colon_pos].strip()
+        first_desc_part = first_line[colon_pos + 1 :].strip()
+
+        # Extract bare argument name (remove type annotation if present)
+        if "(" in arg_name_part and ")" in arg_name_part:
+            arg_name = arg_name_part.split("(")[0].strip()
         else:
-            current_arg += " " + line.strip()
+            arg_name = arg_name_part.strip()
 
-    if current_arg is not None:
-        arguments.append(current_arg)
-    return arguments
+        # Validate argument name
+        if not arg_name or not arg_name.isidentifier():
+            logger.warning(f"Invalid argument name: {arg_name}")
+            return {}
+
+        # Combine all description lines
+        all_desc_parts = [first_desc_part] + [line.strip() for line in arg_lines[1:]]
+        full_description = " ".join(part for part in all_desc_parts if part)
+
+        # Parse choices if specified
+        choices = None
+        if "(choices:" in full_description:
+            try:
+                desc_parts = full_description.split("(choices:", 1)
+                full_description = desc_parts[0].strip()
+                choices_str = desc_parts[1].split(")", 1)[0].strip()
+                # Safely evaluate choices
+                choices = eval(
+                    choices_str
+                )  # This should be replaced with ast.literal_eval for safety
+            except (ValueError, SyntaxError) as e:
+                logger.warning(f"Invalid choices format for argument {arg_name}: {e}")
+
+        # Extract tagged sections from argument description
+        raises_info = extract_tagged_content(full_description, "RAISES")
+        limitations_info = extract_tagged_content(full_description, "LIMITATIONS")
+
+        return {
+            "name": arg_name,
+            "description": full_description,
+            "choices": choices,
+            "raises": raises_info,
+            "limitations": limitations_info,
+        }
+
+    except Exception as e:
+        logger.error(f"Error parsing argument from lines: {e}")
+        return {}
 
 
-def parse_complex_docstring(doc: str) -> tuple[dict[str, str], list[ToolArgument]]:
-    """Parse a complex docstring with multiple sections including Args, Returns, and RAISES."""
-    sections = {}
-    # Extract Args section (between "Args:" and "Returns:")
-    args_match = re.search(r"Args:(.*?)(?=Returns:|$)", doc, re.DOTALL)
-    if args_match:
-        args_content = args_match.group(1).strip()
-        arguments = parse_arguments(args_content)
+def parse_args_section(args_section: str) -> list[dict[str, Any]]:
+    """Parse the Args section to extract individual arguments with their descriptions"""
+    if not args_section:
+        return []
 
-    # Extract Returns section (between "Returns:" and "[RAISES]")
-    returns_match = re.search(r"Returns:(.*?)(?=\[RAISES\]|$)", doc, re.DOTALL)
-    if returns_match:
-        returns_content = returns_match.group(1).strip()
-        sections["RETURNS"] = returns_content if returns_match else ""
+    try:
+        # Split into lines and remove "Args:" header
+        lines = args_section.splitlines()
+        if lines and lines[0].strip().startswith("Args:"):
+            lines = lines[1:]
 
-    # Extract RAISES section (between "[RAISES]" and "[/RAISES]")
-    raises_match = re.search(r"\[RAISES\](.*?)\[/RAISES\]", doc, re.DOTALL)
-    if raises_match:
-        raises_content = raises_match.group(1).strip()
-        sections["RAISES"] = raises_content if raises_match else ""
+        arguments = []
+        current_arg_lines = []
 
-    # Remove these sections from the original document
-    doc_without_sections = doc
-    if args_match:
-        doc_without_sections = re.sub(
-            r"Args:.*?(?=Returns:|$)", "", doc_without_sections, flags=re.DOTALL
-        )
-    if returns_match:
-        doc_without_sections = re.sub(
-            r"Returns:.*?(?=\[RAISES\]|$)", "", doc_without_sections, flags=re.DOTALL
-        )
-    if raises_match:
-        doc_without_sections = re.sub(
-            r"\[RAISES\].*?\[/RAISES\]", "", doc_without_sections, flags=re.DOTALL
-        )
+        # Pattern to match argument start: "arg_name:" or "arg_name (type):"
+        arg_pattern = re.compile(r"^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\([^)]*\))?\s*:")
 
-    # Now extract the remaining keyword sections
-    matches = regex_parsing_docstring_sections(doc_without_sections)
+        for line in lines:
+            if arg_pattern.match(line):
+                # New argument found, process previous one
+                if current_arg_lines:
+                    arg_data = parse_argument_from_lines(current_arg_lines)
+                    if arg_data.get("name"):
+                        arguments.append(arg_data)
+                current_arg_lines = [line]
+            elif current_arg_lines:
+                # Continuation of current argument
+                current_arg_lines.append(line)
 
-    for match in matches:
-        sections[match[0]] = match[1]
+        # Process the last argument
+        if current_arg_lines:
+            arg_data = parse_argument_from_lines(current_arg_lines)
+            if arg_data.get("name"):
+                arguments.append(arg_data)
 
-    return sections, arguments
+        return arguments
+
+    except Exception as e:
+        logger.error(f"Error parsing args section: {e}")
+        return []
+
+
+def is_complex_docstring(docstring: str) -> bool:
+    """Check if docstring has tagged sections like [BRIEF], [DETAILED], etc."""
+    if not docstring:
+        return False
+
+    tagged_keywords = [
+        "BRIEF",
+        "DETAILED",
+        "PROCEDURAL",
+        "CONTEXTUAL",
+        "WORKFLOW_INTEGRATION",
+        "SYNTACTICAL",
+        "RAISES",
+        "LIMITATIONS",
+    ]
+    return any(f"[{keyword}]" in docstring for keyword in tagged_keywords)
 
 
 def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
-    """Parse function docstring to get description and arguments.
+    """Parse function docstring to get description and arguments with comprehensive error handling."""
 
-    This function extracts the description and arguments from a function's docstring.
-    It expects a docstring with a description section and an Args section.
+    # Validate function
+    if not callable(func):
+        raise ValueError(f"Expected callable function, got {type(func)}")
 
-    Args:
-        func (Callable): The function to parse docstring from
-
-    Returns:
-        tuple[dict, list[ToolArgument]]: (description, arguments) where description is a string and
-               arguments is a list of ToolArgument objects
-
-    Raises:
-        ValueError: If the docstring is missing or doesn't have an Args section
-    """
+    # Get docstring
     doc = inspect.getdoc(func)
     if not doc:
         raise ValueError(f"Function {func.__name__} must have a docstring")
 
-    if "[BRIEF]" in str(doc):
-        sections, args_lines = parse_complex_docstring(doc)
+    try:
+        # Determine if this is a complex docstring with tagged sections
+        if is_complex_docstring(doc):
+            # Extract main description from complex docstring
+            # description = extract_main_description_from_complex_docstring(doc)
+            doc_without_args_returns = re.sub(
+                r"Args:.*?(?=Returns:|$)", "", doc, flags=re.DOTALL
+            )
+            description = doc_without_args_returns.strip()
+        else:
+            # Handle simple docstring - use first section as description
+            sections = doc.split("\n\n")
+            description = sections[0].strip()
 
-    else:
-        # Split docstring into sections
-        sections = doc.split("\n\n")
-        description = sections[0].strip()
-        sections = {"BRIEF": description}
+        # Validate description
+        if not description or description == "No description available":
+            logger.warning(f"Function {func.__name__} has empty or invalid description")
 
-        # Find Args section
+        # Find Args section (works for both simple and complex docstrings)
         args_section = None
-        for section in sections:
-            if section.strip().startswith("Args:"):
-                args_section = section.strip()
-                break
+
+        # Look for Args section in the docstring
+        args_match = re.search(
+            r"Args:(.*?)(?=Returns:|$)", doc, re.DOTALL | re.IGNORECASE
+        )
+        if args_match:
+            args_section = "Args:" + args_match.group(1)
+        else:
+            # Fallback: look for Args section in split sections (for simple docstrings)
+            sections = doc.split("\n\n")
+            for section in sections:
+                if section.strip().startswith("Args:"):
+                    args_section = section.strip()
+                    break
 
         if not args_section:
-            raise ValueError("Docstring must have an 'Args:' section")
-
-        # Parse arguments section, skip the "Args:" line
-        args_lines = [
-            line.strip() for line in args_section.splitlines()[1:] if line.strip()
-        ]
-    arguments = []
-
-    # Get type hints from function
-    type_hints = get_type_hints(func)
-
-    # Parse each argument line
-    for line in args_lines:
-        if ":" not in line:
-            continue
-        arg_name, arg_desc = line.split(":", 1)
-        arg_name = arg_name.strip()
-        arg_desc = arg_desc.strip()
-
-        # Extract bare parameter name without the type annotation in parentheses
-        # This handles formats like "query (str): Description"
-        if "(" in arg_name and ")" in arg_name:
-            arg_name = arg_name.split("(")[0].strip()
-
-        # Parse choices if specified in format (choices: [val1, val2, ...])
-        choices = None
-        if "(choices:" in arg_desc:
-            desc_parts = arg_desc.split("(choices:", 1)
-            arg_desc = desc_parts[0].strip()
-            choices_str = desc_parts[1].split(")", 1)[0].strip()
-            try:
-                choices = eval(choices_str)  # Convert string representation to list
-            except ValueError:
-                raise ValueError(
-                    f"Invalid choices format for argument {arg_name}"
-                ) from None
-
-        # Get type from type hints
-        if arg_name not in type_hints:
-            continue  # Skip non-argument sections like Returns
-
-        arg_annotation = type_hints[arg_name]
-        arg_type = format_type_annotation(arg_annotation)
-
-        # Check if argument has default value
-        signature = inspect.signature(func)
-        param = signature.parameters.get(arg_name)
-        has_default = param.default != inspect.Parameter.empty if param else False
-        default_value = param.default if has_default else None
-
-        arguments.append(
-            ToolArgument(
-                name=arg_name,
-                type=arg_type,
-                description=arg_desc,
-                required=not has_default,
-                default=default_value,
-                choices=choices,
+            raise ValueError(
+                f"Function {func.__name__} docstring must have an 'Args:' section"
             )
-        )
 
-    return sections["BRIEF"], arguments
+        # Parse arguments from the Args section
+        parsed_args = parse_args_section(args_section)
+
+        # Get type hints and signature from function
+        try:
+            type_hints = get_type_hints(func)
+            signature = inspect.signature(func)
+        except Exception as e:
+            raise ValueError(
+                f"Error getting type hints for {func.__name__}: {e}"
+            ) from e
+
+        arguments = []
+
+        # Convert parsed arguments to ToolArgument objects
+        for arg_data in parsed_args:
+            try:
+                arg_name = arg_data["name"]
+
+                # Skip if not a real parameter
+                if arg_name not in type_hints:
+                    logger.warning(
+                        f"Argument {arg_name} not found in type hints for {func.__name__}"
+                    )
+                    continue
+
+                # Get type and default from function signature
+                arg_annotation = type_hints[arg_name]
+                arg_type = format_type_annotation(arg_annotation)
+
+                param = signature.parameters.get(arg_name)
+                has_default = param and param.default != inspect.Parameter.empty
+                default_value = param.default if has_default else None
+
+                arguments.append(
+                    ToolArgument(
+                        name=arg_name,
+                        type=arg_type,
+                        description=arg_data["description"],
+                        required=not has_default,
+                        default=default_value,
+                        choices=arg_data["choices"],
+                        raises=arg_data["raises"],
+                        limitations=arg_data["limitations"],
+                    )
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"Error processing argument {arg_data.get('name', 'unknown')} for {func.__name__}: {e}"
+                )
+                continue
+
+        return description, arguments
+
+    except Exception as e:
+        logger.error(f"Error parsing docstring for {func.__name__}: {e}")
+        raise ValueError(
+            f"Error parsing docstring for function {func.__name__}: {e}"
+        ) from e
 
 
 def tool(func: Callable) -> Tool:
@@ -967,111 +1076,3 @@ def embed_text(
     except Exception as e:
         logger.error(f"Error generating embeddings: {e!s}", exc_info=True)
         raise RuntimeError(f"Failed to generate embeddings: {e!s}") from e
-
-
-def chunk_text(text: str) -> list[str]:
-    """
-    Split a long text into smaller chunks based on the number of lines.
-    Args:
-        text (str): The text to be split into chunks
-
-    Returns:
-        list[str]: A list of text chunks, each containing a single line
-    """
-    if not text or not isinstance(text, str):
-        raise ValueError("Input must be a non-empty string")
-
-    return [chunk.strip() for chunk in text.split("\n")]
-
-
-if __name__ == "__main__":
-    # Example usage
-    example_text = """[BRIEF] Returns metadata from a known LAMMPS potential file given the file path. [/BRIEF]
-
-[DETAILED] This tool provides a quick and reliable way to identify the type and
-supported elements of a LAMMPS potential file based solely on its filename.
-It eliminates the need to parse the often large and complex contents of the potential files,
-which can often exceed the processing limits of many systems or applications.
-By returning a structured description, this tool enables the user to determine whether
-a given potential file is appropriate for a specific molecular dynamics (MD) simulation.
-This is especially useful when selecting the correct interatomic potential for a system
-involving specific elements, without having to inspect the file manually or load it entirely.
-[/DETAILED]
-
-[PROCEDURAL] When to use this tool:
-- Use when you need to quickly determine the type and supported elements
-of a LAMMPS potential file based on its filename.
-- Best suited for selecting an appropriate potential file for a specific
-molecular dynamics (MD) simulation without reading or parsing the full file contents.
-- Recommended for gaining a fast, structured overview of a potential file's
-applicability to specific element combinations or simulation scenarios.
-[/PROCEDURAL]
-
-[WORKFLOW_INTEGRATION] Typical workflow integration:
-1. [PREREQUISITE] Select the potential files that might be relevant to
-your simulation task. [/PREREQUISITE]
-2. [CURRENT] Use this tool to retrieve metadata for each potential file based
-on its filename. This will help you quickly identify which potentials are suitable
-for your simulation needs. [/CURRENT]
-3. [FOLLOW_UP] Based on the metadata returned, choose the appropriate potential file
-for your simulation setup, and run the simulation using the potential file
-and the tool `run_lammps`. [/FOLLOW_UP]
-[/WORKFLOW_INTEGRATION]
-
-[CONTEXTUAL] How this tool works:
-- Extracts the file name from the provided file path
-- Matches it against a set of known file names
-- Returns a structured metadata string for recognized files
-- Raises a ValueError if the file name is unrecognized
-[/CONTEXTUAL]
-
-[SYNTACTICAL] Usage examples:
-[
-`get_potential_metadata("sim_data/ffield.reax")`,
-`get_potential_metadata("/path/to/potentials/Al99.eam.alloy")`,
-`get_potential_metadata("Mg_Zhou04.eam.alloy`,
-`get_potential_metadata("/data/Fe-C_Hepburn_Ackland.eam.fs")`,
-`get_potential_metadata("Cu_Zhou04.eam.alloy`
-]
-[/SYNTACTICAL]
-
-Args:
-file_path (str):
-[BRIEF] Absolute path to the potential file. [/BRIEF]
-[DETAILED] This is the absolute path to a LAMMPS-compatible potential file
-(e.g., ReaxFF or EAM formats). The file name is used to determine metadata,
-so it must match one of the known patterns. [/DETAILED]
-[SYNTACTICAL] Format: "string ending in a recognized potential filename". [/SYNTACTICAL]
-[EXAMPLES] Examples: "/path/to/file/ffield.reax", "ffield_UTA1.ITT" [/EXAMPLES]
-
-Returns:
-str :
-[BRIEF] Structured metadata string describing the potential file. [/BRIEF]
-[DETAILED] The returned string includes the type of interatomic potential
-and a list of chemical elements that it supports. This helps in choosing
-suitable potentials for simulations involving specific atoms. [/DETAILED]
-[EXAMPLES] Example outputs: "{potential type : reax, elements supported :
-Carbon (C), Hydrogen (H), Oxygen (O), Calcium (Ca), Silicon (Si),
-pair_style : reaxff}" [/EXAMPLES]
-
-[RAISES] Exceptions:
-ValueError:
-[ERROR_WHEN] If the file name is not recognized. [/ERROR_WHEN]
-[ERROR_DETAILS] Raised when the filename does not match any known potential files.
-This helps prevent silent failures and makes debugging easier
-in automated workflows. [/ERROR_DETAILS]
-[ERROR_RECOVERY] To resolve this, ensure the file name matches one of the known
-potential files or update the tool to include new potential file
-names as needed. [/ERROR_RECOVERY]
-[/RAISES]
-
-[LIMITATIONS] Limitations:
-- This tool only recognizes a predefined set of potential file names.
-If the file name does not match any of the known patterns, it will raise a ValueError.
-- The metadata returned is static and does not include dynamic information
-from the file contents, such as specific parameters or coefficients used in the potential.
-- The tool does not validate the actual contents of the potential file;
-it relies solely on the file name for metadata extraction.
-[/LIMITATIONS]
-"""
-    chunks = parse_docstring(example_text)
