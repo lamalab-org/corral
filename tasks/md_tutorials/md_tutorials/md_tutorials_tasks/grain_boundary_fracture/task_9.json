@@ -1,0 +1,129 @@
+{
+    "id": "task_9",
+    "name": "Grain Boundary Fracture",
+    "keywords": [
+      "molecular_dynamics_simulations",
+      "lammps",
+      "Iron",
+      "conjugate_gradient"
+    ],
+    "metrics": [
+      "binary"
+    ],
+    "input": [
+      {
+
+        "prompt" : "Simulate the fracture behavior of a Σ3(111) symmetric tilt grain boundary (STGB) in body-centered cubic (BCC) iron using LAMMPS. The simulation should begin by reading a pre-generated grain boundary structure file (present at /structures/task_9/Fe_110_sig3.txt) that defines a bicrystal with a tilt direction of <110> and a grain boundary plane of <111>. The simulation should use metal units and atome_style atomic, and box should have periodic boundary conditions in all directions. After initialization, perform an energy minimization using the conjugate gradient (CG) algorithm with force and energy tolerances of 1.0e-15 and a maximum of 1000 iterations and use the EAM potential present at (/potentials/EAM_FS/Fe-C_Hepburn_Ackland.eam.fs). The box should be allowed to relax along the x and z directions while maintaining a fixed y-direction. Following minimization, apply uniaxial tensile loading perpendicular to the grain boundary (y-direction). Atoms far from the boundary should be deleted to avoid artifacts, and atoms at the edges should be fixed before the deformation begins. The strain should be applied in increments, with the fixed groups being displaced incrementally, followed by energy minimization at each step. During the simulation, compute the stress tensor components and store stress-strain data in a text file called stress_strain.txt. The file should contain strain values and stress components converted from bars to GPa in the format strain,stress_xx,stress_yy,stress_zz without any column names or metadata. As the final result, report the maximum tensile stress (in GPa) along the x-direction achieved prior to the onset of plastic deformation or structural instability, identified as the first significant drop in the stress-strain response.",
+        "input_from_task" : null,
+        "input_for_task" : null
+      }
+    ],
+    "output": [
+      {
+        "type": "scalar",
+        "target": "5.66",
+        "threshold": "1e-2"
+      },
+      {
+        "type": "minimiser",
+        "target" : "cg",
+        "threshold" : null
+      }
+    ],
+    "scoring_fn" : "check_stress_strain",
+    "subtasks": [
+      {
+        "id": "subtask_1_1",
+        "name": "initialization",
+        "keywords": [
+          "molecular_dynamics_simulations",
+          "lammps",
+          "Iron"
+        ],
+        "metrics": [
+          "binary"
+        ],
+        "input": [
+          {
+            "prompt": "Initialize a 3D body-centered cubic (BCC) iron bicrystal in LAMMPS by reading a pre-generated grain boundary structure file : /stuctures/Fe_110_sig3.txt. Use metal units and define a simulation box with periodic boundary conditions in all directions. The bicrystal should form a Σ3(111) symmetric tilt grain boundary (STGB), with a tilt direction of <110> and a grain boundary plane of <111>. Once the structure is loaded, extract and print the box dimensions (lx, ly, lz) for verification. Replicate the simulation cell as needed along the x and z directions. Save the processed structure using the write_data command in LAMMPS in initial_structure.xyz. As the final output, return the absolute path of the structure file. The input script used for this simulation should be named subtask_1.in",
+            "input_from_task": null,
+            "input_for_task": null
+          }
+        ],
+        "output": [
+          {
+            "type": "structure",
+            "target": "ground_truth/grain_boundary_fracture/initial_structure.xyz",
+            "threshold": "0",
+            "input_script" : "subtask_1.in",
+            "structure_file" : "initial_structure.xyz"
+          }
+        ],
+        "scoring_fn" : "check_structure"
+      },
+      {
+        "id": "subtask_1_2",
+        "name": "system settings",
+        "keywords": [
+          "molecular_dynamics_simulations",
+          "lammps",
+          "energy_minimisation",
+          "conjugate_gradient"
+        ],
+        "metrics": [
+          "binary"
+        ],
+        "input": [
+          {
+            "prompt": "Minimize the energy of the Σ3(111) symmetric tilt grain boundary (STGB) in BCC iron using LAMMPS. First, read the structure file give as input. Compute the initial simulation box height (ly0) by identifying the minimum and maximum y-coordinates of the atoms. Perform an initial conjugate gradient (CG) energy minimization using the potential present at /potentials/EAM_FS/Fe-C_Hepburn_Ackland.eam.fs, allowing the simulation box to relax along the x and z directions while keeping the y-direction fixed. Use a stopping tolerance of 1.0e-15 for both energy and force, with a maximum of 100 iterations and 1000 force evaluations. After minimization, extract and print the final simulation box height (ly1) to monitor any changes. Save the minimised structure using the write_data command in LAMMPS in minimised_structure.xyz. As the final output, return the absolute path of this minimised structure file. As the final output, return the absolute path of the minimized structure file. The input script used for this simulation should be named subtask_2.in",
+            "input_from_task": [
+              "subtask_1_1"
+            ],
+            "input_for_task": null
+          }
+        ],
+        "output": [
+          {
+            "type": "structure",
+            "target": "ground_truth/grain_boundary_fracture/minimised_structure.xyz",
+            "threshold": "0",
+            "input_script" : "subtask_2.in",
+            "structure_file" : "minimised_structure.xyz"
+          }
+        ],
+        "scoring_fn" : "energy_minimisation_with_structure"
+      },
+      {
+        "id": "subtask_1_3",
+        "name": "system settings",
+        "keywords": [
+          "molecular_dynamics_simulations",
+          "lammps",
+          "energy minimisation"
+        ],
+        "metrics": [
+          "binary"
+        ],
+        "input": [
+          {
+            "prompt": "Apply uniaxial tensile deformation to the Σ3(111) symmetric tilt grain boundary (STGB) in BCC iron using LAMMPS. First, read the minimized structure file from the previous subtask. Identify and delete atoms that are far from the grain boundary to prevent unwanted interactions across periodic boundaries. Define two smaller groups of atoms near the grain boundary and fix their forces to zero to act as boundary conditions. Apply tensile deformation by incrementally displacing these fixed groups in opposite directions along the y-axis. The displacement per step should be proportional to the initial simulation box height (ly0) and the specified strain increment. After each displacement step, perform conjugate gradient (CG) energy minimization using a stopping tolerance of 1.0e-15 for both energy and force, with a maximum of 100 iterations and 1000 force evaluations. At each deformation step, compute and store the engineering strain (based on changes in ly) and the corresponding stress components (pxx, pyy, pzz, pxy, pxz, pyz) in a text file stress_strain.txt. Save snapshots of the atomic configuration for visualization at every 1000 steps. During the simulation, compute the stress tensor components and store stress-strain data in a text file called stress_strain.txt. The file should contain strain values and stress components converted from bars to GPa in the format strain,stress_xx,stress_yy,stress_zz without any column names or metadata. The final output should return the absolute path of the text file containing the stress-strain data. The input script used for this simulation should be named subtask_3.in",
+            "input_from_task": [
+              "subtask_1_2"
+            ],
+            "input_for_task": null
+          }
+        ],
+        "output": [
+          {
+            "type": "plot",
+            "target": "ground_truth/grain_boundary_fracture/data.Fe_110_sig3_fracture.txt",
+            "threshold": "1e-2",
+            "input_script" : "subtask_3.in",
+            "structure_file" : null,
+            "text_file" : "stress_strain.txt"
+          }
+        ],
+        "scoring_fn" : "check_stress_strain"
+      }
+    ]
+}
