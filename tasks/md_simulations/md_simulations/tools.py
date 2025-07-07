@@ -181,14 +181,14 @@ def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:
     [/SYNTACTICAL]
 
     Args:
-        mp_id:
+        mp_id (str):
             [BRIEF] Materials Project ID of the material. [/BRIEF]
             [DETAILED] A unique identifier used by the Materials Project database
             to reference a material. The ID typically starts with "mp-" followed by digits.
             It must correspond to an existing entry. [/DETAILED]
             [SYNTACTIC] Format: '"mp-XXXX" where X is a digit'. [/SYNTACTIC]
             [EXAMPLES] Examples: "mp-149", "mp-13", "mp-1234567" [/EXAMPLES]
-        file_path:
+        file_path (str):
             [BRIEF] Destination path for saving the CIF file. [/BRIEF]
             [DETAILED] Absolute path to the file where the CIF content will be written. [/DETAILED]
             [SYNTACTIC] Format: 'string path ending in ".cif" corresponding
@@ -320,7 +320,7 @@ def convert_structure_to_lammps_data(
     [/SYNTACTICAL]
 
     Args:
-        structure_path:
+        structure_path (str):
             [BRIEF] Path to the CIF-format structure file. [/BRIEF]
             [DETAILED] Path to the file containing the crystallographic structure.
             This file is read and converted into a pymatgen `Structure` object
@@ -328,7 +328,7 @@ def convert_structure_to_lammps_data(
             [SYNTACTIC] Format: 'string ending in ".cif" correspoding
             to the path of the CIF file.' [/SYNTACTIC]
             [EXAMPLES] Examples: "/workspace/graphene.cif", "./data/SiO2.cif" [/EXAMPLES]
-        output_file:
+        output_file (str):
             [BRIEF] Path where the LAMMPS data file will be saved. [/BRIEF]
             [DETAILED] This is the destination file path where the generated
             LAMMPS-compatible data file will be written.
@@ -339,7 +339,7 @@ def convert_structure_to_lammps_data(
             [EXAMPLES] Examples:
                 - "/workspace/output/graphene.data",
                 -"./converted_data/SiO2.data" [/EXAMPLES]
-        atom_style:
+        atom_style (str):
             [BRIEF] Atom style to be used in the LAMMPS data file, defaults to "charge". [/BRIEF]
             [DETAILED] Specifies the LAMMPS atom style to use when formatting the data file.
             Common values include:
@@ -465,7 +465,7 @@ def run_lammps(input_file: str, num_cpus: int = 1) -> str:
     [/SYNTACTICAL]
 
     Args:
-        input_file:
+        input_file (str):
             [BRIEF] Path to the LAMMPS input script file. [/BRIEF]
             [DETAILED] This parameter specifies the absolute or relative path to
             the input script used by LAMMPS. The script typically contains simulation
@@ -479,7 +479,7 @@ def run_lammps(input_file: str, num_cpus: int = 1) -> str:
                 - "/workspace/lammps_inputs/graphene_sim.in"
                 - "./simulations/liquid_water.in"
                 - "minimize_bulk_sio2.in" [/EXAMPLES]
-        num_cpus: [BRIEF] Number of CPUs to use for the simulation, default is 1. [/BRIEF]
+        num_cpus (int): [BRIEF] Number of CPUs to use for the simulation, default is 1. [/BRIEF]
                   [DETAILED] Specifies how many CPU cores to allocate for the LAMMPS simulation.
                     This parameter allows parallel execution of the simulation,
                     which can significantly speed up computations for large systems.
@@ -573,7 +573,7 @@ def run_lammps(input_file: str, num_cpus: int = 1) -> str:
 
 
 @tool
-def extract_max_stress(file_path) -> float:
+def extract_max_stress(file_path: str) -> float:
     """
     [BRIEF] Extracts the maximum tensile stress (GPa) along the x-direction
     from a stress-strain data file. [/BRIEF]
@@ -622,7 +622,7 @@ def extract_max_stress(file_path) -> float:
     [/SYNTACTICAL]
 
     Args:
-        file_path:
+        file_path (str):
             [BRIEF] Absolute Path to the stress-strain data text file. [/BRIEF]
             [DETAILED] Absolute path, and should point to a valid, space-delimited `.txt`
             file containing stress-strain data with a header.
