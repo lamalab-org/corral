@@ -604,7 +604,10 @@ def _tokenize_and_split_chunks(
 
             batch = chunks[batch_idx : batch_idx + batch_size]
             logger.debug(
-                f"Processing batch {batch_idx//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}"
+                f"Processing batch {
+                    batch_idx // batch_size + 1}/{
+                    (
+                        len(chunks) + batch_size - 1) // batch_size}"
             )
 
             batch_results = []
@@ -614,13 +617,17 @@ def _tokenize_and_split_chunks(
                 if len(tokens) <= chunk_size:
                     batch_results.append(chunk)
                     logger.debug(
-                        f"Chunk {batch_idx + chunk_idx + 1} is within token limit ({len(tokens)}/{chunk_size})"
+                        f"Chunk {
+                            batch_idx + chunk_idx + 1} is within token limit ({
+                            len(tokens)}/{chunk_size})"
                     )
                     del tokens
                     continue
 
                 logger.debug(
-                    f"Chunk {batch_idx + chunk_idx + 1} exceeds token limit ({len(tokens)}/{chunk_size}), splitting..."
+                    f"Chunk {
+                        batch_idx + chunk_idx + 1} exceeds token limit ({
+                        len(tokens)}/{chunk_size}), splitting..."
                 )
 
                 start_idx = 0
@@ -630,7 +637,9 @@ def _tokenize_and_split_chunks(
                     end_idx = min(start_idx + target_size, len(tokens))
 
                     logger.debug(
-                        f"Sub-chunk {sub_chunk_count+1}: Processing from token {start_idx} to {end_idx} ({end_idx-start_idx} tokens)"
+                        f"Sub-chunk {sub_chunk_count +
+                                     1}: Processing from token {start_idx} to {end_idx} ({end_idx -
+                                                                                          start_idx} tokens)"
                     )
 
                     sub_chunk = encoding.decode(tokens[start_idx:end_idx])
@@ -645,7 +654,8 @@ def _tokenize_and_split_chunks(
                     start_idx = end_idx - overlap
 
                     logger.debug(
-                        f"Sub-chunk {sub_chunk_count}: Added {len(sub_chunk)} chars, moved start_idx from {old_start_idx} to {start_idx} (overlap: {overlap} tokens)"
+                        f"Sub-chunk {sub_chunk_count}: Added {
+                            len(sub_chunk)} chars, moved start_idx from {old_start_idx} to {start_idx} (overlap: {overlap} tokens)"
                     )
 
                     if start_idx <= old_start_idx:
@@ -672,7 +682,9 @@ def _tokenize_and_split_chunks(
         gc.collect()
 
     logger.info(
-        f"Completed tokenization and splitting: {len(chunks)} input chunks → {len(processed_chunks)} output chunks"
+        f"Completed tokenization and splitting: {
+            len(chunks)} input chunks → {
+            len(processed_chunks)} output chunks"
     )
     return processed_chunks
 
@@ -715,7 +727,9 @@ def create_vector_database(
 
     processed_chunks = _tokenize_and_split_chunks(chunks, chunk_size)
     logger.info(
-        f"Processed {len(chunks)} chunks into {len(processed_chunks)} chunks after tokenization and splitting"
+        f"Processed {
+            len(chunks)} chunks into {
+            len(processed_chunks)} chunks after tokenization and splitting"
     )
 
     client = chromadb.PersistentClient(path=str(persist_directory))
@@ -855,7 +869,7 @@ def embed_text(
                 batch_embeddings = embed_text(batch, model=model)
                 all_embeddings.extend(batch_embeddings)
             except Exception as e:
-                logger.error(f"Error in batch {i//BATCH_SIZE + 1}: {e!s}")
+                logger.error(f"Error in batch {i // BATCH_SIZE + 1}: {e!s}")
                 raise
 
         logger.info(

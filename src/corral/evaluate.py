@@ -234,7 +234,9 @@ class MatAgentBenchmark:
         ]
 
         logger.info(
-            f"Independent execution: {len(completed_tasks)} completed, {len(remaining_tasks)} remaining"
+            f"Independent execution: {
+                len(completed_tasks)} completed, {
+                len(remaining_tasks)} remaining"
         )
 
         for task_id in remaining_tasks:
@@ -326,7 +328,8 @@ class MatAgentBenchmark:
             "task_results": task_results,
             "session_id": session_id,
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-            **extra_data,  # completed_tasks (list) for independent, completed_trials (int) for chained
+            # completed_tasks (list) for independent, completed_trials (int) for chained
+            **extra_data,
         }
         self._save_checkpoint_file(session_id, checkpoint)
 
