@@ -39,12 +39,10 @@ load_dotenv("../.env")
 @tool
 def get_structure_from_mp_text(mp_id: str) -> str:
     """[BRIEF] Retrieve a pymatgen structure from Materials Project using its API and return CIF content as text. [/BRIEF]
-
     [DETAILED] This tool connects to the Materials Project database to download crystal structure data
     for a given material ID. It retrieves the structure object and converts it to CIF (Crystallographic
     Information File) format, which is the standard format for storing crystal structure information.
     CIF is then returned as string [/DETAILED]
-
     [PROCEDURAL] When to use this tool:
     - Use when you need to retrieve bulk crystal structures from the Materials Project database
     - Best suited for materials with known MP IDs
@@ -52,7 +50,6 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     - Recommended for obtaining crystal structures for preparing bulk structures, supercells, bulk cells, slabs etc.
     - Avoid when you need multiple structures
     [/PROCEDURAL]
-
     [CONTEXTUAL] How this tool works:
     - Connects to Materials Project API using authentication key
     - Searches for the specified material ID (MP ID) in the database (MP ID is given as input parameter or if other tools are available to search for MP ID based on available information, then use those tools)
@@ -60,13 +57,11 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     - Converts the structure to CIF format string for compatibility with other tools
     - Returns standardized crystallographic data suitable for further processing
     [/CONTEXTUAL]
-
     [WORKFLOW_INTEGRATION] Typical workflow integration example:
     1. [PREREQUISITE] Ensure that the other more specific tools are not suitable and you dont have to retrieve multiple strucutres[/PREREQUISITE]
     2. [CURRENT] Apply this tool with a valid MP ID to retrieve bulk structure [/CURRENT]
     3. [FOLLOW_UP] Use the CIF output with slab generation tools like enumerate_slabs_text to create slab structures [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
-
     [SYNTACTICAL] Usage examples:
     - get_structure_from_mp_text("mp-149")  # Silicon structure
     - get_structure_from_mp_text("mp-20066")  # CO2 structure
@@ -100,7 +95,6 @@ def get_structure_from_mp_text(mp_id: str) -> str:
                              [ERROR_DETAILS] MP_API_KEY environment variable not set or expired [/ERROR_DETAILS]
                              [ERROR_RECOVERY] Obtain valid API key from Materials Project and set environment variable [/ERROR_RECOVERY]
     [/RAISES]
-
     [LIMITATIONS] Known limitations:
     - Requires valid Materials Project API key to be set and internet connection
     - Limited to materials available in the Materials Project database
@@ -169,7 +163,6 @@ def create_slab_from_structure_text(
                       This structure will be cleaved to create the surface. [/DETAILED]
                       [SYNTACTIC] Format: "Valid CIF format string with atomic coordinates and lattice parameters" [/SYNTACTIC]
                       [EXAMPLES] Examples: CIF string from get_structure_from_mp_text output [/EXAMPLES]
-
         miller_index: [BRIEF] Miller indices for the surface plane. Defaults to (1,1,1). [/BRIEF]
                      [DETAILED] A tuple of three integers specifying the crystallographic plane along
                      which the structure will be cleaved. These indices define the surface orientation
@@ -177,7 +170,6 @@ def create_slab_from_structure_text(
                      (1,0,0), and (1,1,0) for different surface orientations. [/DETAILED]
                      [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
                      [EXAMPLES] Examples: (1,1,1), (1,0,0), (1,1,0) [/EXAMPLES]
-
         min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 12. [/BRIEF]
                       [DETAILED] The minimum thickness of the slab in the direction perpendicular to
                       the surface plane. This parameter ensures that the slab has sufficient bulk-like
@@ -185,7 +177,6 @@ def create_slab_from_structure_text(
                       more accurate representation of bulk properties but increase computational cost. [/DETAILED]
                       [SYNTACTIC] Format: positive integer representing thickness in Angstroms [/SYNTACTIC]
                       [EXAMPLES] Examples: 12, 15, 8[/EXAMPLES]
-
         min_vacuum_size: [BRIEF] Minimum vacuum spacing in Angstroms. Defaults to 5. [/BRIEF]
                         [DETAILED] The minimum vacuum space above the surface to prevent interactions
                         between periodic images in surface calculations. This parameter is crucial for
@@ -193,7 +184,6 @@ def create_slab_from_structure_text(
                         reduce spurious interactions but increase computational requirements. [/DETAILED]
                         [SYNTACTIC] Format: positive integer representing vacuum thickness in Angstroms [/SYNTACTIC]
                         [EXAMPLES] Examples: 5 (minimal), 10 (standard), 15 (large) [/EXAMPLES]
-
         primitive: [BRIEF] Whether to create a primitive cell slab. Defaults to True. [/BRIEF]
                   [DETAILED] Controls whether to use the primitive cell or conventional cell for
                   slab generation. Primitive cells have the minimum number of atoms while maintaining
@@ -292,7 +282,6 @@ def enumerate_slabs_text(
                  The structure will be analyzed to determine all possible surface terminations. [/DETAILED]
                  [SYNTACTIC] Format: "Valid CIF format string with complete structural information" [/SYNTACTIC]
                  [EXAMPLES] Examples: CIF string from Materials Project structures [/EXAMPLES]
-
         miller_index: [BRIEF] Miller indices for surface orientation. Defaults to (1,1,1). [/BRIEF]
                      [DETAILED] A tuple of three integers specifying the crystallographic plane along
                      which all surface terminations will be generated. This determines the surface
@@ -300,7 +289,6 @@ def enumerate_slabs_text(
                      Miller indices will produce different surface structures and properties. [/DETAILED]
                      [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
                      [EXAMPLES] Examples: (1,1,1), (1,0,0), (1,1,0) [/EXAMPLES]
-
         min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 12. [/BRIEF]
                       [DETAILED] The minimum thickness of each slab in the direction perpendicular
                       to the surface plane. This ensures that all generated slabs have sufficient
@@ -308,7 +296,6 @@ def enumerate_slabs_text(
                       both the structural accuracy and computational requirements. [/DETAILED]
                       [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
                       [EXAMPLES] Examples: 10.0 (for thin slab), 12.0 (standard), 15.0 (for thick slab) [/EXAMPLES]
-
         min_vacuum_size: [BRIEF] Minimum vacuum layer thickness in Angstroms. Defaults to 5. [/BRIEF]
                         [DETAILED] The minimum vacuum space above each surface to prevent interactions
                         between periodic images. This parameter is applied to all generated slabs
@@ -413,7 +400,6 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
                    JSON structure must be valid and contain at least one slab entry. [/DETAILED]
                    [SYNTACTIC] Format: 'Valid JSON string with "slab_X" keys and CIF string values' [/SYNTACTIC]
                    [EXAMPLES] Examples: '{"slab_0": "CIF content...", "slab_1": "CIF content..."}' [/EXAMPLES]
-
         index: [BRIEF] Index of the slab to select. Defaults to 0. [/BRIEF]
               [DETAILED] The numerical index of the slab to select from the JSON dictionary.
               This corresponds to the enumeration order from enumerate_slabs_text, where
@@ -593,7 +579,6 @@ def choose_adsorption_site_text(
                               Each coordinate is a list of three numbers representing position within the unit cell. [/DETAILED]
                               [SYNTACTIC] Format: 'Valid JSON string with site type keys and coordinate list values' [/SYNTACTIC]
                               [EXAMPLES] Examples: '{"top": [[0.0, 0.0, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}' [/EXAMPLES]
-
         site_type: [BRIEF] Type of adsorption site to select. [/BRIEF]
                   [DETAILED] The type of binding site to select from the available options. Common
                   types include "top" (above surface atoms), "bridge" (between two atoms), and
@@ -601,7 +586,6 @@ def choose_adsorption_site_text(
                   and determines the coordination environment of the selected site. [/DETAILED]
                   [SYNTACTIC] Format: string matching available site types [/SYNTACTIC]
                   [EXAMPLES] Examples: "top" (on-top), "bridge" (between atoms), "hollow" (in depression) [/EXAMPLES]
-
         index: [BRIEF] Index of the site within the specified type. Defaults to 0. [/BRIEF]
               [DETAILED] The numerical index of the site to select from the list of sites
               of the specified type. Index 0 selects the first site, index 1 the second,
@@ -696,7 +680,6 @@ def add_adsorbate_to_slab_text(
                  substrate for molecular adsorption. [/DETAILED]
                  [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
                  [EXAMPLES] Examples: CIF string from choose_slab_text output [/EXAMPLES]
-
         adsorbate_cif: [BRIEF] CIF string of the adsorbate molecule structure. [/BRIEF]
                       [DETAILED] A CIF or XYZ formatted string containing the molecular structure
                       of the adsorbate to be placed on the surface. This can be a small molecule
@@ -704,7 +687,6 @@ def add_adsorbate_to_slab_text(
                       parse both CIF and XYZ formats automatically. [/DETAILED]
                       [SYNTACTIC] Format: "Valid CIF or XYZ format string with molecular structure" [/SYNTACTIC]
                       [EXAMPLES] Examples: CIF string from get_structure_from_mp_text for molecules [/EXAMPLES]
-
         height: [BRIEF] Height in Angstroms above the surface for adsorbate placement. Defaults to 2.0. [/BRIEF]
                [DETAILED] The vertical distance above the surface at which the adsorbate will be
                placed. This parameter controls the initial separation between the adsorbate and
@@ -712,7 +694,6 @@ def add_adsorbate_to_slab_text(
                molecular size and expected binding interaction. [/DETAILED]
                [SYNTACTIC] Format: positive float representing distance in Angstroms [/SYNTACTIC]
                [EXAMPLES] Examples: 1.5 (close to slab), 2.0, 2.5 (distant from molecule) [/EXAMPLES]
-
         site: [BRIEF] Optional fractional coordinates for adsorbate placement. [/BRIEF]
              [DETAILED] A list of three floating-point numbers representing the fractional
              coordinates [x, y, z] where the adsorbate should be placed. If not provided,
@@ -837,7 +818,6 @@ def generate_reconstructed_slab(
                  positions. The bulk structure provides the template for surface generation. [/DETAILED]
                  [SYNTACTIC] Format: "Valid CIF format string with bulk crystal structure" [/SYNTACTIC]
                  [EXAMPLES] Examples: CIF string from Materials Project database [/EXAMPLES]
-
         miller_index: [BRIEF] Miller indices for the surface orientation. [/BRIEF]
                      [DETAILED] A tuple of three integers specifying the crystallographic plane
                      along which the reconstruction will be performed. These indices must be
@@ -845,7 +825,6 @@ def generate_reconstructed_slab(
                      before reconstruction modifications are applied. [/DETAILED]
                      [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
                      [EXAMPLES] Examples: (1,1,1) (close-packed), (1,0,0) (square), (1,1,0) (rectangular) [/EXAMPLES]
-
         min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. [/BRIEF]
                       [DETAILED] The minimum thickness of the slab before reconstruction modifications
                       are applied. This ensures adequate bulk-like behavior in the center of the
@@ -853,7 +832,6 @@ def generate_reconstructed_slab(
                       values improve accuracy but increase computational cost. [/DETAILED]
                       [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
                       [EXAMPLES] Examples: 12.0 (standard), 15.0 (thick), 10.0 (thin) [/EXAMPLES]
-
         min_vacuum_size: [BRIEF] Minimum vacuum layer thickness in Angstroms. [/BRIEF]
                         [DETAILED] The minimum vacuum space above the reconstructed surface to
                         prevent interactions between periodic images. This parameter is crucial
@@ -861,7 +839,6 @@ def generate_reconstructed_slab(
                         with significant surface protrusions or modifications. [/DETAILED]
                         [SYNTACTIC] Format: positive float representing vacuum thickness in Angstroms [/SYNTACTIC]
                         [EXAMPLES] Examples: 10.0 (standard), 15.0 (large), 5.0 (minimal) [/EXAMPLES]
-
         reconstruction_instructions: [BRIEF] JSON string containing detailed reconstruction parameters. [/BRIEF]
                                    [DETAILED] A comprehensive JSON string specifying all aspects of
                                    the reconstruction including transformation matrices, atomic
@@ -870,7 +847,6 @@ def generate_reconstructed_slab(
                                    instructions. See the tool's source code for detailed format. [/DETAILED]
                                    [SYNTACTIC] Format: "Valid JSON string with reconstruction parameters" [/SYNTACTIC]
                                    [EXAMPLES] Examples: JSON with transformation matrix and atomic modifications [/EXAMPLES]
-
         return_all_variants: [BRIEF] Whether to return all reconstruction variants. Defaults to False. [/BRIEF]
                            [DETAILED] Controls whether to return a single CIF string (False) or a
                            comprehensive JSON with all possible reconstruction variants and metadata
@@ -1344,7 +1320,6 @@ def get_bulk_polymorphs_data_to_file(
                      with this exact composition in the Materials Project database. [/DETAILED]
                      [SYNTACTIC] Format: "Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)" [/SYNTACTIC]
                      [EXAMPLES] Examples: "TiO2" (titanium dioxide), "SiO2" (silicon dioxide), "Fe2O3" (iron oxide) [/EXAMPLES]
-
          save_path: [BRIEF] File path where JSON data will be saved. [/BRIEF]
                    [DETAILED] Complete file path including filename and extension where the polymorph
                    data will be saved. The path should be writable and the directory will be created
@@ -1498,7 +1473,6 @@ def batch_retrieve_polymorphs(
                      Large lists are supported but may take significant time to process. [/DETAILED]
                      [SYNTACTIC] Format: ["composition1", "composition2", ...] [/SYNTACTIC]
                      [EXAMPLES] Examples: ["TiO2", "SiO2", "Al2O3"], ["CaTiO3", "SrTiO3"], ["FeO", "Fe2O3"] [/EXAMPLES]
-
         max_energy_above_hull: [BRIEF] Maximum energy above hull threshold in eV/atom. Defaults to 0.5. [/BRIEF]
                               [DETAILED] Energy threshold above the convex hull for including polymorphs.
                               Only phases with energy above hull less than or equal to this value will
@@ -1507,7 +1481,6 @@ def batch_retrieve_polymorphs(
                               phases but may miss interesting metastable structures. [/DETAILED]
                               [SYNTACTIC] Format: positive float representing energy in eV/atom [/SYNTACTIC]
                               [EXAMPLES] Examples: 0.1 (very stable), 0.5 (standard), 1.0 (include metastable) [/EXAMPLES]
-
         max_per_composition: [BRIEF] Maximum number of polymorphs per composition. Defaults to 10. [/BRIEF]
                             [DETAILED] Maximum number of polymorphs to retrieve for each composition,
                             taken from the most stable phases first. This prevents data explosion for
@@ -1516,7 +1489,6 @@ def batch_retrieve_polymorphs(
                             but increase dataset size and processing time. [/DETAILED]
                             [SYNTACTIC] Format: positive integer [/SYNTACTIC]
                             [EXAMPLES] Examples: 5 (focused), 10 (standard), 20 (comprehensive) [/EXAMPLES]
-
         save_directory: [BRIEF] Directory path for saving individual composition files. Defaults to "polymorph_data". [/BRIEF]
                        [DETAILED] Base directory where individual JSON files for each composition will be saved.
                        The directory will be created if it doesn't exist. Each composition will have its own
@@ -1649,7 +1621,6 @@ def sort_and_get_first_from_json(
                             retrieval tools. [/DETAILED]
                             [SYNTACTIC] Format: "Valid JSON string containing list of dictionaries" [/SYNTACTIC]
                             [EXAMPLES] Examples: JSON from get_bulk_polymorphs_data output [/EXAMPLES]
-
         sort_key: [BRIEF] Property name to sort the data by. [/BRIEF]
                  [DETAILED] The dictionary key name that will be used for sorting the data.
                  This should correspond to a numerical property in the JSON data. The sorting
@@ -1658,7 +1629,6 @@ def sort_and_get_first_from_json(
                  density, formation_energy_per_atom. [/DETAILED]
                  [SYNTACTIC] Format: "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
                  [EXAMPLES] Examples: "energy_above_hull", "band_gap", "density"[/EXAMPLES]
-
         return_key: [BRIEF] Property name to return from the first element after sorting. [/BRIEF]
                    [DETAILED] The dictionary key name for the value that should be returned
                    from the first (optimal) element after sorting. This allows extraction
@@ -1759,7 +1729,6 @@ def select_polymorphs_with_strategy(
                         retrieval tools. [/DETAILED]
                         [SYNTACTIC] Format: "JSON string or valid file path" [/SYNTACTIC]
                         [EXAMPLES] Examples: JSON string from get_bulk_polymorphs_data, "data/polymorphs.json" [/EXAMPLES]
-
         selection_strategy: [BRIEF] Strategy for polymorph selection. Defaults to "diverse_energy". [/BRIEF]
                            [DETAILED] The algorithm used for selecting polymorphs from the dataset.
                            "diverse_energy" selects polymorphs distributed across the energy range
@@ -1768,7 +1737,6 @@ def select_polymorphs_with_strategy(
                            space groups are represented to capture structural diversity. [/DETAILED]
                            [SYNTACTIC] Format: "diverse_energy", "most_stable", or "diverse_structure" [/SYNTACTIC]
                            [EXAMPLES] Examples: "most_stable" (stability focus), "diverse_structure" (structural diversity), "diverse_energy" (energy sampling) [/EXAMPLES]
-
         max_polymorphs: [BRIEF] Maximum number of polymorphs to select. Defaults to 5. [/BRIEF]
                        [DETAILED] The maximum number of polymorphs to include in the final selection.
                        This parameter controls the size of the resulting dataset and should be chosen
@@ -1777,7 +1745,6 @@ def select_polymorphs_with_strategy(
                        computational cost. [/DETAILED]
                        [SYNTACTIC] Format: positive integer [/SYNTACTIC]
                        [EXAMPLES] Examples: 3 (focused), 5 (standard), 10 (comprehensive) [/EXAMPLES]
-
         energy_threshold: [BRIEF] Maximum energy above hull in eV/atom. Defaults to 0.5. [/BRIEF]
                          [DETAILED] Energy threshold above the convex hull for including polymorphs
                          in the selection process. Only phases with energy above hull less than
@@ -1785,7 +1752,6 @@ def select_polymorphs_with_strategy(
                          that only thermodynamically accessible phases are included in the analysis. [/DETAILED]
                          [SYNTACTIC] Format: positive float representing energy in eV/atom [/SYNTACTIC]
                          [EXAMPLES] Examples: 0.1 (very stable), 0.5 (moderate), 1.0 (include metastable) [/EXAMPLES]
-
         is_path: [BRIEF] Whether polymorphs_data is a file path. Defaults to False. [/BRIEF]
                 [DETAILED] Boolean flag indicating whether the polymorphs_data parameter should
                 be treated as a file path (True) or as a JSON string (False). When True, the
@@ -1914,7 +1880,6 @@ def consolidate_polymorph_datasets(
                           information. [/DETAILED]
                           [SYNTACTIC] Format: '{"composition1": "path1.json", "composition2": "path2.json", ...}' [/SYNTACTIC]
                           [EXAMPLES] Examples: {"TiO2": "data/tio2_polymorphs.json", "SiO2": "data/sio2_polymorphs.json"} [/EXAMPLES]
-
         output_path: [BRIEF] Path for the consolidated dataset file. Defaults to "consolidated_polymorphs.json". [/BRIEF]
                     [DETAILED] File path where the consolidated dataset will be saved. The file will
                     contain all polymorphs from all compositions in a single JSON structure with
@@ -2053,7 +2018,6 @@ def execute_python_code(
                     as execution results. [/DETAILED]
                     [SYNTACTIC] Format: "Valid Python code string" [/SYNTACTIC]
                     [EXAMPLES] Examples: "result = 2 + 2", "import json; result = json.loads(data)", "filtered = [x for x in data if x > threshold]" [/EXAMPLES]
-
         input_data: [BRIEF] Optional JSON string to inject as input_data variable. [/BRIEF]
                    [DETAILED] An optional JSON string that will be loaded into a Python variable
                    named 'input_data' within the executed script. This allows the script to
@@ -2061,7 +2025,6 @@ def execute_python_code(
                    object (dict, list, etc.) depending on the JSON structure. [/DETAILED]
                    [SYNTACTIC] Format: "Valid JSON string or None" [/SYNTACTIC]
                    [EXAMPLES] Examples: '{"data": [1, 2, 3]}', '[1, 2, 3, 4, 5]', '{"threshold": 0.5, "values": [...]}' [/EXAMPLES]
-
         save_output_to: [BRIEF] Optional file path to save execution results. [/BRIEF]
                        [DETAILED] An optional file path where the captured execution results will
                        be saved as a JSON file. If provided and execution is successful, the
@@ -2069,7 +2032,6 @@ def execute_python_code(
                        The directory will be created if it doesn't exist. [/DETAILED]
                        [SYNTACTIC] Format: "Valid file path or None" [/SYNTACTIC]
                        [EXAMPLES] Examples: "results.json", "output/analysis_results.json", "data/processed_output.json" [/EXAMPLES]
-
         timeout: [BRIEF] Maximum execution time in seconds. Defaults to 300. [/BRIEF]
                 [DETAILED] The maximum time in seconds the subprocess is allowed to run before
                 being terminated. This prevents infinite loops and runaway processes from
@@ -2255,7 +2217,6 @@ def execute_python_script(
                     file with appropriate shebang or run using the Python interpreter. [/DETAILED]
                     [SYNTACTIC] Format: "Valid file path to Python script" [/SYNTACTIC]
                     [EXAMPLES] Examples: "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/EXAMPLES]
-
         args: [BRIEF] Optional list of command-line arguments for the script. [/BRIEF]
              [DETAILED] A list of strings representing command-line arguments to pass to the script.
              These arguments will be passed to the script in the order provided. Common arguments
@@ -2263,7 +2224,6 @@ def execute_python_script(
              If None, the script will be executed without arguments. [/DETAILED]
              [SYNTACTIC] Format: ["arg1", "arg2", "arg3", ...] or None [/SYNTACTIC]
              [EXAMPLES] Examples: ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/EXAMPLES]
-
         timeout: [BRIEF] Maximum execution time in seconds. Defaults to 600. [/BRIEF]
                 [DETAILED] The maximum time in seconds the script is allowed to run before being
                 terminated. This prevents runaway processes and ensures resource management.
@@ -2271,7 +2231,6 @@ def execute_python_script(
                 computational simulations, longer timeouts may be necessary. [/DETAILED]
                 [SYNTACTIC] Format: positive integer representing seconds [/SYNTACTIC]
                 [EXAMPLES] Examples: 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/EXAMPLES]
-
         working_dir: [BRIEF] Optional working directory for script execution. [/BRIEF]
                     [DETAILED] The directory from which the script should be executed. This affects
                     relative path resolution and file I/O operations within the script. If None,
@@ -2400,7 +2359,6 @@ def filter_json_with_strategy(
                         be readable and contain well-formed JSON. [/DETAILED]
                         [SYNTACTIC] Format: "Valid file path to JSON file" [/SYNTACTIC]
                         [EXAMPLES] Examples: "data/materials.json", "polymorphs/all_structures.json", "input/dataset.json" [/EXAMPLES]
-
         output_json_path: [BRIEF] Path where filtered JSON data will be saved. [/BRIEF]
                          [DETAILED] Complete file path where the filtered JSON data will be written.
                          The directory will be created if it doesn't exist. The output file will
@@ -2408,7 +2366,6 @@ def filter_json_with_strategy(
                          Using .json extension is recommended for clarity. [/DETAILED]
                          [SYNTACTIC] Format: "Valid file path with .json extension" [/SYNTACTIC]
                          [EXAMPLES] Examples: "output/filtered_materials.json", "results/stable_phases.json", "processed/selected_data.json" [/EXAMPLES]
-
         custom_code: [BRIEF] Python code string defining the filtering logic. [/BRIEF]
                     [DETAILED] A string containing Python code that defines the filtering logic.
                     The code should expect the input data in a variable named 'data' and store
@@ -2530,19 +2487,111 @@ def prepare_tabular_dataset(
     test_split: float = 0.2,
     normalize: bool = True,
 ) -> str:
-    """
-    Prepare tabular dataset for traditional ML models (XGBoost, Random Forest, etc.) from json files create using consolidate polymorph tool.
+    """[BRIEF] Prepare tabular dataset for traditional ML models with feature engineering. [/BRIEF]
+
+    [DETAILED] This tool creates ML-ready tabular datasets from materials data with simple feature engineering
+    capabilities suitable for traditional machine learning models like XGBoost. It implements multiple feature engineering strategies such as basic property extraction to
+    structural descriptors, handles data preprocessing, normalization, and train/test splitting. This is essential
+    for building property prediction models. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when preparing data for traditional ML models (XGBoost, Random Forest, etc.)
+    - Best suited for structured materials property prediction tasks
+    - Essential for creating feature-engineered datasets from raw materials data
+    - Recommended for establishing baseline models before deep learning approaches
+    - Avoid when working with graph-structured or sequential data
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Loads materials data (json data) and extracts basic properties (density, volume, composition)
+    - Implements advanced feature engineering including structural and electronic properties
+    - Handles categorical encoding and missing value imputation automatically
+    - Performs data normalization using standard scaling.
+    - Creates train/test splits with proper randomization and metadata tracking
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First consolidate materials data using consolidate_polymorph_datasets [/PREREQUISITE]
+    2. [CURRENT] Prepare comprehensive tabular dataset with engineered features [/CURRENT]
+    3. [FOLLOW_UP] Use train_xgboost_model or other ML training tools with prepared dataset [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - prepare_tabular_dataset("consolidated.json", "ml_data", "formation_energy_per_atom", "advanced", 0.2, True)
+    - prepare_tabular_dataset("polymorphs.json", "datasets", "band_gap", "basic", 0.15, False)
+    - prepare_tabular_dataset("materials.json", "output", "bulk_modulus", "custom", 0.25, True)
+    [/SYNTACTICAL]
 
     Args:
-        polymorphs_json_path: Path to polymorphs JSON file
-        output_path: Base path for saving dataset files
-        target_property: Property to predict (formation_energy_per_atom, energy_above_hull, band_gap)
-        feature_engineering: Feature engineering strategy ('basic', 'advanced', 'custom')
-        test_split: Fraction for test set
-        normalize: Whether to normalize features
+        polymorphs_json_path: [BRIEF] Path to consolidated polymorphs JSON file. [/BRIEF]
+                             [DETAILED] Complete file path to a JSON file containing consolidated polymorph data with
+                             materials properties and crystal structures. This should be the output from
+                             consolidate_polymorph_datasets or similar tools containing comprehensive materials
+                             information including CIF structures and calculated properties. [/DETAILED]
+                             [SYNTACTIC] Format: "Valid file path to JSON file with materials data" [/SYNTACTIC]
+                             [EXAMPLES] Examples: "consolidated_polymorphs.json", "data/materials_database.json", "datasets/all_oxides.json" [/EXAMPLES]
+
+        output_path: [BRIEF] Base path for saving dataset files. [/BRIEF]
+                    [DETAILED] Base directory and filename prefix where the prepared dataset files will be saved.
+                    Multiple files will be created including training data, test data, and metadata. The tool
+                    will create the directory structure if it doesn't exist. [/DETAILED]
+                    [SYNTACTIC] Format: "Valid directory path and filename prefix" [/SYNTACTIC]
+                    [EXAMPLES] Examples: "ml_datasets/formation_energy", "data/tabular", "output/materials_ml" [/EXAMPLES]
+
+        target_property: [BRIEF] Property to predict. Defaults to "formation_energy_per_atom". [/BRIEF]
+                        [DETAILED] The materials property that will serve as the prediction target for machine learning
+                        models. This should be a key present in the polymorphs data with numerical values. Common
+                        targets include formation energy, band gap, bulk modulus, and other calculated properties. [/DETAILED]
+                        [SYNTACTIC] Format: "String matching property key in JSON data" [/SYNTACTIC]
+                        [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
+
+        feature_engineering: [BRIEF] Feature engineering strategy. Defaults to "basic". [/BRIEF]
+                            [DETAILED] The level of feature engineering to apply to the materials data. "basic" extracts
+                            fundamental properties, "advanced" includes structural and electronic descriptors, and "custom"
+                            applies specialized feature extraction.[/DETAILED]
+                            [SYNTACTIC] Format: "basic", "advanced", or "custom" [/SYNTACTIC]
+                            [EXAMPLES] Examples: "basic", "advanced" , "custom" [/EXAMPLES]
+
+        test_split: [BRIEF] Fraction of data for test set. Defaults to 0.2. [/BRIEF]
+                   [DETAILED] The proportion of the dataset to reserve for testing, expressed as a decimal fraction.
+                   The remaining data will be used for training. Common values range from 0.1 to 0.3 depending on
+                   dataset size and validation strategy. Larger test sets provide more reliable evaluation but reduce
+                   training data. [/DETAILED]
+                   [SYNTACTIC] Format: float between 0.0 and 1.0 [/SYNTACTIC]
+                   [EXAMPLES] Examples: 0.1 (small test set), 0.2 (standard), 0.3 (large test set) [/EXAMPLES]
+
+        normalize: [BRIEF] Whether to normalize features. Defaults to True. [/BRIEF]
+                  [DETAILED] Boolean flag controlling whether features should be normalized using standard scaling
+                  (zero mean, unit variance). Normalization is generally recommended for most ML algorithms as it
+                  ensures features have similar scales and prevents any single feature from dominating the model. [/DETAILED]
+                  [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                  [EXAMPLES] Examples: True (recommended), False (when features already normalized) [/EXAMPLES]
 
     Returns:
-        JSON string with dataset preparation results
+        str: [BRIEF] JSON string with comprehensive dataset preparation results and file paths. [/BRIEF]
+             [DETAILED] A detailed JSON-formatted string containing preparation success status, file paths for training
+             and test data, normalization parameters, dataset statistics, feature information, and metadata. This
+             provides complete information about the prepared dataset for subsequent ML workflows. [/DETAILED]
+             [EXAMPLES] Example output: '{"success": true, "train_path": "ml_data_train.csv", "test_path": "ml_data_test.csv", "dataset_info": {...}}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        FileNotFoundError: [ERROR_WHEN] When polymorphs JSON file doesn't exist [/ERROR_WHEN]
+                          [ERROR_DETAILS] Invalid file path or missing input data file [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Verify file path and ensure input data file exists [/ERROR_RECOVERY]
+        KeyError: [ERROR_WHEN] When target property is not found in the data [/ERROR_WHEN]
+                 [ERROR_DETAILS] Specified target property doesn't exist in materials data [/ERROR_DETAILS]
+                 [ERROR_RECOVERY] Check available properties in data and use valid target property name [/ERROR_RECOVERY]
+        ValueError: [ERROR_WHEN] When feature engineering fails or data format is invalid [/ERROR_WHEN]
+                   [ERROR_DETAILS] Structural data cannot be processed or insufficient valid samples [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Check data format and ensure structures are valid for feature extraction [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Advanced feature engineering requires valid crystal structure data
+    - Processing time scales with dataset size and feature engineering complexity
+    - Some features may not be meaningful for all material types
+    - Cannot handle missing structural data gracefully in advanced mode
+    [/LIMITATIONS]
     """
     import json
     import pickle
@@ -3095,15 +3144,75 @@ def prepare_graph_dataset(
 
 @tool
 def get_mp_thermo_data(material_id: str) -> str:
-    """
-    Get thermodynamic data for a specific material from the Materials Project. (Material ID, Thermo Type (functional used),
-    Formation Energy per Atom, Energy Above Hull, Decomposes To, Is Stable, Energy Type, Uncorrected Energy per Atom)
+    """[BRIEF] Retrieve comprehensive thermodynamic data for materials from Materials Project database. [/BRIEF]
+
+    [DETAILED] This tool accesses detailed thermodynamic information from the Materials Project database, providing
+    essential data for understanding material stability, phase relationships, and thermodynamic properties. It
+    retrieves formation energies, energy above hull, decomposition pathways, and stability information crucial
+    for materials design and selection. This thermodynamic data enables informed decisions about material
+    synthesis feasibility and provides benchmarks for computational studies. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need comprehensive thermodynamic data for specific materials
+    - Recommended if you need to retrieve more thermodynaic infprmation of a structure
+    - Avoid when you only need basic structural or electronic properties
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Connects to Materials Project thermodynamics database via API
+    - Retrieves calculated formation energies and stability information
+    - Provides energy above hull data for phase stability assessment
+    - Reports decomposition pathways and competing phases
+    - Returns comprehensive thermodynamic dataset with proper energy corrections
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Ensure MP_API_KEY is set and material ID is valid [/PREREQUISITE]
+    2. [CURRENT] Retrieve comprehensive thermodynamic data for target material [/CURRENT]
+    3. [FOLLOW_UP] Use thermodynamic data for stability analysis or phase diagram studies [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - get_mp_thermo_data("mp-149")   # Silicon thermodynamic data
+    - get_mp_thermo_data("mp-2657")  # TiO2 thermodynamic properties
+    - get_mp_thermo_data("mp-1143")  # Al2O3 stability information
+    [/SYNTACTICAL]
 
     Args:
-        material_id: Materials Project ID (e.g., "mp-149")
+        material_id: [BRIEF] Materials Project ID for the target material. [/BRIEF]
+                    [DETAILED] The unique Materials Project identifier for the material of interest.
+                    Should be in the format "mp-XXXXX" where XXXXX is the numerical ID. The material
+                    must exist in the Materials Project database and have thermodynamic calculations
+                    available. [/DETAILED]
+                    [SYNTACTIC] Format: "mp-" followed by digits (e.g., "mp-149", "mp-2657") [/SYNTACTIC]
+                    [EXAMPLES] Examples: "mp-149" (Silicon), "mp-2657" (TiO2), "mp-1143" (Al2O3) [/EXAMPLES]
 
     Returns:
-        JSON string with thermodynamic data
+        str: [BRIEF] JSON string containing comprehensive thermodynamic data and stability information. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing thermodynamic properties including material ID,
+             thermodynamic functional used, formation energy per atom, energy above hull, decomposition
+             products, stability status, energy type, and uncorrected energies. Returns error information
+             if thermodynamic data is not available. [/DETAILED]
+             [EXAMPLES] Example output: '[{"material_id": "mp-149", "formation_energy_per_atom": -4.2, "energy_above_hull": 0.0, "is_stable": true, ...}]' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When Materials Project API key is not available [/ERROR_WHEN]
+                   [ERROR_DETAILS] MP_API_KEY environment variable not set or invalid [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Obtain valid API key from Materials Project and set environment variable [/ERROR_RECOVERY]
+        ConnectionError: [ERROR_WHEN] When unable to connect to Materials Project API [/ERROR_WHEN]
+                        [ERROR_DETAILS] Network connectivity issues or API server problems [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Check internet connection and try again later [/ERROR_RECOVERY]
+        KeyError: [ERROR_WHEN] When material ID is not found or has no thermodynamic data [/ERROR_WHEN]
+                 [ERROR_DETAILS] Invalid material ID or thermodynamic properties not calculated [/ERROR_DETAILS]
+                 [ERROR_RECOVERY] Verify material ID exists and has thermodynamic calculations [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Limited to materials with calculated thermodynamic properties in Materials Project
+    - Thermodynamic accuracy depends on computational methodology and corrections applied
+    - May not include experimental thermodynamic data or recent calculations
+    - Cannot provide thermodynamic data for custom or modified compositions
+    [/LIMITATIONS]
     """
     from mp_api.client import MPRester
 
@@ -3159,7 +3268,9 @@ def get_mp_thermo_data(material_id: str) -> str:
         return json.dumps(thermo_data, indent=2)
 
 
+"""
 ## NL training models
+"""
 
 
 @tool
@@ -3210,28 +3321,24 @@ def train_xgboost_model(
                         from prepare_tabular_dataset tool. [/DETAILED]
                         [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
                         [EXAMPLES] Examples: "data/train.csv", "datasets/materials_train.csv", "ml_data/train_features.csv" [/EXAMPLES]
-
         test_data_path: [BRIEF] Path to test data CSV file. [/BRIEF]
                        [DETAILED] Complete file path to the CSV file containing test data with the same
                        structure as training data. Used for independent model evaluation and performance
                        assessment. Should have identical column structure to training data. [/DETAILED]
                        [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
                        [EXAMPLES] Examples: "data/test.csv", "datasets/materials_test.csv", "ml_data/test_features.csv" [/EXAMPLES]
-
         model_save_path: [BRIEF] Path to save the trained model file. [/BRIEF]
                         [DETAILED] Complete file path where the trained XGBoost model will be saved using
                         joblib serialization. The model can be loaded later for predictions or further
                         analysis. Using .pkl extension is recommended for clarity. [/DETAILED]
                         [SYNTACTIC] Format: "Valid file path with .pkl extension" [/SYNTACTIC]
                         [EXAMPLES] Examples: "models/xgb_model.pkl", "trained_models/formation_energy_model.pkl", "results/model.pkl" [/EXAMPLES]
-
         target_column: [BRIEF] Name of the target column for prediction. Defaults to "formation_energy_per_atom". [/BRIEF]
                       [DETAILED] The column name in the CSV files that contains the target values to predict.
                       This column will be separated from features during training. Common targets include
                       formation energy, band gap, bulk modulus, and other materials properties. [/DETAILED]
                       [SYNTACTIC] Format: "String matching column name in CSV files" [/SYNTACTIC]
                       [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
-
         hyperparameters: [BRIEF] Optional dictionary of XGBoost hyperparameters. [/BRIEF]
                         [DETAILED] Dictionary containing XGBoost hyperparameters to override default values.
                         Can include parameters like n_estimators, max_depth, learning_rate, subsample, etc.
@@ -3418,7 +3525,6 @@ def evaluate_xgboost_model(
                    a valid model object. [/DETAILED]
                    [SYNTACTIC] Format: "Valid file path to .pkl model file" [/SYNTACTIC]
                    [EXAMPLES] Examples: "models/xgb_model.pkl", "trained_models/formation_energy_model.pkl", "model.pkl" [/EXAMPLES]
-
         test_data_path: [BRIEF] Path to test data CSV file with same structure as training data. [/BRIEF]
                        [DETAILED] Complete file path to CSV file containing test data with identical column
                        structure to the training data used for model creation. Must include both feature
@@ -3426,14 +3532,12 @@ def evaluate_xgboost_model(
                        consistently with the training data. [/DETAILED]
                        [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
                        [EXAMPLES] Examples: "data/test.csv", "datasets/materials_test.csv", "evaluation/test_data.csv" [/EXAMPLES]
-
         target_column: [BRIEF] Name of the target column for evaluation. Defaults to "formation_energy_per_atom". [/BRIEF]
                       [DETAILED] The column name in the test CSV that contains the true values for comparison
                       with model predictions. This should match the target column used during training.
                       Common targets include formation energy, band gap, and other materials properties. [/DETAILED]
                       [SYNTACTIC] Format: "String matching column name in test CSV" [/SYNTACTIC]
                       [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
-
         detailed_analysis: [BRIEF] Whether to include detailed analysis and feature importance. Defaults to True. [/BRIEF]
                           [DETAILED] Boolean flag controlling the depth of analysis performed. When True, includes
                           prediction ranges (min, max, std), error analysis (mean error, error std, max errors),
@@ -3584,7 +3688,6 @@ def perform_cross_validation(
                         represent the complete training dataset. [/DETAILED]
                         [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
                         [EXAMPLES] Examples: "data/train.csv", "datasets/materials_train.csv", "ml_data/training_features.csv" [/EXAMPLES]
-
         target_column: [BRIEF] Name of the target column for prediction. Defaults to "formation_energy_per_atom". [/BRIEF]
                       [DETAILED] The column name in the CSV that contains the target values for prediction.
                       This column will be separated from features during cross-validation. Should match the
@@ -3592,7 +3695,6 @@ def perform_cross_validation(
                       band gap, and other materials properties. [/DETAILED]
                       [SYNTACTIC] Format: "String matching column name in CSV file" [/SYNTACTIC]
                       [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
-
         cv_folds: [BRIEF] Number of cross-validation folds. Defaults to 5. [/BRIEF]
                  [DETAILED] The number of folds to use for k-fold cross-validation. Higher values provide
                  more robust estimates but increase computational cost. Common choices are 5 or 10 folds.
@@ -3600,7 +3702,6 @@ def perform_cross_validation(
                  folds while larger datasets can use fewer folds. [/DETAILED]
                  [SYNTACTIC] Format: positive integer between 2 and dataset_size [/SYNTACTIC]
                  [EXAMPLES] Examples: 5 (standard), 10 (robust), 3 (quick assessment) [/EXAMPLES]
-
         hyperparameters: [BRIEF] Optional XGBoost hyperparameters for cross-validation. [/BRIEF]
                         [DETAILED] Dictionary containing XGBoost hyperparameters to use across all cross-validation
                         folds. If None, optimized default parameters will be used. Consistent hyperparameters
