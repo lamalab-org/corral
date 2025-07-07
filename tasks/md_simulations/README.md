@@ -41,10 +41,10 @@ uv pip install -e .
 
 ## Running the Environment
 
-Start the corral service to host the MD tutorial tasks:
+Start the corral service to host the MD simulations tasks:
 
 ```bash
-cd tasks/md_tutorials/md_simulations
+cd tasks/md_simulations/md_simulations
 python env.py
 ```
 
@@ -52,7 +52,7 @@ The service will start on `http://localhost:8000` by default.
 
 ## Development
 
-To extend this environment based on the MD tutorials, follow these steps:
+To extend this environment based on the MD simulations, follow these steps:
 
 1. Create new task classes inheriting from [`Environment`](https://github.com/lamalab-org/mat-agent-bench/blob/main/src/corral/base.py)
 2. Add tools using the [`@tool`](https://github.com/lamalab-org/mat-agent-bench/blob/main/src/corral/utils.py) decorator

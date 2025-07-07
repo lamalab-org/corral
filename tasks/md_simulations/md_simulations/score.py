@@ -1,3 +1,12 @@
+"""
+MD Simulations Scoring Module
+
+This module provides evaluation and scoring functions for molecular dynamics simulation
+tasks and benchmarks. It contains various validation methods to assess the correctness
+of simulation results, including numerical comparisons, structural validations, and
+analysis of simulation parameters.
+"""
+
 import ast
 import io
 
@@ -8,6 +17,7 @@ from utils import extract_lattice_coordinates
 
 
 def check_numerical(agent_answer, output):
+    """Check if the agent's numerical answer is within a specified tolerance of the target value."""
     agent_answer = float(agent_answer)
     target = float(output["target"])
 
@@ -19,6 +29,7 @@ def check_numerical(agent_answer, output):
 
 
 def check_structure(answer_file, output):
+    """Check if the structure in the answer file matches the target structure."""
     vol = modal.Volume.from_name("simulations")
     try:
         logger.info(f"type of answer_file {type(answer_file)}")
@@ -38,6 +49,7 @@ def check_structure(answer_file, output):
 
 
 def check_minimiser(answer_directory, output):
+    """Check if the minimiser used in the simulation matches the expected one."""
     vol = modal.Volume.from_name("simulations")
     list_files = modal.Function.lookup("simagent", "list_files")
     min_style_orig = output["target"]
@@ -64,18 +76,21 @@ def check_minimiser(answer_directory, output):
 
 
 def energy_minimisation(answer_directory, agent_answer, output):
+    """Check if the energy minimisation task is performed correctly."""
     minimiser = check_minimiser(answer_directory, output[1])
     numerical = check_numerical(agent_answer, output[0])
     return minimiser * numerical
 
 
 def energy_minimisation_with_structure(answer_directory, agent_answer, output):
+    """Check if the energy minimisation task is performed correctly with structure validation."""
     minimiser = check_minimiser(answer_directory, output[0])
     structure = check_structure(agent_answer, output[1])
     return minimiser * structure
 
 
 def check_stress_tensor(agent_output, output):
+    """Check if the stress tensor components are within a specified tolerance."""
     reference_output = output["target"]
     tolerance = float(output["threshold"])
     try:
@@ -97,6 +112,7 @@ def check_stress_tensor(agent_output, output):
 
 
 def check_stress_strain(agent_answer, output):
+    """Check if the stress-strain curve matches the target data."""
     vol = modal.Volume.from_name("simulations")
     try:
         final_path = agent_answer.removeprefix("/results/")

@@ -1,3 +1,11 @@
+"""
+MD Simulations Utilities Module
+
+This module provides utility functions for processing and analyzing molecular dynamics
+simulation data, particularly for LAMMPS data files. It contains helper functions
+for extracting structural information from simulation outputs.
+"""
+
 from pathlib import Path
 
 import numpy as np

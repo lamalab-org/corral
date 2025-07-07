@@ -1,3 +1,9 @@
+"""Environment module for LAMMPS molecular dynamics simulations.
+
+This module provides the LammpsEnvironment class for managing LAMMPS simulation tasks,
+including file operations, simulation execution, and result scoring.
+"""
+
 import json
 import os
 from pathlib import Path
@@ -33,22 +39,33 @@ from corral.server import run_server
 
 
 class LammpsEnvironment(Environment):
+    """Environment for running LAMMPS simulations.
+    This environment is designed to handle tasks related to molecular dynamics simulations
+    using LAMMPS.
+    It includes tools for file management, running simulations, and scoring based on the output.
+    Attributes:
+        task_id (str): Unique identifier for the task.
+        question (str): The question or prompt for the task.
+        output (list[dict[str, str]]): Expected output for the task.
+        work_dir (str): Directory where the task files are located.
+        scoring_fn (str): Function used to score the task based on the output.
+    """
+
     def __init__(
         self,
-        task_id: str,
-        question: str,
-        output: list[dict[str, str]],
-        work_dir: str,
-        scoring_fn: str,
+        config: dict[str, str],
     ):
-        self.question = question
-        self.output = output
-        self.work_dir = work_dir
-        self.scoring_fn = scoring_fn
+        config_task_id = config["task_id"]
+        self.question = config["question"]
+        self.output = config["output"]
+        self.work_dir = config["work_dir"]
+        self.scoring_fn = config["scoring_fn"]
 
         # Initialize environment with the given task id.
-        fs_manager = FSManager("file", base_path=work_dir, app="simagent")
-        super().__init__(task_id, base_work_dir=work_dir, fs_manager=fs_manager)
+        fs_manager = FSManager("file", base_path=self.work_dir, app="simagent")
+        super().__init__(
+            config_task_id, base_work_dir=self.work_dir, fs_manager=fs_manager
+        )
 
         # Add math-related tools
         self.add_tool(run_lammps)
@@ -92,7 +109,20 @@ class LammpsEnvironment(Environment):
         return trial_id
 
     def get_task_prompt(self) -> str:
-        prompt = f"{self.question} Make sure all the associated files for this task (input files, log files, any other files) are in the {self.work_dir} directory. You can use the available I/O tools (e.g., write_file) make new files .etc. Whatever potentials you need to run the simulation, you can find them at /potentials/. A type of potential can be accessed by /potentials/TYPE where TYPE can be [EAM, TERSOFF, REAXFF] which further contains the exact potential files. Note that in case of reaxff potentials, pair style 'reax/c' has been renamed to 'reaxff' and always use NULL for the control file (cfile), for example, this syntax is correct : pair_style reaxff NULL. If the task is to give the final output as a scalar, only return the numerical value, without any units."
+        """Generate the task prompt for the LAMMPS simulation task."""
+        prompt = (
+            f"{self.question} Make sure all the associated files "
+            f"for this task (input files, log files, any other files) "
+            f"are in the {self.work_dir} directory. You can use the available I/O tools "
+            f"(e.g., write_file) make new files .etc. Whatever potentials you need to "
+            f"run the simulation, you can find them at /potentials/. A type of potential "
+            f"can be accessed by /potentials/TYPE where TYPE can be [EAM, TERSOFF, REAXFF] "
+            f"which further contains the exact potential files. Note that in case of reaxff "
+            f"potentials, pair style 'reax/c' has been renamed to 'reaxff' and always use NULL "
+            f"for the control file (cfile), for example, this syntax is correct : "
+            f"pair_style reaxff NULL. If the task is to give the final output as a scalar, "
+            f"only return the numerical value, without any units."
+        )
         logger.info(f"prompt : {prompt}")
         return prompt
 
@@ -102,11 +132,12 @@ class LammpsEnvironment(Environment):
         if self.state.submitted_answer is None:
             logger.warning(f"No submission found for task {self.task_id}")
             return 0.0
+
         try:
             answer_value = self.state.submitted_answer.strip()
             if self.scoring_fn == "check_numerical":
                 return check_numerical(answer_value, self.output[0])
-            if self.scoring_fn == "energy_minimisation":
+            elif self.scoring_fn == "energy_minimisation":
                 return energy_minimisation(
                     self.work_dir, self.state.submitted_answer, self.output
                 )
@@ -133,20 +164,22 @@ if __name__ == "__main__":
         except json.JSONDecodeError as e:
             logger.error(f"Error decoding JSON from {task_file}: {e}")
             raise
-        task_id = data["id"]
-        question = data["input"][0]["prompt"]
-        output = data["output"]
-        scoring_fn = data["scoring_fn"]
+        task_data_id = data["id"]
+        task_data_question = data["input"][0]["prompt"]
+        task_data_output = data["output"]
+        task_data_scoring_fn = data["scoring_fn"]
+        task_data_work_dir = os.environ.get("MODAL_BASE_IO_PATH", f"{task_data_id}/")
 
-        work_dir = os.environ.get("MODAL_BASE_IO_PATH", f"{task_id}/")
+        task_config = {
+            "task_id": task_data_id,
+            "question": task_data_question,
+            "output": task_data_output,
+            "work_dir": task_data_work_dir,
+            "scoring_fn": task_data_scoring_fn,
+        }
 
-        environments[task_id] = LammpsEnvironment(
-            task_id=task_id,
-            question=question,
-            output=output,
-            work_dir=work_dir,
-            scoring_fn=scoring_fn,
-        )
+        environments[task_data_id] = LammpsEnvironment(task_config)
+
     host = os.environ.get("CORRAL_HOST", "0.0.0.0")
     port = int(os.environ.get("CORRAL_PORT", "8000"))
     run_server(environments, host, port)
