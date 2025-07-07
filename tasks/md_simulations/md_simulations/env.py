@@ -110,8 +110,6 @@ class LammpsEnvironment(Environment):
                 return energy_minimisation(
                     self.work_dir, self.state.submitted_answer, self.output
                 )
-            elif self.scoring_fn == "check_numerical":
-                return check_numerical(self.state.submitted_answer, self.output[0])
             elif self.scoring_fn == "check_structure":
                 return check_structure(self.state.submitted_answer, self.output[0])
             elif self.scoring_fn == "check_stress_strain":
