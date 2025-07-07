@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import numpy as np
-from loguru import logger
 
 
 def extract_lattice_coordinates(lammps_data):
@@ -37,14 +36,3 @@ def extract_lattice_coordinates(lammps_data):
         coordinates.append([x, y, z])
 
     return np.array(coordinates)
-
-
-if __name__ == "__main__":
-    coords1 = extract_lattice_coordinates(
-        "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/ground_truth/npt/minimized_aluminum_structure.dat"
-    )
-    coords2 = extract_lattice_coordinates(
-        "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_3/mat-agent-bench/tasks/lammps/lammps/ground_truth/npt/minimized_aluminum_structure.dat"
-    )
-
-    logger.info(int(np.array_equal(coords1, coords2)))
