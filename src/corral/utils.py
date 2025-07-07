@@ -1,6 +1,7 @@
 import gc
 import inspect
 import os
+import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Optional, Union, get_args, get_origin, get_type_hints
@@ -61,6 +62,91 @@ def format_type_annotation(annotation):
     return str(annotation)
 
 
+keywords = [
+    "BRIEF",
+    "DETAILED",
+    "PROCEDURAL",
+    "WORKFLOW_INTEGRATION",
+    "CONTEXTUAL",
+    "SYNTACTICAL",
+    "RAISES",
+    "LIMITATIONS",
+    "EXAMPLES",
+]
+
+
+def regex_parsing_docstring_sections(doc_without_sections: str):
+    """Extracts sections from a docstring based on predefined keywords."""
+    keyword_pattern = "|".join(re.escape(keyword) for keyword in keywords)
+    keyword_regex = re.compile(rf"\[({keyword_pattern})\](.*?)\[/\1\]", re.DOTALL)
+    matches = keyword_regex.findall(doc_without_sections)
+    return [(match[0], match[1].strip()) for match in matches]
+
+
+def parse_arguments(args_content: str) -> list[ToolArgument]:
+    """Parse the Args section of a docstring to extract arguments."""
+    arguments = []
+    lines = args_content.strip().splitlines()
+    current_arg = None
+    arg_pattern = re.compile(r"^\s*\w+\s*\([^)]+\)\s*:")
+    for _i, line in enumerate(lines):
+        if current_arg is None or arg_pattern.match(line):
+            if current_arg is not None:
+                arguments.append(current_arg)
+            current_arg = line.strip()
+        else:
+            current_arg += " " + line.strip()
+
+    if current_arg is not None:
+        arguments.append(current_arg)
+    return arguments
+
+
+def parse_complex_docstring(doc: str) -> tuple[dict[str, str], list[ToolArgument]]:
+    """Parse a complex docstring with multiple sections including Args, Returns, and RAISES."""
+    sections = {}
+    # Extract Args section (between "Args:" and "Returns:")
+    args_match = re.search(r"Args:(.*?)(?=Returns:|$)", doc, re.DOTALL)
+    if args_match:
+        args_content = args_match.group(1).strip()
+        arguments = parse_arguments(args_content)
+
+    # Extract Returns section (between "Returns:" and "[RAISES]")
+    returns_match = re.search(r"Returns:(.*?)(?=\[RAISES\]|$)", doc, re.DOTALL)
+    if returns_match:
+        returns_content = returns_match.group(1).strip()
+        sections["RETURNS"] = returns_content if returns_match else ""
+
+    # Extract RAISES section (between "[RAISES]" and "[/RAISES]")
+    raises_match = re.search(r"\[RAISES\](.*?)\[/RAISES\]", doc, re.DOTALL)
+    if raises_match:
+        raises_content = raises_match.group(1).strip()
+        sections["RAISES"] = raises_content if raises_match else ""
+
+    # Remove these sections from the original document
+    doc_without_sections = doc
+    if args_match:
+        doc_without_sections = re.sub(
+            r"Args:.*?(?=Returns:|$)", "", doc_without_sections, flags=re.DOTALL
+        )
+    if returns_match:
+        doc_without_sections = re.sub(
+            r"Returns:.*?(?=\[RAISES\]|$)", "", doc_without_sections, flags=re.DOTALL
+        )
+    if raises_match:
+        doc_without_sections = re.sub(
+            r"\[RAISES\].*?\[/RAISES\]", "", doc_without_sections, flags=re.DOTALL
+        )
+
+    # Now extract the remaining keyword sections
+    matches = regex_parsing_docstring_sections(doc_without_sections)
+
+    for match in matches:
+        sections[match[0]] = match[1]
+
+    return sections, arguments
+
+
 def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
     """Parse function docstring to get description and arguments.
 
@@ -71,7 +157,7 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
         func (Callable): The function to parse docstring from
 
     Returns:
-        tuple[str, list[ToolArgument]]: (description, arguments) where description is a string and
+        tuple[dict, list[ToolArgument]]: (description, arguments) where description is a string and
                arguments is a list of ToolArgument objects
 
     Raises:
@@ -81,24 +167,29 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
     if not doc:
         raise ValueError(f"Function {func.__name__} must have a docstring")
 
-    # Split docstring into sections
-    sections = doc.split("\n\n")
-    description = sections[0].strip()
+    if "[BRIEF]" in str(doc):
+        sections, args_lines = parse_complex_docstring(doc)
 
-    # Find Args section
-    args_section = None
-    for section in sections:
-        if section.strip().startswith("Args:"):
-            args_section = section.strip()
-            break
+    else:
+        # Split docstring into sections
+        sections = doc.split("\n\n")
+        description = sections[0].strip()
+        sections = {"BRIEF": description}
 
-    if not args_section:
-        raise ValueError("Docstring must have an 'Args:' section")
+        # Find Args section
+        args_section = None
+        for section in sections:
+            if section.strip().startswith("Args:"):
+                args_section = section.strip()
+                break
 
-    # Parse arguments section, skip the "Args:" line
-    args_lines = [
-        line.strip() for line in args_section.splitlines()[1:] if line.strip()
-    ]
+        if not args_section:
+            raise ValueError("Docstring must have an 'Args:' section")
+
+        # Parse arguments section, skip the "Args:" line
+        args_lines = [
+            line.strip() for line in args_section.splitlines()[1:] if line.strip()
+        ]
     arguments = []
 
     # Get type hints from function
@@ -154,7 +245,7 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
             )
         )
 
-    return description, arguments
+    return sections["BRIEF"], arguments
 
 
 def tool(func: Callable) -> Tool:
@@ -604,10 +695,7 @@ def _tokenize_and_split_chunks(
 
             batch = chunks[batch_idx : batch_idx + batch_size]
             logger.debug(
-                f"Processing batch {
-                    batch_idx // batch_size + 1}/{
-                    (
-                        len(chunks) + batch_size - 1) // batch_size}"
+                f"Processing batch {batch_idx // batch_size + 1}/{(len(chunks) + batch_size - 1) // batch_size}"
             )
 
             batch_results = []
@@ -617,17 +705,13 @@ def _tokenize_and_split_chunks(
                 if len(tokens) <= chunk_size:
                     batch_results.append(chunk)
                     logger.debug(
-                        f"Chunk {
-                            batch_idx + chunk_idx + 1} is within token limit ({
-                            len(tokens)}/{chunk_size})"
+                        f"Chunk {batch_idx + chunk_idx + 1} is within token limit ({len(tokens)}/{chunk_size})"
                     )
                     del tokens
                     continue
 
                 logger.debug(
-                    f"Chunk {
-                        batch_idx + chunk_idx + 1} exceeds token limit ({
-                        len(tokens)}/{chunk_size}), splitting..."
+                    f"Chunk {batch_idx + chunk_idx + 1} exceeds token limit ({len(tokens)}/{chunk_size}), splitting..."
                 )
 
                 start_idx = 0
@@ -637,9 +721,7 @@ def _tokenize_and_split_chunks(
                     end_idx = min(start_idx + target_size, len(tokens))
 
                     logger.debug(
-                        f"Sub-chunk {sub_chunk_count +
-                                     1}: Processing from token {start_idx} to {end_idx} ({end_idx -
-                                                                                          start_idx} tokens)"
+                        f"Sub-chunk {sub_chunk_count + 1}: Processing from token {start_idx} to {end_idx} ({end_idx - start_idx} tokens)"
                     )
 
                     sub_chunk = encoding.decode(tokens[start_idx:end_idx])
@@ -654,8 +736,7 @@ def _tokenize_and_split_chunks(
                     start_idx = end_idx - overlap
 
                     logger.debug(
-                        f"Sub-chunk {sub_chunk_count}: Added {
-                            len(sub_chunk)} chars, moved start_idx from {old_start_idx} to {start_idx} (overlap: {overlap} tokens)"
+                        f"Sub-chunk {sub_chunk_count}: Added {len(sub_chunk)} chars, moved start_idx from {old_start_idx} to {start_idx} (overlap: {overlap} tokens)"
                     )
 
                     if start_idx <= old_start_idx:
@@ -682,9 +763,7 @@ def _tokenize_and_split_chunks(
         gc.collect()
 
     logger.info(
-        f"Completed tokenization and splitting: {
-            len(chunks)} input chunks → {
-            len(processed_chunks)} output chunks"
+        f"Completed tokenization and splitting: {len(chunks)} input chunks → {len(processed_chunks)} output chunks"
     )
     return processed_chunks
 
@@ -727,9 +806,7 @@ def create_vector_database(
 
     processed_chunks = _tokenize_and_split_chunks(chunks, chunk_size)
     logger.info(
-        f"Processed {
-            len(chunks)} chunks into {
-            len(processed_chunks)} chunks after tokenization and splitting"
+        f"Processed {len(chunks)} chunks into {len(processed_chunks)} chunks after tokenization and splitting"
     )
 
     client = chromadb.PersistentClient(path=str(persist_directory))
@@ -905,3 +982,96 @@ def chunk_text(text: str) -> list[str]:
         raise ValueError("Input must be a non-empty string")
 
     return [chunk.strip() for chunk in text.split("\n")]
+
+
+if __name__ == "__main__":
+    # Example usage
+    example_text = """[BRIEF] Returns metadata from a known LAMMPS potential file given the file path. [/BRIEF]
+
+[DETAILED] This tool provides a quick and reliable way to identify the type and
+supported elements of a LAMMPS potential file based solely on its filename.
+It eliminates the need to parse the often large and complex contents of the potential files,
+which can often exceed the processing limits of many systems or applications.
+By returning a structured description, this tool enables the user to determine whether
+a given potential file is appropriate for a specific molecular dynamics (MD) simulation.
+This is especially useful when selecting the correct interatomic potential for a system
+involving specific elements, without having to inspect the file manually or load it entirely.
+[/DETAILED]
+
+[PROCEDURAL] When to use this tool:
+- Use when you need to quickly determine the type and supported elements
+of a LAMMPS potential file based on its filename.
+- Best suited for selecting an appropriate potential file for a specific
+molecular dynamics (MD) simulation without reading or parsing the full file contents.
+- Recommended for gaining a fast, structured overview of a potential file's
+applicability to specific element combinations or simulation scenarios.
+[/PROCEDURAL]
+
+[WORKFLOW_INTEGRATION] Typical workflow integration:
+1. [PREREQUISITE] Select the potential files that might be relevant to
+your simulation task. [/PREREQUISITE]
+2. [CURRENT] Use this tool to retrieve metadata for each potential file based
+on its filename. This will help you quickly identify which potentials are suitable
+for your simulation needs. [/CURRENT]
+3. [FOLLOW_UP] Based on the metadata returned, choose the appropriate potential file
+for your simulation setup, and run the simulation using the potential file
+and the tool `run_lammps`. [/FOLLOW_UP]
+[/WORKFLOW_INTEGRATION]
+
+[CONTEXTUAL] How this tool works:
+- Extracts the file name from the provided file path
+- Matches it against a set of known file names
+- Returns a structured metadata string for recognized files
+- Raises a ValueError if the file name is unrecognized
+[/CONTEXTUAL]
+
+[SYNTACTICAL] Usage examples:
+[
+`get_potential_metadata("sim_data/ffield.reax")`,
+`get_potential_metadata("/path/to/potentials/Al99.eam.alloy")`,
+`get_potential_metadata("Mg_Zhou04.eam.alloy`,
+`get_potential_metadata("/data/Fe-C_Hepburn_Ackland.eam.fs")`,
+`get_potential_metadata("Cu_Zhou04.eam.alloy`
+]
+[/SYNTACTICAL]
+
+Args:
+file_path (str):
+[BRIEF] Absolute path to the potential file. [/BRIEF]
+[DETAILED] This is the absolute path to a LAMMPS-compatible potential file
+(e.g., ReaxFF or EAM formats). The file name is used to determine metadata,
+so it must match one of the known patterns. [/DETAILED]
+[SYNTACTICAL] Format: "string ending in a recognized potential filename". [/SYNTACTICAL]
+[EXAMPLES] Examples: "/path/to/file/ffield.reax", "ffield_UTA1.ITT" [/EXAMPLES]
+
+Returns:
+str :
+[BRIEF] Structured metadata string describing the potential file. [/BRIEF]
+[DETAILED] The returned string includes the type of interatomic potential
+and a list of chemical elements that it supports. This helps in choosing
+suitable potentials for simulations involving specific atoms. [/DETAILED]
+[EXAMPLES] Example outputs: "{potential type : reax, elements supported :
+Carbon (C), Hydrogen (H), Oxygen (O), Calcium (Ca), Silicon (Si),
+pair_style : reaxff}" [/EXAMPLES]
+
+[RAISES] Exceptions:
+ValueError:
+[ERROR_WHEN] If the file name is not recognized. [/ERROR_WHEN]
+[ERROR_DETAILS] Raised when the filename does not match any known potential files.
+This helps prevent silent failures and makes debugging easier
+in automated workflows. [/ERROR_DETAILS]
+[ERROR_RECOVERY] To resolve this, ensure the file name matches one of the known
+potential files or update the tool to include new potential file
+names as needed. [/ERROR_RECOVERY]
+[/RAISES]
+
+[LIMITATIONS] Limitations:
+- This tool only recognizes a predefined set of potential file names.
+If the file name does not match any of the known patterns, it will raise a ValueError.
+- The metadata returned is static and does not include dynamic information
+from the file contents, such as specific parameters or coefficients used in the potential.
+- The tool does not validate the actual contents of the potential file;
+it relies solely on the file name for metadata extraction.
+[/LIMITATIONS]
+"""
+    chunks = parse_docstring(example_text)
