@@ -31,7 +31,6 @@ class BaseAgent(ABC):
     objects that support a `.fill()` method for parameter substitution.**
 
     ### Prompt Types:
-
     - **system_prompt**: Sets the agent's behavior and role (e.g., "You are a helpful AI assistant")
     - **user_prompt**: Contains the main task instructions with placeholders for dynamic content
     - **extractor_prompt**: Used to extract and clean final answers from agent responses.
@@ -214,7 +213,6 @@ class BaseAgent(ABC):
         examples: list[str] | None = None,
     ) -> str:
         """
-
         Run the agent to solve a task
 
         This method must be implemented by all subclasses
