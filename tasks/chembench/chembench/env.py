@@ -5,7 +5,6 @@ import uvicorn
 from dotenv import load_dotenv
 from loguru import logger
 from tools import (
-    enhanced_brave_search,
     get_c_nmr_spectra_pubchem,
     get_element_info,
     get_formula_from_smiles,
@@ -16,6 +15,7 @@ from tools import (
     get_number_of_isomers,
     get_pka_from_smiles,
     get_smiles_from_name,
+    online_search,
     relevant_pubchem_sections,
     search_clinical_trials_by_drug,
     search_clinical_trials_by_query,
@@ -44,7 +44,7 @@ load_dotenv("../.env", override=True)
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
 
 _CHEMBENCH_TOOLS = [
-    enhanced_brave_search,
+    online_search,
     relevant_pubchem_sections,
     smiles_to_name,
     get_smiles_from_name,
