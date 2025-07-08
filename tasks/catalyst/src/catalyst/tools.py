@@ -45,9 +45,13 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - get_structure_from_mp_text("mp-149")  # Silicon structure
-    - get_structure_from_mp_text("mp-20066")  # CO2 structure
-    - get_structure_from_mp_text("mp-2")  # Other material
+    [
+        `get_structure_from_mp_text("mp-149")`, # Silicon structure
+        `get_structure_from_mp_text("mp-20066")`, # CO2 structure
+        `get_structure_from_mp_text("mp-2")` # Other material
+        `get_structure_from_mp_text("mp-12345")` # Example with a different MP ID
+        `get_structure_from_mp_text("mp-67890")` # Another example with a different MP ID
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -134,9 +138,13 @@ def create_slab_from_structure_text(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - create_slab_from_structure_text(cif_string, (1,1,1), 12, 5, True)
-    - create_slab_from_structure_text(cif_string, (1,0,0), 15, 10, False)
-    - create_slab_from_structure_text(cif_string)  # Uses defaults
+    [
+        `create_slab_from_structure_text(cif_string, (1,1,1), 12, 5, True)`,
+        `create_slab_from_structure_text(cif_string, (1,0,0), 15, 10, False)`,
+        `create_slab_from_structure_text(cif_string)`,  # Uses default parameters
+        `create_slab_from_structure_text(cif_string, (1,1,0), 10, 5, True)`,  # Example with different Miller indices
+        `create_slab_from_structure_text(cif_string)`,  # Uses defaults
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -252,9 +260,13 @@ def enumerate_slabs_text(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - enumerate_slabs_text(cif_string, (1,1,1), 12, 5)
-    - enumerate_slabs_text(cif_string, (1,0,0), 15, 10)
-    - enumerate_slabs_text(cif_string)  # Uses default parameters
+    [
+        `enumerate_slabs_text(cif_string, (1,1,1), 12, 5)`,
+        `enumerate_slabs_text(cif_string, (1,0,0), 15, 10)`,
+        `enumerate_slabs_text(cif_string)`,  # Uses default parameters
+        `enumerate_slabs_text(cif_string, (1,1,0), 10, 5)`,  # Example with different Miller indices
+        `enumerate_slabs_text(cif_string, (2,1,1), 20, 10)`,  # Example with larger slab size
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -370,9 +382,13 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - choose_slab_text(slabs_json, 0)  # Select first slab
-    - choose_slab_text(slabs_json, 1)  # Select second slab
-    - choose_slab_text(slabs_json)     # Select first slab (default)
+    [
+        `choose_slab_text(slabs_json, 0)`,  # Select first slab
+        `choose_slab_text(slabs_json, 1)`,  # Select second slab
+        `choose_slab_text(slabs_json)`,     # Select first slab (default)
+        `choose_slab_text(slabs_json, 2)`,  # Select third slab
+        `choose_slab_text(slabs_json, 3)`,  # Select fourth slab
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -457,8 +473,13 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - get_adsorption_sites_text(slab_cif_string)
-    - get_adsorption_sites_text(output_from_choose_slab_text)
+    [
+        `get_adsorption_sites_text(slab_cif_string)`,  # Analyze slab structure
+        `get_adsorption_sites_text(output_from_choose_slab_text)`,  # Use output
+        `get_adsorption_sites_text(create_slab_from_structure_text)`,  # From slab creation
+        `get_adsorption_sites_text("CIF string of a slab")`,  # Direct
+        `get_adsorption_sites_text("CIF string with surface atoms")`,  # Example with specific slab
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -549,9 +570,13 @@ def choose_adsorption_site_text(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - choose_adsorption_site_text(sites_json, "top", 0)    # First top site
-    - choose_adsorption_site_text(sites_json, "bridge", 1) # Second bridge site
-    - choose_adsorption_site_text(sites_json, "hollow", 0) # First hollow site
+    [
+        `choose_adsorption_site_text(sites_json, "top", 0)`,
+        `choose_adsorption_site_text(sites_json, "bridge", 1)`,
+        `choose_adsorption_site_text(sites_json, "hollow", 0)`,
+        `choose_adsorption_site_text(sites_json, "top", 1)`,
+        `choose_adsorption_site_text(sites_json, "bridge", 0)`,
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -650,9 +675,13 @@ def add_adsorbate_to_slab_text(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - add_adsorbate_to_slab_text(slab_cif, co2_cif, 2.0, [0.0, 0.0, 0.9])
-    - add_adsorbate_to_slab_text(slab_cif, molecule_cif, 1.5)  # Auto-select top site
-    - add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)      # Default height and site
+    [
+        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)`,  # Default height and auto-select site
+        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 2.0)`,  # Specify height only
+        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 1.5, [0.0, 0.0, 0.9])`,  # Specify height
+        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, site=[0.5, 0.5, 0.9])`,  # Auto-select height
+        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 2.0, None)`,  # Specify height, auto-select site
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -789,8 +818,13 @@ def generate_reconstructed_slab(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - generate_reconstructed_slab(bulk_cif, (1,1,1), 12, 5, instructions_json, False)
-    - generate_reconstructed_slab(bulk_cif, (1,0,0), 15, 10, instructions_json, True)
+    [
+        `generate_reconstructed_slab(bulk_cif, (1,1,1), 12.0, 5.0, instructions_json)`,  # Basic reconstruction
+        `generate_reconstructed_slab(bulk_cif, (1,0,0), 15.0, 10.0, instructions_json, True)`,  # All variants
+        `generate_reconstructed_slab(bulk_cif, (1,1,0), 10.0, 5.0, instructions_json)`,  # Rectangular slab
+        `generate_reconstructed_slab(bulk_cif, (1,2,1), 20.0, 15.0, instructions_json, False)`,  # Complex reconstruction
+        `generate_reconstructed_slab(bulk_cif, (2,0,0), 25.0, 10.0, instructions_json, True)`,  # Thick slab
+    ]
     [/SYNTACTICAL]
 
     Args:

@@ -68,28 +68,28 @@ def online_search(query: str, num_results: int = 5) -> list[dict]:
 
     Args:
         query (str):
-                        [BRIEF] The search query string [\BRIEF]
-                        [DETAILED] The query string to search for in the Brave Search API. It should be a descriptive string that represents the information you are looking for. [\DETAILED]
-                        [SYNTACTICAL] Format: "string with no special requirements" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: "What is the chemical formula of caffeine?", "What is the boiling point of water?", "What is the structure of benzene?" [\EXAMPLES]
+            [BRIEF] The search query string [\BRIEF]
+            [DETAILED] The query string to search for in the Brave Search API. It should be a descriptive string that represents the information you are looking for. [\DETAILED]
+            [SYNTACTICAL] Format: "string with no special requirements" [\SYNTACTICAL]
+            [EXAMPLES] Examples: "What is the chemical formula of caffeine?", "What is the boiling point of water?", "What is the structure of benzene?" [\EXAMPLES]
 
         num_results (int, optional):
-                        [BRIEF] Maximum number of results to return. Defaults to 5 [\BRIEF]
-                        [DETAILED] The maximum number of search results to return from the Brave Search API. It should be a positive integer. [\DETAILED]
-                        [SYNTACTICAL] Format: "any positive integer (e.g., 5, 10, 20)" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: 5, 10, 20 [\EXAMPLES]
+            [BRIEF] Maximum number of results to return. Defaults to 5 [\BRIEF]
+            [DETAILED] The maximum number of search results to return from the Brave Search API. It should be a positive integer. [\DETAILED]
+            [SYNTACTICAL] Format: "any positive integer (e.g., 5, 10, 20)" [\SYNTACTICAL]
+            [EXAMPLES] Examples: 5, 10, 20 [\EXAMPLES]
 
     Returns:
         list[dict]:
-                        [BRIEF] A list of dictionaries containing the most relevant search results with their content and metadata, sorted by similarity score [\BRIEF]
-                        [DETAILED] Each dictionary contains the content of the search result, its metadata, and a similarity score indicating how relevant the result is to the search query. The results are sorted by similarity score in descending order. [\DETAILED]
-                        [EXAMPLES] Examples: [{"content": "Result 1 content", "metadata": {"source": "some_source.com"}, "similarity_score": 0.95}, {"content": "Result 2 content", "metadata": {"source": "second_source.org"}, "similarity_score": 0.90}, ...] [\EXAMPLES]
+            [BRIEF] A list of dictionaries containing the most relevant search results with their content and metadata, sorted by similarity score [\BRIEF]
+            [DETAILED] Each dictionary contains the content of the search result, its metadata, and a similarity score indicating how relevant the result is to the search query. The results are sorted by similarity score in descending order. [\DETAILED]
+            [EXAMPLES] Examples: [{"content": "Result 1 content", "metadata": {"source": "some_source.com"}, "similarity_score": 0.95}, {"content": "Result 2 content", "metadata": {"source": "second_source.org"}, "similarity_score": 0.90}, ...] [\EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
-                        [ERROR_WHEN] If the BRAVE_SEARCH_API_KEY environment variable is not set or if an error occurs during the search. [\ERROR_WHEN]
-                        [ERROR_DETAILS] This exception is raised when the BRAVE_SEARCH_API_KEY is not set, or if there is an error in making the API request to Brave Search, such as network issues or invalid query parameters. [\ERROR_DETAILS]
-                        [ERROR_RECOVERY] Try a different tool. [\ERROR_RECOVERY]
+            [ERROR_WHEN] If the BRAVE_SEARCH_API_KEY environment variable is not set or if an error occurs during the search. [\ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when the BRAVE_SEARCH_API_KEY is not set, or if there is an error in making the API request to Brave Search, such as network issues or invalid query parameters. [\ERROR_DETAILS]
+            [ERROR_RECOVERY] Try a different tool. [\ERROR_RECOVERY]
     [\RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -144,22 +144,22 @@ def search_lab_safety(query: str) -> list[dict]:
 
     Args:
         query (str):
-                        [BRIEF] The search query related to laboratory safety [\BRIEF]
-                        [DETAILED] The query string to search for in the lab safety knowledge database. It should be a descriptive string that represents the information you are looking for related to lab safety. [\DETAILED]
-                        [SYNTACTICAL] Format: "string with no special requirements" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: "What are the safety protocols for handling flammable chemicals?", "How to handle chemical spills safely?", "What are the emergency procedures for a lab fire?" [\EXAMPLES]
+            [BRIEF] The search query related to laboratory safety [\BRIEF]
+            [DETAILED] The query string to search for in the lab safety knowledge database. It should be a descriptive string that represents the information you are looking for related to lab safety. [\DETAILED]
+            [SYNTACTICAL] Format: "string with no special requirements" [\SYNTACTICAL]
+            [EXAMPLES] Examples: "What are the safety protocols for handling flammable chemicals?", "How to handle chemical spills safely?", "What are the emergency procedures for a lab fire?" [\EXAMPLES]
 
     Returns:
         list[dict]:
-                        [BRIEF] A list of dictionaries containing the most relevant lab safety information with their content and relevance scores, sorted by relevance score [\BRIEF]
-                        [DETAILED] Each dictionary contains the content of the lab safety information, its metadata, and a relevance score indicating how relevant the result is to the search query. The results are sorted by relevance score in descending order. [\DETAILED]
-                        [EXAMPLES] Examples: [{"content": "Lab safety protocol for flammable chemicals", "metadata": {"source": "safety_manual.pdf"}, "relevance_score": 0.95}, {"content": "Chemical spill handling guidelines", "metadata": {"source": "spill_guide.pdf"}, "relevance_score": 0.90}, ...] [\EXAMPLES]
+            [BRIEF] A list of dictionaries containing the most relevant lab safety information with their content and relevance scores, sorted by relevance score [\BRIEF]
+            [DETAILED] Each dictionary contains the content of the lab safety information, its metadata, and a relevance score indicating how relevant the result is to the search query. The results are sorted by relevance score in descending order. [\DETAILED]
+            [EXAMPLES] Examples: [{"content": "Lab safety protocol for flammable chemicals", "metadata": {"source": "safety_manual.pdf"}, "relevance_score": 0.95}, {"content": "Chemical spill handling guidelines", "metadata": {"source": "spill_guide.pdf"}, "relevance_score": 0.90}, ...] [\EXAMPLES]
 
     [RAISES] Exceptions:
         RuntimeError:
-                        [ERROR_WHEN] If the lab safety collection doesn't exist or if an error occurs during the search. [\ERROR_WHEN]
-                        [ERROR_DETAILS] This exception is raised when the lab safety collection is not found in the vector database, or if there is an error in making the search request, such as network issues or invalid query parameters. [\ERROR_DETAILS]
-                        [ERROR_RECOVERY] Try a different tool or check the database connection. [\ERROR_RECOVERY]
+            [ERROR_WHEN] If the lab safety collection doesn't exist or if an error occurs during the search. [\ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when the lab safety collection is not found in the vector database, or if there is an error in making the search request, such as network issues or invalid query parameters. [\ERROR_DETAILS]
+            [ERROR_RECOVERY] Try a different tool or check the database connection. [\ERROR_RECOVERY]
     [\RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -208,22 +208,22 @@ def search_ms_guide(query: str) -> list[dict]:
 
     Args:
         query (str):
-                        [BRIEF] The search query related to mass spectrometry [\BRIEF]
-                        [DETAILED] The query string to search for in the mass spectrometry knowledge database. It should be a descriptive string that represents the information you are looking for related to mass spectrometry. [\DETAILED]
-                        [SYNTACTICAL] Format: "string with no special requirements" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: "How to differiantate bromine from clorine?", "How to identify clorine using MS spectra?" [\EXAMPLES]
+            [BRIEF] The search query related to mass spectrometry [\BRIEF]
+            [DETAILED] The query string to search for in the mass spectrometry knowledge database. It should be a descriptive string that represents the information you are looking for related to mass spectrometry. [\DETAILED]
+            [SYNTACTICAL] Format: "string with no special requirements" [\SYNTACTICAL]
+            [EXAMPLES] Examples: "How to differiantate bromine from clorine?", "How to identify clorine using MS spectra?" [\EXAMPLES]
 
     Returns:
         list[dict]:
-                        [BRIEF] A list of dictionaries containing the most relevant mass spectrometry information with their content and relevance scores, sorted by relevance score [\BRIEF]
-                        [DETAILED] Each dictionary contains the content of the mass spectrometry information, its metadata, and a relevance score indicating how relevant the result is to the search query. The results are sorted by relevance score in descending order. [\DETAILED]
-                        [EXAMPLES] Examples: [{"content": "Mass spectrum interpretation guidelines", "metadata": {"source": "ms_guide.pdf"}, "relevance_score": 0.95}, {"content": "Common ionization techniques in mass spectrometry", "metadata": {"source": "ionization_techniques.pdf"}, "relevance_score": 0.90}, ...] [\EXAMPLES]
+            [BRIEF] A list of dictionaries containing the most relevant mass spectrometry information with their content and relevance scores, sorted by relevance score [\BRIEF]
+            [DETAILED] Each dictionary contains the content of the mass spectrometry information, its metadata, and a relevance score indicating how relevant the result is to the search query. The results are sorted by relevance score in descending order. [\DETAILED]
+            [EXAMPLES] Examples: [{"content": "Mass spectrum interpretation guidelines", "metadata": {"source": "ms_guide.pdf"}, "relevance_score": 0.95}, {"content": "Common ionization techniques in mass spectrometry", "metadata": {"source": "ionization_techniques.pdf"}, "relevance_score": 0.90}, ...] [\EXAMPLES]
 
     [RAISES] Exceptions:
         RuntimeError:
-                        [ERROR_WHEN] If the mass spectrometry collection doesn't exist or if an error occurs during the search. [\ERROR_WHEN]
-                        [ERROR_DETAILS] This exception is raised when the mass spectrometry collection is not found in the vector database, or if there is an error in making the search request, such as network issues or invalid query parameters. [\ERROR_DETAILS]
-                        [ERROR_RECOVERY] Try a different tool or check the database connection. [\ERROR_RECOVERY]
+            [ERROR_WHEN] If the mass spectrometry collection doesn't exist or if an error occurs during the search. [\ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when the mass spectrometry collection is not found in the vector database, or if there is an error in making the search request, such as network issues or invalid query parameters. [\ERROR_DETAILS]
+            [ERROR_RECOVERY] Try a different tool or check the database connection. [\ERROR_RECOVERY]
     [\RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -272,22 +272,22 @@ def search_nmr_guide(query: str) -> list[dict]:
 
     Args:
         query (str):
-                        [BRIEF] The search query related to NMR spectroscopy [\BRIEF]
-                        [DETAILED] The query string to search for in the NMR spectroscopy knowledge database. It should be a descriptive string that represents the information you are looking for related to NMR spectroscopy. [\DETAILED]
-                        [SYNTACTICAL] Format: "string with no special requirements" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: "How to interpret the proton NMR to differentiate benzene derivatives?", "What are the differences between the positions of substituents in benzene derivatives?" [\EXAMPLES]
+            [BRIEF] The search query related to NMR spectroscopy [\BRIEF]
+            [DETAILED] The query string to search for in the NMR spectroscopy knowledge database. It should be a descriptive string that represents the information you are looking for related to NMR spectroscopy. [\DETAILED]
+            [SYNTACTICAL] Format: "string with no special requirements" [\SYNTACTICAL]
+            [EXAMPLES] Examples: "How to interpret the proton NMR to differentiate benzene derivatives?", "What are the differences between the positions of substituents in benzene derivatives?" [\EXAMPLES]
 
     Returns:
         list[dict]:
-                        [BRIEF] A list of dictionaries containing the most relevant NMR spectroscopy information with their content and relevance scores, sorted by relevance score [\BRIEF]
-                        [DETAILED] Each dictionary contains the content of the NMR spectroscopy information, its metadata, and a relevance score indicating how relevant the result is to the search query. The results are sorted by relevance score in descending order. [\DETAILED]
-                        [EXAMPLES] Examples: [{"content": "NMR spectroscopy interpretation guidelines", "metadata": {"source": "nmr_guide.pdf"}, "relevance_score": 0.95}, {"content": "Common chemical shifts in NMR spectroscopy", "metadata": {"source": "chemical_shifts.pdf"}, "relevance_score": 0.90}, ...] [\EXAMPLES]
+            [BRIEF] A list of dictionaries containing the most relevant NMR spectroscopy information with their content and relevance scores, sorted by relevance score [\BRIEF]
+            [DETAILED] Each dictionary contains the content of the NMR spectroscopy information, its metadata, and a relevance score indicating how relevant the result is to the search query. The results are sorted by relevance score in descending order. [\DETAILED]
+            [EXAMPLES] Examples: [{"content": "NMR spectroscopy interpretation guidelines", "metadata": {"source": "nmr_guide.pdf"}, "relevance_score": 0.95}, {"content": "Common chemical shifts in NMR spectroscopy", "metadata": {"source": "chemical_shifts.pdf"}, "relevance_score": 0.90}, ...] [\EXAMPLES]
 
     [RAISES] Exceptions:
         RuntimeError:
-                        [ERROR_WHEN] If the NMR spectroscopy collection doesn't exist or if an error occurs during the search. [\ERROR_WHEN]
-                        [ERROR_DETAILS] This exception is raised when the NMR spectroscopy collection is not found in the vector database, or if there is an error in making the search request, such as network issues or invalid query parameters. [\ERROR_DETAILS]
-                        [ERROR_RECOVERY] Try a different tool or check the database connection. [\ERROR_RECOVERY]
+            [ERROR_WHEN] If the NMR spectroscopy collection doesn't exist or if an error occurs during the search. [\ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when the NMR spectroscopy collection is not found in the vector database, or if there is an error in making the search request, such as network issues or invalid query parameters. [\ERROR_DETAILS]
+            [ERROR_RECOVERY] Try a different tool or check the database connection. [\ERROR_RECOVERY]
     [\RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -336,28 +336,28 @@ def llm_vision_expert(query: str, image_path: str) -> str:
 
     Args:
         query (str):
-                        [BRIEF] The question or instruction related to the image [\BRIEF]
-                        [DETAILED] The query string that describes what information you want to extract from the image. It should be a descriptive string that represents the analysis you want to perform on the visual data. [\DETAILED]
-                        [SYNTACTICAL] Format: "string with no special requirements" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: "What does this chart show?", "Can you extract the data from this table?", "What trends can you identify in this plot?" [\EXAMPLES]
+            [BRIEF] The question or instruction related to the image [\BRIEF]
+            [DETAILED] The query string that describes what information you want to extract from the image. It should be a descriptive string that represents the analysis you want to perform on the visual data. [\DETAILED]
+            [SYNTACTICAL] Format: "string with no special requirements" [\SYNTACTICAL]
+            [EXAMPLES] Examples: "What does this chart show?", "Can you extract the data from this table?", "What trends can you identify in this plot?" [\EXAMPLES]
 
         image_path (str):
-                        [BRIEF] Path to the image file containing visual data [\BRIEF]
-                        [DETAILED] The file path to the image that contains charts, plots, or tables that need analysis. It should be a valid file path pointing to an image file. [\DETAILED]
-                        [SYNTACTICAL] Format: "valid file path to an image file" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: "path/to/chart_image.png", "path/to/table_image.jpg", "path/to/plot_image.jpeg" [\EXAMPLES]
+            [BRIEF] Path to the image file containing visual data [\BRIEF]
+            [DETAILED] The file path to the image that contains charts, plots, or tables that need analysis. It should be a valid file path pointing to an image file. [\DETAILED]
+            [SYNTACTICAL] Format: "valid file path to an image file" [\SYNTACTICAL]
+            [EXAMPLES] Examples: "path/to/chart_image.png", "path/to/table_image.jpg", "path/to/plot_image.jpeg" [\EXAMPLES]
 
     Returns:
         str:
-                        [BRIEF] The response from the LLM regarding the image analysis [\BRIEF]
-                        [DETAILED] A string containing the response from the vision expert LLM, which includes the analysis of the image based on the provided query. The response may include insights, data extraction, or interpretations of the visual data in the image. [\DETAILED]
-                        [EXAMPLES] Examples: "The chart shows a significant increase in sales over the last quarter.", "The table contains data on the monthly expenses for the year.", "The plot indicates a positive correlation between the two variables." [\EXAMPLES]
+            [BRIEF] The response from the LLM regarding the image analysis [\BRIEF]
+            [DETAILED] A string containing the response from the vision expert LLM, which includes the analysis of the image based on the provided query. The response may include insights, data extraction, or interpretations of the visual data in the image. [\DETAILED]
+            [EXAMPLES] Examples: "The chart shows a significant increase in sales over the last quarter.", "The table contains data on the monthly expenses for the year.", "The plot indicates a positive correlation between the two variables." [\EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
-                        [ERROR_WHEN] If an error occurs while processing the image or retrieving the response from the LLM. [\ERROR_WHEN]
-                        [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, encoding it in base64, or if there is an error in making the LLM call, such as network issues or invalid prompts. [\ERROR_DETAILS]
-                        [ERROR_RECOVERY] Try a different tool or check the image file path and format. [\ERROR_RECOVERY]
+            [ERROR_WHEN] If an error occurs while processing the image or retrieving the response from the LLM. [\ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, encoding it in base64, or if there is an error in making the LLM call, such as network issues or invalid prompts. [\ERROR_DETAILS]
+            [ERROR_RECOVERY] Try a different tool or check the image file path and format. [\ERROR_RECOVERY]
     [\RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -471,26 +471,26 @@ deplot_image_extractor_remote = MODAL_TOOL_REGISTRY["deplot_image_extractor_moda
 
 @tool
 def deplot_image_extractor(image_path: str) -> str:
-    """[BRIEF] Extract data from charts and plots using Google's Deplot model. [\\BRIEF]
+    """[BRIEF] Extract data from charts and plots using Google's Deplot model. [/BRIEF]
 
     [DETAILED] This tool extracts data from images containing charts or plots using Google's Deplot model.
-    It takes the path to an image file as input, processes the image, and returns a string representation of the extracted data table. [\\DETAILED]
+    It takes the path to an image file as input, processes the image, and returns a string representation of the extracted data table. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use it when you need to extract structured data from images of charts or plots.
     - When you want to convert visual data representations into a machine-readable format.
-    - Recommended for tasks that involve analyzing visual data, such as scientific charts, or any kind of data plots. [\\PROCEDURAL]
+    - Recommended for tasks that involve analyzing visual data, such as scientific charts, or any kind of data plots. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure that the image contains relevant visual data (charts, plots) that needs analysis. [\\PREREQUISITE]
-    2. [CURRENT] Apply this tool with the path to the image file to perform the extraction. [\\CURRENT]
-    3. [FOLLOW_UP] Use the extracted data to inform further analysis, or answer questions. It is reccomended to combine it with other data sources such as `llm_vision_expert`. [\\FOLLOW_UP] [\\WORKFLOW_INTEGRATION]
+    1. [PREREQUISITE] Ensure that the image contains relevant visual data (charts, plots) that needs analysis. [/PREREQUISITE]
+    2. [CURRENT] Apply this tool with the path to the image file to perform the extraction. [/CURRENT]
+    3. [FOLLOW_UP] Use the extracted data to inform further analysis, or answer questions. It is reccomended to combine it with other data sources such as `llm_vision_expert`. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
     - Uses Google's Deplot model to analyze the provided image.
     - Reads the image file and converts it to bytes.
     - Sends the image bytes to the Deplot model for processing.
-    - Returns a string representation of the extracted data table from the image. [\\CONTEXTUAL]
+    - Returns a string representation of the extracted data table from the image. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
     [
@@ -500,27 +500,27 @@ def deplot_image_extractor(image_path: str) -> str:
         `deplot_image_extractor("path/to/scientific_chart.png")`,
         `deplot_image_extractor("path/to/financial_plot.jpeg")`,
     ]
-    [\\SYNTACTICAL]
+    [/SYNTACTICAL]
 
     Args:
         image_path (str):
-                        [BRIEF] Path to the image file containing a chart or plot [\\BRIEF]
-                        [DETAILED] The file path to the image that contains charts or plots from which data needs to be extracted. It should be a valid file path pointing to an image file. [\\DETAILED]
-                        [SYNTACTICAL] Format: "valid file path to an image file" [\\SYNTACTICAL]
-                        [EXAMPLES] Examples: "path/to/chart_image.png", "path/to/plot_image.jpg", "path/to/data_table_image.png" [\\EXAMPLES]
+            [BRIEF] Path to the image file containing a chart or plot [/BRIEF]
+            [DETAILED] The file path to the image that contains charts or plots from which data needs to be extracted. It should be a valid file path pointing to an image file. [/DETAILED]
+            [SYNTACTICAL] Format: "valid file path to an image file" [/SYNTACTICAL]
+            [EXAMPLES] Examples: "path/to/chart_image.png", "path/to/plot_image.jpg", "path/to/data_table_image.png" [/EXAMPLES]
 
     Returns:
         str:
-                        [BRIEF] The extracted data table representation from the image [\\BRIEF]
-                        [DETAILED] A string containing the extracted data table representation from the image. The data is structured in a way that can be easily interpreted or used for further analysis. [\\DETAILED]
-                        [EXAMPLES] Examples: "Column1, Column2, Column3\nValue1, Value2, Value3\n..." [\\EXAMPLES]
+            [BRIEF] The extracted data table representation from the image [/BRIEF]
+            [DETAILED] A string containing the extracted data table representation from the image. The data is structured in a way that can be easily interpreted or used for further analysis. [/DETAILED]
+            [EXAMPLES] Examples: "Column1, Column2, Column3\nValue1, Value2, Value3\n..." [/EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
-                        [ERROR_WHEN] If an error occurs while processing the image or retrieving the extracted data. [\\ERROR_WHEN]
-                        [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, converting it to bytes, or if there is an error in making the Deplot model call, such as network issues or invalid image format. [\\ERROR_DETAILS]
-                        [ERROR_RECOVERY] Try a different tool or check the image file path and format. [\\ERROR_RECOVERY]
-    [\\RAISES]
+            [ERROR_WHEN] If an error occurs while processing the image or retrieving the extracted data. [/ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, converting it to bytes, or if there is an error in making the Deplot model call, such as network issues or invalid image format. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try a different tool or check the image file path and format. [/ERROR_RECOVERY]
+    [/RAISES]
 
     [LIMITATIONS] Known Limitations:
         - Requires a valid image file path to be provided.
@@ -637,27 +637,27 @@ extract_table_text_remote = MODAL_TOOL_REGISTRY["extract_table_text_modal"]
 
 @tool
 def extract_table_text(image_path: str, lang: str = "eng") -> str:
-    """[BRIEF] Extract text from images containing tables using OCR (pyTesseract). [\\BRIEF]
+    """[BRIEF] Extract text from images containing tables using OCR (pyTesseract). [/BRIEF]
 
     [DETAILED] This tool extracts text from images containing tables using Optical Character Recognition (OCR) with pyTesseract.
-    It takes the path to an image file as input, processes the image, and returns a string containing the extracted text from the table. [\\DETAILED]
+    It takes the path to an image file as input, processes the image, and returns a string containing the extracted text from the table. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use it when you need to extract text data from images of tables.
     - When you want to convert visual table data into a machine-readable text format.
-    - Recommended for tasks that involve analyzing tabular data in images, such as scientific tables, or any kind of structured data representation. [\\PROCEDURAL]
+    - Recommended for tasks that involve analyzing tabular data in images, such as scientific tables, or any kind of structured data representation. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure that the image contains a table from which text needs to be extracted. [\\PREREQUISITE]
-    2. [CURRENT] Apply this tool with the path to the image file and the desired language for OCR to perform the extraction. [\\CURRENT]
-    3. [FOLLOW_UP] Use the extracted text to inform further analysis, or answer questions. It is reccomended to combine it with other data sources such as `llm_vision_expert`. [\\FOLLOW_UP] [\\WORKFLOW_INTEGRATION]
+    1. [PREREQUISITE] Ensure that the image contains a table from which text needs to be extracted. [/PREREQUISITE]
+    2. [CURRENT] Apply this tool with the path to the image file and the desired language for OCR to perform the extraction. [/CURRENT]
+    3. [FOLLOW_UP] Use the extracted text to inform further analysis, or answer questions. It is reccomended to combine it with other data sources such as `llm_vision_expert`. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
     - Uses pyTesseract to perform OCR on the provided image.
     - Reads the image file and converts it to bytes.
     - Preprocesses the image to enhance text recognition (grayscale conversion, thresholding, morphological operations).
     - Extracts raw text and structured table data from the image.
-    - Returns a string containing both the raw extracted text and the structured table data from the image. [\\CONTEXTUAL]
+    - Returns a string containing both the raw extracted text and the structured table data from the image. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
     [
@@ -667,33 +667,33 @@ def extract_table_text(image_path: str, lang: str = "eng") -> str:
         `extract_table_text("path/to/scientific_table.png", lang="spa")`,
         `extract_table_text("path/to/financial_table.jpeg", lang="deu")`,
     ]
-    [\\SYNTACTICAL]
+    [/SYNTACTICAL]
 
     Args:
         image_path (str):
-                        [BRIEF] Path to the image file containing a table [\\BRIEF]
-                        [DETAILED] The file path to the image that contains a table from which text needs to be extracted. It should be a valid file path pointing to an image file. [\\DETAILED]
-                        [SYNTACTICAL] Format: "valid file path to an image file" [\\SYNTACTICAL]
-                        [EXAMPLES] Examples: "path/to/table_image.png", "path/to/table_image.jpg", "path/to/data_table_image.png" [\\EXAMPLES]
+            [BRIEF] Path to the image file containing a table [/BRIEF]
+            [DETAILED] The file path to the image that contains a table from which text needs to be extracted. It should be a valid file path pointing to an image file. [/DETAILED]
+            [SYNTACTICAL] Format: "valid file path to an image file" [/SYNTACTICAL]
+            [EXAMPLES] Examples: "path/to/table_image.png", "path/to/table_image.jpg", "path/to/data_table_image.png" [/EXAMPLES]
 
         lang (str, optional):
-                        [BRIEF] Language code for OCR (default: 'eng') [\\BRIEF]
-                        [DETAILED] The language code for OCR processing. It should be a valid language code supported by Tesseract OCR. Default is 'eng' for English. [\\DETAILED]
-                        [SYNTACTICAL] Format: "language code string" [\\SYNTACTICAL]
-                        [EXAMPLES] Examples: "eng", "fra", "spa", "deu" [\\EXAMPLES]
+            [BRIEF] Language code for OCR (default: 'eng') [/BRIEF]
+            [DETAILED] The language code for OCR processing. It should be a valid language code supported by Tesseract OCR. Default is 'eng' for English. [/DETAILED]
+            [SYNTACTICAL] Format: "language code string" [/SYNTACTICAL]
+            [EXAMPLES] Examples: "eng", "fra", "spa", "deu" [/EXAMPLES]
 
     Returns:
         str:
-                        [BRIEF] The extracted text from the table image [\\BRIEF]
-                        [DETAILED] A string containing the raw extracted text and structured table data from the image. The text is formatted to include both the raw extraction and a structured representation of the table data. [\\DETAILED]
-                        [EXAMPLES] Examples: "Raw Extracted Text:\nColumn1, Column2, Column3\nValue1, Value2, Value3\n\nStructured Table Data:\nColumn1: Value1\nColumn2: Value2\n..." [\\EXAMPLES]
+            [BRIEF] The extracted text from the table image [/BRIEF]
+            [DETAILED] A string containing the raw extracted text and structured table data from the image. The text is formatted to include both the raw extraction and a structured representation of the table data. [/DETAILED]
+            [EXAMPLES] Examples: "Raw Extracted Text:\nColumn1, Column2, Column3\nValue1, Value2, Value3\n\nStructured Table Data:\nColumn1: Value1\nColumn2: Value2\n..." [/EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
-                        [ERROR_WHEN] If an error occurs while processing the image or retrieving the extracted text. [\\ERROR_WHEN]
-                        [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, converting it to bytes, or if there is an error in making the OCR call, such as network issues or invalid image format. [\\ERROR_DETAILS]
-                        [ERROR_RECOVERY] Try a different tool or check the image file path and format. [\\ERROR_RECOVERY]
-    [\\RAISES]
+            [ERROR_WHEN] If an error occurs while processing the image or retrieving the extracted text. [/ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, converting it to bytes, or if there is an error in making the OCR call, such as network issues or invalid image format. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try a different tool or check the image file path and format. [/ERROR_RECOVERY]
+    [/RAISES]
 
     [LIMITATIONS] Known Limitations:
         - Requires a valid image file path to be provided.
@@ -750,22 +750,22 @@ def decimer_molecule_extraction(image_path: str) -> str:
 
     Args:
         image_path (str):
-                        [BRIEF] Path to the image file containing a molecule [\BRIEF]
-                        [DETAILED] The file path to the image that contains a molecule from which information needs to be extracted. It should be a valid file path pointing to an image file. [\DETAILED]
-                        [SYNTACTICAL] Format: "valid file path to an image file" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: "path/to/molecule_image.png", "path/to/chemical_structure_image.jpg", "path/to/molecule_diagram_image.jpeg" [\EXAMPLES]
+            [BRIEF] Path to the image file containing a molecule [\BRIEF]
+            [DETAILED] The file path to the image that contains a molecule from which information needs to be extracted. It should be a valid file path pointing to an image file. [\DETAILED]
+            [SYNTACTICAL] Format: "valid file path to an image file" [\SYNTACTICAL]
+            [EXAMPLES] Examples: "path/to/molecule_image.png", "path/to/chemical_structure_image.jpg", "path/to/molecule_diagram_image.jpeg" [\EXAMPLES]
 
     Returns:
         str:
-                        [BRIEF] The extracted molecule information from the image [\BRIEF]
-                        [DETAILED] A string containing the extracted molecule information, typically in SMILES format. The information is structured in a way that can be easily interpreted or used for further chemical analysis. [\DETAILED]
-                        [EXAMPLES] Examples: "C1=CC=CC=C1", "CC(=O)OC1=CC=CC=C1C(=O)O" [\EXAMPLES]
+            [BRIEF] The extracted molecule information from the image [\BRIEF]
+            [DETAILED] A string containing the extracted molecule information, typically in SMILES format. The information is structured in a way that can be easily interpreted or used for further chemical analysis. [\DETAILED]
+            [EXAMPLES] Examples: "C1=CC=CC=C1", "CC(=O)OC1=CC=CC=C1C(=O)O" [\EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
-                        [ERROR_WHEN] If an error occurs while processing the image or retrieving the extracted molecule information. [\ERROR_WHEN]
-                        [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, converting it to bytes, or if there is an error in making the Decimer model call, such as network issues or invalid image format. [\ERROR_DETAILS]
-                        [ERROR_RECOVERY] Try a different tool or check the image file path and format. [\ERROR_RECOVERY]
+            [ERROR_WHEN] If an error occurs while processing the image or retrieving the extracted molecule information. [\ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, converting it to bytes, or if there is an error in making the Decimer model call, such as network issues or invalid image format. [\ERROR_DETAILS]
+            [ERROR_RECOVERY] Try a different tool or check the image file path and format. [\ERROR_RECOVERY]
     [\RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -820,31 +820,31 @@ def molscribe_molecule_extraction(image_path: str) -> dict[str, Any]:
 
     Args:
         image_path (str):
-                        [BRIEF] Path to the image file containing a molecule [\BRIEF]
-                        [DETAILED] The file path to the image that contains a molecule from which information needs to be extracted. It should be a valid file path pointing to an image file. [\DETAILED]
-                        [SYNTACTICAL] Format: "valid file path to an image file" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: "path/to/molecule_image.png", "path/to/chemical_structure_image.jpg", "path/to/molecule_diagram_image.jpeg" [\EXAMPLES]
+            [BRIEF] Path to the image file containing a molecule [\BRIEF]
+            [DETAILED] The file path to the image that contains a molecule from which information needs to be extracted. It should be a valid file path pointing to an image file. [\DETAILED]
+            [SYNTACTICAL] Format: "valid file path to an image file" [\SYNTACTICAL]
+            [EXAMPLES] Examples: "path/to/molecule_image.png", "path/to/chemical_structure_image.jpg", "path/to/molecule_diagram_image.jpeg" [\EXAMPLES]
 
     Returns:
         dict[str, Any]:
-                        [BRIEF] The extracted molecule information from the image [\BRIEF]
-                        [DETAILED] A dictionary containing the extracted molecule information, including:
-                        - 'smiles': SMILES representation of the molecule
-                        - 'confidence': Confidence score of the extraction
-                        - 'atoms': List of dictionaries with atom details (symbol, coordinates, confidence)
-                        - 'bonds': List of dictionaries with bond details (type, endpoint atoms, confidence) [\DETAILED]
-                        [EXAMPLES] Examples: {
-                            'smiles': 'Fc1ccc(-c2cc(-c3ccccc3)n(-c3ccccc3)c2)cc1',
-                            'confidence': 0.9175,
-                            'atoms': [{'atom_symbol': '[Ph]', 'x': 0.5714, 'y': 0.9523, 'confidence': 0.9127}, ... ],
-                            'bonds': [{'bond_type': 'single', 'endpoint_atoms': [0, 1], 'confidence': 0.9999}, ... ]
-                        } [\EXAMPLES]
+            [BRIEF] The extracted molecule information from the image [\BRIEF]
+            [DETAILED] A dictionary containing the extracted molecule information, including:
+            - 'smiles': SMILES representation of the molecule
+            - 'confidence': Confidence score of the extraction
+            - 'atoms': List of dictionaries with atom details (symbol, coordinates, confidence)
+            - 'bonds': List of dictionaries with bond details (type, endpoint atoms, confidence) [\DETAILED]
+            [EXAMPLES] Examples: {
+                'smiles': 'Fc1ccc(-c2cc(-c3ccccc3)n(-c3ccccc3)c2)cc1',
+                'confidence': 0.9175,
+                'atoms': [{'atom_symbol': '[Ph]', 'x': 0.5714, 'y': 0.9523, 'confidence': 0.9127}, ... ],
+                'bonds': [{'bond_type': 'single', 'endpoint_atoms': [0, 1], 'confidence': 0.9999}, ... ]
+            } [\EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
-                        [ERROR_WHEN] If an error occurs while processing the image or retrieving the extracted molecule information. [\ERROR_WHEN]
-                        [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, converting it to bytes, or if there is an error in making the MolScribe model call, such as network issues or invalid image format. [\ERROR_DETAILS]
-                        [ERROR_RECOVERY] Try a different tool or check the image file path and format. [\ERROR_RECOVERY]
+            [ERROR_WHEN] If an error occurs while processing the image or retrieving the extracted molecule information. [\ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, converting it to bytes, or if there is an error in making the MolScribe model call, such as network issues or invalid image format. [\ERROR_DETAILS]
+            [ERROR_RECOVERY] Try a different tool or check the image file path and format. [\ERROR_RECOVERY]
     [\RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -899,32 +899,32 @@ def rxnscribe_reaction_extraction(image_path: str) -> list[dict]:
 
     Args:
         image_path (str):
-                        [BRIEF] Path to the image file containing a chemical reaction [\BRIEF]
-                        [DETAILED] The file path to the image that contains a chemical reaction from which information needs to be extracted. It should be a valid file path pointing to an image file. [\DETAILED]
-                        [SYNTACTICAL] Format: "valid file path to an image file" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: "path/to/reaction_image.png", "path/to/chemical_reaction_image.jpg", "path/to/reaction_diagram_image.jpeg" [\EXAMPLES]
+            [BRIEF] Path to the image file containing a chemical reaction [\BRIEF]
+            [DETAILED] The file path to the image that contains a chemical reaction from which information needs to be extracted. It should be a valid file path pointing to an image file. [\DETAILED]
+            [SYNTACTICAL] Format: "valid file path to an image file" [\SYNTACTICAL]
+            [EXAMPLES] Examples: "path/to/reaction_image.png", "path/to/chemical_reaction_image.jpg", "path/to/reaction_diagram_image.jpeg" [\EXAMPLES]
 
     Returns:
         list[dict]:
-                        [BRIEF] The extracted reaction information from the image [\BRIEF]
-                        [DETAILED] A list of dictionaries containing the extracted reaction information, where each dictionary represents a reaction and includes:
-                        - 'reactants': List of reactants with details such as category, bounding box coordinates, and SMILES representation
-                        - 'conditions': List of conditions with details such as category, bounding box coordinates, and text
-                        - 'products': List of products with similar structure to reactants [\DETAILED]
-                        [EXAMPLES] Examples: [
-                            {
-                                'reactants': [{'category': '[Mol]', 'category_id': 1, 'bbox': (0.1550, 0.0246, 0.2851, 0.2614), 'smiles': '*OC(=O)c1ccccc1C#Cc1ccccc1'}],
-                                'conditions': [{'category': '[Txt]', 'category_id': 2, 'bbox': (0.2941, 0.0641, 0.3811, 0.1450), 'text': ['CIBcat', '(1.4 equiv)']}],
-                                'products': []
-                            },
-                            # More reactions
-                        ] [\EXAMPLES]
+            [BRIEF] The extracted reaction information from the image [\BRIEF]
+            [DETAILED] A list of dictionaries containing the extracted reaction information, where each dictionary represents a reaction and includes:
+            - 'reactants': List of reactants with details such as category, bounding box coordinates, and SMILES representation
+            - 'conditions': List of conditions with details such as category, bounding box coordinates, and text
+            - 'products': List of products with similar structure to reactants [\DETAILED]
+            [EXAMPLES] Examples: [
+                {
+                    'reactants': [{'category': '[Mol]', 'category_id': 1, 'bbox': (0.1550, 0.0246, 0.2851, 0.2614), 'smiles': '*OC(=O)c1ccccc1C#Cc1ccccc1'}],
+                    'conditions': [{'category': '[Txt]', 'category_id': 2, 'bbox': (0.2941, 0.0641, 0.3811, 0.1450), 'text': ['CIBcat', '(1.4 equiv)']}],
+                    'products': []
+                },
+                # More reactions
+            ] [\EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
-                        [ERROR_WHEN] If an error occurs while processing the image or retrieving the extracted reaction information. [\ERROR_WHEN]
-                        [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, converting it to bytes, or if there is an error in making the RXNScribe model call, such as network issues or invalid image format. [\ERROR_DETAILS]
-                        [ERROR_RECOVERY] Try a different tool or check the image file path and format. [\ERROR_RECOVERY]
+            [ERROR_WHEN] If an error occurs while processing the image or retrieving the extracted reaction information. [\ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an issue with reading the image file, converting it to bytes, or if there is an error in making the RXNScribe model call, such as network issues or invalid image format. [\ERROR_DETAILS]
+            [ERROR_RECOVERY] Try a different tool or check the image file path and format. [\ERROR_RECOVERY]
     [\RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -978,28 +978,28 @@ def crop_plot_with_labels(image_path: str, output_path: str) -> str:
 
     Args:
         image_path (str):
-                        [BRIEF] Path to the input image containing a plot [\BRIEF]
-                        [DETAILED] The file path to the image that contains a plot with axis labels that need to be extracted. It should be a valid file path pointing to an image file. [\DETAILED]
-                        [SYNTACTICAL] Format: "valid file path to an image file" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: "path/to/input_image.png", "path/to/plot_image.jpg", "path/to/data_plot_image.png" [\EXAMPLES]
+            [BRIEF] Path to the input image containing a plot [\BRIEF]
+            [DETAILED] The file path to the image that contains a plot with axis labels that need to be extracted. It should be a valid file path pointing to an image file. [\DETAILED]
+            [SYNTACTICAL] Format: "valid file path to an image file" [\SYNTACTICAL]
+            [EXAMPLES] Examples: "path/to/input_image.png", "path/to/plot_image.jpg", "path/to/data_plot_image.png" [\EXAMPLES]
 
         output_path (str):
-                        [BRIEF] Path where the extracted plot will be saved [\BRIEF]
-                        [DETAILED] The file path where the extracted plot image will be saved. It should be a valid file path pointing to an image file. [\DETAILED]
-                        [SYNTACTICAL] Format: "valid file path to save the image" [\SYNTACTICAL]
-                        [EXAMPLES] Examples: "path/to/output_plot.png", "path/to/extracted_plot.jpg", "path/to/cropped_plot.png" [\EXAMPLES]
+            [BRIEF] Path where the extracted plot will be saved [\BRIEF]
+            [DETAILED] The file path where the extracted plot image will be saved. It should be a valid file path pointing to an image file. [\DETAILED]
+            [SYNTACTICAL] Format: "valid file path to save the image" [\SYNTACTICAL]
+            [EXAMPLES] Examples: "path/to/output_plot.png", "path/to/extracted_plot.jpg", "path/to/cropped_plot.png" [\EXAMPLES]
 
     Returns:
         str:
-                        [BRIEF] Confirmation message indicating where the cropped image was saved [\BRIEF]
-                        [DETAILED] A string containing a confirmation message indicating the path where the cropped image with the extracted plot was saved. This message can be used for further reference or logging. [\DETAILED]
-                        [EXAMPLES] Examples: "Cropped plot saved to path/to/output_plot.png", "Extracted plot saved to path/to/extracted_plot.jpg" [\EXAMPLES]
+            [BRIEF] Confirmation message indicating where the cropped image was saved [\BRIEF]
+            [DETAILED] A string containing a confirmation message indicating the path where the cropped image with the extracted plot was saved. This message can be used for further reference or logging. [\DETAILED]
+            [EXAMPLES] Examples: "Cropped plot saved to path/to/output_plot.png", "Extracted plot saved to path/to/extracted_plot.jpg" [\EXAMPLES]
 
     [RAISES] Exceptions:
         FileNotFoundError:
-                        [ERROR_WHEN] If the input image cannot be loaded or if there is an issue with saving the output image. [\ERROR_WHEN]
-                        [ERROR_DETAILS] This exception is raised when the specified input image path does not exist or cannot be read, or if there is an issue with writing the output image to the specified path. [\ERROR_DETAILS]
-                        [ERROR_RECOVERY] Ensure that the input image path is correct. [\ERROR_RECOVERY]
+            [ERROR_WHEN] If the input image cannot be loaded or if there is an issue with saving the output image. [\ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when the specified input image path does not exist or cannot be read, or if there is an issue with writing the output image to the specified path. [\ERROR_DETAILS]
+            [ERROR_RECOVERY] Ensure that the input image path is correct. [\ERROR_RECOVERY]
     [\RAISES]
 
     [LIMITATIONS] Known Limitations:
