@@ -146,7 +146,6 @@ def create_slab_from_structure_text(
                       This structure will be cleaved to create the surface. [/DETAILED]
                       [SYNTACTIC] Format: "Valid CIF format string with atomic coordinates and lattice parameters" [/SYNTACTIC]
                       [EXAMPLES] Examples: CIF string from get_structure_from_mp_text output [/EXAMPLES]
-
         miller_index: [BRIEF] Miller indices for the surface plane. Defaults to (1,1,1). [/BRIEF]
                      [DETAILED] A tuple of three integers specifying the crystallographic plane along
                      which the structure will be cleaved. These indices define the surface orientation
@@ -154,7 +153,6 @@ def create_slab_from_structure_text(
                      (1,0,0), and (1,1,0) for different surface orientations. [/DETAILED]
                      [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
                      [EXAMPLES] Examples: (1,1,1), (1,0,0), (1,1,0) [/EXAMPLES]
-
         min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 12. [/BRIEF]
                       [DETAILED] The minimum thickness of the slab in the direction perpendicular to
                       the surface plane. This parameter ensures that the slab has sufficient bulk-like
@@ -162,7 +160,6 @@ def create_slab_from_structure_text(
                       more accurate representation of bulk properties but increase computational cost. [/DETAILED]
                       [SYNTACTIC] Format: positive integer representing thickness in Angstroms [/SYNTACTIC]
                       [EXAMPLES] Examples: 12, 15, 8[/EXAMPLES]
-
         min_vacuum_size: [BRIEF] Minimum vacuum spacing in Angstroms. Defaults to 5. [/BRIEF]
                         [DETAILED] The minimum vacuum space above the surface to prevent interactions
                         between periodic images in surface calculations. This parameter is crucial for
@@ -170,7 +167,6 @@ def create_slab_from_structure_text(
                         reduce spurious interactions but increase computational requirements. [/DETAILED]
                         [SYNTACTIC] Format: positive integer representing vacuum thickness in Angstroms [/SYNTACTIC]
                         [EXAMPLES] Examples: 5 (minimal), 10 (standard), 15 (large) [/EXAMPLES]
-
         primitive: [BRIEF] Whether to create a primitive cell slab. Defaults to True. [/BRIEF]
                   [DETAILED] Controls whether to use the primitive cell or conventional cell for
                   slab generation. Primitive cells have the minimum number of atoms while maintaining
@@ -269,7 +265,6 @@ def enumerate_slabs_text(
                  The structure will be analyzed to determine all possible surface terminations. [/DETAILED]
                  [SYNTACTIC] Format: "Valid CIF format string with complete structural information" [/SYNTACTIC]
                  [EXAMPLES] Examples: CIF string from Materials Project structures [/EXAMPLES]
-
         miller_index: [BRIEF] Miller indices for surface orientation. Defaults to (1,1,1). [/BRIEF]
                      [DETAILED] A tuple of three integers specifying the crystallographic plane along
                      which all surface terminations will be generated. This determines the surface
@@ -277,7 +272,6 @@ def enumerate_slabs_text(
                      Miller indices will produce different surface structures and properties. [/DETAILED]
                      [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
                      [EXAMPLES] Examples: (1,1,1), (1,0,0), (1,1,0) [/EXAMPLES]
-
         min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 12. [/BRIEF]
                       [DETAILED] The minimum thickness of each slab in the direction perpendicular
                       to the surface plane. This ensures that all generated slabs have sufficient
@@ -285,7 +279,6 @@ def enumerate_slabs_text(
                       both the structural accuracy and computational requirements. [/DETAILED]
                       [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
                       [EXAMPLES] Examples: 10.0 (for thin slab), 12.0 (standard), 15.0 (for thick slab) [/EXAMPLES]
-
         min_vacuum_size: [BRIEF] Minimum vacuum layer thickness in Angstroms. Defaults to 5. [/BRIEF]
                         [DETAILED] The minimum vacuum space above each surface to prevent interactions
                         between periodic images. This parameter is applied to all generated slabs
@@ -390,7 +383,6 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
                    JSON structure must be valid and contain at least one slab entry. [/DETAILED]
                    [SYNTACTIC] Format: 'Valid JSON string with "slab_X" keys and CIF string values' [/SYNTACTIC]
                    [EXAMPLES] Examples: '{"slab_0": "CIF content...", "slab_1": "CIF content..."}' [/EXAMPLES]
-
         index: [BRIEF] Index of the slab to select. Defaults to 0. [/BRIEF]
               [DETAILED] The numerical index of the slab to select from the JSON dictionary.
               This corresponds to the enumeration order from enumerate_slabs_text, where
@@ -570,7 +562,6 @@ def choose_adsorption_site_text(
                               Each coordinate is a list of three numbers representing position within the unit cell. [/DETAILED]
                               [SYNTACTIC] Format: 'Valid JSON string with site type keys and coordinate list values' [/SYNTACTIC]
                               [EXAMPLES] Examples: '{"top": [[0.0, 0.0, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}' [/EXAMPLES]
-
         site_type: [BRIEF] Type of adsorption site to select. [/BRIEF]
                   [DETAILED] The type of binding site to select from the available options. Common
                   types include "top" (above surface atoms), "bridge" (between two atoms), and
@@ -578,7 +569,6 @@ def choose_adsorption_site_text(
                   and determines the coordination environment of the selected site. [/DETAILED]
                   [SYNTACTIC] Format: string matching available site types [/SYNTACTIC]
                   [EXAMPLES] Examples: "top" (on-top), "bridge" (between atoms), "hollow" (in depression) [/EXAMPLES]
-
         index: [BRIEF] Index of the site within the specified type. Defaults to 0. [/BRIEF]
               [DETAILED] The numerical index of the site to select from the list of sites
               of the specified type. Index 0 selects the first site, index 1 the second,
@@ -673,7 +663,6 @@ def add_adsorbate_to_slab_text(
                  substrate for molecular adsorption. [/DETAILED]
                  [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
                  [EXAMPLES] Examples: CIF string from choose_slab_text output [/EXAMPLES]
-
         adsorbate_cif: [BRIEF] CIF string of the adsorbate molecule structure. [/BRIEF]
                       [DETAILED] A CIF or XYZ formatted string containing the molecular structure
                       of the adsorbate to be placed on the surface. This can be a small molecule
@@ -681,7 +670,6 @@ def add_adsorbate_to_slab_text(
                       parse both CIF and XYZ formats automatically. [/DETAILED]
                       [SYNTACTIC] Format: "Valid CIF or XYZ format string with molecular structure" [/SYNTACTIC]
                       [EXAMPLES] Examples: CIF string from get_structure_from_mp_text for molecules [/EXAMPLES]
-
         height: [BRIEF] Height in Angstroms above the surface for adsorbate placement. Defaults to 2.0. [/BRIEF]
                [DETAILED] The vertical distance above the surface at which the adsorbate will be
                placed. This parameter controls the initial separation between the adsorbate and
@@ -689,7 +677,6 @@ def add_adsorbate_to_slab_text(
                molecular size and expected binding interaction. [/DETAILED]
                [SYNTACTIC] Format: positive float representing distance in Angstroms [/SYNTACTIC]
                [EXAMPLES] Examples: 1.5 (close to slab), 2.0, 2.5 (distant from molecule) [/EXAMPLES]
-
         site: [BRIEF] Optional fractional coordinates for adsorbate placement. [/BRIEF]
              [DETAILED] A list of three floating-point numbers representing the fractional
              coordinates [x, y, z] where the adsorbate should be placed. If not provided,
@@ -814,7 +801,6 @@ def generate_reconstructed_slab(
                  positions. The bulk structure provides the template for surface generation. [/DETAILED]
                  [SYNTACTIC] Format: "Valid CIF format string with bulk crystal structure" [/SYNTACTIC]
                  [EXAMPLES] Examples: CIF string from Materials Project database [/EXAMPLES]
-
         miller_index: [BRIEF] Miller indices for the surface orientation. [/BRIEF]
                      [DETAILED] A tuple of three integers specifying the crystallographic plane
                      along which the reconstruction will be performed. These indices must be
@@ -822,7 +808,6 @@ def generate_reconstructed_slab(
                      before reconstruction modifications are applied. [/DETAILED]
                      [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
                      [EXAMPLES] Examples: (1,1,1) (close-packed), (1,0,0) (square), (1,1,0) (rectangular) [/EXAMPLES]
-
         min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. [/BRIEF]
                       [DETAILED] The minimum thickness of the slab before reconstruction modifications
                       are applied. This ensures adequate bulk-like behavior in the center of the
@@ -830,7 +815,6 @@ def generate_reconstructed_slab(
                       values improve accuracy but increase computational cost. [/DETAILED]
                       [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
                       [EXAMPLES] Examples: 12.0 (standard), 15.0 (thick), 10.0 (thin) [/EXAMPLES]
-
         min_vacuum_size: [BRIEF] Minimum vacuum layer thickness in Angstroms. [/BRIEF]
                         [DETAILED] The minimum vacuum space above the reconstructed surface to
                         prevent interactions between periodic images. This parameter is crucial
@@ -838,7 +822,6 @@ def generate_reconstructed_slab(
                         with significant surface protrusions or modifications. [/DETAILED]
                         [SYNTACTIC] Format: positive float representing vacuum thickness in Angstroms [/SYNTACTIC]
                         [EXAMPLES] Examples: 10.0 (standard), 15.0 (large), 5.0 (minimal) [/EXAMPLES]
-
         reconstruction_instructions: [BRIEF] JSON string containing detailed reconstruction parameters. [/BRIEF]
                                    [DETAILED] A comprehensive JSON string specifying all aspects of
                                    the reconstruction including transformation matrices, atomic
@@ -847,7 +830,6 @@ def generate_reconstructed_slab(
                                    instructions. See the tool's source code for detailed format. [/DETAILED]
                                    [SYNTACTIC] Format: "Valid JSON string with reconstruction parameters" [/SYNTACTIC]
                                    [EXAMPLES] Examples: JSON with transformation matrix and atomic modifications [/EXAMPLES]
-
         return_all_variants: [BRIEF] Whether to return all reconstruction variants. Defaults to False. [/BRIEF]
                            [DETAILED] Controls whether to return a single CIF string (False) or a
                            comprehensive JSON with all possible reconstruction variants and metadata
