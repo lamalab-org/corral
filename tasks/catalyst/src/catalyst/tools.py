@@ -153,9 +153,10 @@ def create_slab_from_structure_text(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - create_slab_from_structure_text(cif_string, (1,1,1), 12, 5, True)
-    - create_slab_from_structure_text(cif_string, (1,0,0), 15, 10, False)
-    - create_slab_from_structure_text(cif_string)  # Uses defaults
+    [ create_slab_from_structure_text(cif_string, (1,1,1), 12, 5, True), # Create slab with (1,1,1) Miller indices
+    create_slab_from_structure_text(cif_string, (1,0,0), 15, 10, False), # Create slab with (1,0,0) Miller indices
+    create_slab_from_structure_text(cif_string)  # Uses defaults (1,1,1), 12, 5, True
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -271,9 +272,11 @@ def enumerate_slabs_text(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - enumerate_slabs_text(cif_string, (1,1,1), 12, 5)
-    - enumerate_slabs_text(cif_string, (1,0,0), 15, 10)
-    - enumerate_slabs_text(cif_string)  # Uses default parameters
+    [
+    `enumerate_slabs_text(cif_string, (1,1,1), 12, 5)`,  # Enumerate slabs with (1,1,1) Miller indices
+    `enumerate_slabs_text(cif_string, (1,0,0), 15, 10)`,  # Enumerate slabs with (1,0,0) Miller indices
+    `enumerate_slabs_text(cif_string)`  # Uses default parameters (1,1,1), 12, 5
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -389,9 +392,11 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - choose_slab_text(slabs_json, 0)  # Select first slab
-    - choose_slab_text(slabs_json, 1)  # Select second slab
-    - choose_slab_text(slabs_json)     # Select first slab (default)
+    [
+    `choose_slab_text(slabs_json, 0)`,  # Select first slab
+    `choose_slab_text(slabs_json, 1)`,  # Select second slab
+    `choose_slab_text(slabs_json)`       # Select first slab (default)
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -476,8 +481,10 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - get_adsorption_sites_text(slab_cif_string)
-    - get_adsorption_sites_text(output_from_choose_slab_text)
+    [
+    `get_adsorption_sites_text(slab_cif_string)`,  # Identify sites on a specific slab
+    `get_adsorption_sites_text(output_from_choose_slab_text)`,  # Use output from choose_slab_text
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -568,9 +575,11 @@ def choose_adsorption_site_text(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - choose_adsorption_site_text(sites_json, "top", 0)    # First top site
-    - choose_adsorption_site_text(sites_json, "bridge", 1) # Second bridge site
-    - choose_adsorption_site_text(sites_json, "hollow", 0) # First hollow site
+    [
+    `choose_adsorption_site_text(sites_json, "top", 0)`,    # Select first top site
+    `choose_adsorption_site_text(sites_json, "bridge", 1)`, #
+    `choose_adsorption_site_text(sites_json, "hollow", 0)`, # Select first hollow site
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -669,9 +678,12 @@ def add_adsorbate_to_slab_text(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - add_adsorbate_to_slab_text(slab_cif, co2_cif, 2.0, [0.0, 0.0, 0.9])
-    - add_adsorbate_to_slab_text(slab_cif, molecule_cif, 1.5)  # Auto-select top site
-    - add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)      # Default height and site
+    [
+    `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)`,  # Default height and auto-select site
+    `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 2.0)`,  # Specify height, auto-select site
+    `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 1.5, [0.0, 0.0, 0.9])`,  # Specify height and site
+    `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)`
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -1168,9 +1180,11 @@ def get_bulk_polymorphs_data(composition: str) -> str:
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - get_bulk_polymorphs_data("TiO2")  # Titanium dioxide polymorphs
-    - get_bulk_polymorphs_data("SiO2")  # Silicon dioxide polymorphs
-    - get_bulk_polymorphs_data("Al2O3") # Aluminum oxide polymorphs
+    [
+    `get_bulk_polymorphs_data("TiO2")`,  # Retrieve polymorphs for titanium dioxide
+    `get_bulk_polymorphs_data("SiO2")`,  # Retrieve polymorphs for silicon dioxide
+    `get_bulk_polymorphs_data("Al2O3
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -1309,9 +1323,12 @@ def get_bulk_polymorphs_data_to_file(
      [/WORKFLOW_INTEGRATION]
 
      [SYNTACTICAL] Usage examples:
-     - get_bulk_polymorphs_data_to_file("TiO2", "data/tio2_polymorphs.json")
-     - get_bulk_polymorphs_data_to_file("SiO2", "temp_path/silica_phases.json")
-     - get_bulk_polymorphs_data_to_file("Al2O3", "datasets/alumina_structures.json")
+     [
+     `get_bulk_polymorphs_data_to_file("TiO2", "data/tio2_polymorphs.json")`,  # Save polymorphs for titanium dioxide
+     `get_bulk_polymorphs_data_to_file("SiO2", "data/si2_polymorphs.json")`,  # Save polymorphs for silicon dioxide
+     `get_bulk_polymorphs_data_to_file("Al2O3", "data/al2o3_polymorphs.json")`,  # Save polymorphs for aluminum oxide
+     `get_bulk_polymorphs_data_to_file("Fe2O3", "data/fe2o3_polymorphs.json")`,  # Save polymorphs for iron
+     ]
      [/SYNTACTICAL]
 
      Args:
@@ -1462,9 +1479,11 @@ def batch_retrieve_polymorphs(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - batch_retrieve_polymorphs(["TiO2", "SiO2", "Al2O3"], 0.3, 5, "oxides_data")
-    - batch_retrieve_polymorphs(["CaTiO3", "SrTiO3", "BaTiO3"], 0.5, 10, "perovskites")
-    - batch_retrieve_polymorphs(["FeO", "Fe2O3", "Fe3O4"], 0.2, 8, "iron_oxides")
+    [
+    `batch_retrieve_polymorphs(["TiO2", "SiO2", "Al2O3"], 0.3, 5, "oxides_data")`,  # Retrieve polymorphs for multiple oxides
+    `batch_retrieve_polymorphs(["CaTiO3", "SrTiO3", "BaTiO3"], 0.5, 10, "perovskites")`,  # Retrieve polymorphs for perovskites
+    `batch_retrieve_polymorphs(["FeO", "Fe2O3", "Fe3O4"], 0.2, 8, "iron_oxides")`,  # Retrieve polymorph
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -1609,9 +1628,9 @@ def sort_and_get_first_from_json(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - sort_and_get_first_from_json(polymorphs_json, "energy_above_hull", "material_id")
-    - sort_and_get_first_from_json(polymorphs_json, "band_gap", "cif")
-    - sort_and_get_first_from_json(polymorphs_json, "density", "formation_energy_per_atom")
+    `sort_and_get_first_from_json(polymorphs_json, "energy_above_hull", "material_id")`,
+    `sort_and_get_first_from_json(polymorphs_json, "band_gap", "cif")`,
+    `sort_and_get_first_from_json(polymorphs_json, "density", "formation_energy_per_atom")`,
     [/SYNTACTICAL]
 
     Args:
@@ -1717,9 +1736,9 @@ def select_polymorphs_with_strategy(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - select_polymorphs_with_strategy(polymorphs_json, "most_stable", 3, 0.3, False)
-    - select_polymorphs_with_strategy("data/polymorphs.json", "diverse_structure", 5, 0.5, True)
-    - select_polymorphs_with_strategy(polymorphs_json, "diverse_energy", 8, 0.8, False)
+    `select_polymorphs_with_strategy(polymorphs_json, "most_stable", 3, 0.3, False)`,
+    `select_polymorphs_with_strategy("data/polymorphs.json", "diverse_structure", 5, 0.5, True)`,
+    `select_polymorphs_with_strategy(polymorphs_json, "diverse_energy", 8, 0.8, False)`,
     [/SYNTACTICAL]
 
     Args:
@@ -1868,9 +1887,9 @@ def consolidate_polymorph_datasets(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - consolidate_polymorph_datasets({"TiO2": "data/tio2.json", "SiO2": "data/sio2.json"})
-    - consolidate_polymorph_datasets(composition_files_dict, "materials_database.json")
-    - consolidate_polymorph_datasets(batch_results["composition_files"], "consolidated.json")
+    `consolidate_polymorph_datasets({"TiO2": "data/tio2.json", "SiO2": "data/sio2.json"})`,
+    `consolidate_polymorph_datasets(composition_files_dict, "materials_database.json")`,
+    `consolidate_polymorph_datasets(batch_results["composition_files"], "consolidated.json")`,
     [/SYNTACTICAL]
 
     Args:
@@ -2010,9 +2029,9 @@ def select_polymorphs_with_strategy_to_file(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - select_polymorphs_with_strategy_to_file(polymorphs_json, "selected_tio2.json", "most_stable", 3, 0.3, False)
-    - select_polymorphs_with_strategy_to_file("data/polymorphs.json", "output/diverse.json", "diverse_structure", 5, 0.5, True)
-    - select_polymorphs_with_strategy_to_file(batch_data, "results/selected_materials.json", "diverse_energy", 8, 0.8, False)
+    `select_polymorphs_with_strategy_to_file(polymorphs_json, "selected_tio2.json", "most_stable", 3, 0.3, False)`,
+    `select_polymorphs_with_strategy_to_file("data/polymorphs.json", "output/diverse.json", "diverse_structure", 5, 0.5, True)`,
+    `select_polymorphs_with_strategy_to_file(batch_data, "results/selected_materials.json", "diverse_energy", 8, 0.8, False)`,
     [/SYNTACTICAL]
 
     Args:
@@ -2169,9 +2188,9 @@ def execute_python_code(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - execute_python_code("result = sum([1, 2, 3, 4, 5])", None, None, 30)
-    - execute_python_code("filtered_data = [x for x in input_data if x > 0.5]", json_data, "output.json")
-    - execute_python_code("import numpy as np; result = np.mean(input_data)", array_data, None, 60)
+    `execute_python_code("result = sum([1, 2, 3, 4, 5])", None, None, 30)`,
+    `execute_python_code("filtered_data = [x for x in input_data if x > 0.5]", json_data, "output.json")`,
+    `execute_python_code("import numpy as np; result = np.mean(input_data)", array_data, None, 60)`,
     [/SYNTACTICAL]
 
     Args:
@@ -2369,9 +2388,9 @@ def execute_python_script(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - execute_python_script("analysis.py", ["--input", "data.json", "--output", "results.json"], 300)
-    - execute_python_script("simulation.py", ["--steps", "1000", "--temp", "300"], 1800, "/path/to/workdir")
-    - execute_python_script("processing.py", None, 600, None)
+    `execute_python_script("analysis.py", ["--input", "data.json", "--output", "results.json"], 300)`,
+    `execute_python_script("simulation.py", ["--steps", "1000", "--temp", "300"], 1800, "/path/to/workdir")`,
+    `execute_python_script("processing.py", None, 600, None)`,
     [/SYNTACTICAL]
 
     Args:
@@ -2511,9 +2530,9 @@ def filter_json_with_strategy(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - filter_json_with_strategy("input.json", "output.json", "filtered_data = [x for x in data if x['energy'] < 0.5]")
-    - filter_json_with_strategy("materials.json", "stable.json", "filtered_data = [x for x in data if x['is_stable']]")
-    - filter_json_with_strategy("polymorphs.json", "filtered.json", "filtered_data = [x for x in data if x['band_gap'] > 1.0 and x['density'] < 5.0]")
+    `filter_json_with_strategy("input.json", "output.json", "filtered_data = [x for x in data if x['energy'] < 0.5]")`,
+    `filter_json_with_strategy("materials.json", "stable.json", "filtered_data = [x for x in data if x['is_stable']]")`,
+    `filter_json_with_strategy("polymorphs.json", "filtered.json", "filtered_data = [x for x in data if x['band_gap'] > 1.0 and x['density'] < 5.0]")`,
     [/SYNTACTICAL]
 
     Args:
@@ -2682,9 +2701,9 @@ def prepare_tabular_dataset(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - prepare_tabular_dataset("consolidated.json", "ml_data", "formation_energy_per_atom", "advanced", 0.2, True)
-    - prepare_tabular_dataset("polymorphs.json", "datasets", "band_gap", "basic", 0.15, False)
-    - prepare_tabular_dataset("materials.json", "output", "bulk_modulus", "custom", 0.25, True)
+    `prepare_tabular_dataset("consolidated.json", "ml_data", "formation_energy_per_atom", "advanced", 0.2, True)`,
+    `prepare_tabular_dataset("polymorphs.json", "datasets", "band_gap", "basic", 0.15, False)`,
+    `prepare_tabular_dataset("materials.json", "output", "bulk_modulus", "custom", 0.25, True)`,
     [/SYNTACTICAL]
 
     Args:
@@ -2989,9 +3008,9 @@ def get_mp_thermo_data(material_id: str) -> str:
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - get_mp_thermo_data("mp-149")   # Silicon thermodynamic data
-    - get_mp_thermo_data("mp-2657")  # TiO2 thermodynamic properties
-    - get_mp_thermo_data("mp-1143")  # Al2O3 stability information
+    `get_mp_thermo_data("mp-149")   # Silicon thermodynamic data`,
+    `get_mp_thermo_data("mp-2657")  # TiO2 thermodynamic properties`,
+    `get_mp_thermo_data("mp-1143")  # Al2O3 stability information`,
     [/SYNTACTICAL]
 
     Args:
@@ -3124,9 +3143,9 @@ def train_xgboost_model(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - train_xgboost_model("train.csv", "test.csv", "model.pkl", "formation_energy_per_atom")
-    - train_xgboost_model("train.csv", "test.csv", "model.pkl", "band_gap", {"n_estimators": 200})
-    - train_xgboost_model("data/train.csv", "data/test.csv", "models/xgb_model.pkl", "energy")
+    `train_xgboost_model("train.csv", "test.csv", "model.pkl", "formation_energy_per_atom")`,
+    `train_xgboost_model("train.csv", "test.csv", "model.pkl", "band_gap", {"n_estimators": 200})`,
+    `train_xgboost_model("data/train.csv", "data/test.csv", "models/xgb_model.pkl", "energy")`,
     [/SYNTACTICAL]
 
     Args:
@@ -3328,9 +3347,9 @@ def evaluate_xgboost_model(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - evaluate_xgboost_model("trained_model.pkl", "test_data.csv", "formation_energy_per_atom", True)
-    - evaluate_xgboost_model("models/xgb_model.pkl", "data/test.csv", "band_gap", False)
-    - evaluate_xgboost_model("model.pkl", "test.csv", "energy", True)
+    `evaluate_xgboost_model("trained_model.pkl", "test_data.csv", "formation_energy_per_atom", True)`,
+    `evaluate_xgboost_model("models/xgb_model.pkl", "data/test.csv", "band_gap", False)`,
+    `evaluate_xgboost_model("model.pkl", "test.csv", "energy", True)`,
     [/SYNTACTICAL]
 
     Args:
@@ -3491,9 +3510,9 @@ def perform_cross_validation(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - perform_cross_validation("train_data.csv", "formation_energy_per_atom", 5, None)
-    - perform_cross_validation("data/train.csv", "band_gap", 10, {"n_estimators": 200})
-    - perform_cross_validation("training.csv", "energy", 3, {"max_depth": 8, "learning_rate": 0.05})
+    `perform_cross_validation("train_data.csv", "formation_energy_per_atom", 5, None)`,
+    `perform_cross_validation("data/train.csv", "band_gap", 10, {"n_estimators": 200})`,
+    `perform_cross_validation("training.csv", "energy", 3, {"max_depth": 8, "learning_rate": 0.05})`,
     [/SYNTACTICAL]
 
     Args:
@@ -3647,9 +3666,9 @@ def find_all_unique_slabs_upto_millerindex(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - find_all_unique_slabs_upto_millerindex(bulk_cif, False, 2, 10, 15, True, 10)
-    - find_all_unique_slabs_upto_millerindex("bulk_structure.cif", True, 1, 8, 12, True, 5)
-    - find_all_unique_slabs_upto_millerindex(structure_string, False, 3, 12, 20, False, 15)
+    `find_all_unique_slabs_upto_millerindex(bulk_cif, False, 2, 10, 15, True, 10)`,
+    `find_all_unique_slabs_upto_millerindex("bulk_structure.cif", True, 1, 8, 12, True, 5)`,
+    `find_all_unique_slabs_upto_millerindex(structure_string, False, 3, 12, 20, False, 15)`,
     [/SYNTACTICAL]
 
     Args:
@@ -3932,9 +3951,9 @@ def save_structures_to_db(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - save_structures_to_db("materials.db", polymorphs_json, "bulk", "bulk_structures")
-    - save_structures_to_db("surfaces.db", slabs_json, "slab", "slab_structures")
-    - save_structures_to_db("configs.db", adsorbate_configs_json, "adsorbate_slab", "configurations")
+    `save_structures_to_db("materials.db", polymorphs_json, "bulk", "bulk_structures")`,
+    `save_structures_to_db("surfaces.db", slabs_json, "slab", "slab_structures")`,
+    `save_structures_to_db("configs.db", adsorbate_configs_json, "adsorbate_slab", "configurations")`,
     [/SYNTACTICAL]
 
     Args:
@@ -4232,9 +4251,9 @@ def process_slab_ocdata_style(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - process_slab_ocdata_style(slab_cif, bulk_cif, 8.0, True)
-    - process_slab_ocdata_style(slab_cif, bulk_cif, min_xy_size=10.0)
-    - process_slab_ocdata_style(slab_cif, bulk_cif, apply_constraints=False)
+    `process_slab_ocdata_style(slab_cif, bulk_cif, 8.0, True)`,
+    `process_slab_ocdata_style(slab_cif, bulk_cif, min_xy_size=10.0)`,
+    `process_slab_ocdata_style(slab_cif, bulk_cif, apply_constraints=False)`,
     [/SYNTACTICAL]
 
     Args:
@@ -4355,9 +4374,9 @@ def get_symmetrically_distinct_miller_indices_from_bulk(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - get_symmetrically_distinct_miller_indices_from_bulk(cif_string, False, 2)
-    - get_symmetrically_distinct_miller_indices_from_bulk("structure.cif", True, 3)
-    - get_symmetrically_distinct_miller_indices_from_bulk(cif_string)
+    `get_symmetrically_distinct_miller_indices_from_bulk(cif_string, False, 2)`,
+    `get_symmetrically_distinct_miller_indices_from_bulk("structure.cif", True, 3)`,
+    `get_symmetrically_distinct_miller_indices_from_bulk(cif_string)`,
     [/SYNTACTICAL]
 
     Args:
@@ -4444,9 +4463,9 @@ def enumerate_all_possible_miller_indices(max_miller: int = 2) -> list:
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - enumerate_all_possible_miller_indices(2)
-    - enumerate_all_possible_miller_indices(3)
-    - enumerate_all_possible_miller_indices()  # Uses default max_miller=2
+    `enumerate_all_possible_miller_indices(2)`,
+    `enumerate_all_possible_miller_indices(3)`,
+    `enumerate_all_possible_miller_indices()`,  # Uses default max_miller=2
     [/SYNTACTICAL]
 
     Args:
@@ -4532,9 +4551,9 @@ def find_all_unique_slabs_upto_millerindex_to_file(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - find_all_unique_slabs_upto_millerindex_to_file(cif_string, "slabs.json", False, 2, 8, 15, True, 10)
-    - find_all_unique_slabs_upto_millerindex_to_file("bulk.cif", "output.json", True)
-    - find_all_unique_slabs_upto_millerindex_to_file(cif_string, "slabs.json")
+    `find_all_unique_slabs_upto_millerindex_to_file(cif_string, "slabs.json", False, 2, 8, 15, True, 10)`,
+    `find_all_unique_slabs_upto_millerindex_to_file("bulk.cif", "output.json", True)`,
+    `find_all_unique_slabs_upto_millerindex_to_file(cif_string, "slabs.json")`,
     [/SYNTACTICAL]
 
     Args:
@@ -4683,9 +4702,9 @@ def enumerate_slabs_for_list_of_miller_index(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - enumerate_slabs_for_list_of_miller_index(cif_string, False, [(1,1,1), (1,0,0)], 12, 5)
-    - enumerate_slabs_for_list_of_miller_index("bulk.cif", True, [(1,1,1), (1,1,0)])
-    - enumerate_slabs_for_list_of_miller_index(cif_string, miller_index_list=[(2,1,1)])
+    `enumerate_slabs_for_list_of_miller_index(cif_string, False, [(1,1,1), (1,0,0)], 12, 5)`,
+    `enumerate_slabs_for_list_of_miller_index("bulk.cif", True, [(1,1,1), (1,1,0)])`,
+    `enumerate_slabs_for_list_of_miller_index(cif_string, miller_index_list=[(2,1,1)])`,
     [/SYNTACTICAL]
 
     Args:
@@ -4813,9 +4832,9 @@ def select_slabs_with_strategy(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - select_slabs_with_strategy(slabs_json, "diverse_miller", 3)
-    - select_slabs_with_strategy(slabs_json, "large_surface", 5)
-    - select_slabs_with_strategy(slabs_json, "high_coordination")
+    `select_slabs_with_strategy(slabs_json, "diverse_miller", 3)`,
+    `select_slabs_with_strategy(slabs_json, "large_surface", 5)`,
+    `select_slabs_with_strategy(slabs_json, "high_coordination")`,
     [/SYNTACTICAL]
 
     Args:
@@ -4934,9 +4953,9 @@ def select_slabs_with_strategy_to_file(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - select_slabs_with_strategy_to_file("slabs.json", "selected.json", "diverse_miller", 3, True)
-    - select_slabs_with_strategy_to_file(slabs_json_string, "output.json", "large_surface", 5, False)
-    - select_slabs_with_strategy_to_file("input.json", "filtered.json", is_path=True)
+    `select_slabs_with_strategy_to_file("slabs.json", "selected.json", "diverse_miller", 3, True)`,
+    `select_slabs_with_strategy_to_file(slabs_json_string, "output.json", "large_surface", 5, False)`,
+    `select_slabs_with_strategy_to_file("input.json", "filtered.json", is_path=True)`,
     [/SYNTACTICAL]
 
     Args:
@@ -5073,9 +5092,9 @@ def generate_adsorbate_slab_configs(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json, 1.8)
-    - generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json, height=2.0)
-    - generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json)
+    `generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json, 1.8)`,
+    `generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json, height=2.0)`,
+    `generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json)`,
     [/SYNTACTICAL]
 
     Args:
@@ -5221,9 +5240,9 @@ def add_descriptor_column_to_db(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - add_descriptor_column_to_db(db_path, "slabs", "coordination", function_code, 100)
-    - add_descriptor_column_to_db(db_path, "table", "bond_length", code, batch_size=50)
-    - add_descriptor_column_to_db(db_path, "table", "d_band", code, dependencies=["bulk"])
+    `add_descriptor_column_to_db(db_path, "slabs", "coordination", function_code, 100)`,
+    `add_descriptor_column_to_db(db_path, "table", "bond_length", code, batch_size=50)`,
+    `add_descriptor_column_to_db(db_path, "table", "d_band", code, dependencies=["bulk"])`,
     [/SYNTACTICAL]
 
     Args:
@@ -5490,9 +5509,9 @@ def prepare_neural_network_dataset(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - prepare_neural_network_dataset("materials.json", "nn_dataset", "formation_energy", False, True, 0.2)
-    - prepare_neural_network_dataset("polymorphs.json", "output", sequence_features=True)
-    - prepare_neural_network_dataset("data.json", "neural_data", test_split=0.15)
+    `prepare_neural_network_dataset("materials.json", "nn_dataset", "formation_energy", False, True, 0.2)`,
+    `prepare_neural_network_dataset("polymorphs.json", "output", sequence_features=True)`,
+    `prepare_neural_network_dataset("data.json", "neural_data", test_split=0.15)`,
     [/SYNTACTICAL]
 
     Args:
@@ -5750,9 +5769,9 @@ def prepare_graph_dataset(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - prepare_graph_dataset("materials.json", "graph_data", "formation_energy", 5.0, 0.2)
-    - prepare_graph_dataset("polymorphs.json", "gnn_dataset", cutoff_radius=4.0)
-    - prepare_graph_dataset("data.json", "graphs", test_split=0.15)
+    `prepare_graph_dataset("materials.json", "graph_data", "formation_energy", 5.0, 0.2)`,
+    `prepare_graph_dataset("polymorphs.json", "gnn_dataset", cutoff_radius=4.0)`,
+    `prepare_graph_dataset("data.json", "graphs", test_split=0.15)`,
     [/SYNTACTICAL]
 
     Args:
@@ -6008,9 +6027,9 @@ def generate_ml_dataset_format(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - generate_ml_dataset_format("data.db", "materials", ["coord", "area"], "energy", "csv", "dataset")
-    - generate_ml_dataset_format("db.sqlite", "slabs", features, "stability", "json", "ml_data")
-    - generate_ml_dataset_format("materials.db", "table", cols, "target", output_format="npz")
+    `generate_ml_dataset_format("data.db", "materials", ["coord", "area"], "energy", "csv", "dataset")`,
+    `generate_ml_dataset_format("db.sqlite", "slabs", features, "stability", "json", "ml_data")`,
+    `generate_ml_dataset_format("materials.db", "table", cols, "target", output_format="npz")`,
     [/SYNTACTICAL]
 
     Args:
