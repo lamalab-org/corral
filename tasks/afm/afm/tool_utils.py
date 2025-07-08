@@ -45,6 +45,8 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.graph import END, StateGraph, START
 from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
+import os
+from loguru import logger
 
 embeddings = OpenAIEmbeddings(
     model="text-embedding-3-large",
@@ -95,6 +97,8 @@ def scan_image(PGain, IGain, DGain, file):
     zcontrol.IGain = IGain
     zcontrol.DGain = DGain
     scan.StartFrameUp()
+
+    current_working_directory = application.GetGalleryHistoryDirectoryPath
     
     scanning = scan.IsScanning
     while scanning:
@@ -103,7 +107,8 @@ def scan_image(PGain, IGain, DGain, file):
         scanning = scan.IsScanning
 
     from NSFopen.read import read
-    list_of_files = glob.glob(new_path+'/*')
+    pattern = os.path.join(current_working_directory, '*.nid')
+    list_of_files = glob.glob(pattern)
     latest_file = max(list_of_files, key=os.path.getctime)
     afm = read(latest_file)
     data = afm.data
@@ -147,7 +152,7 @@ def scan_image_poly(PGain, IGain, DGain, file):
     zcontrol.IGain = IGain
     zcontrol.DGain = DGain
     scan.StartFrameUp()
-    
+    current_working_directory = application.GetGalleryHistoryDirectoryPath
     scanning = scan.IsScanning
     while scanning:
         print("Scanning in progress...")
@@ -155,7 +160,8 @@ def scan_image_poly(PGain, IGain, DGain, file):
         scanning = scan.IsScanning
 
     from NSFopen.read import read
-    list_of_files = glob.glob(new_path+'/*')
+    pattern = os.path.join(current_working_directory, '*.nid')
+    list_of_files = glob.glob(pattern)
     latest_file = max(list_of_files, key=os.path.getctime)
     afm = read(latest_file)
     data = afm.data
@@ -180,6 +186,6 @@ class MyProblem(ElementwiseProblem):
         else:
             scan_outputs = scan_image(x[0], x[1], x[2], f"scan_{x[0]}_{x[1]}_{x[2]}_")
 
-        mse = scan_outputs[1]
-        f1 = (1 - mse) * 10000
+        ssim = scan_outputs[0]
+        f1 = (1 - ssim) * 10000
         out["F"] = [f1]

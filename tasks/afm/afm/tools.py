@@ -7,11 +7,13 @@ from tool_utils import Document_Retriever
 from aila_image_process import *
 import matplotlib.pyplot as plt
 import numpy as np
+import os
+import glob
+import gc
 
-# app = modal.App("corral-test")
 
 @tool
-def visualize_grain_boxes(image_path: str=None) -> list:
+def visualize_grain_boxes(image_path: str) -> list:
     """
     Detects grains in the input image and generates bounding boxes around each one.
 
@@ -19,7 +21,7 @@ def visualize_grain_boxes(image_path: str=None) -> list:
     used to reference and process specific grains in subsequent steps (e.g., scanning).
 
     Args:
-         image_path (str, optional): Path to the input image file. If None, uses the latest saved .nid file.
+         image_path (str): Path to the input image file.
 
     Returns:
         list: List of bounding boxes as (index, x1, y1, x2, y2), where
@@ -28,13 +30,6 @@ def visualize_grain_boxes(image_path: str=None) -> list:
     import matplotlib
     matplotlib.use('Agg')  # Use non-GUI backend for saving
     
-    if image_path is None:
-        # Search for the latest .nid file
-        nid_files = glob.glob("*.nid")
-        if not nid_files:
-            raise FileNotFoundError("No .nid image files found in the current directory.")
-        image_path = max(nid_files, key=os.path.getmtime)
-
     indexed_boxes, extents, Z_flat2, labeled = image_process(image_path)
     
     fig, ax = plt.subplots()
@@ -70,17 +65,26 @@ def visualize_grain_boxes(image_path: str=None) -> list:
     ax.set_title("Grains with Bounding Boxes")
 
     # Save to file
-    output_path = os.path.splitext(image_path)[0] + "_annotated.png"
+    import pythoncom
+    pythoncom.CoInitialize()
+    import nanosurf
+    spm = nanosurf.SPM()
+    application = spm.application
+    current_path = application.GetGalleryHistoryDirectoryPath
+    output_path = os.path.join(current_path, "annotated.png")
     fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"image annotated with bounding boxes saved at {current_path}.")
     plt.close(fig)
+    del application
+    del spm
+    gc.collect()
+    pythoncom.CoUninitialize()
     
     return box_coords
 
-_image_scan_cache = {}
 
-
-@tool
-def scan_grain_area(grain_id: int, image_path: str = None) -> None:
+# @tool
+def scan_grain_area(grain_id: int, image_path: str) -> None:
     """
     Scans the area corresponding to the specified grain in the image.
 
@@ -88,10 +92,10 @@ def scan_grain_area(grain_id: int, image_path: str = None) -> None:
 
     Args:
         grain_id (int): ID of the grain (bounding box index starting from 1).
-        image_path (str, optional): Path to the image file containing grains. If None, uses the latest .nid file.
+        image_path (str): Path to the image file containing grains.
 
     Returns:
-        None
+        str: path to the generated image
     """
 
     import pythoncom
@@ -99,33 +103,17 @@ def scan_grain_area(grain_id: int, image_path: str = None) -> None:
     import nanosurf
     import time
     import os
-    if image_path is None:
-        nid_files = glob.glob("*.nid")
-        if not nid_files:
-            raise FileNotFoundError("No .nid files found in the current directory.")
-        image_path = max(nid_files, key=os.path.getmtime)
-        print(f"No image_path provided. Using latest .nid file: {image_path}")
 
     # Use absolute path as key for consistency
     abs_image_path = os.path.abspath(image_path)
-
-    # Check if parameters are already cached for this image
-    if abs_image_path in _image_scan_cache:
-        current_center, current_size = _image_scan_cache[abs_image_path]
-        print(f"Using cached scan parameters for {abs_image_path}")
-    else:
         
         # Query current scan parameters from the SPM
-        spm = nanosurf.SPM()
-        application = spm.application
-        scan = application.Scan
-
-        current_size = (scan.ImageWidth * 1e6, scan.ImageHeight * 1e6)
-        current_center = (scan.CenterPosX * 1e6, scan.CenterPosY * 1e6)
-
-        # Cache the values for future use
-        _image_scan_cache[abs_image_path] = (current_center, current_size)
-        print(f"Caching scan parameters for {abs_image_path}")
+    spm = nanosurf.SPM()
+    application = spm.application
+    current_working_directory = application.GetGalleryHistoryDirectoryPath
+    scan = application.Scan
+    current_size = (scan.ImageWidth * 1e9, scan.ImageHeight * 1e9)
+    current_center = (scan.CenterPosX * 1e9, scan.CenterPosY * 1e9)
 
     # Process the image and compute subscan parameters
     boxes, extents, Z_flat2, labeled = image_process(image_path)
@@ -139,18 +127,19 @@ def scan_grain_area(grain_id: int, image_path: str = None) -> None:
     )
 
     # Update scan settings
-    scan.ImageWidth = params["width"] * 1e-6
-    scan.ImageHeight = params["height"] * 1e-6
-    scan.CenterPosX = params["center_x"] * 1e-6
-    scan.CenterPosY = params["center_y"] * 1e-6
+    scan.ImageWidth = params["width"] * 1e-9
+    scan.ImageHeight = params["height"] * 1e-9
+    scan.CenterPosX = params["center_x"] * 1e-9
+    scan.CenterPosY = params["center_y"] * 1e-9
     scan.StartFrameUp()
+
 
     # Wait while scanning is in progress
     while scan.IsScanning:
         print("Scanning in progress...")
         time.sleep(5)
         
-    nid_files = glob.glob("*.nid")
+    nid_files = glob.glob(os.path.join(current_working_directory, "*.nid"))
     if not nid_files:
         raise FileNotFoundError("No .nid files found after scan.")
     latest_nid = max(nid_files, key=os.path.getmtime)
@@ -176,44 +165,35 @@ def Document_Retrieval(query: str) -> str:
     return result
 
 
-@tool
-def Image_optimizer(baseline: bool) -> str:
+# @tool
+def Image_optimizer(baseline : bool = False) -> str:
     """
     This tool optimizes the parameters (P/I/D gains) based on baseline correction
-    settings to provide the best solution for image clarity. Use this tool if the image 
-    appears blurry or unclear and you want to enhance its sharpness.
+    settings to provide the best solution for image clarity using genetic algorithm. Use this tool if the image 
+    appears blurry or unclear and you want to enhance its sharpness. 
     
     Args:
-        baseline: If True, use baseline correction. If False, do not use baseline correction.
+        baseline (bool): Whether to correct the baseline. Defaults to False.
     """
     import os
     import glob
     from pymoo.termination import get_termination
-    from tools_utils import MyProblem
+    from tool_utils import MyProblem
     from pymoo.optimize import minimize
     from pymoo.algorithms.soo.nonconvex.ga import GA
 
-    original_path = os.getcwd()
-    # new_path = "./test_directory"
-    new_path = "./afm_images/tool_calling/claude_37"
+    if not isinstance(baseline, bool):
+        raise ValueError(f"Invalid type for 'baseline': {type(baseline).__name__}. Expected a boolean.")
 
     try:
-        os.chdir(new_path)
-        print(f"Current working directory: {os.getcwd()}")
-        
-        # Your code that needs to be executed in the new directory goes here
+
         import pythoncom
         pythoncom.CoInitialize()
-    
-        list_of_files = glob.glob(new_path+'/*') 
-        latest_file = max(list_of_files, key=os.path.getctime)
-        print(latest_file)
-    
-    
+
         problem = MyProblem(baseline=baseline)
     
-        termination = get_termination("n_gen", 5)
-        algorithm = GA(pop_size=3, eliminate_duplicates=True)
+        termination = get_termination("n_gen", 3)
+        algorithm = GA(pop_size=2, eliminate_duplicates=True)
     
         res = minimize(problem,
                        algorithm,
@@ -222,9 +202,7 @@ def Image_optimizer(baseline: bool) -> str:
                        verbose=True)
 
     finally:
-        # Restore the original working directory
-        os.chdir(original_path)
-        print(f"Returned to original working directory: {os.getcwd()}")
+        pass
 
     return "Best solution found: \n[Pgain Igain Dgain] = %s\n[Error] = %s" % (res.X, res.F)
 
@@ -252,7 +230,7 @@ def Code_Executor(code: str) -> int:
 
 
 @tool
-def Image_Analyzer(path: str = None, filename: str = None, dynamic_code: str = None, calculate_friction: bool = False, calculate_mean_roughness: bool = False, calculate_rms_roughness: bool = False) -> Dict[str, Any]:
+def Image_Analyzer(path: str = None, dynamic_code: str = None, calculate_friction: bool = False, calculate_mean_roughness: bool = False, calculate_rms_roughness: bool = False) -> Dict[str, Any]:
     """
     This tool is specifically designed to extract and analyze image data from Atomic Force Microscopy (AFM) .nid image files captured using Nanosurf instruments. Leveraging the Nanosurf API, it processes high-resolution AFM images and optionally computes key surface properties such as:
     - Average Friction
@@ -261,8 +239,7 @@ def Image_Analyzer(path: str = None, filename: str = None, dynamic_code: str = N
     The tool supports both static file access (via a provided filename) and dynamic selection of the latest AFM image file in a specified directory. It also allows execution of custom image-processing logic through an optional dynamic_code parameter, enabling flexible access to different imaging channels (e.g., Z-Axis, Deflection, Friction Force) and scan directions (Forward/Backward).
     
     Args:
-        path (str): The directory path to search for the latest file. Defaults to None.
-        filename (str): The specific image file to display. Defaults to None.
+        path (str): The path to the image file which is to be analysed. 
         dynamic_code (str): A string containing Python code to process the image data. Defaults to None.
         calculate_friction (bool): Whether to calculate average friction. Defaults to False.
         calculate_mean_roughness (bool): Whether to calculate mean roughness. Defaults to False.
@@ -275,31 +252,31 @@ def Image_Analyzer(path: str = None, filename: str = None, dynamic_code: str = N
     import glob
     from NSFopen.read import read
     import numpy as np
-    if path is None:
-        path = os.getcwd()
+    # if path is None:
+    #     path = os.getcwd()
     
-    # Determine the file to display
-    if filename:
-        file_to_display = os.path.join(path, filename)
-        if not os.path.isfile(file_to_display):
-            print(f"File not found: {file_to_display}")
-            return {"status": "Error", "message": "The specified file does not exist."}
-    else:
-        # Get the list of all files in the directory
-        list_of_files = glob.glob(os.path.join(path, '*'))
+    # # Determine the file to display
+    # if filename:
+    #     file_to_display = os.path.join(path, filename)
+    #     if not os.path.isfile(file_to_display):
+    #         print(f"File not found: {file_to_display}")
+    #         return {"status": "Error", "message": "The specified file does not exist."}
+    # else:
+    #     # Get the list of all files in the directory
+    #     list_of_files = glob.glob(os.path.join(path, '*'))
         
-        if not list_of_files:
-            print("No files found in the specified directory.")
-            return {"status": "Error", "message": "No files found in the directory."}
+    #     if not list_of_files:
+    #         print("No files found in the specified directory.")
+    #         return {"status": "Error", "message": "No files found in the directory."}
         
-        # Find the latest file based on creation time
-        file_to_display = max(list_of_files, key=os.path.getctime)
+    #     # Find the latest file based on creation time
+    #     file_to_display = max(list_of_files, key=os.path.getctime)
     
-    print(f"File to display: {file_to_display}")
+    # print(f"File to display: {file_to_display}")
 
     try:
         # Read the file
-        afm = read(file_to_display)
+        afm = read(path)
         
         # Extract data and parameters
         data = afm.data  # Raw data
@@ -346,7 +323,7 @@ def Image_Analyzer(path: str = None, filename: str = None, dynamic_code: str = N
             print(f"RMS Roughness: {rms_roughness}")
         
         # Return the image data along with status
-        result = {"status": "Success", "message": f"Raw Image {file_to_display} processed successfully.", "image_data": image_data}
+        result = {"status": "Success", "message": f"Raw Image {path} processed successfully.", "image_data": image_data}
         
         # Include calculated metrics in the result if they were calculated
         if calculate_friction:

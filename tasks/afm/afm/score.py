@@ -9,6 +9,19 @@ import nanosurf
 from loguru import logger
 import math
 
+import os
+
+def check_indentation(gt, ag):
+    if gt.lower() == ag.lower():
+        return True
+    return False
+
+def check_nid_file_exists(directory):
+    for filename in os.listdir(directory):
+        if filename.endswith(".nid"):
+            return True
+    return False
+
 def get_params():
     import pythoncom
     pythoncom.CoInitialize()
@@ -67,6 +80,8 @@ def get_params():
         "points_per_line" : scan.Points,
         "lines_per_frame" : scan.Lines,
         "rotation" : scan.rotation,
+        "centre_x" : scan.CenterPosX,
+        "centre_y" : scan.CenterPosY,
         "setpoint" : zcontrol.SetPoint,
         "tip" :  tip
     }
