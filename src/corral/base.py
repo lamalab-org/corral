@@ -96,6 +96,12 @@ class TaskState:
             },
         }
 
+    def get_duration(self) -> float | None:
+        """Get trial duration in seconds"""
+        if self.end_time and self.start_time:
+            return (self.end_time - self.start_time).total_seconds()
+        return None
+
 
 class Tool:
     """Base class for tools
@@ -210,6 +216,8 @@ class Environment(ABC):
     def reset_state(self) -> str:
         """Reset the environment state with a new trial id and fresh TaskState and return finished trail id."""
         if hasattr(self, "state") and self.state is not None:
+            if self.state.is_completed and self.state.end_time is None:
+                self.state.end_time = datetime.now(tz=timezone.utc)
             archived_snapshot = self.save_current_state()
             self.trial_states[self.state.trial_id] = archived_snapshot
 
@@ -254,20 +262,22 @@ class Environment(ABC):
         """Add a tool to the environment"""
         self.tools[tool.name] = tool
 
-    def get_available_tools(self) -> list[dict[str, str | list[ToolArgument]]]:
-        """Get list of available tools with their descriptions and arguments.
-
-        Returns:
-            list[dict[str, str | list[ToolArgument]]]: A list of dictionaries where each dictionary contains:
-                - 'name': the tool's name as a string.
-                - 'description': a string describing the tool.
-                - 'arguments': a list of ToolArgument objects representing the tool's arguments.
-        """
+    def get_available_tools(self) -> list[dict[str, str | list[dict]]]:
         return [
             {
                 "name": t.name,
                 "description": t.description,
-                "arguments": ", ".join(arg.name for arg in t.arguments),
+                "arguments": [
+                    {
+                        "name": arg.name,
+                        "type": arg.type,
+                        "description": arg.description,
+                        "required": arg.required,
+                        "default": arg.default,
+                        "choices": arg.choices,
+                    }
+                    for arg in t.arguments
+                ],
             }
             for t in self.tools.values()
         ]
@@ -372,7 +382,8 @@ class Environment(ABC):
         score = self.score()  # Using existing abstract score method
         self.state.score = score
         self.state.is_completed = True
-        self.state.end_time = datetime.now(tz=timezone.utc)
+        if self.state.end_time is None:
+            self.state.end_time = datetime.now(tz=timezone.utc)
         return score
 
     def get_completed_trial_data(self) -> dict:

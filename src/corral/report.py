@@ -684,6 +684,7 @@ class BenchmarkResult:
             except Exception as e:
                 logger.error(f"Error saving report file: {e}")
                 raise
+
         from rich.console import Console
         from rich.panel import Panel
 
