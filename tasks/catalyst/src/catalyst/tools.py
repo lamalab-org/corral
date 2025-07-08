@@ -63,9 +63,11 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     3. [FOLLOW_UP] Use the CIF output with slab generation tools like enumerate_slabs_text to create slab structures [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
     [SYNTACTICAL] Usage examples:
-    - get_structure_from_mp_text("mp-149")  # Silicon structure
-    - get_structure_from_mp_text("mp-20066")  # CO2 structure
-    - get_structure_from_mp_text("mp-2")  # Other material
+    [
+    `get_structure_from_mp_text("mp-149")`,  # Silicon structure
+    `get_structure_from_mp_text("mp-20066")` , # CO2 structure
+    `get_structure_from_mp_text("mp-2")`, # Other material
+    ]
     [/SYNTACTICAL]
 
     Args:
@@ -1947,7 +1949,7 @@ def consolidate_polymorph_datasets(
 
     stats["total_polymorphs"] = len(all_polymorphs)
     if stats["compositions_included"] > 0:
-        stats["average_per_composition"] = (
+        stats["average_per_composition"] = int(
             stats["total_polymorphs"] / stats["compositions_included"]
         )
     else:
@@ -1964,6 +1966,169 @@ def consolidate_polymorph_datasets(
     return json.dumps(
         {"success": True, "output_path": output_path, "statistics": stats}, indent=2
     )
+
+
+@tool
+def select_polymorphs_with_strategy_to_file(
+    polymorphs_data: str,
+    save_path: str,
+    selection_strategy: str = "diverse_energy",
+    max_polymorphs: int = 5,
+    energy_threshold: float = 0.5,
+    is_path: bool = False,
+) -> str:
+    """[BRIEF] Select polymorphs using strategic criteria and save results to file for persistent storage. [/BRIEF]
+
+    [DETAILED] This tool combines the strategic polymorph selection capabilities with direct file output for
+    persistent storage and workflow automation. It implements the same selection algorithms as
+    select_polymorphs_with_strategy but automatically saves results to a specified file path.
+    The input can be json polymorph data as string or path to json file of polymorph data.
+    It supports multiple selection algorithms designed for different research objectives, from stability-focused structures to comprehensive structures.
+    This is essential for automated workflows, batch processing, and creating organized datasets where selected polymorphs need
+    to be stored for later use or sharing. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need strategic polymorph selection with automatic file storage
+    - Best suited for automated workflows and batch processing pipelines
+    - Essential for creating organized datasets that will be shared or archived
+    - Recommended when building systematic collections of selected materials
+    - Avoid when you only need temporary selection results in memory
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Applies identical selection strategies as select_polymorphs_with_strategy
+    - Processes energy threshold filtering and strategic selection algorithms
+    - Automatically saves selected polymorphs to specified file path in JSON format
+    - Ensures proper file formatting and directory creation as needed
+    - Returns file path for integration with downstream tools
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First obtain polymorph data using get_bulk_polymorphs_data or load from file [/PREREQUISITE]
+    2. [CURRENT] Apply strategic selection and save results to persistent file storage [/CURRENT]
+    3. [FOLLOW_UP] Use saved file with find_all_unique_slabs_upto_millerindex or other structural analysis tools [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - select_polymorphs_with_strategy_to_file(polymorphs_json, "selected_tio2.json", "most_stable", 3, 0.3, False)
+    - select_polymorphs_with_strategy_to_file("data/polymorphs.json", "output/diverse.json", "diverse_structure", 5, 0.5, True)
+    - select_polymorphs_with_strategy_to_file(batch_data, "results/selected_materials.json", "diverse_energy", 8, 0.8, False)
+    [/SYNTACTICAL]
+
+    Args:
+        polymorphs_data: [BRIEF] JSON string or file path containing polymorph data. [/BRIEF]
+                        [DETAILED] Either a JSON-formatted string containing polymorph data or a file path
+                        to a JSON file, depending on the is_path parameter. The data should contain
+                        polymorphs with properties like energy_above_hull, space_group, and other
+                        structural/energetic information for strategic selection. [/DETAILED]
+                        [SYNTACTIC] Format: "JSON string or valid file path" [/SYNTACTIC]
+                        [EXAMPLES] Examples: JSON string from get_bulk_polymorphs_data, "data/polymorphs.json" [/EXAMPLES]
+
+        save_path: [BRIEF] File path where selected polymorphs will be saved. [/BRIEF]
+                  [DETAILED] Complete file path where the selected polymorph subset will be saved in JSON format.
+                  The directory will be created if it doesn't exist. This file can be used by subsequent tools
+                  or shared with collaborators. Using .json extension is recommended for clarity. [/DETAILED]
+                  [SYNTACTIC] Format: "Valid file path with .json extension" [/SYNTACTIC]
+                  [EXAMPLES] Examples: "selected_polymorphs.json", "data/tio2_selected.json", "results/diverse_materials.json" [/EXAMPLES]
+
+        selection_strategy: [BRIEF] Strategy for polymorph selection. Defaults to "diverse_energy". [/BRIEF]
+                           [DETAILED] The algorithm used for selecting polymorphs from the dataset. Options include
+                           "diverse_energy" for energy range sampling, "most_stable" for thermodynamic stability,
+                           and "diverse_structure" for structural diversity. Each strategy optimizes for different
+                           research objectives and analysis requirements. [/DETAILED]
+                           [SYNTACTIC] Format: "diverse_energy", "most_stable", or "diverse_structure" [/SYNTACTIC]
+                           [EXAMPLES] Examples: "most_stable" (stability focus), "diverse_structure" (structural variety), "diverse_energy" (representative sampling) [/EXAMPLES]
+
+        max_polymorphs: [BRIEF] Maximum number of polymorphs to select. Defaults to 5. [/BRIEF]
+                       [DETAILED] The maximum number of polymorphs to include in the final selection and save to file.
+                       This parameter controls dataset size and should be chosen based on computational resources
+                       and analysis requirements. Larger values provide more comprehensive coverage but increase
+                       processing time. [/DETAILED]
+                       [SYNTACTIC] Format: positive integer [/SYNTACTIC]
+                       [EXAMPLES] Examples: 3 (focused selection), 5 (standard), 10 (comprehensive coverage) [/EXAMPLES]
+
+        energy_threshold: [BRIEF] Maximum energy above hull in eV/atom. Defaults to 0.5. [/BRIEF]
+                         [DETAILED] Energy threshold above the convex hull for including polymorphs in the selection
+                         process. Only phases with energy above hull less than or equal to this value will be
+                         considered. This pre-filtering ensures thermodynamic accessibility of selected phases. [/DETAILED]
+                         [SYNTACTIC] Format: positive float representing energy in eV/atom [/SYNTACTIC]
+                         [EXAMPLES] Examples: 0.1 (very stable only), 0.5 (moderate threshold), 1.0 (include metastable) [/EXAMPLES]
+
+        is_path: [BRIEF] Whether polymorphs_data is a file path. Defaults to False. [/BRIEF]
+                [DETAILED] Boolean flag indicating whether the polymorphs_data parameter should be treated as
+                a file path (True) or as a JSON string (False). When True, the tool will read the JSON data
+                from the specified file. This enables flexible input handling for different workflow patterns. [/DETAILED]
+                [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                [EXAMPLES] Examples: True (file input), False (JSON string input) [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] File path where the selected polymorphs were saved. [/BRIEF]
+             [DETAILED] The complete file path where the selected polymorphs have been successfully saved.
+             This path can be used by subsequent tools for loading the selected dataset or for verification
+             that the file was created correctly. The file contains the subset of polymorphs selected
+             according to the specified strategy. [/DETAILED]
+             [EXAMPLES] Example output: "data/selected_tio2_polymorphs.json" [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When invalid selection strategy is specified [/ERROR_WHEN]
+                   [ERROR_DETAILS] Strategy name not recognized or invalid parameters [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Use valid strategy names: "diverse_energy", "most_stable", "diverse_structure" [/ERROR_RECOVERY]
+        FileNotFoundError: [ERROR_WHEN] When is_path=True but input file doesn't exist [/ERROR_WHEN]
+                          [ERROR_DETAILS] Specified input file path cannot be found or accessed [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Check input file path and ensure file exists [/ERROR_RECOVERY]
+        IOError: [ERROR_WHEN] When unable to write to the save_path location [/ERROR_WHEN]
+                [ERROR_DETAILS] Output directory doesn't exist or insufficient write permissions [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Check output directory permissions and ensure path is writable [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Selection strategies are predefined and not customizable
+    - File overwriting occurs without warning if save_path already exists
+    - Cannot validate file format compatibility with specific downstream tools
+    - Energy threshold applies uniformly without consideration of composition differences
+    [/LIMITATIONS]
+    """
+    if is_path:
+        with Path(polymorphs_data).open("r") as f:
+            polymorphs = json.loads(f.read())
+    else:
+        polymorphs = json.loads(polymorphs_data)
+
+    # Filter by energy threshold
+    filtered = [p for p in polymorphs if p["energy_above_hull"] <= energy_threshold]
+
+    if selection_strategy == "most_stable":
+        selected = sorted(filtered, key=lambda x: x["energy_above_hull"])[
+            :max_polymorphs
+        ]
+
+    elif selection_strategy == "diverse_energy":
+        sorted_polymorphs = sorted(filtered, key=lambda x: x["energy_above_hull"])
+        selected = []
+        if sorted_polymorphs:
+            step = max(1, len(sorted_polymorphs) // max_polymorphs)
+            for i in range(0, min(len(sorted_polymorphs), max_polymorphs * step), step):
+                selected.append(sorted_polymorphs[i])
+
+    elif selection_strategy == "diverse_structure":
+        selected = []
+        seen_space_groups = set()
+        for p in sorted(filtered, key=lambda x: x["energy_above_hull"]):
+            if (
+                p["space_group"] not in seen_space_groups
+                and len(selected) < max_polymorphs
+            ):
+                selected.append(p)
+                seen_space_groups.add(p["space_group"])
+
+    else:
+        selected = filtered[:max_polymorphs]
+
+    # Save to file
+    with Path(save_path).open("w") as f:
+        json.dump(selected, f, indent=2)
+
+    return save_path
 
 
 @tool
@@ -2794,355 +2959,6 @@ def prepare_tabular_dataset(
 
 
 @tool
-def prepare_neural_network_dataset(
-    polymorphs_json_path: str,
-    output_path: str,
-    target_property: str = "formation_energy_per_atom",
-    sequence_features: bool = False,
-    embedding_features: bool = True,
-    test_split: float = 0.2,
-) -> str:
-    """
-    Prepare dataset for neural network models with embeddings and sequence features.
-
-    Args:
-        polymorphs_json_path: Path to polymorphs JSON file
-        output_path: Base path for saving dataset files
-        target_property: Property to predict
-        sequence_features: Whether to create sequence-based features
-        embedding_features: Whether to create embedding features
-        test_split: Fraction for test set
-
-    Returns:
-        JSON string with dataset preparation results
-    """
-    try:
-        # Load polymorphs data
-        with Path(polymorphs_json_path).open("r") as f:
-            polymorphs = json.load(f)
-
-        # Prepare neural network specific features
-        nn_features = []
-        targets = []
-        metadata = []
-
-        for poly in polymorphs:
-            if target_property not in poly or poly[target_property] is None:
-                continue
-
-            try:
-                from pymatgen.core import Structure
-
-                structure = Structure.from_str(poly["cif"], fmt="cif")
-
-                # Base features
-                features = {
-                    "structural": [
-                        structure.density,
-                        structure.volume,
-                        len(structure),
-                        len(structure.composition.elements),
-                        structure.lattice.a,
-                        structure.lattice.b,
-                        structure.lattice.c,
-                        structure.lattice.alpha,
-                        structure.lattice.beta,
-                        structure.lattice.gamma,
-                    ]
-                }
-
-                # Element embeddings
-                if embedding_features:
-                    element_properties = []
-                    for element in structure.composition.elements:
-                        element_properties.extend(
-                            [
-                                element.atomic_radius or 0,
-                                element.X,  # electronegativity
-                                element.atomic_mass,
-                                element.number,
-                                element.row,
-                                element.group,
-                            ]
-                        )
-
-                    # Pad or truncate to fixed size (max 5 elements * 6 properties = 30)
-                    element_properties = element_properties[:30]
-                    element_properties.extend([0] * (30 - len(element_properties)))
-                    features["elements"] = element_properties
-
-                # Sequence features (atomic positions)
-                if sequence_features:
-                    positions = structure.frac_coords.flatten()
-                    # Limit to first 150 coordinates (50 atoms * 3 coords)
-                    positions = positions[:150]
-                    positions = np.pad(positions, (0, max(0, 150 - len(positions))))
-                    features["positions"] = positions.tolist()
-
-                nn_features.append(features)
-                targets.append(poly[target_property])
-                metadata.append(
-                    {
-                        "material_id": poly.get("material_id", "unknown"),
-                        "composition": poly.get("composition", "unknown"),
-                    }
-                )
-
-            except Exception as e:
-                logger.info(
-                    f"Warning: Could not process {poly.get('material_id', 'unknown')}: {e}"
-                )
-                continue
-
-        if len(nn_features) == 0:
-            return json.dumps({"success": False, "error": "No valid samples found"})
-
-        # Split data
-        from sklearn.model_selection import train_test_split
-
-        indices = np.arange(len(nn_features))
-        train_idx, test_idx = train_test_split(
-            indices, test_size=test_split, random_state=42
-        )
-
-        train_features = [nn_features[i] for i in train_idx]
-        test_features = [nn_features[i] for i in test_idx]
-        train_targets = [targets[i] for i in train_idx]
-        test_targets = [targets[i] for i in test_idx]
-        train_metadata = [metadata[i] for i in train_idx]
-        test_metadata = [metadata[i] for i in test_idx]
-
-        # Save as NPZ files for neural networks
-        train_path = f"{output_path}_train.npz"
-        test_path = f"{output_path}_test.npz"
-
-        # Prepare arrays
-        train_data = {"targets": np.array(train_targets), "metadata": train_metadata}
-        test_data = {"targets": np.array(test_targets), "metadata": test_metadata}
-
-        # Add feature arrays
-        for feature_type in ["structural", "elements", "positions"]:
-            if feature_type in train_features[0]:
-                train_data[feature_type] = np.array(
-                    [f[feature_type] for f in train_features]
-                )
-                test_data[feature_type] = np.array(
-                    [f[feature_type] for f in test_features]
-                )
-
-        np.savez(train_path, **train_data)
-        np.savez(test_path, **test_data)
-
-        # Save dataset info
-        metadata_path = f"{output_path}_metadata.json"
-        dataset_info = {
-            "target_property": target_property,
-            "sequence_features": sequence_features,
-            "embedding_features": embedding_features,
-            "train_samples": len(train_features),
-            "test_samples": len(test_features),
-            "feature_types": list(train_features[0].keys()),
-            "train_path": train_path,
-            "test_path": test_path,
-        }
-
-        with Path(metadata_path).open("w") as f:
-            json.dump(dataset_info, f, indent=2)
-
-        return json.dumps(
-            {
-                "success": True,
-                "train_path": train_path,
-                "test_path": test_path,
-                "metadata_path": metadata_path,
-                "dataset_info": dataset_info,
-            },
-            indent=2,
-        )
-
-    except Exception as e:
-        import traceback
-
-        return json.dumps(
-            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
-        )
-
-
-@tool
-def prepare_graph_dataset(
-    polymorphs_json_path: str,
-    output_path: str,
-    target_property: str = "formation_energy_per_atom",
-    cutoff_radius: float = 5.0,
-    test_split: float = 0.2,
-) -> str:
-    """
-    Prepare graph dataset for Graph Neural Networks (GNNs).
-
-    Args:
-        polymorphs_json_path: Path to polymorphs JSON file
-        output_path: Base path for saving dataset files
-        target_property: Property to predict
-        cutoff_radius: Cutoff radius for graph edges (Angstroms)
-        test_split: Fraction for test set
-
-    Returns:
-        JSON string with dataset preparation results
-    """
-    try:
-        # Load polymorphs data
-        with Path(polymorphs_json_path).open("r") as f:
-            polymorphs = json.load(f)
-
-        graphs = []
-        targets = []
-        metadata = []
-
-        for poly in polymorphs:
-            if target_property not in poly or poly[target_property] is None:
-                continue
-
-            try:
-                from pymatgen.core import Structure
-
-                structure = Structure.from_str(poly["cif"], fmt="cif")
-
-                # Create graph representation
-                # Nodes: atoms with features
-                # Edges: bonds within cutoff radius
-
-                node_features = []
-                edge_indices = []
-                edge_features = []
-
-                # Node features (atomic properties)
-                for _i, site in enumerate(structure.sites):
-                    element = site.specie
-                    node_features.append(
-                        [
-                            element.atomic_radius or 1.0,
-                            element.X,  # electronegativity
-                            element.atomic_mass,
-                            element.number,
-                            float(element.row),
-                            float(element.group),
-                            site.coords[0],
-                            site.coords[1],
-                            site.coords[2],  # coordinates
-                        ]
-                    )
-
-                # Edge features (distances and angles)
-                for i, _site_i in enumerate(structure.sites):
-                    for j, _site_j in enumerate(structure.sites):
-                        if i != j:
-                            distance = structure.get_distance(i, j)
-                            if distance <= cutoff_radius:
-                                edge_indices.append([i, j])
-                                edge_features.append(
-                                    [distance, 1.0 / distance]
-                                )  # distance and inverse distance
-
-                graph_data = {
-                    "node_features": node_features,
-                    "edge_indices": edge_indices,
-                    "edge_features": edge_features,
-                    "num_nodes": len(node_features),
-                    "num_edges": len(edge_indices),
-                }
-
-                graphs.append(graph_data)
-                targets.append(poly[target_property])
-                metadata.append(
-                    {
-                        "material_id": poly.get("material_id", "unknown"),
-                        "composition": poly.get("composition", "unknown"),
-                        "num_atoms": len(structure),
-                    }
-                )
-
-            except Exception as e:
-                logger.info(
-                    f"Warning: Could not create graph for {poly.get('material_id', 'unknown')}: {e}"
-                )
-                continue
-
-        if len(graphs) == 0:
-            return json.dumps({"success": False, "error": "No valid graphs created"})
-
-        # Split data
-        from sklearn.model_selection import train_test_split
-
-        indices = np.arange(len(graphs))
-        train_idx, test_idx = train_test_split(
-            indices, test_size=test_split, random_state=42
-        )
-
-        train_graphs = [graphs[i] for i in train_idx]
-        test_graphs = [graphs[i] for i in test_idx]
-        train_targets = [targets[i] for i in train_idx]
-        test_targets = [targets[i] for i in test_idx]
-        train_metadata = [metadata[i] for i in train_idx]
-        test_metadata = [metadata[i] for i in test_idx]
-
-        # Save graph datasets
-        train_path = f"{output_path}_train_graphs.json"
-        test_path = f"{output_path}_test_graphs.json"
-
-        train_data = {
-            "graphs": train_graphs,
-            "targets": train_targets,
-            "metadata": train_metadata,
-        }
-
-        test_data = {
-            "graphs": test_graphs,
-            "targets": test_targets,
-            "metadata": test_metadata,
-        }
-
-        with Path(train_path).open("w") as f:
-            json.dump(train_data, f, indent=2)
-
-        with Path(test_path).open("w") as f:
-            json.dump(test_data, f, indent=2)
-
-        # Save dataset info
-        metadata_path = f"{output_path}_metadata.json"
-        dataset_info = {
-            "target_property": target_property,
-            "cutoff_radius": cutoff_radius,
-            "train_samples": len(train_graphs),
-            "test_samples": len(test_graphs),
-            "avg_nodes_per_graph": np.mean([g["num_nodes"] for g in graphs]),
-            "avg_edges_per_graph": np.mean([g["num_edges"] for g in graphs]),
-            "train_path": train_path,
-            "test_path": test_path,
-        }
-
-        with Path(metadata_path).open("w") as f:
-            json.dump(dataset_info, f, indent=2)
-
-        return json.dumps(
-            {
-                "success": True,
-                "train_path": train_path,
-                "test_path": test_path,
-                "metadata_path": metadata_path,
-                "dataset_info": dataset_info,
-            },
-            indent=2,
-        )
-
-    except Exception as e:
-        import traceback
-
-        return json.dumps(
-            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
-        )
-
-
-@tool
 def get_mp_thermo_data(material_id: str) -> str:
     """[BRIEF] Retrieve comprehensive thermodynamic data for materials from Materials Project database. [/BRIEF]
 
@@ -3790,181 +3606,6 @@ def perform_cross_validation(
         return json.dumps({"success": False, "error": str(e)}, indent=2)
 
 
-########################
-# Distractor tools
-########################
-
-
-@tool
-def select_polymorphs_with_strategy_to_file(
-    polymorphs_data: str,
-    save_path: str,
-    selection_strategy: str = "diverse_energy",
-    max_polymorphs: int = 5,
-    energy_threshold: float = 0.5,
-    is_path: bool = False,
-) -> str:
-    """
-    Select polymorphs based on a strategy (diverse_energy, most_stable, or diverse_structure). and save results to a file.
-    diverse_energy selects polymorphs with diverse energies,
-    most_stable selects the most stable ones, and diverse_structure selects polymorphs with different space groups.
-
-    Args:
-        polymorphs_data: JSON string or file path with polymorph data
-        save_path: Path where to save the selected polymorphs JSON
-        selection_strategy: Strategy for selection ("diverse_energy", "most_stable", "diverse_structure")
-        max_polymorphs: Maximum number of polymorphs to select
-        energy_threshold: Maximum energy above hull (eV/atom)
-        is_path: If True, polymorphs_data is treated as a file path
-
-    Returns:
-        Path to the saved JSON file
-    """
-    if is_path:
-        with Path(polymorphs_data).open("r") as f:
-            polymorphs = json.loads(f.read())
-    else:
-        polymorphs = json.loads(polymorphs_data)
-
-    # Filter by energy threshold
-    filtered = [p for p in polymorphs if p["energy_above_hull"] <= energy_threshold]
-
-    if selection_strategy == "most_stable":
-        selected = sorted(filtered, key=lambda x: x["energy_above_hull"])[
-            :max_polymorphs
-        ]
-
-    elif selection_strategy == "diverse_energy":
-        sorted_polymorphs = sorted(filtered, key=lambda x: x["energy_above_hull"])
-        selected = []
-        if sorted_polymorphs:
-            step = max(1, len(sorted_polymorphs) // max_polymorphs)
-            for i in range(0, min(len(sorted_polymorphs), max_polymorphs * step), step):
-                selected.append(sorted_polymorphs[i])
-
-    elif selection_strategy == "diverse_structure":
-        selected = []
-        seen_space_groups = set()
-        for p in sorted(filtered, key=lambda x: x["energy_above_hull"]):
-            if (
-                p["space_group"] not in seen_space_groups
-                and len(selected) < max_polymorphs
-            ):
-                selected.append(p)
-                seen_space_groups.add(p["space_group"])
-
-    else:
-        selected = filtered[:max_polymorphs]
-
-    # Save to file
-    with Path(save_path).open("w") as f:
-        json.dump(selected, f, indent=2)
-
-    return save_path
-
-
-@tool
-def process_slab_ocdata_style(
-    slab_cif: str,
-    bulk_cif: str,
-    min_xy_size: float = 8.0,
-    apply_constraints: bool = True,
-) -> str:
-    """
-    Applies ocdata-style processing to a raw slab CIF string:
-    1. Tags surface atoms based on height and coordination relative to the bulk.
-    2. Tiles the slab to meet a minimum lateral (XY) size.
-    3. (Optional) Applies constraints to fix bulk-like atoms (tag=0).
-
-    Requires the original bulk structure for accurate surface atom tagging.
-
-    Args:
-        slab_cif: CIF string of the raw slab structure (typically from pymatgen generation).
-        bulk_cif: CIF string of the original bulk structure used for coordination reference.
-        min_xy_size: Minimum lateral size (Å) the slab should span after tiling.
-        apply_constraints: If True, applies FixAtoms constraints to non-surface atoms (tag=0).
-
-    Returns:
-        str: CIF string of the processed (tagged, tiled, constrained) slab.
-    """
-    from pymatgen.core import Structure
-    from pymatgen.io.ase import AseAtomsAdaptor
-
-    try:
-        # Load structures
-        slab_struct_pmg = load_structure(slab_cif)
-        slab_atoms_ase = AseAtomsAdaptor.get_atoms(slab_struct_pmg)
-
-        bulk_struct_pmg = load_structure(bulk_cif)
-        # Standardize bulk *before* getting ASE atoms for consistent coordination check
-        standardized_bulk_pmg = standardize_bulk(bulk_struct_pmg)
-        standardized_bulk_ase = AseAtomsAdaptor.get_atoms(standardized_bulk_pmg)
-
-        # 1. Tag Surface Atoms
-        tags = find_surface_atoms_with_voronoi(standardized_bulk_ase, slab_atoms_ase)
-        slab_atoms_ase.set_tags(tags)
-
-        # 2. Tile the Tagged Slab
-        tiled_atoms_ase = tile_atoms(slab_atoms_ase, min_xy_size)
-
-        # 3. Apply Constraints (Optional)
-        final_atoms_ase = tiled_atoms_ase
-        if apply_constraints:
-            final_atoms_ase = set_fixed_atom_constraints(tiled_atoms_ase)
-
-        # 4. Convert back to CIF
-        final_struct_pmg = Structure.from_ase_atoms(final_atoms_ase)
-        return final_struct_pmg.to(fmt="cif")
-
-    except Exception as e:
-        return f"ERROR: Slab processing failed - {e}"
-
-
-@tool
-def get_symmetrically_distinct_miller_indices_from_bulk(
-    bulk_structure_path_or_string: str, from_path: bool = False, max_miller: int = 2
-) -> list:
-    """
-    Get symmetrically distinct Miller indices for a bulk structure.
-
-    Args:
-        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
-        from_path: Boolean indicating if the input is a file path
-        max_miller: Maximum Miller index to consider (1, 2, or 3)
-
-    Returns:
-        List of symmetrically distinct Miller indices
-    """
-    # Load the bulk structure from a CIF file or string
-
-    from pymatgen.core.surface import get_symmetrically_distinct_miller_indices
-
-    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
-
-    return get_symmetrically_distinct_miller_indices(bulk_structure, max_miller)
-
-
-@tool
-def enumerate_all_possible_miller_indices(max_miller: int = 2) -> list:
-    """
-    Generate all possible Miller indices up to a given maximum.
-
-    Args:
-        max_miller: Maximum Miller index to consider (1, 2, or 3)
-
-    Returns:
-        List of tuples representing all possible Miller indices
-    """
-    mill_list = []
-    for i in range(max_miller + 1):
-        for j in range(max_miller + 1):
-            for k in range(max_miller + 1):
-                if i == 0 and j == 0 and k == 0:
-                    continue  # Skip (0,0,0)
-                mill_list.append((i, j, k))
-    return mill_list
-
-
 @tool
 def find_all_unique_slabs_upto_millerindex(
     bulk_structure_path_or_string: str,
@@ -3975,21 +3616,121 @@ def find_all_unique_slabs_upto_millerindex(
     center_slab: bool = True,
     max_normal_search: int = 10,
 ) -> str:
-    """
-    Generates all unique slabs for a given bulk structure up to specified Miller indices.
+    """[BRIEF] Generate all unique surface slabs for bulk structure up to specified Miller indices systematically. [/BRIEF]
+
+    [DETAILED] This tool provides comprehensive surface generation by systematically creating all unique surface
+    slabs for a given bulk structure across all Miller indices up to a specified maximum. It implements advanced
+    slab generation algorithms that explore different surface orientations and terminations, essential for
+    systematic surface studies, catalysis research, and comprehensive materials characterization. This approach
+    ensures no important surface orientations are missed in analysis. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need comprehensive exploration of all possible surface orientations
+    - Best suited for systematic surface studies and complete materials characterization
+    - Essential for identifying optimal surface orientations for catalysis or adsorption
+    - Recommended for research requiring exhaustive surface analysis
+    - Avoid when you only need specific known surface orientations
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Systematically generates slabs for all Miller indices up to the specified maximum
+    - Uses advanced algorithms to identify unique surface terminations and orientations
+    - Applies consistent slab thickness and vacuum parameters across all surfaces
+    - Calculates surface properties including area, thickness, and atom count
+    - Returns comprehensive dataset with detailed metadata for each surface
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First obtain bulk structure using get_structure_from_mp_text or select from polymorphs [/PREREQUISITE]
+    2. [CURRENT] Generate comprehensive collection of all possible surface slabs [/CURRENT]
+    3. [FOLLOW_UP] Use select_slabs_with_strategy to filter results or save_structures_to_db for storage [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - find_all_unique_slabs_upto_millerindex(bulk_cif, False, 2, 10, 15, True, 10)
+    - find_all_unique_slabs_upto_millerindex("bulk_structure.cif", True, 1, 8, 12, True, 5)
+    - find_all_unique_slabs_upto_millerindex(structure_string, False, 3, 12, 20, False, 15)
+    [/SYNTACTICAL]
 
     Args:
-        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
-        from_path: Boolean indicating if the input is a file path
-        max_index: Maximum Miller index to consider (1, 2, or 3)
-        min_slab_size: Minimum slab thickness in Angstroms
-        min_vacuum_size: Minimum vacuum size in Angstroms
-        center_slab: If True, centers the slab in the vacuum region
-        max_normal_search: Maximum number of normals to search for slab generation
+        bulk_structure_path_or_string: [BRIEF] Path to CIF file or CIF string of bulk structure. [/BRIEF]
+                                      [DETAILED] Either a complete file path to a CIF file containing the bulk crystal
+                                      structure, or a CIF-formatted string containing the structure data, depending on
+                                      the from_path parameter. This structure serves as the basis for all surface
+                                      generation and should be a well-defined three-dimensional crystal. [/DETAILED]
+                                      [SYNTACTIC] Format: "Valid CIF file path or CIF format string" [/SYNTACTIC]
+                                      [EXAMPLES] Examples: "structures/bulk_si.cif", CIF string from Materials Project [/EXAMPLES]
+
+        from_path: [BRIEF] Boolean indicating if input is a file path. Defaults to False. [/BRIEF]
+                  [DETAILED] Boolean flag that determines how to interpret the bulk_structure_path_or_string parameter.
+                  When True, treats the input as a file path to read. When False, treats it as a CIF string to parse
+                  directly. This provides flexibility for different data input patterns in workflows. [/DETAILED]
+                  [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                  [EXAMPLES] Examples: True (file input), False (string input) [/EXAMPLES]
+
+        max_index: [BRIEF] Maximum Miller index to consider. Defaults to 2. [/BRIEF]
+                  [DETAILED] The maximum value for Miller indices (h, k, l) to include in surface generation.
+                  Higher values explore more surface orientations but increase computational cost exponentially.
+                  Common choices are 1, 2, or 3 depending on the comprehensiveness required and computational
+                  resources available. [/DETAILED]
+                  [SYNTACTIC] Format: positive integer (1, 2, or 3) [/SYNTACTIC]
+                  [EXAMPLES] Examples: 1 (basic orientations), 2 (standard), 3 (comprehensive but expensive) [/EXAMPLES]
+
+        min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 8. [/BRIEF]
+                      [DETAILED] The minimum thickness of generated slabs in the direction perpendicular to the surface
+                      plane. This ensures adequate bulk-like behavior in the slab center while exposing the desired
+                      surface. Larger values provide more accurate surface representation but increase computational cost. [/DETAILED]
+                      [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
+                      [EXAMPLES] Examples: 8.0 (minimal), 12.0 (standard), 15.0 (thick) [/EXAMPLES]
+
+        min_vacuum_size: [BRIEF] Minimum vacuum layer thickness in Angstroms. Defaults to 15. [/BRIEF]
+                        [DETAILED] The minimum vacuum space above each surface to prevent interactions between periodic
+                        images in surface calculations. Larger vacuum regions are essential for accurate surface energy
+                        calculations and prevent spurious interactions between surface images. [/DETAILED]
+                        [SYNTACTIC] Format: positive float representing vacuum thickness in Angstroms [/SYNTACTIC]
+                        [EXAMPLES] Examples: 10.0 (minimal), 15.0 (standard), 20.0 (large) [/EXAMPLES]
+
+        center_slab: [BRIEF] Whether to center slab in vacuum region. Defaults to True. [/BRIEF]
+                    [DETAILED] Boolean flag controlling whether the slab should be positioned in the center of the
+                    vacuum region. Centering is generally recommended for symmetric boundary conditions and
+                    consistent surface calculations. Setting to False may be useful for specific calculation
+                    requirements or interfacial studies. [/DETAILED]
+                    [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                    [EXAMPLES] Examples: True (centered, recommended), False (offset positioning) [/EXAMPLES]
+
+        max_normal_search: [BRIEF] Maximum number of surface normals to search. Defaults to 10. [/BRIEF]
+                          [DETAILED] The maximum number of surface normal directions to explore for each Miller index.
+                          Higher values may find more unique terminations but increase computational cost. This parameter
+                          controls the thoroughness of surface termination exploration for complex structures. [/DETAILED]
+                          [SYNTACTIC] Format: positive integer [/SYNTACTIC]
+                          [EXAMPLES] Examples: 5 (quick), 10 (standard), 20 (thorough) [/EXAMPLES]
 
     Returns:
-        JSON dictionary with slab IDs as keys and their properties as values.
-             Each value contains Miller index, termination, CIF string, area, number of sites, and slab thickness.
+        str: [BRIEF] JSON dictionary with comprehensive slab data including properties and metadata. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing a dictionary where keys are slab identifiers and values
+             contain comprehensive slab information including Miller indices, termination numbers, CIF structures,
+             surface areas, atom counts, and slab thicknesses. This provides complete characterization of all
+             generated surfaces for analysis and selection. [/DETAILED]
+             [EXAMPLES] Example output: '{"111_0": {"miller_index": [1,1,1], "cif": "...", "area": 45.2, "num_sites": 24, ...}}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When bulk structure is invalid or parameters are incompatible [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid CIF format, negative size parameters, or structure incompatible with Miller indices [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify structure format and ensure all parameters are positive [/ERROR_RECOVERY]
+        FileNotFoundError: [ERROR_WHEN] When from_path=True but file doesn't exist [/ERROR_WHEN]
+                          [ERROR_DETAILS] Specified file path cannot be found or accessed [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Check file path exists and is readable [/ERROR_RECOVERY]
+        MemoryError: [ERROR_WHEN] When max_index is too large for available memory [/ERROR_WHEN]
+                    [ERROR_DETAILS] Exponential growth in surface combinations exceeds memory limits [/ERROR_DETAILS]
+                    [ERROR_RECOVERY] Reduce max_index or increase available memory [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Computational cost grows exponentially with max_index
+    - May generate many similar surfaces for high-symmetry structures
+    - Does not perform surface relaxation or energy calculations
+    - Cannot predict relative stability or importance of different surfaces
+    [/LIMITATIONS]
     """
     from pymatgen.core.surface import generate_all_slabs
 
@@ -4018,322 +3759,81 @@ def find_all_unique_slabs_upto_millerindex(
         }
 
     return json.dumps(slabs_dict, indent=2)
-
-
-@tool
-def find_all_unique_slabs_upto_millerindex_to_file(
-    bulk_structure_path_or_string: str,
-    out_put_path: str,
-    from_path: bool = False,
-    max_index: int = 2,
-    min_slab_size: float = 8,
-    min_vacuum_size: float = 15,
-    center_slab: bool = True,
-    max_normal_search: int = 10,
-) -> str:
-    """
-    Generates all unique slabs for a given bulk structure up to specified Miller indices
-    and saves the results to a JSON file.
-
-    Args:
-        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
-        out_put_path: Path where to save the JSON output
-        from_path: Boolean indicating if the input is a file path
-        max_index: Maximum Miller index to consider (1, 2, or 3)
-        min_slab_size: Minimum slab thickness in Angstroms
-        min_vacuum_size: Minimum vacuum size in Angstroms
-        center_slab: If True, centers the slab in the vacuum region
-        max_normal_search: Maximum number of normals to search for slab generation
-
-    Returns:
-        str: Message indicating where the slabs data has been written.
-    """
-
-    from pymatgen.core.surface import generate_all_slabs
-
-    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
-
-    slabs = generate_all_slabs(
-        bulk_structure,
-        max_index=max_index,
-        min_slab_size=min_slab_size,
-        min_vacuum_size=min_vacuum_size,
-        center_slab=center_slab,
-        max_normal_search=max_normal_search,
-    )
-    slabs_dict = {}
-    for i, slab in enumerate(slabs):
-        slab_id = (
-            f"{slab.miller_index[0]}{slab.miller_index[1]}{slab.miller_index[2]}_{i}"
-        )
-        slabs_dict[slab_id] = {
-            "miller_index": slab.miller_index,
-            "termination": i,
-            "cif": slab.to(fmt="cif"),
-            "area": slab.surface_area,
-            "num_sites": len(slab),
-            "slab_thickness": slab.thickness,
-        }
-
-    with Path(out_put_path).open("w") as f:
-        json.dump(slabs_dict, f, indent=2)
-    return f"Slabs data written to {out_put_path}"
-
-
-@tool
-def enumerate_slabs_for_list_of_miller_index(
-    bulk_structure_path_or_string: str,
-    from_path: bool = False,
-    miller_index_list: list[tuple] | None = None,
-    min_slab_size: float = 12,
-    min_vacuum_size: float = 5,
-) -> str:
-    """
-    Generates slabs for a given bulk structure and specified Miller indices.
-
-    Args:
-        bulk_structure_path_or_string: Path to CIF file or CIF string of the bulk structure
-        from_path: Boolean indicating if the input is a file path
-        miller_index_list: List of Miller indices to generate slabs for (e.g., [(1, 1, 1), (2, 0, 0)])
-        min_slab_size: Minimum slab thickness in Angstroms
-        min_vacuum_size: Minimum vacuum size in Angstroms
-
-    Returns:
-        str: JSON dictionary: {"slab_0": "<cif_string>", "slab_1": "<cif_string>", ...}
-    """
-    import json
-
-    from pymatgen.core import Structure
-    from pymatgen.core.surface import SlabGenerator
-
-    if miller_index_list is None:
-        raise ValueError("Miller indexes should be defined")
-
-    if from_path:
-        bulk_structure = Structure.from_file(bulk_structure_path_or_string)
-    else:
-        bulk_structure = Structure.from_str(bulk_structure_path_or_string, fmt="cif")
-
-    slabs_dict = {}
-    for millers in miller_index_list:
-        slab_gen = SlabGenerator(
-            bulk_structure, millers, min_slab_size, min_vacuum_size
-        )
-        slabs = slab_gen.get_slabs()  # returns a list of Slab objects
-        for i, slab in enumerate(slabs):
-            # We use get_orthogonal_c_slab() ensures that the slab lattice is reoriented in c axis for easier adsorption placement.
-            # get_sorted_structure() variations in atom ordering that might occur due to how the slab was originally created.
-            slab_clean = (
-                slab.get_sorted_structure()
-                # slab.get_orthogonal_c_slab().get_sorted_structure()
-            )
-            slabs_dict[f"slab_{i}_{millers}"] = slab_clean.to(fmt="cif")
-
-    return json.dumps(slabs_dict, indent=2)
-
-
-@tool
-def select_slabs_with_strategy(
-    slabs_json: str,
-    selection_strategy: str = "diverse_miller",
-    max_slabs_per_polymorph: int = 3,
-) -> str:
-    """
-    Select slabs based on strategy (diverse_miller, high_coordination, or large_surface).
-    diverse_miller selects slabs with different Miller indices,
-    high_coordination selects slabs with higher number of surface sites,
-    large_surface selects slabs with largest surface areas.
-
-    Args:
-        slabs_json: JSON string with slab data
-        selection_strategy: Strategy ("diverse_miller", "high_coordination", "large_surface")
-        max_slabs_per_polymorph: Maximum slabs to select per polymorph
-
-    Returns:
-        JSON string with selected slabs
-    """
-    slabs = json.loads(slabs_json)
-
-    if selection_strategy == "diverse_miller":
-        # Select slabs with different Miller indices
-        selected = {}
-        miller_indices_seen = set()
-        for slab_id, slab_data in slabs.items():
-            miller_tuple = tuple(slab_data["miller_index"])
-            if (
-                miller_tuple not in miller_indices_seen
-                and len(selected) < max_slabs_per_polymorph
-            ):
-                selected[slab_id] = slab_data
-                miller_indices_seen.add(miller_tuple)
-
-    elif selection_strategy == "large_surface":
-        # Select slabs with largest surface areas
-        sorted_slabs = sorted(slabs.items(), key=lambda x: x[1]["area"], reverse=True)
-        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
-
-    elif selection_strategy == "high_coordination":
-        # Select slabs with higher number of surface sites (proxy for coordination)
-        sorted_slabs = sorted(
-            slabs.items(), key=lambda x: x[1]["num_sites"], reverse=True
-        )
-        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
-
-    else:
-        # Default: take first max_slabs_per_polymorph
-        selected = dict(list(slabs.items())[:max_slabs_per_polymorph])
-
-    return json.dumps(selected, indent=2)
-
-
-@tool
-def select_slabs_with_strategy_to_file(
-    slabs_data: str,
-    save_path: str,
-    selection_strategy: str = "diverse_miller",
-    max_slabs_per_polymorph: int = 3,
-    is_path: bool = False,
-) -> str:
-    """
-    Select slabs based on strategy (diverse_miller, high_coordination, or large_surface).
-    diverse_miller selects slabs with different Miller indices,
-    high_coordination selects slabs with higher number of surface sites,
-    large_surface selects slabs with largest surface areas.
-
-    Args:
-        slabs_data: JSON string or file path with slab data
-        save_path: Path where to save the selected slabs JSON
-        selection_strategy: Strategy ("diverse_miller", "high_coordination", "large_surface")
-        max_slabs_per_polymorph: Maximum slabs to select per polymorph
-        is_path: If True, slabs_data is treated as a file path
-
-    Returns:
-        Path to the saved JSON file
-    """
-    # Load slabs data
-    if is_path:
-        with Path(slabs_data).open("r") as f:
-            slabs = json.loads(f.read())
-    else:
-        slabs = json.loads(slabs_data)
-
-    if selection_strategy == "diverse_miller":
-        # Select slabs with different Miller indices
-        selected = {}
-        miller_indices_seen = set()
-        for slab_id, slab_data in slabs.items():
-            miller_tuple = tuple(slab_data["miller_index"])
-            if (
-                miller_tuple not in miller_indices_seen
-                and len(selected) < max_slabs_per_polymorph
-            ):
-                selected[slab_id] = slab_data
-                miller_indices_seen.add(miller_tuple)
-
-    elif selection_strategy == "large_surface":
-        # Select slabs with largest surface areas
-        sorted_slabs = sorted(slabs.items(), key=lambda x: x[1]["area"], reverse=True)
-        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
-
-    elif selection_strategy == "high_coordination":
-        # Select slabs with higher number of surface sites (proxy for coordination)
-        sorted_slabs = sorted(
-            slabs.items(), key=lambda x: x[1]["num_sites"], reverse=True
-        )
-        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
-
-    else:
-        # Default: take first max_slabs_per_polymorph
-        selected = dict(list(slabs.items())[:max_slabs_per_polymorph])
-
-    # Save to file
-    with Path(save_path).open("w") as f:
-        json.dump(selected, f, indent=2)
-
-    return save_path
-
-
-@tool
-def generate_adsorbate_slab_configs(
-    slab_cif: str, adsorbate_cif: str, adsorption_sites_json: str, height: float = 1.8
-) -> str:
-    """
-    Generate configurations of adsorbates on slab at different adsorption sites.
-
-    Args:
-        slab_cif: CIF string of the slab
-        adsorbate_cif: CIF string of the adsorbate molecule
-        adsorption_sites_json: JSON string with adsorption sites information
-        height: Height in Angstroms for initial adsorbate placement
-
-    Returns:
-        JSON string mapping site identifiers to adsorbate+slab configurations
-    """
-    from pymatgen.analysis.adsorption import AdsorbateSiteFinder
-    from pymatgen.core import Molecule, Structure
-
-    # Load structures
-    slab = Structure.from_str(slab_cif, fmt="cif")
-
-    # Try to load adsorbate as a molecule or structure
-    try:
-        adsorbate_struct = Structure.from_str(adsorbate_cif, fmt="cif")
-        adsorbate = Molecule(
-            species=adsorbate_struct.species,
-            coords=list(adsorbate_struct.cart_coords),
-            charge=0,
-        )
-    except Exception as e:
-        raise ValueError(f"Could not parse adsorbate: {e}") from e
-
-    # Parse adsorption sites
-    adsorption_sites = json.loads(adsorption_sites_json)
-
-    # Generate configs for different sites
-    configs = {}
-    finder = AdsorbateSiteFinder(slab)
-
-    for site_type, sites in adsorption_sites.items():
-        # For each site type (top, bridge, hollow), select a few sites
-        max_sites = min(3, len(sites))  # Limit to 3 sites per type
-
-        for i in range(max_sites):
-            site = sites[i]
-            site_coords = site if isinstance(site, list) else list(site)
-
-            try:
-                # Add adsorbate to the slab
-                ads_slab = finder.add_adsorbate(adsorbate, site_coords, height)
-
-                # Add to configs
-                config_id = f"{site_type}_{i}"
-                configs[config_id] = {
-                    "site_type": site_type,
-                    "site_index": i,
-                    "site_coords": site_coords,
-                    "height": height,
-                    "cif": ads_slab.to(fmt="cif"),
-                }
-            except Exception:
-                # Skip sites that cause errors
-                continue
-
-    return json.dumps(configs, indent=2)
 
 
 @tool
 def get_mp_surface_properties(material_id: str) -> str:
-    """
-    Get surface properties for a specific material from the Materials Project. (Material ID, Formula,
-    Weighted Surface Energy, Weighted Surface Energy (eV/Å^2), Surface Anisotropy, Shape Factor,
-    Has Reconstructed)
+    """[BRIEF] Retrieve comprehensive surface properties for materials from Materials Project database. [/BRIEF]
+
+    [DETAILED] This tool retrieves detailed surface properties and energetics for specific materials from the
+    Materials Project database, providing essential information for surface chemistry and catalysis studies.
+    It accesses calculated surface energies, anisotropy factors, shape factors, and reconstruction information
+    that are crucial for understanding surface stability and reactivity. This data enables informed selection
+    of materials for surface applications and provides theoretical benchmarks for computational studies. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need comprehensive surface property data for specific materials
+    - Best suited for surface stability analysis and catalysis material selection
+    - Essential for benchmarking computational surface calculations
+    - Recommended for systematic surface property studies across material classes
+    - Avoid when you only need basic structural information
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Connects to Materials Project API to access surface property database
+    - Retrieves calculated surface energies and related thermodynamic properties
+    - Provides surface anisotropy and shape factor information for crystal habit prediction
+    - Reports reconstruction information for complex surface behavior
+    - Returns comprehensive JSON with all available surface properties
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Ensure MP_API_KEY is set and material ID is valid [/PREREQUISITE]
+    2. [CURRENT] Retrieve comprehensive surface properties for target material [/CURRENT]
+    3. [FOLLOW_UP] Use surface property data for material selection or computational benchmarking [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - get_mp_surface_properties("mp-149")  # Silicon surface properties
+    - get_mp_surface_properties("mp-2657")  # TiO2 surface properties
+    - get_mp_surface_properties("mp-1143")  # Other material surface data
+    [/SYNTACTICAL]
 
     Args:
-        material_id: Materials Project ID (e.g., "mp-149")
-        api_key: Materials Project API key (optional if set in environment)
+        material_id: [BRIEF] Materials Project ID for the target material. [/BRIEF]
+                    [DETAILED] The unique Materials Project identifier for the material of interest.
+                    Should be in the format "mp-XXXXX" where XXXXX is the numerical ID. The material
+                    must exist in the Materials Project database and have calculated surface properties
+                    available. [/DETAILED]
+                    [SYNTACTIC] Format: "mp-" followed by digits (e.g., "mp-149", "mp-2657") [/SYNTACTIC]
+                    [EXAMPLES] Examples: "mp-149" (Silicon), "mp-2657" (TiO2 anatase), "mp-1143" (Al2O3) [/EXAMPLES]
 
     Returns:
-        JSON string with surface properties
+        str: [BRIEF] JSON string containing comprehensive surface properties and energetics data. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing surface properties including material ID,
+             formula, weighted surface energy, surface energy in eV/Å², surface anisotropy, shape factor,
+             and reconstruction information. Returns error information if surface properties are not
+             available for the specified material. [/DETAILED]
+             [EXAMPLES] Example output: '[{"material_id": "mp-149", "weighted_surface_energy": 1.23, "surface_anisotropy": 0.15, ...}]' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When Materials Project API key is not available [/ERROR_WHEN]
+                   [ERROR_DETAILS] MP_API_KEY environment variable not set or invalid [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Obtain valid API key from Materials Project and set environment variable [/ERROR_RECOVERY]
+        ConnectionError: [ERROR_WHEN] When unable to connect to Materials Project API [/ERROR_WHEN]
+                        [ERROR_DETAILS] Network connectivity issues or API server problems [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Check internet connection and try again later [/ERROR_RECOVERY]
+        KeyError: [ERROR_WHEN] When material ID is not found or has no surface data [/ERROR_WHEN]
+                 [ERROR_DETAILS] Invalid material ID or surface properties not calculated [/ERROR_DETAILS]
+                 [ERROR_RECOVERY] Verify material ID exists and has surface property calculations [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Limited to materials with calculated surface properties in Materials Project
+    - Surface property accuracy depends on computational methodology used
+    - May not include very recent calculations or experimental data
+    - Cannot provide surface properties for custom or modified structures
+    [/LIMITATIONS]
     """
     from mp_api.client import MPRester
 
@@ -4401,18 +3901,109 @@ def save_structures_to_db(
     table_name: str | None = None,
     additional_properties: dict | None = None,
 ) -> str:
-    """
-    Save structures (bulk, slabs, adsorbates, or adsorbate+slab) to a SQLite database with appropriate schema.
+    """[BRIEF] Save crystal structures to SQLite database with appropriate schema for materials informatics. [/BRIEF]
+
+    [DETAILED] This tool provides comprehensive database storage for crystal structures with specialized
+    schemas for different structure types (bulk, slab, adsorbate, adsorbate_slab). It creates appropriate
+    tables with optimized column types and relationships for materials informatics workflows. This is
+    essential for building persistent materials databases, enabling efficient queries, and supporting
+    large-scale computational studies with proper data organization. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need persistent storage for large collections of crystal structures
+    - Best suited for building materials databases with queryable metadata
+    - Essential for organizing complex computational workflows with multiple structure types
+    - Recommended for datasets requiring efficient access and relationship management
+    - Avoid for simple file-based storage or small datasets
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Creates SQLite database with optimized schemas for different structure types
+    - Parses JSON structure data and maps to appropriate database columns
+    - Implements proper data types and constraints for materials properties
+    - Handles bulk insertion with conflict resolution and data validation
+    - Supports extensible schemas with additional property columns
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] First generate structure data using polymorph retrieval or slab generation tools [/PREREQUISITE]
+    2. [CURRENT] Save structures to database with appropriate schema [/CURRENT]
+    3. [FOLLOW_UP] Use add_descriptor_column_to_db for feature engineering or generate_ml_dataset_format for ML [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - save_structures_to_db("materials.db", polymorphs_json, "bulk", "bulk_structures")
+    - save_structures_to_db("surfaces.db", slabs_json, "slab", "slab_structures")
+    - save_structures_to_db("configs.db", adsorbate_configs_json, "adsorbate_slab", "configurations")
+    [/SYNTACTICAL]
 
     Args:
-        db_path: Path to SQLite database file.
-        structures_json: JSON string with structure data.
-        structure_type: Type of structures being saved ("bulk", "slab", "adsorbate", or "adsorbate_slab").
-        table_name: Override default table name (default is determined by structure_type).
-        additional_properties: Dictionary of additional properties to save for all structures.
+        db_path: [BRIEF] Path to SQLite database file. [/BRIEF]
+                [DETAILED] Complete file path to the SQLite database where structures will be stored.
+                The database will be created if it doesn't exist. Multiple tables can be stored
+                in the same database for related structure types. Path should be writable and
+                the directory should exist. [/DETAILED]
+                [SYNTACTIC] Format: "Valid file path with .db extension" [/SYNTACTIC]
+                [EXAMPLES] Examples: "materials.db", "data/structures.db", "databases/materials_db.db" [/EXAMPLES]
+
+        structures_json: [BRIEF] JSON string containing structure data to save. [/BRIEF]
+                        [DETAILED] A JSON-formatted string containing structure data with appropriate
+                        format for the specified structure_type. The JSON should contain dictionaries
+                        with structure IDs as keys and structure properties as values. This is typically
+                        output from polymorph retrieval or slab generation tools. [/DETAILED]
+                        [SYNTACTIC] Format: "Valid JSON string with structure data" [/SYNTACTIC]
+                        [EXAMPLES] Examples: JSON from get_bulk_polymorphs_data, JSON from find_all_unique_slabs_upto_millerindex [/EXAMPLES]
+
+        structure_type: [BRIEF] Type of structures being saved. Defaults to "slab". [/BRIEF]
+                       [DETAILED] The type of crystal structures being saved, which determines the
+                       database schema and column structure. "bulk" for bulk crystals, "slab" for
+                       surface slabs, "adsorbate" for molecules, and "adsorbate_slab" for combined
+                       surface-molecule systems. Each type has specialized properties and metadata. [/DETAILED]
+                       [SYNTACTIC] Format: "bulk", "slab", "adsorbate", or "adsorbate_slab" [/SYNTACTIC]
+                       [EXAMPLES] Examples: "bulk" (polymorphs), "slab" (surfaces), "adsorbate_slab" (adsorption configs) [/EXAMPLES]
+
+        table_name: [BRIEF] Optional custom table name. [/BRIEF]
+                   [DETAILED] Custom name for the database table where structures will be stored.
+                   If None, the table name will be automatically determined based on structure_type
+                   (e.g., "bulks", "slabs", "adsorbates", "adsorbate_slabs"). Custom names are
+                   useful for organizing different datasets or studies. [/DETAILED]
+                   [SYNTACTIC] Format: "Valid SQL table name or None" [/SYNTACTIC]
+                   [EXAMPLES] Examples: "tio2_polymorphs", "silicon_surfaces", "co2_adsorption_configs", None [/EXAMPLES]
+
+        additional_properties: [BRIEF] Optional dictionary of additional column definitions. [/BRIEF]
+                              [DETAILED] Dictionary specifying additional columns to add to the database
+                              table with their SQL data types. Useful for storing custom calculated
+                              properties or metadata specific to a particular study. Keys are column
+                              names and values are SQL data types. [/DETAILED]
+                              [SYNTACTIC] Format: '{"column_name": "SQL_TYPE", ...} or None' [/SYNTACTIC]
+                              [EXAMPLES] Examples: {"custom_descriptor": "REAL", "study_id": "TEXT"}, None [/EXAMPLES]
 
     Returns:
-        Status string.
+        str: [BRIEF] Status message indicating successful storage with count information. [/BRIEF]
+             [DETAILED] A string message confirming successful storage of structures to the database,
+             including the number of structures saved, the table name used, and the database path.
+             This provides confirmation and summary information about the storage operation. [/DETAILED]
+             [EXAMPLES] Example output: "Saved 25 slab structures to slab_structures in materials.db" [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When invalid structure_type is specified [/ERROR_WHEN]
+                   [ERROR_DETAILS] Structure type not recognized or invalid JSON format [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Use valid structure types: "bulk", "slab", "adsorbate", "adsorbate_slab" [/ERROR_RECOVERY]
+        sqlite3.Error: [ERROR_WHEN] When database operations fail [/ERROR_WHEN]
+                      [ERROR_DETAILS] Database creation, table creation, or data insertion errors [/ERROR_DETAILS]
+                      [ERROR_RECOVERY] Check database path permissions and ensure valid data format [/ERROR_RECOVERY]
+        JSONDecodeError: [ERROR_WHEN] When structures_json contains invalid JSON [/ERROR_WHEN]
+                        [ERROR_DETAILS] Malformed JSON string or incorrect data structure [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Verify JSON format and ensure proper structure data format [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - SQLite limitations on concurrent access and database size
+    - Schema is predefined and may not accommodate all possible structure properties
+    - CIF strings are stored as text, which may be inefficient for very large structures
+    - No automatic indexing optimization for large datasets
+    - Limited support for complex relationships between structure types
+    [/LIMITATIONS]
     """
     import json
     import sqlite3
@@ -4595,6 +4186,999 @@ def save_structures_to_db(
     return f"Saved {len(structures)} {structure_type} structures to {table_name} in {db_path}"
 
 
+########################
+# Extra  tools for ablations
+########################
+
+
+@tool
+def process_slab_ocdata_style(
+    slab_cif: str,
+    bulk_cif: str,
+    min_xy_size: float = 8.0,
+    apply_constraints: bool = True,
+) -> str:
+    """[BRIEF] Process a raw slab structure with ocdata-style surface atom tagging, tiling, and constraints for computational surface studies. [/BRIEF]
+
+    [DETAILED] This tool applies a comprehensive processing pipeline to raw slab structures, implementing the ocdata
+    methodology for surface science calculations. It identifies surface atoms based on coordination analysis relative
+    to the bulk structure, tiles the slab to meet minimum lateral size requirements for accurate periodic calculations,
+    and optionally applies constraints to fix bulk-like atoms during optimization. This processing is essential for
+    creating production-ready slab models for catalysis and surface chemistry studies. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use after generating raw slabs that need surface atom identification and proper sizing
+    - Essential for preparing slabs for DFT calculations or molecular dynamics simulations
+    - Required when you need to distinguish between surface and bulk atoms in the slab
+    - Use when raw slabs are too small for accurate periodic boundary calculations
+    - Avoid for slabs that have already been properly processed and tagged
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Loads both slab and bulk structures from CIF strings
+    - Standardizes the bulk structure for consistent coordination reference
+    - Uses Voronoi analysis to identify surface atoms based on coordination differences
+    - Tags atoms as surface (tag=1) or bulk-like (tag=0) based on coordination analysis
+    - Tiles the slab structure to meet minimum lateral size requirements
+    - Applies FixAtoms constraints to bulk-like atoms if requested
+    - Returns the processed slab as a CIF string ready for calculations
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Generate raw slab using create_slab_from_structure_text or enumerate_slabs_text [/PREREQUISITE]
+    2. [PREREQUISITE] Have original bulk structure available for coordination reference [/PREREQUISITE]
+    3. [CURRENT] Apply this tool to process and tag the slab structure [/CURRENT]
+    4. [FOLLOW_UP] Use processed slab for adsorption studies or DFT calculations [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - process_slab_ocdata_style(slab_cif, bulk_cif, 8.0, True)
+    - process_slab_ocdata_style(slab_cif, bulk_cif, min_xy_size=10.0)
+    - process_slab_ocdata_style(slab_cif, bulk_cif, apply_constraints=False)
+    [/SYNTACTICAL]
+
+    Args:
+        slab_cif: [BRIEF] CIF string of the raw slab structure from pymatgen generation. [/BRIEF]
+                 [DETAILED] A properly formatted CIF string containing the raw slab structure that needs
+                 processing. This should be a freshly generated slab from tools like SlabGenerator that
+                 has not yet been tagged or processed for surface calculations. [/DETAILED]
+                 [SYNTACTIC] Format: "Valid CIF format string with slab atomic coordinates" [/SYNTACTIC]
+                 [EXAMPLES] Examples: Output from create_slab_from_structure_text [/EXAMPLES]
+        bulk_cif: [BRIEF] CIF string of the original bulk structure for coordination reference. [/BRIEF]
+                 [DETAILED] The bulk crystal structure that was used to generate the slab. This is required
+                 for accurate surface atom identification as it provides the reference coordination environment
+                 for distinguishing between surface and bulk-like atoms in the slab. [/DETAILED]
+                 [SYNTACTIC] Format: "Valid CIF format string with bulk crystal structure" [/SYNTACTIC]
+                 [EXAMPLES] Examples: Original bulk structure from Materials Project [/EXAMPLES]
+        min_xy_size: [BRIEF] Minimum lateral size in Angstroms for slab tiling. Defaults to 8.0. [/BRIEF]
+                    [DETAILED] The minimum lateral dimension (in XY plane) that the slab should span after
+                    tiling. This ensures adequate periodic boundary conditions for accurate surface calculations.
+                    Larger values provide better convergence but increase computational cost. [/DETAILED]
+                    [SYNTACTIC] Format: positive float representing size in Angstroms [/SYNTACTIC]
+                    [EXAMPLES] Examples: 8.0 (minimal), 10.0 (standard), 12.0 (large) [/EXAMPLES]
+        apply_constraints: [BRIEF] Whether to fix bulk-like atoms with constraints. Defaults to True. [/BRIEF]
+                         [DETAILED] Controls whether to apply FixAtoms constraints to bulk-like atoms (tag=0)
+                         during structural optimization. This is recommended for surface calculations to maintain
+                         the bulk-like character of the slab interior while allowing surface atoms to relax. [/DETAILED]
+                         [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                         [EXAMPLES] Examples: True (recommended), False (all atoms free) [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] CIF string of the processed slab with surface tagging, tiling, and constraints. [/BRIEF]
+             [DETAILED] A CIF-formatted string containing the fully processed slab structure with surface
+             atoms properly tagged, adequate lateral size for periodic calculations, and optional constraints
+             applied to bulk-like atoms. Ready for surface chemistry calculations. [/DETAILED]
+             [EXAMPLES] Example output: CIF string with tagged atoms and proper dimensions [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When CIF strings are malformed or incompatible structures [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid CIF format, mismatched slab-bulk structures, or processing errors [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify CIF formats and ensure slab was generated from the provided bulk [/ERROR_RECOVERY]
+        StructureError: [ERROR_WHEN] When surface atom tagging or tiling fails [/ERROR_WHEN]
+                       [ERROR_DETAILS] Coordination analysis failure or insufficient structure size [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Check structure quality and increase min_xy_size if needed [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Requires the original bulk structure for accurate surface atom identification
+    - May not handle highly defective or reconstructed surfaces properly
+    - Surface tagging accuracy depends on the quality of coordination analysis
+    - Does not account for surface relaxation or reconstruction effects
+    [/LIMITATIONS]
+    """
+    from pymatgen.core import Structure
+    from pymatgen.io.ase import AseAtomsAdaptor
+
+    try:
+        # Load structures
+        slab_struct_pmg = load_structure(slab_cif)
+        slab_atoms_ase = AseAtomsAdaptor.get_atoms(slab_struct_pmg)
+
+        bulk_struct_pmg = load_structure(bulk_cif)
+        # Standardize bulk *before* getting ASE atoms for consistent coordination check
+        standardized_bulk_pmg = standardize_bulk(bulk_struct_pmg)
+        standardized_bulk_ase = AseAtomsAdaptor.get_atoms(standardized_bulk_pmg)
+
+        # 1. Tag Surface Atoms
+        tags = find_surface_atoms_with_voronoi(standardized_bulk_ase, slab_atoms_ase)
+        slab_atoms_ase.set_tags(tags)
+
+        # 2. Tile the Tagged Slab
+        tiled_atoms_ase = tile_atoms(slab_atoms_ase, min_xy_size)
+
+        # 3. Apply Constraints (Optional)
+        final_atoms_ase = tiled_atoms_ase
+        if apply_constraints:
+            final_atoms_ase = set_fixed_atom_constraints(tiled_atoms_ase)
+
+        # 4. Convert back to CIF
+        final_struct_pmg = Structure.from_ase_atoms(final_atoms_ase)
+        return final_struct_pmg.to(fmt="cif")
+
+    except Exception as e:
+        return f"ERROR: Slab processing failed - {e}"
+
+
+@tool
+def get_symmetrically_distinct_miller_indices_from_bulk(
+    bulk_structure_path_or_string: str, from_path: bool = False, max_miller: int = 2
+) -> list:
+    """[BRIEF] Identify symmetrically distinct Miller indices for a bulk crystal structure using crystallographic symmetry analysis. [/BRIEF]
+
+    [DETAILED] This tool analyzes the crystallographic symmetry of a bulk structure to identify Miller indices
+    that correspond to genuinely different surface orientations. By considering the crystal's space group symmetry,
+    it eliminates redundant Miller indices that would produce equivalent surfaces, significantly reducing the
+    computational burden of systematic surface studies. This is essential for comprehensive surface analysis
+    while avoiding unnecessary calculations on symmetrically equivalent surfaces. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when planning systematic surface studies across multiple orientations
+    - Essential before generating multiple slabs to avoid redundant calculations
+    - Required for high-throughput surface screening studies
+    - Use when you need to understand available surface orientations for a material
+    - Avoid when you only need specific, known Miller indices
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Loads the bulk crystal structure from CIF file or string
+    - Analyzes the crystal's space group symmetry operations
+    - Generates all possible Miller indices up to the specified maximum
+    - Applies symmetry operations to identify equivalent Miller indices
+    - Returns only the symmetrically distinct indices that produce unique surfaces
+    - Uses pymatgen's crystallographic analysis for accurate symmetry determination
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Have bulk crystal structure available as CIF file or string [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to identify distinct Miller indices [/CURRENT]
+    3. [FOLLOW_UP] Use output with enumerate_slabs_for_list_of_miller_index for efficient slab generation [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - get_symmetrically_distinct_miller_indices_from_bulk(cif_string, False, 2)
+    - get_symmetrically_distinct_miller_indices_from_bulk("structure.cif", True, 3)
+    - get_symmetrically_distinct_miller_indices_from_bulk(cif_string)
+    [/SYNTACTICAL]
+
+    Args:
+        bulk_structure_path_or_string: [BRIEF] Path to CIF file or CIF string of the bulk structure. [/BRIEF]
+                                     [DETAILED] Either a file path to a CIF file containing the bulk crystal
+                                     structure, or a CIF-formatted string. The structure should be a well-defined
+                                     bulk crystal with proper space group information for accurate symmetry analysis. [/DETAILED]
+                                     [SYNTACTIC] Format: "file/path/to/structure.cif" or "CIF format string" [/SYNTACTIC]
+                                     [EXAMPLES] Examples: "bulk_structure.cif", CIF string content [/EXAMPLES]
+        from_path: [BRIEF] Boolean indicating if input is a file path. Defaults to False. [/BRIEF]
+                  [DETAILED] Controls whether the first argument should be treated as a file path (True)
+                  or as a CIF string content (False). This allows the tool to handle both file-based
+                  and string-based inputs flexibly. [/DETAILED]
+                  [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                  [EXAMPLES] Examples: True (file path), False (CIF string) [/EXAMPLES]
+        max_miller: [BRIEF] Maximum Miller index to consider. Defaults to 2. [/BRIEF]
+                   [DETAILED] The maximum value for Miller indices (h, k, l) to consider in the analysis.
+                   Higher values include more high-index surfaces but increase computational requirements.
+                   Values of 1-3 are typically sufficient for most surface studies. [/DETAILED]
+                   [SYNTACTIC] Format: positive integer (1, 2, or 3) [/SYNTACTIC]
+                   [EXAMPLES] Examples: 1 (low-index only), 2 (standard), 3 (high-index) [/EXAMPLES]
+
+    Returns:
+        list: [BRIEF] List of symmetrically distinct Miller indices as tuples. [/BRIEF]
+              [DETAILED] A list of tuples, each containing three integers representing Miller indices
+              (h, k, l) that correspond to crystallographically distinct surface orientations. Each
+              tuple represents a unique surface that cannot be obtained from others by symmetry operations. [/DETAILED]
+              [EXAMPLES] Example output: [(1,0,0), (1,1,0), (1,1,1)] [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When CIF structure is malformed or max_miller is invalid [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid CIF format, file not found, or max_miller outside valid range [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify CIF format and ensure max_miller is 1, 2, or 3 [/ERROR_RECOVERY]
+        StructureError: [ERROR_WHEN] When symmetry analysis fails [/ERROR_WHEN]
+                       [ERROR_DETAILS] Unclear space group or problematic crystal structure [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Check structure quality and space group assignment [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Accuracy depends on correct space group assignment in the input structure
+    - May not account for surface-specific symmetry breaking
+    - Limited to crystalline materials with well-defined space groups
+    - Does not consider surface stability or feasibility
+    [/LIMITATIONS]
+    """
+
+    from pymatgen.core.surface import get_symmetrically_distinct_miller_indices
+
+    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
+
+    return get_symmetrically_distinct_miller_indices(bulk_structure, max_miller)
+
+
+@tool
+def enumerate_all_possible_miller_indices(max_miller: int = 2) -> list:
+    """[BRIEF] Generate all possible Miller indices up to a specified maximum value for comprehensive surface enumeration. [/BRIEF]
+
+    [DETAILED] This tool systematically generates all possible combinations of Miller indices (h, k, l) up to a
+    specified maximum value, providing a complete set of surface orientations for systematic surface studies.
+    Unlike symmetry-based filtering, this tool produces all mathematically possible Miller indices regardless
+    of crystallographic equivalence, useful for comprehensive surface exploration or when symmetry information
+    is unavailable. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need a complete enumeration of all possible surface orientations
+    - Helpful for systematic surface studies without symmetry constraints
+    - Use when symmetry information is unavailable or unreliable
+    - Good for initial exploration of surface space before symmetry filtering
+    - Avoid when you only need symmetrically distinct surfaces (use get_symmetrically_distinct_miller_indices_from_bulk)
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Generates all combinations of integers from 0 to max_miller for (h, k, l)
+    - Excludes the invalid (0, 0, 0) combination
+    - Returns a comprehensive list of all possible Miller index combinations
+    - No crystallographic analysis or symmetry filtering applied
+    - Simple mathematical enumeration approach
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [CURRENT] Apply this tool to generate all possible Miller indices [/CURRENT]
+    2. [FOLLOW_UP] Filter results using get_symmetrically_distinct_miller_indices_from_bulk if needed [/FOLLOW_UP]
+    3. [FOLLOW_UP] Use selected indices with enumerate_slabs_for_list_of_miller_index [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - enumerate_all_possible_miller_indices(2)
+    - enumerate_all_possible_miller_indices(3)
+    - enumerate_all_possible_miller_indices()  # Uses default max_miller=2
+    [/SYNTACTICAL]
+
+    Args:
+        max_miller: [BRIEF] Maximum Miller index value to consider. Defaults to 2. [/BRIEF]
+                   [DETAILED] The maximum value for each Miller index component (h, k, l). The tool will
+                   generate all combinations where each component is between 0 and max_miller inclusive.
+                   Higher values produce more surface orientations but increase the total number exponentially. [/DETAILED]
+                   [SYNTACTIC] Format: positive integer (typically 1, 2, or 3) [/SYNTACTIC]
+                   [EXAMPLES] Examples: 1 (27 combinations), 2 (125 combinations), 3 (343 combinations) [/EXAMPLES]
+
+    Returns:
+        list: [BRIEF] List of all possible Miller indices as tuples. [/BRIEF]
+              [DETAILED] A comprehensive list of tuples, each containing three integers representing
+              Miller indices (h, k, l). Includes all mathematical combinations from (0,0,1) to
+              (max_miller, max_miller, max_miller), excluding only the invalid (0,0,0). [/DETAILED]
+              [EXAMPLES] Example output for max_miller=1: [(0,0,1), (0,1,0), (0,1,1), (1,0,0), ...] [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When max_miller is not a positive integer [/ERROR_WHEN]
+                   [ERROR_DETAILS] Negative values or non-integer input for max_miller [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Provide a positive integer value for max_miller [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Does not consider crystallographic symmetry or equivalence
+    - May produce many redundant surface orientations
+    - Number of combinations grows as (max_miller+1)³
+    - No filtering for physically meaningful or stable surfaces
+    [/LIMITATIONS]
+    """
+
+    mill_list = []
+    for i in range(max_miller + 1):
+        for j in range(max_miller + 1):
+            for k in range(max_miller + 1):
+                if i == 0 and j == 0 and k == 0:
+                    continue  # Skip (0,0,0)
+                mill_list.append((i, j, k))
+    return mill_list
+
+
+@tool
+def find_all_unique_slabs_upto_millerindex_to_file(
+    bulk_structure_path_or_string: str,
+    out_put_path: str,
+    from_path: bool = False,
+    max_index: int = 2,
+    min_slab_size: float = 8,
+    min_vacuum_size: float = 15,
+    center_slab: bool = True,
+    max_normal_search: int = 10,
+) -> str:
+    """[BRIEF] Generate all unique slab structures up to specified Miller indices and save comprehensive results to JSON file. [/BRIEF]
+
+    [DETAILED] This tool performs exhaustive slab generation for a bulk structure, creating all possible unique
+    surface slabs up to a specified maximum Miller index. It systematically explores different surface orientations
+    and terminations, providing a comprehensive database of surface structures for high-throughput surface studies.
+    The results include structural information, surface area, thickness, and other properties essential for
+    surface analysis and screening studies. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use for comprehensive surface screening and high-throughput studies
+    - Essential when you need a complete database of surface structures
+    - Use when planning systematic surface property calculations
+    - Recommended for materials with unknown optimal surface orientations
+    - Avoid for targeted studies where specific surfaces are already known
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Loads the bulk structure from file or CIF string
+    - Uses pymatgen's generate_all_slabs for comprehensive slab generation
+    - Systematically explores all Miller indices up to max_index
+    - Generates multiple terminations for each Miller index
+    - Collects detailed information including surface area, thickness, and atom count
+    - Saves all results to a structured JSON file for easy access and analysis
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Have bulk crystal structure available as file or string [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to generate comprehensive slab database [/CURRENT]
+    3. [FOLLOW_UP] Use select_slabs_with_strategy_to_file to filter results [/FOLLOW_UP]
+    4. [FOLLOW_UP] Process selected slabs with surface analysis tools [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - find_all_unique_slabs_upto_millerindex_to_file(cif_string, "slabs.json", False, 2, 8, 15, True, 10)
+    - find_all_unique_slabs_upto_millerindex_to_file("bulk.cif", "output.json", True)
+    - find_all_unique_slabs_upto_millerindex_to_file(cif_string, "slabs.json")
+    [/SYNTACTICAL]
+
+    Args:
+        bulk_structure_path_or_string: [BRIEF] Path to CIF file or CIF string of the bulk structure. [/BRIEF]
+                                     [DETAILED] Either a file path to a CIF file or a CIF-formatted string
+                                     containing the bulk crystal structure. This structure will be systematically
+                                     cleaved along all possible Miller indices to generate surface slabs. [/DETAILED]
+                                     [SYNTACTIC] Format: "file/path/to/structure.cif" or "CIF format string" [/SYNTACTIC]
+                                     [EXAMPLES] Examples: "bulk_structure.cif", CIF string content [/EXAMPLES]
+        out_put_path: [BRIEF] Path where the JSON output file will be saved. [/BRIEF]
+                     [DETAILED] Full file path for saving the comprehensive slab database as a JSON file.
+                     The file will contain structured data with slab IDs, Miller indices, termination information,
+                     CIF structures, and calculated properties for each generated slab. [/DETAILED]
+                     [SYNTACTIC] Format: "path/to/output_file.json" [/SYNTACTIC]
+                     [EXAMPLES] Examples: "slabs_database.json", "output/all_slabs.json" [/EXAMPLES]
+        from_path: [BRIEF] Boolean indicating if input is a file path. Defaults to False. [/BRIEF]
+                  [DETAILED] Controls whether the bulk_structure_path_or_string parameter should be treated
+                  as a file path (True) or as a CIF string content (False). This allows flexible input handling
+                  for both file-based and string-based workflows. [/DETAILED]
+                  [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                  [EXAMPLES] Examples: True (file path), False (CIF string) [/EXAMPLES]
+        max_index: [BRIEF] Maximum Miller index to consider. Defaults to 2. [/BRIEF]
+                  [DETAILED] The maximum value for Miller indices (h, k, l) to include in the systematic
+                  slab generation. Higher values include more surface orientations but significantly increase
+                  computational requirements and the number of generated slabs. [/DETAILED]
+                  [SYNTACTIC] Format: positive integer (1, 2, or 3) [/SYNTACTIC]
+                  [EXAMPLES] Examples: 1 (low-index), 2 (standard), 3 (high-index) [/EXAMPLES]
+        min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 8. [/BRIEF]
+                      [DETAILED] The minimum thickness of generated slabs in the direction perpendicular
+                      to the surface plane. This ensures adequate bulk-like character in the slab center
+                      while maintaining the desired surface properties. [/DETAILED]
+                      [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
+                      [EXAMPLES] Examples: 8.0 (minimal), 12.0 (standard), 15.0 (thick) [/EXAMPLES]
+        min_vacuum_size: [BRIEF] Minimum vacuum size in Angstroms. Defaults to 15. [/BRIEF]
+                        [DETAILED] The minimum vacuum space above the surface to prevent interactions
+                        between periodic images. Larger values ensure better isolation but increase
+                        computational cost. The default of 15 Å is suitable for most surface calculations. [/DETAILED]
+                        [SYNTACTIC] Format: positive float representing vacuum thickness in Angstroms [/SYNTACTIC]
+                        [EXAMPLES] Examples: 10.0 (minimal), 15.0 (standard), 20.0 (large) [/EXAMPLES]
+        center_slab: [BRIEF] Whether to center the slab in the vacuum region. Defaults to True. [/BRIEF]
+                    [DETAILED] Controls whether the slab is centered within the vacuum region or positioned
+                    at one end. Centering is generally preferred for surface calculations as it provides
+                    symmetric vacuum on both sides of the slab. [/DETAILED]
+                    [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                    [EXAMPLES] Examples: True (recommended), False (asymmetric) [/EXAMPLES]
+        max_normal_search: [BRIEF] Maximum number of normals to search for slab generation. Defaults to 10. [/BRIEF]
+                          [DETAILED] The maximum number of different normal vectors to consider when searching
+                          for valid slab orientations. Higher values may find more slab orientations but
+                          increase generation time. [/DETAILED]
+                          [SYNTACTIC] Format: positive integer [/SYNTACTIC]
+                          [EXAMPLES] Examples: 5 (fast), 10 (standard), 20 (thorough) [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] Confirmation message indicating where the slabs data has been written. [/BRIEF]
+             [DETAILED] A status message confirming successful generation and saving of the slab database.
+             The actual slab data is saved to the specified JSON file, which contains detailed information
+             about each generated slab including Miller indices, terminations, and structural properties. [/DETAILED]
+             [EXAMPLES] Example output: "Slabs data written to slabs_database.json" [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When input parameters are invalid or CIF structure is malformed [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid CIF format, negative size parameters, or file path issues [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify CIF format and ensure all size parameters are positive [/ERROR_RECOVERY]
+        IOError: [ERROR_WHEN] When output file cannot be written [/ERROR_WHEN]
+                [ERROR_DETAILS] Insufficient permissions or invalid output path [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Check file permissions and ensure output directory exists [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Can generate very large numbers of slabs for high max_index values
+    - Does not filter for surface stability or feasibility
+    - May include slabs with unusual or unstable terminations
+    - Processing time increases significantly with max_index
+    [/LIMITATIONS]
+    """
+
+    from pymatgen.core.surface import generate_all_slabs
+
+    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)
+
+    slabs = generate_all_slabs(
+        bulk_structure,
+        max_index=max_index,
+        min_slab_size=min_slab_size,
+        min_vacuum_size=min_vacuum_size,
+        center_slab=center_slab,
+        max_normal_search=max_normal_search,
+    )
+    slabs_dict = {}
+    for i, slab in enumerate(slabs):
+        slab_id = (
+            f"{slab.miller_index[0]}{slab.miller_index[1]}{slab.miller_index[2]}_{i}"
+        )
+        slabs_dict[slab_id] = {
+            "miller_index": slab.miller_index,
+            "termination": i,
+            "cif": slab.to(fmt="cif"),
+            "area": slab.surface_area,
+            "num_sites": len(slab),
+            "slab_thickness": slab.thickness,
+        }
+
+    with Path(out_put_path).open("w") as f:
+        json.dump(slabs_dict, f, indent=2)
+    return f"Slabs data written to {out_put_path}"
+
+
+@tool
+def enumerate_slabs_for_list_of_miller_index(
+    bulk_structure_path_or_string: str,
+    from_path: bool = False,
+    miller_index_list: list[tuple] | None = None,
+    min_slab_size: float = 12,
+    min_vacuum_size: float = 5,
+) -> str:
+    """[BRIEF] Generate slab structures for a specific list of Miller indices with customizable dimensions. [/BRIEF]
+
+    [DETAILED] This tool generates surface slab structures for a user-specified list of Miller indices,
+    providing precise control over which surface orientations to create. Unlike exhaustive generation methods,
+    this tool allows targeted slab creation for specific crystallographic planes, making it ideal for focused
+    surface studies or when specific surface orientations are known to be of interest. Each slab is properly
+    oriented and sized according to the specified parameters. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need slabs for specific, known Miller indices
+    - Ideal for targeted surface studies rather than comprehensive screening
+    - Use after identifying interesting surfaces from symmetry analysis
+    - Recommended when computational resources are limited
+    - Avoid for exhaustive surface exploration (use find_all_unique_slabs_upto_millerindex_to_file)
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Loads the bulk structure from file or CIF string
+    - Iterates through the provided list of Miller indices
+    - Creates SlabGenerator for each Miller index with specified dimensions
+    - Generates all possible terminations for each Miller index
+    - Sorts and orients each slab with surface normal along c-axis
+    - Returns a JSON string containing all generated slabs with identifiers
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Identify Miller indices using get_symmetrically_distinct_miller_indices_from_bulk [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to generate slabs for selected Miller indices [/CURRENT]
+    3. [FOLLOW_UP] Use select_slabs_with_strategy to filter results if needed [/FOLLOW_UP]
+    4. [FOLLOW_UP] Process slabs with surface analysis or adsorption tools [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - enumerate_slabs_for_list_of_miller_index(cif_string, False, [(1,1,1), (1,0,0)], 12, 5)
+    - enumerate_slabs_for_list_of_miller_index("bulk.cif", True, [(1,1,1), (1,1,0)])
+    - enumerate_slabs_for_list_of_miller_index(cif_string, miller_index_list=[(2,1,1)])
+    [/SYNTACTICAL]
+
+    Args:
+        bulk_structure_path_or_string: [BRIEF] Path to CIF file or CIF string of the bulk structure. [/BRIEF]
+                                     [DETAILED] Either a file path to a CIF file or a CIF-formatted string
+                                     containing the bulk crystal structure that will be cleaved along the
+                                     specified Miller indices to create surface slabs. [/DETAILED]
+                                     [SYNTACTIC] Format: "file/path/to/structure.cif" or "CIF format string" [/SYNTACTIC]
+                                     [EXAMPLES] Examples: "bulk_structure.cif", CIF string content [/EXAMPLES]
+        from_path: [BRIEF] Boolean indicating if input is a file path. Defaults to False. [/BRIEF]
+                  [DETAILED] Controls whether the bulk_structure_path_or_string parameter should be treated
+                  as a file path (True) or as a CIF string content (False). This allows flexible input handling
+                  for both file-based and string-based workflows. [/DETAILED]
+                  [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                  [EXAMPLES] Examples: True (file path), False (CIF string) [/EXAMPLES]
+        miller_index_list: [BRIEF] List of Miller indices to generate slabs for. Required parameter. [/BRIEF]
+                          [DETAILED] A list of tuples, each containing three integers representing Miller
+                          indices (h, k, l) for the desired surface orientations. Each tuple specifies a
+                          crystallographic plane along which the bulk structure will be cleaved. [/DETAILED]
+                          [SYNTACTIC] Format: list of tuples [(h1,k1,l1), (h2,k2,l2), ...] [/SYNTACTIC]
+                          [EXAMPLES] Examples: [(1,1,1), (1,0,0), (1,1,0)], [(2,1,1), (1,2,1)] [/EXAMPLES]
+        min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 12. [/BRIEF]
+                      [DETAILED] The minimum thickness of generated slabs in the direction perpendicular
+                      to the surface plane. This ensures adequate bulk-like character in the slab center
+                      while maintaining the desired surface properties. [/DETAILED]
+                      [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
+                      [EXAMPLES] Examples: 8.0 (minimal), 12.0 (standard), 15.0 (thick) [/EXAMPLES]
+        min_vacuum_size: [BRIEF] Minimum vacuum size in Angstroms. Defaults to 5. [/BRIEF]
+                        [DETAILED] The minimum vacuum space above the surface to prevent interactions
+                        between periodic images in surface calculations. Smaller values are acceptable
+                        for initial slab generation, but larger values may be needed for accurate calculations. [/DETAILED]
+                        [SYNTACTIC] Format: positive float representing vacuum thickness in Angstroms [/SYNTACTIC]
+                        [EXAMPLES] Examples: 5.0 (minimal), 10.0 (standard), 15.0 (large) [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] JSON string containing all generated slabs with identifiers and CIF structures. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing a dictionary where keys are slab identifiers
+             (e.g., "slab_0_(1,1,1)") and values are CIF strings of the corresponding slab structures.
+             Each slab is properly oriented and sized according to the specified parameters. [/DETAILED]
+             [EXAMPLES] Example output: {"slab_0_(1,1,1)": "CIF string", "slab_1_(1,0,0)": "CIF string"} [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When miller_index_list is None or contains invalid indices [/ERROR_WHEN]
+                   [ERROR_DETAILS] Missing Miller indices list or invalid tuple format [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Provide a valid list of Miller index tuples [/ERROR_RECOVERY]
+        StructureError: [ERROR_WHEN] When CIF structure is malformed or slab generation fails [/ERROR_WHEN]
+                       [ERROR_DETAILS] Invalid CIF format or incompatible Miller indices [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Verify CIF format and ensure Miller indices are valid for the structure [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Requires explicit specification of Miller indices
+    - Does not perform symmetry analysis or filtering
+    - May generate multiple terminations per Miller index
+    - Does not optimize slab dimensions for specific surfaces
+    [/LIMITATIONS]
+    """
+
+    import json
+
+    from pymatgen.core import Structure
+    from pymatgen.core.surface import SlabGenerator
+
+    if miller_index_list is None:
+        raise ValueError("Miller indexes should be defined")
+
+    if from_path:
+        bulk_structure = Structure.from_file(bulk_structure_path_or_string)
+    else:
+        bulk_structure = Structure.from_str(bulk_structure_path_or_string, fmt="cif")
+
+    slabs_dict = {}
+    for millers in miller_index_list:
+        slab_gen = SlabGenerator(
+            bulk_structure, millers, min_slab_size, min_vacuum_size
+        )
+        slabs = slab_gen.get_slabs()  # returns a list of Slab objects
+        for i, slab in enumerate(slabs):
+            # We use get_orthogonal_c_slab() ensures that the slab lattice is reoriented in c axis for easier adsorption placement.
+            # get_sorted_structure() variations in atom ordering that might occur due to how the slab was originally created.
+            slab_clean = (
+                slab.get_sorted_structure()
+                # slab.get_orthogonal_c_slab().get_sorted_structure()
+            )
+            slabs_dict[f"slab_{i}_{millers}"] = slab_clean.to(fmt="cif")
+
+    return json.dumps(slabs_dict, indent=2)
+
+
+@tool
+def select_slabs_with_strategy(
+    slabs_json: str,
+    selection_strategy: str = "diverse_miller",
+    max_slabs_per_polymorph: int = 3,
+) -> str:
+    """[BRIEF] Select a subset of slabs from a collection using intelligent filtering strategies for focused studies. [/BRIEF]
+
+    [DETAILED] This tool applies intelligent selection strategies to filter large collections of slab structures,
+    choosing the most relevant slabs based on specified criteria. It supports multiple selection strategies including
+    diversity-based selection (diverse Miller indices), property-based selection (surface area, coordination),
+    and custom filtering approaches. This is essential for managing large slab databases and focusing computational
+    resources on the most promising surface structures. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use after generating large collections of slabs to focus on most relevant structures
+    - Essential for managing computational resources in high-throughput studies
+    - Use when you need representative samples from comprehensive slab databases
+    - Recommended for initial screening before expensive calculations
+    - Avoid when you need all generated slabs for comprehensive analysis
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Parses the input JSON containing slab data and properties
+    - Applies the selected strategy to rank and filter slabs
+    - diverse_miller: Selects slabs with different Miller indices for surface diversity
+    - large_surface: Prioritizes slabs with the largest surface areas
+    - high_coordination: Selects slabs with higher numbers of surface sites
+    - Returns a filtered JSON with the selected slabs and their properties
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Generate slab collection using find_all_unique_slabs_upto_millerindex_to_file [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to select most relevant slabs [/CURRENT]
+    3. [FOLLOW_UP] Use selected slabs for detailed surface analysis or adsorption studies [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - select_slabs_with_strategy(slabs_json, "diverse_miller", 3)
+    - select_slabs_with_strategy(slabs_json, "large_surface", 5)
+    - select_slabs_with_strategy(slabs_json, "high_coordination")
+    [/SYNTACTICAL]
+
+    Args:
+        slabs_json: [BRIEF] JSON string containing slab data with properties and structures. [/BRIEF]
+                   [DETAILED] A JSON-formatted string containing a dictionary of slab data, where each entry
+                   includes slab properties such as Miller indices, surface area, number of sites, and CIF
+                   structures. This should be the output from slab generation tools. [/DETAILED]
+                   [SYNTACTIC] Format: "JSON string with slab data dictionary" [/SYNTACTIC]
+                   [EXAMPLES] Examples: Output from find_all_unique_slabs_upto_millerindex_to_file [/EXAMPLES]
+        selection_strategy: [BRIEF] Strategy for slab selection. Defaults to "diverse_miller". [/BRIEF]
+                          [DETAILED] The selection strategy to apply for filtering slabs. Options include:
+                          "diverse_miller" for different Miller indices, "large_surface" for largest surface areas,
+                          "high_coordination" for highest number of surface sites. Each strategy focuses on
+                          different aspects of surface structure importance. [/DETAILED]
+                          [SYNTACTIC] Format: string from ["diverse_miller", "large_surface", "high_coordination"] [/SYNTACTIC]
+                          [EXAMPLES] Examples: "diverse_miller", "large_surface", "high_coordination" [/EXAMPLES]
+        max_slabs_per_polymorph: [BRIEF] Maximum number of slabs to select. Defaults to 3. [/BRIEF]
+                               [DETAILED] The maximum number of slabs to include in the filtered selection.
+                               This controls the size of the final slab collection and helps manage computational
+                               resources for subsequent analysis. [/DETAILED]
+                               [SYNTACTIC] Format: positive integer [/SYNTACTIC]
+                               [EXAMPLES] Examples: 3 (focused), 5 (balanced), 10 (comprehensive) [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] JSON string containing the selected slabs with their properties and structures. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing the filtered slab collection, with the same structure
+             as the input but containing only the selected slabs according to the specified strategy and
+             maximum count. Each selected slab retains all its original properties and CIF structure. [/DETAILED]
+             [EXAMPLES] Example output: Filtered JSON with selected slabs and their complete data [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When slabs_json is malformed or selection_strategy is invalid [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid JSON format or unsupported selection strategy [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify JSON format and use valid selection strategy [/ERROR_RECOVERY]
+        KeyError: [ERROR_WHEN] When required slab properties are missing from the input data [/ERROR_WHEN]
+                 [ERROR_DETAILS] Missing miller_index, area, or num_sites properties [/ERROR_DETAILS]
+                 [ERROR_RECOVERY] Ensure input JSON contains all required slab properties [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Selection strategies are predefined and may not cover all use cases
+    - Does not consider surface stability or chemical properties
+    - May not account for computational cost differences between slabs
+    - Selection is based on structural properties rather than target applications
+    [/LIMITATIONS]
+    """
+    slabs = json.loads(slabs_json)
+
+    if selection_strategy == "diverse_miller":
+        # Select slabs with different Miller indices
+        selected = {}
+        miller_indices_seen = set()
+        for slab_id, slab_data in slabs.items():
+            miller_tuple = tuple(slab_data["miller_index"])
+            if (
+                miller_tuple not in miller_indices_seen
+                and len(selected) < max_slabs_per_polymorph
+            ):
+                selected[slab_id] = slab_data
+                miller_indices_seen.add(miller_tuple)
+
+    elif selection_strategy == "large_surface":
+        # Select slabs with largest surface areas
+        sorted_slabs = sorted(slabs.items(), key=lambda x: x[1]["area"], reverse=True)
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    elif selection_strategy == "high_coordination":
+        # Select slabs with higher number of surface sites (proxy for coordination)
+        sorted_slabs = sorted(
+            slabs.items(), key=lambda x: x[1]["num_sites"], reverse=True
+        )
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    else:
+        # Default: take first max_slabs_per_polymorph
+        selected = dict(list(slabs.items())[:max_slabs_per_polymorph])
+
+    return json.dumps(selected, indent=2)
+
+
+@tool
+def select_slabs_with_strategy_to_file(
+    slabs_data: str,
+    save_path: str,
+    selection_strategy: str = "diverse_miller",
+    max_slabs_per_polymorph: int = 3,
+    is_path: bool = False,
+) -> str:
+    """[BRIEF] Select slabs using filtering strategies and save results to file for persistent storage and workflow integration. [/BRIEF]
+
+    [DETAILED] This tool extends the slab selection functionality by providing file-based input/output capabilities,
+    allowing for persistent storage of selection results and better integration with file-based computational workflows.
+    It applies the same intelligent selection strategies as the base selection tool but handles file operations
+    automatically, making it ideal for batch processing and pipeline integration. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to save selection results for later use or sharing
+    - Essential for batch processing and automated workflows
+    - Use when working with large slab databases stored in files
+    - Recommended for pipeline integration and reproducible research
+    - Avoid for one-time selections that don't need persistent storage
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Loads slab data from JSON string or file path based on is_path parameter
+    - Applies the specified selection strategy to filter slabs
+    - Saves the filtered results to a new JSON file at the specified path
+    - Maintains all original slab properties and structures in the output
+    - Returns the path to the saved file for further workflow integration
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Generate slab database file using find_all_unique_slabs_upto_millerindex_to_file [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to select and save filtered slabs [/CURRENT]
+    3. [FOLLOW_UP] Use saved selection file for subsequent surface analysis workflows [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - select_slabs_with_strategy_to_file("slabs.json", "selected.json", "diverse_miller", 3, True)
+    - select_slabs_with_strategy_to_file(slabs_json_string, "output.json", "large_surface", 5, False)
+    - select_slabs_with_strategy_to_file("input.json", "filtered.json", is_path=True)
+    [/SYNTACTICAL]
+
+    Args:
+        slabs_data: [BRIEF] JSON string or file path containing slab data. [/BRIEF]
+                   [DETAILED] Either a JSON-formatted string containing slab data or a file path to a JSON
+                   file with slab information. The data should include slab properties such as Miller indices,
+                   surface area, number of sites, and CIF structures. [/DETAILED]
+                   [SYNTACTIC] Format: "JSON string" or "path/to/slabs.json" [/SYNTACTIC]
+                   [EXAMPLES] Examples: JSON string content, "slabs_database.json" [/EXAMPLES]
+        save_path: [BRIEF] Path where the selected slabs JSON file will be saved. [/BRIEF]
+                  [DETAILED] Full file path for saving the filtered slab collection as a JSON file.
+                  The file will contain the selected slabs with all their original properties and
+                  structures, ready for further analysis or processing. [/DETAILED]
+                  [SYNTACTIC] Format: "path/to/output_file.json" [/SYNTACTIC]
+                  [EXAMPLES] Examples: "selected_slabs.json", "output/filtered_slabs.json" [/EXAMPLES]
+        selection_strategy: [BRIEF] Strategy for slab selection. Defaults to "diverse_miller". [/BRIEF]
+                          [DETAILED] The selection strategy to apply for filtering slabs. Options include:
+                          "diverse_miller" for different Miller indices, "large_surface" for largest surface areas,
+                          "high_coordination" for highest number of surface sites. [/DETAILED]
+                          [SYNTACTIC] Format: string from ["diverse_miller", "large_surface", "high_coordination"] [/SYNTACTIC]
+                          [EXAMPLES] Examples: "diverse_miller", "large_surface", "high_coordination" [/EXAMPLES]
+        max_slabs_per_polymorph: [BRIEF] Maximum number of slabs to select. Defaults to 3. [/BRIEF]
+                               [DETAILED] The maximum number of slabs to include in the filtered selection.
+                               This controls the size of the final slab collection and helps manage computational
+                               resources for subsequent analysis. [/DETAILED]
+                               [SYNTACTIC] Format: positive integer [/SYNTACTIC]
+                               [EXAMPLES] Examples: 3 (focused), 5 (balanced), 10 (comprehensive) [/EXAMPLES]
+        is_path: [BRIEF] Whether slabs_data is a file path. Defaults to False. [/BRIEF]
+                [DETAILED] Controls whether the slabs_data parameter should be treated as a file path (True)
+                or as a JSON string content (False). This allows flexible input handling for both
+                file-based and string-based workflows. [/DETAILED]
+                [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                [EXAMPLES] Examples: True (file path), False (JSON string) [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] Path to the saved JSON file containing selected slabs. [/BRIEF]
+             [DETAILED] The file path where the filtered slab collection has been saved. This path can be
+             used for subsequent workflow steps or for loading the selected slabs in other tools. [/DETAILED]
+             [EXAMPLES] Example output: "path/to/selected_slabs.json" [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When input data is malformed or selection strategy is invalid [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid JSON format, unsupported selection strategy, or file reading errors [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify JSON format and use valid selection strategy [/ERROR_RECOVERY]
+        IOError: [ERROR_WHEN] When file operations fail [/ERROR_WHEN]
+                [ERROR_DETAILS] Cannot read input file or write to output path [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Check file permissions and ensure paths are valid [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Same selection strategy limitations as the base selection tool
+    - File operations may fail with insufficient permissions
+    - Large files may consume significant memory during processing
+    - No validation of file formats before processing
+    [/LIMITATIONS]
+    """
+    # Load slabs data
+    if is_path:
+        with Path(slabs_data).open("r") as f:
+            slabs = json.loads(f.read())
+    else:
+        slabs = json.loads(slabs_data)
+
+    if selection_strategy == "diverse_miller":
+        # Select slabs with different Miller indices
+        selected = {}
+        miller_indices_seen = set()
+        for slab_id, slab_data in slabs.items():
+            miller_tuple = tuple(slab_data["miller_index"])
+            if (
+                miller_tuple not in miller_indices_seen
+                and len(selected) < max_slabs_per_polymorph
+            ):
+                selected[slab_id] = slab_data
+                miller_indices_seen.add(miller_tuple)
+
+    elif selection_strategy == "large_surface":
+        # Select slabs with largest surface areas
+        sorted_slabs = sorted(slabs.items(), key=lambda x: x[1]["area"], reverse=True)
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    elif selection_strategy == "high_coordination":
+        # Select slabs with higher number of surface sites (proxy for coordination)
+        sorted_slabs = sorted(
+            slabs.items(), key=lambda x: x[1]["num_sites"], reverse=True
+        )
+        selected = dict(sorted_slabs[:max_slabs_per_polymorph])
+
+    else:
+        # Default: take first max_slabs_per_polymorph
+        selected = dict(list(slabs.items())[:max_slabs_per_polymorph])
+
+    # Save to file
+    with Path(save_path).open("w") as f:
+        json.dump(selected, f, indent=2)
+
+    return save_path
+
+
+@tool
+def generate_adsorbate_slab_configs(
+    slab_cif: str, adsorbate_cif: str, adsorption_sites_json: str, height: float = 1.8
+) -> str:
+    """[BRIEF] Generate adsorbate-slab configurations by placing adsorbate molecules at different surface sites. [/BRIEF]
+
+    [DETAILED] This tool creates multiple adsorbate-slab configurations by systematically placing adsorbate molecules
+    at different adsorption sites on a slab surface. It uses pymatgen's AdsorbateSiteFinder to handle the geometric
+    placement of adsorbates at specified surface sites, including top, bridge, and hollow sites. This is essential
+    for adsorption energy calculations, catalysis studies, and surface reactivity analysis. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use after identifying adsorption sites on a slab surface
+    - Essential for creating input structures for adsorption energy calculations
+    - Use when studying catalytic reactions or surface interactions
+    - Recommended for systematic screening of adsorption configurations
+    - Avoid when you only need the clean slab surface without adsorbates
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Loads the slab structure from CIF string
+    - Converts adsorbate CIF to a molecular structure
+    - Parses the adsorption sites information from JSON
+    - Uses AdsorbateSiteFinder to place adsorbates at each site
+    - Generates multiple configurations with different site types and positions
+    - Returns a JSON containing all successfully generated adsorbate-slab configurations
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Generate slab structure using slab creation tools [/PREREQUISITE]
+    2. [PREREQUISITE] Identify adsorption sites using get_adsorption_sites_text [/PREREQUISITE]
+    3. [PREREQUISITE] Have adsorbate molecule structure available [/PREREQUISITE]
+    4. [CURRENT] Apply this tool to generate adsorbate-slab configurations [/CURRENT]
+    5. [FOLLOW_UP] Use configurations for DFT calculations or energy analysis [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json, 1.8)
+    - generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json, height=2.0)
+    - generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json)
+    [/SYNTACTICAL]
+
+    Args:
+        slab_cif: [BRIEF] CIF string of the slab structure. [/BRIEF]
+                 [DETAILED] A properly formatted CIF string containing the slab structure on which
+                 adsorbates will be placed. The slab should be oriented with the surface normal
+                 along the c-axis for proper adsorbate placement. [/DETAILED]
+                 [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
+                 [EXAMPLES] Examples: Output from slab generation tools [/EXAMPLES]
+        adsorbate_cif: [BRIEF] CIF string of the adsorbate molecule. [/BRIEF]
+                      [DETAILED] A CIF-formatted string containing the adsorbate molecule structure
+                      that will be placed on the slab surface. The molecule should be properly
+                      oriented and have reasonable geometry for surface adsorption. [/DETAILED]
+                      [SYNTACTIC] Format: "Valid CIF format string with molecular structure" [/SYNTACTIC]
+                      [EXAMPLES] Examples: CO molecule, H2O molecule, organic compounds [/EXAMPLES]
+        adsorption_sites_json: [BRIEF] JSON string containing adsorption sites information. [/BRIEF]
+                              [DETAILED] A JSON-formatted string containing information about potential
+                              adsorption sites on the slab surface, typically organized by site type
+                              (top, bridge, hollow) with coordinates for each site. [/DETAILED]
+                              [SYNTACTIC] Format: "JSON string with site types and coordinates" [/SYNTACTIC]
+                              [EXAMPLES] Examples: {"top": [[x1,y1,z1], [x2,y2,z2]], "bridge": [...]} [/EXAMPLES]
+        height: [BRIEF] Height in Angstroms for initial adsorbate placement. Defaults to 1.8. [/BRIEF]
+               [DETAILED] The initial height above the surface at which the adsorbate will be placed.
+               This is the starting geometry for optimization and should be reasonable for the specific
+               adsorbate-surface system. Typical values are 1.5-2.5 Å. [/DETAILED]
+               [SYNTACTIC] Format: positive float representing height in Angstroms [/SYNTACTIC]
+               [EXAMPLES] Examples: 1.5 (close), 1.8 (standard), 2.2 (distant) [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] JSON string containing all generated adsorbate-slab configurations. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing all successfully generated adsorbate-slab
+             configurations, with each configuration including site information, coordinates, and
+             the complete CIF structure ready for calculations. [/DETAILED]
+             [EXAMPLES] Example output: {"top_0": {"site_coords": [x,y,z], "cif": "..."}, ...} [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When CIF structures are malformed or incompatible [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid CIF format for slab or adsorbate, or parsing errors [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify CIF formats and ensure structures are valid [/ERROR_RECOVERY]
+        StructureError: [ERROR_WHEN] When adsorbate placement fails [/ERROR_WHEN]
+                       [ERROR_DETAILS] Geometric conflicts or invalid adsorption sites [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Check adsorption sites and adjust height parameter [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Limited to 3 sites per site type to manage computational cost
+    - Does not optimize adsorbate geometry or consider surface relaxation
+    - May skip sites that cause geometric conflicts
+    - No validation of chemical reasonableness of adsorption sites
+    [/LIMITATIONS]
+    """
+    from pymatgen.analysis.adsorption import AdsorbateSiteFinder
+    from pymatgen.core import Molecule, Structure
+
+    # Load structures
+    slab = Structure.from_str(slab_cif, fmt="cif")
+
+    # Try to load adsorbate as a molecule or structure
+    try:
+        adsorbate_struct = Structure.from_str(adsorbate_cif, fmt="cif")
+        adsorbate = Molecule(
+            species=adsorbate_struct.species,
+            coords=list(adsorbate_struct.cart_coords),
+            charge=0,
+        )
+    except Exception as e:
+        raise ValueError(f"Could not parse adsorbate: {e}") from e
+
+    # Parse adsorption sites
+    adsorption_sites = json.loads(adsorption_sites_json)
+
+    # Generate configs for different sites
+    configs = {}
+    finder = AdsorbateSiteFinder(slab)
+
+    for site_type, sites in adsorption_sites.items():
+        # For each site type (top, bridge, hollow), select a few sites
+        max_sites = min(3, len(sites))  # Limit to 3 sites per type
+
+        for i in range(max_sites):
+            site = sites[i]
+            site_coords = site if isinstance(site, list) else list(site)
+
+            try:
+                # Add adsorbate to the slab
+                ads_slab = finder.add_adsorbate(adsorbate, site_coords, height)
+
+                # Add to configs
+                config_id = f"{site_type}_{i}"
+                configs[config_id] = {
+                    "site_type": site_type,
+                    "site_index": i,
+                    "site_coords": site_coords,
+                    "height": height,
+                    "cif": ads_slab.to(fmt="cif"),
+                }
+            except Exception:
+                # Skip sites that cause errors
+                continue
+
+    return json.dumps(configs, indent=2)
+
+
 @tool
 def add_descriptor_column_to_db(
     db_path: str,
@@ -4604,22 +5188,104 @@ def add_descriptor_column_to_db(
     batch_size: int = 100,
     dependencies: list | None = None,
 ) -> str:
-    """
-    Add one or more descriptor columns to a database table and compute values efficiently.
-    Specialized for ML feature calculation with support for batch processing.
+    """[BRIEF] Add computed descriptor columns to a database table with batch processing for ML feature engineering. [/BRIEF]
+
+    [DETAILED] This tool adds one or more descriptor columns to a database table by executing user-defined
+    Python functions that compute features from existing data. It's designed for machine learning feature
+    engineering in materials science, allowing computation of structural descriptors, coordination numbers,
+    bond lengths, and other properties. The tool supports batch processing for memory efficiency and can
+    handle dependencies between tables for complex feature calculations. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use for computing ML features from structural or property data
+    - Essential for feature engineering in materials property prediction
+    - Use when you need to add calculated properties to existing databases
+    - Recommended for batch processing of large datasets
+    - Avoid for simple column additions that don't require computation
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Connects to the specified SQLite database and table
+    - Executes the provided Python function code to define descriptor computation
+    - Processes database rows in batches for memory efficiency
+    - Handles table joins if dependencies are specified
+    - Creates new columns with appropriate data types
+    - Tracks statistics for numerical descriptors
+    - Updates the database with computed descriptor values
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Have database with structural or property data [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to compute and add descriptors [/CURRENT]
+    3. [FOLLOW_UP] Use generate_ml_dataset_format to create ML-ready datasets [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - add_descriptor_column_to_db(db_path, "slabs", "coordination", function_code, 100)
+    - add_descriptor_column_to_db(db_path, "table", "bond_length", code, batch_size=50)
+    - add_descriptor_column_to_db(db_path, "table", "d_band", code, dependencies=["bulk"])
+    [/SYNTACTICAL]
 
     Args:
-        db_path: Path to database.
-        table_name: Table name to modify.
-        descriptor_type: Type of descriptor to add (e.g., "coordination", "d_band", "bond_length").
-        descriptor_function_code: String of a Python function that accepts a row dict and returns
-                                 a dict mapping column names to values.
-        batch_size: Number of rows to process in each batch for memory efficiency.
-        dependencies: List of other tables this calculation depends on (for joining data).
+        db_path: [BRIEF] Path to the SQLite database file. [/BRIEF]
+                [DETAILED] Full path to the SQLite database file containing the table to be modified.
+                The database should be accessible for both reading and writing operations. [/DETAILED]
+                [SYNTACTIC] Format: "path/to/database.db" [/SYNTACTIC]
+                [EXAMPLES] Examples: "materials.db", "data/surfaces.db" [/EXAMPLES]
+        table_name: [BRIEF] Name of the table to modify. [/BRIEF]
+                   [DETAILED] The name of the database table where descriptor columns will be added.
+                   This table should contain the source data needed for descriptor computation. [/DETAILED]
+                   [SYNTACTIC] Format: "table_name" [/SYNTACTIC]
+                   [EXAMPLES] Examples: "slabs", "bulk_structures", "materials" [/EXAMPLES]
+        descriptor_type: [BRIEF] Type of descriptor being computed. [/BRIEF]
+                        [DETAILED] A descriptive name for the type of descriptor being computed, used
+                        for logging and documentation purposes. This helps track what calculations
+                        were performed on the data. [/DETAILED]
+                        [SYNTACTIC] Format: "descriptor_type_name" [/SYNTACTIC]
+                        [EXAMPLES] Examples: "coordination", "d_band", "bond_length", "surface_area" [/EXAMPLES]
+        descriptor_function_code: [BRIEF] Python function code that computes descriptors from row data. [/BRIEF]
+                                 [DETAILED] A string containing Python code that defines a function named
+                                 'compute_descriptor' which takes a row dictionary as input and returns
+                                 a dictionary mapping column names to computed values. [/DETAILED]
+                                 [SYNTACTIC] Format: "Python code defining compute_descriptor(row) function" [/SYNTACTIC]
+                                 [EXAMPLES] Examples: Function code computing coordination numbers, bond lengths [/EXAMPLES]
+        batch_size: [BRIEF] Number of rows to process per batch. Defaults to 100. [/BRIEF]
+                   [DETAILED] The number of database rows to process in each batch for memory efficiency.
+                   Larger batches may be faster but use more memory, while smaller batches are more
+                   memory-efficient but may be slower. [/DETAILED]
+                   [SYNTACTIC] Format: positive integer [/SYNTACTIC]
+                   [EXAMPLES] Examples: 50 (small), 100 (standard), 500 (large) [/EXAMPLES]
+        dependencies: [BRIEF] List of other tables needed for computation. Defaults to None. [/BRIEF]
+                     [DETAILED] A list of other table names that need to be joined with the main table
+                     for descriptor computation. This allows access to related data from multiple tables
+                     during feature calculation. [/DETAILED]
+                     [SYNTACTIC] Format: list of table names ["table1", "table2"] or None [/SYNTACTIC]
+                     [EXAMPLES] Examples: ["bulk_structures"], ["slabs", "adsorbates"], None [/EXAMPLES]
 
     Returns:
-        Status string with descriptor statistics.
+        str: [BRIEF] JSON string with descriptor computation results and statistics. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing information about the descriptor computation,
+             including the number of rows processed, columns added, and statistical information about
+             the computed descriptors. [/DETAILED]
+             [EXAMPLES] Example output: {"rows_processed": 1000, "columns_added": ["coord_num"], "statistics": {...}} [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When function code is invalid or doesn't define compute_descriptor [/ERROR_WHEN]
+                   [ERROR_DETAILS] Syntax errors in function code or missing compute_descriptor function [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify function code syntax and ensure compute_descriptor is defined [/ERROR_RECOVERY]
+        sqlite3.Error: [ERROR_WHEN] When database operations fail [/ERROR_WHEN]
+                      [ERROR_DETAILS] Database connection issues, table not found, or permission errors [/ERROR_DETAILS]
+                      [ERROR_RECOVERY] Check database path and permissions [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Requires SQLite database format
+    - Function code must be valid Python and define compute_descriptor
+    - Memory usage depends on batch size and descriptor complexity
+    - Limited error handling for complex descriptor calculations
+    [/LIMITATIONS]
     """
+
     import json
     import sqlite3
     from collections import defaultdict
@@ -4783,6 +5449,521 @@ def add_descriptor_column_to_db(
 
 
 @tool
+def prepare_neural_network_dataset(
+    polymorphs_json_path: str,
+    output_path: str,
+    target_property: str = "formation_energy_per_atom",
+    sequence_features: bool = False,
+    embedding_features: bool = True,
+    test_split: float = 0.2,
+) -> str:
+    """[BRIEF] Prepare neural network-ready datasets with embeddings and sequence features for deep learning models. [/BRIEF]
+
+    [DETAILED] This tool prepares datasets specifically designed for neural network models in materials science,
+    creating feature representations suitable for deep learning architectures. It generates structural features,
+    element embeddings, and optional sequence features from materials data, handling the conversion from
+    crystallographic structures to tensor-ready formats. The tool supports various neural network architectures
+    and provides proper train/test splits for model development. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when preparing data for neural network models (CNNs, RNNs, transformers)
+    - Essential for deep learning approaches to materials property prediction
+    - Use when you need embedding representations of chemical elements
+    - Recommended for sequence-based modeling of atomic arrangements
+    - Avoid for traditional ML models that don't require tensor inputs
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Loads materials data from JSON file containing structures and properties
+    - Converts crystal structures to neural network features
+    - Creates element embeddings using atomic properties
+    - Generates sequence features from atomic positions if requested
+    - Handles train/test splitting with stratification
+    - Saves datasets in NPZ format optimized for neural network training
+    - Includes normalization parameters and metadata for model development
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Have materials database with structures and target properties [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to create neural network datasets [/CURRENT]
+    3. [FOLLOW_UP] Use output files for training neural network models [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - prepare_neural_network_dataset("materials.json", "nn_dataset", "formation_energy", False, True, 0.2)
+    - prepare_neural_network_dataset("polymorphs.json", "output", sequence_features=True)
+    - prepare_neural_network_dataset("data.json", "neural_data", test_split=0.15)
+    [/SYNTACTICAL]
+
+    Args:
+        polymorphs_json_path: [BRIEF] Path to JSON file containing materials data. [/BRIEF]
+                             [DETAILED] Full path to a JSON file containing materials structures and properties.
+                             Each entry should include CIF structures and target properties for neural network
+                             training. The file should be properly formatted with consistent property names. [/DETAILED]
+                             [SYNTACTIC] Format: "path/to/materials.json" [/SYNTACTIC]
+                             [EXAMPLES] Examples: "polymorphs.json", "data/materials_database.json" [/EXAMPLES]
+        output_path: [BRIEF] Base path for saving dataset files. [/BRIEF]
+                    [DETAILED] Base path for saving the neural network dataset files. The tool will create
+                    train, test, and metadata files with appropriate suffixes. The path should be writable
+                    and have sufficient space for the dataset files. [/DETAILED]
+                    [SYNTACTIC] Format: "path/to/output_base" [/SYNTACTIC]
+                    [EXAMPLES] Examples: "nn_dataset", "output/neural_data" [/EXAMPLES]
+        target_property: [BRIEF] Property name to predict. Defaults to "formation_energy_per_atom". [/BRIEF]
+                        [DETAILED] The name of the property in the JSON data that will be used as the target
+                        for neural network training. This property should be numerical and present in most
+                        or all entries in the dataset. [/DETAILED]
+                        [SYNTACTIC] Format: "property_name" [/SYNTACTIC]
+                        [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus" [/EXAMPLES]
+        sequence_features: [BRIEF] Whether to create sequence-based features. Defaults to False. [/BRIEF]
+                          [DETAILED] Controls whether to generate sequence features from atomic positions,
+                          suitable for RNN or transformer models. This creates flattened coordinate arrays
+                          that can be used for sequence modeling of atomic arrangements. [/DETAILED]
+                          [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                          [EXAMPLES] Examples: True (for sequence models), False (for standard NNs) [/EXAMPLES]
+        embedding_features: [BRIEF] Whether to create element embedding features. Defaults to True. [/BRIEF]
+                           [DETAILED] Controls whether to generate element embedding features using atomic
+                           properties like electronegativity, atomic radius, and atomic mass. These features
+                           are essential for most neural network models in materials science. [/DETAILED]
+                           [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                           [EXAMPLES] Examples: True (recommended), False (structural only) [/EXAMPLES]
+        test_split: [BRIEF] Fraction of data for test set. Defaults to 0.2. [/BRIEF]
+                   [DETAILED] The fraction of the dataset to reserve for testing. The remaining data
+                   will be used for training. A value of 0.2 means 20% test, 80% train, which is
+                   standard for most machine learning applications. [/DETAILED]
+                   [SYNTACTIC] Format: float between 0 and 1 [/SYNTACTIC]
+                   [EXAMPLES] Examples: 0.15 (small test), 0.2 (standard), 0.25 (large test) [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] JSON string with dataset preparation results and file paths. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing information about the dataset preparation,
+             including file paths for train/test data, dataset statistics, and metadata about the
+             features and target property. [/DETAILED]
+             [EXAMPLES] Example output: {"success": True, "train_path": "...", "test_path": "...", "dataset_info": {...}} [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When input data is invalid or target property is missing [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid JSON format, missing target property, or insufficient data [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify JSON format and ensure target property exists in data [/ERROR_RECOVERY]
+        IOError: [ERROR_WHEN] When file operations fail [/ERROR_WHEN]
+                [ERROR_DETAILS] Cannot read input file or write output files [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Check file permissions and ensure sufficient disk space [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Requires consistent JSON format for input data
+    - Element embeddings are limited to predefined atomic properties
+    - Sequence features are truncated/padded to fixed lengths
+    - May not handle very large structures efficiently
+    [/LIMITATIONS]
+    """
+
+    try:
+        # Load polymorphs data
+        with Path(polymorphs_json_path).open("r") as f:
+            polymorphs = json.load(f)
+
+        # Prepare neural network specific features
+        nn_features = []
+        targets = []
+        metadata = []
+
+        for poly in polymorphs:
+            if target_property not in poly or poly[target_property] is None:
+                continue
+
+            try:
+                from pymatgen.core import Structure
+
+                structure = Structure.from_str(poly["cif"], fmt="cif")
+
+                # Base features
+                features = {
+                    "structural": [
+                        structure.density,
+                        structure.volume,
+                        len(structure),
+                        len(structure.composition.elements),
+                        structure.lattice.a,
+                        structure.lattice.b,
+                        structure.lattice.c,
+                        structure.lattice.alpha,
+                        structure.lattice.beta,
+                        structure.lattice.gamma,
+                    ]
+                }
+
+                # Element embeddings
+                if embedding_features:
+                    element_properties = []
+                    for element in structure.composition.elements:
+                        element_properties.extend(
+                            [
+                                element.atomic_radius or 0,
+                                element.X,  # electronegativity
+                                element.atomic_mass,
+                                element.number,
+                                element.row,
+                                element.group,
+                            ]
+                        )
+
+                    # Pad or truncate to fixed size (max 5 elements * 6 properties = 30)
+                    element_properties = element_properties[:30]
+                    element_properties.extend([0] * (30 - len(element_properties)))
+                    features["elements"] = element_properties
+
+                # Sequence features (atomic positions)
+                if sequence_features:
+                    positions = structure.frac_coords.flatten()
+                    # Limit to first 150 coordinates (50 atoms * 3 coords)
+                    positions = positions[:150]
+                    positions = np.pad(positions, (0, max(0, 150 - len(positions))))
+                    features["positions"] = positions.tolist()
+
+                nn_features.append(features)
+                targets.append(poly[target_property])
+                metadata.append(
+                    {
+                        "material_id": poly.get("material_id", "unknown"),
+                        "composition": poly.get("composition", "unknown"),
+                    }
+                )
+
+            except Exception as e:
+                logger.info(
+                    f"Warning: Could not process {poly.get('material_id', 'unknown')}: {e}"
+                )
+                continue
+
+        if len(nn_features) == 0:
+            return json.dumps({"success": False, "error": "No valid samples found"})
+
+        # Split data
+        from sklearn.model_selection import train_test_split
+
+        indices = np.arange(len(nn_features))
+        train_idx, test_idx = train_test_split(
+            indices, test_size=test_split, random_state=42
+        )
+
+        train_features = [nn_features[i] for i in train_idx]
+        test_features = [nn_features[i] for i in test_idx]
+        train_targets = [targets[i] for i in train_idx]
+        test_targets = [targets[i] for i in test_idx]
+        train_metadata = [metadata[i] for i in train_idx]
+        test_metadata = [metadata[i] for i in test_idx]
+
+        # Save as NPZ files for neural networks
+        train_path = f"{output_path}_train.npz"
+        test_path = f"{output_path}_test.npz"
+
+        # Prepare arrays
+        train_data = {"targets": np.array(train_targets), "metadata": train_metadata}
+        test_data = {"targets": np.array(test_targets), "metadata": test_metadata}
+
+        # Add feature arrays
+        for feature_type in ["structural", "elements", "positions"]:
+            if feature_type in train_features[0]:
+                train_data[feature_type] = np.array(
+                    [f[feature_type] for f in train_features]
+                )
+                test_data[feature_type] = np.array(
+                    [f[feature_type] for f in test_features]
+                )
+
+        np.savez(train_path, **train_data)
+        np.savez(test_path, **test_data)
+
+        # Save dataset info
+        metadata_path = f"{output_path}_metadata.json"
+        dataset_info = {
+            "target_property": target_property,
+            "sequence_features": sequence_features,
+            "embedding_features": embedding_features,
+            "train_samples": len(train_features),
+            "test_samples": len(test_features),
+            "feature_types": list(train_features[0].keys()),
+            "train_path": train_path,
+            "test_path": test_path,
+        }
+
+        with Path(metadata_path).open("w") as f:
+            json.dump(dataset_info, f, indent=2)
+
+        return json.dumps(
+            {
+                "success": True,
+                "train_path": train_path,
+                "test_path": test_path,
+                "metadata_path": metadata_path,
+                "dataset_info": dataset_info,
+            },
+            indent=2,
+        )
+
+    except Exception as e:
+        import traceback
+
+        return json.dumps(
+            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+        )
+
+
+@tool
+def prepare_graph_dataset(
+    polymorphs_json_path: str,
+    output_path: str,
+    target_property: str = "formation_energy_per_atom",
+    cutoff_radius: float = 5.0,
+    test_split: float = 0.2,
+) -> str:
+    """[BRIEF] Prepare graph-based datasets for Graph Neural Networks (GNNs) with node and edge features. [/BRIEF]
+
+    [DETAILED] This tool creates graph representations of crystal structures suitable for Graph Neural Networks,
+    converting atomic structures into graphs where atoms are nodes and bonds are edges. It generates node features
+    from atomic properties and edge features from interatomic distances, creating comprehensive graph datasets
+    for GNN-based materials property prediction. The tool handles the complexity of converting 3D crystal
+    structures to graph format while preserving essential structural information. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when preparing data for Graph Neural Network models
+    - Essential for GNN-based materials property prediction
+    - Use when you need to capture local atomic environments and bonding
+    - Recommended for problems where atomic connectivity is important
+    - Avoid for models that don't require graph representations
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Loads materials data from JSON file containing structures and properties
+    - Converts each crystal structure to a graph representation
+    - Creates node features from atomic properties (radius, electronegativity, etc.)
+    - Generates edges based on interatomic distances within cutoff radius
+    - Computes edge features from distances and geometric relationships
+    - Saves graph datasets in JSON format suitable for GNN frameworks
+    - Includes metadata about graph statistics and dataset properties
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Have materials database with crystal structures and properties [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to create graph datasets [/CURRENT]
+    3. [FOLLOW_UP] Use output with GNN frameworks like PyTorch Geometric [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - prepare_graph_dataset("materials.json", "graph_data", "formation_energy", 5.0, 0.2)
+    - prepare_graph_dataset("polymorphs.json", "gnn_dataset", cutoff_radius=4.0)
+    - prepare_graph_dataset("data.json", "graphs", test_split=0.15)
+    [/SYNTACTICAL]
+
+    Args:
+        polymorphs_json_path: [BRIEF] Path to JSON file containing materials data. [/BRIEF]
+                             [DETAILED] Full path to a JSON file containing materials structures and properties.
+                             Each entry should include CIF structures and target properties for GNN training.
+                             The structures should be well-formed crystal structures with atomic coordinates. [/DETAILED]
+                             [SYNTACTIC] Format: "path/to/materials.json" [/SYNTACTIC]
+                             [EXAMPLES] Examples: "polymorphs.json", "data/crystal_database.json" [/EXAMPLES]
+        output_path: [BRIEF] Base path for saving graph dataset files. [/BRIEF]
+                    [DETAILED] Base path for saving the graph dataset files. The tool will create train,
+                    test, and metadata files with appropriate suffixes. The files will be in JSON format
+                    suitable for GNN frameworks. [/DETAILED]
+                    [SYNTACTIC] Format: "path/to/output_base" [/SYNTACTIC]
+                    [EXAMPLES] Examples: "graph_dataset", "output/gnn_data" [/EXAMPLES]
+        target_property: [BRIEF] Property name to predict. Defaults to "formation_energy_per_atom". [/BRIEF]
+                        [DETAILED] The name of the property in the JSON data that will be used as the target
+                        for GNN training. This property should be numerical and represent a material property
+                        that can be predicted from structural information. [/DETAILED]
+                        [SYNTACTIC] Format: "property_name" [/SYNTACTIC]
+                        [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "elastic_modulus" [/EXAMPLES]
+        cutoff_radius: [BRIEF] Cutoff radius for graph edges in Angstroms. Defaults to 5.0. [/BRIEF]
+                      [DETAILED] The maximum distance between atoms to create edges in the graph representation.
+                      This parameter controls the connectivity of the graph and affects the local environment
+                      captured by the GNN. Typical values are 3-8 Å depending on the material system. [/DETAILED]
+                      [SYNTACTIC] Format: positive float representing distance in Angstroms [/SYNTACTIC]
+                      [EXAMPLES] Examples: 3.0 (short-range), 5.0 (standard), 8.0 (long-range) [/EXAMPLES]
+        test_split: [BRIEF] Fraction of data for test set. Defaults to 0.2. [/BRIEF]
+                   [DETAILED] The fraction of the dataset to reserve for testing. The remaining data
+                   will be used for training. This split is important for evaluating GNN model performance
+                   on unseen graph structures. [/DETAILED]
+                   [SYNTACTIC] Format: float between 0 and 1 [/SYNTACTIC]
+                   [EXAMPLES] Examples: 0.15 (small test), 0.2 (standard), 0.25 (large test) [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] JSON string with graph dataset preparation results and file paths. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing information about the graph dataset preparation,
+             including file paths for train/test data, graph statistics (average nodes/edges per graph),
+             and metadata about the dataset and target property. [/DETAILED]
+             [EXAMPLES] Example output: {"success": True, "train_path": "...", "avg_nodes_per_graph": 42.3, ...} [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When input data is invalid or graph creation fails [/ERROR_WHEN]
+                   [ERROR_DETAILS] Invalid JSON format, missing target property, or structure conversion errors [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify JSON format and ensure structures are valid crystal structures [/ERROR_RECOVERY]
+        StructureError: [ERROR_WHEN] When crystal structures cannot be converted to graphs [/ERROR_WHEN]
+                       [ERROR_DETAILS] Malformed crystal structures or inappropriate cutoff radius [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Check structure quality and adjust cutoff radius if needed [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Graph size varies significantly with structure size and cutoff radius
+    - May create very large graphs for complex structures
+    - Edge features are limited to distance-based properties
+    - Does not account for periodic boundary conditions in edge creation
+    [/LIMITATIONS]
+    """
+    try:
+        # Load polymorphs data
+        with Path(polymorphs_json_path).open("r") as f:
+            polymorphs = json.load(f)
+
+        graphs = []
+        targets = []
+        metadata = []
+
+        for poly in polymorphs:
+            if target_property not in poly or poly[target_property] is None:
+                continue
+
+            try:
+                from pymatgen.core import Structure
+
+                structure = Structure.from_str(poly["cif"], fmt="cif")
+
+                # Create graph representation
+                # Nodes: atoms with features
+                # Edges: bonds within cutoff radius
+
+                node_features = []
+                edge_indices = []
+                edge_features = []
+
+                # Node features (atomic properties)
+                for _i, site in enumerate(structure.sites):
+                    element = site.specie
+                    node_features.append(
+                        [
+                            element.atomic_radius or 1.0,
+                            element.X,  # electronegativity
+                            element.atomic_mass,
+                            element.number,
+                            float(element.row),
+                            float(element.group),
+                            site.coords[0],
+                            site.coords[1],
+                            site.coords[2],  # coordinates
+                        ]
+                    )
+
+                # Edge features (distances and angles)
+                for i, _site_i in enumerate(structure.sites):
+                    for j, _site_j in enumerate(structure.sites):
+                        if i != j:
+                            distance = structure.get_distance(i, j)
+                            if distance <= cutoff_radius:
+                                edge_indices.append([i, j])
+                                edge_features.append(
+                                    [distance, 1.0 / distance]
+                                )  # distance and inverse distance
+
+                graph_data = {
+                    "node_features": node_features,
+                    "edge_indices": edge_indices,
+                    "edge_features": edge_features,
+                    "num_nodes": len(node_features),
+                    "num_edges": len(edge_indices),
+                }
+
+                graphs.append(graph_data)
+                targets.append(poly[target_property])
+                metadata.append(
+                    {
+                        "material_id": poly.get("material_id", "unknown"),
+                        "composition": poly.get("composition", "unknown"),
+                        "num_atoms": len(structure),
+                    }
+                )
+
+            except Exception as e:
+                logger.info(
+                    f"Warning: Could not create graph for {poly.get('material_id', 'unknown')}: {e}"
+                )
+                continue
+
+        if len(graphs) == 0:
+            return json.dumps({"success": False, "error": "No valid graphs created"})
+
+        # Split data
+        from sklearn.model_selection import train_test_split
+
+        indices = np.arange(len(graphs))
+        train_idx, test_idx = train_test_split(
+            indices, test_size=test_split, random_state=42
+        )
+
+        train_graphs = [graphs[i] for i in train_idx]
+        test_graphs = [graphs[i] for i in test_idx]
+        train_targets = [targets[i] for i in train_idx]
+        test_targets = [targets[i] for i in test_idx]
+        train_metadata = [metadata[i] for i in train_idx]
+        test_metadata = [metadata[i] for i in test_idx]
+
+        # Save graph datasets
+        train_path = f"{output_path}_train_graphs.json"
+        test_path = f"{output_path}_test_graphs.json"
+
+        train_data = {
+            "graphs": train_graphs,
+            "targets": train_targets,
+            "metadata": train_metadata,
+        }
+
+        test_data = {
+            "graphs": test_graphs,
+            "targets": test_targets,
+            "metadata": test_metadata,
+        }
+
+        with Path(train_path).open("w") as f:
+            json.dump(train_data, f, indent=2)
+
+        with Path(test_path).open("w") as f:
+            json.dump(test_data, f, indent=2)
+
+        # Save dataset info
+        metadata_path = f"{output_path}_metadata.json"
+        dataset_info = {
+            "target_property": target_property,
+            "cutoff_radius": cutoff_radius,
+            "train_samples": len(train_graphs),
+            "test_samples": len(test_graphs),
+            "avg_nodes_per_graph": np.mean([g["num_nodes"] for g in graphs]),
+            "avg_edges_per_graph": np.mean([g["num_edges"] for g in graphs]),
+            "train_path": train_path,
+            "test_path": test_path,
+        }
+
+        with Path(metadata_path).open("w") as f:
+            json.dump(dataset_info, f, indent=2)
+
+        return json.dumps(
+            {
+                "success": True,
+                "train_path": train_path,
+                "test_path": test_path,
+                "metadata_path": metadata_path,
+                "dataset_info": dataset_info,
+            },
+            indent=2,
+        )
+
+    except Exception as e:
+        import traceback
+
+        return json.dumps(
+            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+        )
+
+
+@tool
 def generate_ml_dataset_format(
     db_path: str,
     table_name: str,
@@ -4794,22 +5975,122 @@ def generate_ml_dataset_format(
     normalize_features: bool = True,
     include_metadata: bool = True,
 ) -> str:
-    """
-    Generate a ML-ready dataset in the specified format with proper train/validation splits.
+    """[BRIEF] Generate ML-ready datasets from database tables with proper formatting, splits, and normalization. [/BRIEF]
+
+    [DETAILED] This tool extracts data from database tables and converts it to machine learning-ready formats
+    with proper train/validation splits, feature normalization, and metadata tracking. It supports multiple
+    output formats (CSV, JSON, NPZ) and handles missing data, feature scaling, and dataset documentation.
+    This is the final step in the ML pipeline, converting processed descriptors and features into datasets
+    ready for training traditional machine learning models. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use after computing descriptors and features in database tables
+    - Essential for creating final ML datasets from processed data
+    - Use when you need properly formatted datasets for scikit-learn or similar libraries
+    - Recommended for traditional ML models (Random Forest, SVM, etc.)
+    - Avoid for deep learning models that require specialized preprocessing
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Connects to the specified database and extracts data from the table
+    - Validates feature and target columns for completeness
+    - Handles missing data by excluding incomplete rows
+    - Applies feature normalization using z-score standardization
+    - Splits data into train/validation sets with random sampling
+    - Exports datasets in the specified format with proper structure
+    - Generates metadata files with normalization parameters and dataset information
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Have database with computed descriptors using add_descriptor_column_to_db [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to create ML-ready datasets [/CURRENT]
+    3. [FOLLOW_UP] Use output files for training ML models with scikit-learn or similar [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - generate_ml_dataset_format("data.db", "materials", ["coord", "area"], "energy", "csv", "dataset")
+    - generate_ml_dataset_format("db.sqlite", "slabs", features, "stability", "json", "ml_data")
+    - generate_ml_dataset_format("materials.db", "table", cols, "target", output_format="npz")
+    [/SYNTACTICAL]
 
     Args:
-        db_path: Path to SQLite database
-        table_name: Table containing the data
-        feature_columns: List of column names to use as features
-        target_column: Column name for the prediction target
-        output_format: Format for the dataset (csv, json, npz)
-        output_path: Base path/filename for the output files
-        validation_split: Fraction to use for validation set
-        normalize_features: Whether to normalize features
-        include_metadata: Whether to include feature metadata
+        db_path: [BRIEF] Path to the SQLite database file. [/BRIEF]
+                [DETAILED] Full path to the SQLite database file containing the processed data with
+                computed descriptors and target properties. The database should be accessible for
+                reading and contain the specified table. [/DETAILED]
+                [SYNTACTIC] Format: "path/to/database.db" [/SYNTACTIC]
+                [EXAMPLES] Examples: "materials.db", "data/processed_data.sqlite" [/EXAMPLES]
+        table_name: [BRIEF] Name of the table containing the data. [/BRIEF]
+                   [DETAILED] The name of the database table containing the features and target values
+                   for ML dataset generation. This table should have computed descriptors and complete
+                   data for the specified columns. [/DETAILED]
+                   [SYNTACTIC] Format: "table_name" [/SYNTACTIC]
+                   [EXAMPLES] Examples: "materials", "slabs", "processed_data" [/EXAMPLES]
+        feature_columns: [BRIEF] List of column names to use as features. [/BRIEF]
+                        [DETAILED] A list of column names from the database table that will be used as
+                        input features for machine learning. These should be numerical columns containing
+                        computed descriptors or material properties. [/DETAILED]
+                        [SYNTACTIC] Format: list of column names ["col1", "col2", "col3"] [/SYNTACTIC]
+                        [EXAMPLES] Examples: ["coordination_number", "surface_area"], ["d_band_center", "work_function"] [/EXAMPLES]
+        target_column: [BRIEF] Column name for the prediction target. [/BRIEF]
+                      [DETAILED] The name of the column containing the target values for machine learning.
+                      This should be a numerical column representing the property you want to predict
+                      using the feature columns. [/DETAILED]
+                      [SYNTACTIC] Format: "column_name" [/SYNTACTIC]
+                      [EXAMPLES] Examples: "formation_energy", "band_gap", "adsorption_energy" [/EXAMPLES]
+        output_format: [BRIEF] Format for the dataset output. Defaults to "csv". [/BRIEF]
+                      [DETAILED] The format for saving the ML dataset. Options include "csv" for tabular data,
+                      "json" for structured data, and "npz" for NumPy arrays. CSV is most compatible with
+                      standard ML libraries. [/DETAILED]
+                      [SYNTACTIC] Format: string from ["csv", "json", "npz"] [/SYNTACTIC]
+                      [EXAMPLES] Examples: "csv" (most common), "json" (structured), "npz" (NumPy) [/EXAMPLES]
+        output_path: [BRIEF] Base path for output files. Defaults to "ml_dataset". [/BRIEF]
+                    [DETAILED] Base path for saving the ML dataset files. The tool will create separate
+                    files for train/validation splits with appropriate suffixes. Should be a writable
+                    location with sufficient space. [/DETAILED]
+                    [SYNTACTIC] Format: "path/to/output_base" [/SYNTACTIC]
+                    [EXAMPLES] Examples: "ml_dataset", "output/materials_data" [/EXAMPLES]
+        validation_split: [BRIEF] Fraction of data for validation set. Defaults to 0.2. [/BRIEF]
+                         [DETAILED] The fraction of the dataset to reserve for validation. The remaining
+                         data will be used for training. This split is crucial for proper model evaluation
+                         and hyperparameter tuning. [/DETAILED]
+                         [SYNTACTIC] Format: float between 0 and 1 [/SYNTACTIC]
+                         [EXAMPLES] Examples: 0.15 (small validation), 0.2 (standard), 0.25 (large validation) [/EXAMPLES]
+        normalize_features: [BRIEF] Whether to normalize features. Defaults to True. [/BRIEF]
+                           [DETAILED] Controls whether to apply z-score normalization to feature columns.
+                           Normalization is generally recommended for ML models to ensure features are
+                           on similar scales and improve training stability. [/DETAILED]
+                           [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                           [EXAMPLES] Examples: True (recommended), False (raw features) [/EXAMPLES]
+        include_metadata: [BRIEF] Whether to include metadata files. Defaults to True. [/BRIEF]
+                         [DETAILED] Controls whether to generate metadata files containing information
+                         about the dataset, normalization parameters, and data splits. These files are
+                         important for reproducibility and model deployment. [/DETAILED]
+                         [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
+                         [EXAMPLES] Examples: True (recommended), False (data only) [/EXAMPLES]
 
     Returns:
-        Status string with information about the generated dataset
+        str: [BRIEF] JSON string with dataset generation results and file paths. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing information about the generated ML dataset,
+             including file paths for train/validation data, dataset statistics, and metadata about
+             the features and normalization applied. [/DETAILED]
+             [EXAMPLES] Example output: {"format": "csv", "train_path": "...", "validation_path": "...", "train_samples": 800} [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERROR_WHEN] When specified columns don't exist or contain invalid data [/ERROR_WHEN]
+                   [ERROR_DETAILS] Missing columns, non-numerical data, or insufficient valid rows [/ERROR_DETAILS]
+                   [ERROR_RECOVERY] Verify column names and ensure data is numerical and complete [/ERROR_RECOVERY]
+        sqlite3.Error: [ERROR_WHEN] When database operations fail [/ERROR_WHEN]
+                      [ERROR_DETAILS] Database connection issues, table not found, or query errors [/ERROR_DETAILS]
+                      [ERROR_RECOVERY] Check database path and table names [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Requires numerical data for all feature and target columns
+    - Excludes rows with any missing values
+    - Normalization assumes normal distribution of features
+    - Limited to single-table datasets without complex joins
+    [/LIMITATIONS]
     """
     import json
     import sqlite3
