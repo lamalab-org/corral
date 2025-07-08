@@ -4,7 +4,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from loguru import logger
 
-from corral.ablations import DocstringProcessor, ToolVerbosity, VerbosityConfig
+from corral.ablations import ToolVerbosity, VerbosityConfig
 from corral.base import Environment, ToolRequest
 
 
@@ -20,7 +20,7 @@ def get_tools_guide_with_verbosity(
 
     for tool in env.tools.values():
         # Filter tool description
-        filtered_description = DocstringProcessor.filter_tool_description(
+        filtered_description = VerbosityConfig.filter_tool_description(
             tool.description, verbosity
         )
 
@@ -32,23 +32,10 @@ def get_tools_guide_with_verbosity(
             )
         else:
             args_desc = []
-            # Check if this verbosity level should show raises/limitations
-            included_sections = VerbosityConfig.get_sections_for_verbosity(verbosity)
-            show_raises_limitations = (
-                "RAISES" in included_sections or "LIMITATIONS" in included_sections
-            )
-
             for arg in tool.arguments:
-                filtered_arg_desc = DocstringProcessor.filter_argument_description(
+                filtered_arg_desc = VerbosityConfig.filter_argument_description(
                     arg.description, verbosity
                 )
-
-                # Add raises and limitations if verbosity supports it
-                if show_raises_limitations:
-                    if arg.raises:
-                        filtered_arg_desc += f" [RAISES: {arg.raises}]"
-                    if arg.limitations:
-                        filtered_arg_desc += f" [LIMITATIONS: {arg.limitations}]"
 
                 required = (
                     "required" if arg.required else f"optional, default: {arg.default}"
@@ -169,14 +156,14 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
 
         for tool in env.tools.values():
             # Filter tool description based on verbosity
-            filtered_description = DocstringProcessor.filter_tool_description(
+            filtered_description = VerbosityConfig.filter_tool_description(
                 tool.description, verbosity
             )
 
             # Filter argument descriptions
             filtered_args = []
             for arg in tool.arguments:
-                filtered_arg_desc = DocstringProcessor.filter_argument_description(
+                filtered_arg_desc = VerbosityConfig.filter_argument_description(
                     arg.description, verbosity
                 )
 
