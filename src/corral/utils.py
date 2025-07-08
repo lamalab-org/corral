@@ -337,8 +337,6 @@ def parse_docstring(func: Callable) -> tuple[str, list[ToolArgument]]:
                         required=not has_default,
                         default=default_value,
                         choices=arg_data["choices"],
-                        raises=arg_data["raises"],
-                        limitations=arg_data["limitations"],
                     )
                 )
 
