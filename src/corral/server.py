@@ -1,10 +1,79 @@
 from collections.abc import Mapping
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from loguru import logger
 
+from corral.ablations import ToolVerbosity, VerbosityConfig
 from corral.base import Environment, ToolRequest
+
+
+def get_tools_guide_with_verbosity(
+    env: Environment, verbosity: ToolVerbosity | None
+) -> str:
+    """Generate tools guide with specified verbosity level"""
+    if not env.tools:
+        return "No tools available."
+    if verbosity is None:
+        verbosity = ToolVerbosity.FULL
+    tools_descriptions = []
+
+    for tool in env.tools.values():
+        # Filter tool description
+        filtered_description = VerbosityConfig.filter_tool_description(
+            tool.description, verbosity
+        )
+
+        # Format arguments based on verbosity
+        if verbosity == ToolVerbosity.MINIMAL:
+            args_desc = ", ".join(arg.name for arg in tool.arguments)
+            tools_descriptions.append(
+                f"**{tool.name}**: {filtered_description}\nArguments: {args_desc}"
+            )
+        else:
+            args_desc = []
+            for arg in tool.arguments:
+                filtered_arg_desc = VerbosityConfig.filter_argument_description(
+                    arg.description, verbosity
+                )
+
+                required = (
+                    "required" if arg.required else f"optional, default: {arg.default}"
+                )
+                args_desc.append(
+                    f"- {arg.name} ({arg.type}, {required}): {filtered_arg_desc}"
+                )
+
+            tool_guide = f"""Tool: {tool.name}
+Description: {filtered_description}
+Arguments:
+{chr(10).join(args_desc)}"""
+            tools_descriptions.append(tool_guide)
+
+    tools_guide = "\n\n".join(tools_descriptions)
+
+    # Add usage instructions based on verbosity
+    if verbosity == ToolVerbosity.MINIMAL:
+        return f"Available Tools:\n{tools_guide}"
+    else:
+        return f"""Available Tools:
+{tools_guide}
+
+How to use tools:
+1. Each tool call must specify the tool name and required arguments
+2. Tools may return errors if arguments are invalid
+3. You can make multiple tool calls as needed
+4. All tool calls are recorded and affect your final score
+
+Example tool call format:
+{{
+    "tool_name": "tool_name",
+    "arguments": {{
+        "arg1": value1,
+        "arg2": value2
+    }}
+}}
+"""
 
 
 def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
@@ -33,25 +102,94 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         return {"prompt": environments[task_id].get_task_prompt()}
 
     @app.get("/tasks/{task_id}/guide")
-    def get_environment_guide(task_id: str):
-        """Get the task prompt for the agent"""
+    def get_environment_guide(
+        task_id: str,
+        verbosity: ToolVerbosity | None = None,
+    ):
+        if verbosity is None:
+            verbosity = Query(
+                ToolVerbosity.FULL, description="Tool description verbosity level"
+            )
+        """Get the complete environment guide with specified tool verbosity"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
-        return {"prompt": environments[task_id].get_environment_guide()}
+
+        env = environments[task_id]
+        task_prompt = env.get_task_prompt()
+        tools_guide = get_tools_guide_with_verbosity(env, verbosity)
+
+        return {"prompt": f"Task: {task_prompt}\n\n{tools_guide}"}
 
     @app.get("/tasks/{task_id}/tools/guide")
-    def get_tools_guide(task_id: str):
-        """Get the tools guide for the agent"""
+    def get_tools_guide(
+        task_id: str,
+        verbosity: ToolVerbosity | None = None,
+    ):
+        if verbosity is None:
+            verbosity = Query(
+                ToolVerbosity.FULL, description="Tool description verbosity level"
+            )
+        """Get the tools guide with specified verbosity level"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
-        return {"prompt": environments[task_id].get_tools_guide()}
+
+        env = environments[task_id]
+        tools_guide = get_tools_guide_with_verbosity(env, verbosity)
+
+        return {"prompt": tools_guide}
 
     @app.get("/tasks/{task_id}/tools")
-    def get_available_tools(task_id: str):
-        """Get available tools for this task"""
+    def get_available_tools(
+        task_id: str,
+        verbosity: ToolVerbosity | None = None,
+    ):
+        if verbosity is None:
+            verbosity = Query(
+                ToolVerbosity.FULL, description="Tool description verbosity level"
+            )
+        """Get available tools for this task with specified verbosity"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
-        return {"tools": environments[task_id].get_available_tools()}
+
+        env = environments[task_id]
+        tools_info = []
+
+        for tool in env.tools.values():
+            # Filter tool description based on verbosity
+            filtered_description = VerbosityConfig.filter_tool_description(
+                tool.description, verbosity
+            )
+
+            # Filter argument descriptions
+            filtered_args = []
+            for arg in tool.arguments:
+                filtered_arg_desc = VerbosityConfig.filter_argument_description(
+                    arg.description, verbosity
+                )
+
+                if verbosity == ToolVerbosity.MINIMAL:
+                    # Just name and type
+                    filtered_args.append(f"{arg.name} ({arg.type})")
+                else:
+                    # Include filtered description
+                    required = (
+                        "required"
+                        if arg.required
+                        else f"optional, default: {arg.default}"
+                    )
+                    filtered_args.append(
+                        f"{arg.name} ({arg.type}, {required}): {filtered_arg_desc}"
+                    )
+
+            tools_info.append(
+                {
+                    "name": tool.name,
+                    "description": filtered_description,
+                    "arguments": filtered_args,
+                }
+            )
+
+        return {"tools": tools_info}
 
     @app.post("/tasks/{task_id}/tools/execute")
     def execute_tool(task_id: str, request: ToolRequest):
@@ -80,27 +218,21 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
+
+        # 1. Submit answer and score
         score = env.submit_answer(answer["answer"])
 
-        state_dict = env.state.__dict__  # Get state as dict
-        tool_statistics = env.state.get_tool_statistics()
+        # 2. Get completed trial data (before any reset)
+        completed_trial = env.get_completed_trial_data()
 
-        # Add detailed tool calls to the statistics
-        tool_statistics["tool_calls"] = [
-            {
-                "tool_name": call.tool_name,
-                "arguments": call.arguments,
-                "result": call.result,
-                "status": call.status.value,  # Convert enum to string
-                "error_message": call.error_message,
-                "timestamp": call.timestamp.isoformat() if call.timestamp else None,
-            }
-            for call in env.state.tool_calls
-        ]
-        state_dict["tool_statistics"] = tool_statistics
-        finished_trail = env.reset_state()  # Reset the state for the next trail
+        # 3. Reset for next trial
+        finished_trial_id = env.reset_state()
 
-        return {"score": score, "state": state_dict, "trial_id": finished_trail}
+        return {
+            "score": score,
+            "state": completed_trial["state"],
+            "trial_id": finished_trial_id,
+        }
 
     @app.get("/tasks/{task_id}/status")
     def get_task_status(task_id: str):

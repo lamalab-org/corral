@@ -1,103 +1,135 @@
-import importlib.resources
-import json
-
 from promptstore import PromptStore
 
-from corral.agents.prompt_utils import get_prompt
+from corral.agents.base_agent import BaseAgent
+from corral.agents.prompt_utils import create_prompt
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
-from corral.agents.utils import LiteLLMMessage, _build_user_content, llm_call
+from corral.agents.utils import LiteLLMMessage
 from corral.evaluate import BenchmarkInterface
-from corral.utils import serialize_messages
 
 
-class LLMPlanner:
-    """Agent that uses the LLM planner to generate plans.
-    Then the low-level planner is called to execute the plan.
+class LLMPlanner(BaseAgent):
+    """
+    Agent that uses hierarchical planning to solve tasks.
     Based on https://arxiv.org/abs/2212.04088
 
+    The LLMPlanner works in two stages:
+    1. **High-level planning**: Generates step-by-step plans using the LLM
+    2. **Low-level execution**: Delegates plan execution to ReActAgent or ToolCallingAgent
+
+    This approach allows for better task decomposition and more structured problem-solving.
+
+    ## Required Prompt Fields
+
+    The user prompt for LLMPlanner must contain the following Jinja template fields:
+    - **{{task_guide}}**: The main task instructions and description
+    - **{{tools}}**: JSON string containing available tools and their descriptions
+    - **{{iterations}}**: Maximum number of iterations as a string
+    - **{{examples}}**: Few-shot examples formatted as a string (optional, can be empty)
+
+    ### Default User Prompt Template:
+    The default prompt (ID: "1c7f064f-9a3b-40f5-a555-94e551722d50") expects:
+
+    ### Custom Prompt Requirements:
+    If providing a custom user_prompt, it must:
+    1. Include {{task_guide}} placeholder for task instructions
+    2. Include {{tools}} placeholder for available tools (JSON format)
+    3. Include {{iterations}} placeholder for iteration limit
+    4. Include {{examples}} placeholder for few-shot examples
+    5. Instruct the agent to create step-by-step plans
+    6. Specify "Final Answer:" format for completion
+    7. Support Jinja templating with .fill() method
+
     Args:
-        model (str): The model to use for running the agent
+        model (str): The model to use for running the agent. Defaults to "openai/gpt-4o".
         max_iterations (int, optional): The maximum number of iterations to plan. Defaults to 10.
         api_endpoint (str, optional): The API endpoint URL for the LLM provider (e.g., OpenAI, VLLM, or self-hosted models) to handle tool/function calling requests. Defaults to None.
-        system_prompt (str, optional): The system prompt to use.
-            Defaults to "You are a helpful AI assistant that solves tasks step by step."
-        user_prompt (str, optional): The user prompt to use. Defaults to a simple prompt with `task_guide`, `tools`, `iterations` and `examples`. `examples` is thought to include few-shot guide.
-        temperature (float, optional): The temperature to use for sampling.
-                Defaults to 0.7.
+        system_prompt (str | Any, optional): The system prompt to use. Can be a string, PromptStore ID, or prompt object
+            that implements .fill() method. Defaults to "You are a helpful AI assistant that solves tasks step by step."
+        user_prompt (str | Any, optional): The user prompt template. Must contain {{task_guide}}, {{tools}},
+            {{iterations}}, and {{examples}} fields for hierarchical planning functionality.
+            Can be a string, PromptStore ID, or prompt object that implements .fill() method.
+        extractor_prompt (str | Any, optional): The prompt to use for extracting final answers. Can be a string,
+            PromptStore ID, or prompt object that implements .fill() method. Defaults to None.
+        temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
-        kwargs: Additional keyword arguments to pass to the LiteLLM API for all LLM calls
+        system_prompt_id (str, optional): The ID of the system prompt to use. Defaults to "400fcecf-f5f2-464b-aff5-8a4377c9685c".
+        user_prompt_id (str, optional): The ID of the user prompt to use. Defaults to "1c7f064f-9a3b-40f5-a555-94e551722d50".
+        extractor_prompt_id (str, optional): The ID of the extractor prompt to use. Defaults to "9d37e4a0-26c5-438a-ba1b-a273388fcded".
+        **kwargs: Additional keyword arguments to pass to the LiteLLM API for all LLM calls
     """
 
     def __init__(
         self,
-        model: str = "gpt-4",
-        max_iterations: int = 5,
+        model: str = "openai/gpt-4o",
+        max_iterations: int = 10,
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
+        extractor_prompt: str | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
+        system_prompt_id: str = "400fcecf-f5f2-464b-aff5-8a4377c9685c",
+        user_prompt_id: str = "1c7f064f-9a3b-40f5-a555-94e551722d50",
+        extractor_prompt_id: str | None = "9d37e4a0-26c5-438a-ba1b-a273388fcded",
         **kwargs,
     ):
         """Initialize the agent"""
-        self.model = model
-        self.max_iterations = max_iterations
-        self.api_endpoint = api_endpoint
-        self.temperature = temperature
-        if prompt_store:
-            self.store = prompt_store
-        else:
-            with importlib.resources.path("corral.agents", "") as style_path:
-                self.store = PromptStore(f"{style_path}/prompts")
-        self.kwargs = kwargs
-        self.system_prompt = (
-            get_prompt(
-                self.store, system_prompt, "400fcecf-f5f2-464b-aff5-8a4377c9685c"
-            ).fill({})
-            if system_prompt is None
-            else system_prompt
+        super().__init__(
+            model=model,
+            max_iterations=max_iterations,
+            api_endpoint=api_endpoint,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            extractor_prompt=extractor_prompt,
+            temperature=temperature,
+            prompt_store=prompt_store,
+            system_prompt_id=system_prompt_id,
+            user_prompt_id=user_prompt_id,
+            extractor_prompt_id=extractor_prompt_id,
+            **kwargs,
         )
 
-        self.user_prompt = get_prompt(
-            self.store, user_prompt, "1c7f064f-9a3b-40f5-a555-94e551722d50"
-        )
-
-    def run_agent(
+    def run(
         self,
         interface: BenchmarkInterface,
         task_id: str,
-        tool_usage: bool = False,
+        history: list[LiteLLMMessage] | None = None,
+        task_prompt: str | None = None,
         examples: list[str] | None = None,
-    ) -> tuple[str, list[LiteLLMMessage]]:
+    ) -> str:
         """Run the LLM planner agent
 
         Args:
             interface (BenchmarkInterface): The benchmark interface to use
             task_id (str): The task ID to solve
+            history (List[LiteLLMMessage], optional): The history items to include. Defaults to None.
+            task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
-            tool_usage (bool, optional): Whether to use tool calling or not. Defaults to False.
 
         Returns:
-            Tuple[str, List[LiteLLMMessage]]: The final answer and messages
+            str: The final answer to the task
         """
         tools = interface.get_available_tools_for_task(task_id)
 
-        task_guide = interface.get_task_prompt(task_id)
+        if task_prompt is None:
+            task_guide = interface.get_task_prompt(task_id)
+        else:
+            task_guide = task_prompt
 
-        user_content = _build_user_content(
-            agent="llm_planner",
+        tool_usage = (
+            False  # Default to False, could be passed as a parameter in the future
+        )
+
+        self.messages = create_prompt(
+            system_prompt=self.system_prompt,
             user_prompt=self.user_prompt,
             task_guide=task_guide,
-            iterations=self.max_iterations,
+            history=history,
+            max_iterations=self.max_iterations,
             examples=examples,
             tools=tools,
         )
-
-        messages: list[LiteLLMMessage] = []
-        if self.system_prompt:
-            messages.append(LiteLLMMessage(role="system", content=self.system_prompt))
-        messages.append(LiteLLMMessage(role="user", content=user_content))
 
         if tool_usage:
             agent = ToolCallingAgent(
@@ -119,15 +151,9 @@ class LLMPlanner:
             )
 
         for _i in range(self.max_iterations):
-            plan = llm_call(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                api_endpoint=self.api_endpoint,
-                **self.kwargs,
-            ).content
+            plan = self.get_llm_response().content
 
-            messages.append(
+            self.messages.append(
                 LiteLLMMessage(
                     role="assistant", content=plan, name="high-level-planner"
                 )
@@ -136,23 +162,29 @@ class LLMPlanner:
                 continue
 
             if "Final Answer:" in plan:
-                final_answer = plan.split("Final Answer:")[1].strip()
-                return final_answer, messages
+                return plan.split("Final Answer:")[1].strip()
 
-            final_answer, low_level_planner_messages = agent.run_agent(
+            final_answer = agent.run(
                 interface=interface,
                 task_id=task_id,
                 task_prompt=plan,
             )
 
-            serialized_messages = serialize_messages(low_level_planner_messages)
-
-            messages.append(
+            self.messages.append(
                 LiteLLMMessage(
                     role="assistant",
-                    content=f"Answer submitted by the executor: {final_answer}.\nMessages by the executor:\n{json.dumps(serialized_messages, indent=2)}",
+                    content=f"Answer submitted by the executor: {final_answer}.\nMessages by the executor:",
                     name="low-level-planner",
                 )
             )
+            self.messages.extend(agent.messages)
+            agent.messages.clear()
 
-        return "Error: Maximum iterations reached", messages
+        self.messages.append(
+            LiteLLMMessage(
+                role="assistant",
+                content="Error: Maximum iterations reached without finding a final answer.",
+                name="planner-error",
+            )
+        )
+        return "Error: Maximum iterations reached"

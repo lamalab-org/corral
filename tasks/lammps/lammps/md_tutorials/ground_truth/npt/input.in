@@ -1,0 +1,58 @@
+#------------------------Aluminum Simulation------------------#
+
+# Initial setup
+units           metal
+dimension       3
+processors      * * *
+atom_style      atomic
+boundary        p p p
+
+#-------------------------Lattice Setup-----------------------#
+
+# Define the aluminum lattice structure and create the simulation box
+
+lattice         fcc 4.05             # FCC lattice for aluminum with lattice constant 4.05 Å
+region          box block 0 5 0 5 0 5 units lattice
+create_box      1 box
+create_atoms    1 box
+
+#-------------------------Potential---------------------------#
+
+# Define the potential for aluminum
+
+pair_style      eam/alloy
+pair_coeff      * * /Users/chandan21gupta/Desktop/iit_delhi/agent_llms_5/mat-agent-bench/tasks/lammps/lammps/ground_truth/potentials/Al/eam/Al99.eam.alloy Al
+
+neighbor        2.0 bin
+neigh_modify    every 1 delay 0 check yes
+
+#-----------------------Minimization--------------------------#
+
+# Perform energy minimization
+thermo          50
+thermo_style    custom step atoms temp pe ke etotal press
+min_style       sd
+minimize        1.0e-10 1.0e-10 100000 100000
+
+write_data      minimized_aluminum_structure.dat
+write_restart   minimized_aluminum_structure.restart
+
+
+#-------------------NPT Simulation for Density Calculation---#
+
+# Perform NPT simulation to equilibrate the system
+velocity        all create 300.0 12345
+timestep        0.001
+fix             npt all npt temp 300.0 300.0 0.1 iso 0.0 0.0 1.0
+dump            npt_dump all custom 1000 npt_aluminum_density.lammpstrj id type x y z
+thermo          100
+thermo_style    custom step temp press density
+run             50000
+unfix           npt
+undump          npt_dump
+
+
+#-------------------Density Calculation---#
+variable        final_density equal density
+print           "Final density of aluminum: ${final_density} g/cm^3"
+

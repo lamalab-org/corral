@@ -6,20 +6,30 @@ from typing import Any, Protocol
 import requests
 from loguru import logger
 
+from corral.ablations import ToolVerbosity
 from corral.report import (
     BenchmarkResult,
     TaskTrailResult,
     TaskTrialResults,
     ToolResponse,
 )
-from corral.utils import save_agent_messages
 
 
 class BenchmarkInterface:
     """General interface for interacting with benchmark server"""
 
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8000",
+        default_verbosity: str | None = ToolVerbosity.FULL,
+    ):
         self.base_url = base_url
+        self.current_verbosity = default_verbosity
+
+    def set_verbosity(self, verbosity: str):
+        """Set the verbosity level for subsequent requests"""
+        self.current_verbosity = verbosity
+        logger.info(f"Set tool verbosity to: {verbosity}")
 
     def get_available_tasks(self) -> list[str]:
         """Get list of available task IDs"""
@@ -36,21 +46,34 @@ class BenchmarkInterface:
         except Exception:
             return False
 
-    def get_available_tools_for_task(self, task_id: str) -> str:
-        """Get list of available tools for a task"""
-        response = requests.get(f"{self.base_url}/tasks/{task_id}/tools")
+    def get_available_tools_for_task(
+        self, task_id: str, verbosity: str | None = None
+    ) -> dict[str, Any]:
+        """Get list of available tools for a task with specified verbosity"""
+        verbosity = verbosity or self.current_verbosity
+
+        params = {"verbosity": verbosity}
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/tools", params=params)
         response.raise_for_status()
         return response.json()
 
-    def get_task_guide(self, task_id: str) -> str:
-        """Get complete guide for task including tools"""
-        response = requests.get(f"{self.base_url}/tasks/{task_id}/guide")
+    def get_task_guide(self, task_id: str, verbosity: str | None = None) -> str:
+        """Get complete guide for task including tools with specified verbosity"""
+        verbosity = verbosity or self.current_verbosity
+
+        params = {"verbosity": verbosity}
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/guide", params=params)
         response.raise_for_status()
         return response.json()["prompt"]
 
-    def get_tools_guide(self, task_id: str) -> str:
-        """Get tools guide for task"""
-        response = requests.get(f"{self.base_url}/tasks/{task_id}/tools/guide")
+    def get_tools_guide(self, task_id: str, verbosity: str | None = None) -> str:
+        """Get tools guide for task with specified verbosity"""
+        verbosity = verbosity or self.current_verbosity
+
+        params = {"verbosity": verbosity}
+        response = requests.get(
+            f"{self.base_url}/tasks/{task_id}/tools/guide", params=params
+        )
         response.raise_for_status()
         return response.json()["prompt"]
 
@@ -98,6 +121,12 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()
 
+    def get_trial_state(self, task_id: str, trial_id: str) -> dict[str, Any]:
+        """Get specific trial state"""
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/trials/{trial_id}")
+        response.raise_for_status()
+        return response.json()["trial_state"]
+
 
 class Agent(Protocol):
     """Protocol defining what an agent must implement"""
@@ -138,9 +167,11 @@ class MatAgentBenchmark:
         k_values: int | list[int] | None = None,
         verbose: bool | None = False,
         session_id: str | None = None,
+        tool_verbosity: str | None = None,
     ) -> BenchmarkResult:
         """Run benchmark"""
-
+        if tool_verbosity is not None:
+            self.interface.set_verbosity(tool_verbosity)
         if task_ids is None:
             task_ids = self.interface.get_available_tasks()
 
@@ -229,7 +260,9 @@ class MatAgentBenchmark:
         ]
 
         logger.info(
-            f"Independent execution: {len(completed_tasks)} completed, {len(remaining_tasks)} remaining"
+            f"Independent execution: {
+                len(completed_tasks)} completed, {
+                len(remaining_tasks)} remaining"
         )
 
         for task_id in remaining_tasks:
@@ -321,7 +354,8 @@ class MatAgentBenchmark:
             "task_results": task_results,
             "session_id": session_id,
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-            **extra_data,  # completed_tasks (list) for independent, completed_trials (int) for chained
+            # completed_tasks (list) for independent, completed_trials (int) for chained
+            **extra_data,
         }
         self._save_checkpoint_file(session_id, checkpoint)
 
@@ -363,14 +397,19 @@ class MatAgentBenchmark:
             logger.info(
                 f"Running trial {len(task_trials.trials) + 1} for task {task_id}"
             )
-            answer, messages = self.agent.run_agent(self.interface, task_id)
+            answer, token_usage = self.agent.run_agent(
+                self.interface, task_id, verbose=verbose
+            )
             result = self.interface.submit_answer(task_id, answer)
+            duration = result.state.get("duration")
+            result.duration = duration
+            result.token_usage = token_usage
+
             task_trials.trials.append(result)
 
-            if verbose:
-                save_agent_messages(messages, task_id, self.agent.__class__.__name__)
-
-            logger.info(f"Trial completed for {task_id}, score: {result.score}")
+            logger.info(
+                f"Trial completed for {task_id}, score: {result.score}, duration: {duration:.2f}s"
+            )
             return True
 
         except KeyboardInterrupt:
