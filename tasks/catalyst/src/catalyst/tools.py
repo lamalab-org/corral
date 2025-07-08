@@ -64,9 +64,11 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     [/WORKFLOW_INTEGRATION]
     [SYNTACTICAL] Usage examples:
     [
-    `get_structure_from_mp_text("mp-149")`,  # Silicon structure
-    `get_structure_from_mp_text("mp-20066")` , # CO2 structure
-    `get_structure_from_mp_text("mp-2")`, # Other material
+        `get_structure_from_mp_text("mp-149")`, # Silicon structure
+        `get_structure_from_mp_text("mp-20066")`, # CO2 structure
+        `get_structure_from_mp_text("mp-2")` # Other material
+        `get_structure_from_mp_text("mp-12345")` # Example with a different MP ID
+        `get_structure_from_mp_text("mp-67890")` # Another example with a different MP ID
     ]
     [/SYNTACTICAL]
 
@@ -452,73 +454,81 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
 def get_adsorption_sites_text(slab_cif: str) -> str:
     """[BRIEF] Identify and classify all possible adsorption sites on a surface slab. [/BRIEF]
 
-    [DETAILED] This tool analyzes a surface slab structure to identify and classify potential
-    adsorption sites where molecules can bind. It uses geometric and chemical analysis to
-    determine different types of binding sites such as top sites (above surface atoms),
-    bridge sites (between two atoms), and hollow sites (in multi-atom depressions). This
-    analysis is fundamental for understanding surface reactivity and designing catalysts. [/DETAILED]
+        [DETAILED] This tool analyzes a surface slab structure to identify and classify potential
+        adsorption sites where molecules can bind. It uses geometric and chemical analysis to
+        determine different types of binding sites such as top sites (above surface atoms),
+        bridge sites (between two atoms), and hollow sites (in multi-atom depressions). This
+        analysis is fundamental for understanding surface reactivity and designing catalysts. [/DETAILED]
 
-    [PROCEDURAL] When to use this tool:
-    - Use when you need to identify all possible adsorption sites on a surface
-    - Best suited for systematic studies of surface reactivity and catalysis
-    - Essential for understanding how molecules interact with surfaces
-    - Recommended before placing adsorbates to understand binding options
-    - Avoid when you already know the specific binding site coordinates
-    [/PROCEDURAL]
+        [PROCEDURAL] When to use this tool:
+        - Use when you need to identify all possible adsorption sites on a surface
+        - Best suited for systematic studies of surface reactivity and catalysis
+        - Essential for understanding how molecules interact with surfaces
+        - Recommended before placing adsorbates to understand binding options
+        - Avoid when you already know the specific binding site coordinates
+        [/PROCEDURAL]
 
-    [CONTEXTUAL] How this tool works:
-    - Parses the slab CIF structure to identify surface atoms
-    - Uses AdsorbateSiteFinder to geometrically analyze the surface topology
-    - Classifies sites based on coordination environment (top, bridge, hollow)
-    - Calculates fractional coordinates for each potential binding site
-    - Returns sites organized by type in a JSON format for easy selection
-    [/CONTEXTUAL]
+        [CONTEXTUAL] How this tool works:
+        - Parses the slab CIF structure to identify surface atoms
+        - Uses AdsorbateSiteFinder to geometrically analyze the surface topology
+        - Classifies sites based on coordination environment (top, bridge, hollow)
+        - Calculates fractional coordinates for each potential binding site
+        - Returns sites organized by type in a JSON format for easy selection
+        [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration example:
-    1. [PREREQUISITE] First obtain a slab structure using choose_slab_text or create_slab_from_structure_text [/PREREQUISITE]
-    2. [CURRENT] Apply this tool to identify all adsorption sites on the surface [/CURRENT]
-    3. [FOLLOW_UP] Use choose_adsorption_site_text to select a specific site for adsorbate placement [/FOLLOW_UP]
-    [/WORKFLOW_INTEGRATION]
+        [WORKFLOW_INTEGRATION] Typical workflow integration example:
+        1. [PREREQUISITE] First obtain a slab structure using choose_slab_text or create_slab_from_structure_text [/PREREQUISITE]
+        2. [CURRENT] Apply this tool to identify all adsorption sites on the surface [/CURRENT]
+        3. [FOLLOW_UP] Use choose_adsorption_site_text to select a specific site for adsorbate placement [/FOLLOW_UP]
+        [/WORKFLOW_INTEGRATION]
 
-    [SYNTACTICAL] Usage examples:
-    [
-    `get_adsorption_sites_text(slab_cif_string)`,  # Identify sites on a specific slab
-    `get_adsorption_sites_text(output_from_choose_slab_text)`,  # Use output from choose_slab_text
-    ]
-    [/SYNTACTICAL]
+        [SYNTACTICAL] Usage examples:
+        [
+    <<<<<<< HEAD
+        `get_adsorption_sites_text(slab_cif_string)`,  # Identify sites on a specific slab
+        `get_adsorption_sites_text(output_from_choose_slab_text)`,  # Use output from choose_slab_text
+    =======
+            `get_adsorption_sites_text(slab_cif_string)`,  # Analyze slab structure
+            `get_adsorption_sites_text(output_from_choose_slab_text)`,  # Use output
+            `get_adsorption_sites_text(create_slab_from_structure_text)`,  # From slab creation
+            `get_adsorption_sites_text("CIF string of a slab")`,  # Direct
+            `get_adsorption_sites_text("CIF string with surface atoms")`,  # Example with specific slab
+    >>>>>>> 6809aa904a758b7217fcc7342db3e63523bb514c
+        ]
+        [/SYNTACTICAL]
 
-    Args:
-        slab_cif: [BRIEF] CIF string of the surface slab structure. [/BRIEF]
-                 [DETAILED] A properly formatted CIF string containing the surface slab structure
-                 with atomic positions, lattice parameters, and surface geometry. This should be
-                 a two-dimensional periodic structure with a well-defined surface and vacuum
-                 region. The structure is analyzed to identify potential adsorption sites. [/DETAILED]
-                 [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
-                 [EXAMPLES] Examples: CIF string from choose_slab_text or create_slab_from_structure_text [/EXAMPLES]
+        Args:
+            slab_cif: [BRIEF] CIF string of the surface slab structure. [/BRIEF]
+                     [DETAILED] A properly formatted CIF string containing the surface slab structure
+                     with atomic positions, lattice parameters, and surface geometry. This should be
+                     a two-dimensional periodic structure with a well-defined surface and vacuum
+                     region. The structure is analyzed to identify potential adsorption sites. [/DETAILED]
+                     [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
+                     [EXAMPLES] Examples: CIF string from choose_slab_text or create_slab_from_structure_text [/EXAMPLES]
 
-    Returns:
-        str: [BRIEF] JSON string containing classified adsorption sites with fractional coordinates. [/BRIEF]
-             [DETAILED] A JSON-formatted string containing a dictionary where keys are site types
-             (e.g., "top", "bridge", "hollow") and values are lists of fractional coordinates
-             for each site of that type. Each coordinate is a list of three numbers [x, y, z]
-             representing the fractional position within the unit cell. [/DETAILED]
-             [EXAMPLES] Example output: '{"top": [[0.0, 0.0, 0.9], [0.5, 0.5, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}' [/EXAMPLES]
+        Returns:
+            str: [BRIEF] JSON string containing classified adsorption sites with fractional coordinates. [/BRIEF]
+                 [DETAILED] A JSON-formatted string containing a dictionary where keys are site types
+                 (e.g., "top", "bridge", "hollow") and values are lists of fractional coordinates
+                 for each site of that type. Each coordinate is a list of three numbers [x, y, z]
+                 representing the fractional position within the unit cell. [/DETAILED]
+                 [EXAMPLES] Example output: '{"top": [[0.0, 0.0, 0.9], [0.5, 0.5, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}' [/EXAMPLES]
 
-    [RAISES] Exceptions:
-        ValueError: [ERROR_WHEN] When the CIF string is malformed or doesn't represent a valid slab [/ERROR_WHEN]
-                   [ERROR_DETAILS] Invalid CIF format, missing surface atoms, or improper slab structure [/ERROR_DETAILS]
-                   [ERROR_RECOVERY] Verify CIF format and ensure it represents a proper surface slab [/ERROR_RECOVERY]
-        StructureError: [ERROR_WHEN] When the slab structure cannot be analyzed for adsorption sites [/ERROR_WHEN]
-                       [ERROR_DETAILS] Insufficient surface area, unclear surface definition, or geometric issues [/ERROR_DETAILS]
-                       [ERROR_RECOVERY] Check slab structure quality and surface termination [/ERROR_RECOVERY]
-    [/RAISES]
+        [RAISES] Exceptions:
+            ValueError: [ERROR_WHEN] When the CIF string is malformed or doesn't represent a valid slab [/ERROR_WHEN]
+                       [ERROR_DETAILS] Invalid CIF format, missing surface atoms, or improper slab structure [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Verify CIF format and ensure it represents a proper surface slab [/ERROR_RECOVERY]
+            StructureError: [ERROR_WHEN] When the slab structure cannot be analyzed for adsorption sites [/ERROR_WHEN]
+                           [ERROR_DETAILS] Insufficient surface area, unclear surface definition, or geometric issues [/ERROR_DETAILS]
+                           [ERROR_RECOVERY] Check slab structure quality and surface termination [/ERROR_RECOVERY]
+        [/RAISES]
 
-    [LIMITATIONS] Known limitations:
-    - Does not account for surface relaxation or reconstruction effects
-    - Cannot predict relative binding strengths or preferences
-    - Limited to geometric analysis without chemical bonding considerations
-    - May not identify all possible sites for large or complex molecules
-    [/LIMITATIONS]
+        [LIMITATIONS] Known limitations:
+        - Does not account for surface relaxation or reconstruction effects
+        - Cannot predict relative binding strengths or preferences
+        - Limited to geometric analysis without chemical bonding considerations
+        - May not identify all possible sites for large or complex molecules
+        [/LIMITATIONS]
     """
     import json
 
@@ -548,88 +558,96 @@ def choose_adsorption_site_text(
 ) -> list[float]:
     """[BRIEF] Select a specific adsorption site from classified sites by type and index. [/BRIEF]
 
-    [DETAILED] This tool selects one specific adsorption site from a collection of classified
-    sites based on the site type (top, bridge, hollow) and index within that type.
-    This selection is crucial for systematic studies of different
-    binding environments and their effects on adsorption energetics. [/DETAILED]
+        [DETAILED] This tool selects one specific adsorption site from a collection of classified
+        sites based on the site type (top, bridge, hollow) and index within that type.
+        This selection is crucial for systematic studies of different
+        binding environments and their effects on adsorption energetics. [/DETAILED]
 
-    [PROCEDURAL] When to use this tool:
-    - Use after identifying all possible adsorption site to select a specific binding site
-    - Best suited for systematic comparison of different site types
-    - Essential for placing adsorbates at specific coordination environments
-    - Recommended when studying site-specific reactivity or selectivity
-    - Avoid when you need to place adsorbates at multiple sites simultaneously
-    [/PROCEDURAL]
+        [PROCEDURAL] When to use this tool:
+        - Use after identifying all possible adsorption site to select a specific binding site
+        - Best suited for systematic comparison of different site types
+        - Essential for placing adsorbates at specific coordination environments
+        - Recommended when studying site-specific reactivity or selectivity
+        - Avoid when you need to place adsorbates at multiple sites simultaneously
+        [/PROCEDURAL]
 
-    [CONTEXTUAL] How this tool works:
-    - Parses the JSON string containing classified adsorption sites
-    - Locates the specified site type in the dictionary
-    - Selects the site at the specified index within that type
-    - Returns the fractional coordinates as a list of three floats
-    [/CONTEXTUAL]
+        [CONTEXTUAL] How this tool works:
+        - Parses the JSON string containing classified adsorption sites
+        - Locates the specified site type in the dictionary
+        - Selects the site at the specified index within that type
+        - Returns the fractional coordinates as a list of three floats
+        [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration example:
-    1. [PREREQUISITE] First run get_adsorption_sites_text to identify available sites [/PREREQUISITE]
-    2. [CURRENT] Apply this tool to select a specific site by type and index [/CURRENT]
-    3. [FOLLOW_UP] Use the coordinates with add_adsorbate_to_slab_text for molecule placement [/FOLLOW_UP]
-    [/WORKFLOW_INTEGRATION]
+        [WORKFLOW_INTEGRATION] Typical workflow integration example:
+        1. [PREREQUISITE] First run get_adsorption_sites_text to identify available sites [/PREREQUISITE]
+        2. [CURRENT] Apply this tool to select a specific site by type and index [/CURRENT]
+        3. [FOLLOW_UP] Use the coordinates with add_adsorbate_to_slab_text for molecule placement [/FOLLOW_UP]
+        [/WORKFLOW_INTEGRATION]
 
-    [SYNTACTICAL] Usage examples:
-    [
-    `choose_adsorption_site_text(sites_json, "top", 0)`,    # Select first top site
-    `choose_adsorption_site_text(sites_json, "bridge", 1)`, #
-    `choose_adsorption_site_text(sites_json, "hollow", 0)`, # Select first hollow site
-    ]
-    [/SYNTACTICAL]
+        [SYNTACTICAL] Usage examples:
+        [
+    <<<<<<< HEAD
+        `choose_adsorption_site_text(sites_json, "top", 0)`,    # Select first top site
+        `choose_adsorption_site_text(sites_json, "bridge", 1)`, #
+        `choose_adsorption_site_text(sites_json, "hollow", 0)`, # Select first hollow site
+    =======
+            `choose_adsorption_site_text(sites_json, "top", 0)`,
+            `choose_adsorption_site_text(sites_json, "bridge", 1)`,
+            `choose_adsorption_site_text(sites_json, "hollow", 0)`,
+            `choose_adsorption_site_text(sites_json, "top", 1)`,
+            `choose_adsorption_site_text(sites_json, "bridge", 0)`,
+    >>>>>>> 6809aa904a758b7217fcc7342db3e63523bb514c
+        ]
+        [/SYNTACTICAL]
 
-    Args:
-        adsorption_sites_json: [BRIEF] JSON string mapping site types to lists of fractional coordinates. [/BRIEF]
-                              [DETAILED] A JSON-formatted string containing a dictionary where keys are
-                              site types (e.g., "top", "bridge", "hollow") and values are lists of
-                              fractional coordinates. This should be the output from get_adsorption_sites_text.
-                              Each coordinate is a list of three numbers representing position within the unit cell. [/DETAILED]
-                              [SYNTACTIC] Format: 'Valid JSON string with site type keys and coordinate list values' [/SYNTACTIC]
-                              [EXAMPLES] Examples: '{"top": [[0.0, 0.0, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}' [/EXAMPLES]
-        site_type: [BRIEF] Type of adsorption site to select. [/BRIEF]
-                  [DETAILED] The type of binding site to select from the available options. Common
-                  types include "top" (above surface atoms), "bridge" (between two atoms), and
-                  "hollow" (in multi-atom depressions). The type must exist in the JSON dictionary
-                  and determines the coordination environment of the selected site. [/DETAILED]
-                  [SYNTACTIC] Format: string matching available site types [/SYNTACTIC]
-                  [EXAMPLES] Examples: "top" (on-top), "bridge" (between atoms), "hollow" (in depression) [/EXAMPLES]
-        index: [BRIEF] Index of the site within the specified type. Defaults to 0. [/BRIEF]
-              [DETAILED] The numerical index of the site to select from the list of sites
-              of the specified type. Index 0 selects the first site, index 1 the second,
-              and so on. The index must be within the range of available sites for the
-              specified type. [/DETAILED]
-              [SYNTACTIC] Format: non-negative integer [/SYNTACTIC]
-              [EXAMPLES] Examples: 0 (first site), 1 (second site), 2 (third site) [/EXAMPLES]
+        Args:
+            adsorption_sites_json: [BRIEF] JSON string mapping site types to lists of fractional coordinates. [/BRIEF]
+                                  [DETAILED] A JSON-formatted string containing a dictionary where keys are
+                                  site types (e.g., "top", "bridge", "hollow") and values are lists of
+                                  fractional coordinates. This should be the output from get_adsorption_sites_text.
+                                  Each coordinate is a list of three numbers representing position within the unit cell. [/DETAILED]
+                                  [SYNTACTIC] Format: 'Valid JSON string with site type keys and coordinate list values' [/SYNTACTIC]
+                                  [EXAMPLES] Examples: '{"top": [[0.0, 0.0, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}' [/EXAMPLES]
+            site_type: [BRIEF] Type of adsorption site to select. [/BRIEF]
+                      [DETAILED] The type of binding site to select from the available options. Common
+                      types include "top" (above surface atoms), "bridge" (between two atoms), and
+                      "hollow" (in multi-atom depressions). The type must exist in the JSON dictionary
+                      and determines the coordination environment of the selected site. [/DETAILED]
+                      [SYNTACTIC] Format: string matching available site types [/SYNTACTIC]
+                      [EXAMPLES] Examples: "top" (on-top), "bridge" (between atoms), "hollow" (in depression) [/EXAMPLES]
+            index: [BRIEF] Index of the site within the specified type. Defaults to 0. [/BRIEF]
+                  [DETAILED] The numerical index of the site to select from the list of sites
+                  of the specified type. Index 0 selects the first site, index 1 the second,
+                  and so on. The index must be within the range of available sites for the
+                  specified type. [/DETAILED]
+                  [SYNTACTIC] Format: non-negative integer [/SYNTACTIC]
+                  [EXAMPLES] Examples: 0 (first site), 1 (second site), 2 (third site) [/EXAMPLES]
 
-    Returns:
-        list[float]: [BRIEF] Fractional coordinates of the selected adsorption site. [/BRIEF]
-                    [DETAILED] A list of three floating-point numbers representing the fractional
-                    coordinates [x, y, z] of the selected adsorption site within the unit cell.
-                    These coordinates can be used directly for adsorbate placement and represent
-                    the optimal binding position for the specified site type. [/DETAILED]
-                    [EXAMPLES] Example output: [0.0, 0.0, 0.9] or [0.25, 0.25, 0.85] [/EXAMPLES]
+        Returns:
+            list[float]: [BRIEF] Fractional coordinates of the selected adsorption site. [/BRIEF]
+                        [DETAILED] A list of three floating-point numbers representing the fractional
+                        coordinates [x, y, z] of the selected adsorption site within the unit cell.
+                        These coordinates can be used directly for adsorbate placement and represent
+                        the optimal binding position for the specified site type. [/DETAILED]
+                        [EXAMPLES] Example output: [0.0, 0.0, 0.9] or [0.25, 0.25, 0.85] [/EXAMPLES]
 
-    [RAISES] Exceptions:
-        ValueError: [ERROR_WHEN] When the specified site type is not found in the JSON [/ERROR_WHEN]
-                   [ERROR_DETAILS] The site_type key does not exist in the JSON dictionary [/ERROR_DETAILS]
-                   [ERROR_RECOVERY] Check available site types in the JSON or use a valid type [/ERROR_RECOVERY]
-        IndexError: [ERROR_WHEN] When the specified index is out of range for the site type [/ERROR_WHEN]
-                   [ERROR_DETAILS] The index is greater than or equal to the number of sites of that type [/ERROR_DETAILS]
-                   [ERROR_RECOVERY] Check the number of available sites for the specified type [/ERROR_RECOVERY]
-        JSONDecodeError: [ERROR_WHEN] When the adsorption_sites_json string is not valid JSON [/ERROR_WHEN]
-                        [ERROR_DETAILS] Malformed JSON string or incorrect format [/ERROR_DETAILS]
-                        [ERROR_RECOVERY] Verify JSON format and ensure it's output from get_adsorption_sites_text [/ERROR_RECOVERY]
-    [/RAISES]
+        [RAISES] Exceptions:
+            ValueError: [ERROR_WHEN] When the specified site type is not found in the JSON [/ERROR_WHEN]
+                       [ERROR_DETAILS] The site_type key does not exist in the JSON dictionary [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Check available site types in the JSON or use a valid type [/ERROR_RECOVERY]
+            IndexError: [ERROR_WHEN] When the specified index is out of range for the site type [/ERROR_WHEN]
+                       [ERROR_DETAILS] The index is greater than or equal to the number of sites of that type [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Check the number of available sites for the specified type [/ERROR_RECOVERY]
+            JSONDecodeError: [ERROR_WHEN] When the adsorption_sites_json string is not valid JSON [/ERROR_WHEN]
+                            [ERROR_DETAILS] Malformed JSON string or incorrect format [/ERROR_DETAILS]
+                            [ERROR_RECOVERY] Verify JSON format and ensure it's output from get_adsorption_sites_text [/ERROR_RECOVERY]
+        [/RAISES]
 
-    [LIMITATIONS] Known limitations:
-    - Cannot evaluate the relative quality or stability of different sites
-    - Limited to sites identified by get_adsorption_sites_text
-    - Cannot modify or optimize the selected site coordinates
-    [/LIMITATIONS]
+        [LIMITATIONS] Known limitations:
+        - Cannot evaluate the relative quality or stability of different sites
+        - Limited to sites identified by get_adsorption_sites_text
+        - Cannot modify or optimize the selected site coordinates
+        [/LIMITATIONS]
     """
     import json
 
@@ -650,98 +668,106 @@ def add_adsorbate_to_slab_text(
 ) -> str:
     """[BRIEF] Place an adsorbate molecule on a surface slab at a specified adsorption site. [/BRIEF]
 
-    [DETAILED] This tool combines a surface slab with an adsorbate molecule by placing the
-    adsorbate at a specific binding site on the surface. It handles the geometric placement
-    of the molecule at the correct height above the surface and ensures proper structural
-    integration. This is essential for creating realistic surface-adsorbate systems for
-    computational studies of catalysis, adsorption energetics, and surface reactivity. [/DETAILED]
+        [DETAILED] This tool combines a surface slab with an adsorbate molecule by placing the
+        adsorbate at a specific binding site on the surface. It handles the geometric placement
+        of the molecule at the correct height above the surface and ensures proper structural
+        integration. This is essential for creating realistic surface-adsorbate systems for
+        computational studies of catalysis, adsorption energetics, and surface reactivity. [/DETAILED]
 
-    [PROCEDURAL] When to use this tool:
-    - Use when you need to create a surface-adsorbate system
-    - Recommended for systematic studies of different binding sites or orientations
-    - Avoid when you need complex multi-adsorbate systems or surface reconstructions
-    [/PROCEDURAL]
+        [PROCEDURAL] When to use this tool:
+        - Use when you need to create a surface-adsorbate system
+        - Recommended for systematic studies of different binding sites or orientations
+        - Avoid when you need complex multi-adsorbate systems or surface reconstructions
+        [/PROCEDURAL]
 
-    [CONTEXTUAL] How this tool works:
-    - Parses the slab CIF structure to identify the surface geometry
-    - Loads the adsorbate as a molecular structure (handles both XYZ and CIF formats)
-    - Uses AdsorbateSiteFinder to place the adsorbate at the specified site
-    - Adjusts the vertical position according to the specified height parameter
-    - Combines the structures into a single CIF-formatted output
-    - Automatically selects a top site if no specific site is provided
-    [/CONTEXTUAL]
+        [CONTEXTUAL] How this tool works:
+        - Parses the slab CIF structure to identify the surface geometry
+        - Loads the adsorbate as a molecular structure (handles both XYZ and CIF formats)
+        - Uses AdsorbateSiteFinder to place the adsorbate at the specified site
+        - Adjusts the vertical position according to the specified height parameter
+        - Combines the structures into a single CIF-formatted output
+        - Automatically selects a top site if no specific site is provided
+        [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration example:
-    1. [PREREQUISITE] First obtain slab from choose_slab_text and adsorbate from get_structure_from_mp_text [/PREREQUISITE]
-    2. [CURRENT] Apply this tool to place the adsorbate on the surface [/CURRENT]
-    3. [FOLLOW_UP] Use the combined structure for further analysis or optimization [/FOLLOW_UP]
-    [/WORKFLOW_INTEGRATION]
+        [WORKFLOW_INTEGRATION] Typical workflow integration example:
+        1. [PREREQUISITE] First obtain slab from choose_slab_text and adsorbate from get_structure_from_mp_text [/PREREQUISITE]
+        2. [CURRENT] Apply this tool to place the adsorbate on the surface [/CURRENT]
+        3. [FOLLOW_UP] Use the combined structure for further analysis or optimization [/FOLLOW_UP]
+        [/WORKFLOW_INTEGRATION]
 
-    [SYNTACTICAL] Usage examples:
-    [
-    `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)`,  # Default height and auto-select site
-    `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 2.0)`,  # Specify height, auto-select site
-    `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 1.5, [0.0, 0.0, 0.9])`,  # Specify height and site
-    `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)`
-    ]
-    [/SYNTACTICAL]
+        [SYNTACTICAL] Usage examples:
+        [
+    <<<<<<< HEAD
+        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)`,  # Default height and auto-select site
+        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 2.0)`,  # Specify height, auto-select site
+        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 1.5, [0.0, 0.0, 0.9])`,  # Specify height and site
+        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)`
+    =======
+            `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)`,  # Default height and auto-select site
+            `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 2.0)`,  # Specify height only
+            `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 1.5, [0.0, 0.0, 0.9])`,  # Specify height
+            `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, site=[0.5, 0.5, 0.9])`,  # Auto-select height
+            `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 2.0, None)`,  # Specify height, auto-select site
+    >>>>>>> 6809aa904a758b7217fcc7342db3e63523bb514c
+        ]
+        [/SYNTACTICAL]
 
-    Args:
-        slab_cif: [BRIEF] CIF string of the surface slab structure. [/BRIEF]
-                 [DETAILED] A properly formatted CIF string containing the surface slab structure
-                 on which the adsorbate will be placed. This should be a two-dimensional periodic
-                 structure with a well-defined surface and vacuum region. The slab provides the
-                 substrate for molecular adsorption. [/DETAILED]
-                 [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
-                 [EXAMPLES] Examples: CIF string from choose_slab_text output [/EXAMPLES]
-        adsorbate_cif: [BRIEF] CIF string of the adsorbate molecule structure. [/BRIEF]
-                      [DETAILED] A CIF or XYZ formatted string containing the molecular structure
-                      of the adsorbate to be placed on the surface. This can be a small molecule
-                      like CO2, H2O, or more complex organic molecules. The tool will attempt to
-                      parse both CIF and XYZ formats automatically. [/DETAILED]
-                      [SYNTACTIC] Format: "Valid CIF or XYZ format string with molecular structure" [/SYNTACTIC]
-                      [EXAMPLES] Examples: CIF string from get_structure_from_mp_text for molecules [/EXAMPLES]
-        height: [BRIEF] Height in Angstroms above the surface for adsorbate placement. Defaults to 2.0. [/BRIEF]
-               [DETAILED] The vertical distance above the surface at which the adsorbate will be
-               placed. This parameter controls the initial separation between the adsorbate and
-               the surface atoms. Typical values range from 1.5 to 3.0 Å depending on the
-               molecular size and expected binding interaction. [/DETAILED]
-               [SYNTACTIC] Format: positive float representing distance in Angstroms [/SYNTACTIC]
-               [EXAMPLES] Examples: 1.5 (close to slab), 2.0, 2.5 (distant from molecule) [/EXAMPLES]
-        site: [BRIEF] Optional fractional coordinates for adsorbate placement. [/BRIEF]
-             [DETAILED] A list of three floating-point numbers representing the fractional
-             coordinates [x, y, z] where the adsorbate should be placed. If not provided,
-             the tool will automatically select the first available top site. These coordinates
-             should typically come from choose_adsorption_site_text output. [/DETAILED]
-             [SYNTACTIC] Format: list of three floats [x, y, z] or None [/SYNTACTIC]
-             [EXAMPLES] Examples: [0.0, 0.0, 0.9], [0.5, 0.5, 0.9], None (auto-select) [/EXAMPLES]
+        Args:
+            slab_cif: [BRIEF] CIF string of the surface slab structure. [/BRIEF]
+                     [DETAILED] A properly formatted CIF string containing the surface slab structure
+                     on which the adsorbate will be placed. This should be a two-dimensional periodic
+                     structure with a well-defined surface and vacuum region. The slab provides the
+                     substrate for molecular adsorption. [/DETAILED]
+                     [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
+                     [EXAMPLES] Examples: CIF string from choose_slab_text output [/EXAMPLES]
+            adsorbate_cif: [BRIEF] CIF string of the adsorbate molecule structure. [/BRIEF]
+                          [DETAILED] A CIF or XYZ formatted string containing the molecular structure
+                          of the adsorbate to be placed on the surface. This can be a small molecule
+                          like CO2, H2O, or more complex organic molecules. The tool will attempt to
+                          parse both CIF and XYZ formats automatically. [/DETAILED]
+                          [SYNTACTIC] Format: "Valid CIF or XYZ format string with molecular structure" [/SYNTACTIC]
+                          [EXAMPLES] Examples: CIF string from get_structure_from_mp_text for molecules [/EXAMPLES]
+            height: [BRIEF] Height in Angstroms above the surface for adsorbate placement. Defaults to 2.0. [/BRIEF]
+                   [DETAILED] The vertical distance above the surface at which the adsorbate will be
+                   placed. This parameter controls the initial separation between the adsorbate and
+                   the surface atoms. Typical values range from 1.5 to 3.0 Å depending on the
+                   molecular size and expected binding interaction. [/DETAILED]
+                   [SYNTACTIC] Format: positive float representing distance in Angstroms [/SYNTACTIC]
+                   [EXAMPLES] Examples: 1.5 (close to slab), 2.0, 2.5 (distant from molecule) [/EXAMPLES]
+            site: [BRIEF] Optional fractional coordinates for adsorbate placement. [/BRIEF]
+                 [DETAILED] A list of three floating-point numbers representing the fractional
+                 coordinates [x, y, z] where the adsorbate should be placed. If not provided,
+                 the tool will automatically select the first available top site. These coordinates
+                 should typically come from choose_adsorption_site_text output. [/DETAILED]
+                 [SYNTACTIC] Format: list of three floats [x, y, z] or None [/SYNTACTIC]
+                 [EXAMPLES] Examples: [0.0, 0.0, 0.9], [0.5, 0.5, 0.9], None (auto-select) [/EXAMPLES]
 
-    Returns:
-        str: [BRIEF] CIF string of the combined surface-adsorbate structure. [/BRIEF]
-             [DETAILED] A properly formatted CIF string containing the combined structure
-             with the adsorbate placed on the surface at the specified position and height.
-             This structure includes both the original slab atoms and the adsorbate atoms,
-             properly integrated into a single periodic structure. [/DETAILED]
-             [EXAMPLES] Example output: CIF string with both slab and adsorbate atoms [/EXAMPLES]
+        Returns:
+            str: [BRIEF] CIF string of the combined surface-adsorbate structure. [/BRIEF]
+                 [DETAILED] A properly formatted CIF string containing the combined structure
+                 with the adsorbate placed on the surface at the specified position and height.
+                 This structure includes both the original slab atoms and the adsorbate atoms,
+                 properly integrated into a single periodic structure. [/DETAILED]
+                 [EXAMPLES] Example output: CIF string with both slab and adsorbate atoms [/EXAMPLES]
 
-    [RAISES] Exceptions:
-        ValueError: [ERROR_WHEN] When CIF strings are malformed or adsorbate cannot be parsed [/ERROR_WHEN]
-                   [ERROR_DETAILS] Invalid CIF format, unsupported molecule format, or structural issues [/ERROR_DETAILS]
-                   [ERROR_RECOVERY] Verify CIF formats and ensure adsorbate is a valid molecular structure [/ERROR_RECOVERY]
-        StructureError: [ERROR_WHEN] When adsorbate placement fails due to geometric constraints [/ERROR_WHEN]
-                       [ERROR_DETAILS] Site coordinates outside unit cell, insufficient surface area, or placement conflicts [/ERROR_DETAILS]
-                       [ERROR_RECOVERY] Check site coordinates are within [0,1] range and surface has adequate space [/ERROR_RECOVERY]
-        RuntimeError: [ERROR_WHEN] When no adsorption sites are found on the surface [/ERROR_WHEN]
-                     [ERROR_DETAILS] Surface structure lacks identifiable binding sites [/ERROR_DETAILS]
-                     [ERROR_RECOVERY] Verify slab structure has proper surface termination and geometry [/ERROR_RECOVERY]
-    [/RAISES]
+        [RAISES] Exceptions:
+            ValueError: [ERROR_WHEN] When CIF strings are malformed or adsorbate cannot be parsed [/ERROR_WHEN]
+                       [ERROR_DETAILS] Invalid CIF format, unsupported molecule format, or structural issues [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Verify CIF formats and ensure adsorbate is a valid molecular structure [/ERROR_RECOVERY]
+            StructureError: [ERROR_WHEN] When adsorbate placement fails due to geometric constraints [/ERROR_WHEN]
+                           [ERROR_DETAILS] Site coordinates outside unit cell, insufficient surface area, or placement conflicts [/ERROR_DETAILS]
+                           [ERROR_RECOVERY] Check site coordinates are within [0,1] range and surface has adequate space [/ERROR_RECOVERY]
+            RuntimeError: [ERROR_WHEN] When no adsorption sites are found on the surface [/ERROR_WHEN]
+                         [ERROR_DETAILS] Surface structure lacks identifiable binding sites [/ERROR_DETAILS]
+                         [ERROR_RECOVERY] Verify slab structure has proper surface termination and geometry [/ERROR_RECOVERY]
+        [/RAISES]
 
-    [LIMITATIONS] Known limitations:
-    - Does not optimize adsorbate orientation or conformation
-    - Cannot handle multiple adsorbates or complex binding modes
-    - Limited to simple geometric placement without chemical bonding
-    - Does not account for surface relaxation or reconstruction upon adsorption
-    [/LIMITATIONS]
+        [LIMITATIONS] Known limitations:
+        - Does not optimize adsorbate orientation or conformation
+        - Cannot handle multiple adsorbates or complex binding modes
+        - Limited to simple geometric placement without chemical bonding
+        - Does not account for surface relaxation or reconstruction upon adsorption
+        [/LIMITATIONS]
     """
     from pymatgen.analysis.adsorption import AdsorbateSiteFinder
     from pymatgen.core import Molecule, Structure
@@ -820,8 +846,13 @@ def generate_reconstructed_slab(
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - generate_reconstructed_slab(bulk_cif, (1,1,1), 12, 5, instructions_json, False)
-    - generate_reconstructed_slab(bulk_cif, (1,0,0), 15, 10, instructions_json, True)
+    [
+        `generate_reconstructed_slab(bulk_cif, (1,1,1), 12.0, 5.0, instructions_json)`,  # Basic reconstruction
+        `generate_reconstructed_slab(bulk_cif, (1,0,0), 15.0, 10.0, instructions_json, True)`,  # All variants
+        `generate_reconstructed_slab(bulk_cif, (1,1,0), 10.0, 5.0, instructions_json)`,  # Rectangular slab
+        `generate_reconstructed_slab(bulk_cif, (1,2,1), 20.0, 15.0, instructions_json, False)`,  # Complex reconstruction
+        `generate_reconstructed_slab(bulk_cif, (2,0,0), 25.0, 10.0, instructions_json, True)`,  # Thick slab
+    ]
     [/SYNTACTICAL]
 
     Args:
