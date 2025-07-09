@@ -44,11 +44,12 @@ class TaskTrailResult:
     tool_statistics: dict[str, Any]  # TODO replace Any with specific types
     duration: float | None = None
     token_usage: dict[str, int] | None = None
+    error_message: str | None = None
 
     @property
     def success(self) -> bool:
         """Whether the trial was successful"""
-        return self.score > 0
+        return self.score > 0 and self.error_message is None
 
 
 @dataclass
