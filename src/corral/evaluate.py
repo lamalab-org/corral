@@ -11,10 +11,10 @@ from loguru import logger
 from corral.ablations import ToolVerbosity
 from corral.report import (
     BenchmarkResult,
+    CorralWandbLogger,
     TaskTrailResult,
     TaskTrialResults,
     ToolResponse,
-    WandbLogger,
 )
 
 
@@ -292,7 +292,7 @@ class MatAgentBenchmark:
         agent: "Agent",
         checkpoint_dir: str = "./benchmark_checkpoints",
         checkpoint_name: str | None = None,
-        logger: WandbLogger | None = None,
+        logger: CorralWandbLogger | None = None,
     ):
         self.interface = interface
         self.agent = agent

@@ -4,7 +4,7 @@ from loguru import logger
 
 from corral.agents.react import ReActAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
-from corral.report import WandbLogger
+from corral.report import CorralWandbLogger
 
 load_dotenv("../.env", override=True)
 
@@ -23,7 +23,7 @@ def run_benchmark(
     """Run the benchmark with specified model and tasks"""
 
     interface = BenchmarkInterface()
-    wandblogger = WandbLogger(
+    wandblogger = CorralWandbLogger(
         project="corral",
         group="tool_description_ablation",
         name=run_name,

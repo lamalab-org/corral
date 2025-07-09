@@ -739,7 +739,7 @@ def calculate_trial_tool_duration(trial: TaskTrailResult) -> float:
     return duration
 
 
-class WandbLogger:
+class CorralWandbLogger:
     """Handles all wandb logging logic"""
 
     def __init__(
