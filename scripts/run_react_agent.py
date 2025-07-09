@@ -4,6 +4,7 @@ from loguru import logger
 
 from corral.agents.react import ReActAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
+from corral.report import WandbLogger
 
 load_dotenv("../.env", override=True)
 
@@ -19,17 +20,18 @@ def run_benchmark(
     temperature: float = 0.0,
 ):
     """Run the benchmark with specified model and tasks"""
-
+    wandb_project = "corral_test"  # Required: Your wandb project name
+    # wandb_entity="your_entity_name", # Optional: Your wandb entity (username or team)
+    wandb_group = "test"  # Optional: Group related runs
+    wandb_name = "testrun-ml-functional"  # Optional: Custom run name)
     interface = BenchmarkInterface()
     agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
-    runner = MatAgentBenchmark(
-        interface,
-        agent,
-        wandb_project="corral_test",  # Required: Your wandb project name
-        # wandb_entity="your_entity_name", # Optional: Your wandb entity (username or team)
-        wandb_group="test",  # Optional: Group related runs
-        wandb_name="experiment-run-1",  # Optional: Custom run name)
+    wandblogger = WandbLogger(
+        project=wandb_project,
+        group=wandb_group,
+        name=wandb_name,
     )
+    runner = MatAgentBenchmark(interface, agent, logger=wandblogger)
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
