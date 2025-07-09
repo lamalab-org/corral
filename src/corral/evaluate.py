@@ -239,13 +239,8 @@ def run_independent_trials(
 
             # Save checkpoint after each trial
             checkpoint_saver(task_results)
-
-            # Stop if trial failed (configurable)
             if not result.success:
-                logger.error(
-                    f"Trial failed for task {task_id}, stopping remaining trials"
-                )
-                break
+                logger.error(f"Trial failed for task {task_id}")
 
 
 def run_chained_trials(
@@ -270,17 +265,10 @@ def run_chained_trials(
             task_results[task_id].trials.append(result)
 
             if not result.success:
-                logger.error(
-                    f"Trial failed for task {task_id}, stopping chained execution"
-                )
+                logger.error(f"Trial failed for task {task_id}")
                 success = False
-                break
-
         # Save checkpoint after each round
         checkpoint_saver(task_results, trial_round + 1 if success else trial_round)
-
-        if not success:
-            break
 
 
 def create_wandb_config(agent: "Agent", session_id: str, **kwargs) -> dict[str, Any]:
