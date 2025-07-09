@@ -403,7 +403,7 @@ class MatAgentBenchmark:
 
             # Log final results
             if self.logger:
-                self.logger.log_final_results(result)
+                self.logger.log_final_results(result, k_values)
 
             return result
 
