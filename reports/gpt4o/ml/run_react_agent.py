@@ -38,7 +38,7 @@ def run_benchmark(
         trials_per_task=5,
         k_values=[1, 2, 3, 4, 5],
         verbose=True,
-        tool_verbosity="full",
+        tool_verbosity="comprehensive",
     )
     result.generate_report("gpt-react-ml_env-full_verbosity.json")
     logger.info("Benchmark completed")
