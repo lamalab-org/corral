@@ -1,0 +1,139 @@
+variable strain equal 0.001
+variable repx equal 1
+variable repz equal 1
+variable strain2 equal "1+v_strain"
+variable deldist equal 50
+variable fixdist equal 45
+
+######################################
+# INITIALIZATION
+units metal
+dimension 3
+boundary p p p
+atom_style atomic
+atom_modify map array
+
+######################################
+# SIMULATION CELL VARIABLES (in Angstroms)
+
+read_data ${datfile}.txt
+
+#variable minlength equal 100
+variable xlen equal lx
+variable ylen equal ly
+variable zlen equal lz
+
+print "lx: ${xlen}"
+print "ly: ${ylen}"
+print "lz: ${zlen}"
+
+# Replicate simulation cell in each direction
+replicate ${repx} 1 ${repz}
+
+######################################
+# INTERATOMIC POTENTIAL
+pair_style eam/fs
+pair_coeff * * Fe-C_Hepburn_Ackland.eam.fs Fe C
+
+# Compute stress information for Atomeye visualization
+compute stress all stress/atom NULL
+compute stress1 all reduce sum c_stress[1]
+compute stress2 all reduce sum c_stress[2]
+compute stress3 all reduce sum c_stress[3]
+compute stress4 all reduce sum c_stress[4]
+compute stress5 all reduce sum c_stress[5]
+compute stress6 all reduce sum c_stress[6]
+
+# Compute distance for each side of the grain boundary to displace
+#variable ly1 equal ly
+compute ly1low all reduce min y
+compute ly1hi all reduce max y
+
+##########################################
+# Minimize first
+reset_timestep 0
+thermo 10
+thermo_style custom step lx ly lz press pxx pyy pzz pe c_ly1low c_ly1hi
+min_style cg
+fix 1 all box/relax x 0.0 z 0.0 couple none vmax 0.001
+minimize 1.0e-15 1.0e-15 100 1000
+unfix 1
+
+##########################################
+# CREATE REGIONS FOR BOUNDARY CONDITIONS
+
+# lx, ly, lz are fixed for the rest
+thermo_style custom step press pxx pyy pzz pe c_ly1low c_ly1hi
+
+# Delete groups of atoms far from boundary
+region rlow block 0 200 -200 -${deldist} 0 200 units box
+region rhigh block 0 200 ${deldist} 200 0 200 units box
+group glow region rlow
+group ghigh region rhigh
+
+delete_atoms group glow
+delete_atoms group ghigh
+
+# Create groups to fix and displace
+region rgblow block 0 200 -200 -${fixdist} 0 200 units box
+region rgbhigh block 0 200 ${fixdist} 200 0 200 units box
+group gbhigh region rgbhigh
+group gblow region rgblow
+
+# Put fixed boundary condition on edge atoms by setting forces to zero
+fix 2 gbhigh setforce 0 0 0
+fix 3 gblow setforce 0 0 0
+##########################################
+
+run 0
+variable ly1 equal "c_ly1hi - c_ly1low"
+variable ly0 equal ${ly1}
+variable lydelta equal "v_strain*v_ly0/2"
+print "Length of box w/ GB: ${ly0}"
+print "y Strain increments: ${lydelta}"
+
+# Setup file output (time in ps, pressure in GPa)
+variable p1 equal "(v_ly1-v_ly0)/v_ly0"
+variable p2 equal "-pxx/10000"
+variable p3 equal "-pyy/10000"
+variable p4 equal "-pzz/10000"
+variable p5 equal "-pxy/10000"
+variable p6 equal "-pxz/10000"
+variable p7 equal "-pyz/10000"
+variable p8 equal "pe"
+
+# Output stress and strain information to datafile for Matlab post-processing
+fix gb_fracture all print 1 "${p1} ${p2} ${p3} ${p4} ${p5} ${p6} ${p7} ${p8}" file data.${datfile}_fracture.txt screen no
+run 0
+
+##########################################
+# MS Deformation loop
+
+variable a loop ${nloop}
+
+label loop
+
+# Displace the atoms and minimize again
+# displace_atoms group-ID style args keyword value
+displace_atoms gblow move 0 -${lydelta} 0 units box
+displace_atoms gbhigh move 0 ${lydelta} 0 units box
+
+minimize 1.0e-15 1.0e-15 100 1000
+
+# Create cfg files with stress in y direction for AtomEye viewing
+reset_timestep ${a}
+dump 1 all cfg 1000 dump.${datfile}_*.cfg mass type xs ys zs c_stress[2]
+dump_modify 1 element Fe C
+dump_modify 1 first yes
+dump_modify 1 pad 3
+run 0
+undump 1
+
+next a
+jump in.gb_fracture.txt loop
+
+unfix gb_fracture
+
+######################################
+# SIMULATION DONE
+print "All done"
