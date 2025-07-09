@@ -73,6 +73,7 @@ class BenchmarkResult:
     task_results: dict[str, TaskTrialResults]
     k: list[int] = field(default_factory=lambda: [1])
     total_duration: float | None = None
+    verbosity: str | None = None
 
     @property
     def all_task_ids(self) -> list[str]:
@@ -340,6 +341,8 @@ class BenchmarkResult:
         summary_table.add_column("Metric", justify="left", style="cyan")
         summary_table.add_column("Value", justify="right", style="white")
         summary_table.add_row("Total Tasks", str(self.total_tasks))
+        if self.verbosity:
+            summary_table.add_row("Tool Verbosity", self.verbosity)
         summary_table.add_row("Average Score", f"{self.average_score():.3f}")
         summary_table.add_row(
             "Overall Success Rate", f"{self.overall_success_rate():.3f}"
@@ -569,6 +572,7 @@ class BenchmarkResult:
                         **pass_at_k_dict,
                         **pass_hat_k_dict,
                         "total_tasks": self.total_tasks,
+                        "tool_verbosity": self.verbosity,
                         "total_tool_calls": tool_call_stats["total"],
                         "successful_tool_calls": tool_call_stats["successful"],
                         "failed_tool_calls": tool_call_stats["failed"],

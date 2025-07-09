@@ -211,7 +211,11 @@ class MatAgentBenchmark:
                 task_ids, trials_per_task, task_results, session_id, verbose
             )
 
-        return BenchmarkResult(task_results=task_results, k=k_values)
+        return BenchmarkResult(
+            task_results=task_results,
+            k=k_values,
+            verbosity=self.interface.current_verbosity,
+        )
 
     def _initialize_task_results(
         self, task_ids: list[str], session_id: str
