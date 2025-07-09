@@ -1,7 +1,6 @@
 import os
 from typing import Any
 
-import uvicorn
 from dotenv import load_dotenv
 from loguru import logger
 from tools import (
@@ -38,7 +37,6 @@ from corral.io import (
     ReadFileTool,
     WriteFileTool,
 )
-from corral.server import create_benchmark_server
 
 load_dotenv("../.env", override=True)
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
@@ -208,13 +206,19 @@ def main():
 
     environments = {}
     for task in tasks:
-        environments[task._uuid] = ChemBenchEnvironment(
-            task._uuid, [task], benchmark, prompter, tools=fs_tools
-        )
+        if (
+            "requires-reasoning" in task._keywords
+            or "requires-calculation" in task._keywords
+        ):
+            logger.info(f"Skipping task {task._uuid} due to reasoning requirement")
 
-    # Create and run server
-    app = create_benchmark_server(environments)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+            environments[task._uuid] = ChemBenchEnvironment(
+                task._uuid, [task], benchmark, prompter, tools=fs_tools
+            )
+
+    # # Create and run server
+    # app = create_benchmark_server(environments)
+    # uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":

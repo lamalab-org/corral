@@ -280,7 +280,7 @@ def relevant_pubchem_sections(
 
 
 @tool
-def smiles_to_name(compound: str) -> str:
+def smiles_to_name(smiles: str) -> str:
     """[BRIEF] Convert a SMILES representation of a compound to its IUPAC name. [/BRIEF]
 
     [DETAILED] This function takes a SMILES representation of a compound and returns its IUPAC name.
@@ -341,7 +341,7 @@ def smiles_to_name(compound: str) -> str:
     """
     try:
         return remote_call(function_name="get_iupac_name", env_name="chemenv")(
-            smiles=compound
+            smiles=smiles
         )
     except Exception as e:
         error_details = traceback.format_exc()
@@ -349,7 +349,7 @@ def smiles_to_name(compound: str) -> str:
 
 
 @tool
-def get_smiles_from_name(compound: str) -> str:
+def get_smiles_from_name(iupac_name: str) -> str:
     """[BRIEF] Convert an IUPAC name of a compound to its SMILES representation. [/BRIEF]
 
     [DETAILED] This function takes an IUPAC name of a compound and returns its SMILES representation.
@@ -383,7 +383,7 @@ def get_smiles_from_name(compound: str) -> str:
     [/SYNTACTICAL]
 
     Args:
-        name (str):
+        iupac_name (str):
             [BRIEF] The IUPAC name of the compound [/BRIEF]
             [DETAILED] The IUPAC name of the compound to convert to its SMILES representation. It should be a valid IUPAC name that represents the chemical structure of the compound. [/DETAILED]
             [SYNTACTICAL] Format: "valid IUPAC name" [/SYNTACTICAL]
@@ -410,7 +410,7 @@ def get_smiles_from_name(compound: str) -> str:
     """
     try:
         return remote_call(function_name="get_smiles_from_name", env_name="chemenv")(
-            name=compound
+            name=iupac_name
         )
     except Exception as e:
         error_details = traceback.format_exc()
