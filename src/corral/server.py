@@ -143,11 +143,17 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         task_id: str,
         verbosity: ToolVerbosity | None = None,
     ):
+        """
+        Get available tools for a task, returning a structured JSON object.
+
+        This endpoint provides tool definitions in a format compatible with modern
+        LLM function-calling APIs. The structure of the returned argument
+        dictionaries will vary based on the requested verbosity level.
+        """
         if verbosity is None:
             verbosity = Query(
                 ToolVerbosity.FULL, description="Tool description verbosity level"
             )
-        """Get available tools for this task with specified verbosity"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
 
@@ -155,37 +161,43 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         tools_info = []
 
         for tool in env.tools.values():
-            # Filter tool description based on verbosity
             filtered_description = VerbosityConfig.filter_tool_description(
                 tool.description, verbosity
             )
 
-            # Filter argument descriptions
-            filtered_args = []
+            structured_args = []
             for arg in tool.arguments:
-                filtered_arg_desc = VerbosityConfig.filter_argument_description(
-                    arg.description, verbosity
-                )
-
+                # Conditionally build the argument dictionary based on verbosity.
                 if verbosity == ToolVerbosity.MINIMAL:
-                    # Just name and type
-                    filtered_args.append(f"{arg.name} ({arg.type})")
-                else:
-                    # Include filtered description
-                    required = (
-                        "required"
-                        if arg.required
-                        else f"optional, default: {arg.default}"
+                    # For MINIMAL, provide only the essential keys.
+                    structured_args.append(
+                        {
+                            "name": arg.name,
+                            "type": arg.type,
+                            "required": arg.required,
+                        }
                     )
-                    filtered_args.append(
-                        f"{arg.name} ({arg.type}, {required}): {filtered_arg_desc}"
+                else:
+                    # For FULL (or other levels), provide all details.
+                    filtered_arg_desc = VerbosityConfig.filter_argument_description(
+                        arg.description, verbosity
+                    )
+                    structured_args.append(
+                        {
+                            "name": arg.name,
+                            "type": arg.type,
+                            "description": filtered_arg_desc,
+                            "required": arg.required,
+                            "default": arg.default,
+                            "choices": arg.choices,
+                        }
                     )
 
             tools_info.append(
                 {
                     "name": tool.name,
                     "description": filtered_description,
-                    "arguments": filtered_args,
+                    "arguments": structured_args,
                 }
             )
 

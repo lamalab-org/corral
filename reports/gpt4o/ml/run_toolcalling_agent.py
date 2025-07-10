@@ -22,7 +22,7 @@ def run_benchmark(
 
     interface = BenchmarkInterface()
     wandblogger = CorralWandbLogger(
-        project="corral",
+        project="corral-test",
         group="tool_description_ablation",
         name=run_name,
     )

@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
@@ -22,12 +23,15 @@ RETRY_EXCEPTIONS = (
     openai.InternalServerError,
 )
 
+
 TYPE_MAPPING = {
     "str": "string",
     "bool": "boolean",
     "int": "integer",
     "float": "number",
     "list[str]": "array",
+    "none": "null",
+    "dict": "object",
 }
 
 
@@ -140,93 +144,171 @@ def format_examples(examples: list[str] | None) -> str:
 
 
 def convert_dict_arg(arg: dict) -> dict:
-    """Convert a single argument dictionary to OpenAI tool format."""
+    """
+    Convert a single argument dictionary (from our ToolArgument format)
+    to an OpenAI-compatible JSON schema property.
+    """
     if not isinstance(arg, dict):
-        raise ValueError(f"Expected arg to be a dictionary but got: {arg}")
+        raise TypeError(
+            f"Expected argument specification to be a dictionary, but got {type(arg)}: {arg}"
+        )
 
     arg_type = arg.get("type")
     if not arg_type:
         raise ValueError(
-            f"Argument type is missing for argument: {arg.get('name', 'unknown')}"
+            f"Argument 'type' is missing for argument: {arg.get('name', 'unknown')}"
         )
 
-    if arg_type == "str":
-        prop = {"type": "string", "description": arg.get("description", "")}
-    elif arg_type == "bool":
-        prop = {"type": "boolean", "description": arg.get("description", "")}
-    elif arg_type == "int":
-        prop = {
-            "type": "integer",  # More specific than "number"
-            "description": arg.get("description", ""),
-        }
-    elif arg_type == "float":
-        prop = {"type": "number", "description": arg.get("description", "")}
-    elif arg_type == "list[str]":
-        # Very explicit array schema to prevent character-by-character parsing
-        prop = {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": f"{arg.get('description', '')} - Provide as array of complete strings, e.g., [\"Li2O3\", \"CaCO3\"]",
-            "minItems": 1,
-        }
-    else:
-        # Fallback for unknown types
-        prop = {
-            "type": "string",
-            "description": f"{arg.get('description', '')} (type: {arg_type})",
-        }
+    prop = {"description": arg.get("description", "")}
 
-    # Add choices/enum if specified
+    if arg_type == "list[str]":
+        prop["type"] = "array"
+        prop["items"] = {"type": "string"}
+        prop["description"] += (
+            ' - Provide as an array of strings, e.g., ["item1", "item2"]'
+        )
+    else:
+        json_type = TYPE_MAPPING.get(arg_type)
+        if not json_type:
+            logger.warning(
+                f"Unknown argument type '{arg_type}'. Defaulting to 'string'."
+            )
+            prop["type"] = "string"
+        else:
+            prop["type"] = json_type
+
     if arg.get("choices"):
         prop["enum"] = arg["choices"]
 
-    # Add default if specified
-    if arg.get("default") is not None:
+    if "default" in arg and arg["default"] is not None:
         prop["default"] = arg["default"]
 
     return prop
 
 
-def convert_to_openai_tool_format(tools_dict: dict) -> list:
+def _parse_argument_string_to_dict(arg_string: str) -> dict | None:
+    """
+    Parses a human-readable argument string back into a structured dictionary.
+    Handles formats like: "name (type, required): description"
+    or "name (type, optional, default: value): description"
+    """
+    # Regex to capture the different parts of the argument string
+    pattern = re.compile(
+        r"^(?P<name>\w+)\s+\((?P<type>[^,]+),\s*(?P<req_opt>required|optional(?:,\s*default:\s*(?P<default>.*?))?)\):\s*(?P<desc>.*)$",
+        re.DOTALL,
+    )
+    match = pattern.match(arg_string)
+
+    if not match:
+        logger.warning(f"Could not parse argument string: {arg_string}")
+        return None
+
+    data = match.groupdict()
+
+    arg_dict = {
+        "name": data["name"],
+        "type": data["type"],
+        "required": data["req_opt"] == "required",
+        "description": data["desc"],
+    }
+
+    if data["default"] is not None:
+        # Here we are just storing the default as a string. A more robust
+        # implementation might try to cast it to the correct type.
+        arg_dict["default"] = data["default"]
+
+    return arg_dict
+
+
+def convert_to_openai_tool_format(tools_dict: dict) -> list[dict]:
     """
     Convert a dictionary of tools into the OpenAI tool calling format.
-
-    Args:
-        tools_dict (dict): Dictionary with a 'tools' list containing tool specifications
-
-    Returns:
-        list: List of tools in OpenAI tool calling format
+    This is now robust and can handle arguments as a list of dicts OR a list of strings.
     """
-    openai_tools = []
+    if "tools" not in tools_dict or not isinstance(tools_dict["tools"], list):
+        logger.warning(
+            "No 'tools' list found in the provided dictionary. Returning empty list."
+        )
+        return []
 
+    openai_tools = []
     for tool in tools_dict["tools"]:
-        function = {
+        if not all(k in tool for k in ["name", "description", "arguments"]):
+            logger.warning(f"Skipping malformed tool, missing required keys: {tool}")
+            continue
+
+        function_spec = {
             "name": tool["name"],
             "description": tool["description"],
             "parameters": {"type": "object", "properties": {}, "required": []},
         }
 
-        if isinstance(tool["arguments"], str):
-            arg_names = [arg_name.strip() for arg_name in tool["arguments"].split(",")]
-            for arg_name in arg_names:
-                if arg_name:
-                    function["parameters"]["properties"][arg_name] = {
-                        "type": "string",
-                        "description": f"Argument: {arg_name}",
-                    }
-                    function["parameters"]["required"].append(arg_name)
+        if not isinstance(tool["arguments"], list):
+            logger.warning(
+                f"Skipping tool '{tool['name']}' because its arguments are not a list. Got: {type(tool['arguments'])}"
+            )
+            continue
 
-        else:
-            for arg in tool["arguments"]:
-                property_entry = convert_dict_arg(arg)
-                function["parameters"]["properties"][arg["name"]] = property_entry
+        for arg_spec in tool["arguments"]:
+            arg_dict = None
+            # UPDATED LOGIC: Handle both string and dict formats
+            if isinstance(arg_spec, str):
+                arg_dict = _parse_argument_string_to_dict(arg_spec)
+            elif isinstance(arg_spec, dict):
+                arg_dict = arg_spec
+            else:
+                logger.error(
+                    f"Argument spec for tool '{tool['name']}' is neither a string nor a dictionary: {arg_spec}"
+                )
+                continue
 
-                if arg.get("required", True):
-                    function["parameters"]["required"].append(arg["name"])
+            if not arg_dict:
+                continue  # Skip if parsing failed or spec was invalid
 
-        openai_tools.append({"type": "function", "function": function})
+            try:
+                property_entry = convert_dict_arg(arg_dict)
+                arg_name = arg_dict["name"]
+                function_spec["parameters"]["properties"][arg_name] = property_entry
+
+                if arg_dict.get("required", True):
+                    function_spec["parameters"]["required"].append(arg_name)
+            except (TypeError, ValueError, KeyError) as e:
+                logger.error(
+                    f"Skipping invalid argument in tool '{tool['name']}': {arg_dict}. Error: {e}"
+                )
+                continue
+
+        if function_spec["name"] and function_spec["description"]:
+            openai_tools.append({"type": "function", "function": function_spec})
 
     return openai_tools
+
+
+def parse_string_argument(arg_string: str) -> dict | None:
+    """
+    Parse a string argument format like "path (str, required): Path to the directory"
+    This is a fallback for malformed API responses.
+    """
+    import re
+
+    # Pattern to match "name (type, required/optional): description"
+    pattern = r"^(\w+)\s*\(([^,]+)(?:,\s*(required|optional))?\):\s*(.+)$"
+    match = re.match(pattern, arg_string.strip())
+
+    if match:
+        name = match.group(1)
+        arg_type = match.group(2).strip()
+        required_str = match.group(3)
+        description = match.group(4).strip()
+
+        return {
+            "name": name,
+            "type": arg_type,
+            "description": description,
+            "required": required_str != "optional" if required_str else True,
+        }
+
+    return None
 
 
 def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
