@@ -2,11 +2,9 @@ import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
-from corral.agents.react import ReActAgent
+from corral.agents import ToolCallingAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 from corral.report import CorralWandbLogger
-
-load_dotenv("../.env", override=True)
 
 
 def setup_litellm():
@@ -28,7 +26,7 @@ def run_benchmark(
         group="tool_description_ablation",
         name=run_name,
     )
-    agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
+    agent = ToolCallingAgent(model=model, max_iterations=20, temperature=temperature)
     runner = MatAgentBenchmark(interface, agent, logger=wandblogger)
 
     # Run benchmark
@@ -40,7 +38,7 @@ def run_benchmark(
         verbose=True,
         tool_verbosity="comprehensive",
     )
-    result.generate_report(run_name + ".json")
+    result.generate_report("gpt-toolcalling-ml_env-comprehensive_verbosity.json")
     logger.info("Benchmark completed")
 
 
@@ -50,7 +48,7 @@ if __name__ == "__main__":
 
     try:
         model = "gpt-4o"
-        run_name = "gpt-react-ml_env-comprehensive_verbosity"
+        run_name = "gpt-toolcalling-ml_env-comprehensive_verbosity"
         run_benchmark(model=model, run_name=run_name)
 
     except Exception as e:
