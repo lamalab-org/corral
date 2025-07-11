@@ -1015,7 +1015,7 @@ def create_tools() -> dict[str, Tool]:
         # "cat_files": CatFilesTool(fs_manager),
         # "copy_file": CopyFileTool(fs_manager),
         # "online_search": online_search,
-        "relevant_pubchem_sections": relevant_pubchem_sections,
+        # "relevant_pubchem_sections": relevant_pubchem_sections,
         "get_formula_from_smiles": get_formula_from_smiles,
         "simulate_spectra": simulate_spectra,
         "retrieve_protons_shifts": retrieve_protons_shifts,

@@ -15,7 +15,7 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "gpt-4o",
+    model: str = "gpt-4o-2024-08-06",
     task_ids: list | None = None,
     temperature: float = 0.0,
     run_name: str = "corral_benchmark_run",
@@ -38,9 +38,9 @@ def run_benchmark(
         trials_per_task=5,
         k_values=[1, 2, 3, 4, 5],
         verbose=True,
-        tool_verbosity="comprehensive",
+        tool_verbosity="brief",
     )
-    result.generate_report("gpt-react-ml_env-full_verbosity.json")
+    result.generate_report(f"{run_name}.json")
     logger.info("Benchmark completed")
 
 
@@ -49,8 +49,9 @@ if __name__ == "__main__":
     setup_litellm()
 
     try:
-        model = "gpt-4o"
-        run_name = "gpt-react-ml_env-full_verbosity"
+        # claude-3-5-sonnet-20241022
+        model = "gpt-4o-2024-08-06"
+        run_name = "gpt-react-spectra_easy-brief_verbosity"
         run_benchmark(model=model, run_name=run_name)
 
     except Exception as e:

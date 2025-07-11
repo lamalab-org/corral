@@ -46,7 +46,7 @@ class TaskEnvironment(Environment):
         self.current_task = task_group.tasks[task_id]
 
         # Initialize environment
-        super().__init__(f"{task_group.group_id}_{task_id}")
+        super().__init__(f"{task_group.group_id}_{task_id}", "./SPECTRA_ELU")
 
         # Add required tools for the task
         for tool_name in self.current_task.tools:
