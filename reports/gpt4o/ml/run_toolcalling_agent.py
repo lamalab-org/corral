@@ -20,7 +20,7 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = BenchmarkInterface()
+    interface = BenchmarkInterface("http://0.0.0.0:8000")
     wandblogger = CorralWandbLogger(
         project="corral-test",
         group="tool_description_ablation",
@@ -36,9 +36,9 @@ def run_benchmark(
         trials_per_task=5,
         k_values=[1, 2, 3, 4, 5],
         verbose=True,
-        tool_verbosity="comprehensive",
+        tool_verbosity="workflow",
     )
-    result.generate_report("gpt-toolcalling-ml_env-comprehensive_verbosity.json")
+    result.generate_report("gpt-toolcalling-ml_env-workflow_verbosity.json")
     logger.info("Benchmark completed")
 
 
@@ -48,7 +48,7 @@ if __name__ == "__main__":
 
     try:
         model = "gpt-4o"
-        run_name = "gpt-toolcalling-ml_env-comprehensive_verbosity"
+        run_name = "gpt-toolcalling-ml_env-workflow_verbosity"
         run_benchmark(model=model, run_name=run_name)
 
     except Exception as e:
