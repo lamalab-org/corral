@@ -44,86 +44,19 @@ def resolve_path(path_or_str: str) -> str:
         return path_or_str
 
 
-def check_valid_json_file(json_path: str) -> float:
-    """
-    Check if a valid JSON file exists at the given path.
-
-    Args:
-        json_path: Path to the JSON file to validate
-
-    Returns:
-        float: 1.0 if valid JSON file exists, 0.0 otherwise
-    """
-    try:
-        if not json_path or not json_path.strip():
-            logger.warning("Empty path provided to check_valid_json_file")
-            return 0.0
-
-        logger.info(f"check_valid_json_file: input={json_path!r}")
-
-        # Resolve the path
-        resolved_path = smart_resolve_path(json_path.strip())
-        logger.info(f"check_valid_json_file: resolved={resolved_path!r}")
-
-        # Check if file exists
-        if not Path(resolved_path).exists():
-            logger.info(f"JSON file not found at: {resolved_path}")
-            return 0.0
-
-        # Check if it's a file (not a directory)
-        if not Path(resolved_path).is_file():
-            logger.info(f"Path exists but is not a file: {resolved_path}")
-            return 0.0
-
-        # Try to load and parse the JSON
-        with Path(resolved_path).open("r", encoding="utf-8") as f:
-            json_data = json.load(f)
-
-        # Additional validation - check if it's not empty
-        if json_data is None:
-            logger.info("JSON file contains null")
-            return 0.0  # Valid JSON but null content
-
-        logger.info(f"Valid JSON file found with {type(json_data).__name__} content")
-        return 1.0
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON format in file {resolved_path}: {e}")
-        return 0.0
-    except UnicodeDecodeError as e:
-        logger.error(f"Encoding error reading file {resolved_path}: {e}")
-        return 0.0
-    except PermissionError as e:
-        logger.error(f"Permission denied reading file {resolved_path}: {e}")
-        return 0.0
-    except Exception as e:
-        logger.error(f"Error validating JSON file {json_path}: {e}", exc_info=True)
-        return 0.0
-
-
 def check_slabs_json(slabs_json: str) -> float:
     """
     Check that the slabs JSON contains at least one valid slab by trying to parse
     the CIF string for one of the slabs. Accepts either a path to a JSON file or a raw JSON string.
     """
     try:
-        logger.info(f"check_slabs_json: input={slabs_json!r}")
-
-        # Try to resolve as path
-        resolved_input = smart_resolve_path(slabs_json)
-        logger.info(f"check_slabs_json: resolved={resolved_input!r}")
-
         # Try loading from file if it's a valid path
         json_data = None
-        if Path(resolved_input).exists():
-            with Path(resolved_input).open() as f:
+        if Path(slabs_json).exists():
+            with Path(slabs_json).open() as f:
                 json_data = json.load(f)
         else:
-            # Try parsing as raw JSON string (try original first, then resolved)
-            try:
-                json_data = json.loads(slabs_json)
-            except json.JSONDecodeError:
-                json_data = json.loads(resolved_input)
+            json_data = json.loads(slabs_json)
 
         if not json_data or not isinstance(json_data, dict):
             return 0.0
@@ -138,8 +71,7 @@ def check_slabs_json(slabs_json: str) -> float:
                 continue
         return 0.0
 
-    except Exception as e:
-        logger.error(f"Error in check_slabs_json: {e}", exc_info=True)
+    except Exception:
         return 0.0
 
 
@@ -150,8 +82,7 @@ def check_mp_structure(path_or_cif: str) -> float:
     logger.info("check_mp_structure")
     logger.info(f"Input path_or_cif: {path_or_cif}")
     try:
-        path_or_cif = smart_resolve_path(path_or_cif)
-        logger.info(f"Resolved path: {path_or_cif}")
+        path_or_cif = resolve_path(path_or_cif)
 
         # Then continue with the existing logic
         if Path(path_or_cif).exists():
@@ -178,8 +109,7 @@ def check_slab_structure(path_or_cif: str) -> float:  # TODO: better slab check.
     logger.info("check_slab_structure")
     logger.info(f"Input path_or_cif: {path_or_cif}")
     try:
-        path_or_cif = smart_resolve_path(path_or_cif)
-        logger.info(f"Resolved path: {path_or_cif}")
+        path_or_cif = resolve_path(path_or_cif)
         # Determine if the input is a path or a CIF string
         if Path(path_or_cif).exists():
             structure = Structure.from_file(path_or_cif)
@@ -206,8 +136,7 @@ def check_co2_molecule_structure(path_or_cif: str) -> float:
     logger.info("check_molecule_structure")
     logger.info(f"Input path_or_cif: {path_or_cif}")
     try:
-        path_or_cif = smart_resolve_path(path_or_cif)
-        logger.info(f"Resolved path: {path_or_cif}")
+        path_or_cif = resolve_path(path_or_cif)
         # Determine if the input is a path or a CIF string
         if Path(path_or_cif).exists():
             structure = Structure.from_file(path_or_cif)
@@ -238,80 +167,34 @@ def check_adsorption_structure(
 ) -> Callable[[str], float]:
     """Returns a scoring function customized to given slab and adsorbate elements"""
 
-    logger.info(
-        f"Creating adsorption structure checker for slab_elements={slab_elements}, adsorbate_elements={adsorbate_elements}"
-    )
-
     def score_fn(path_or_cif: str) -> float:
         try:
             from pathlib import Path
 
             from pymatgen.core import Structure
 
-            logger.info(f"check_adsorption_structure: input={path_or_cif!r}")
-
-            # Try to resolve as path first, but handle both cases
-            resolved_input = smart_resolve_path(path_or_cif)
-            logger.info(f"check_adsorption_structure: resolved={resolved_input!r}")
-
-            # Check if file exists
-            if Path(resolved_input).exists():
-                logger.info(f"File exists at resolved path: {resolved_input}")
-                structure = Structure.from_file(resolved_input)
-                logger.info("Successfully loaded structure from file")
+            if Path(path_or_cif).exists():
+                structure = Structure.from_file(path_or_cif)
             else:
-                logger.warning(
-                    f"File does not exist at resolved path: {resolved_input}"
-                )
-                # If resolved path doesn't exist, try original input as CIF string
-                try:
-                    logger.info("Trying to parse original input as CIF string")
-                    structure = Structure.from_str(path_or_cif, fmt="cif")
-                    logger.info("Successfully parsed original input as CIF")
-                except Exception as e1:
-                    logger.warning(f"Failed to parse original input as CIF: {e1}")
-                    # If that fails too, try resolved input as CIF string
-                    logger.info("Trying to parse resolved input as CIF string")
-                    structure = Structure.from_str(resolved_input, fmt="cif")
-                    logger.info("Successfully parsed resolved input as CIF")
+                structure = Structure.from_str(path_or_cif, fmt="cif")
 
-            if not structure:
-                logger.error("Structure is None")
-                return 0.0
-
-            if len(structure) == 0:
-                logger.error("Structure is empty")
-                return 0.0
-
-            logger.info(f"Structure loaded successfully with {len(structure)} sites")
+            if not structure or len(structure) == 0:
+                return 0.25
 
             atoms = {str(site.specie) for site in structure}
-            logger.info(f"Found atoms in structure: {atoms}")
-
             has_slab = all(e in atoms for e in slab_elements)
             has_adsorbate = all(e in atoms for e in adsorbate_elements)
 
-            logger.info(f"Required slab elements {slab_elements}: {has_slab}")
-            logger.info(
-                f"Required adsorbate elements {adsorbate_elements}: {has_adsorbate}"
-            )
+            # abc = structure.lattice.abc # TODO: Check if slab-like
+            # is_slab_like = abc[2] > 2 * max(abc[0], abc[1]) # need bot always in c direction
 
             if has_slab and has_adsorbate:
-                logger.info(
-                    "SUCCESS: Structure contains both slab and adsorbate elements"
-                )
-                return 1.0
+                return 1.0  # if is_slab_like else 0.75
             elif has_slab or has_adsorbate:
-                logger.info(
-                    "PARTIAL: Structure contains only slab or adsorbate elements"
-                )
-                return 0.0
+                return 0.5
             else:
-                logger.error("FAILURE: Structure missing required elements")
-                return 0.0
-
-        except Exception as e:
-            logger.error(f"Exception in check_adsorption_structure: {e}", exc_info=True)
+                return 0.25
+        except Exception:
             return 0.0
 
     return score_fn
@@ -327,31 +210,13 @@ def check_adsorption_sites(sites_json_or_path: str) -> float:
     Returns:
         float: Score between 0.0 and 1.0
     """
+
     try:
-        if not sites_json_or_path or not sites_json_or_path.strip():
-            logger.warning("Empty input provided to check_adsorption_sites")
-            return 0.0
+        if Path(sites_json_or_path).is_file():
+            with Path(sites_json_or_path).open() as f:
+                sites_json_or_path = f.read()
 
-        logger.info(f"check_adsorption_sites: input={sites_json_or_path!r}")
-
-        # Try to resolve as path
-        resolved_input = smart_resolve_path(sites_json_or_path.strip())
-        logger.info(f"check_adsorption_sites: resolved={resolved_input!r}")
-
-        # Try to load from file first
-        if Path(resolved_input).is_file():
-            with Path(resolved_input).open() as f:
-                json_content = f.read()
-        else:
-            # If no file exists, treat as raw JSON string
-            # Try original input first, then resolved input
-            json_content = (
-                sites_json_or_path
-                if not resolved_input.endswith(".json")
-                else resolved_input
-            )
-
-        sites = json.loads(json_content)
+        sites = json.loads(sites_json_or_path)
 
         # Check if the structure contains expected site types
         type_aliases = {
@@ -390,7 +255,7 @@ def check_adsorption_sites(sites_json_or_path: str) -> float:
         return 1.0  # At least one site type has valid coordinates
 
     except Exception as e:
-        logger.error(f"Error validating adsorption sites: {e}", exc_info=True)
+        logger.error(f"Error validating adsorption sites: {e}")
         return 0.0
 
 
