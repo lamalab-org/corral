@@ -11,6 +11,7 @@ from score import (
     check_mp_structure,
     check_slab_structure,
     check_slabs_json,
+    check_valid_json_file,
 )
 from tools import create_tools
 
@@ -38,7 +39,7 @@ SCORING_FUNCTIONS = {
     "slab_structure": check_slab_structure,
     "adsorption_sites": check_adsorption_sites,
     "adsorption_structure": check_adsorption_structure,
-    "file_exists": lambda path: 1.0 if Path(path).exists() else 0.0,
+    "file_exists": check_valid_json_file,
 }
 
 
@@ -51,12 +52,14 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
     # If it's a factory function (i.e., takes arguments), call with params
     if params:
         try:
+            logger.info(f"Initializing scoring function '{name}' with params: {params}")
             return fn(**params)
         except Exception as e:
             raise ValueError(
                 f"Error initializing scoring function '{name}' with params {params}: {e}"
             ) from e
     else:
+        logger.info(f"Using scoring function '{name}' without params")
         return fn
 
 
@@ -123,9 +126,7 @@ class TaskGroupEnvironment(Environment):
 
         self.current_task = task_group.tasks[task_id]
 
-        super().__init__(
-            f"{task_group.group_id}_{task_id}", base_work_dir=base_work_dir
-        )
+        super().__init__(f"{task_id}", base_work_dir=base_work_dir)
 
         # Add tools
         self._add_task_tools()
