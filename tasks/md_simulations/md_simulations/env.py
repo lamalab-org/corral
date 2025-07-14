@@ -113,7 +113,7 @@ class LammpsEnvironment(Environment):
         prompt = (
             f"{self.question} Make sure all the associated files "
             f"for this task (input files, log files, any other files) "
-            f"are in the {self.work_dir} directory. You can use the available I/O tools "
+            f"are in the {self.current_work_dir} directory. You can use the available I/O tools "
             f"(e.g., write_file) make new files .etc. Whatever potentials you need to "
             f"run the simulation, you can find them at /potentials/. A type of potential "
             f"can be accessed by /potentials/TYPE where TYPE can be [EAM, TERSOFF, REAXFF] "
@@ -153,22 +153,39 @@ class LammpsEnvironment(Environment):
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--agent", required=True)
+    parser.add_argument("--llm", required=True)
+    parser.add_argument("--verbosity", required=True)
+    parser.add_argument("--port", type=int, default=8000)
+    # parser.add_argument(
+    #     "--tasks", nargs="+", required=True, help="List of task JSON filenames to load"
+    # )
+    args = parser.parse_args()
+
     tasks_files_path = Path(__file__).parent / "md_tasks"
     tasks_files = tasks_files_path.glob("**/*.json")
 
     environments = {}
     for task_file in tasks_files:
+        # if task_file.name not in args.tasks:
+        #     continue
         try:
             with Path.open(task_file, encoding="utf-8") as file:
                 data = json.load(file)
         except json.JSONDecodeError as e:
             logger.error(f"Error decoding JSON from {task_file}: {e}")
             raise
+
         task_data_id = data["id"]
         task_data_question = data["input"][0]["prompt"]
         task_data_output = data["output"]
         task_data_scoring_fn = data["scoring_fn"]
-        task_data_work_dir = os.environ.get("MODAL_BASE_IO_PATH", f"{task_data_id}/")
+
+        task_data_work_dir = (
+            f"/results/13_July_2025/md_simulations/{args.agent}/{args.llm}/{args.verbosity}/{task_data_id}/"
+        )
 
         task_config = {
             "task_id": task_data_id,
@@ -181,5 +198,4 @@ if __name__ == "__main__":
         environments[task_data_id] = LammpsEnvironment(task_config)
 
     host = os.environ.get("CORRAL_HOST", "0.0.0.0")
-    port = int(os.environ.get("CORRAL_PORT", "8000"))
-    run_server(environments, host, port)
+    run_server(environments, host, args.port)

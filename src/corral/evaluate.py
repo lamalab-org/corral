@@ -16,7 +16,7 @@ from corral.report import (
     TaskTrialResults,
     ToolResponse,
 )
-
+import time
 
 class BenchmarkInterface:
     """General interface for interacting with benchmark server"""
@@ -241,6 +241,8 @@ def run_independent_trials(
             checkpoint_saver(task_results)
             if not result.success:
                 logger.error(f"Trial failed for task {task_id}")
+            logger.info(f"Waiting for 10 seconds before next trial for task {task_id}...")
+            time.sleep(10)
 
 
 def run_chained_trials(

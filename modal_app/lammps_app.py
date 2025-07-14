@@ -125,13 +125,32 @@ def convert_structure_to_lammps_data(structure: str, output_file: str, atom_styl
     # Convert CIF string to pymatgen Structure object
     volume_sim.reload()
     try:
+        # Load structure from CIF file
         structure_obj = Structure.from_file(structure)
 
-        # Convert the Structure to LAMMPS data format
-        lammps_data = LammpsData.from_structure(structure_obj, atom_style=atom_style)
+        # Check if the structure contains ONLY Si
+        elements = set([str(el) for el in structure_obj.composition.elements])
+        is_silicon_only = (elements == {"Si"})
 
-        # Write the LAMMPS data to a file
+        # Convert to LAMMPS data
+        lammps_data = LammpsData.from_structure(structure_obj, atom_style=atom_style)
         lammps_data.write_file(output_file)
+
+        # Only modify the file if it's pure silicon
+        if is_silicon_only:
+            with open(output_file, 'r') as f:
+                lines = f.readlines()
+
+            # Insert tilt line after zlo zhi
+            for i, line in enumerate(lines):
+                if 'zlo zhi' in line:
+                    lines.insert(i + 1, "0.0 0.0 0.0 xy xz yz\n")
+                    break
+
+            # Write final file
+            with open(output_file, 'w') as f:
+                f.writelines(lines)
+
         volume_sim.commit()
 
     except Exception as e:

@@ -21,7 +21,7 @@ def check_numerical(agent_answer, output):
     agent_answer = float(agent_answer)
     target = float(output["target"])
 
-    tolerance = 0.10 * abs(target)  # 10% of the target
+    tolerance = float(output['threshold']) * abs(target)  # 10% of the target
     lower_limit = target - tolerance
     upper_limit = target + tolerance
 

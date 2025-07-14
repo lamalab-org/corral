@@ -347,7 +347,7 @@ def convert_structure_to_lammps_data(
                 - "charge": Includes atomic charges in addition to position and mass.
             The choice of style should match the `atom_style` directive in the LAMMPS input script.
             Defaults to "charge" if not provided.
-            Valid values: "real", "metal", "si", "cgs", "electron", "micro", "nano", "". [/DETAILED]
+            Valid values: "real", "metal", "si", "cgs", "electron", "micro", "nano", "full", "". [/DETAILED]
             [SYNTACTIC] Format: "one of the predefined LAMMPS atom styles
             as a lowercase string". [/SYNTACTIC]
             [EXAMPLES] Examples: "real", "metal". [/EXAMPLES]
