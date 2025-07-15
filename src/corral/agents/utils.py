@@ -12,7 +12,8 @@ from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
-    wait_exponential,
+    wait_chain,
+    wait_fixed,
 )
 
 RETRY_EXCEPTIONS = (
@@ -50,7 +51,7 @@ class LiteLLMMessage(TypedDict, total=False):
 
 @retry(
     stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=2, min=1),
+    wait=wait_chain(wait_fixed(30), wait_fixed(60), wait_fixed(90)),
     retry=retry_if_exception_type(RETRY_EXCEPTIONS),
     before_sleep=before_sleep_loguru,
     reraise=True,

@@ -272,10 +272,15 @@ class BaseAgent(ABC):
             logger.error(f"Error running agent: {e}")
             return f"Error running agent: {e}", self.get_total_token_usage()
 
+        message = "The task is to:\n" + self.messages[0]["content"]
+        if message[0]["role"] == "system":
+            message += "\n\n" + self.messages[1]["content"]
+        message += f"\n\nAnd the answer provided by the model\n\n{self.messages[-1]['content']}"
+
         prompt = self.extractor_prompt.fill(
             {
                 "answer": final_answer,
-                "message": self.messages[-1]["content"],
+                "message": message,
             }
         )
 
