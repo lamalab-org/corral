@@ -15,13 +15,25 @@ def create_dummy_results():
             task_id="task_1",
             trials=[
                 TaskTrailResult(
-                    task_id="task_1", score=1.0, state={}, tool_statistics={}
+                    task_id="task_1",
+                    trial_id="1",
+                    score=1.0,
+                    state={},
+                    tool_statistics={},
                 ),
                 TaskTrailResult(
-                    task_id="task_1", score=0.0, state={}, tool_statistics={}
+                    task_id="task_1",
+                    trial_id="2",
+                    score=0.0,
+                    state={},
+                    tool_statistics={},
                 ),
                 TaskTrailResult(
-                    task_id="task_1", score=1.0, state={}, tool_statistics={}
+                    task_id="task_1",
+                    trial_id="3",
+                    score=1.0,
+                    state={},
+                    tool_statistics={},
                 ),
             ],
         ),
@@ -29,10 +41,18 @@ def create_dummy_results():
             task_id="task_2",
             trials=[
                 TaskTrailResult(
-                    task_id="task_2", score=0.0, state={}, tool_statistics={}
+                    task_id="task_2",
+                    trial_id="1",
+                    score=0.0,
+                    state={},
+                    tool_statistics={},
                 ),
                 TaskTrailResult(
-                    task_id="task_2", score=0.0, state={}, tool_statistics={}
+                    task_id="task_2",
+                    trial_id="2",
+                    score=0.0,
+                    state={},
+                    tool_statistics={},
                 ),
             ],
         ),
@@ -40,13 +60,25 @@ def create_dummy_results():
             task_id="task_3",
             trials=[
                 TaskTrailResult(
-                    task_id="task_3", score=1.0, state={}, tool_statistics={}
+                    task_id="task_3",
+                    trial_id="1",
+                    score=1.0,
+                    state={},
+                    tool_statistics={},
                 ),
                 TaskTrailResult(
-                    task_id="task_3", score=1.0, state={}, tool_statistics={}
+                    task_id="task_3",
+                    trial_id="2",
+                    score=1.0,
+                    state={},
+                    tool_statistics={},
                 ),
                 TaskTrailResult(
-                    task_id="task_3", score=1.0, state={}, tool_statistics={}
+                    task_id="task_3",
+                    trial_id="3",
+                    score=1.0,
+                    state={},
+                    tool_statistics={},
                 ),
             ],
         ),
