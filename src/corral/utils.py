@@ -15,7 +15,7 @@ import requests
 import tiktoken
 from litellm import embedding
 from loguru import logger
-from modal import App, Image, Mount, Secret, Volume
+from modal import App, Image, Secret, Volume
 from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 from tenacity import (
     retry,
@@ -455,7 +455,6 @@ def modal_tool(
     app: App,
     image: Image | None = None,
     secrets: Sequence[Secret] | None = None,
-    mounts: Sequence[Mount] | None = None,
     volumes: dict[str, Volume] | None = None,
     memory: int | None = None,
     timeout: int | None = None,
@@ -478,7 +477,6 @@ def modal_tool(
     modal_kwargs = {
         "image": image,
         "secrets": secrets,
-        "mounts": mounts,
         "volumes": volumes,
         "memory": memory,
         "timeout": timeout,
