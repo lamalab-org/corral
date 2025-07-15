@@ -262,7 +262,11 @@ class BaseAgent(ABC):
             final_answer = self.run(interface, task_id, history, task_prompt, examples)
 
             if verbose:
-                save_agent_messages(self.messages, task_id, self.__class__.__name__)
+                # Check if agent has stored tools information
+                tools = getattr(self, "_available_tools", None)
+                save_agent_messages(
+                    self.messages, task_id, self.__class__.__name__, tools=tools
+                )
 
             if "Error" in final_answer:
                 logger.error(f"Error in agent response: {final_answer}")

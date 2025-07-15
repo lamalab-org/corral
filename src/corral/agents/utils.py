@@ -364,6 +364,7 @@ def save_agent_messages(
     task_id: str,
     agent_name: str,
     output_dir: str = "agent_logs",
+    tools: list[dict] | None = None,
 ) -> str:
     """Save agent conversation to a JSON file for logging and analysis purposes.
 
@@ -375,6 +376,7 @@ def save_agent_messages(
         task_id (str): The ID of the task being solved
         agent_name (str): The name of the agent that generated the messages
         output_dir (str, optional): Directory to save the logs (will be created if it doesn't exist). Default is "agent_logs".
+        tools (list[dict], optional): List of available tools used by the agent. Defaults to None.
 
     Returns:
         str: Path to the saved file
@@ -388,15 +390,22 @@ def save_agent_messages(
     # Convert messages to serializable format
     serializable_messages = serialize_messages(messages)
 
+    # Prepare log data with metadata
+    log_data = {
+        "task_id": task_id,
+        "agent": agent_name,
+        "timestamp": timestamp,
+        "messages": serializable_messages,
+    }
+
+    # Add tools information if provided
+    if tools:
+        log_data["tools"] = tools
+
     # Write to file with metadata and pretty formatting
     with Path(file_path).open("w") as f:
         json.dump(
-            {
-                "task_id": task_id,
-                "agent": agent_name,
-                "timestamp": timestamp,
-                "messages": serializable_messages,
-            },
+            log_data,
             f,
             indent=2,
         )
