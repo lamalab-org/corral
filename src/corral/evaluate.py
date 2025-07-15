@@ -9,7 +9,6 @@ from typing import Any, Protocol
 import requests
 from loguru import logger
 
-from corral.ablations import ToolVerbosity
 from corral.report import (
     BenchmarkResult,
     CorralWandbLogger,
@@ -25,7 +24,7 @@ class BenchmarkInterface:
     def __init__(
         self,
         base_url: str = "http://localhost:8000",
-        default_verbosity: str | None = ToolVerbosity.FULL,
+        default_verbosity: str | None = "brief",
     ):
         self.base_url = base_url
         self.current_verbosity = default_verbosity
