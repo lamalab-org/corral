@@ -36,7 +36,7 @@ def visualize_grain_boxes(image_path: str) -> list:
     [WORKFLOW_INTEGRATION] Typical workflow integration:
         1. [PREREQUISITE] Provide a valid image file path that captures a topographical or microstructural view of a sample. [/PREREQUISITE]
         2. [CURRENT] Use this tool to detect and index each grain, draw bounding boxes, and extract coordinate data. [/CURRENT]
-        3. [FOLLOW_UP] Use the returned grain coordinates (and `image_path`) with the `scan_grain_area` tool to zoom in and scan a specific grain. This enables precise, localized AFM scanning on individual grain features. [/FOLLOW_UP]
+        3. [FOLLOW_UP] Use the returned grain coordinates (and `image_path`) with the `scan_grain_area` tool to zoom in and scan a specific grain. This enables precise, localized AFM scanning on individual grain features. In case if no bounding boxes are generated, image quality may be low and needs to be improved with optimal P,I,D gains using `Image_optimizer` tool[/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
@@ -151,7 +151,7 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
     [WORKFLOW_INTEGRATION] Typical workflow integration:
         1. [PREREQUISITE] Run `visualize_grain_boxes` with a `.nid` image to obtain the indexed grain list. Choose a specific `grain_id` from the output. [/PREREQUISITE]
         2. [CURRENT] Use this tool to zoom into the bounding box of the selected grain and start an AFM scan on that localized area. [/CURRENT]
-        3. [FOLLOW_UP] The resulting `.nid` file (path returned by this tool) can be used for further image optimization, measurement, or grain-level material analysis. [/FOLLOW_UP]
+        3. [FOLLOW_UP] The resulting `.nid` file (path returned by this tool) can be used for further measurement, or grain-level material analysis. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
