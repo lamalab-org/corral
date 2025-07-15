@@ -1,4 +1,5 @@
 import pickle
+import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import partial
@@ -393,6 +394,10 @@ class MatAgentBenchmark:
             if self.logger:
                 self.logger.log_final_results(result, k_values)
 
+            # Save final checkpoint with finished suffix and remove original
+            self._save_finished_checkpoint(session_id, task_results)
+            self._remove_original_checkpoint(session_id)
+
             return result
 
         finally:
@@ -439,6 +444,26 @@ class MatAgentBenchmark:
 
         return wrapped_saver
 
+    def _write_checkpoint_file(
+        self,
+        checkpoint_path: Path,
+        checkpoint: dict,
+        session_id: str,
+        checkpoint_type: str = "checkpoint",
+    ) -> None:
+        """Write checkpoint data to file using atomic write pattern"""
+        temp_path = checkpoint_path.with_suffix(".tmp")
+
+        try:
+            with temp_path.open("wb") as f:
+                pickle.dump(checkpoint, f, protocol=pickle.HIGHEST_PROTOCOL)
+            temp_path.rename(checkpoint_path)
+            logger.info(f"{checkpoint_type.title()} saved for session {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to save {checkpoint_type}: {e}")
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+
     def _save_checkpoint(
         self, session_id: str, task_results: dict[str, TaskTrialResults], **extra_data
     ) -> None:
@@ -453,17 +478,10 @@ class MatAgentBenchmark:
         checkpoint_path = (
             self.checkpoint_dir / f"{self.checkpoint_name}_{session_id}.pkl"
         )
-        temp_path = checkpoint_path.with_suffix(".tmp")
 
-        try:
-            with temp_path.open("wb") as f:
-                pickle.dump(checkpoint, f, protocol=pickle.HIGHEST_PROTOCOL)
-            temp_path.rename(checkpoint_path)
-            logger.info(f"Checkpoint saved for session {session_id}")
-        except Exception as e:
-            logger.error(f"Failed to save checkpoint: {e}")
-            if temp_path.exists():
-                temp_path.unlink(missing_ok=True)
+        self._write_checkpoint_file(
+            checkpoint_path, checkpoint, session_id, "checkpoint"
+        )
 
     def _load_checkpoint(self, session_id: str) -> dict | None:
         """Load checkpoint from file"""
@@ -472,7 +490,8 @@ class MatAgentBenchmark:
         )
 
         if not checkpoint_path.exists():
-            return None
+            # Search for the most recent checkpoint with same checkpoint_name
+            return self._find_most_recent_checkpoint()
 
         try:
             with checkpoint_path.open("rb") as f:
@@ -482,3 +501,72 @@ class MatAgentBenchmark:
         except Exception as e:
             logger.warning(f"Error loading checkpoint: {e}")
             return None
+
+    def _find_most_recent_checkpoint(self) -> dict | None:
+        """Find the most recent checkpoint file with the same checkpoint_name"""
+
+        # Pattern to match checkpoint files with same name but different session IDs
+        # excluding "finished" files
+        pattern = f"{self.checkpoint_name}_session_*.pkl"
+
+        matching_files = []
+        for file_path in self.checkpoint_dir.glob(pattern):
+            file_name = file_path.name
+            # Skip finished checkpoints
+            if "finished" in file_name:
+                continue
+
+            # Extract session ID from filename
+            match = re.search(r"session_(\d{8}_\d{6}_\d{6})", file_name)
+            if match:
+                session_timestamp = match.group(1)
+                matching_files.append((file_path, session_timestamp))
+
+        if not matching_files:
+            logger.info("No existing checkpoints found")
+            return None
+
+        # Sort by session timestamp (most recent first)
+        matching_files.sort(key=lambda x: x[1], reverse=True)
+        most_recent_file = matching_files[0][0]
+
+        try:
+            with most_recent_file.open("rb") as f:
+                checkpoint = pickle.load(f)
+            logger.info(f"Loaded most recent checkpoint: {most_recent_file.name}")
+            return checkpoint
+        except Exception as e:
+            logger.warning(f"Error loading most recent checkpoint: {e}")
+            return None
+
+    def _save_finished_checkpoint(
+        self, session_id: str, task_results: dict[str, TaskTrialResults]
+    ) -> None:
+        """Save final checkpoint with finished suffix"""
+        checkpoint = {
+            "task_results": task_results,
+            "session_id": session_id,
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "status": "finished",
+        }
+
+        finished_checkpoint_path = (
+            self.checkpoint_dir / f"{self.checkpoint_name}_finished_{session_id}.pkl"
+        )
+
+        self._write_checkpoint_file(
+            finished_checkpoint_path, checkpoint, session_id, "final checkpoint"
+        )
+
+    def _remove_original_checkpoint(self, session_id: str) -> None:
+        """Remove the original checkpoint file"""
+        checkpoint_path = (
+            self.checkpoint_dir / f"{self.checkpoint_name}_{session_id}.pkl"
+        )
+
+        try:
+            if checkpoint_path.exists():
+                checkpoint_path.unlink()
+                logger.info(f"Original checkpoint removed for session {session_id}")
+        except Exception as e:
+            logger.warning(f"Failed to remove original checkpoint: {e}")
