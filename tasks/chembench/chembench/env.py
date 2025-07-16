@@ -1,6 +1,9 @@
 import os
 from typing import Any
 
+import fire
+import uvicorn
+from datasets import load_dataset
 from dotenv import load_dotenv
 from loguru import logger
 from tools import (
@@ -8,17 +11,17 @@ from tools import (
     get_element_info,
     get_formula_from_smiles,
     get_functional_groups,
-    get_ghs_classification_pubchem,
+    # get_ghs_classification_pubchem,
     get_h_nmr_spectra_pubchem,
     get_ms_spectra_pubchem,
     get_number_of_isomers,
     get_pka_from_smiles,
     get_smiles_from_name,
-    online_search,
-    relevant_pubchem_sections,
-    search_clinical_trials_by_drug,
-    search_clinical_trials_by_query,
-    search_materials_compatibility,
+    # online_search,
+    # relevant_pubchem_sections,
+    # search_clinical_trials_by_drug,
+    # search_clinical_trials_by_query,
+    # search_materials_compatibility,
     simulate_spectra,
     smiles_to_name,
 )
@@ -37,28 +40,29 @@ from corral.io import (
     ReadFileTool,
     WriteFileTool,
 )
+from corral.server import create_benchmark_server
 
 load_dotenv("../.env", override=True)
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
 
 _CHEMBENCH_TOOLS = [
-    online_search,
-    relevant_pubchem_sections,
+    # online_search,
+    # relevant_pubchem_sections,
     smiles_to_name,
     get_smiles_from_name,
     get_pka_from_smiles,
     get_formula_from_smiles,
     get_element_info,
     get_number_of_isomers,
-    get_ghs_classification_pubchem,
+    # get_ghs_classification_pubchem,
     get_ms_spectra_pubchem,
     get_h_nmr_spectra_pubchem,
     get_c_nmr_spectra_pubchem,
     simulate_spectra,
     get_functional_groups,
-    search_clinical_trials_by_query,
-    search_clinical_trials_by_drug,
-    search_materials_compatibility,
+    # search_clinical_trials_by_query,
+    # search_clinical_trials_by_drug,
+    # search_materials_compatibility,
 ]
 
 
@@ -96,6 +100,7 @@ class ChemBenchEnvironment(Environment):
         benchmark: ChemBenchmark,
         prompter: PrompterBuilder,
         tools: dict[str, Any] | None = None,
+        work_dir: str = "chembench_env",
     ):
         self.task_id = task_id
         self.tasks = tasks
@@ -106,7 +111,7 @@ class ChemBenchEnvironment(Environment):
         self.all_prompts = []
         self.all_score_maps = []
 
-        super().__init__(task_id)
+        super().__init__(task_id, base_work_dir=work_dir)
         # Add multiple tools
         for tool in _CHEMBENCH_TOOLS:
             self.add_tool(tool)
@@ -185,8 +190,44 @@ def get_all_tasks(benchmark: ChemBenchmark) -> list[Task]:
     return tasks
 
 
-def main():
+def main(port: int = 8000, work_dir: str = "chembench_env"):
     benchmark = ChemBenchmark.from_huggingface(report_dir="../reports", verbose=True)
+
+    # Load the dataset from HuggingFace
+    logger.info("Loading ChemBench dataset from HuggingFace...")
+
+    # Available configs (excluding chemical_preference as requested)
+    configs = [
+        "analytical_chemistry",
+        "general_chemistry",
+        "inorganic_chemistry",
+        "materials_science",
+        "organic_chemistry",
+        "physical_chemistry",
+        "technical_chemistry",
+        "toxicity_and_safety",
+    ]
+
+    # Create a mapping from uuid to dataset row for quick lookup
+    uuid_to_row = {}
+
+    for config in configs:
+        logger.info(f"Loading config: {config}")
+        try:
+            dataset = load_dataset("jablonkagroup/ChemBench", config)
+
+            # Process all splits in this config
+            for split in dataset:
+                for row in dataset[split]:
+                    uuid_to_row[row["uuid"]] = row
+
+        except Exception as e:
+            logger.error(f"Failed to load config {config}: {e}")
+            continue
+
+    logger.info(
+        f"Loaded {len(uuid_to_row)} tasks from dataset (excluding chemical_preference config)"
+    )
 
     prompter = PrompterBuilder.from_model_object(
         model=Model(),
@@ -210,16 +251,36 @@ def main():
             "requires-reasoning" in task._keywords
             or "requires-calculation" in task._keywords
         ):
-            logger.info(f"Skipping task {task._uuid} due to reasoning requirement")
+            logger.info(f"Task {task._uuid} fits in the reasoning requirement")
 
-            environments[task._uuid] = ChemBenchEnvironment(
-                task._uuid, [task], benchmark, prompter, tools=fs_tools
-            )
+            # Check if task exists in dataset and has valid humansubset flags
+            if task._uuid in uuid_to_row:
+                row = uuid_to_row[task._uuid]
+                if row.get("in_humansubset_w_tool", False) or row.get(
+                    "in_humansubset_wo_tool", False
+                ):
+                    logger.info(
+                        f"Task {task._uuid} is in human subset, creating environment"
+                    )
+                    environments[task._uuid] = ChemBenchEnvironment(
+                        task._uuid,
+                        [task],
+                        benchmark,
+                        prompter,
+                        tools=fs_tools,
+                        work_dir=work_dir,
+                    )
+                else:
+                    logger.info(f"Task {task._uuid} is not in human subset, skipping")
+            else:
+                logger.warning(f"Task {task._uuid} not found in dataset, skipping")
 
-    # # Create and run server
-    # app = create_benchmark_server(environments)
-    # uvicorn.run(app, host="0.0.0.0", port=8000)
+    logger.info(f"Created {len(environments)} environments")
+
+    # Create and run server
+    app = create_benchmark_server(environments)
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
-    main()
+    fire.Fire(main)
