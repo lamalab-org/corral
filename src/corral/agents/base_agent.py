@@ -14,7 +14,7 @@ from corral.agents.utils import (
     llm_call,
     save_agent_messages,
 )
-from corral.evaluate import BenchmarkInterface
+from corral.router.routes import CorralRouter
 
 
 class BaseAgent(ABC):
@@ -206,7 +206,7 @@ class BaseAgent(ABC):
     @abstractmethod
     def run(
         self,
-        interface: BenchmarkInterface,
+        interface: CorralRouter,
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
@@ -218,7 +218,7 @@ class BaseAgent(ABC):
         This method must be implemented by all subclasses
 
         Args:
-            interface (BenchmarkInterface): The benchmark interface to use
+            interface (CorralRouter): The benchmark interface to use
             task_id (str): The task ID to solve
             history (list[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
@@ -231,7 +231,7 @@ class BaseAgent(ABC):
 
     def run_agent(
         self,
-        interface: BenchmarkInterface,
+        interface: CorralRouter,
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
@@ -243,7 +243,7 @@ class BaseAgent(ABC):
         This method is a wrapper around run to provide a consistent interface
 
         Args:
-            interface (BenchmarkInterface): The benchmark interface to use
+            interface (CorralRouter): The benchmark interface to use
             task_id (str): The task ID to solve
             history (list[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.

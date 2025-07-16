@@ -3,140 +3,18 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any
 
-import requests
 from loguru import logger
 
-from corral.ablations import ToolVerbosity
-from corral.report import (
-    BenchmarkResult,
-    CorralWandbLogger,
-    TaskTrailResult,
-    TaskTrialResults,
-    ToolResponse,
-)
-
-
-class BenchmarkInterface:
-    """General interface for interacting with benchmark server"""
-
-    def __init__(
-        self,
-        base_url: str = "http://localhost:8000",
-        default_verbosity: str | None = ToolVerbosity.FULL,
-    ):
-        self.base_url = base_url
-        self.current_verbosity = default_verbosity
-
-    def set_verbosity(self, verbosity: str):
-        """Set the verbosity level for subsequent requests"""
-        self.current_verbosity = verbosity
-        logger.info(f"Set tool verbosity to: {verbosity}")
-
-    def get_available_tasks(self) -> list[str]:
-        """Get list of available task IDs"""
-        response = requests.get(f"{self.base_url}/tasks")
-        response.raise_for_status()
-        return response.json()
-
-    def supports_dependency_chain(self) -> bool:
-        """Check if the environment supports dependency chaining"""
-        try:
-            response = requests.get(f"{self.base_url}/dependency_chain")
-            response.raise_for_status()
-            return response.json()["dependency_chain"]
-        except Exception:
-            return False
-
-    def get_available_tools_for_task(
-        self, task_id: str, verbosity: str | None = None
-    ) -> dict[str, Any]:
-        """Get list of available tools for a task with specified verbosity"""
-        verbosity = verbosity or self.current_verbosity
-
-        params = {"verbosity": verbosity}
-        response = requests.get(f"{self.base_url}/tasks/{task_id}/tools", params=params)
-        response.raise_for_status()
-        return response.json()
-
-    def get_task_guide(self, task_id: str, verbosity: str | None = None) -> str:
-        """Get complete guide for task including tools with specified verbosity"""
-        verbosity = verbosity or self.current_verbosity
-
-        params = {"verbosity": verbosity}
-        response = requests.get(f"{self.base_url}/tasks/{task_id}/guide", params=params)
-        response.raise_for_status()
-        return response.json()["prompt"]
-
-    def get_tools_guide(self, task_id: str, verbosity: str | None = None) -> str:
-        """Get tools guide for task with specified verbosity"""
-        verbosity = verbosity or self.current_verbosity
-
-        params = {"verbosity": verbosity}
-        response = requests.get(
-            f"{self.base_url}/tasks/{task_id}/tools/guide", params=params
-        )
-        response.raise_for_status()
-        return response.json()["prompt"]
-
-    def get_task_prompt(self, task_id: str) -> str | list[dict]:
-        """Get task prompt without tools description"""
-        response = requests.get(f"{self.base_url}/tasks/{task_id}/prompt")
-        response.raise_for_status()
-        return response.json()["prompt"]
-
-    def execute_tool(
-        self, task_id: str, tool_name: str, arguments: dict[str, Any]
-    ) -> ToolResponse:
-        """Execute a tool and get result"""
-        try:
-            logger.info(f"Agent calling tool {tool_name} with args {arguments}")
-            response = requests.post(
-                f"{self.base_url}/tasks/{task_id}/tools/execute",
-                json={"tool_name": tool_name, "arguments": arguments},
-            )
-            response.raise_for_status()
-            data = response.json()
-            return ToolResponse(success=True, result=data["result"], error=None)
-        except Exception as e:
-            return ToolResponse(success=False, result=None, error=str(e))
-
-    def submit_answer(self, task_id: str, answer: str) -> TaskTrailResult:
-        """Submit final answer for a task"""
-        logger.info(f"Agent submitting answer {answer} for task {task_id}")
-        response = requests.post(
-            f"{self.base_url}/tasks/{task_id}/submit", json={"answer": answer}
-        )
-        response.raise_for_status()
-        data = response.json()
-        return TaskTrailResult(
-            task_id=task_id,
-            trial_id=data["trial_id"],
-            score=data["score"],
-            state=data["state"],
-            tool_statistics=data["state"]["tool_statistics"],
-        )
-
-    def get_task_status(self, task_id: str) -> dict[str, Any]:
-        """Get current status of a task"""
-        response = requests.get(f"{self.base_url}/tasks/{task_id}/status")
-        response.raise_for_status()
-        return response.json()
-
-    def get_trial_state(self, task_id: str, trial_id: str) -> dict[str, Any]:
-        """Get specific trial state"""
-        response = requests.get(f"{self.base_url}/tasks/{task_id}/trials/{trial_id}")
-        response.raise_for_status()
-        return response.json()["trial_state"]
-
-
-class Agent(Protocol):
-    """Protocol defining what an agent must implement"""
-
-    def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
-        """Solve a task and return the answer"""
-        ...
+if TYPE_CHECKING:
+    from corral.agents.base_agent import BaseAgent as TypeAgent
+    from corral.router.routes import CorralRouter as TypeRouter
+else:
+    TypeAgent = Any
+    TypeRouter = Any
+from corral.report.logger import CorralWandbLogger
+from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 
 
 def create_session_id() -> str:
@@ -176,10 +54,10 @@ def filter_incomplete_tasks(
 def execute_single_trial(
     task_id: str,
     trial_index: int,
-    interface: "BenchmarkInterface",
-    agent: "Agent",
+    interface: TypeRouter,
+    agent: TypeAgent,
     verbose: bool = False,
-) -> TaskTrailResult:
+) -> TaskTrialResult:
     """Execute a single trial - pure function"""
     try:
         # Run agent
@@ -191,7 +69,7 @@ def execute_single_trial(
             result.token_usage = token_usage
             return result
         except Exception as submit_error:
-            return TaskTrailResult(
+            return TaskTrialResult(
                 task_id=task_id,
                 trial_id=f"attempt_{trial_index + 1}",
                 score=0.0,
@@ -202,7 +80,7 @@ def execute_single_trial(
                 error_message=f"Submission Error: {submit_error}",
             )
     except Exception as agent_error:
-        return TaskTrailResult(
+        return TaskTrialResult(
             task_id=task_id,
             trial_id=f"attempt_{trial_index + 1}",
             score=0.0,
@@ -218,7 +96,7 @@ def run_independent_trials(
     task_ids: list[str],
     trials_per_task: int,
     task_results: dict[str, TaskTrialResults],
-    trial_executor: Callable[[str, int], TaskTrailResult],
+    trial_executor: Callable[[str, int], TaskTrialResult],
     checkpoint_saver: Callable[[dict[str, TaskTrialResults]], None],
 ) -> None:
     """Run trials independently for each task"""
@@ -247,7 +125,7 @@ def run_chained_trials(
     task_ids: list[str],
     trials_per_task: int,
     task_results: dict[str, TaskTrialResults],
-    trial_executor: Callable[[str, int], TaskTrailResult],
+    trial_executor: Callable[[str, int], TaskTrialResult],
     checkpoint_saver: Callable[[dict[str, TaskTrialResults], int], None],
     completed_rounds: int = 0,
 ) -> None:
@@ -271,7 +149,7 @@ def run_chained_trials(
         checkpoint_saver(task_results, trial_round + 1 if success else trial_round)
 
 
-def create_wandb_config(agent: "Agent", session_id: str, **kwargs) -> dict[str, Any]:
+def create_wandb_config(agent: TypeAgent, session_id: str, **kwargs) -> dict[str, Any]:
     """Create wandb configuration"""
     return {
         "agent_type": agent.__class__.__name__,
@@ -283,13 +161,13 @@ def create_wandb_config(agent: "Agent", session_id: str, **kwargs) -> dict[str, 
     }
 
 
-class MatAgentBenchmark:
+class CorralRunner:
     """Simplified benchmark runner with functional approach"""
 
     def __init__(
         self,
-        interface: "BenchmarkInterface",
-        agent: "Agent",
+        interface: TypeRouter,
+        agent: TypeAgent,
         checkpoint_dir: str = "./benchmark_checkpoints",
         checkpoint_name: str | None = None,
         logger: CorralWandbLogger | None = None,
@@ -421,7 +299,7 @@ class MatAgentBenchmark:
     def _make_logging_trial_executor(self, trial_executor: Callable) -> Callable:
         """Wrap trial executor with logging"""
 
-        def wrapped_executor(task_id: str, trial_index: int) -> TaskTrailResult:
+        def wrapped_executor(task_id: str, trial_index: int) -> TaskTrialResult:
             result = trial_executor(task_id, trial_index)
             if self.logger:
                 self.logger.log_trial(result)

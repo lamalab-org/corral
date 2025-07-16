@@ -5,7 +5,7 @@ from pathlib import Path
 import fsspec
 import modal
 
-from corral.base import Tool, ToolArgument
+from corral.backend.tool import Tool, ToolArgument
 
 
 class FSManager:
@@ -24,18 +24,6 @@ class FSManager:
         self.base_path = Path(base_path) if base_path else None
         self.fs = fsspec.filesystem(protocol, **kwargs)
         self.app = app
-
-    def _resolve_path(self, path: str) -> str:
-        """Resolve a relative path against the base_path"""
-        if self.base_path is None:
-            return path
-
-        path_obj = Path(path)
-        if path_obj.is_absolute():
-            return str(path_obj)
-        # Relative path - resolve against base_path
-        resolved = self.base_path / path_obj
-        return str(resolved)
 
     def _resolve_path(self, path: str) -> str:
         """Resolve a relative path against the base_path"""
