@@ -400,6 +400,7 @@ def save_agent_messages(
         "task_id": task_id,
         "model": model,
         "agent": agent_name,
+        "tool_verbosity": tool_verbosity,
         "timestamp": timestamp,
         "messages": serializable_messages,
     }
