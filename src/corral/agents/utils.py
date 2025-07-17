@@ -363,7 +363,8 @@ def save_agent_messages(
     messages: list[LiteLLMMessage],
     task_id: str,
     agent_name: str,
-    output_dir: str = "agent_logs",
+    model: str,
+    output_dir: str | None = None,
     tools: list[dict] | None = None,
 ) -> str:
     """Save agent conversation to a JSON file for logging and analysis purposes.
@@ -381,6 +382,8 @@ def save_agent_messages(
     Returns:
         str: Path to the saved file
     """
+    if output_dir is None:
+        output_dir = f"agent_logs-{agent_name}-{model}"
     Path(output_dir).mkdir(exist_ok=True, parents=True)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -393,6 +396,7 @@ def save_agent_messages(
     # Prepare log data with metadata
     log_data = {
         "task_id": task_id,
+        "model": model,
         "agent": agent_name,
         "timestamp": timestamp,
         "messages": serializable_messages,

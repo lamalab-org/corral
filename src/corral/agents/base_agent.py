@@ -265,7 +265,11 @@ class BaseAgent(ABC):
                 # Check if agent has stored tools information
                 tools = getattr(self, "_available_tools", None)
                 save_agent_messages(
-                    self.messages, task_id, self.__class__.__name__, tools=tools
+                    messages=self.messages,
+                    task_id=task_id,
+                    agent_name=self.__class__.__name__,
+                    model=self.model,
+                    tools=tools,
                 )
 
             if "Error" in final_answer:
