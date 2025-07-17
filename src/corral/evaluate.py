@@ -179,11 +179,14 @@ def execute_single_trial(
     interface: "BenchmarkInterface",
     agent: "Agent",
     verbose: bool = False,
+    tool_verbosity: str | None = None,
 ) -> TaskTrailResult:
     """Execute a single trial - pure function"""
     try:
         # Run agent
-        answer, token_usage = agent.run_agent(interface, task_id, verbose=verbose)
+        answer, token_usage = agent.run_agent(
+            interface, task_id, verbose=verbose, tool_verbosity=tool_verbosity
+        )
 
         # Submit answer
         try:
@@ -334,6 +337,7 @@ class MatAgentBenchmark:
             interface=self.interface,
             agent=self.agent,
             verbose=verbose,
+            tool_verbosity=tool_verbosity,
         )
 
         checkpoint_saver = partial(self._save_checkpoint, session_id)

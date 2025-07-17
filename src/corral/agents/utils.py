@@ -366,6 +366,7 @@ def save_agent_messages(
     model: str,
     output_dir: str | None = None,
     tools: list[dict] | None = None,
+    tool_verbosity: str = "brief",
 ) -> str:
     """Save agent conversation to a JSON file for logging and analysis purposes.
 
@@ -378,12 +379,13 @@ def save_agent_messages(
         agent_name (str): The name of the agent that generated the messages
         output_dir (str, optional): Directory to save the logs (will be created if it doesn't exist). Default is "agent_logs".
         tools (list[dict], optional): List of available tools used by the agent. Defaults to None.
+        tool_verbosity (str, optional): Verbosity level for tool descriptions. Defaults to "brief".
 
     Returns:
         str: Path to the saved file
     """
     if output_dir is None:
-        output_dir = f"agent_logs-{agent_name}-{model}"
+        output_dir = f"agent_logs-{agent_name}-{model}-{tool_verbosity}"
     Path(output_dir).mkdir(exist_ok=True, parents=True)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

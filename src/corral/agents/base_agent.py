@@ -237,6 +237,7 @@ class BaseAgent(ABC):
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         verbose: bool = False,
+        tool_verbosity: str = "brief",
     ) -> tuple[str, dict[str, int]]:
         """Run the agent to solve a task
 
@@ -249,6 +250,7 @@ class BaseAgent(ABC):
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             verbose (bool, optional): Whether to save agent messages. Defaults to False.
+            tool_verbosity (str, optional): The verbosity level for tool information. Defaults to "brief".
 
         Returns:
             str: The final answer from the agent
@@ -270,6 +272,7 @@ class BaseAgent(ABC):
                     agent_name=self.__class__.__name__,
                     model=self.model,
                     tools=tools,
+                    tool_verbosity=tool_verbosity,
                 )
 
             if "Error" in final_answer:
