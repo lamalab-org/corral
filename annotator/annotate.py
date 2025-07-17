@@ -5,7 +5,117 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import streamlit as st
-from rubrics import RUBRICS_v1 as RUBRICS
+
+# Rubrics definition (keeping same structure as provided)
+RUBRICS = {
+    "task_rubrics": {
+        "correctness": {
+            "question": "Do the agent logs lead to the correct answer?",
+            "description": "If the answer returned by the agent is correct, then this is correct, or the box is checked. Otherwise, it is incorrect. This only checks the final answer, not the intermediate steps.",
+            "examples": [
+                "Answer returned by the agent: 'Final Answer: [B-](CCC1=CC=CC=C1)(F)(F)F.[K+]'\nCorrectness: Correct",
+                "Answer returned by the agent: 'Final Answer: CCO=F'\nCorrectness: Incorrect",
+            ],
+            "automatic_check": True,
+            "step_wise": False,
+        },
+        "insanity": {
+            "repeated_message": {
+                "question": "Did the agent avoid repeating the same exact message two or more iterations?",
+                "description": "If the agent returned the same exact message two or more consecutive iterations. Note the negative character of the question. This is the checkbox that would stick unchecked if insanity is observed. Otherwise, we check the box if the agent keeps a normal and rational behavior.",
+                "examples": [
+                    "`iteration 3`: 'Now I need to provide the final answer with the correct format.' `iteration 4`: 'Now I need to provide the final answer with the correct format.' `iteration 5`: 'Now I need to provide the final answer with the correct format.': incorrect since the agent repeated the same message three times."
+                ],
+                "automatic_check": True,
+                "step_wise": False,
+            },
+            "repeated_tokens": {
+                "question": "Did the agent avoid repeating the same tokens until the max output tokens limit?",
+                "description": "If for one message, the agent reproduced the same repeated tokens until the max output tokens limit. Note the negative character of the question. This is the checkbox that would stick unchecked if insanity is observed. Otherwise, we check the box if the agent keeps a normal and rational behavior.",
+                "examples": [
+                    "'The spectra suggest that the molecule could be the one with SMILES: COCCC#CCOCC#CCOCC#CCOCC#CCOCC#CCOCC#CCOCC#CCOCC#CCOCC#CCOCC#CCOCC#CCOCC#CCOCC#CCOCC#CCOCC...': incorrect since the agent repeated the same tokens until the max output tokens limit."
+                ],
+                "automatic_check": False,
+                "step_wise": False,
+            },
+        },
+        "task_understanding": {
+            "task_decomposition": {
+                "question": "Is the task decomposed correctly?",
+                "description": "If the agent decomposed the task correctly before proposing the respective steps, then this is correct, or the box is checked. Otherwise, it is incorrect.",
+                "examples": [
+                    '\'Based on the input data, let me try a structure: ethyl 4-((5-chloropyridin-2-yl)amino)benzoate\n\nLet me verify this with the formula tool first.\nAction: get_formula_from_smiles\nAction Input: {"smiles": "O=C(OCC)c1ccc(Nc2ccc(Cl)cn2)cc1"\': incorrect since the agent did not decompose the task correctly. The task decomposition is to find the functional groups in the spectra, not to verify a structure.'
+                ],
+                "automatic_check": False,
+                "step_wise": False,
+            },
+            "input_understanding": {
+                "question": "Is there a mistake that could have been avoided by using knowledge provided in the context?",
+                "description": "If the agent made a mistake that could have been avoided by using knowledge provided in the context, then this is incorrect, or the box is checked. Otherwise, it is correct.",
+                "examples": [
+                    "For example, in spectra, if some of the spectra are not used, resulting in the agent not finding the correct functional groups, then this is incorrect. If the agent uses all the spectra and finds the correct functional groups, then this is correct."
+                ],
+                "automatic_check": False,
+                "step_wise": False,
+            },
+        },
+        "tool_usage": {
+            "tool_sampling": {
+                "question": "Did the agent incur into sampling a tool with different inputs?",
+                "description": "If the agent used the tool with different inputs (being the inputs always correct) two or more consecutive times, then this is correct, or the box is checked. Otherwise, it is incorrect.",
+                "examples": [
+                    "`iteration 2`: {'tool_name': 'simulate_spectra', 'arguments': {'smiles': 'CC1=C(C(=O)O)C=CC=C1C(=O)C'}\n`iteration 3`: {'tool_name': 'simulate_spectra', 'arguments': {'smiles': 'CC1=CC=CC=C1C(=O)OC(=O)C'}}\n`iteration 4`: {'tool_name': 'simulate_spectra', 'arguments': {'smiles': 'CC1=CC=C(C(=O)C)C(C(=O)O)=C1'}}: incorrect",
+                    "`iteration 2`: {'tool_name': 'get_formula_from_smiles', 'arguments': {'smiles': 'C#CCC#CCCCCC'}\n`iteration 3`: {'tool_name': 'get_formula_from_smiles', 'arguments': {'smiles': 'C#CC#CCCCCCC'}}: incorrect",
+                ],
+                "automatic_check": True,
+                "step_wise": False,
+            },
+            "tool_usage_reasoning": {
+                "question": "Did the agent provide a reasoning for using a specific tool?",
+                "description": "If the agent used the tool explaining the reasoning behind why that tool is used, then this is correct, or the box is checked. Otherwise, it is incorrect. Note that for this we do not care about if the reasoning is correct or not, just that the agent provided a reasoning.",
+                "examples": [
+                    '\'Action: get_formula_from_smiles\nAction Input: {"smiles": "O=C(OCC)c1ccc(Nc2ccc(Cl)cn2)cc1"}\': incorrect since the agent did not explain why it is using the tool get_formula_from_smiles.',
+                    '\'Let me verify the structure further by simulating the spectra to compare with the given data.\nAction: simulate_spectra\nAction Input: {"smiles": "O=C(OCC)c1ccc(Nc2ccc(Cl)cn2)cc1"}\': correct since the agent explained why it is using the tool simulate_spectra.',
+                ],
+                "automatic_check": False,
+                "step_wise": True,
+            },
+            "rational": {
+                "logical_tool_usage": {
+                    "question": "Is the step meaningful at this point in the trajectory and conductive toward the end goal? Hint: A step would be non-meaningful if the information obtained in there can be used in no way for the final solution.",
+                    "description": "If the tool used by the agent is logical for that step, taking into account the end goal and the information known at that step, then this is correct or the box is checked. Otherwise, it is incorrect.",
+                    "examples": [
+                        '\'The final answer is the SMILES CC1=C(C(=O)O)C=CC=C1C(=O)C. I will know retrieve the carbon shifts and then I will provide the final answer.\nAction: get_carbon_shifts\nAction Input: {"smiles": "CC1=C(C(=O)O)C=CC=C1C(=O)C"}\': incorrect since the agent is retrieving some prior knowledge that is not needed to provide the final answer.',
+                        '\'I will start by retrieving the carbon shifts of the molecule to better understand the spectra provided.\nAction: get_carbon_shifts\nAction Input: {"smiles": "CC1=C(C(=O)O)C=CC=C1C(=O)C"}\': correct since the agent is retrieving some prior knowledge that is needed to fully understand the input.',
+                    ],
+                    "automatic_check": False,
+                    "step_wise": True,
+                },
+                "efficient_execution": {
+                    "question": "Is the action performed in the most efficient way? For example, was an optimized tool used when it was available?",
+                    "description": "If the agent executed the action in the most efficient way, then this is correct, or the box is checked. Otherwise, it is incorrect.",
+                    "examples": [
+                        '\'I need to join the different datasets: Action: read_file\nAction Input: {"file_path": "dataset1.csv"}... Action: write_file\nAction Input: {"file_path": "joined_dataset.csv", "data": "..."}\': incorrect since the agent is reading and writing files, which is not the most efficient way to join datasets.',
+                        '\'I will write a python script to join the datasets: Action: write_file\nAction Input: {"file_path": "join_datasets.py", "data": "import pandas as pd...\': correct since the agent is using a python script to join the datasets, which is the most efficient way to do it.',
+                    ],
+                    "automatic_check": False,
+                    "step_wise": True,
+                },
+            },
+            "tool_calling_error": {
+                "question": "Did the agent call the tool correctly or did it incur some error?",
+                "description": "If the agent called the tool correctly, i.e., without incurring in argument format errors or an incorrect tool name, then this is correct or the box is checked. Otherwise, it is incorrect. Note that this only checks if the tool was called correctly, not if the tool returned the expected output.",
+                "examples": [
+                    '\'Action: get_formula_from_smiles\nAction Input: {"smiles": "[C#CCC#CCCCCC]"}\': incorrect since the agent passed an incorrect argument format to the tool get_formula_from_smiles list instead of string.',
+                    '\'Action: wrong_tool_name\nAction Input: {"smiles": "O=C(OCC)c1ccc(Nc2ccc(Cl)cn2)cc1"}\': incorrect since the agent used a wrong tool name.',
+                    '\'Action: get_formula_from_smiles\nAction Input: {"smiles": "O=C(OCC)c1ccc(Nc2ccc(Cl)cn2)cc1"}\': correct since the agent passed the correct argument format to the tool get_formula_from_smiles string.',
+                ],
+                "automatic_check": False,
+                "step_wise": True,
+            },
+        },
+    }
+}
 
 USER_TAGS = ["NA", "MRG", "KMJ", "NMA", "CG", "SJ"]
 
@@ -138,11 +248,15 @@ def format_message_for_display(message, index):
     return header, content
 
 
-def save_annotated_file(directory, original_filename, annotated_data, user_tag):
-    """Idea is to save the annotated logs(in json file) with additional tags"""
+def save_annotated_file(output_directory, original_filename, annotated_data, user_tag):
+    """Save annotated logs to specified output directory."""
+    # Create output directory if it doesn't exist
+    output_path = Path(output_directory)
+    output_path.mkdir(parents=True, exist_ok=True)
+
     base_name = original_filename.replace(".json", "")
     new_filename = f"{base_name}_{user_tag}_ANNOTATED.json"
-    filepath = Path(directory) / new_filename
+    filepath = output_path / new_filename
 
     try:
         with filepath.open("w") as f:
@@ -153,195 +267,307 @@ def save_annotated_file(directory, original_filename, annotated_data, user_tag):
         return None
 
 
+def initialize_session_state():
+    """Initialize session state variables."""
+    if "current_step" not in st.session_state:
+        st.session_state.current_step = 0
+    if "annotation_phase" not in st.session_state:
+        st.session_state.annotation_phase = "stepwise"  # "stepwise" or "taskwise"
+    if "step_annotations" not in st.session_state:
+        st.session_state.step_annotations = {}
+    if "step_comments" not in st.session_state:
+        st.session_state.step_comments = {}
+    if "task_annotations" not in st.session_state:
+        st.session_state.task_annotations = {}
+    if "task_comments" not in st.session_state:
+        st.session_state.task_comments = {}
+    if "selected_file_index" not in st.session_state:
+        st.session_state.selected_file_index = 0
+
+
+def reset_annotation_state():
+    """Reset annotation state for new file."""
+    st.session_state.current_step = 0
+    st.session_state.annotation_phase = "stepwise"
+    st.session_state.step_annotations = {}
+    st.session_state.step_comments = {}
+    st.session_state.task_annotations = {}
+    st.session_state.task_comments = {}
+
+
 def main():
     st.set_page_config(page_title="Agent Log Annotation", layout="wide")
+
+    initialize_session_state()
 
     st.title("Agent Log Annotation Tool")
 
     # Directory selection
-    if "directory" not in st.session_state:
-        st.session_state.directory = ""
+    col1, col2 = st.columns(2)
 
-    directory = st.text_input(
-        "Enter directory path containing JSON files:", value=st.session_state.directory
-    )
+    with col1:
+        input_directory = st.text_input(
+            "📁 Input directory (JSON files):",
+            value=st.session_state.get("input_directory", ""),
+            key="input_directory_input",
+        )
 
-    if directory and Path(directory).exists():
-        st.session_state.directory = directory
+    with col2:
+        output_directory = st.text_input(
+            "📁 Output directory (annotated files):",
+            value=st.session_state.get("output_directory", ""),
+            key="output_directory_input",
+            help="Leave blank to save in same directory as input",
+        )
+
+    if input_directory and Path(input_directory).exists():
+        st.session_state.input_directory = input_directory
+
+        # Set output directory (default to input directory if blank)
+        if output_directory.strip():
+            st.session_state.output_directory = output_directory
+        else:
+            st.session_state.output_directory = input_directory
 
         # Load available files
-        json_files = load_json_files(directory)
+        json_files = load_json_files(input_directory)
 
         if not json_files:
             st.warning("No JSON files found in the specified directory.")
             return
 
-        # File selection
-        selected_file = st.selectbox("Select log file to annotate:", json_files)
+        # File selection with progress indicator
+        col1, col2 = st.columns([3, 1])
 
-        if selected_file:
-            # User tag selection
-            user_tag = st.selectbox("Select user tag:", USER_TAGS)
+        with col1:
+            selected_file_index = st.selectbox(
+                "Select log file to annotate:",
+                range(len(json_files)),
+                format_func=lambda x: json_files[x],
+                index=st.session_state.selected_file_index,
+                key="file_selector",
+            )
 
-            # Load the selected file
-            log_data = load_log_file(directory, selected_file)
+        with col2:
+            st.metric("Files Progress", f"{selected_file_index + 1}/{len(json_files)}")
 
-            if log_data:
-                # Display metadata
-                st.subheader("Log Metadata")
-                metadata = {k: v for k, v in log_data.items() if k != "messages"}
-                st.json(metadata)
+        # Reset state if file changed
+        if selected_file_index != st.session_state.selected_file_index:
+            st.session_state.selected_file_index = selected_file_index
+            reset_annotation_state()
 
-                # Show complete messages with expandable sections
-                st.subheader("Complete Message History")
+        selected_file = json_files[selected_file_index]
+
+        # User tag selection
+        user_tag = st.selectbox("Select user tag:", USER_TAGS)
+
+        # Load the selected file
+        log_data = load_log_file(input_directory, selected_file)
+
+        if log_data:
+            # Display metadata
+            st.subheader("📋 Log Metadata")
+            metadata = {k: v for k, v in log_data.items() if k != "messages"}
+            st.json(metadata)
+
+            # Show complete messages with expandable sections (as reference)
+            with st.expander("📖 Complete Message History (Reference)", expanded=False):
                 messages = log_data.get("messages", [])
+                for i, message in enumerate(messages):
+                    header, content = format_message_for_display(message, i)
 
-                with st.expander(
-                    f"All Messages ({len(messages)} total)", expanded=False
-                ):
-                    for i, message in enumerate(messages):
-                        header, content = format_message_for_display(message, i)
+                    # Color-code different message types
+                    msg_type = identify_message_type(message)
+                    if msg_type == "system":
+                        st.info(f"**{header}**")
+                    elif msg_type == "task":
+                        st.warning(f"**{header}**")
+                    elif msg_type == "agent_action":
+                        st.success(f"**{header}**")
+                    elif msg_type == "tool_call":
+                        st.error(f"**{header}**")
+                    else:
+                        st.write(f"**{header}**")
 
-                        # Color-code different message types
-                        msg_type = identify_message_type(message)
-                        if msg_type == "system":
-                            st.info(f"**{header}**")
-                        elif msg_type == "task":
-                            st.warning(f"**{header}**")
-                        elif msg_type == "agent_action":
-                            st.success(f"**{header}**")
-                        elif msg_type == "tool_call":
-                            st.error(f"**{header}**")
-                        else:
-                            st.write(f"**{header}**")
+                    if content:
+                        st.code(content, language="text")
 
-                        # Show content in code block for better formatting
-                        if content:
-                            st.code(content, language="text")
+                    if i < len(messages) - 1:
+                        st.divider()
 
-                        if i < len(messages) - 1:
-                            st.divider()
+            # Extract agent actions
+            agent_actions = extract_agent_actions(log_data.get("messages", []))
 
-                # Extract agent actions for annotation
-                agent_actions = extract_agent_actions(messages)
+            if not agent_actions:
+                st.warning("No agent actions found in this log.")
+                return
 
-                # Might not be useful now becasuse we added all the agent log
-                # st.subheader(
-                #     f"Agent Actions Summary ({len(agent_actions)} actions found)",
-                # )
+            # Get rubrics
+            step_rubrics = flatten_rubrics(RUBRICS["task_rubrics"])
+            step_rubrics = [
+                (k, v) for k, v in step_rubrics if v.get("step_wise", False)
+            ]
 
-                # # Show brief summary of agent actions
-                # with st.expander("Agent Actions Overview", expanded=False):
-                #     for i, (msg_idx, action) in enumerate(agent_actions):
-                #         st.write(f"**Action {i+1} (Message {msg_idx})**")
-                #         content = action.get("content", "")
-                #         preview = (
-                #             content[:200] + "..." if len(content) > 200 else content
-                #         )
-                #         st.write(preview)
-                #         if i < len(agent_actions) - 1:
-                #             st.write("---")
+            task_rubrics = flatten_rubrics(RUBRICS["task_rubrics"])
+            task_rubrics = [
+                (k, v) for k, v in task_rubrics if not v.get("step_wise", False)
+            ]
 
-                st.divider()
+            st.divider()
 
-                # Task-level rubrics
-                st.header("Task-Wise Rubrics")
-                task_annotations = {}
-                task_comments = {}
+            # Step-wise annotation phase
+            if st.session_state.annotation_phase == "stepwise":
+                st.header("🔄 Step-wise Annotation")
 
-                # Get task-level rubrics (step_wise = False)
-                task_rubrics = flatten_rubrics(RUBRICS["task_rubrics"])
-                task_rubrics = [
-                    (k, v) for k, v in task_rubrics if not v.get("step_wise", False)
-                ]
-
-                for key, rubric in task_rubrics:
-                    checkbox_result, comment_result = display_rubric_item(
-                        key, rubric, "task_"
+                # Progress indicator
+                progress_col1, progress_col2, progress_col3 = st.columns([1, 2, 1])
+                with progress_col2:
+                    st.progress(
+                        (st.session_state.current_step + 1) / len(agent_actions)
                     )
-                    task_annotations[key] = checkbox_result
-                    task_comments[key] = comment_result
+                    st.write(
+                        f"Step {st.session_state.current_step + 1} of {len(agent_actions)}"
+                    )
+
+                # Display current step
+                if st.session_state.current_step < len(agent_actions):
+                    msg_idx, action = agent_actions[st.session_state.current_step]
+
+                    st.subheader(
+                        f"Action {st.session_state.current_step + 1} (Message {msg_idx})"
+                    )
+
+                    # Show action content
+                    st.code(action.get("content", ""))
+
+                    # Show tool_calls if present
+                    if "tool_calls" in action:
+                        st.subheader("Tool Calls")
+                        st.json(action["tool_calls"])
+
                     st.divider()
 
-                # Step-wise rubrics for each agent action
-                st.header("Step-wise Rubrics")
-                step_annotations = {}
-                step_comments = {}
+                    # Initialize step annotations if not exists
+                    if msg_idx not in st.session_state.step_annotations:
+                        st.session_state.step_annotations[msg_idx] = {}
+                        st.session_state.step_comments[msg_idx] = {}
 
-                # Get step-wise rubrics (step_wise = True)
-                step_rubrics = flatten_rubrics(RUBRICS["task_rubrics"])
-                step_rubrics = [
-                    (k, v) for k, v in step_rubrics if v.get("step_wise", False)
-                ]
-
-                for i, (msg_idx, action) in enumerate(agent_actions):
-                    st.subheader(f"Action {i+1} (Message {msg_idx})")
-
-                    # Display the action content in an expandable section
-                    with st.expander(f"View Action {i+1} Content", expanded=True):
-                        st.code(action.get("content", ""))
-
-                        # Show tool_calls if present (for ToolCallingAgent)
-                        if "tool_calls" in action:
-                            st.subheader("Tool Calls")
-                            st.json(action["tool_calls"])
-
-                    # Step-wise rubrics for this action
-                    step_annotations[msg_idx] = {}
-                    step_comments[msg_idx] = {}
-
+                    # Display step rubrics
                     for key, rubric in step_rubrics:
                         checkbox_result, comment_result = display_rubric_item(
                             key, rubric, f"step_{msg_idx}_"
                         )
-                        step_annotations[msg_idx][key] = checkbox_result
-                        step_comments[msg_idx][key] = comment_result
+                        st.session_state.step_annotations[msg_idx][key] = (
+                            checkbox_result
+                        )
+                        st.session_state.step_comments[msg_idx][key] = comment_result
+                        st.divider()
 
-                    st.divider()
+                # Navigation buttons
+                col1, col2, col3 = st.columns([1, 1, 1])
 
-                # Save button
-                if st.button("Save Annotations", type="primary"):
-                    # Create annotated data
-                    annotated_data = copy.deepcopy(log_data)
+                with col1:
+                    if st.button(
+                        "← Previous", disabled=st.session_state.current_step == 0
+                    ):
+                        st.session_state.current_step -= 1
+                        st.rerun()
 
-                    # Add task-level annotations
-                    annotated_data["task_annotations"] = task_annotations
-                    annotated_data["task_comments"] = task_comments
+                with col2:
+                    if st.session_state.current_step < len(agent_actions) - 1:
+                        if st.button("Next →"):
+                            st.session_state.current_step += 1
+                            st.rerun()
+                    else:
+                        if st.button("Proceed to Task-Level Rubrics →", type="primary"):
+                            st.session_state.annotation_phase = "taskwise"
+                            st.rerun()
 
-                    # Add step-wise annotations to agent action messages
-                    for msg_idx, annotations in step_annotations.items():
-                        # Find the message in the annotated data and add annotations
-                        for ann_key, ann_value in annotations.items():
-                            annotated_data["messages"][msg_idx][ann_key] = ann_value
-
-                    # Add step-wise comments to agent action messages
-                    for msg_idx, comments in step_comments.items():
-                        for comment_key, comment_value in comments.items():
-                            annotated_data["messages"][msg_idx][
-                                f"{comment_key}_comment"
-                            ] = comment_value
-
-                    # Add annotation metadata
-                    annotated_data["annotation_metadata"] = {
-                        "user_tag": user_tag,
-                        "annotation_timestamp": datetime.now(
-                            tz=timezone.utc
-                        ).isoformat(),
-                        "original_file": selected_file,
-                    }
-
-                    # Save the file
-                    saved_filename = save_annotated_file(
-                        directory, selected_file, annotated_data, user_tag
+                with col3:
+                    st.write(
+                        f"Step {st.session_state.current_step + 1}/{len(agent_actions)}"
                     )
 
-                    if saved_filename:
-                        st.success(
-                            f"Annotations saved successfully as: {saved_filename}"
+            # Task-wise annotation phase
+            elif st.session_state.annotation_phase == "taskwise":
+                st.header("📝 Task-Level Rubrics")
+
+                # Display task rubrics
+                for key, rubric in task_rubrics:
+                    checkbox_result, comment_result = display_rubric_item(
+                        key, rubric, "task_"
+                    )
+                    st.session_state.task_annotations[key] = checkbox_result
+                    st.session_state.task_comments[key] = comment_result
+                    st.divider()
+
+                # Action buttons
+                col1, col2 = st.columns([1, 1])
+
+                with col1:
+                    if st.button("← Back to Step-wise", type="secondary"):
+                        st.session_state.annotation_phase = "stepwise"
+                        st.rerun()
+
+                with col2:
+                    if st.button("💾 Save Annotations", type="primary"):
+                        # Create annotated data
+                        annotated_data = copy.deepcopy(log_data)
+
+                        # Add task-level annotations
+                        annotated_data["task_annotations"] = (
+                            st.session_state.task_annotations
+                        )
+                        annotated_data["task_comments"] = st.session_state.task_comments
+
+                        # Add step-wise annotations to agent action messages
+                        for (
+                            msg_idx,
+                            annotations,
+                        ) in st.session_state.step_annotations.items():
+                            for ann_key, ann_value in annotations.items():
+                                annotated_data["messages"][msg_idx][ann_key] = ann_value
+
+                        # Add step-wise comments to agent action messages
+                        for msg_idx, comments in st.session_state.step_comments.items():
+                            for comment_key, comment_value in comments.items():
+                                annotated_data["messages"][msg_idx][
+                                    f"{comment_key}_comment"
+                                ] = comment_value
+
+                        # Add annotation metadata
+                        annotated_data["annotation_metadata"] = {
+                            "user_tag": user_tag,
+                            "annotation_timestamp": datetime.now(
+                                tz=timezone.utc
+                            ).isoformat(),
+                            "original_file": selected_file,
+                        }
+
+                        # Save the file
+                        saved_filename = save_annotated_file(
+                            st.session_state.output_directory,
+                            selected_file,
+                            annotated_data,
+                            user_tag,
                         )
 
-    elif directory:
-        st.error("Directory not found. Please check the path.")
+                        if saved_filename:
+                            st.success(f"✅ Annotations saved as: {saved_filename}")
+
+                            # Show next file button if available
+                            if selected_file_index < len(json_files) - 1:
+                                if st.button(
+                                    "➡️ Save and Go to Next File", type="primary"
+                                ):
+                                    st.session_state.selected_file_index += 1
+                                    reset_annotation_state()
+                                    st.rerun()
+                            else:
+                                st.info("🎉 This was the last file in the directory!")
+
+    elif input_directory:
+        st.error("❌ Input directory not found. Please check the path.")
 
 
 if __name__ == "__main__":
