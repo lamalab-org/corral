@@ -4,7 +4,7 @@ from typing import ClassVar
 
 from loguru import logger
 
-from corral.backend.base import Environment
+from corral.backend.env import Environment
 
 
 class ToolVerbosity(Enum):

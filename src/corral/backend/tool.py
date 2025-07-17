@@ -1,6 +1,7 @@
 import inspect
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, get_type_hints
 
@@ -14,6 +15,19 @@ class ToolCallStatus(Enum):
     INVALID_TOOL = "invalid_tool"
     INVALID_ARGS = "invalid_args"
     EXECUTION_ERROR = "execution_error"
+
+
+@dataclass
+class ToolCall:
+    """Record of a tool being called"""
+
+    tool_name: str
+    arguments: dict[str, Any]
+    result: str | None
+    status: ToolCallStatus
+    error_message: str | None
+    duration: float | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
 
 class ToolRequest(BaseModel):
