@@ -283,6 +283,8 @@ def initialize_session_state():
         st.session_state.task_comments = {}
     if "selected_file_index" not in st.session_state:
         st.session_state.selected_file_index = 0
+    if "annotation_started" not in st.session_state:
+        st.session_state.annotation_started = False
 
 
 def reset_annotation_state():
@@ -303,23 +305,25 @@ def main():
     st.title("Agent Log Annotation Tool")
 
     # Directory selection
+    st.subheader("📁 Setup Directories")
     col1, col2 = st.columns(2)
 
     with col1:
         input_directory = st.text_input(
-            "📁 Input directory (JSON files):",
+            "Input directory (JSON files):",
             value=st.session_state.get("input_directory", ""),
             key="input_directory_input",
         )
 
     with col2:
         output_directory = st.text_input(
-            "📁 Output directory (annotated files):",
+            "Output directory (annotated files):",
             value=st.session_state.get("output_directory", ""),
             key="output_directory_input",
             help="Leave blank to save in same directory as input",
         )
 
+    # Validation and start button
     if input_directory and Path(input_directory).exists():
         st.session_state.input_directory = input_directory
 
@@ -336,12 +340,25 @@ def main():
             st.warning("No JSON files found in the specified directory.")
             return
 
+        # Show file count and start button
+        st.info(f"Found {len(json_files)} JSON files to annotate")
+
+        if not st.session_state.annotation_started:
+            if st.button("🚀 Start Annotation", type="primary"):
+                st.session_state.annotation_started = True
+                st.rerun()
+            return
+
+        # Main annotation interface (only show after start button is pressed)
+        st.divider()
+        st.subheader("📝 Annotation Interface")
+
         # File selection with progress indicator
         col1, col2 = st.columns([3, 1])
 
         with col1:
             selected_file_index = st.selectbox(
-                "Select log file to annotate:",
+                "Current file:",
                 range(len(json_files)),
                 format_func=lambda x: json_files[x],
                 index=st.session_state.selected_file_index,
@@ -557,11 +574,16 @@ def main():
 
                             # Show next file button if available
                             if selected_file_index < len(json_files) - 1:
+                                st.divider()
                                 if st.button(
-                                    "➡️ Save and Go to Next File", type="primary"
+                                    "➡️ Save and Go to Next File",
+                                    type="primary",
+                                    key="next_file_btn",
                                 ):
+                                    # Move to next file and reset everything
                                     st.session_state.selected_file_index += 1
                                     reset_annotation_state()
+                                    # Force rerun to refresh the interface
                                     st.rerun()
                             else:
                                 st.info("🎉 This was the last file in the directory!")
