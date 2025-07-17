@@ -9,7 +9,7 @@ from typing import Any
 
 from loguru import logger
 
-from corral.backend.tool import Tool, ToolCallStatus
+from corral.backend.tool import Tool, ToolCall, ToolCallStatus
 
 
 class Role(StrEnum):
@@ -18,19 +18,6 @@ class Role(StrEnum):
     AGENT = "agent"
     ENVIRONMENT = "environment"
     TOOL = "tool"
-
-
-@dataclass
-class ToolCall:
-    """Record of a tool being called"""
-
-    tool_name: str
-    arguments: dict[str, Any]
-    result: str | None
-    status: ToolCallStatus
-    error_message: str | None
-    duration: float | None = None
-    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
 
 @dataclass
