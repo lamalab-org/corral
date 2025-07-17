@@ -166,16 +166,6 @@ from corral.agents.llm_planner import LLMPlanner
 agent = LLMPlanner(model="gpt-4o", temperature=0.1, max_iterations=5)
 ```
 
-### BaseAgent
-
-Simple base agent for basic tool calling and task execution.
-
-```python
-from corral.agents.base_agent import BaseAgent
-
-agent = BaseAgent(model="gpt-4o", temperature=0.0)
-```
-
 ## 💾 Checkpoint System
 
 The framework automatically saves checkpoints during benchmark runs.
@@ -332,26 +322,13 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
 1. **Install development dependencies**
 
    ```bash
-   uv sync --dev
+   uv pip install -e .
    ```
 
-2. **Install pre-commit hooks**
+2. **Install pre-commit hooks with commitizen commits**
 
    ```bash
-   pre-commit install
-   ```
-
-3. **Run tests**
-
-   ```bash
-   pytest tests/
-   ```
-
-4. **Run linting**
-
-   ```bash
-   ruff check src/
-   ruff format src/
+   pre-commit install --hook-type commit-msg --hook-type pre-push
    ```
 
 ## 📋 Advanced Usage
