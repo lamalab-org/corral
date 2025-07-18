@@ -2,6 +2,7 @@ import gc
 import inspect
 import os
 import re
+import types
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Union, get_args, get_origin, get_type_hints
@@ -55,6 +56,23 @@ def format_type_annotation(annotation) -> str:
                 formatted_args = [format_type_annotation(arg) for arg in args]
                 return " | ".join(formatted_args)
 
+        # Handle Python 3.10+ union syntax (str | int) using types.UnionType
+        try:
+            is_union_type = isinstance(annotation, types.UnionType)
+        except (ImportError, AttributeError):
+            is_union_type = False
+
+        if is_union_type:
+            # Recursively format all types in the union
+            formatted_args = [
+                format_type_annotation(arg) for arg in annotation.__args__
+            ]
+            # Handle Optional[T] (T | None)
+            if len(formatted_args) == 2 and "None" in formatted_args:
+                non_none_type = next(a for a in formatted_args if a != "None")
+                return f"{non_none_type} | None"
+            return " | ".join(formatted_args)
+
         # Handle generic types like List[str], Dict[str, int], etc.
         if origin is not None:
             origin_name = getattr(origin, "__name__", str(origin))
@@ -62,15 +80,6 @@ def format_type_annotation(annotation) -> str:
                 formatted_args = [format_type_annotation(arg) for arg in args]
                 return f"{origin_name}[{', '.join(formatted_args)}]"
             return origin_name
-
-        # Handle Python 3.10+ union syntax (str | int)
-        # Check if this is a union type using the new syntax
-        if hasattr(annotation, "__class__") and "UnionType" in str(
-            annotation.__class__
-        ):
-            # Extract the union args manually
-            union_str = str(annotation)
-            return union_str.replace(" | ", " | ")
 
         # Fallback to string representation for unknown types
         return str(annotation).replace("typing.", "")
