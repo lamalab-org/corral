@@ -28,7 +28,7 @@ A comprehensive benchmarking framework for evaluating AI agents on materials sci
 
    ```bash
    # create task environments
-   cd tasks/samplemath && uv venv && uv pip install -e .  # create an env for running sample math 
+   cd tasks/samplemath && uv venv && uv pip install -e .  # create an env for running sample math
    # ... repeat for other tasks as needed
    ```
 
