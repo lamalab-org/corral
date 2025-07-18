@@ -1,14 +1,25 @@
 RUBRICS_v1 = {
     "task_rubrics": {
         "correctness": {
-            "question": "Do the agent logs lead to the correct answer?",
-            "description": "If the answer returned by the agent is correct, then this is correct, or the box is checked. Otherwise, it is incorrect. This only checks the final answer, not the intermediate steps.",
-            "examples": [
-                "Answer returned by the agent: 'Final Answer: [B-](CCC1=CC=CC=C1)(F)(F)F.[K+]'\nCorrectness: Correct",
-                "Answer returned by the agent: 'Final Answer: CCO=F'\nCorrectness: Incorrect",
-            ],
-            "automatic_check": True,
-            "step_wise": False,
+            "trajecory_correctness": {
+                "question": "Do the agent makes the right trajectory?",
+                "description": "If the agent makes the right trajectory without commiting silly mistakes (for example this could be agent making wrong submission path), then this is correct, or the box is checked. Otherwise, it is incorrect. This checks the correctness of the trajectory, not the final answer.",
+                "examples": [
+                    "Answer returned by the agent: 'Final Answer: path/to/final_answer.cif'\nCorrectness: Correct",
+                ],
+                "automatic_check": False,
+                "step_wise": False,
+            },
+            "final_answer": {
+                "question": "Do the agent logs lead to the correct answer?",
+                "description": "If the answer returned by the agent is correct, then this is correct, or the box is checked. Otherwise, it is incorrect. This only checks the final answer, not the intermediate steps.",
+                "examples": [
+                    "Answer returned by the agent: 'Final Answer: [B-](CCC1=CC=CC=C1)(F)(F)F.[K+]'\nCorrectness: Correct",
+                    "Answer returned by the agent: 'Final Answer: CCO=F'\nCorrectness: Incorrect",
+                ],
+                "automatic_check": True,
+                "step_wise": False,
+            },
         },
         "insanity": {
             "repeated_message": {
@@ -94,7 +105,7 @@ RUBRICS_v1 = {
                 },
             },
             "tool_calling_error": {
-                "question": "Did the agent call the tool correctly or did it incur some error?",
+                "question": "Did the agent call the tool correctly without incurring any errors?",
                 "description": "If the agent called the tool correctly, i.e., without incurring in argument format errors or an incorrect tool name, then this is correct or the box is checked. Otherwise, it is incorrect. Note that this only checks if the tool was called correctly, not if the tool returned the expected output.",
                 "examples": [
                     '\'Action: get_formula_from_smiles\nAction Input: {"smiles": "[C#CCC#CCCCCC]"}\': incorrect since the agent passed an incorrect argument format to the tool get_formula_from_smiles list instead of string.',
