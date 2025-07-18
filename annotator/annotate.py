@@ -75,11 +75,11 @@ def identify_message_type(message):
 
 def extract_agent_actions(messages):
     """Extract agent action messages from the log."""
-    agent_actions = []
-    for i, message in enumerate(messages):
-        if identify_message_type(message) == "agent_action":
-            agent_actions.append((i, message))
-    return agent_actions
+    return [
+        (i, message)
+        for i, message in enumerate(messages)
+        if identify_message_type(message) == "agent_action"
+    ]
 
 
 def flatten_rubrics(rubrics, parent_key=""):
