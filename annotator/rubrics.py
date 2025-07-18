@@ -3,7 +3,7 @@ RUBRICS_v1 = {
         "correctness": {
             "trajectory_correctness": {
                 "question": "Do the agent makes the right trajectory?",
-                "description": "If the agent makes the right trajectory without commiting silly mistakes (for example this could be agent making wrong submission path), then this is correct, or the box is checked. Otherwise, it is incorrect. This checks the correctness of the trajectory, not the final answer.",
+                "description": "If the agent makes the right trajectory without committing silly mistakes (for example this could be agent making wrong submission path), then this is correct, or the box is checked. Otherwise, it is incorrect. This checks the correctness of the trajectory, not the final answer.",
                 "examples": [
                     "Answer returned by the agent: 'Final Answer: path/to/final_answer.cif'\nCorrectness: Correct",
                 ],
