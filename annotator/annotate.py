@@ -368,7 +368,7 @@ def main():
                         st.write(f"**{header}**")
 
                     if content:
-                        st.code(content, language="text")
+                        st.markdown(f"""```text\n{content}\n```""", unsafe_allow_html=True)
 
                     if i < len(messages) - 1:
                         st.divider()
