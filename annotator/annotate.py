@@ -93,11 +93,11 @@ def flatten_rubrics(rubrics, parent_key=""):
 
 
 def display_rubric_item(key, rubric, prefix=""):
-    """Display a single rubric item with checkbox and comment field."""
+    """Display a single rubric item with radio buttons and comment field."""
     question = rubric["question"]
     description = rubric["description"]
 
-    # Display rubric question and checkbox in a single row format
+    # Display rubric question and radio buttons in a single row format
     st.markdown(f"**{key}**")
     st.markdown(f"*{question}*")
 
@@ -111,8 +111,15 @@ def display_rubric_item(key, rubric, prefix=""):
             for example in rubric["examples"]:
                 st.code(example, language="text")
 
-    # Checkbox and comment field in single row format
-    checkbox_result = st.checkbox("Yes", key=f"{prefix}{key}_checkbox")
+    # Radio buttons for Yes/NA selection
+    checkbox_result = st.radio(
+        "Select response:",
+        options=["Yes", "NA"],
+        key=f"{prefix}{key}_radio",
+        horizontal=True,
+        index=None,  # No default selection
+    )
+
     comment_result = st.text_area(
         "Add comment (optional)",
         key=f"{prefix}{key}_comment",
@@ -400,6 +407,9 @@ def main():
                 )
                 st.write(
                     "2. **Task-wise Annotation**: Provide overall annotations for the task."
+                )
+                st.write(
+                    "You can check Yes if the rubriks are met, if not it is counted as No. Select NA if not applicable (please maybe provide a comment here)."
                 )
 
                 with st.expander("TASK & SYSTEM PROMPT", expanded=True):
