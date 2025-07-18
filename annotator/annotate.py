@@ -25,14 +25,16 @@ def get_already_annotated_files(output_directory):
 
 
 def load_json_files(input_directory, output_directory):
-    """Load all JSON files from the input directory, excluding already annotated ones."""
+    """Load all JSON files from the input directory, excluding already annotated and in-progress ones."""
     json_files = []
     if Path(input_directory).exists():
         # Get all JSON files from input directory
         all_files = [
             filename
             for filename in os.listdir(input_directory)
-            if filename.endswith(".json") and not filename.endswith("_ANNOTATED.json")
+            if filename.endswith(".json")
+            and not filename.endswith("_ANNOTATED.json")
+            and not filename.endswith("_INPROGRESS.json")
         ]
 
         # Get already annotated files from output directory
@@ -175,6 +177,133 @@ def save_annotated_file(output_directory, original_filename, annotated_data, use
     except Exception as e:
         st.error(f"Error saving file: {e!s}")
         return None
+
+
+def save_intermediate_progress(output_directory, original_filename, log_data, user_tag):
+    """Save intermediate annotation progress."""
+    output_path = Path(output_directory)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    base_name = original_filename.replace(".json", "")
+    progress_filename = f"{base_name}_{user_tag}_INPROGRESS.json"
+    filepath = output_path / progress_filename
+
+    try:
+        # Create annotated data with current progress
+        annotated_data = copy.deepcopy(log_data)
+
+        # Add current annotations
+        annotated_data["task_annotations"] = st.session_state.get(
+            "task_annotations", {}
+        )
+        annotated_data["task_comments"] = st.session_state.get("task_comments", {})
+
+        # Add step-wise annotations and comments to agent action messages
+        messages_length = len(annotated_data.get("messages", []))
+        for msg_idx, annotations in st.session_state.get(
+            "step_annotations", {}
+        ).items():
+            if 0 <= int(msg_idx) < messages_length:
+                for ann_key, ann_value in annotations.items():
+                    annotated_data["messages"][msg_idx][ann_key] = ann_value
+
+        for msg_idx, comments in st.session_state.get("step_comments", {}).items():
+            if 0 <= int(msg_idx) < messages_length:
+                for comment_key, comment_value in comments.items():
+                    annotated_data["messages"][msg_idx][f"{comment_key}_comment"] = (
+                        comment_value
+                    )
+
+        # Add progress metadata
+        annotated_data["progress_metadata"] = {
+            "user_tag": user_tag,
+            "current_step": st.session_state.get("current_step", 0),
+            "annotation_phase": st.session_state.get("annotation_phase", "stepwise"),
+            "last_saved": datetime.now(tz=timezone.utc).isoformat(),
+            "original_file": original_filename,
+        }
+
+        with filepath.open("w") as f:
+            json.dump(annotated_data, f, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"Error saving progress: {e!s}")
+        return False
+
+
+def load_intermediate_progress(output_directory, original_filename, user_tag):
+    """Load intermediate annotation progress if exists."""
+    output_path = Path(output_directory)
+    base_name = original_filename.replace(".json", "")
+    progress_filename = f"{base_name}_{user_tag}_INPROGRESS.json"
+    filepath = output_path / progress_filename
+
+    if not filepath.exists():
+        return False
+
+    try:
+        with filepath.open() as f:
+            data = json.load(f)
+
+        # Validate rubrics to ensure loaded keys are still valid
+        valid_rubric_keys = {k for k, _ in flatten_rubrics(RUBRICS["task_rubrics"])}
+
+        # Load progress metadata
+        if "progress_metadata" in data:
+            metadata = data["progress_metadata"]
+            st.session_state.current_step = min(
+                int(metadata.get("current_step", 0)),
+                len(extract_agent_actions(data.get("messages", []))) - 1
+                if data.get("messages")
+                else 0,
+            )
+            st.session_state.annotation_phase = metadata.get(
+                "annotation_phase", "stepwise"
+            )
+
+        # Load task annotations, filtering out invalid keys
+        if "task_annotations" in data:
+            st.session_state.task_annotations = {
+                k: v
+                for k, v in data["task_annotations"].items()
+                if k in valid_rubric_keys
+            }
+        if "task_comments" in data:
+            st.session_state.task_comments = {
+                k: v for k, v in data["task_comments"].items() if k in valid_rubric_keys
+            }
+
+        # Load step annotations from messages
+        messages = data.get("messages", [])
+        for i, message in enumerate(messages):
+            # Find annotation keys (not comments)
+            ann_keys = [
+                k
+                for k in message
+                if not k.endswith("_comment")
+                and k not in ["role", "content", "tool_calls"]
+                and k in valid_rubric_keys
+            ]
+            comment_keys = [k for k in message if k.endswith("_comment")]
+
+            if ann_keys or comment_keys:
+                if i not in st.session_state.step_annotations:
+                    st.session_state.step_annotations[i] = {}
+                if i not in st.session_state.step_comments:
+                    st.session_state.step_comments[i] = {}
+
+                for key in ann_keys:
+                    st.session_state.step_annotations[i][key] = message[key]
+
+                for key in comment_keys:
+                    original_key = key.replace("_comment", "")
+                    if original_key in valid_rubric_keys:
+                        st.session_state.step_comments[i][original_key] = message[key]
+
+        return True
+    except Exception as e:
+        st.error(f"Error loading progress from {filepath}: {e!s}")
+        return False
 
 
 def initialize_session_state():
@@ -344,6 +473,24 @@ def main():
         log_data = load_log_file(input_directory, selected_file)
 
         if log_data:
+            # Load intermediate progress
+            if load_intermediate_progress(
+                st.session_state.output_directory, selected_file, user_tag
+            ):
+                st.info("📄 Loaded previous annotation progress")
+                # Validate current_step against agent_actions
+                messages = log_data.get("messages", [])
+                agent_actions = extract_agent_actions(messages)
+                if st.session_state.current_step >= len(agent_actions):
+                    st.session_state.current_step = max(0, len(agent_actions) - 1)
+                    save_intermediate_progress(
+                        st.session_state.output_directory,
+                        selected_file,
+                        log_data,
+                        user_tag,
+                    )
+                    st.rerun()
+
             # Display metadata
             st.subheader("📋 Log Metadata")
             metadata = {k: v for k, v in log_data.items() if k != "messages"}
@@ -475,12 +622,22 @@ def main():
                             checkbox_result, comment_result = display_rubric_item(
                                 key, rubric, f"step_{msg_idx}_"
                             )
-                            st.session_state.step_annotations[msg_idx][key] = (
-                                checkbox_result
-                            )
-                            st.session_state.step_comments[msg_idx][key] = (
-                                comment_result
-                            )
+                            if (
+                                checkbox_result is not None
+                            ):  # Only update if a selection is made
+                                st.session_state.step_annotations[msg_idx][key] = (
+                                    checkbox_result
+                                )
+                                st.session_state.step_comments[msg_idx][key] = (
+                                    comment_result
+                                )
+                                # Save progress after each rubric input
+                                save_intermediate_progress(
+                                    st.session_state.output_directory,
+                                    selected_file,
+                                    log_data,
+                                    user_tag,
+                                )
                             st.divider()
 
                     # Navigation buttons
@@ -490,19 +647,39 @@ def main():
                         if st.button(
                             "← Previous", disabled=st.session_state.current_step == 0
                         ):
-                            st.session_state.current_step -= 1
+                            st.session_state.current_step = max(
+                                0, st.session_state.current_step - 1
+                            )
+                            save_intermediate_progress(
+                                st.session_state.output_directory,
+                                selected_file,
+                                log_data,
+                                user_tag,
+                            )
                             st.rerun()
 
                     with col2:
                         if st.session_state.current_step < len(agent_actions) - 1:
                             if st.button("Next →"):
                                 st.session_state.current_step += 1
+                                save_intermediate_progress(
+                                    st.session_state.output_directory,
+                                    selected_file,
+                                    log_data,
+                                    user_tag,
+                                )
                                 st.rerun()
                         else:
                             if st.button(
                                 "Proceed to Task-Level Rubrics →", type="primary"
                             ):
                                 st.session_state.annotation_phase = "taskwise"
+                                save_intermediate_progress(
+                                    st.session_state.output_directory,
+                                    selected_file,
+                                    log_data,
+                                    user_tag,
+                                )
                                 st.rerun()
 
                     with col3:
@@ -521,6 +698,13 @@ def main():
                         )
                         st.session_state.task_annotations[key] = checkbox_result
                         st.session_state.task_comments[key] = comment_result
+                        # Save progress after each task rubric input
+                        save_intermediate_progress(
+                            st.session_state.output_directory,
+                            selected_file,
+                            log_data,
+                            user_tag,
+                        )
                         st.divider()
 
                     # Action buttons
@@ -529,6 +713,12 @@ def main():
                     with col1:
                         if st.button("← Back to Step-wise", type="secondary"):
                             st.session_state.annotation_phase = "stepwise"
+                            save_intermediate_progress(
+                                st.session_state.output_directory,
+                                selected_file,
+                                log_data,
+                                user_tag,
+                            )
                             st.rerun()
 
                     with col2:
@@ -585,6 +775,20 @@ def main():
 
                         if saved_filename:
                             st.success(f"✅ Annotations saved as: {saved_filename}")
+                            # Delete the in-progress file since annotation is complete
+                            base_name = selected_file.replace(".json", "")
+                            progress_filename = (
+                                f"{base_name}_{user_tag}_INPROGRESS.json"
+                            )
+                            progress_filepath = (
+                                Path(st.session_state.output_directory)
+                                / progress_filename
+                            )
+                            if progress_filepath.exists():
+                                try:
+                                    progress_filepath.unlink()
+                                except Exception as e:
+                                    st.warning(f"Could not delete progress file: {e!s}")
 
                             # Refresh file list to exclude the newly annotated file
                             st.session_state.json_files = load_json_files(
