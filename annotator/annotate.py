@@ -97,34 +97,28 @@ def display_rubric_item(key, rubric, prefix=""):
     question = rubric["question"]
     description = rubric["description"]
 
-    # Create two columns for checkbox and comment
-    col1, col2 = st.columns([3, 2])
+    # Display rubric question and checkbox in a single row format
+    st.markdown(f"**{key}**")
+    st.markdown(f"*{question}*")
 
-    with col1:
-        st.markdown(f"**{key}**")
-        st.markdown(f"*{question}*")
+    # Add collapsible description
+    with st.expander("💡 Description"):
+        st.write(description)
 
-        # Add collapsible description
-        with st.expander("💡 Description"):
-            st.write(description)
+    # Show examples in expander
+    if rubric.get("examples"):
+        with st.expander("📖 Examples"):
+            for example in rubric["examples"]:
+                st.code(example, language="text")
 
-        # Show examples in expander
-        if rubric.get("examples"):
-            with st.expander("📖 Examples"):
-                for example in rubric["examples"]:
-                    st.code(example, language="text")
-
-        checkbox_result = st.checkbox("Yes", key=f"{prefix}{key}_checkbox")
-
-    with col2:
-        st.markdown("**Comment**")
-        st.write("")  # Add some spacing
-        comment_result = st.text_area(
-            "Add comment (optional)",
-            key=f"{prefix}{key}_comment",
-            height=100,
-            placeholder="Add your notes here...",
-        )
+    # Checkbox and comment field in single row format
+    checkbox_result = st.checkbox("Yes", key=f"{prefix}{key}_checkbox")
+    comment_result = st.text_area(
+        "Add comment (optional)",
+        key=f"{prefix}{key}_comment",
+        height=100,
+        placeholder="Add your notes here...",
+    )
 
     return checkbox_result, comment_result
 
@@ -380,170 +374,210 @@ def main():
 
             st.divider()
 
-            # Step-wise annotation phase
-            if st.session_state.annotation_phase == "stepwise":
-                st.header("🔄 Step-wise Annotation")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("📝 Annotation Phases")
+                st.write(
+                    "You can annotate agent actions in two phases: step-wise and task-wise."
+                )
+                st.write(
+                    "1. **Step-wise Annotation**: Annotate each agent action step by step."
+                )
+                st.write(
+                    "2. **Task-wise Annotation**: Provide overall annotations for the task."
+                )
 
-                # Progress indicator
-                progress_col1, progress_col2, progress_col3 = st.columns([1, 2, 1])
-                with progress_col2:
-                    st.progress(
-                        (st.session_state.current_step + 1) / len(agent_actions)
-                    )
-                    st.write(
-                        f"Step {st.session_state.current_step + 1} of {len(agent_actions)}"
-                    )
+                with st.expander("TASK & SYSTEM PROMPT", expanded=True):
+                    messages = log_data.get("messages", [])
+                    for i, message in enumerate(messages):
+                        header, content = format_message_for_display(message, i)
 
-                # Display current step
-                if st.session_state.current_step < len(agent_actions):
-                    msg_idx, action = agent_actions[st.session_state.current_step]
+                        # Color-code different message types
+                        msg_type = identify_message_type(message)
+                        if msg_type == "system":
+                            st.info(f"**{header}**")
+                            if content:
+                                st.code(content, language="text")
+                            if i < len(messages) - 1:
+                                st.divider()
+                        elif msg_type == "task":
+                            st.warning(f"**{header}**")
+                            if content:
+                                st.code(content, language="text")
+                            if i < len(messages) - 1:
+                                st.divider()
 
-                    st.subheader(
-                        f"Action {st.session_state.current_step + 1} (Message {msg_idx})"
-                    )
+            with col2:
+                # Step-wise annotation phase
+                if st.session_state.annotation_phase == "stepwise":
+                    st.header("🔄 Step-wise Annotation")
 
-                    # Show action content
-                    st.code(action.get("content", ""))
-
-                    # Show tool_calls if present
-                    if "tool_calls" in action:
-                        st.subheader("Tool Calls")
-                        st.json(action["tool_calls"])
-
-                    st.divider()
-
-                    # Initialize step annotations if not exists
-                    if msg_idx not in st.session_state.step_annotations:
-                        st.session_state.step_annotations[msg_idx] = {}
-                        st.session_state.step_comments[msg_idx] = {}
-
-                    # Display step rubrics
-                    for key, rubric in step_rubrics:
-                        checkbox_result, comment_result = display_rubric_item(
-                            key, rubric, f"step_{msg_idx}_"
+                    # Progress indicator
+                    progress_col1, progress_col2, progress_col3 = st.columns([1, 2, 1])
+                    with progress_col2:
+                        st.progress(
+                            (st.session_state.current_step + 1) / len(agent_actions)
                         )
-                        st.session_state.step_annotations[msg_idx][key] = (
-                            checkbox_result
+                        st.write(
+                            f"Step {st.session_state.current_step + 1} of {len(agent_actions)}"
                         )
-                        st.session_state.step_comments[msg_idx][key] = comment_result
+
+                    # Display current step
+                    if st.session_state.current_step < len(agent_actions):
+                        msg_idx, action = agent_actions[st.session_state.current_step]
+
+                        st.subheader(
+                            f"Action {st.session_state.current_step + 1} (Message {msg_idx})"
+                        )
+
+                        # Show action content
+                        st.code(action.get("content", ""))
+
+                        # Show tool_calls if present
+                        if "tool_calls" in action:
+                            st.subheader("Tool Calls")
+                            st.json(action["tool_calls"])
+
                         st.divider()
 
-                # Navigation buttons
-                col1, col2, col3 = st.columns([1, 1, 1])
+                        # Initialize step annotations if not exists
+                        if msg_idx not in st.session_state.step_annotations:
+                            st.session_state.step_annotations[msg_idx] = {}
+                            st.session_state.step_comments[msg_idx] = {}
 
-                with col1:
-                    if st.button(
-                        "← Previous", disabled=st.session_state.current_step == 0
-                    ):
-                        st.session_state.current_step -= 1
-                        st.rerun()
+                        # Display step rubrics
+                        for key, rubric in step_rubrics:
+                            checkbox_result, comment_result = display_rubric_item(
+                                key, rubric, f"step_{msg_idx}_"
+                            )
+                            st.session_state.step_annotations[msg_idx][key] = (
+                                checkbox_result
+                            )
+                            st.session_state.step_comments[msg_idx][key] = (
+                                comment_result
+                            )
+                            st.divider()
 
-                with col2:
-                    if st.session_state.current_step < len(agent_actions) - 1:
-                        if st.button("Next →"):
-                            st.session_state.current_step += 1
+                    # Navigation buttons
+                    col1, col2, col3 = st.columns([1, 1, 1])
+
+                    with col1:
+                        if st.button(
+                            "← Previous", disabled=st.session_state.current_step == 0
+                        ):
+                            st.session_state.current_step -= 1
                             st.rerun()
-                    else:
-                        if st.button("Proceed to Task-Level Rubrics →", type="primary"):
-                            st.session_state.annotation_phase = "taskwise"
-                            st.rerun()
 
-                with col3:
-                    st.write(
-                        f"Step {st.session_state.current_step + 1}/{len(agent_actions)}"
-                    )
-
-            # Task-wise annotation phase
-            elif st.session_state.annotation_phase == "taskwise":
-                st.header("📝 Task-Level Rubrics")
-
-                # Display task rubrics
-                for key, rubric in task_rubrics:
-                    checkbox_result, comment_result = display_rubric_item(
-                        key, rubric, "task_"
-                    )
-                    st.session_state.task_annotations[key] = checkbox_result
-                    st.session_state.task_comments[key] = comment_result
-                    st.divider()
-
-                # Action buttons
-                col1, col2 = st.columns([1, 1])
-
-                with col1:
-                    if st.button("← Back to Step-wise", type="secondary"):
-                        st.session_state.annotation_phase = "stepwise"
-                        st.rerun()
-
-                with col2:
-                    save_clicked = st.button("💾 Save Annotations", type="primary")
-
-                if save_clicked:
-                    # Create annotated data
-                    annotated_data = copy.deepcopy(log_data)
-
-                    # Add task-level annotations
-                    annotated_data["task_annotations"] = (
-                        st.session_state.task_annotations
-                    )
-                    annotated_data["task_comments"] = st.session_state.task_comments
-
-                    # Add step-wise annotations to agent action messages
-                    messages_length = len(annotated_data.get("messages", []))
-                    for (
-                        msg_idx,
-                        annotations,
-                    ) in st.session_state.step_annotations.items():
-                        if 0 <= msg_idx < messages_length:
-                            for ann_key, ann_value in annotations.items():
-                                annotated_data["messages"][msg_idx][ann_key] = ann_value
+                    with col2:
+                        if st.session_state.current_step < len(agent_actions) - 1:
+                            if st.button("Next →"):
+                                st.session_state.current_step += 1
+                                st.rerun()
                         else:
-                            st.warning(f"Skipping invalid message index: {msg_idx}")
+                            if st.button(
+                                "Proceed to Task-Level Rubrics →", type="primary"
+                            ):
+                                st.session_state.annotation_phase = "taskwise"
+                                st.rerun()
 
-                    # Add step-wise comments to agent action messages
-                    for msg_idx, comments in st.session_state.step_comments.items():
-                        if 0 <= msg_idx < messages_length:
-                            for comment_key, comment_value in comments.items():
-                                annotated_data["messages"][msg_idx][
-                                    f"{comment_key}_comment"
-                                ] = comment_value
-
-                    # Add annotation metadata
-                    annotated_data["annotation_metadata"] = {
-                        "user_tag": user_tag,
-                        "annotation_timestamp": datetime.now(
-                            tz=timezone.utc
-                        ).isoformat(),
-                        "original_file": selected_file,
-                    }
-
-                    # Save the file
-                    saved_filename = save_annotated_file(
-                        st.session_state.output_directory,
-                        selected_file,
-                        annotated_data,
-                        user_tag,
-                    )
-
-                    if saved_filename:
-                        st.success(f"✅ Annotations saved as: {saved_filename}")
-
-                        # Refresh file list to exclude the newly annotated file
-                        st.session_state.json_files = load_json_files(
-                            input_directory, st.session_state.output_directory
+                    with col3:
+                        st.write(
+                            f"Step {st.session_state.current_step + 1}/{len(agent_actions)}"
                         )
-                        json_files = st.session_state.json_files
 
-                        # Move to next file if available
-                        if st.session_state.selected_file_index < len(json_files):
-                            st.session_state.selected_file_index += 1
-                        else:
-                            st.session_state.selected_file_index = 0
-                            if not json_files:
-                                st.info("🎉 All files have been annotated!")
-                                st.session_state.annotation_started = False
+                # Task-wise annotation phase
+                elif st.session_state.annotation_phase == "taskwise":
+                    st.header("📝 Task-Level Rubrics")
 
-                        reset_annotation_state()
-                        st.rerun()
+                    # Display task rubrics
+                    for key, rubric in task_rubrics:
+                        checkbox_result, comment_result = display_rubric_item(
+                            key, rubric, "task_"
+                        )
+                        st.session_state.task_annotations[key] = checkbox_result
+                        st.session_state.task_comments[key] = comment_result
+                        st.divider()
+
+                    # Action buttons
+                    col1, col2 = st.columns([1, 1])
+
+                    with col1:
+                        if st.button("← Back to Step-wise", type="secondary"):
+                            st.session_state.annotation_phase = "stepwise"
+                            st.rerun()
+
+                    with col2:
+                        save_clicked = st.button("💾 Save Annotations", type="primary")
+
+                    if save_clicked:
+                        # Create annotated data
+                        annotated_data = copy.deepcopy(log_data)
+
+                        # Add task-level annotations
+                        annotated_data["task_annotations"] = (
+                            st.session_state.task_annotations
+                        )
+                        annotated_data["task_comments"] = st.session_state.task_comments
+
+                        # Add step-wise annotations to agent action messages
+                        messages_length = len(annotated_data.get("messages", []))
+                        for (
+                            msg_idx,
+                            annotations,
+                        ) in st.session_state.step_annotations.items():
+                            if 0 <= msg_idx < messages_length:
+                                for ann_key, ann_value in annotations.items():
+                                    annotated_data["messages"][msg_idx][ann_key] = (
+                                        ann_value
+                                    )
+                            else:
+                                st.warning(f"Skipping invalid message index: {msg_idx}")
+
+                        # Add step-wise comments to agent action messages
+                        for msg_idx, comments in st.session_state.step_comments.items():
+                            if 0 <= msg_idx < messages_length:
+                                for comment_key, comment_value in comments.items():
+                                    annotated_data["messages"][msg_idx][
+                                        f"{comment_key}_comment"
+                                    ] = comment_value
+
+                        # Add annotation metadata
+                        annotated_data["annotation_metadata"] = {
+                            "user_tag": user_tag,
+                            "annotation_timestamp": datetime.now(
+                                tz=timezone.utc
+                            ).isoformat(),
+                            "original_file": selected_file,
+                        }
+
+                        # Save the file
+                        saved_filename = save_annotated_file(
+                            st.session_state.output_directory,
+                            selected_file,
+                            annotated_data,
+                            user_tag,
+                        )
+
+                        if saved_filename:
+                            st.success(f"✅ Annotations saved as: {saved_filename}")
+
+                            # Refresh file list to exclude the newly annotated file
+                            st.session_state.json_files = load_json_files(
+                                input_directory, st.session_state.output_directory
+                            )
+                            json_files = st.session_state.json_files
+
+                            # Move to next file if available
+                            if st.session_state.selected_file_index < len(json_files):
+                                st.session_state.selected_file_index += 1
+                            else:
+                                st.session_state.selected_file_index = 0
+                                if not json_files:
+                                    st.info("🎉 All files have been annotated!")
+                                    st.session_state.annotation_started = False
+
+                            reset_annotation_state()
+                            st.rerun()
 
     elif input_directory:
         st.error("❌ Input directory not found. Please check the path.")
