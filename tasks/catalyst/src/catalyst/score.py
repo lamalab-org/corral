@@ -4,9 +4,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 import joblib
+from catalyst.utils import smart_resolve_path
 from loguru import logger
 from pymatgen.core import Structure
-from utils import smart_resolve_path
 
 if "CORRAL_WORK_DIR" not in os.environ:
     raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")

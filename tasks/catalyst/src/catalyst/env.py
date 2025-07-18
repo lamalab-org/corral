@@ -4,8 +4,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from loguru import logger
-from score import (
+from catalyst.score import (
     check_adsorption_sites,
     check_adsorption_structure,
     check_mp_structure,
@@ -13,8 +12,9 @@ from score import (
     check_slabs_json,
     check_valid_json_file,
 )
-from tools import create_tools
-from utils import smart_resolve_path
+from catalyst.tools import create_tools
+from catalyst.utils import smart_resolve_path
+from loguru import logger
 
 from corral.base import Environment, Tool
 from corral.io import (
