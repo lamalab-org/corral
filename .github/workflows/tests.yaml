@@ -1,5 +1,4 @@
 name: CI
-
 on:
   push:
     branches: [main]
@@ -10,61 +9,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Code-quality / formatting
-  # ---------------------------------------------------------------------------
   code-quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Ensure the desired interpreter is on the runner
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Download the uv binary (with caching)
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v6        # pin a recent uv
         with:
+          version: "0.7.*"
           enable-cache: true
 
-      # Install project + dev + all extras into .venv
-      - name: Sync environment (dev + extras)
+      # Install project (+dev & all extras). This creates .venv
+      - name: Sync environment
         run: uv sync --all-extras --dev
 
-      # Run pre-commit inside the venv
-      - name: Run pre-commit checks
-        run: uv run pre-commit run --all-files
+      # Belt-and-braces: make sure pre-commit is available even if
+      # it’s not yet in pyproject.toml
+      - name: Ensure pre-commit is present
+        run: uv pip install pre-commit
 
-      # Cache pre-commit hook environments
-      - name: Cache pre-commit hooks
+      - name: Cache pre-commit hook envs
         uses: actions/cache@v4
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
 
-      # Fail if pre-commit reformatted files
-      - name: Verify no changes were introduced
+      - name: Run pre-commit
+        run: uv run pre-commit run --all-files
+
+      - name: Fail if hooks rewrote files
         run: |
-          if ! git diff --quiet; then
-            echo "::error::Code formatting issues found. Run pre-commit locally and commit the changes."
-            git --no-pager diff
-            exit 1
-          fi
+          git diff --quiet || {
+            echo "::error::Code formatting issues found. Run pre-commit locally and commit the changes.";
+            git --no-pager diff; exit 1; }
 
   tests:
     needs: code-quality
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
       matrix:
         python-version: ["3.11"]
-
-    defaults:
-      run:
-        shell: bash -l {0}
 
     steps:
       - uses: actions/checkout@v4
@@ -75,21 +65,19 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v6
         with:
+          version: "0.7.*"
           enable-cache: true
 
-      # Ensure lockfile matches pyproject and install everything reproducibly
-      - name: Verify lockfile & sync env
+      - name: Verify lock & sync env reproducibly
         run: |
-          uv lock --check        # cheap validation of uv.lock vs pyproject.toml
+          uv lock --check                 # fast drift check
           uv sync --frozen --all-extras --dev
 
-      # Run the test suite inside the venv
       - name: Run tests
         run: uv run pytest --cov=corral
 
-      # Optional: clean cached wheels to keep the runner’s cache small
       - name: Prune uv cache
         if: ${{ always() }}
         run: uv cache prune --ci
