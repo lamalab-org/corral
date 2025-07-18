@@ -416,7 +416,7 @@ def main():
                     )
 
                     # Show action content
-                    st.code(action.get("content", ""))
+                    st.markdown(f"""```text\n{action.get('content', '')}\n```""", unsafe_allow_html=True)
 
                     # Show tool_calls if present
                     if "tool_calls" in action:
