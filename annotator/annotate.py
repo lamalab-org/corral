@@ -205,6 +205,19 @@ def reset_annotation_state():
 def main():
     st.set_page_config(page_title="Agent Log Annotation", layout="wide")
 
+    # Enable code wrapping for all code blocks using CSS workaround
+    st.markdown(
+        """
+        <style>
+        .streamlit-expanderContent pre, .streamlit-expanderContent code, pre, code {
+            white-space: pre-wrap !important;
+            word-break: break-word !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     initialize_session_state()
 
     st.title("Agent Log Annotation Tool")
@@ -349,7 +362,9 @@ def main():
                         st.write(f"**{header}**")
 
                     if content:
-                        st.code(content, language="text")
+                        st.markdown(
+                            f"""```text\n{content}\n```""", unsafe_allow_html=True
+                        )
 
                     if i < len(messages) - 1:
                         st.divider()
