@@ -24,7 +24,7 @@ class BenchmarkInterface:
     def __init__(
         self,
         base_url: str = "http://localhost:8000",
-        default_verbosity: str | None = "brief",
+        default_verbosity: str | None = ToolVerbosity.BRIEF.value,
     ):
         self.base_url = base_url
         self.current_verbosity = default_verbosity
