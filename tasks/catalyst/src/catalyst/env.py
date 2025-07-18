@@ -14,6 +14,7 @@ from score import (
     check_valid_json_file,
 )
 from tools import create_tools
+from utils import smart_resolve_path
 
 from corral.base import Environment, Tool
 from corral.io import (
@@ -236,12 +237,15 @@ Required submission format:
             # Get and log the raw submission
             answer_value = self.state.submitted_answer.strip()
             logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
-
+            resolved_answer = smart_resolve_path(answer_value)
+            logger.info(f"Resolved answer for {self.task_id}: {resolved_answer!r}")
             # Call the scoring function with the raw answer
-            score = self.current_task.scoring_fn(answer_value)
+            score = self.current_task.scoring_fn(resolved_answer)
 
             # Store result in task group
-            self.task_group.store_result(self.task_id, {"answer": answer_value}, score)
+            self.task_group.store_result(
+                self.task_id, {"answer": resolved_answer}, score
+            )
             logger.info(f"Task {self.task_id} scored: {score}")
 
             return score
