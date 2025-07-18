@@ -1,16 +1,15 @@
-import numpy as np
-from skimage.metrics import structural_similarity as ssim
-from skimage.io import imread
-from skimage.transform import resize
 import gc
-from NSFopen.read import read
-import nanosurf
-
-from loguru import logger
 import math
+
+import nanosurf
+from loguru import logger
+from NSFopen.read import read
+from skimage.metrics import structural_similarity as ssim
+
 
 def get_params():
     import pythoncom
+
     pythoncom.CoInitialize()
     tip_guid_map = {
         "AN2_200": "{BD61D124-8350-4464-BFE4-1D8A156E4913}",
@@ -42,12 +41,11 @@ def get_params():
         "qp_CONT": "{0996E3AC-ABF6-4A22-B320-4BF749288156}",
         "qp_fast_CB1": "{3F3DD96B-F838-45B6-AA8C-B54F66ED9571}",
         "qp_fast_CB2": "{964280C3-70F7-4E22-AA60-734E672D7A02}",
-        "qp_fast_CB3": "{CCF4B65D-F3D8-4A40-9108-53468ECBA1B4}"
+        "qp_fast_CB3": "{CCF4B65D-F3D8-4A40-9108-53468ECBA1B4}",
     }
     spm = nanosurf.SPM()
     application = spm.application
     scan = application.Scan
-    opmode = application.OperatingMode
     zcontrol = application.ZController
     head = application.ScanHead
     current_guid = head.CantileverByGUID
@@ -58,17 +56,17 @@ def get_params():
             tip = tip_name
 
     params = {
-        "pgain" : zcontrol.PGain,
-        "igain" : zcontrol.IGain,
-        "dgain" : zcontrol.DGain,
-        "image_height" : scan.ImageHeight*1e9,
-        "image_width" : scan.ImageWidth*1e9,
-        "times_per_line" : scan.Scantime,
-        "points_per_line" : scan.Points,
-        "lines_per_frame" : scan.Lines,
-        "rotation" : scan.rotation,
-        "setpoint" : zcontrol.SetPoint,
-        "tip" :  tip
+        "pgain": zcontrol.PGain,
+        "igain": zcontrol.IGain,
+        "dgain": zcontrol.DGain,
+        "image_height": scan.ImageHeight * 1e9,
+        "image_width": scan.ImageWidth * 1e9,
+        "times_per_line": scan.Scantime,
+        "points_per_line": scan.Points,
+        "lines_per_frame": scan.Lines,
+        "rotation": scan.rotation,
+        "setpoint": zcontrol.SetPoint,
+        "tip": tip,
     }
     del zcontrol
     del scan
@@ -77,6 +75,7 @@ def get_params():
     gc.collect()
     pythoncom.CoUninitialize()
     return params
+
 
 def check_params(gt_params, rel_tol=1e-4, abs_tol=1e-9):
     current_params = get_params()
@@ -87,7 +86,9 @@ def check_params(gt_params, rel_tol=1e-4, abs_tol=1e-9):
 
         # Use math.isclose for floats
         if isinstance(gt_val, float) or isinstance(current_val, float):
-            if not math.isclose(float(current_val), float(gt_val), rel_tol=rel_tol, abs_tol=abs_tol):
+            if not math.isclose(
+                float(current_val), float(gt_val), rel_tol=rel_tol, abs_tol=abs_tol
+            ):
                 logger.warning(f"Mismatch in {key}: {current_val} != {gt_val}")
                 return 0.0
         else:
@@ -97,50 +98,44 @@ def check_params(gt_params, rel_tol=1e-4, abs_tol=1e-9):
 
     return 1.0
 
+
 def check_gain():
     spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()
     application = spm.application
-    scan = application.Scan
-    opmode = application.OperatingMode
     zcontrol = application.ZController
-    head = application.ScanHead
     return [zcontrol.PGain, zcontrol.IGain, zcontrol.DGain]
 
-def check_image_size():
 
-    #load application
+def check_image_size():
+    # load application
     spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()
     application = spm.application
 
-    #all variables
+    # all variables
     scan = application.Scan
-    opmode = application.OperatingMode
-    zcontrol = application.ZController
-    head = application.ScanHead
-    return [scan.ImageHeight*1e9, scan.ImageWidth*1e9]
+    return [scan.ImageHeight * 1e9, scan.ImageWidth * 1e9]
+
 
 def check_scan_mode():
     spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreA FM()
     application = spm.application
     scan = application.Scan
-    scanning = scan.IsScanning
-    return scanning
+    return scan.IsScanning
+
 
 def check_tip():
     spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()
     application = spm.application
 
-    #all variables
-    scan = application.Scan
-    opmode = application.OperatingMode
-    zcontrol = application.ZController
+    # all variables
     head = application.ScanHead
     return head.CantileverByGUID
+
 
 def check_scalar(gt, ag):
     """
     Check if 'ag' is within ±10% of 'gt'.
-    
+
     Parameters:
         gt (float): Ground truth value
         ag (float): Agent-predicted or measured value
@@ -149,15 +144,20 @@ def check_scalar(gt, ag):
         bool: True if ag is within 10% of gt, False otherwise
     """
     tolerance = 0.20 * abs(gt)
-    return abs(ag - gt) <= tolerance    
+    return abs(ag - gt) <= tolerance
+
 
 def check_image_quality(path):
-    from NSFopen.read import read
     afm = read(path)
     data = afm.data
-    im_file_fw = data['Image']['Forward']['Z-Axis']
-    im_file_bw = data['Image']['Backward']['Z-Axis']
-    similarity_index, diff = ssim(im_file_bw, im_file_fw, full=True, data_range=im_file_bw.max() - im_file_bw.min())
+    im_file_fw = data["Image"]["Forward"]["Z-Axis"]
+    im_file_bw = data["Image"]["Backward"]["Z-Axis"]
+    similarity_index, diff = ssim(
+        im_file_bw,
+        im_file_fw,
+        full=True,
+        data_range=im_file_bw.max() - im_file_bw.min(),
+    )
     if similarity_index >= 0.80:
         return 1.0
     return 0.0
@@ -180,7 +180,7 @@ def check_image_quality(path):
 #     def normalize_image(img):
 #         img = img.astype(np.float32)
 #         return (img - np.min(img)) / (np.max(img) - np.min(img) + 1e-8)
-    
+
 #     img1 = imread(img1_path, as_gray=True)
 #     img2 = imread(img2_path, as_gray=True)
 

@@ -6,7 +6,7 @@ The system consists of three main components:
 - Benchmark Interface (`MatAgentBenchmark`)- Communicates with the `corral` service, runs evaluations
 - `Agent` - Solves tasks using available tools
 
-## 1. Create environment and add tools example:
+## 1. Create environment and add tools example
 
 example of creating a tool and running the environment server
 
@@ -59,6 +59,7 @@ environments = {
 ```python
 from corral.utils import tool
 
+
 @tool
 def percentage_calculator(value: float, percentage: float = 100.0) -> float:
     """Calculate percentage of a value.
@@ -71,13 +72,14 @@ def percentage_calculator(value: float, percentage: float = 100.0) -> float:
         float: The calculated result
     """
     return (value * percentage) / 100.0
-
 ```
 
 ### Create tool that would run in [Modal](https://modal.com/) environment
 
 ```python
 from corral.utils import modal_tool, MODAL_TOOL_REGISTRY
+
+
 @modal_tool(app=app, image=Image.debian_slim().pip_install("numerizer"), memory=512)
 def number_convert(text: str, return_float: bool = False) -> str:
     """
@@ -98,17 +100,18 @@ def number_convert(text: str, return_float: bool = False) -> str:
 
 # TODO: decorator could not return the tool instance
 number_converter = MODAL_TOOL_REGISTRY["number_convert"]
-```python
+```
 
-## 2. Create agent example:
+## 2. Create agent example
 
 see an example of a simple agent.
-```python
+
 ```bash
 cd agents/baseline
 ```
 
 Creating an agent
+
 - Create a new agent class that implements the `Agent` protocol
 - TODO: Toolcalling parsing final answer submission parsing from message to the server
 (see the example on how this is being done now.)
@@ -120,29 +123,34 @@ class Agent(Protocol):
     def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
         """Solve a task and return the answer"""
         ...
-        guide = interface.get_task_guide(task_id) # get instruction on task, tools available and their respective tool calling syntax
-        system_prompt = BASELINESYSTEMPROMPT.format(guide=guide) # set these instructions to the system prompt
-        interface.execute_tool(task_id, tool_request["tool_name"], tool_request["arguments"]) # how to communicate tool calls
-
-
+        guide = interface.get_task_guide(
+            task_id
+        )  # get instruction on task, tools available and their respective tool calling syntax
+        system_prompt = BASELINESYSTEMPROMPT.format(
+            guide=guide
+        )  # set these instructions to the system prompt
+        interface.execute_tool(
+            task_id, tool_request["tool_name"], tool_request["arguments"]
+        )  # how to communicate tool calls
 ```
 
 ## 3. Benchmark Interface
 
 Setup benchmark interface
+
 - Start `corral` service and get the base url. See step 1. (This would `start` corral server, with 3 tasks and 2 tools)
 
 ```python
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 
-interface = BenchmarkInterface(base_url) # defaults to "http://localhost:8000"
-agent = ClaudeAgent(api_key=os.getenv("ANTHROPIC_API_KEY")) # or any other agent
+interface = BenchmarkInterface(base_url)  # defaults to "http://localhost:8000"
+agent = ClaudeAgent(api_key=os.getenv("ANTHROPIC_API_KEY"))  # or any other agent
 runner = MatAgentBenchmark(interface, agent)
 
 result = runner.bench()
 ```
 
-## Development 
+## Development
 
 This project uses pre-commit hooks to maintain code quality. The hooks run automatically on each commit to ensure consistent code formatting and catch common issues early.
 

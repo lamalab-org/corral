@@ -1,19 +1,16 @@
-import uvicorn
 from loguru import logger
 from tools import calculator
 
-from corral.base import Environment, Tool
+from corral.base import Environment
 from corral.io import (
+    CatFilesTool,
     CopyFileTool,
     FileInfoTool,
     FSManager,
     ListFilesTool,
     ReadFileTool,
     WriteFileTool,
-    MkdirTool,
-    CatFilesTool
 )
-
 from corral.server import run_server
 
 
@@ -38,7 +35,7 @@ class MathEnvironment(Environment):
         super().__init__(task_id, base_work_dir="corral_tmp")
 
         # Add math-related tools
-        self.add_tool(calculator)   
+        self.add_tool(calculator)
         self._setup_file_tools()
         # self.add_tool(number_converter)
         # self.add_tool(UnitConverterTool())
@@ -85,16 +82,15 @@ class MathEnvironment(Environment):
         # Recreate file tools for new workspace
         self._setup_file_tools()
         return trial_id
-    
-    def get_task_prompt(self) -> str:
 
+    def get_task_prompt(self) -> str:
         prompt = f"Solve this math problem:\n{self.question}\n\n"
         # Add workspace info
         if self.current_work_dir:
             prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n"
-        
+
         logger.info(f"task prompt is : {prompt}")
-        
+
         return prompt
         # return (
         #     f"Solve this math problem:\n{self.question}\n\n"
@@ -117,10 +113,7 @@ class MathEnvironment(Environment):
 
             # Call the scoring function with the raw answer
             # score = self.current_task.scoring_fn(answer_value, **self.current_task.scoring_inputs)
-            if float(answer_value) == float(self.correct_answer):
-                score = 1.0
-            else:
-                score = 0.0
+            score = 1.0 if float(answer_value) == float(self.correct_answer) else 0.0
             # Store result in task group
             logger.info(f"Task {self.task_id} scored: {score}")
 
@@ -133,6 +126,7 @@ class MathEnvironment(Environment):
             )
             logger.error(f"Submission was: {self.state.submitted_answer!r}")
             return 0.0
+
 
 if __name__ == "__main__":
     import os
