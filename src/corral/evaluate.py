@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 import requests
 from loguru import logger
-
+from corral.ablations import ToolVerbosity
 from corral.report import (
     BenchmarkResult,
     CorralWandbLogger,
