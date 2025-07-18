@@ -27,9 +27,8 @@ A comprehensive benchmarking framework for evaluating AI agents on materials sci
 3. **Install specific environment dependencies**
 
    ```bash
-   # Install some task environments
-   cd tasks/samplemath && uv pip install -e . && cd ../..
-   cd tasks/spectra_elu_easy && uv pip install -e . && cd ../..
+   # create task environments
+   cd tasks/samplemath && uv venv && uv pip install -e .  # create an env for running sample math 
    # ... repeat for other tasks as needed
    ```
 
@@ -100,7 +99,7 @@ result = runner.bench()  # Uses all tasks in the environment
 result = runner.bench(
     task_ids=["math_1", "math_2"],
     trials_per_task=3,
-    k_values=[1, 3, 5],
+    k_values=[1, 2, 3],
     tool_verbosity="MINIMAL",  # Options: FULL, MINIMAL, NONE
 )
 
