@@ -34,3 +34,29 @@ def score_molecule_similarity(prediction: str, ground_truth: str) -> float:
         return 1.0
 
     return 0.0
+
+
+def score_molecule_fragments_subtasks(
+    prediction: list[str], ground_truth: str
+) -> float:
+    """Score the prediction based on whether all fragments are substructures of the ground truth molecule.
+
+    Args:
+        prediction (list[str]): List of SMILES strings representing fragments.
+        ground_truth (str): SMILES string of the ground truth molecule.
+
+    Returns:
+        float: 1.0 if all fragments are substructures of the ground truth molecule,
+               0.0 otherwise.
+    """
+    target_mol = Chem.MolFromSmiles(ground_truth)
+    if target_mol is None:
+        raise ValueError("Invalid ground truth SMILES string.")
+    for frag in prediction:
+        frag_mol = Chem.MolFromSmiles(frag)
+        if frag_mol is None:
+            return 0.0
+        # Check if fragment is a substructure of the target molecule
+        if not target_mol.HasSubstructMatch(frag_mol):
+            return 0.0
+    return 1.0
