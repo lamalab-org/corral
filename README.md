@@ -99,7 +99,7 @@ result = runner.bench()  # Uses all tasks in the environment
 result = runner.bench(
     task_ids=["math_1", "math_2"],
     trials_per_task=3,
-    k_values=[1, 3, 5],
+    k_values=[1, 2, 3],
     tool_verbosity="MINIMAL",  # Options: FULL, MINIMAL, NONE
 )
 
