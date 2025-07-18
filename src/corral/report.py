@@ -803,7 +803,7 @@ class CorralWandbLogger:
 
     def start_logging(self, config: dict[str, Any]) -> None:
         """Initialize wandb run, resuming if interrupted and run_name matches."""
-        run_name = self.name or f"{config['agent_type']}-{config['session_id'][:8]}"
+        run_name = self.name or f"{config['agent_type']}-{config['session_id']}"
 
         # Try to resume from previous run ID if available and run_name matches
         run_id = self._load_run_id(run_name)

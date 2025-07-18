@@ -39,7 +39,7 @@ A comprehensive benchmarking framework for evaluating AI agents on materials sci
 
    ```bash
    cd tasks/samplemath/samplemath
-   python -m env  # Starts server on http://localhost:8000
+   python env.py  # Starts server on http://localhost:8000
    ```
 
 2. **Run benchmark in another terminal**
@@ -195,7 +195,30 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
    ]
    ```
 
-3. **Implement environment class**
+3. **Create tools**
+
+   ```python
+   # tasks/my_new_env/my_new_env/tools.py
+   from corral.utils import tool
+
+
+   @tool
+   def my_custom_tool(input_param: str) -> str:
+       """Description of what the tool does.
+
+       Args:
+           input_param: Description of the parameter
+
+       Returns:
+           Description of the return value
+       """
+       # Your tool implementation
+       return f"Processed: {input_param}"
+   ```
+
+   Note that the docstring has to be formatted correctly for the tool to be registered properly. This means it has to include a description of the parameters and return values as in the example above.
+
+4. **Implement environment class**
 
    ```python
    # tasks/my_new_env/my_new_env/env.py
@@ -233,41 +256,6 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
        import uvicorn
 
        uvicorn.run(app, host="0.0.0.0", port=8000)
-   ```
-
-4. **Create tools**
-
-   ```python
-   # tasks/my_new_env/my_new_env/tools.py
-   from corral.utils import tool
-
-
-   @tool
-   def my_custom_tool(input_param: str) -> str:
-       """Description of what the tool does.
-
-       Args:
-           input_param: Description of the parameter
-
-       Returns:
-           Description of the return value
-       """
-       # Your tool implementation
-       return f"Processed: {input_param}"
-   ```
-
-   Note that the docstring has to be formatted correctly for the tool to be registered properly. This means it has to include a description of the parameters and return values as in the example above.
-
-5. **Add module runner**
-
-   ```python
-   # tasks/my_new_env/my_new_env/__main__.py
-   from .env import environments
-   from corral.server import create_benchmark_server
-   import uvicorn
-
-   app = create_benchmark_server(environments)
-   uvicorn.run(app, host="0.0.0.0", port=8000)
    ```
 
 ### Adding a New Agent
