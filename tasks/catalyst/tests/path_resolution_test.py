@@ -1,64 +1,26 @@
 import os
-import tempfile
-import time
 from pathlib import Path
 
-import pytest
 from catalyst.utils import (
     extract_path_from_answer,
     find_file_by_name,
     smart_resolve_path,
 )
 
-
-@pytest.fixture()
-def temp_dir_structure():
-    """
-    Creates a temporary directory with a predefined file structure for testing.
-    Yields the path to the temporary base directory.
-    """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        base_path = Path(tmpdir)
-
-        # Create files
-        (base_path / "file1.txt").write_text("content1")
-        (base_path / "data.json").write_text("{}")
-        (base_path / "report.pdf").write_text("%PDF-1.4...")
-
-        # Create a subdirectory and files within it
-        subdir1 = base_path / "subdir1"
-        subdir1.mkdir()
-        (subdir1 / "nested_file.log").write_text("log content")
-        (subdir1 / "config.ini").write_text("[settings]")
-
-        # Create another subdirectory with a file of the same name
-        subdir2 = base_path / "subdir2"
-        subdir2.mkdir()
-        # Create an older file
-        time.sleep(0.01)  # Ensure different modification times
-        (subdir2 / "data.json").write_text("{'old': true}")
-        time.sleep(0.01)  # Ensure different modification times
-        # Create a newer file
-        (base_path / "data.json").write_text("{'new': true}")
-
-        # Set CORRAL_WORK_DIR for tests that rely on it
-        os.environ["CORRAL_WORK_DIR"] = str(base_path)
-
-        yield base_path
-
-        # Cleanup is handled by TemporaryDirectory context manager
-        del os.environ["CORRAL_WORK_DIR"]
+os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_files")
+TEMP_DIR = Path(os.environ["CORRAL_WORK_DIR"])
 
 
 # --- Tests for extract_path_from_answer ---
 def test_extract_path_from_answer_basic_filename():
     assert extract_path_from_answer("filename.txt") == "filename.txt"
 
-    # def test_extract_path_from_answer_with_prefix():
-    #     assert (
-    #         extract_path_from_answer("final answer is path/to/file.json")
-    #         == "path/to/file.json"
-    #     )
+    def test_extract_path_from_answer_with_prefix():
+        assert (
+            extract_path_from_answer("final answer is path/to/file.json")
+            == "path/to/file.json"
+        )
+
     assert extract_path_from_answer("answer: `another_file.py`") == "another_file.py"
 
 
@@ -112,40 +74,40 @@ def test_extract_path_from_answer_non_string_input():
 
 
 # --- Tests for find_file_by_name ---
-def test_find_file_by_name_found_in_base_dir(temp_dir_structure):
-    base_path = temp_dir_structure
-    found_path = find_file_by_name("file1.txt", str(base_path))
-    assert Path(found_path) == base_path / "file1.txt"
+def test_find_file_by_name_found_in_base_dir():
+    base_path = TEMP_DIR
+    found_path = find_file_by_name("slabs.json", str(base_path))
+    assert Path(found_path) == base_path / "slabs.json"
     assert Path(found_path).exists()
 
 
-def test_find_file_by_name_found_in_subdir(temp_dir_structure):
-    base_path = temp_dir_structure
+def test_find_file_by_name_found_in_subdir():
+    base_path = TEMP_DIR
     found_path = find_file_by_name("nested_file.log", str(base_path))
     assert Path(found_path) == base_path / "subdir1" / "nested_file.log"
     assert Path(found_path).exists()
 
 
-def test_find_file_by_name_not_found(temp_dir_structure):
-    base_path = temp_dir_structure
+def test_find_file_by_name_not_found():
+    base_path = TEMP_DIR
     result = find_file_by_name("non_existent_file.xyz", str(base_path))
     assert result == "non_existent_file.xyz"
     assert not Path(result).exists()
 
 
-def test_find_file_by_name_multiple_matches_returns_most_recent(temp_dir_structure):
-    base_path = temp_dir_structure
+def test_find_file_by_name_multiple_matches_returns_most_recent():
+    base_path = TEMP_DIR
     # The fixture ensures base_path/data.json is newer than subdir2/data.json
     found_path = find_file_by_name("data.json", str(base_path))
     assert Path(found_path) == base_path / "data.json"
     assert Path(found_path).exists()
 
 
-def test_find_file_by_name_no_base_dir_provided(temp_dir_structure):
+def test_find_file_by_name_no_base_dir_provided():
     # This test relies on CORRAL_WORK_DIR being set by the fixture
-    base_path = temp_dir_structure
-    found_path = find_file_by_name("report.pdf")  # No base_dir argument
-    assert Path(found_path) == base_path / "report.pdf"
+    base_path = TEMP_DIR
+    found_path = find_file_by_name("bulk_structure.cif")  # No base_dir argument
+    assert Path(found_path) == base_path / "bulk_structure.cif"
     assert Path(found_path).exists()
 
 
@@ -161,16 +123,16 @@ def test_find_file_by_name_invalid_base_dir():
 
 
 # --- Tests for smart_resolve_path ---
-def test_smart_resolve_path_direct_existing_path(temp_dir_structure):
-    base_path = temp_dir_structure
+def test_smart_resolve_path_direct_existing_path():
+    base_path = TEMP_DIR
     existing_path = base_path / "file1.txt"
     resolved_path = smart_resolve_path(str(existing_path))
     assert Path(resolved_path) == existing_path
     assert Path(resolved_path).exists()
 
 
-def test_smart_resolve_path_path_does_not_exist_but_file_found(temp_dir_structure):
-    base_path = temp_dir_structure
+def test_smart_resolve_path_path_does_not_exist_but_file_found():
+    base_path = TEMP_DIR
     # Simulate an extracted path that doesn't exist, but the file name does
     non_existent_path_str = str(base_path / "non_existent_dir" / "nested_file.log")
     resolved_path = smart_resolve_path(non_existent_path_str)
@@ -179,8 +141,8 @@ def test_smart_resolve_path_path_does_not_exist_but_file_found(temp_dir_structur
     assert Path(resolved_path).exists()
 
 
-def test_smart_resolve_path_path_does_not_exist_and_file_not_found(temp_dir_structure):
-    _base_path = temp_dir_structure
+def test_smart_resolve_path_path_does_not_exist_and_file_not_found():
+    _base_path = TEMP_DIR
     non_existent_file_path = "answer: `unknown_file.doc`"
     resolved_path = smart_resolve_path(non_existent_file_path)
     assert (
@@ -189,8 +151,8 @@ def test_smart_resolve_path_path_does_not_exist_and_file_not_found(temp_dir_stru
     assert not Path(resolved_path).exists()
 
 
-def test_smart_resolve_path_with_markdown_extraction(temp_dir_structure):
-    base_path = temp_dir_structure
+def test_smart_resolve_path_with_markdown_extraction():
+    base_path = TEMP_DIR
     # This file exists at base_path/data.json
     input_answer = "The latest data is in `data.json`."
     resolved_path = smart_resolve_path(input_answer)
@@ -198,8 +160,8 @@ def test_smart_resolve_path_with_markdown_extraction(temp_dir_structure):
     assert Path(resolved_path).exists()
 
 
-def test_smart_resolve_path_with_quotes_extraction(temp_dir_structure):
-    base_path = temp_dir_structure
+def test_smart_resolve_path_with_quotes_extraction():
+    base_path = TEMP_DIR
     # This file exists at base_path/subdir1/config.ini
     input_answer = "Check the 'config.ini' file."
     resolved_path = smart_resolve_path(input_answer)
@@ -207,10 +169,8 @@ def test_smart_resolve_path_with_quotes_extraction(temp_dir_structure):
     assert Path(resolved_path).exists()
 
 
-def test_smart_resolve_path_absolute_path_does_not_exist_but_file_found(
-    temp_dir_structure,
-):
-    base_path = temp_dir_structure
+def test_smart_resolve_path_absolute_path_does_not_exist_but_file_found():
+    base_path = TEMP_DIR
     # Simulate an absolute path that doesn't exist, but the file name does
     non_existent_abs_path = "/tmp/some_other_place/file1.txt"
     resolved_path = smart_resolve_path(non_existent_abs_path)
