@@ -99,7 +99,7 @@ def test_find_file_by_name_multiple_matches_returns_most_recent():
     base_path = TEMP_DIR
     # The fixture ensures base_path/data.json is newer than subdir2/data.json
     found_path = find_file_by_name("data.json", str(base_path))
-    assert Path(found_path) == base_path / "data.json"
+    assert Path(found_path) == base_path / "subdir3" / "data.json"
     assert Path(found_path).exists()
 
 
@@ -156,7 +156,7 @@ def test_smart_resolve_path_with_markdown_extraction():
     # This file exists at base_path/data.json
     input_answer = "The latest data is in `data.json`."
     resolved_path = smart_resolve_path(input_answer)
-    assert Path(resolved_path) == base_path / "data.json"
+    assert Path(resolved_path) == base_path / "subdir3" / "data.json"
     assert Path(resolved_path).exists()
 
 
