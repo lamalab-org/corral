@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import pytest
 from catalyst.utils import (
     extract_path_from_answer,
     find_file_by_name,
@@ -9,6 +10,16 @@ from catalyst.utils import (
 
 os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_files")
 TEMP_DIR = Path(os.environ["CORRAL_WORK_DIR"])
+
+
+@pytest.fixture(scope="module")
+def set_corral_work_dir():
+    # Set the CORRAL_WORK_DIR environment variable to the temporary directory
+    os.environ["CORRAL_WORK_DIR"] = str(TEMP_DIR)
+    yield
+    # Clean up after tests
+    if "CORRAL_WORK_DIR" in os.environ:
+        del os.environ["CORRAL_WORK_DIR"]
 
 
 # --- Tests for extract_path_from_answer ---
@@ -103,6 +114,7 @@ def test_find_file_by_name_multiple_matches_returns_most_recent():
     assert Path(found_path).exists()
 
 
+@pytest.mark.usefixtures("set_corral_work_dir")
 def test_find_file_by_name_no_base_dir_provided():
     # This test relies on CORRAL_WORK_DIR being set by the fixture
     base_path = TEMP_DIR

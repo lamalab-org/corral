@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -5,10 +6,12 @@ import pytest
 
 # Import the scoring functions to test
 from catalyst.score import (
+    check_adsorption_sites,
     check_adsorption_structure,
     check_co2_molecule_structure,
     check_mp_structure,
     check_slab_structure,
+    check_slabs_json,
     check_valid_json_file,
 )
 from hypothesis import given
@@ -126,7 +129,6 @@ class TestStructureValidation:
         files["invalid_malformed"] = str(invalid_malformed)
 
         empty_cif = tmp_path / "empty.cif"
-        empty_cif.write_text("")
         files["empty"] = str(empty_cif)
 
         no_atoms = tmp_path / "no_atoms.cif"
@@ -252,3 +254,135 @@ loop_
             result = func(input_text)
             assert isinstance(result, float)
             assert 0.0 <= result <= 1.0
+
+
+class TestSlabsJsonValidation:
+    """Test validation of JSON files containing slab CIF data."""
+
+    @pytest.fixture()
+    def sample_slabs_json(self, tmp_path):
+        """Create sample slabs JSON files."""
+        files = {}
+
+        # Valid slabs JSON with CIF content
+        tmp_path = Path(TEST_SCORE_FILES, "json_files")
+        valid_slabs = tmp_path / "valid_slabs.json"
+        files["valid_slabs"] = str(valid_slabs)
+
+        # Invalid slabs JSON (malformed CIF)
+        invalid_slabs = tmp_path / "invalid_slabs.json"
+        files["invalid_slabs"] = str(invalid_slabs)
+
+        # Empty slabs JSON
+        empty_slabs = tmp_path / "empty_slabs.json"
+        files["empty_slabs"] = str(empty_slabs)
+
+        return files
+
+    def test_check_slabs_json_with_valid_file(self, sample_slabs_json):
+        """Test check_slabs_json with valid slabs JSON file."""
+        assert check_slabs_json(sample_slabs_json["valid_slabs"]) == 1.0
+
+    def test_check_slabs_json_with_invalid_file(self, sample_slabs_json):
+        """Test check_slabs_json with invalid slabs JSON file."""
+        assert check_slabs_json(sample_slabs_json["invalid_slabs"]) == 0.0
+
+    def test_check_slabs_json_with_empty_file(self, sample_slabs_json):
+        """Test check_slabs_json with empty slabs JSON file."""
+        assert check_slabs_json(sample_slabs_json["empty_slabs"]) == 0.0
+
+    def test_check_slabs_json_with_json_string(self):
+        """Test check_slabs_json with JSON string instead of file."""
+        json_string = json.dumps(
+            {
+                "slab_0": "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n"
+            }
+        )
+        assert check_slabs_json(json_string) == 1.0
+
+    def test_check_slabs_json_with_nonexistent_file(self):
+        """Test check_slabs_json with nonexistent file."""
+        assert check_slabs_json("nonexistent_slabs.json") == 0.0
+
+
+class TestAdsorptionSitesValidation:
+    """Test validation of adsorption sites JSON data."""
+
+    @pytest.fixture()
+    def sample_sites_json(self, tmp_path):
+        """Create sample adsorption sites JSON files."""
+        files = {}
+
+        # Valid adsorption sites
+        tmp_path = Path(TEST_SCORE_FILES, "json_files")
+        valid_sites = tmp_path / "valid_sites.json"
+        files["valid_sites"] = str(valid_sites)
+
+        # Sites with alias (top instead of ontop)
+        alias_sites = tmp_path / "alias_sites.json"
+        files["alias_sites"] = str(alias_sites)
+
+        # Invalid sites (wrong coordinate format)
+        invalid_sites = tmp_path / "invalid_sites.json"
+        files["invalid_sites"] = str(invalid_sites)
+
+        # Empty sites
+        empty_sites = tmp_path / "empty_sites.json"
+        files["empty_sites"] = str(empty_sites)
+
+        return files
+
+    def test_check_adsorption_sites_with_valid_sites(self, sample_sites_json):
+        """Test check_adsorption_sites with valid sites."""
+        assert check_adsorption_sites(sample_sites_json["valid_sites"]) == 1.0
+
+    def test_check_adsorption_sites_with_aliases(self, sample_sites_json):
+        """Test check_adsorption_sites with site type aliases."""
+        assert check_adsorption_sites(sample_sites_json["alias_sites"]) == 1.0
+
+    def test_check_adsorption_sites_with_invalid_sites(self, sample_sites_json):
+        """Test check_adsorption_sites with invalid coordinate format."""
+        assert check_adsorption_sites(sample_sites_json["invalid_sites"]) == 0.0
+
+    def test_check_adsorption_sites_with_empty_sites(self, sample_sites_json):
+        """Test check_adsorption_sites with empty sites."""
+        assert check_adsorption_sites(sample_sites_json["empty_sites"]) == 0.0
+
+    def test_check_adsorption_sites_with_json_string(self):
+        """Test check_adsorption_sites with JSON string input."""
+        json_string = json.dumps(
+            {
+                "ontop": [[0.0, 0.0, 3.5]],
+                "bridge": [[0.25, 0.25, 3.2]],
+                "hollow": [[0.333, 0.667, 3.0]],
+            }
+        )
+        assert check_adsorption_sites(json_string) == 1.0
+
+    def test_check_adsorption_sites_missing_site_types(self, tmp_path):
+        """Test check_adsorption_sites with missing basic site types."""
+        partial_sites = tmp_path / "partial_sites.json"
+        # Only has 'ontop', missing 'bridge' and 'hollow'
+        partial_data = {"ontop": [[0.0, 0.0, 3.5]]}
+        partial_sites.write_text(json.dumps(partial_data))
+
+        # Should still return 1.0 if at least one valid site type exists
+        assert check_adsorption_sites(str(partial_sites)) == 1.0
+
+    def test_check_adsorption_sites_unrecognized_types(self, tmp_path):
+        """Test check_adsorption_sites with unrecognized site types."""
+        unknown_sites = tmp_path / "unknown_sites.json"
+        unknown_data = {
+            "unknown_type": [[0.0, 0.0, 3.5]],
+            "weird_site": [[0.25, 0.25, 3.2]],
+        }
+        unknown_sites.write_text(json.dumps(unknown_data))
+
+        assert check_adsorption_sites(str(unknown_sites)) == 0.0
+
+    @given(st.text())
+    def test_check_adsorption_sites_property(self, input_text):
+        """Property test: check_adsorption_sites handles arbitrary input."""
+        result = check_adsorption_sites(input_text)
+        assert isinstance(result, float)
+        assert 0.0 <= result <= 1.0

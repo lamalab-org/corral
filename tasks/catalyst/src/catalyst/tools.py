@@ -760,7 +760,7 @@ def add_adsorbate_to_slab_text(
     # Load adsorbate as a Molecule
     try:
         # First try loading directly as molecule
-        adsorbate = Molecule.from_str(adsorbate_cif, fmt="xyz")
+        adsorbate = Molecule.from_str(adsorbate_cif, fmt="cif")
     except ValueError:
         try:
             # If that fails, try as structure and convert to molecule
