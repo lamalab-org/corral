@@ -54,28 +54,23 @@ def check_valid_json_file(json_path: str) -> float:
         float: 1.0 if valid JSON file exists, 0.0 otherwise
     """
     try:
+        json_path = json_path.strip()
         if not json_path or not json_path.strip():
             logger.warning("Empty path provided to check_valid_json_file")
             return 0.0
 
-        logger.info(f"check_valid_json_file: input={json_path!r}")
-
-        # Resolve the path
-        resolved_path = smart_resolve_path(json_path.strip())
-        logger.info(f"check_valid_json_file: resolved={resolved_path!r}")
-
         # Check if file exists
-        if not Path(resolved_path).exists():
-            logger.info(f"JSON file not found at: {resolved_path}")
+        if not Path(json_path).exists():
+            logger.info(f"JSON file not found at: {json_path}")
             return 0.0
 
         # Check if it's a file (not a directory)
-        if not Path(resolved_path).is_file():
-            logger.info(f"Path exists but is not a file: {resolved_path}")
+        if not Path(json_path).is_file():
+            logger.info(f"Path exists but is not a file: {json_path}")
             return 0.0
 
         # Try to load and parse the JSON
-        with Path(resolved_path).open("r", encoding="utf-8") as f:
+        with Path(json_path).open("r", encoding="utf-8") as f:
             json_data = json.load(f)
 
         # Additional validation - check if it's not empty
@@ -87,13 +82,13 @@ def check_valid_json_file(json_path: str) -> float:
         return 1.0
 
     except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON format in file {resolved_path}: {e}")
+        logger.error(f"Invalid JSON format in file {json_path}: {e}")
         return 0.0
     except UnicodeDecodeError as e:
-        logger.error(f"Encoding error reading file {resolved_path}: {e}")
+        logger.error(f"Encoding error reading file {json_path}: {e}")
         return 0.0
     except PermissionError as e:
-        logger.error(f"Permission denied reading file {resolved_path}: {e}")
+        logger.error(f"Permission denied reading file {json_path}: {e}")
         return 0.0
     except Exception as e:
         logger.error(f"Error validating JSON file {json_path}: {e}", exc_info=True)
@@ -435,65 +430,6 @@ def bulk_diversity_score(polymorph_data_path):
         return 0.0
 
 
-def database_structure_quality(database_path):
-    """
-    Score 1.0 if:
-    - Database exists with bulk and slab tables
-    - Tables contain essential columns
-    - At least one valid entry in each table
-    """
-    import sqlite3
-    from pathlib import Path
-
-    if not Path(database_path).exists():
-        return 0.0
-
-    try:
-        conn = sqlite3.connect(database_path)
-        cursor = conn.cursor()
-
-        # Check tables
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [table[0] for table in cursor.fetchall()]
-
-        bulk_table = next((t for t in tables if "bulk" in t.lower()), None)
-        slab_table = next((t for t in tables if "slab" in t.lower()), None)
-
-        if not bulk_table or not slab_table:
-            conn.close()
-            return 0.0
-
-        # Check for essential columns in bulk table
-        cursor.execute(f"PRAGMA table_info({bulk_table})")
-        bulk_columns = [col[1] for col in cursor.fetchall()]
-        bulk_essential = {"material_id", "cif", "energy_above_hull"}
-
-        # Check for essential columns in slab table
-        cursor.execute(f"PRAGMA table_info({slab_table})")
-        slab_columns = [col[1] for col in cursor.fetchall()]
-        slab_essential = {"slab_id", "miller_index", "cif"}
-
-        # Check if tables have data
-        cursor.execute(f"SELECT COUNT(*) FROM {bulk_table}")
-        bulk_count = cursor.fetchone()[0]
-
-        cursor.execute(f"SELECT COUNT(*) FROM {slab_table}")
-        slab_count = cursor.fetchone()[0]
-
-        conn.close()
-
-        # Score 1.0 if all criteria are met
-        bulk_columns_ok = all(col in bulk_columns for col in bulk_essential)
-        slab_columns_ok = all(col in slab_columns for col in slab_essential)
-
-        if bulk_columns_ok and slab_columns_ok and bulk_count > 0 and slab_count > 0:
-            return 1.0
-        return 0.0
-
-    except Exception:
-        return 0.0
-
-
 def miller_indices_coverage(miller_indices_path):
     """
     Score 1.0 if:
@@ -618,57 +554,6 @@ def slab_diversity_score(slab_terminations_path):
         all_valid = valid_slabs == len(slab_data)
 
         if len(miller_indices) >= 3 and termination_ratio >= 0.7 and all_valid:
-            return 1.0
-        return 0.0
-
-    except Exception:
-        return 0.0
-
-
-def relaxation_sampling_efficiency(relaxed_structures_path):
-    """
-    Score 1.0 if:
-    - Relaxed structures cover at least 3 different Miller indices
-    - Energy values provided for all structures
-    - 10-30 structures total (optimal sampling size)
-    """
-    import json
-
-    if not Path(relaxed_structures_path).exists():
-        return 0.0
-
-    try:
-        with Path(relaxed_structures_path).open() as f:
-            relaxed_data = json.load(f)
-
-        if not relaxed_data:
-            return 0.0
-
-        miller_indices = set()
-        structures_with_energy = 0
-        total_structures = len(relaxed_data)
-
-        for struct_info in relaxed_data.values():
-            # Track Miller indices
-            if "miller_index" in struct_info:
-                miller_idx = struct_info["miller_index"]
-                if isinstance(miller_idx, list):
-                    miller_idx = tuple(miller_idx)
-                miller_indices.add(str(miller_idx))
-
-            # Check energy values
-            if ("energy" in struct_info and struct_info["energy"] is not None) or (
-                "energy_per_atom" in struct_info
-                and struct_info["energy_per_atom"] is not None
-            ):
-                structures_with_energy += 1
-
-        # Check criteria
-        diverse_miller = len(miller_indices) >= 3
-        complete_energy = structures_with_energy == total_structures
-        optimal_sampling = 10 <= total_structures <= 30
-
-        if diverse_miller and complete_energy and optimal_sampling:
             return 1.0
         return 0.0
 
