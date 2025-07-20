@@ -6,15 +6,15 @@ from pathlib import Path
 input_path = Path("./tasks_open.json")
 
 prompts = [
-    "Output only the SMILES string of the compound detailed below: {task['spectra']}.",
+    "Based on the characterization data in the following, output only the SMILES string of the matching compound: {task['spectra']}.",
     "From the following spectral data {task['spectra']}, derive and return the compound's SMILES—nothing else.",
-    "Using these characterization data {task['spectra']}, give the SMILES string alone.",
-    "Return just the SMILES for the compound described by {task['spectra']}.",
-    "Provide the SMILES corresponding to the spectra {task['spectra']}; no additional text.",
+    "Using these characterization data {task['spectra']}, give the SMILES string of the matching compound alone.",
+    "Return just the SMILES for the compound that matched the following characterization data {task['spectra']}.",
+    "Provide the SMILES corresponding to compound matching the spectra {task['spectra']}; no additional text.",
     "Output solely the SMILES representation for the compound with these spectral details: {task['spectra']}.",
-    "Based on the following spectra {task['spectra']}, supply only the compound's SMILES.",
+    "Based on the following spectra {task['spectra']}, return only the compound's SMILES.",
     "Deliver the SMILES string for the molecule characterized by {task['spectra']}, with no extra information.",
-    "Give the SMILES form of the compound indicated by the spectra here: {task['spectra']}.",
+    "Give the SMILES representation of the compound characterized by the spectra here: {task['spectra']}.",
     "Report only the SMILES string derived from these characterization data: {task['spectra']}.",
 ]
 
