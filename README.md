@@ -342,7 +342,7 @@ def calculate_molecular_weight(formula: str) -> float:
     pass
 ```
 
-#### Modal Tools (Cloud Execution)
+#### [Modal](https://modal.com) Tools (Cloud Execution)
 
 ```python
 from corral.utils import modal_tool, MODAL_TOOL_REGISTRY
