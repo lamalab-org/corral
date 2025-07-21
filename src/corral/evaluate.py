@@ -9,6 +9,7 @@ from typing import Any, Protocol
 import requests
 from loguru import logger
 
+from corral.ablations import ToolVerbosity
 from corral.report import (
     BenchmarkResult,
     CorralWandbLogger,
@@ -454,7 +455,15 @@ class MatAgentBenchmark:
         session_id: str,
         checkpoint_type: str = "checkpoint",
     ) -> None:
-        """Write checkpoint data to file using atomic write pattern"""
+        """
+        Write checkpoint data to file using an atomic write pattern.
+
+        This method first writes the checkpoint to a temporary file and then renames it to the target path.
+        This approach ensures that the checkpoint file is never left in a partially written or corrupted state,
+        even if the process crashes or is interrupted during the write. The atomic rename operation guarantees
+        that readers will either see the old file or the fully written new file, but never a half-written file.
+        If an error occurs, the temporary file is cleaned up to avoid clutter.
+        """
         temp_path = checkpoint_path.with_suffix(".tmp")
 
         try:
@@ -470,7 +479,14 @@ class MatAgentBenchmark:
     def _save_checkpoint(
         self, session_id: str, task_results: dict[str, TaskTrialResults], **extra_data
     ) -> None:
-        """Save checkpoint to file"""
+        """
+        Save checkpoint to file, including all relevant session and task state.
+
+        This method centralizes the logic for checkpoint creation, ensuring that all necessary
+        metadata (such as session ID and timestamp) is included. It delegates the actual file
+        writing to an atomic method to guarantee data integrity. This design allows for robust
+        recovery and resumption of long-running or multi-step processes.
+        """
         checkpoint = {
             "task_results": task_results,
             "session_id": session_id,
@@ -487,7 +503,14 @@ class MatAgentBenchmark:
         )
 
     def _load_checkpoint(self, session_id: str) -> dict | None:
-        """Load checkpoint from file"""
+        """
+        Load checkpoint from file, or recover the most recent one if not found.
+
+        This method attempts to load a checkpoint for the given session. If the specific
+        checkpoint file does not exist (e.g., due to interruption or cleanup), it searches
+        for the most recent available checkpoint with the same naming pattern. This design
+        increases robustness and allows for recovery from unexpected interruptions or missing files.
+        """
         checkpoint_path = (
             self.checkpoint_dir / f"{self.checkpoint_name}_{session_id}.pkl"
         )
@@ -506,7 +529,15 @@ class MatAgentBenchmark:
             return None
 
     def _find_most_recent_checkpoint(self) -> dict | None:
-        """Find the most recent checkpoint file with the same checkpoint_name"""
+        """
+        Find and load the most recent checkpoint file with the same checkpoint_name.
+
+        This method scans the checkpoint directory for files matching the session pattern,
+        excluding those marked as finished. It sorts the files by timestamp and loads the most
+        recent one. This enables recovery from interruptions and ensures that progress is not lost
+        if the latest checkpoint file is missing or incomplete. It is a fallback mechanism for robust
+        checkpoint management.
+        """
 
         # Pattern to match checkpoint files with same name but different session IDs
         # excluding "finished" files
@@ -545,7 +576,14 @@ class MatAgentBenchmark:
     def _save_finished_checkpoint(
         self, session_id: str, task_results: dict[str, TaskTrialResults]
     ) -> None:
-        """Save final checkpoint with finished suffix"""
+        """
+        Save the final checkpoint with a 'finished' suffix to mark completion.
+
+        This method creates a checkpoint file that is clearly marked as finished, making it easy
+        to distinguish between in-progress and completed runs. This helps prevent accidental
+        resumption of already completed sessions and provides a clear audit trail for completed
+        benchmarks. The atomic write pattern is used for reliability.
+        """
         checkpoint = {
             "task_results": task_results,
             "session_id": session_id,
@@ -562,7 +600,14 @@ class MatAgentBenchmark:
         )
 
     def _remove_original_checkpoint(self, session_id: str) -> None:
-        """Remove the original checkpoint file"""
+        """
+        Remove the original (unfinished) checkpoint file after completion.
+
+        This method deletes the in-progress checkpoint file once a finished checkpoint has been
+        written. This prevents confusion between incomplete and completed runs, and helps keep
+        the checkpoint directory clean. The try/except block ensures that errors during removal
+        do not interrupt the main workflow.
+        """
         checkpoint_path = (
             self.checkpoint_dir / f"{self.checkpoint_name}_{session_id}.pkl"
         )
