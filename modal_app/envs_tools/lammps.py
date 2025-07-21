@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from modal import Image
-import modal
+
 # cuda_version = "12.8.0"  # should be no greater than host CUDA version
 # flavor = "devel"  #  includes full CUDA toolkit
 # operating_sys = "ubuntu22.04"
@@ -22,7 +22,7 @@ _lammps_image = (
     )
     .pip_install("loguru", "fsspec", "numpy", "matplotlib", "pymatgen")
     .run_commands(
-        'echo \'export LAMMPS_POTENTIALS="/potentials/EAM:/potentials/EAM_FS:/potentials/TERSOFF"\' >> /root/.bashrc'
+        "echo 'export LAMMPS_POTENTIALS=\"/potentials/EAM:/potentials/EAM_FS:/potentials/TERSOFF\"' >> /root/.bashrc"
     )
 )
 with _lammps_image.imports():
@@ -33,25 +33,30 @@ with _lammps_image.imports():
 
 
 def _install_lammps():
-
     try:
-        logger.debug("Cloning LAMMPS repository...")    
-        subprocess.run(["git", "clone", "https://github.com/lammps/lammps.git"], check=True)
+        logger.debug("Cloning LAMMPS repository...")
+        subprocess.run(
+            ["git", "clone", "https://github.com/lammps/lammps.git"], check=True
+        )
 
         logger.debug("Making lammps/build directory")
-        os.makedirs("lammps/build", exist_ok=True)
+        from pathlib import Path
+
+        Path("lammps/build").mkdir(parents=True, exist_ok=True)
 
         logger.debug("Changing to lammps/build")
         os.chdir("lammps/build")
-        
+
         logger.debug("Running CMAKE for MANY BODY PACKAGE")
-        subprocess.check_call("cmake ../cmake -D PKG_MANYBODY=on -D PKG_ATC=yes", shell=True)
+        subprocess.check_call(
+            "cmake ../cmake -D PKG_MANYBODY=on -D PKG_ATC=yes", shell=True
+        )
         logger.debug("Running CMake with presets and GPU support...")
         subprocess.check_call(
             "cmake -C ../cmake/presets/most.cmake "
             "-C ../cmake/presets/nolib.cmake "
             "../cmake",
-            shell=True
+            shell=True,
         )
         # logger.debug("Running CMake with GPU and KOKKOS support...")
         # subprocess.check_call(
@@ -62,7 +67,7 @@ def _install_lammps():
         #     "../cmake",
         #     shell=True
         # )
-    
+
         logger.debug("CMAKE build...")
         subprocess.check_call("cmake --build .", shell=True)
 
@@ -71,14 +76,18 @@ def _install_lammps():
 
         logger.debug("LAMMPS installed successfully.")
         return "LAMMPS installed successfully"
-    
+
     except subprocess.CalledProcessError as e:
         logger.error(f"Installation failed at step: {e.cmd}")
-        raise Exception(f"Installation failed at step: {e.cmd}")
+        raise Exception(f"Installation failed at step: {e.cmd}") from e
+
 
 lammps_image = _lammps_image.run_function(_install_lammps)
 
-def _run_lammps(input_file: str, log_file: str, directory_path: str = None, num_cpus: int = 1) -> None:
+
+def _run_lammps(
+    input_file: str, log_file: str, directory_path: str | None = None, num_cpus: int = 1
+) -> None:
     """
     Runs a LAMMPS simulation using a specified input file and writes the log output to a given log file.
 
@@ -92,19 +101,31 @@ def _run_lammps(input_file: str, log_file: str, directory_path: str = None, num_
     Raises:
         ValueError: If the LAMMPS simulation fails.
     """
-    import subprocess
+
     import os
+    import subprocess
+    from pathlib import Path
 
     lmp_command = "/root/lammps/build/lmp"
-    original_cwd = os.getcwd()
+    original_cwd = Path.cwd()
     if directory_path:
         os.chdir(directory_path)
     try:
         # command = ["mpirun", "--allow-run-as-root", "-np", "8", lmp_command, "-in", input_file, "-log", log_file]
         # if use_cpus:
         logger.info("Running LAMMPS with multiple CPUs")
-            # command = [lmp_command, "-sf", "gpu", "-pk", "gpu", "1", "-in", input_file, "-log", log_file]
-        command = ["mpirun", "--allow-run-as-root", "-np", str(num_cpus), lmp_command, "-in", input_file, "-log", log_file]
+        # command = [lmp_command, "-sf", "gpu", "-pk", "gpu", "1", "-in", input_file, "-log", log_file]
+        command = [
+            "mpirun",
+            "--allow-run-as-root",
+            "-np",
+            str(num_cpus),
+            lmp_command,
+            "-in",
+            input_file,
+            "-log",
+            log_file,
+        ]
         # else:
         #     logger.info("Running LAMMPS with single CPU")
         #     command = [lmp_command, "-in", input_file, "-log", log_file]
