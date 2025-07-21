@@ -1,25 +1,20 @@
-import uvicorn
+import gc
+
 from loguru import logger
-# from tools import Image_optimizer, get_structure_from_mp_text
-from tools import Image_optimizer, Image_Analyzer, Code_Executor, Document_Retrieval
-from pathlib import Path
-from score import *
-from corral.base import Environment, Tool
+from score import check_image_quality, check_params, check_scalar
+from tools import Code_Executor, Document_Retrieval, Image_Analyzer, Image_optimizer
+
+from corral.base import Environment
 from corral.io import (
+    CatFilesTool,
     CopyFileTool,
     FileInfoTool,
     FSManager,
     ListFilesTool,
     ReadFileTool,
     WriteFileTool,
-    MkdirTool,
-    CatFilesTool
 )
-import os
 
-from corral.server import run_server
-
-from score import check_params, check_scalar, check_image_quality
 
 class AfmEnvironment(Environment):
     def __init__(
@@ -27,13 +22,13 @@ class AfmEnvironment(Environment):
         task_id: str,
         question: str,
         answer: dict[str, float],
-        initial_params : dict[str, float],
+        initial_params: dict[str, float],
         scoring_fn: str,
         work_dir: str,
-        file: str = None,
-        pointer: str = None,
-        gt: float = None,
-        target_directory: str = None
+        file: str | None = None,
+        pointer: str | None = None,
+        gt: float | None = None,
+        target_directory: str | None = None,
     ):
         self.question = question
         self.correct_answer = answer
@@ -44,7 +39,7 @@ class AfmEnvironment(Environment):
         self.gt = gt
         self.target_directory = target_directory
         # self.target_directory = None
-        
+
         super().__init__(task_id, base_work_dir=work_dir)
 
         # Add math-related tools
@@ -89,9 +84,11 @@ class AfmEnvironment(Environment):
 
     def reset_params(self) -> None:
         import pythoncom
+
         pythoncom.CoInitialize()
-        
+
         import nanosurf
+
         # Initialize SPM and access subsystems
         # spm = nanosurf.SPM()
         # application = spm.application
@@ -107,10 +104,10 @@ class AfmEnvironment(Environment):
 
         # Apply scan parameters (converted to meters and seconds)
         scan.ImageHeight = params["image_height"] * 1e-9  # nm to m
-        scan.ImageWidth = params["image_width"] * 1e-9    # nm to m
-        scan.Scantime = params["times_per_line"]          # [s]
+        scan.ImageWidth = params["image_width"] * 1e-9  # nm to m
+        scan.Scantime = params["times_per_line"]  # [s]
         scan.Points = params["points_per_line"]
-        scan.Rotation = params["rotation"]                # [deg]
+        scan.Rotation = params["rotation"]  # [deg]
         scan.Lines = params["lines_per_frame"]
 
         # Apply Z-controller parameters
@@ -119,7 +116,7 @@ class AfmEnvironment(Environment):
         zcontrol.DGain = params["dgain"]
         zcontrol.SetPoint = params["setpoint"]
         head.CantileverByGUID = params["tip"]
-        
+
         del zcontrol
         del scan
         del application
@@ -127,11 +124,8 @@ class AfmEnvironment(Environment):
         gc.collect()
         pythoncom.CoUninitialize()
 
-
         # Optionally log or confirm
         logger.info("AFM parameters have been reset to initial values.")
-
-
 
     def reset_state(self) -> str:
         """Reset state and update file tools for new workspace"""
@@ -142,14 +136,14 @@ class AfmEnvironment(Environment):
         return trial_id
 
     def get_task_prompt(self) -> str:
-        prompt = f"You are an advanced AI-AFM system with access to the Nanosurf AFM software through its Python API. Solve this task :\n{self.question}\n Images, if generated in the experiment, are stored at {self.target_directory}. If any images are to be saved, use the name {self.file}_ for the nid file in which image will be saved. Note that the Nanosurf software automatically appends an INDEX in the given file name, and hence the final image that will be saved will be {self.file}_{self.pointer}.nid file. In case of numerical answers, give the final scalar output without any units. Do not change parameters except the ones given in the task, as they have been configured by the experimentalists." 
+        prompt = f"You are an advanced AI-AFM system with access to the Nanosurf AFM software through its Python API. Solve this task :\n{self.question}\n Images, if generated in the experiment, are stored at {self.target_directory}. If any images are to be saved, use the name {self.file}_ for the nid file in which image will be saved. Note that the Nanosurf software automatically appends an INDEX in the given file name, and hence the final image that will be saved will be {self.file}_{self.pointer}.nid file. In case of numerical answers, give the final scalar output without any units. Do not change parameters except the ones given in the task, as they have been configured by the experimentalists."
         # Add workspace info
         if self.current_work_dir:
-            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files, if generated, except AFM images will be saved in your isolated workspace."
+            prompt += "\nIMPORTANT: You have access to filesystem tools. All files, if generated, except AFM images will be saved in your isolated workspace."
             # prompt += f"For this task, the afm image will be saved at C:\\Users\\Admin\\Desktop\\corral\\mat-agent-bench\\tasks\\afm\\afm\\afm_images\\{self.file}_{pointer_}.nid\n"
         logger.info(f"prompt : {prompt}")
         return prompt
-    
+
     def score(self) -> float:
         """Score the submitted answer"""
         if not self.state.submitted_answer:
@@ -162,63 +156,55 @@ class AfmEnvironment(Environment):
             logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
 
             if self.scoring_fn == "check_params":
-                score = check_params(self.correct_answer)
-                return score
-            
+                return check_params(self.correct_answer)
+
             if self.scoring_fn == "check_image":
                 score = check_params(self.correct_answer)
-                base_path = self.target_directory
+                from pathlib import Path
+
+                base_path = Path(self.target_directory)
                 file_name = f"{self.file}_{self.pointer}.nid"
-                full_path = os.path.join(base_path, file_name)
+                full_path = base_path / file_name
                 logger.info(f"checking for path {full_path}")
-                exists = os.path.exists(full_path)
+                exists = full_path.exists()
                 logger.info(f"Path exists : {exists}")
                 if exists:
                     self.update_pointer()
-                if score > 0 and exists:
-                    score = 1.0
-                else:
-                    score = 0.0
-                return score
+                return 1.0 if score > 0 and exists else 0.0
 
-                
             elif self.scoring_fn == "check_scalar":
                 score1 = check_scalar(float(self.gt), float(answer_value))
                 score2 = check_params(self.correct_answer)
-                if score1 > 0 and score2 > 0:
-                    score = 1.0
-                else:
-                    score = 0.0
+                score = 1.0 if score1 > 0 and score2 > 0 else 0.0
 
-                base_path = self.target_directory
+                from pathlib import Path
+
+                base_path = Path(self.target_directory)
                 file_name = f"{self.file}_{self.pointer}.nid"
-                full_path = os.path.join(base_path, file_name)
+                full_path = base_path / file_name
                 logger.info(f"checking for path {full_path}")
-                exists = os.path.exists(full_path)
+                exists = full_path.exists()
                 logger.info(f"Path exists : {exists}")
                 if exists:
                     self.update_pointer()
                 return score
-            
+
             elif self.scoring_fn == "check_image_quality":
-                import glob
-                base_path = self.target_directory
-                files = glob.glob(os.path.join(base_path, '*'))
+                from pathlib import Path
+
+                base_path = Path(self.target_directory)
+                files = list(base_path.glob("*"))
                 if not files:
                     return 0.0
-                latest_file = max(files, key=os.path.getctime)
-                full_path = os.path.join(base_path, latest_file)
-                return check_image_quality(full_path)
+                latest_file = max(files, key=lambda f: f.stat().st_ctime)
+                return check_image_quality(str(latest_file))
 
-            
             # elif self.scoring_fn == "binary_image_score":
             #     base_path = self.target_directory
             #     file_name = f"{self.file}_{self.pointer}.nid"
             #     full_path = os.path.join(base_path, file_name)
             #     score = binary_image_score(img1_path, img2_path, metric='ssim', threshold=0.95, resize_to=None)
             #     return score
-
-
 
         except Exception as e:
             logger.error(
@@ -231,24 +217,18 @@ class AfmEnvironment(Environment):
 
 # if __name__ == "__main__":
 
-    # # Create environments for different tasks
-    # environments = {
-    #     "afm_1": AfmEnvironment(
-    #         "afm_1",
-    #         "Set the image size to 100x100 nanometer.",
-    #         [100, 100],
-    #         "check_image_size",
-    #         work_dir="./test_directory",
-    #     ),
+# # Create environments for different tasks
+# environments = {
+#     "afm_1": AfmEnvironment(
+#         "afm_1",
+#         "Set the image size to 100x100 nanometer.",
+#         [100, 100],
+#         "check_image_size",
+#         work_dir="./test_directory",
+#     ),
 
-    # }
+# }
 
-    # host = os.environ.get("CORRAL_HOST", "0.0.0.0")
-    # port = int(os.environ.get("CORRAL_PORT", "8000"))
-    # run_server(environments, host, port)
-
-
-
-
-
-
+# host = os.environ.get("CORRAL_HOST", "0.0.0.0")
+# port = int(os.environ.get("CORRAL_PORT", "8000"))
+# run_server(environments, host, port)
