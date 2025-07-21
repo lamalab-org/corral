@@ -7,7 +7,7 @@ A comprehensive benchmarking framework for evaluating AI agents on materials sci
 ### Prerequisites
 
 - Python 3.10 or higher
-- uv (recommended) or pip for package management
+- `uv` (recommended) or `pip` for package management
 
 ### Installation
 
@@ -99,7 +99,7 @@ result = runner.bench()  # Uses all tasks in the environment
 result = runner.bench(
     task_ids=["math_1", "math_2"],
     trials_per_task=3,
-    k_values=[1, 2, 3],
+    k_values=[1, 2, 3],  # Evaluate with different k values for pass@k metrics
     tool_verbosity="MINIMAL",  # Options: FULL, MINIMAL, NONE
 )
 
@@ -135,7 +135,7 @@ Uses the ReAct (Reasoning and Acting) framework for step-by-step problem solving
 from corral.agents.react import ReActAgent
 
 agent = ReActAgent(
-    model="gpt-4o",  # or "claude-3-5-sonnet-20241022"
+    model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model litellm supports
     temperature=0.1,
     max_iterations=10,
 )
@@ -149,7 +149,7 @@ Uses native function calling from LLM providers to solve tasks by leveraging bui
 from corral.agents.tool_calling import ToolCallingAgent
 
 agent = ToolCallingAgent(
-    model="gpt-4o",  # or "claude-3-5-sonnet-20241022"
+    model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model LiteLLM supports
     temperature=0.0,
     max_iterations=10,
 )
@@ -342,7 +342,7 @@ def calculate_molecular_weight(formula: str) -> float:
     pass
 ```
 
-#### Modal Tools (Cloud Execution)
+#### [Modal](https://modal.com) Tools (Cloud Execution)
 
 ```python
 from corral.utils import modal_tool, MODAL_TOOL_REGISTRY
