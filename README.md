@@ -7,7 +7,7 @@ A comprehensive benchmarking framework for evaluating AI agents on materials sci
 ### Prerequisites
 
 - Python 3.10 or higher
-- uv (recommended) or pip for package management
+- `uv` (recommended) or `pip` for package management
 
 ### Installation
 
