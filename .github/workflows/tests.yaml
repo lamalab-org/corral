@@ -114,11 +114,13 @@ jobs:
       - name: Ensure Git LFS is initialized
         run: |
           git lfs install
-          # Try to pull LFS objects, but don't fail if some are missing
+          # Try to pull LFS objects, but don't fail if some are missing , this is because md environment has big files
           git lfs pull --exclude="" || echo "Some LFS objects missing, continuing..."
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
+        with:
+            enable-cache: true
 
       - name: Install root project (corral)
         run: uv sync --all-extras --dev
@@ -126,14 +128,16 @@ jobs:
       - name: Install task dependencies
         run: |
           # Install the task package in development mode
-          # Path dependencies will automatically use the local corral
-          uv pip install -e .
+          # For src layouts, ensure editable install works properly
+          uv pip install -e . --force-reinstall
         working-directory: ./tasks/${{ matrix.task }}
 
       - name: Run task tests
         run: |
-          # Run tests for this specific task
-          uv run pytest tests -v
+          # Set CORRAL_WORK_DIR for tests that need it
+          export CORRAL_WORK_DIR=$(mktemp -d)
+          # Run tests using uv run and ensure pytest uses the local config
+          uv run python -m pytest tests -v --rootdir=.
         working-directory: ./tasks/${{ matrix.task }}
 
   # Summary job to check all results
