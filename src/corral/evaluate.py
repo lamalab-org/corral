@@ -1,4 +1,5 @@
 import pickle
+import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import partial
@@ -24,7 +25,7 @@ class BenchmarkInterface:
     def __init__(
         self,
         base_url: str = "http://localhost:8000",
-        default_verbosity: str | None = ToolVerbosity.FULL,
+        default_verbosity: str | None = ToolVerbosity.BRIEF.value,
     ):
         self.base_url = base_url
         self.current_verbosity = default_verbosity
@@ -179,11 +180,14 @@ def execute_single_trial(
     interface: "BenchmarkInterface",
     agent: "Agent",
     verbose: bool = False,
+    tool_verbosity: str | None = None,
 ) -> TaskTrailResult:
     """Execute a single trial - pure function"""
     try:
         # Run agent
-        answer, token_usage = agent.run_agent(interface, task_id, verbose=verbose)
+        answer, token_usage = agent.run_agent(
+            interface, task_id, verbose=verbose, tool_verbosity=tool_verbosity
+        )
 
         # Submit answer
         try:
@@ -334,6 +338,7 @@ class MatAgentBenchmark:
             interface=self.interface,
             agent=self.agent,
             verbose=verbose,
+            tool_verbosity=tool_verbosity,
         )
 
         checkpoint_saver = partial(self._save_checkpoint, session_id)
@@ -393,6 +398,10 @@ class MatAgentBenchmark:
             if self.logger:
                 self.logger.log_final_results(result, k_values)
 
+            # Save final checkpoint with finished suffix and remove original
+            self._save_finished_checkpoint(session_id, task_results)
+            self._remove_original_checkpoint(session_id)
+
             return result
 
         finally:
@@ -439,10 +448,45 @@ class MatAgentBenchmark:
 
         return wrapped_saver
 
+    def _write_checkpoint_file(
+        self,
+        checkpoint_path: Path,
+        checkpoint: dict,
+        session_id: str,
+        checkpoint_type: str = "checkpoint",
+    ) -> None:
+        """
+        Write checkpoint data to file using an atomic write pattern.
+
+        This method first writes the checkpoint to a temporary file and then renames it to the target path.
+        This approach ensures that the checkpoint file is never left in a partially written or corrupted state,
+        even if the process crashes or is interrupted during the write. The atomic rename operation guarantees
+        that readers will either see the old file or the fully written new file, but never a half-written file.
+        If an error occurs, the temporary file is cleaned up to avoid clutter.
+        """
+        temp_path = checkpoint_path.with_suffix(".tmp")
+
+        try:
+            with temp_path.open("wb") as f:
+                pickle.dump(checkpoint, f, protocol=pickle.HIGHEST_PROTOCOL)
+            temp_path.rename(checkpoint_path)
+            logger.info(f"{checkpoint_type.title()} saved for session {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to save {checkpoint_type}: {e}")
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+
     def _save_checkpoint(
         self, session_id: str, task_results: dict[str, TaskTrialResults], **extra_data
     ) -> None:
-        """Save checkpoint to file"""
+        """
+        Save checkpoint to file, including all relevant session and task state.
+
+        This method centralizes the logic for checkpoint creation, ensuring that all necessary
+        metadata (such as session ID and timestamp) is included. It delegates the actual file
+        writing to an atomic method to guarantee data integrity. This design allows for robust
+        recovery and resumption of long-running or multi-step processes.
+        """
         checkpoint = {
             "task_results": task_results,
             "session_id": session_id,
@@ -453,26 +497,27 @@ class MatAgentBenchmark:
         checkpoint_path = (
             self.checkpoint_dir / f"{self.checkpoint_name}_{session_id}.pkl"
         )
-        temp_path = checkpoint_path.with_suffix(".tmp")
 
-        try:
-            with temp_path.open("wb") as f:
-                pickle.dump(checkpoint, f, protocol=pickle.HIGHEST_PROTOCOL)
-            temp_path.rename(checkpoint_path)
-            logger.info(f"Checkpoint saved for session {session_id}")
-        except Exception as e:
-            logger.error(f"Failed to save checkpoint: {e}")
-            if temp_path.exists():
-                temp_path.unlink(missing_ok=True)
+        self._write_checkpoint_file(
+            checkpoint_path, checkpoint, session_id, "checkpoint"
+        )
 
     def _load_checkpoint(self, session_id: str) -> dict | None:
-        """Load checkpoint from file"""
+        """
+        Load checkpoint from file, or recover the most recent one if not found.
+
+        This method attempts to load a checkpoint for the given session. If the specific
+        checkpoint file does not exist (e.g., due to interruption or cleanup), it searches
+        for the most recent available checkpoint with the same naming pattern. This design
+        increases robustness and allows for recovery from unexpected interruptions or missing files.
+        """
         checkpoint_path = (
             self.checkpoint_dir / f"{self.checkpoint_name}_{session_id}.pkl"
         )
 
         if not checkpoint_path.exists():
-            return None
+            # Search for the most recent checkpoint with same checkpoint_name
+            return self._find_most_recent_checkpoint()
 
         try:
             with checkpoint_path.open("rb") as f:
@@ -482,3 +527,94 @@ class MatAgentBenchmark:
         except Exception as e:
             logger.warning(f"Error loading checkpoint: {e}")
             return None
+
+    def _find_most_recent_checkpoint(self) -> dict | None:
+        """
+        Find and load the most recent checkpoint file with the same checkpoint_name.
+
+        This method scans the checkpoint directory for files matching the session pattern,
+        excluding those marked as finished. It sorts the files by timestamp and loads the most
+        recent one. This enables recovery from interruptions and ensures that progress is not lost
+        if the latest checkpoint file is missing or incomplete. It is a fallback mechanism for robust
+        checkpoint management.
+        """
+
+        # Pattern to match checkpoint files with same name but different session IDs
+        # excluding "finished" files
+        pattern = f"{self.checkpoint_name}_session_*.pkl"
+
+        matching_files = []
+        for file_path in self.checkpoint_dir.glob(pattern):
+            file_name = file_path.name
+            # Skip finished checkpoints
+            if "finished" in file_name:
+                continue
+
+            # Extract session ID from filename
+            match = re.search(r"session_(\d{8}_\d{6}_\d{6})", file_name)
+            if match:
+                session_timestamp = match.group(1)
+                matching_files.append((file_path, session_timestamp))
+
+        if not matching_files:
+            logger.info("No existing checkpoints found")
+            return None
+
+        # Sort by session timestamp (most recent first)
+        matching_files.sort(key=lambda x: x[1], reverse=True)
+        most_recent_file = matching_files[0][0]
+
+        try:
+            with most_recent_file.open("rb") as f:
+                checkpoint = pickle.load(f)
+            logger.info(f"Loaded most recent checkpoint: {most_recent_file.name}")
+            return checkpoint
+        except Exception as e:
+            logger.warning(f"Error loading most recent checkpoint: {e}")
+            return None
+
+    def _save_finished_checkpoint(
+        self, session_id: str, task_results: dict[str, TaskTrialResults]
+    ) -> None:
+        """
+        Save the final checkpoint with a 'finished' suffix to mark completion.
+
+        This method creates a checkpoint file that is clearly marked as finished, making it easy
+        to distinguish between in-progress and completed runs. This helps prevent accidental
+        resumption of already completed sessions and provides a clear audit trail for completed
+        benchmarks. The atomic write pattern is used for reliability.
+        """
+        checkpoint = {
+            "task_results": task_results,
+            "session_id": session_id,
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "status": "finished",
+        }
+
+        finished_checkpoint_path = (
+            self.checkpoint_dir / f"{self.checkpoint_name}_finished_{session_id}.pkl"
+        )
+
+        self._write_checkpoint_file(
+            finished_checkpoint_path, checkpoint, session_id, "final checkpoint"
+        )
+
+    def _remove_original_checkpoint(self, session_id: str) -> None:
+        """
+        Remove the original (unfinished) checkpoint file after completion.
+
+        This method deletes the in-progress checkpoint file once a finished checkpoint has been
+        written. This prevents confusion between incomplete and completed runs, and helps keep
+        the checkpoint directory clean. The try/except block ensures that errors during removal
+        do not interrupt the main workflow.
+        """
+        checkpoint_path = (
+            self.checkpoint_dir / f"{self.checkpoint_name}_{session_id}.pkl"
+        )
+
+        try:
+            if checkpoint_path.exists():
+                checkpoint_path.unlink()
+                logger.info(f"Original checkpoint removed for session {session_id}")
+        except Exception as e:
+            logger.warning(f"Failed to remove original checkpoint: {e}")

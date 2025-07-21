@@ -97,6 +97,8 @@ class ToolCallingAgent(BaseAgent):
             extractor_prompt_id=extractor_prompt_id,
             **kwargs,
         )
+        # Initialize available tools for logging
+        self._available_tools = None
 
     def run(
         self,
@@ -121,6 +123,9 @@ class ToolCallingAgent(BaseAgent):
         tools = convert_to_openai_tool_format(
             interface.get_available_tools_for_task(task_id)
         )
+        # Store tools for logging
+        self._available_tools = tools
+
         if task_prompt is None:
             task_guide = interface.get_task_prompt(task_id)
         else:
