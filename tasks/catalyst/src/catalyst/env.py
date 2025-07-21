@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -31,8 +32,12 @@ from corral.task import TaskDefinition, TaskGroup
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:
-    raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
-BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+    BASE_WORK_DIR = tempfile.mkdtemp(prefix="catalyst_")
+    logger.info(f"CORRAL_WORK_DIR not set, using temporary directory: {BASE_WORK_DIR}")
+else:
+    BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+
+
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     "mp_structure": check_mp_structure,
