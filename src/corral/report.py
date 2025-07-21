@@ -765,8 +765,10 @@ class CorralWandbLogger:
         self._run_id = None
 
     def _load_run_id(self, run_name: str) -> str | None:
-        """Load the run ID and run name from the local file if it exists and matches the current run_name.
-        Only supports the format: run_id|run_name."""
+        """
+        Loads the run ID and run name from the local file if it exists and matches the current run_name.
+        This enables resuming a previous wandb run with the same name, ensuring continuity in logging and avoiding duplicate runs.
+        """
         try:
             if self.run_id_file.exists():
                 with self.run_id_file.open() as f:
@@ -783,7 +785,10 @@ class CorralWandbLogger:
         return None
 
     def _save_run_id(self, run_id: str, run_name: str) -> None:
-        """Save the run ID and run name to a local file for resuming."""
+        """
+        Saves the run ID and run name to a local file for resuming.
+        This allows future sessions to pick up the same wandb run, supporting robust experiment tracking.
+        """
         try:
             # Save to file in format: run_id|run_name
             with self.run_id_file.open("w") as f:
@@ -793,7 +798,10 @@ class CorralWandbLogger:
             logger.warning(f"Could not save wandb run ID: {e}")
 
     def _remove_run_id(self) -> None:
-        """Remove the run ID file after successful finish."""
+        """
+        Removes the run ID file after a successful finish.
+        This cleanup step prevents accidental resumption of completed runs and keeps the workspace tidy.
+        """
         try:
             if self.run_id_file.exists():
                 self.run_id_file.unlink()
@@ -802,7 +810,10 @@ class CorralWandbLogger:
             logger.warning(f"Could not remove wandb run ID file: {e}")
 
     def start_logging(self, config: dict[str, Any]) -> None:
-        """Initialize wandb run, resuming if interrupted and run_name matches."""
+        """
+        Initializes a wandb run, resuming if interrupted and the run_name matches.
+        This ensures experiment continuity and consistent logging, even if the process is restarted or interrupted.
+        """
         run_name = self.name or f"{config['agent_type']}-{config['session_id']}"
 
         # Try to resume from previous run ID if available and run_name matches
@@ -845,7 +856,10 @@ class CorralWandbLogger:
         logger.info(f"Wandb run initialized: {self.run.url}")
 
     def log_trial(self, trial: TaskTrailResult) -> None:
-        """Log a single trial result"""
+        """
+        Logs a single trial result to the wandb trial table.
+        This enables detailed tracking of each trial's metrics and supports later aggregation and analysis.
+        """
         if not self.trial_table:
             return
 
@@ -871,7 +885,10 @@ class CorralWandbLogger:
         )
 
     def log_final_results(self, result: BenchmarkResult, k_values: list[int]) -> None:
-        """Log final benchmark results"""
+        """
+        Logs final benchmark results, including overall and per-task metrics, to wandb.
+        This function aggregates and records comprehensive metrics for the entire benchmark, supporting reproducibility and in-depth analysis.
+        """
         if not self.run:
             return
 
@@ -992,7 +1009,10 @@ class CorralWandbLogger:
                 logger.error(f"Error logging trial details table: {e}")
 
     def log_agent_artifacts(self, verbose: bool) -> None:
-        """Log agent message files if verbose was True"""
+        """
+        Logs agent message files as wandb artifacts if verbose is True.
+        This preserves detailed agent logs for later inspection, aiding in debugging and experiment transparency.
+        """
         if not self.run or not verbose:
             return
 
@@ -1012,7 +1032,10 @@ class CorralWandbLogger:
             )
 
     def finish(self) -> None:
-        """Finish wandb run and clean up run ID file."""
+        """
+        Finishes the wandb run and cleans up the run ID file.
+        This ensures that the run is properly closed and prevents accidental resumption in future sessions.
+        """
         if self.run:
             self.run.finish()
             logger.info("Wandb run finished")

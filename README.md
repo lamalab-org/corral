@@ -1,6 +1,31 @@
-# Corral: Materials Agent Benchmark
+# Corral: Scientific Agent Benchmark
 
-A comprehensive benchmarking framework for evaluating AI agents on materials science tasks. The system provides standardized environments, tools, and evaluation metrics to test agent performance across diverse materials science challenges.
+<p align="center">
+    <a href="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yml">
+        <img alt="Tests" src="https://github.com/lamalab-org/mat-agent-bench/workflows/Tests/badge.svg" />
+    </a>
+    <a href="https://pypi.org/project/corral">
+        <img alt="PyPI" src="https://img.shields.io/pypi/v/corral" />
+    </a>
+    <a href="https://github.com/lamalab-org/mat-agent-bench/blob/main/LICENSE.md">
+        <img alt="PyPI - License" src="https://img.shields.io/pypi/l/corral" />
+    </a>
+    <a href='https://lamalab-org.github.io/mat-agent-bench/'>
+        <img src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/docs.yml/badge.svg" alt='Documentation Status' />
+    </a>
+    <a href="https://github.com/lamalab-org/mat-agent-bench/blob/main/CODE_OF_CONDUCT.md">
+        <img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Contributor Covenant"/>
+    </a>
+</p>
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/_static/definitive_inverted.png">
+  <img alt="Corral logo" src="docs/_static/definitive.png" width='300px'>
+</picture>
+</p>
+
+A comprehensive benchmarking framework for evaluating AI agents on science tasks. The system provides standardized environments, tools, and evaluation metrics to test agent performance across diverse materials science challenges.
 
 ## 🚀 Getting Started
 
@@ -111,17 +136,17 @@ result = runner.bench(trials_per_task=5, k_values=[1, 2, 3, 4, 5])
 
 The framework includes several pre-built environments:
 
-| Environment | Description | Tasks |
-|-------------|-------------|-------|
-| `samplemath` | Basic mathematical operations | 3 math problems |
-| `chembench` | Chemical structure analysis | Multiple chemistry tasks |
-| `spectra_elu_easy` | Spectroscopy data analysis | Spectral interpretation |
-| `md_simulations` | Molecular dynamics setup | Simulation configuration |
-| `catalyst` | Catalysis research tasks | Catalyst design |
-| `afm` | Atomic force microscopy | Image analysis |
-| `macbench` | Materials computation | Property prediction |
-| `mp_rag_task` | Materials project retrieval | Database queries |
-| `md_tutorials` | MD tutorial completion | Educational tasks |
+| Environment | Description |
+|-------------|-------------|
+| `samplemath` | Basic mathematical operations |
+| `chembench` | Chemical structure analysis |
+| `spectra_elu_easy` | Spectroscopy data analysis |
+| `md_simulations` | Molecular dynamics setup |
+| `catalyst` | Catalysis research tasks |
+| `afm` | Atomic force microscopy |
+| `macbench` | Materials computation |
+| `mp_rag_task` | Materials project retrieval |
+| `md_tutorials` | MD tutorial completion |
 
 ## 🤖 Available Agents
 

@@ -401,13 +401,10 @@ def save_agent_messages(
         "model": model,
         "agent": agent_name,
         "tool_verbosity": tool_verbosity,
+        "tools": tools,
         "timestamp": timestamp,
         "messages": serializable_messages,
     }
-
-    # Add tools information if provided
-    if tools:
-        log_data["tools"] = tools
 
     # Write to file with metadata and pretty formatting
     with Path(file_path).open("w") as f:

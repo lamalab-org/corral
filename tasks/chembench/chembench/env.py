@@ -10,17 +10,13 @@ from tools import (
     get_element_info,
     get_formula_from_smiles,
     get_functional_groups,
-    # get_ghs_classification_pubchem,
     get_h_nmr_spectra_pubchem,
     get_ms_spectra_pubchem,
     get_number_of_isomers,
     get_pka_from_smiles,
     get_smiles_from_name,
-    # online_search,
-    # relevant_pubchem_sections,
-    # search_clinical_trials_by_drug,
-    # search_clinical_trials_by_query,
-    # search_materials_compatibility,
+    online_search,
+    relevant_pubchem_sections,
     simulate_spectra,
     smiles_to_name,
 )
@@ -44,24 +40,23 @@ from corral.server import create_benchmark_server
 load_dotenv("../.env", override=True)
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")
 
+_GENERAL_TOOLS = [
+    online_search,
+    relevant_pubchem_sections,
+]
+
 _CHEMBENCH_TOOLS = [
-    # online_search,
-    # relevant_pubchem_sections,
     smiles_to_name,
     get_smiles_from_name,
     get_pka_from_smiles,
     get_formula_from_smiles,
     get_element_info,
     get_number_of_isomers,
-    # get_ghs_classification_pubchem,
     get_ms_spectra_pubchem,
     get_h_nmr_spectra_pubchem,
     get_c_nmr_spectra_pubchem,
     simulate_spectra,
     get_functional_groups,
-    # search_clinical_trials_by_query,
-    # search_clinical_trials_by_drug,
-    # search_materials_compatibility,
 ]
 
 
@@ -112,10 +107,15 @@ class ChemBenchEnvironment(Environment):
 
         super().__init__(task_id, base_work_dir=work_dir)
         # Add multiple tools
+
         for tool in _CHEMBENCH_TOOLS:
             self.add_tool(tool)
-        for tool in tools.values():
-            self.add_tool(tool)
+        general = False
+        if general:
+            for tool in _GENERAL_TOOLS:
+                self.add_tool(tool)
+            for tool in tools.values():
+                self.add_tool(tool)
 
     def get_task_prompt(self) -> str:
         """Get the task prompt for the environment.
