@@ -1,8 +1,8 @@
 # Corral: Scientific Agent Benchmark
 
 <p align="center">
-    <a href="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yml">
-        <img alt="Tests" src="https://github.com/lamalab-org/mat-agent-bench/workflows/Tests/badge.svg" />
+    <a href="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yaml">
+        <img alt="Tests" src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yaml/badge.svg" />
     </a>
     <a href="https://pypi.org/project/corral">
         <img alt="PyPI" src="https://img.shields.io/pypi/v/corral" />
@@ -11,7 +11,7 @@
         <img alt="PyPI - License" src="https://img.shields.io/pypi/l/corral" />
     </a>
     <a href='https://lamalab-org.github.io/mat-agent-bench/'>
-        <img src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/docs.yml/badge.svg" alt='Documentation Status' />
+        <img src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/docs.yaml/badge.svg" alt='Documentation Status' />
     </a>
     <a href="https://github.com/lamalab-org/mat-agent-bench/blob/main/CODE_OF_CONDUCT.md">
         <img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Contributor Covenant"/>
@@ -20,7 +20,7 @@
 
 <p align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/_static/definitive_inverted.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/_static/corral_logo_final.png">
   <img alt="Corral logo" src="docs/_static/definitive.png" width='300px'>
 </picture>
 </p>
