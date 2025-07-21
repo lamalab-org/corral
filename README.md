@@ -135,7 +135,7 @@ Uses the ReAct (Reasoning and Acting) framework for step-by-step problem solving
 from corral.agents.react import ReActAgent
 
 agent = ReActAgent(
-    model="gpt-4o",  # or "claude-3-5-sonnet-20241022"
+    model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model litellm supports
     temperature=0.1,
     max_iterations=10,
 )
