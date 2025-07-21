@@ -149,7 +149,7 @@ Uses native function calling from LLM providers to solve tasks by leveraging bui
 from corral.agents.tool_calling import ToolCallingAgent
 
 agent = ToolCallingAgent(
-    model="gpt-4o",  # or "claude-3-5-sonnet-20241022"
+    model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model LiteLLM supports
     temperature=0.0,
     max_iterations=10,
 )
