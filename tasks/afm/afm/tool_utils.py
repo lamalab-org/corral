@@ -35,21 +35,6 @@ Document_Retriever = create_retriever_tool(
     "However, it does not contain any code related to displaying/optimizing images."
     "Single query allowed at one. but multiple call allowed",
 )
-# @tool
-# def Document_Retriever(query: str) -> str:
-#     """
-#     This tool retrieves code snippets from a database that are specifically designed for
-#     operating an Atomic Force Microscope (AFM) machine. The retrieved code is intended to be
-#     used as a reference for controlling the AFM.
-
-#     Args:
-#         query (str): The query string to search for relevant code snippets in the database.
-
-#     Returns:
-#         str: The retrieved code snippet.
-#     """
-#     result = Document_Retriever.invoke(query)
-#     return result
 
 
 def scan_image(PGain, IGain, DGain, file):

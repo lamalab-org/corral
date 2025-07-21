@@ -2,8 +2,6 @@ import gc
 
 from loguru import logger
 from score import check_image_quality, check_params, check_scalar
-
-# from tools import Image_optimizer, get_structure_from_mp_text
 from tools import Code_Executor, Document_Retrieval, Image_Analyzer, Image_optimizer
 
 from corral.base import Environment

@@ -191,60 +191,6 @@ def get_subscan_parameters(
     }
 
 
-# def image_process(filename):
-#     # Load AFM data
-#     # filename = "sample.nid"
-#     afm = read(filename)
-#     data = afm.data
-
-#     # Convert to nanometers
-#     Z = data['Image']['Forward']['Z-Axis'] * 1e9
-
-#     # Initial flattening
-#     Z_flat = flatten(Z, order=1)
-
-#     # Extract spatial extents in micrometers
-#     param = afm.param
-#     extents = [param[i][j][0] * 1e6 for i in ['X', 'Y'] for j in ['min', 'range']]
-
-#     # # Further flatten using mask
-#     clip_mask = Z_flat > 10
-#     Z_flat2 = flatten(Z_flat, mask=clip_mask)
-
-#     Z_values = Z_flat2[Z_flat2 > 1].reshape(-1, 1)
-#     gmm = GaussianMixture(n_components=2).fit(Z_values)
-#     labels = gmm.predict(Z_values)
-
-#     # Choose the higher mean as the grain class
-#     means = gmm.means_.flatten()
-#     grain_label = np.argmax(means)
-#     grain_mask = np.zeros_like(Z_flat2, dtype=bool)
-#     grain_mask[Z_flat2 > 1] = labels == grain_label
-
-#     # Label and find objects
-#     labeled, num_features = label(grain_mask)
-#     slices = find_objects(labeled)
-
-#     # Compute bounding boxes in real-world units
-#     x_min, x_max, y_min, y_max = extents
-#     ny, nx = Z_flat2.shape
-#     x_scale = (x_max - x_min) / nx
-#     y_scale = (y_max - y_min) / ny
-
-#     boxes = []
-#     for sl in slices:
-#         if sl is None:
-#             continue
-#         minr, maxr = sl[0].start, sl[0].stop
-#         minc, maxc = sl[1].start, sl[1].stop
-#         x = x_min + minc * x_scale
-#         y = y_min + minr * y_scale
-#         width = (maxc - minc) * x_scale
-#         height = (maxr - minr) * y_scale
-#         boxes.append((x, y, width, height))
-#     return boxes,extents,Z_flat2,labeled
-
-
 def image_process(filename):
     # Load AFM data
     afm = read(filename)
