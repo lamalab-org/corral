@@ -27,5 +27,5 @@ def calculate_lattice_energy(structure_file: str) -> float:
         structure = Structure.from_file(structure_file)
         calculator = EnergyCalculator()
         return calculator.get_energy(structure)
-    except Exception as e:
+    except Exception:
         return None
