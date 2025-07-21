@@ -5,7 +5,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -53,28 +52,20 @@ jobs:
             exit 1
           fi
 
-  tests:
+  # Test the main corral package
+  test-main:
     needs: code-quality
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        python-version: ["3.11"]
-
-    defaults:
-      run:
-        shell: bash -l {0}
-
-
     steps:
       - uses: actions/checkout@v4
-        # Ensure LFS files are pulled for the main repository.
         with:
           lfs: true
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Ensure Git LFS is initialized
-        run: git lfs install
-        # This is because md tasks have big files that need to be pulled. If they needs to be there is different question #:todo
+        run: |
+          git lfs install
+          git lfs pull --exclude=""
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -82,23 +73,83 @@ jobs:
       - name: Install root project
         run: uv sync --all-extras --dev
 
-      # - name: Install catalyst package
-      #   # Change directory to the catalyst task and install its dependencies
-      #   run: |
-      #     # Configure Git to use the GITHUB_TOKEN for GitHub URLs. this is because repo is private  now.
-      #     git config --global url."https://oauth2:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
-      #     uv sync --all-extras --dev
-      #   working-directory: ./tasks/catalyst
-
       - name: Run root project tests
-        # Runs tests in the main 'tests' directory
         run: uv run pytest tests
 
-      - name: Install catalyst dependencies
-        run: uv pip install -e .
-        working-directory: ./tasks/catalyst
+  # Discover and test all tasks
+  discover-tasks:
+    needs: code-quality
+    runs-on: ubuntu-latest
+    outputs:
+      tasks: ${{ steps.discover.outputs.tasks }}
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Run catalyst package tests
-        # Runs tests specifically for the catalyst package
-        run: uv run pytest tests
-        working-directory: ./tasks/catalyst
+      - name: Discover tasks with tests
+        id: discover
+        run: |
+          # Find all directories in tasks/ that have both pyproject.toml and tests/
+          tasks=$(find tasks -maxdepth 1 -type d -name "*" | while read task_dir; do
+            if [[ -f "$task_dir/pyproject.toml" ]] && [[ -d "$task_dir/tests" ]]; then
+              echo "$(basename "$task_dir")"
+            fi
+          done | jq -R -s -c 'split("\n")[:-1]')
+          echo "tasks=$tasks" >> $GITHUB_OUTPUT
+          echo "Found tasks with tests: $tasks"
+
+  # Test each task in parallel
+  test-tasks:
+    needs: [discover-tasks, test-main]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # Don't stop other tasks if one fails
+      matrix:
+        task: ${{ fromJson(needs.discover-tasks.outputs.tasks) }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ensure Git LFS is initialized
+        run: |
+          git lfs install
+          # Try to pull LFS objects, but don't fail if some are missing
+          git lfs pull --exclude="" || echo "Some LFS objects missing, continuing..."
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install root project (corral)
+        run: uv sync --all-extras --dev
+
+      - name: Install task dependencies
+        run: |
+          # Install the task package in development mode
+          uv pip install -e .
+        working-directory: ./tasks/${{ matrix.task }}
+
+      - name: Run task tests
+        run: |
+          # Run tests for this specific task
+          uv run pytest tests -v
+        working-directory: ./tasks/${{ matrix.task }}
+        continue-on-error: false  # Fail the job if tests fail
+
+  # Optional: Create a summary job
+  test-summary:
+    needs: [test-main, test-tasks]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          if [[ "${{ needs.test-main.result }}" == "success" ]] && [[ "${{ needs.test-tasks.result }}" == "success" ]]; then
+            echo "✅ All tests passed!"
+          else
+            echo "❌ Some tests failed:"
+            echo "Main tests: ${{ needs.test-main.result }}"
+            echo "Task tests: ${{ needs.test-tasks.result }}"
+            exit 1
+          fi
