@@ -237,6 +237,7 @@ class BaseAgent(ABC):
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         verbose: bool = False,
+        tool_verbosity: str = "brief",
     ) -> tuple[str, dict[str, int]]:
         """Run the agent to solve a task
 
@@ -249,6 +250,7 @@ class BaseAgent(ABC):
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             verbose (bool, optional): Whether to save agent messages. Defaults to False.
+            tool_verbosity (str, optional): The verbosity level for tool information. Defaults to "brief".
 
         Returns:
             str: The final answer from the agent
@@ -262,7 +264,16 @@ class BaseAgent(ABC):
             final_answer = self.run(interface, task_id, history, task_prompt, examples)
 
             if verbose:
-                save_agent_messages(self.messages, task_id, self.__class__.__name__)
+                # Check if agent has stored tools information
+                tools = getattr(self, "_available_tools", None)
+                save_agent_messages(
+                    messages=self.messages,
+                    task_id=task_id,
+                    agent_name=self.__class__.__name__,
+                    model=self.model,
+                    tools=tools,
+                    tool_verbosity=tool_verbosity,
+                )
 
             if "Error" in final_answer:
                 logger.error(f"Error in agent response: {final_answer}")
@@ -272,10 +283,15 @@ class BaseAgent(ABC):
             logger.error(f"Error running agent: {e}")
             return f"Error running agent: {e}", self.get_total_token_usage()
 
+        message = "The task is to:\n" + self.messages[0]["content"]
+        if self.messages[0]["role"] == "system":
+            message += "\n\n" + self.messages[1]["content"]
+        message += f"\n\nAnd the answer provided by the model\n\n{self.messages[-1]['content']}"
+
         prompt = self.extractor_prompt.fill(
             {
                 "answer": final_answer,
-                "message": self.messages[-1]["content"],
+                "message": message,
             }
         )
 

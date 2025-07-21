@@ -35,6 +35,7 @@ class TaskEnvironment(Environment):
         task_id: str,
         task_group: TaskGroup,
         available_tools: dict[str, Tool],
+        work_dir: str = "spectra_elu_easy_env",
     ):
         self.task_id = task_id
         self.task_group = task_group
@@ -46,7 +47,7 @@ class TaskEnvironment(Environment):
         self.current_task = task_group.tasks[task_id]
 
         # Initialize environment
-        super().__init__(f"{task_group.group_id}_{task_id}")
+        super().__init__(f"{task_group.group_id}_{task_id}", base_work_dir=work_dir)
 
         # Add required tools for the task
         for tool_name in self.current_task.tools:
