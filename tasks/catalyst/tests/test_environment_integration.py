@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_files" / "temp")
+
 import pytest
 from catalyst.env import TaskGroupEnvironment, create_environments, load_tasks_from_json
 from catalyst.score import check_mp_structure, check_slabs_json, check_valid_json_file
@@ -18,7 +20,6 @@ from hypothesis import strategies as st
 
 from corral.task import TaskDefinition, TaskGroup
 
-os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_files" / "temp")
 TEMP_DIR = Path(os.environ["CORRAL_WORK_DIR"])
 
 

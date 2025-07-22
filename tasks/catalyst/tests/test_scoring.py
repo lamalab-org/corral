@@ -2,6 +2,8 @@ import json
 import os
 from pathlib import Path
 
+os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_score_files")
+
 import pytest
 
 # Import the scoring functions to test
@@ -17,7 +19,6 @@ from catalyst.score import (
 from hypothesis import given
 from hypothesis import strategies as st
 
-os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_score_files")
 TEST_SCORE_FILES = Path(os.environ["CORRAL_WORK_DIR"])
 
 
