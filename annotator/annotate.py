@@ -53,7 +53,11 @@ def premark_correctness_from_trials(agent_logs_dir, trials_correctness):
         # Find all agent log files for this task_id
         files = sorted(agent_logs_dir.glob(f"{task_id}_*.json"))
         # Discard files containing _ANNOTATED or _INPROGRESS in their names
-        files = [f for f in files if "_ANNOTATED" not in f and "_INPROGRESS" not in f]
+        files = [
+            f
+            for f in files
+            if "_ANNOTATED" not in f.name and "_INPROGRESS" not in f.name
+        ]
 
         # Sort files by timestamp in filename
         def extract_ts(f, task_id=task_id):
