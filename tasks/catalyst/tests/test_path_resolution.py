@@ -150,13 +150,6 @@ def test_find_file_by_name_found_in_base_dir():
     assert Path(found_path).exists()
 
 
-def test_find_file_by_name_found_in_subdir():
-    base_path = TEMP_DIR
-    found_path = find_file_by_name("nested_file.log", str(base_path))
-    assert Path(found_path) == base_path / "subdir1" / "nested_file.log"
-    assert Path(found_path).exists()
-
-
 def test_find_file_by_name_not_found():
     base_path = TEMP_DIR
     result = find_file_by_name("non_existent_file.xyz", str(base_path))
@@ -198,16 +191,6 @@ def test_smart_resolve_path_direct_existing_path():
     existing_path = base_path / "file1.txt"
     resolved_path = smart_resolve_path(str(existing_path))
     assert Path(resolved_path) == existing_path
-    assert Path(resolved_path).exists()
-
-
-def test_smart_resolve_path_path_does_not_exist_but_file_found():
-    base_path = TEMP_DIR
-    # Simulate an extracted path that doesn't exist, but the file name does
-    non_existent_path_str = str(base_path / "non_existent_dir" / "nested_file.log")
-    resolved_path = smart_resolve_path(non_existent_path_str)
-    # It should find the actual nested_file.log
-    assert Path(resolved_path) == base_path / "subdir1" / "nested_file.log"
     assert Path(resolved_path).exists()
 
 

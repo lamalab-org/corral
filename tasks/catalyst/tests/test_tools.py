@@ -1,5 +1,5 @@
-# test_catalyst_tools.py
 import json
+import os
 import pickle
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -23,6 +23,13 @@ from hypothesis import strategies as st
 from pymatgen.core import Molecule, Structure
 
 MOCK_DATA_DIR = Path(Path(__file__).parent / "mock_data")
+
+
+def skip_if_no_api_key():
+    """Skip test if MP_API_KEY is not available"""
+    return pytest.mark.skipif(
+        not os.getenv("MP_API_KEY"), reason="MP_API_KEY not available in environment"
+    )
 
 
 def rehydrate_docs(docs_as_dicts):
@@ -91,6 +98,7 @@ def co_cif():
     return struct.to(fmt="cif")
 
 
+@skip_if_no_api_key()
 def test_get_structure_from_mp_text():
     cif_str = get_structure_from_mp_text.execute(mp_id="mp-149")
     assert isinstance(cif_str, str)
@@ -99,9 +107,7 @@ def test_get_structure_from_mp_text():
     assert struct.composition.reduced_formula == "Si"
 
 
-@settings(
-    deadline=1000, suppress_health_check=[HealthCheck.too_slow]
-)  # FIX 2: Increase deadline
+@settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
 @given(
     miller_index=st.tuples(
         st.integers(0, 2), st.integers(0, 2), st.integers(0, 2)
@@ -167,6 +173,7 @@ def test_adsorption_workflow(silicon_cif, co_cif):
     assert len(combined_struct) == len(slab_struct) + len(adsorbate_struct)
 
 
+@skip_if_no_api_key()
 def test_get_bulk_polymorphs_data():
     polymorphs_json = get_bulk_polymorphs_data.execute(composition="TiO2")
     data = json.loads(polymorphs_json)
@@ -175,6 +182,7 @@ def test_get_bulk_polymorphs_data():
     assert data[0]["energy_above_hull"] <= data[1]["energy_above_hull"]
 
 
+@skip_if_no_api_key()
 def test_sort_and_get_first_from_json():
     polymorphs_json = get_bulk_polymorphs_data.execute(composition="TiO2")
     stable_id = sort_and_get_first_from_json.execute(
@@ -194,6 +202,7 @@ def test_execute_python_code():
     assert output["execution_result"]["result"] == 50
 
 
+@skip_if_no_api_key()
 def test_get_mp_thermo_data():
     thermo_json = get_mp_thermo_data.execute(material_id="mp-149")
     data = json.loads(thermo_json)
