@@ -159,7 +159,9 @@ def test_find_file_by_name_not_found():
 
 def test_find_file_by_name_multiple_matches_returns_most_recent():
     base_path = TEMP_DIR
-    # The fixture ensures base_path/data.json is newer than subdir2/data.json
+
+    newest_file = Path(base_path / "subdir3" / "data.json")
+    newest_file.write_text('{"key": "newest"}')
     found_path = find_file_by_name("data.json", str(base_path))
     assert Path(found_path) == base_path / "subdir3" / "data.json"
     assert Path(found_path).exists()
