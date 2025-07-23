@@ -7,7 +7,6 @@ from pathlib import Path
 
 from loguru import logger
 from ml.score import (
-    composition_list_quality,
     ml_dataset_preparation_quality_binary,
     ml_pipeline_score,
     model_evaluation_completeness_binary,
@@ -16,6 +15,7 @@ from ml.score import (
     score_polymorph_dataset,
 )
 from ml.tools import create_ml_tools
+from ml.utils import smart_resolve_path
 
 from corral.base import Environment, Tool
 from corral.io import (
@@ -47,7 +47,6 @@ SCORING_FUNCTIONS = {
     "polymorph_retrieval_success": polymorph_retrieval_success,
     "score_polymorph_dataset": score_polymorph_dataset,
     "ml_dataset_preparation_quality_binary": ml_dataset_preparation_quality_binary,
-    "composition_list_quality": composition_list_quality,
 }
 
 
@@ -70,7 +69,7 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
 
 
 def load_tasks_from_json(
-    json_path: str | Path, work_dir: str
+    json_path: str | Path, work_dir: str | Path
 ) -> dict[str, TaskDefinition]:
     """Load task definitions from a JSON file.
 
@@ -120,7 +119,7 @@ class TaskGroupEnvironment(Environment):
         task_id: str,
         task_group: TaskGroup,
         subtask_specific_tools: dict[str, Tool],
-        base_work_dir: str,
+        base_work_dir: str | Path,
         taskgroup_common_tools: dict[str, Tool] | None = None,
     ):
         self.task_group = task_group
@@ -215,7 +214,7 @@ Required submission format:
 
         # Add workspace info
         if self.current_work_dir:
-            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir}. when using tools use this path\n"
+            prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n"
 
         # Add note about dependencies
         if self.current_task.input_from_tasks:
@@ -242,12 +241,15 @@ Required submission format:
             # Get and log the raw submission
             answer_value = self.state.submitted_answer.strip()
             logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
-
+            resolved_answer = smart_resolve_path(answer_value)
+            logger.info(f"Resolved answer for {self.task_id}: {resolved_answer!r}")
             # Call the scoring function with the raw answer
-            score = self.current_task.scoring_fn(answer_value)
+            score = self.current_task.scoring_fn(resolved_answer)
 
             # Store result in task group
-            self.task_group.store_result(self.task_id, {"answer": answer_value}, score)
+            self.task_group.store_result(
+                self.task_id, {"answer": resolved_answer}, score
+            )
             logger.info(f"Task {self.task_id} scored: {score}")
 
             return score
