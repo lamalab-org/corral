@@ -12,13 +12,13 @@ import pandas as pd
 import xgboost as xgb
 from dotenv import load_dotenv
 from loguru import logger
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from tool_utils import (
+from ml.tool_utils import (
     ensure_directory_exists,
     generate_output_capture_code,
     parse_execution_output,
     safe_convert_timeout,
 )
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from corral.base import Tool
 from corral.utils import tool
@@ -1897,36 +1897,27 @@ def filter_json_with_strategy(
         with Path(input_json_path).open("r") as f:
             data = json.load(f)
 
-        # The custom_code expects 'data' to be available and should produce 'filtered_data'
-        filter_code = f"""
-import json
+        # Create execution environment with data available
+        exec_globals = {"data": data}
+        exec_locals = {}
 
-# Input data is available as 'data'
-data = {json.dumps(data)}
+        # Execute the custom filtering code
+        exec(custom_code, exec_globals, exec_locals)
 
-# Custom filtering logic
-{custom_code}
-
-# Result should be stored in 'filtered_data'
-output = filtered_data
-"""
-
-        exec_result = execute_python_code_given_code(filter_code)
-        exec_data = json.loads(exec_result)
-
-        if exec_data["success"] and exec_data["execution_result"]:
-            filtered_data = exec_data["execution_result"].get("output", [])
-        else:
+        # Get the filtered data
+        if "filtered_data" not in exec_locals:
             return json.dumps(
                 {
                     "success": False,
-                    "error": "Custom filtering code failed",
-                    "details": exec_data,
+                    "error": "Custom code must define 'filtered_data' variable",
                 },
                 indent=2,
             )
 
+        filtered_data = exec_locals["filtered_data"]
+
         # Save filtered data
+        Path(output_json_path).parent.mkdir(parents=True, exist_ok=True)
         with Path(output_json_path).open("w") as f:
             json.dump(filtered_data, f, indent=2)
 
