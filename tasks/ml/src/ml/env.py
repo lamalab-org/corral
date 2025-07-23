@@ -1,11 +1,12 @@
 import json
 import os
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
-from score import (
+from ml.score import (
     composition_list_quality,
     ml_dataset_preparation_quality_binary,
     ml_pipeline_score,
@@ -14,7 +15,7 @@ from score import (
     polymorph_retrieval_success,
     score_polymorph_dataset,
 )
-from tools import create_ml_tools
+from ml.tools import create_ml_tools
 
 from corral.base import Environment, Tool
 from corral.io import (
@@ -31,8 +32,13 @@ from corral.task import TaskDefinition, TaskGroup
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:
-    raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
-BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+    BASE_WORK_DIR = tempfile.mkdtemp(prefix="catalyst_")
+    logger.info(f"CORRAL_WORK_DIR not set, using temporary directory: {BASE_WORK_DIR}")
+else:
+    BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+    logger.info(f"Using CORRAL_WORK_DIR: {BASE_WORK_DIR}")
+
+
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     "ml_pipeline_score": ml_pipeline_score,
@@ -258,7 +264,7 @@ Required submission format:
 def create_environments(
     task_json_path: str | Path,
     taskgroup_common_tools: dict[str, Tool] | None = None,
-    work_dir: str = BASE_WORK_DIR,
+    work_dir: str | Path = BASE_WORK_DIR,
 ) -> dict[str, TaskGroupEnvironment]:
     """Create environments for tasks defined in a JSON file
 
@@ -317,7 +323,7 @@ if __name__ == "__main__":
     else:
         tasks_json_path = os.environ.get(
             "CORRAL_TASKS_PATH",
-            Path(__file__).parent / "tasks" / "catalysis_tasks.json",
+            str(Path(__file__).parent.parent.parent / "config" / "dataset.json"),
         )
 
     # Get server settings from environment if provided

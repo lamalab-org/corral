@@ -7,7 +7,7 @@ import traceback
 from pathlib import Path
 
 import joblib
-import numpy as np  # Import numpy
+import numpy as np
 import pandas as pd
 import xgboost as xgb
 from dotenv import load_dotenv
