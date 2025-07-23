@@ -24,20 +24,34 @@ def sample_polymorph_data():
         {
             "material_id": "mp-149",
             "cif": """# CIF sample data
+# generated using pymatgen
 data_Si
-_cell_length_a 5.468
-_cell_length_b 5.468
-_cell_length_c 5.468
-_cell_angle_alpha 90.0
-_cell_angle_beta 90.0
-_cell_angle_gamma 90.0
-_space_group_name_H-M_alt 'F d -3 m'
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   3.84927840
+_cell_length_b   3.84927941
+_cell_length_c   3.84927800
+_cell_angle_alpha   60.00001213
+_cell_angle_beta   60.00000347
+_cell_angle_gamma   60.00001098
+_symmetry_Int_Tables_number   1
+_chemical_formula_structural   Si
+_chemical_formula_sum   Si2
+_cell_volume   40.32952685
+_cell_formula_units_Z   2
 loop_
-_atom_site_label
-_atom_site_fract_x
-_atom_site_fract_y
-_atom_site_fract_z
-Si1 0.125 0.125 0.125
+ _symmetry_equiv_pos_site_id
+ _symmetry_equiv_pos_as_xyz
+  1  'x, y, z'
+loop_
+ _atom_site_type_symbol
+ _atom_site_label
+ _atom_site_symmetry_multiplicity
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+  Si  Si0  1  0.87500000  0.87500000  0.87500000  1
+  Si  Si1  1  0.12500000  0.12500000  0.12500000  1
 """,
             "energy_above_hull": 0.0,
             "formation_energy_per_atom": -4.2,

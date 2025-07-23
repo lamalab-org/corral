@@ -127,7 +127,7 @@ class TestJSONProcessing:
 
         # Result should be the id of the item with minimum energy
         min_energy_item = min(valid_data, key=lambda x: x["energy"])
-        assert result == min_energy_item["id"]
+        assert result == str(min_energy_item["id"])
 
 
 class TestPolymorphSelection:
@@ -327,20 +327,34 @@ class TestStructureValidation:
 
     def test_check_mp_structure_with_valid_cif(self):
         """Test structure validation with valid CIF string."""
-        cif_string = """# Test CIF
-data_test
-_cell_length_a 5.0
-_cell_length_b 5.0
-_cell_length_c 5.0
-_cell_angle_alpha 90.0
-_cell_angle_beta 90.0
-_cell_angle_gamma 90.0
+        cif_string = """# generated using pymatgen
+data_Si
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   3.84927840
+_cell_length_b   3.84927941
+_cell_length_c   3.84927800
+_cell_angle_alpha   60.00001213
+_cell_angle_beta   60.00000347
+_cell_angle_gamma   60.00001098
+_symmetry_Int_Tables_number   1
+_chemical_formula_structural   Si
+_chemical_formula_sum   Si2
+_cell_volume   40.32952685
+_cell_formula_units_Z   2
 loop_
-_atom_site_label
-_atom_site_fract_x
-_atom_site_fract_y
-_atom_site_fract_z
-Si1 0.0 0.0 0.0
+ _symmetry_equiv_pos_site_id
+ _symmetry_equiv_pos_as_xyz
+  1  'x, y, z'
+loop_
+ _atom_site_type_symbol
+ _atom_site_label
+ _atom_site_symmetry_multiplicity
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+  Si  Si0  1  0.87500000  0.87500000  0.87500000  1
+  Si  Si1  1  0.12500000  0.12500000  0.12500000  1
 """
         result = check_mp_structure(cif_string)
         assert result == 1.0
@@ -354,14 +368,34 @@ Si1 0.0 0.0 0.0
     def test_check_mp_structure_with_file_path(self, temp_dir):
         """Test structure validation with file path."""
         cif_file = Path(temp_dir) / "test.cif"
-        cif_content = """data_test
-_cell_length_a 5.0
+        cif_content = """# generated using pymatgen
+data_Si
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   3.84927840
+_cell_length_b   3.84927941
+_cell_length_c   3.84927800
+_cell_angle_alpha   60.00001213
+_cell_angle_beta   60.00000347
+_cell_angle_gamma   60.00001098
+_symmetry_Int_Tables_number   1
+_chemical_formula_structural   Si
+_chemical_formula_sum   Si2
+_cell_volume   40.32952685
+_cell_formula_units_Z   2
 loop_
-_atom_site_label
-_atom_site_fract_x
-_atom_site_fract_y
-_atom_site_fract_z
-Si1 0.0 0.0 0.0
+ _symmetry_equiv_pos_site_id
+ _symmetry_equiv_pos_as_xyz
+  1  'x, y, z'
+loop_
+ _atom_site_type_symbol
+ _atom_site_label
+ _atom_site_symmetry_multiplicity
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+  Si  Si0  1  0.87500000  0.87500000  0.87500000  1
+  Si  Si1  1  0.12500000  0.12500000  0.12500000  1
 """
         cif_file.write_text(cif_content)
 

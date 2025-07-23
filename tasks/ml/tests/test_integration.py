@@ -233,9 +233,9 @@ Si2 0.875 0.875 0.875
         # Test advanced feature engineering
         output_path = str(Path(temp_dir) / "advanced_dataset")
 
-        result_json = prepare_tabular_dataset(
-            str(input_path),
-            output_path,
+        result_json = prepare_tabular_dataset.execute(
+            polymorphs_json_path=str(input_path),
+            output_path=output_path,
             target_property="formation_energy_per_atom",
             feature_engineering="advanced",
             test_split=0.5,  # 50% split for small dataset
@@ -273,9 +273,9 @@ Si2 0.875 0.875 0.875
         # Prepare dataset
         output_path = str(Path(temp_dir) / "validation_dataset")
 
-        dataset_result_json = prepare_tabular_dataset(
-            test_data_files["consolidated"],
-            output_path,
+        dataset_result_json = prepare_tabular_dataset.execute(
+            polymorphs_json_path=test_data_files["consolidated"],
+            output_path=output_path,
             target_property="formation_energy_per_atom",
             feature_engineering="basic",
             test_split=0.3,
@@ -297,10 +297,10 @@ Si2 0.875 0.875 0.875
         for i, config in enumerate(model_configs):
             model_path = str(Path(temp_dir) / f"model_{i}.pkl")
 
-            training_result_json = train_xgboost_model(
-                dataset_result["train_path"],
-                dataset_result["test_path"],
-                model_path,
+            training_result_json = train_xgboost_model.execute(
+                train_data_path=dataset_result["train_path"],
+                test_data_path=dataset_result["test_path"],
+                model_save_path=model_path,
                 target_column="formation_energy_per_atom",
                 hyperparameters=config,
             )
@@ -308,9 +308,9 @@ Si2 0.875 0.875 0.875
             training_result = json.loads(training_result_json)
             if training_result["success"]:
                 # Evaluate each model
-                eval_result_json = evaluate_xgboost_model(
-                    model_path,
-                    dataset_result["test_path"],
+                eval_result_json = evaluate_xgboost_model.execute(
+                    model_path=model_path,
+                    test_data_path=dataset_result["test_path"],
                     target_column="formation_energy_per_atom",
                     detailed_analysis=True,
                 )
@@ -354,9 +354,9 @@ class TestErrorHandlingWorkflow:
 
         output_path = str(Path(temp_dir) / "failed_dataset")
 
-        result_json = prepare_tabular_dataset(
-            str(input_path),
-            output_path,
+        result_json = prepare_tabular_dataset.execute(
+            polymorphs_json_path=str(input_path),
+            output_path=output_path,
             target_property="formation_energy_per_atom",
             feature_engineering="basic",
         )
@@ -373,10 +373,10 @@ class TestErrorHandlingWorkflow:
 
         model_path = str(Path(temp_dir) / "model.pkl")
 
-        result_json = train_xgboost_model(
-            str(invalid_csv),
-            str(invalid_csv),  # Same invalid file for both
-            model_path,
+        result_json = train_xgboost_model.execute(
+            train_data_path=str(invalid_csv),
+            test_data_path=str(invalid_csv),  # Same invalid file for both
+            model_save_path=model_path,
             target_column="nonexistent_column",
         )
 
@@ -386,9 +386,9 @@ class TestErrorHandlingWorkflow:
 
     def test_evaluation_with_nonexistent_model(self, test_data_files):
         """Test model evaluation with non-existent model file."""
-        result_json = evaluate_xgboost_model(
-            "/nonexistent/model.pkl",
-            test_data_files["test_csv"],
+        result_json = evaluate_xgboost_model.execute(
+            model_path="/nonexistent/model.pkl",
+            test_data_path=test_data_files["test_csv"],
             target_column="formation_energy_per_atom",
         )
 
@@ -411,9 +411,9 @@ class TestDataIntegrityWorkflow:
 
         # Step 2: Select subset
         selected_path = str(Path(temp_dir) / "selected.json")
-        select_polymorphs_with_strategy_to_file(
-            test_data_files["consolidated"],
-            selected_path,
+        select_polymorphs_with_strategy_to_file.execute(
+            polymorphs_data=test_data_files["consolidated"],
+            save_path=selected_path,
             selection_strategy="most_stable",
             max_polymorphs=min(2, original_count),  # Select at most 2
             energy_threshold=10.0,  # High threshold
@@ -434,9 +434,9 @@ class TestDataIntegrityWorkflow:
         if selected_count > 0:
             output_path = str(Path(temp_dir) / "integrity_dataset")
 
-            result_json = prepare_tabular_dataset(
-                selected_path,
-                output_path,
+            result_json = prepare_tabular_dataset.execute(
+                polymorphs_json_path=selected_path,
+                output_path=output_path,
                 target_property="formation_energy_per_atom",
                 feature_engineering="basic",
                 test_split=0.3,
@@ -473,9 +473,9 @@ class TestDataIntegrityWorkflow:
         """Test that features remain consistent between train and test sets."""
         output_path = str(Path(temp_dir) / "feature_consistency_dataset")
 
-        result_json = prepare_tabular_dataset(
-            test_data_files["consolidated"],
-            output_path,
+        result_json = prepare_tabular_dataset.execute(
+            polymorphs_json_path=test_data_files["consolidated"],
+            output_path=output_path,
             target_property="formation_energy_per_atom",
             feature_engineering="basic",
             test_split=0.4,
@@ -565,7 +565,7 @@ result = {
         assert Path(output_file).exists()
         with Path(output_file).open() as f:
             saved_result = json.load(f)
-        assert saved_result == exec_result
+        assert saved_result["result"] == exec_result
 
     def test_python_code_for_custom_filtering(self, sample_polymorph_data):
         """Test using Python code for custom data filtering."""

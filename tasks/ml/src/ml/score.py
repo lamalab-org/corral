@@ -99,10 +99,10 @@ def compare_with_ground_truth(
 
     try:
         # Load both files
-        with Path(generated_path, "r").open() as f:
+        with Path(generated_path).open("r") as f:
             generated = json.load(f)
 
-        with Path(ground_truth_path, "r").open() as f:
+        with Path(ground_truth_path).open("r") as f:
             ground_truth = json.load(f)
 
         # Handle different comparison modes
