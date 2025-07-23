@@ -5,7 +5,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -53,27 +52,107 @@ jobs:
             exit 1
           fi
 
-  tests:
+  # Test the main corral package
+  test-main:
     needs: code-quality
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        python-version: ["3.11"]
-
-    defaults:
-      run:
-        shell: bash -l {0}
-
-
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Ensure Git LFS is initialized
+        run: |
+          git lfs install
+          # Try to pull LFS objects, but don't fail if some are missing
+          git lfs pull --exclude="" || echo "Some LFS objects missing, continuing..."
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
-      - name: Install the project
+      - name: Install root project
         run: uv sync --all-extras --dev
 
-      - name: Run tests
+      - name: Run root project tests
         run: uv run pytest tests
+
+  # Discover and test all tasks
+  discover-tasks:
+    needs: code-quality
+    runs-on: ubuntu-latest
+    outputs:
+      tasks: ${{ steps.discover.outputs.tasks }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover tasks with tests
+        id: discover
+        run: |
+          # Find all directories in tasks/ that have both pyproject.toml and tests/
+          tasks=$(find tasks -maxdepth 1 -type d -name "*" | while read task_dir; do
+            if [[ -f "$task_dir/pyproject.toml" ]] && [[ -d "$task_dir/tests" ]]; then
+              echo "$(basename "$task_dir")"
+            fi
+          done | jq -R -s -c 'split("\n")[:-1]')
+          echo "tasks=$tasks" >> $GITHUB_OUTPUT
+          echo "Found tasks with tests: $tasks"
+
+  # Test each task in parallel
+  test-tasks:
+    needs: [discover-tasks, test-main]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # Don't stop other tasks if one fails
+      matrix:
+        task: ${{ fromJson(needs.discover-tasks.outputs.tasks) }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Ensure Git LFS is initialized
+        run: |
+          git lfs install
+          # Try to pull LFS objects, but don't fail if some are missing , this is because md environment has big files
+          git lfs pull --exclude="" || echo "Some LFS objects missing, continuing..."
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+            enable-cache: true
+
+      - name: Install root project (corral)
+        run: uv sync --all-extras --dev
+
+      - name: Install task dependencies
+        run: |
+          # Install the task package in development mode
+          # For src layouts, ensure editable install works properly
+          uv pip install -e . --force-reinstall
+        working-directory: ./tasks/${{ matrix.task }}
+
+      - name: Run task tests
+        run: |
+          # Set CORRAL_WORK_DIR for tests that need it
+          export CORRAL_WORK_DIR=$(mktemp -d)
+          # Run tests using uv run and ensure pytest uses the local config
+          uv run python -m pytest tests -v --rootdir=.
+        working-directory: ./tasks/${{ matrix.task }}
+
+  # Summary job to check all results
+  test-summary:
+    needs: [test-main, test-tasks]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          if [[ "${{ needs.test-main.result }}" == "success" ]] && [[ "${{ needs.test-tasks.result }}" == "success" ]]; then
+            echo "✅ All tests passed!"
+          else
+            echo "❌ Some tests failed:"
+            echo "Main tests: ${{ needs.test-main.result }}"
+            echo "Task tests: ${{ needs.test-tasks.result }}"
+            exit 1
+          fi
