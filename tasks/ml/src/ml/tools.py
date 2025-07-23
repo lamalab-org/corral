@@ -2081,6 +2081,10 @@ def prepare_tabular_dataset(
     import pandas as pd
 
     try:
+        # Create output directory if it doesn't exist
+        output_dir = Path(output_path)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         # Load polymorphs data
         with Path(polymorphs_json_path).open("r") as f:
             polymorphs = json.load(f)
@@ -2215,16 +2219,17 @@ def prepare_tabular_dataset(
             )
 
             # Save scaler
-            scaler_path = f"{output_path}/scaler.pkl"
-            with Path(scaler_path).open("wb") as f:
+            scaler_path = output_dir / "scaler.pkl"
+            with scaler_path.open("wb") as f:
                 pickle.dump(scaler, f)
+            scaler_path = str(scaler_path)
         else:
             X_train_scaled, X_test_scaled = X_train, X_test
             scaler_path = None
 
         # Save datasets
-        train_path = f"{output_path}/train.csv"
-        test_path = f"{output_path}/test.csv"
+        train_path = output_dir / "train.csv"
+        test_path = output_dir / "test.csv"
 
         # Combine features and targets for saving
         train_data = X_train_scaled.copy()
@@ -2236,7 +2241,7 @@ def prepare_tabular_dataset(
         test_data.to_csv(test_path, index=False)
 
         # Save metadata
-        metadata_path = f"{output_path}/metadata.json"
+        metadata_path = output_dir / "metadata.json"
         dataset_info = {
             "target_property": target_property,
             "feature_engineering": feature_engineering,
@@ -2245,22 +2250,22 @@ def prepare_tabular_dataset(
             "test_samples": len(X_test),
             "features": list(df_features.columns),
             "feature_count": len(df_features.columns),
-            "train_path": train_path,
-            "test_path": test_path,
+            "train_path": str(train_path),
+            "test_path": str(test_path),
             "scaler_path": scaler_path,
             "train_metadata": metadata_train.to_dict("records"),
             "test_metadata": metadata_test.to_dict("records"),
         }
 
-        with Path(metadata_path).open("w") as f:
+        with metadata_path.open("w") as f:
             json.dump(dataset_info, f, indent=2)
 
         return json.dumps(
             {
                 "success": True,
-                "train_path": train_path,
-                "test_path": test_path,
-                "metadata_path": metadata_path,
+                "train_path": str(train_path),
+                "test_path": str(test_path),
+                "metadata_path": str(metadata_path),
                 "scaler_path": scaler_path,
                 "dataset_info": dataset_info,
             },
@@ -2268,6 +2273,8 @@ def prepare_tabular_dataset(
         )
 
     except Exception as e:
+        import traceback
+
         return json.dumps(
             {"success": False, "error": str(e), "traceback": traceback.format_exc()}
         )
