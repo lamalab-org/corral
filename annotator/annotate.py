@@ -61,7 +61,7 @@ def premark_correctness_from_trials(agent_logs_dir, trials_correctness):
 
         # Sort files by timestamp in filename
         def extract_ts(f, task_id=task_id):
-            m = re.search(rf"{re.escape(task_id)}_(\d{{8}}_\d{{6}})\\.json$", f)
+            m = re.search(rf"{re.escape(task_id)}_(\d{{8}}_\d{{6}})\\.json$", str(f))
             return m.group(1) if m else ""
 
         files = sorted(files, key=extract_ts)
@@ -927,14 +927,6 @@ def main():
                                     )
                             else:
                                 st.warning(f"Skipping invalid message index: {msg_idx}")
-
-                        # Add step-wise comments to agent action messages
-                        for msg_idx, comments in st.session_state.step_comments.items():
-                            if 0 <= msg_idx < messages_length:
-                                for comment_key, comment_value in comments.items():
-                                    annotated_data["messages"][msg_idx][
-                                        f"{comment_key}_comment"
-                                    ] = comment_value
 
                         # Add annotation metadata
                         annotated_data["annotation_metadata"] = {
