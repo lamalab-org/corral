@@ -195,7 +195,10 @@ def check_slab_structure(path_or_cif: str) -> float:  # TODO: better slab check.
 
 def check_co2_molecule_structure(path_or_cif: str) -> float:
     """
-    Check if the path points to a valid CIF file containing a molecule structure (e.g., CO2).
+    Check if the path points to a valid CIF file contains a CO2 molecule.
+
+    Caveat: Does not work if there is more than one CO2 molecule. 
+    Also does not check for connectivity of the atoms.
 
     Args:
         path_or_cif: Either a path to a CIF file or a CIF string
@@ -242,10 +245,6 @@ def check_adsorption_structure(
 
     def score_fn(path_or_cif: str) -> float:
         try:
-            from pathlib import Path
-
-            from pymatgen.core import Structure
-
             logger.info(f"check_adsorption_structure: input={path_or_cif!r}")
 
             # Check if file exists
