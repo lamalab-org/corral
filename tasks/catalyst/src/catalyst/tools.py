@@ -25,9 +25,10 @@ load_dotenv("../.env")
 # utility function
 def get_bulk_polymorphs_data_func(composition: str) -> str:
     """
-    Query the Materials Project database to find polymorphs for a given composition. This function returns
-    a JSON string containing polymorph data including MP IDs, structures (CIF),  structures (CIF), energies above hull, formation_energy_per_atom, band gaps, densities,
-    volumes, number of sites, symmetry, and stability. The results are sorted by energy above hull.
+    Query the Materials Project database to find polymorphs for a given composition. 
+    This function returns a JSON string containing polymorph data including MP IDs, structures (CIF), 
+    energies above hull, formation_energy_per_atom, band gaps, densities, volumes, number of sites, 
+    symmetry, and stability. The results are sorted by energy above hull.
 
     Args:
         composition: Chemical composition (e.g., 'TiO2')
@@ -103,14 +104,14 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     Information File) format, which is the standard format for storing crystal structure information.
     CIF is then returned as string [/DETAILED]
     [PROCEDURAL] When to use this tool:
-    - Use when you need to retrieve bulk crystal structures from the Materials Project database
+    - Use when you need to retrieve a bulk crystal structure from the Materials Project database
     - Best suited for materials with known MP IDs
-    - Usuall first step in simulation workflows
-    - Recommended for obtaining crystal structures for preparing bulk structures, supercells, bulk cells, slabs etc.
+    - Usually first step in simulation workflows
+    - Recommended for obtaining a crystal structure for preparing bulk structures, supercells, bulk cells, slabs etc.
     - Avoid when you need multiple structures
     [/PROCEDURAL]
     [CONTEXTUAL] How this tool works:
-    - Connects to Materials Project API using authentication key
+    - Connects to Materials Project API using authentication key (which is already provided in the environment)
     - Searches for the specified material ID (MP ID) in the database (MP ID is given as input parameter or if other tools are available to search for MP ID based on available information, then use those tools)
     - Retrieves the pymatgen Structure object containing atomic positions and lattice parameters
     - Converts the structure to CIF format string for compatibility with other tools
