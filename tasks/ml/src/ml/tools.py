@@ -215,8 +215,8 @@ def get_bulk_polymorphs_data(composition: str) -> str:
     - Use when you need to explore all known structural variants of a single material composition
     - Suitable for identifying thermodynamically stable and metastable phases and other properties like band gap, density, volume, number of sites, space group of the structure.
     - Recommended for retrieving structure and Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group of one single compoisition
-    - Avoid when you only need a single, well-known structure (use get_structure_from_mp_text instead)
-    - Avoid when you need data for multiple composition (use batch_retrieve_polymorphs instead)
+    - Avoid when you only need a single structure
+    - Avoid when you need data for multiple composition
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
@@ -332,7 +332,7 @@ def get_bulk_polymorphs_data_to_file(
 ) -> str:
     """[BRIEF] Query Materials Project for polymorphs and save comprehensive data to a JSON file to give path. [/BRIEF]
 
-    [DETAILED] This tool performs the same comprehensive polymorph retrieval as get_bulk_polymorphs_data but saves the results directly to a JSON file for persistent storage and later analysis.
+    [DETAILED] This tool performs the same comprehensive polymorph retrieval  but saves the results directly to a JSON file for persistent storage and later analysis.
     This tool retrieves comprehensive polymorph data from the Materials Project database for a specific chemical composition.
     Polymorphs are different crystal structures with the same chemical formula but different atomic arrangements, leading to distinct physical and chemical properties.
     This tool could be relevant for retrieving structures of the same composition.
@@ -346,9 +346,9 @@ def get_bulk_polymorphs_data_to_file(
     - Use when you need to store polymorph data for later analysis or sharing or if you want to save context of llm.
     - Best suited for building persistent datasets and material databases
     - Highly recommended if the number of polymorphs for a composition could be very big
-    - Avoid when you only need temporary data access (use get_bulk_polymorphs_data instead)
-    - Avoid when you only need a single, well-known structure (use get_structure_from_mp_text instead)
-    - Avoid when you need data for multiple composition (use batch_retrieve_polymorphs instead)
+    - Avoid when you only need temporary data access
+    - Avoid when you only need a single, well-known structure
+    - Avoid when you need data for multiple composition
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
@@ -671,7 +671,7 @@ def sort_and_get_first_from_json(
         polymorph_data_json: [BRIEF] JSON string containing the data to be sorted. [/BRIEF]
                             [DETAILED] A JSON-formatted string containing a list of dictionaries, each representing a material or structure with various properties. The data should be structured consistently with numerical values for the sorting key. This is typically output from polymorph retrieval tools. [/DETAILED]
                             [SYNTACTIC] Format: "Valid JSON string containing list of dictionaries" [/SYNTACTIC]
-                            [EXAMPLES] Examples: JSON from get_bulk_polymorphs_data output [/EXAMPLES]
+                            [EXAMPLES] Examples: JSON /EXAMPLES]
         sort_key: [BRIEF] Property name to sort the data by. [/BRIEF]
                  [DETAILED] The dictionary key name that will be used for sorting the data. This should correspond to a numerical property in the JSON data. The sorting is performed in ascending order, so the first element will have the smallest value for this property. Common keys include energy_above_hull, band_gap, density, formation_energy_per_atom. [/DETAILED]
                  [SYNTACTIC] Format: "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
@@ -734,7 +734,7 @@ def select_polymorphs_with_strategy(
     - Essential for creating representative training sets for machine learning
     - Recommended for comparative studies requiring diverse structural examples
     - Avoid when you need all available data or have specific material requirements
-    - Avoid when you have a custom logic for selection (use custom Python code instead)
+    - Avoid when you have a custom logic for selection
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
@@ -765,7 +765,7 @@ def select_polymorphs_with_strategy(
                         The data should contain polymorphs with properties like energy_above_hull, space_group, and other structural/energetic information.
                         This is typically output from polymorph retrieval tools. [/DETAILED]
                         [SYNTACTIC] Format: "JSON string or valid file path" [/SYNTACTIC]
-                        [EXAMPLES] Examples: JSON string from get_bulk_polymorphs_data, "data/polymorphs.json" [/EXAMPLES]
+                        [EXAMPLES] Examples: JSON string "data/polymorphs.json" [/EXAMPLES]
         selection_strategy: [BRIEF] Strategy for polymorph selection. Defaults to "diverse_energy". [/BRIEF]
                            [DETAILED] The algorithm used for selecting polymorphs from the dataset "diverse_energy" selects polymorphs distributed across the energy range for representative sampling.
                            "most_stable" prioritizes the most thermodynamically stable phases.
@@ -873,7 +873,7 @@ def consolidate_polymorph_datasets(
     [PROCEDURAL] When to use this tool:
     - Use when you need to combine multiple datasets
     - Best suited for building comprehensive materials databases
-    - Recommended for for combining results from batch_retrieve_polymorphs
+    - Recommended for for combining results
     - Avoid when you need to maintain composition-specific organization
     - AVoid when you have a single polymorph file or no files to combine
     [/PROCEDURAL]
@@ -902,7 +902,6 @@ def consolidate_polymorph_datasets(
     Args:
         composition_files: [BRIEF] Dictionary mapping compositions to their JSON file paths. [/BRIEF]
                           [DETAILED] A dictionary where keys are composition names/formulas and values are file paths to their corresponding JSON files containing polymorph data.
-                          This is typically the output from batch_retrieve_polymorphs.
                           The tool will attempt to read each file and integrate the data while maintaining composition information. [/DETAILED]
                           [SYNTACTIC] Format: '{"composition1": "path1.json", "composition2": "path2.json", ...}' [/SYNTACTIC]
                           [EXAMPLES] Examples: {"TiO2": "data/tio2_polymorphs.json", "SiO2": "data/sio2_polymorphs.json"} [/EXAMPLES]
@@ -1015,7 +1014,6 @@ def select_polymorphs_with_strategy_to_file(
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
-    - Applies identical selection strategies as select_polymorphs_with_strategy
     - Processes energy threshold filtering and strategic selection algorithms
     - Automatically saves selected polymorphs to specified file path in JSON format
     - Ensures proper file formatting and directory creation as needed
@@ -1039,7 +1037,7 @@ def select_polymorphs_with_strategy_to_file(
                         [DETAILED] Either a JSON-formatted string containing polymorph data or a file path to a JSON file, depending on the is_path parameter.
                         The data should contain polymorphs with properties like energy_above_hull, space_group, and other structural/energetic information for strategic selection. [/DETAILED]
                         [SYNTACTIC] Format: "JSON string or valid file path" [/SYNTACTIC]
-                        [EXAMPLES] Examples: JSON string from get_bulk_polymorphs_data, "data/polymorphs.json" [/EXAMPLES]
+                        [EXAMPLES] Examples: JSON string from "data/polymorphs.json" [/EXAMPLES]
 
         save_path: [BRIEF] File path where selected polymorphs will be saved. [/BRIEF]
                   [DETAILED] Complete file path where the selected polymorph subset will be saved in JSON format.
@@ -1360,7 +1358,7 @@ def execute_python_script(
     - Best suited for running complex analysis workflows or simulations
     - Essential for integrating external Python tools into automated pipelines
     - Recommended for batch processing and computational workflows
-    - Avoid for simple code execution (use execute_python_code instead)
+    - Avoid for simple code execution
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
@@ -1680,8 +1678,7 @@ def prepare_tabular_dataset(
 
     Args:
         polymorphs_json_path: [BRIEF] Path to consolidated polymorphs JSON file. [/BRIEF]
-                             [DETAILED] Complete file path to a JSON file containing consolidated polymorph data with materials properties and crystal structures.
-                             This should be the output from consolidate_polymorph_datasets or similar tools containing comprehensive materials information including CIF structures and calculated properties. [/DETAILED]
+                             [DETAILED] Complete file path to a JSON file containing consolidated polymorph data with materials properties and crystal structures.[/DETAILED]
                              [SYNTACTIC] Format: "Valid file path to JSON file with materials data" [/SYNTACTIC]
                              [EXAMPLES] Examples: "consolidated_polymorphs.json", "data/materials_database.json", "datasets/all_oxides.json" [/EXAMPLES]
 
@@ -2120,8 +2117,7 @@ def train_xgboost_model(
     Args:
         train_data_path: [BRIEF] Path to training data CSV file. [/BRIEF]
                         [DETAILED] Complete file path to the CSV file containing training data with features and target column.
-                        The file should have a header row with column names and be properly formatted with numerical features.
-                        This is typically output from prepare_tabular_dataset tool. [/DETAILED]
+                        The file should have a header row with column names and be properly formatted with numerical features.[/DETAILED]
                         [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
                         [EXAMPLES] Examples: "data/train.csv", "datasets/materials_train.csv", "ml_data/train_features.csv" [/EXAMPLES]
         test_data_path: [BRIEF] Path to test data CSV file. [/BRIEF]
@@ -2317,7 +2313,7 @@ def evaluate_xgboost_model(
 
     Args:
         model_path: [BRIEF] Path to the saved XGBoost model file. [/BRIEF]
-                   [DETAILED] Complete file path to the serialized XGBoost model created by train_xgboost_model or similar training functions.
+                   [DETAILED] Complete file path to the serialized XGBoost model.
                    The model should be saved using joblib or pickle and contain a trained XGBoost regressor ready for evaluation.
                    The file must be readable and contain a valid model object. [/DETAILED]
                    [SYNTACTIC] Format: "Valid file path to .pkl model file" [/SYNTACTIC]
