@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,6 +9,80 @@ import streamlit as st
 from rubrics import RUBRICS_v1 as RUBRICS
 
 USER_TAGS = ["NA", "MRG", "KMJ", "NMA", "CG", "SJ"]
+
+
+def check_repeated_agent_messages(messages):
+    """
+    Returns a set of message indices where the agent repeated the same message
+    two or more consecutive times.
+    """
+    repeated_indices = set()
+    last_content = None
+    last_idx = None
+    repeat_count = 1
+    for i, message in enumerate(messages):
+        if identify_message_type(message) == "agent_action":
+            content = message.get("content", "")
+            if content == last_content:
+                repeat_count += 1
+                if repeat_count >= 2:
+                    repeated_indices.add(i)
+                    if last_idx is not None:
+                        repeated_indices.add(last_idx)
+            else:
+                repeat_count = 1
+            last_content = content
+            last_idx = i
+        else:
+            last_content = None
+            last_idx = None
+            repeat_count = 1
+    return repeated_indices
+
+
+def premark_correctness_from_trials(agent_logs_dir, trials_correctness):
+    """
+    For each task_id in trials_correctness, find agent log files in agent_logs_dir matching {task_id}_*.json,
+    sort by timestamp, and if the corresponding trial's success is True, pre-mark 'correctness.final_answer' as 'Yes'.
+    """
+    agent_logs_dir = Path(agent_logs_dir)
+    # Always initialize premarked_annotations so it exists in session state
+    if "premarked_annotations" not in st.session_state:
+        st.session_state.premarked_annotations = {}
+    for task_id, trial_list in trials_correctness.items():
+        # Find all agent log files for this task_id
+        files = sorted(agent_logs_dir.glob(f"{task_id}_*.json"))
+        # Discard files containing _ANNOTATED or _INPROGRESS in their names
+        files = [
+            f
+            for f in files
+            if "_ANNOTATED" not in f.name and "_INPROGRESS" not in f.name
+        ]
+
+        # Sort files by timestamp in filename
+        def extract_ts(f, task_id=task_id):
+            m = re.search(rf"{re.escape(task_id)}_(\d{{8}}_\d{{6}})\\.json$", str(f))
+            return m.group(1) if m else ""
+
+        files = sorted(files, key=extract_ts)
+        # For each trial, if success, pre-mark
+        for i, trial in enumerate(trial_list):
+            trial_list_item = list(trial)
+            trial_id, success = trial_list_item
+            if i < len(files):
+                log_path = files[i]
+                log_filename = log_path.name
+                if success is True or success == "True":
+                    # Find the rubric key for correctness.final_answer
+                    task_rubrics = flatten_rubrics(RUBRICS["task_rubrics"])
+                    for key, _rubric in task_rubrics:
+                        if key == "correctness.final_answer":
+                            if "premarked_annotations" not in st.session_state:
+                                st.session_state.premarked_annotations = {}
+                            st.session_state.premarked_annotations[log_filename] = {
+                                key: "Yes"
+                            }
+                            break
 
 
 def get_already_annotated_files(output_directory):
@@ -326,6 +401,36 @@ def initialize_session_state():
         st.session_state.annotation_started = False
     if "json_files" not in st.session_state:
         st.session_state.json_files = []
+    if "results_file_path" not in st.session_state:
+        st.session_state.results_file_path = ""
+    if "trials_correctness" not in st.session_state:
+        st.session_state.trials_correctness = {}
+
+
+# --- Results file loader and extractor ---
+def extract_trials_correctness(results_file_path):
+    """
+    Extracts a dictionary mapping task_ids to a list of sets,
+    each set containing (trial_id, success) from the results file.
+    """
+    import json
+    from pathlib import Path
+
+    if not results_file_path or not Path(results_file_path).exists():
+        return {}
+    with Path(results_file_path).open() as f:
+        results = json.load(f)
+    task_results = results.get("task_results", {})
+    trials_correctness = {}
+    for task_id, task_info in task_results.items():
+        trials = task_info.get("trials", [])
+        trial_list = []
+        for trial in trials:
+            trial_id = trial.get("trial_id")
+            success = trial.get("success")
+            trial_list.append((trial_id, success))  # Use tuple to preserve order
+        trials_correctness[task_id] = trial_list
+    return trials_correctness
 
 
 def reset_annotation_state():
@@ -376,6 +481,30 @@ def main():
             key="output_directory_input",
             help="Leave blank to save in same directory as input",
         )
+
+    # Prompt for results file after input/output directories
+    results_file_path = st.text_input(
+        "Results file (metrics/results.json):",
+        value=st.session_state.get("results_file_path", ""),
+        key="results_file_input",
+        help="Path to the results JSON file with metrics and task_results. Optional, but required for trial correctness extraction.",
+    )
+    if results_file_path:
+        st.session_state.results_file_path = results_file_path
+        st.session_state.trials_correctness = extract_trials_correctness(
+            results_file_path
+        )
+        if st.session_state.trials_correctness:
+            st.success(
+                f"Loaded trial correctness for {len(st.session_state.trials_correctness)} tasks from results file."
+            )
+            # Try to premark agent logs if input_directory is available
+            agent_logs_dir = Path(input_directory)
+            premark_correctness_from_trials(
+                agent_logs_dir, st.session_state.trials_correctness
+            )
+        else:
+            st.info("No trial correctness data found or file missing.")
 
     # Validation and start button
     if input_directory and Path(input_directory).exists():
@@ -524,7 +653,20 @@ def main():
                         st.divider()
 
             # Extract agent actions
-            agent_actions = extract_agent_actions(log_data.get("messages", []))
+            # Only consider messages with role == 'assistant' for repeated message checks
+            assistant_messages = [
+                m for m in log_data.get("messages", []) if m.get("role") == "assistant"
+            ]
+            agent_actions = extract_agent_actions(assistant_messages)
+
+            # --- Auto premark insanity.repeated_message rubric if agent repeated same message ---
+            repeated_indices = check_repeated_agent_messages(assistant_messages)
+            for idx in repeated_indices:
+                if idx not in st.session_state.step_annotations:
+                    st.session_state.step_annotations[idx] = {}
+                st.session_state.step_annotations[idx]["insanity.repeated_message"] = (
+                    "Yes"
+                )
 
             if not agent_actions:
                 st.warning("No agent actions found in this log.")
@@ -692,11 +834,49 @@ def main():
                     st.header("📝 Task-Level Rubrics")
 
                     # Display task rubrics
+                    premarked = {}
+                    # Use only the filename for premarked lookup
+                    log_filename = Path(selected_file).name
+                    if (
+                        "premarked_annotations" in st.session_state
+                        and log_filename in st.session_state.premarked_annotations
+                    ):
+                        premarked = st.session_state.premarked_annotations[log_filename]
+                    # Precheck insanity.repeated_message if any step annotation has it set to Yes
+                    repeated_prechecked = False
+                    for step_ann in st.session_state.step_annotations.values():
+                        if step_ann.get("insanity.repeated_message") == "Yes":
+                            repeated_prechecked = True
+                            break
                     for key, rubric in task_rubrics:
+                        default = premarked.get(key)
+                        radio_key = f"task_{key}_radio"
+                        # Always set the default for correctness.final_answer if premarked and not set by user
+                        if key == "correctness.final_answer":
+                            if default is not None:
+                                st.session_state[radio_key] = default
+                            elif radio_key not in st.session_state:
+                                st.session_state[radio_key] = None
+                        # Precheck insanity.repeated_message if any step annotation has it set to Yes
+                        elif key == "insanity.repeated_message" and repeated_prechecked:
+                            st.session_state[radio_key] = "Yes"
+                        # For other keys, only set if not already set
+                        elif default is not None and radio_key not in st.session_state:
+                            st.session_state[radio_key] = default
+
                         checkbox_result, comment_result = display_rubric_item(
                             key, rubric, "task_"
                         )
-                        st.session_state.task_annotations[key] = checkbox_result
+                        # If not set by user, use premarked value for correctness.final_answer
+                        if key == "correctness.final_answer":
+                            if checkbox_result is None and default is not None:
+                                st.session_state.task_annotations[key] = default
+                            else:
+                                st.session_state.task_annotations[key] = checkbox_result
+                        elif key == "insanity.repeated_message" and repeated_prechecked:
+                            st.session_state.task_annotations[key] = "Yes"
+                        else:
+                            st.session_state.task_annotations[key] = checkbox_result
                         st.session_state.task_comments[key] = comment_result
                         # Save progress after each task rubric input
                         save_intermediate_progress(
@@ -747,14 +927,6 @@ def main():
                                     )
                             else:
                                 st.warning(f"Skipping invalid message index: {msg_idx}")
-
-                        # Add step-wise comments to agent action messages
-                        for msg_idx, comments in st.session_state.step_comments.items():
-                            if 0 <= msg_idx < messages_length:
-                                for comment_key, comment_value in comments.items():
-                                    annotated_data["messages"][msg_idx][
-                                        f"{comment_key}_comment"
-                                    ] = comment_value
 
                         # Add annotation metadata
                         annotated_data["annotation_metadata"] = {
