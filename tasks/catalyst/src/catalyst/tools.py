@@ -6,11 +6,11 @@ import tempfile
 from pathlib import Path
 
 from catalyst.tool_utils import (
+    cast_timeout,
     ensure_directory_exists,
     generate_output_capture_code,
     load_structure,
     parse_execution_output,
-    safe_convert_timeout,
 )
 from dotenv import load_dotenv
 from loguru import logger
@@ -25,9 +25,9 @@ load_dotenv("../.env")
 # utility function
 def get_bulk_polymorphs_data_func(composition: str) -> str:
     """
-    Query the Materials Project database to find polymorphs for a given composition. 
-    This function returns a JSON string containing polymorph data including MP IDs, structures (CIF), 
-    energies above hull, formation_energy_per_atom, band gaps, densities, volumes, number of sites, 
+    Query the Materials Project database to find polymorphs for a given composition.
+    This function returns a JSON string containing polymorph data including MP IDs, structures (CIF),
+    energies above hull, formation_energy_per_atom, band gaps, densities, volumes, number of sites,
     symmetry, and stability. The results are sorted by energy above hull.
 
     Args:
@@ -195,7 +195,7 @@ def create_slab_from_structure_text(
     - Use when you need to create a single slab from a bulk structure with known Miller indices
     - Best suited for straightforward surface generation without need for multiple terminations
     - Recommended when you have specific requirements for slab thickness and vacuum spacing
-    - Avoid when you need to explore multiple possible surface terminations (use enumerate_slabs_text instead)
+    - Avoid when you need to explore multiple possible surface terminations
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
@@ -208,7 +208,7 @@ def create_slab_from_structure_text(
     [/CONTEXTUAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration example:
-    1. [PREREQUISITE] First obtain bulk structure using get_structure_from_mp_text or using other tools that return single struucture CIF [/PREREQUISITE]
+    1. [PREREQUISITE] First obtain bulk structure using get_structure_from_mp_text or using other tools that return single structure CIF [/PREREQUISITE]
     2. [CURRENT] Apply this tool to create slab from bulk structure [/CURRENT]
     3. [FOLLOW_UP] Use output with adsorption site tools like get_adsorption_sites_text [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
@@ -225,8 +225,8 @@ def create_slab_from_structure_text(
                       [DETAILED] A properly formatted CIF string containing the bulk crystal structure
                       data including lattice parameters, atomic positions, and space group information.
                       This structure will be cleaved to create the surface. [/DETAILED]
-                      [SYNTACTIC] Format: "Valid CIF format string with atomic coordinates and lattice parameters" [/SYNTACTIC]
-                      [EXAMPLES] Examples: CIF string from get_structure_from_mp_text output [/EXAMPLES]
+                      [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
+                      [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
         miller_index: [BRIEF] Miller indices for the surface plane. Defaults to (1,1,1). [/BRIEF]
                      [DETAILED] A tuple of three integers specifying the crystallographic plane along
                      which the structure will be cleaved. These indices define the surface orientation
@@ -315,7 +315,7 @@ def enumerate_slabs_text(
     - Use when you need to explore all possible surface terminations for a material
     - Best suited for complex materials with multiple distinct atomic layers
     - Recommended for systematic surface studies and comparing different surface chemistries
-    - Avoid when you only need a single, well-defined surface (use create_slab_from_structure_text instead)
+    - Avoid when you only need a single, well-defined surface
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
@@ -346,8 +346,8 @@ def enumerate_slabs_text(
                  from which surface slabs will be generated. This should be a three-dimensional
                  periodic structure with well-defined atomic positions and lattice parameters.
                  The structure will be analyzed to determine all possible surface terminations. [/DETAILED]
-                 [SYNTACTIC] Format: "Valid CIF format string with complete structural information" [/SYNTACTIC]
-                 [EXAMPLES] Examples: CIF string from Materials Project structures [/EXAMPLES]
+                 [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
+                 [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
         miller_index: [BRIEF] Miller indices for surface orientation. Defaults to (1,1,1). [/BRIEF]
                      [DETAILED] A tuple of three integers specifying the crystallographic plane along
                      which all surface terminations will be generated. This determines the surface
@@ -436,7 +436,7 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
     - Could be useful for workflows that require a single slab for adsorption or catalysis studies
     - Recommended when you need to compare results from different surface terminations
     - One can randomly pick index to select a slab from the enumerated list if they want to randomly pick a slab
-    - Avoid when you only need one slab (use create_slab_from_structure_text directly)
+    - Avoid when you only need one slab
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
@@ -529,7 +529,7 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
 
     [CONTEXTUAL] How this tool works:
     - Parses the slab CIF structure to identify surface atoms
-    - Uses AdsorbateSiteFinder to geometrically analyze the surface topology
+    - Uses AdsorbateSiteFinder from pymatgen to geometrically analyze the surface topology
     - Classifies sites based on coordination environment (top, bridge, hollow)
     - Calculates fractional coordinates for each potential binding site
     - Returns sites organized by type in a JSON format for easy selection
@@ -557,8 +557,8 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
                  with atomic positions, lattice parameters, and surface geometry. This should be
                  a two-dimensional periodic structure with a well-defined surface and vacuum
                  region. The structure is analyzed to identify potential adsorption sites. [/DETAILED]
-                 [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
-                 [EXAMPLES] Examples: CIF string from choose_slab_text or create_slab_from_structure_text [/EXAMPLES]
+                 [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
+                 [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string containing classified adsorption sites with fractional coordinates. [/BRIEF]
@@ -731,7 +731,7 @@ def add_adsorbate_to_slab_text(
     [CONTEXTUAL] How this tool works:
     - Parses the slab CIF structure to identify the surface geometry
     - Loads the adsorbate as a molecular structure (handles both XYZ and CIF formats)
-    - Uses AdsorbateSiteFinder to place the adsorbate at the specified site
+    - Uses AdsorbateSiteFinder from pymatgen to place the adsorbate at the specified site
     - Adjusts the vertical position according to the specified height parameter
     - Combines the structures into a single CIF-formatted output
     - Automatically selects a top site if no specific site is provided
@@ -759,15 +759,15 @@ def add_adsorbate_to_slab_text(
                  on which the adsorbate will be placed. This should be a two-dimensional periodic
                  structure with a well-defined surface and vacuum region. The slab provides the
                  substrate for molecular adsorption. [/DETAILED]
-                 [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
-                 [EXAMPLES] Examples: CIF string from choose_slab_text output [/EXAMPLES]
+                 [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
+                 [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
         adsorbate_cif: [BRIEF] CIF string of the adsorbate molecule structure. [/BRIEF]
                       [DETAILED] A CIF or XYZ formatted string containing the molecular structure
                       of the adsorbate to be placed on the surface. This can be a small molecule
                       like CO2, H2O, or more complex organic molecules. The tool will attempt to
                       parse both CIF and XYZ formats automatically. [/DETAILED]
                       [SYNTACTIC] Format: "Valid CIF or XYZ format string with molecular structure" [/SYNTACTIC]
-                      [EXAMPLES] Examples: CIF string from get_structure_from_mp_text for molecules [/EXAMPLES]
+                      [EXAMPLES] Examples: CIF string for molecules [/EXAMPLES]
         height: [BRIEF] Height in Angstroms above the surface for adsorbate placement. Defaults to 2.0. [/BRIEF]
                [DETAILED] The vertical distance above the surface at which the adsorbate will be
                placed. This parameter controls the initial separation between the adsorbate and
@@ -878,13 +878,13 @@ def generate_reconstructed_slab(
     - If the slab has no adsorption site, reconstruction may introduce suitable sites.
     - Essential for accurate modeling of catalytic surfaces with complex structures
     - Recommended for systematic studies of reconstruction effects on surface properties
-    - Avoid for simple surface terminations (use enumerate_slabs_text instead)
+    - Avoid for simple surface terminations
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
     - Parses the bulk structure and validates Miller indices for the crystal system
     - Interprets complex reconstruction instructions in JSON format
-    - Uses ReconstructionGenerator to apply transformation matrices and structural changes
+    - Uses ReconstructionGenerator from pymatgen to apply transformation matrices and structural changes
     - Implements atomic additions, removals, and rearrangements as specified
     - Generates either a single reconstruction or all possible variants
     - Validates and optimizes the resulting surface structures
@@ -912,8 +912,8 @@ def generate_reconstructed_slab(
                  that will be used as the starting point for reconstruction. This should be a
                  three-dimensional periodic structure with well-defined symmetry and atomic
                  positions. The bulk structure provides the template for surface generation. [/DETAILED]
-                 [SYNTACTIC] Format: "Valid CIF format string with bulk crystal structure" [/SYNTACTIC]
-                 [EXAMPLES] Examples: CIF string from Materials Project database [/EXAMPLES]
+                 [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
+                 [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
         miller_index: [BRIEF] Miller indices for the surface orientation. [/BRIEF]
                      [DETAILED] A tuple of three integers specifying the crystallographic plane
                      along which the reconstruction will be performed. These indices must be
@@ -1152,9 +1152,9 @@ def get_bulk_polymorphs_data(composition: str) -> str:
     - Use when you need to explore all known structural variants of a single material composition
     - Suitable for identifying thermodynamically stable and metastable phases and other properties like band gap, density, volume, number of sites, space group of the structure.
     - Recommended for retrieving structure and Materials Project ID (MP ID), CIF structure, energy above hull,
-    formation energy per atom, band gap, density, volume, number of sites, space group of one single compoisition
-    - Avoid when you only need a single, well-known structure (use get_structure_from_mp_text instead)
-    - Avoid when you need data for multiple composition (use batch_retrieve_polymorphs instead)
+    formation energy per atom, band gap, density, volume, number of sites, space group of one single composition
+    - Avoid when you only need a single, well-known structure
+    - Avoid when you need data for multiple compositions
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
@@ -1291,9 +1291,9 @@ def get_bulk_polymorphs_data_to_file(
      - Use when you need to store polymorph data for later analysis or sharing or if you want to save context of llm.
      - Best suited for building persistent datasets and material databases
      - Highly recommended if the number of polymorphs for a compoisition could be very big
-     - Avoid when you only need temporary data access (use get_bulk_polymorphs_data instead)
-     - Avoid when you only need a single, well-known structure (use get_structure_from_mp_text instead)
-     - Avoid when you need data for multiple composition (use batch_retrieve_polymorphs instead)
+     - Avoid when you only need temporary data access
+     - Avoid when you only need a single structure
+     - Avoid when you need data for multiple compositions
      [/PROCEDURAL]
 
      [CONTEXTUAL] How this tool works:
@@ -1633,7 +1633,7 @@ def execute_python_code(
 
     try:
         # Ensure timeout is valid
-        timeout = safe_convert_timeout(timeout)
+        timeout = cast_timeout(timeout)
 
         # Create directory if needed
         if save_output_to:
@@ -1743,7 +1743,7 @@ def execute_python_script(
     - Best suited for running complex analysis workflows or simulations
     - Essential for integrating external Python tools into automated pipelines
     - Recommended for batch processing and computational workflows
-    - Avoid for simple code execution (use execute_python_code instead)
+    - Avoid for simple code execution
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
@@ -1878,7 +1878,7 @@ def get_mp_thermo_data(material_id: str) -> str:
 
     [PROCEDURAL] When to use this tool:
     - Use when you need comprehensive thermodynamic data for specific materials
-    - Recommended if you need to retrieve more thermodynaic infprmation of a structure
+    - Recommended if you need to retrieve more thermodynamic information of a structure
     - Avoid when you only need basic structural or electronic properties
     [/PROCEDURAL]
 
@@ -1891,7 +1891,7 @@ def get_mp_thermo_data(material_id: str) -> str:
     [/CONTEXTUAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure MP_API_KEY is set and material ID is valid [/PREREQUISITE]
+    1. [PREREQUISITE] Ensure material MPID is valid [/PREREQUISITE]
     2. [CURRENT] Retrieve comprehensive thermodynamic data for target material [/CURRENT]
     3. [FOLLOW_UP] Use thermodynamic data for stability analysis or phase diagram studies [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
@@ -2043,7 +2043,7 @@ def find_all_unique_slabs_upto_millerindex(
                                       structure, or a CIF-formatted string containing the structure data, depending on
                                       the from_path parameter. This structure serves as the basis for all surface
                                       generation and should be a well-defined three-dimensional crystal. [/DETAILED]
-                                      [SYNTACTIC] Format: "Valid CIF file path or CIF format string" [/SYNTACTIC]
+                                      [SYNTACTIC] Format: "Valid CIF file path or string in valid CIF syntax" [/SYNTACTIC]
                                       [EXAMPLES] Examples: "structures/bulk_si.cif", CIF string from Materials Project [/EXAMPLES]
 
         from_path: [BRIEF] Boolean indicating if input is a file path. Defaults to False. [/BRIEF]
@@ -2300,7 +2300,7 @@ def generate_adsorbate_slab_configs(
     - Loads the slab structure from CIF string
     - Converts adsorbate CIF to a molecular structure
     - Parses the adsorption sites information from JSON
-    - Uses AdsorbateSiteFinder to place adsorbates at each site
+    - Uses AdsorbateSiteFinder from pymatgen to place adsorbates at each site
     - Generates multiple configurations with different site types and positions
     - Returns a JSON containing all successfully generated adsorbate-slab configurations
     [/CONTEXTUAL]
@@ -2324,14 +2324,14 @@ def generate_adsorbate_slab_configs(
                  [DETAILED] A properly formatted CIF string containing the slab structure on which
                  adsorbates will be placed. The slab should be oriented with the surface normal
                  along the c-axis for proper adsorbate placement. [/DETAILED]
-                 [SYNTACTIC] Format: "Valid CIF format string with slab structure" [/SYNTACTIC]
+                 [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
                  [EXAMPLES] Examples: Output from slab generation tools [/EXAMPLES]
         adsorbate_cif: [BRIEF] CIF string of the adsorbate molecule. [/BRIEF]
                       [DETAILED] A CIF-formatted string containing the adsorbate molecule structure
                       that will be placed on the slab surface. The molecule should be properly
                       oriented and have reasonable geometry for surface adsorption. [/DETAILED]
-                      [SYNTACTIC] Format: "Valid CIF format string with molecular structure" [/SYNTACTIC]
-                      [EXAMPLES] Examples: CO molecule, H2O molecule, organic compounds [/EXAMPLES]
+                      [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
+                      [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
         adsorption_sites_json: [BRIEF] JSON string containing adsorption sites information. [/BRIEF]
                               [DETAILED] A JSON-formatted string containing information about potential
                               adsorption sites on the slab surface, typically organized by site type

@@ -177,7 +177,6 @@ def check_slab_structure(path_or_cif: str) -> float:  # TODO: better slab check.
     Returns:
         float: Score between 0.0 and 1.0
     """
-    logger.info("check_slab_structure")
     logger.info(f"Input path_or_cif: {path_or_cif}")
     try:
         # Determine if the input is a path or a CIF string
@@ -197,7 +196,7 @@ def check_co2_molecule_structure(path_or_cif: str) -> float:
     """
     Check if the path points to a valid CIF file contains a CO2 molecule.
 
-    Caveat: Does not work if there is more than one CO2 molecule. 
+    Caveat: Does not work if there is more than one CO2 molecule.
     Also does not check for connectivity of the atoms.
 
     Args:
@@ -206,7 +205,6 @@ def check_co2_molecule_structure(path_or_cif: str) -> float:
     Returns:
         float: Score between 0.0 and 1.0
     """
-    logger.info("check_molecule_structure")
     logger.info(f"Input path_or_cif: {path_or_cif}")
     try:
         # Determine if the input is a path or a CIF string

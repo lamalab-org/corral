@@ -1,27 +1,4 @@
-import json
-import traceback
-
 from pymatgen.core import Structure
-
-
-def execute_python_code_given_code(code: str) -> str:
-    """
-    Executes a given Python code string.
-    This is a placeholder and should be replaced with your actual implementation.
-    """
-    try:
-        # Create a dictionary to hold local variables during execution
-        exec_globals = {}
-        exec_locals = {}
-        exec(code, exec_globals, exec_locals)
-        # Assuming the filtering code will produce a 'output' variable
-        return json.dumps(
-            {"success": True, "execution_result": {"output": exec_locals.get("output")}}
-        )
-    except Exception as e:
-        return json.dumps(
-            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
-        )
 
 
 def generate_output_capture_code() -> str:
@@ -141,7 +118,7 @@ print('EXECUTION_RESULT:', json.dumps(result_))
 """
 
 
-def safe_convert_timeout(timeout) -> int:
+def cast_timeout(timeout) -> int:
     """
     Safely convert timeout parameter to integer.
 
