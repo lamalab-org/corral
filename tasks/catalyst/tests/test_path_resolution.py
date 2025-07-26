@@ -8,7 +8,6 @@ from catalyst.utils import (
     find_file_by_name,
     smart_resolve_path,
 )
-from loguru import logger
 
 TEMP_DIR = Path(os.environ["CORRAL_WORK_DIR"])
 
@@ -23,61 +22,6 @@ def setup_corral_work_dir():
         os.environ["CORRAL_WORK_DIR"] = original
     else:
         os.environ.pop("CORRAL_WORK_DIR", None)
-
-
-def test_debug_ci_environment():
-    """Debug test to see what files exist in CI"""
-    import os
-    from pathlib import Path
-
-    logger.info("\n=== CI DEBUG INFO ===")
-    logger.info(f"CORRAL_WORK_DIR: {os.environ.get('CORRAL_WORK_DIR')}")
-    logger.info(f"TEMP_DIR: {TEMP_DIR}")
-    logger.info(f"TEMP_DIR exists: {TEMP_DIR.exists()}")
-    logger.info(f"TEMP_DIR is directory: {TEMP_DIR.is_dir()}")
-
-    if TEMP_DIR.exists():
-        logger.info("\nFiles in TEMP_DIR:")
-        for item in TEMP_DIR.rglob("*"):
-            logger.info(f"  {item} ({'file' if item.is_file() else 'dir'})")
-
-        logger.info("\nSpecific file checks:")
-        files_to_check = [
-            "slabs.json",
-            "file1.txt",
-            "subdir1/nested_file.log",
-            "subdir1/config.ini",
-            "subdir2/data.json",
-            "subdir3/data.json",
-            "data.json",
-        ]
-
-        for file_path in files_to_check:
-            full_path = TEMP_DIR / file_path
-            exists = full_path.exists()
-            logger.info(f"  {file_path}: {'✓' if exists else '✗'}")
-            if exists and file_path.endswith(".json"):
-                try:
-                    content = full_path.read_text()[:50]
-                    logger.info(f"    Content: {content}...")
-                except Exception:
-                    logger.info("    Content: <unreadable>")
-
-        # Check data.json timestamps
-        data_files = list(TEMP_DIR.rglob("data.json"))
-        logger.info(f"\nFound {len(data_files)} data.json files:")
-        for data_file in data_files:
-            mtime = data_file.stat().st_mtime
-            logger.info(f"  {data_file} - mtime: {mtime}")
-    else:
-        logger.info("TEMP_DIR does not exist!")
-        logger.info(f"Current working directory: {Path.cwd()}")
-        logger.info("Files in current directory:")
-        for item in Path().iterdir():
-            logger.info(f"  {item}")
-
-    # This test always passes - it's just for debugging
-    assert True
 
 
 # --- Tests for extract_path_from_answer ---

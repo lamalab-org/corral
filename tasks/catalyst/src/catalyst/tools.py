@@ -26,18 +26,14 @@ load_dotenv("../.env")
 def get_bulk_polymorphs_data_func(composition: str) -> str:
     """
     Query the Materials Project database to find polymorphs for a given composition.
-    This function returns a JSON string containing polymorph data including MP IDs, structures (CIF),
-    energies above hull, formation_energy_per_atom, band gaps, densities, volumes, number of sites,
-    symmetry, and stability. The results are sorted by energy above hull.
+    This function returns a JSON string containing polymorph data including MP IDs, structures (CIF), energies above hull, formation_energy_per_atom, band gaps, densities, volumes, number of sites,symmetry, and stability. The results are sorted by energy above hull.
 
     Args:
         composition: Chemical composition (e.g., 'TiO2')
         api_key: Materials Project API key (optional if set in environment)
 
     Returns:
-        JSON string containing polymorph data including MP IDs, structures (CIF),
-        energies above hull, formation_energy_per_atom, band gaps, densities,
-        volumes, number of sites, symmetry, and stability. (sorted by energy above hull)
+        JSON string containing polymorph data including MP IDs, structures (CIF), energies above hull, formation_energy_per_atom, band gaps, densities, volumes, number of sites, symmetry, and stability. (sorted by energy above hull)
     """
 
     # Use provided API key or get from environment
@@ -99,9 +95,8 @@ def get_bulk_polymorphs_data_func(composition: str) -> str:
 @tool
 def get_structure_from_mp_text(mp_id: str) -> str:
     """[BRIEF] Retrieve a pymatgen structure from Materials Project using its API and return CIF content as text. [/BRIEF]
-    [DETAILED] This tool connects to the Materials Project database to download crystal structure data
-    for a given material ID. It retrieves the structure object and converts it to CIF (Crystallographic
-    Information File) format, which is the standard format for storing crystal structure information.
+    [DETAILED] This tool connects to the Materials Project database to download crystal structure data for a given material ID.
+    It retrieves the structure object and converts it to CIF (Crystallographic Information File) format, which is the standard format for storing crystal structure information.
     CIF is then returned as string [/DETAILED]
     [PROCEDURAL] When to use this tool:
     - Use when you need to retrieve a bulk crystal structure from the Materials Project database
@@ -135,17 +130,15 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     Args:
         mp_id: [BRIEF] Materials Project identifier string. [/BRIEF]
                [DETAILED] The unique identifier used by Materials Project to catalog materials.
-               Should be in the format "mp-XXXXX" where XXXXX is a numerical ID. This ID
-               corresponds to a specific material entry in the Materials Project database. [/DETAILED]
+               Should be in the format "mp-XXXXX" where XXXXX is a numerical ID.
+               This ID corresponds to a specific material entry in the Materials Project database. [/DETAILED]
                [SYNTACTIC] Format: "mp-" followed by digits (e.g., "mp-149", "mp-20066") [/SYNTACTIC]
                [EXAMPLES] Examples: "mp-149" (Silicon), "mp-20066" (CO2), "mp-2" (Li) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] CIF content string containing the crystal structure data. [/BRIEF]
-             [DETAILED] A properly formatted CIF (Crystallographic Information File) string
-             containing all necessary information about the crystal structure including lattice
-             parameters, atomic positions, space group, and symmetry operations. This format
-             is widely compatible with crystallographic software and other structure analysis tools. [/DETAILED]
+             [DETAILED] A properly formatted CIF (Crystallographic Information File) string containing all necessary information about the crystal structure including lattice parameters, atomic positions, space group, and symmetry operations.
+             This format is widely compatible with crystallographic software and other structure analysis tools. [/DETAILED]
              [EXAMPLES] Example output: "\n_chemical_formula_structural Si\n_cell_length_a 5.468..." [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -185,10 +178,9 @@ def create_slab_from_structure_text(
 ) -> str:
     """[BRIEF] Create a surface slab from a bulk crystal structure with specified Miller indices and dimensions. [/BRIEF]
 
-    [DETAILED] This tool generates a surface slab by cleaving a bulk crystal structure along a specified
-    crystallographic plane. It creates a two-dimensional periodic surface model suitable for surface
-    chemistry calculations, catalysis studies, and adsorption analysis. The tool automatically handles
-    the creation of vacuum space above the surface and ensures proper termination of the crystal structure.
+    [DETAILED] This tool generates a surface slab by cleaving a bulk crystal structure along a specified crystallographic plane.
+    It creates a two-dimensional periodic surface model suitable for surface chemistry calculations, catalysis studies, and adsorption analysis.
+    The tool automatically handles the creation of vacuum space above the surface and ensures proper termination of the crystal structure.
     This is essential for computational surface science studies. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -222,46 +214,39 @@ def create_slab_from_structure_text(
 
     Args:
         structure_cif: [BRIEF] CIF content string of the bulk crystal structure. [/BRIEF]
-                      [DETAILED] A properly formatted CIF string containing the bulk crystal structure
-                      data including lattice parameters, atomic positions, and space group information.
+                      [DETAILED] A properly formatted CIF string containing the bulk crystal structure data including lattice parameters, atomic positions, and space group information.
                       This structure will be cleaved to create the surface. [/DETAILED]
                       [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
                       [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
         miller_index: [BRIEF] Miller indices for the surface plane. Defaults to (1,1,1). [/BRIEF]
-                     [DETAILED] A tuple of three integers specifying the crystallographic plane along
-                     which the structure will be cleaved. These indices define the surface orientation
-                     and determine the atomic arrangement at the surface. Common choices include (1,1,1),
-                     (1,0,0), and (1,1,0) for different surface orientations. [/DETAILED]
+                     [DETAILED] A tuple of three integers specifying the crystallographic plane along which the structure will be cleaved.
+                     These indices define the surface orientation and determine the atomic arrangement at the surface.
+                     Common choices include (1,1,1), (1,0,0), and (1,1,0) for different surface orientations. [/DETAILED]
                      [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
                      [EXAMPLES] Examples: (1,1,1), (1,0,0), (1,1,0) [/EXAMPLES]
         min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 12. [/BRIEF]
-                      [DETAILED] The minimum thickness of the slab in the direction perpendicular to
-                      the surface plane. This parameter ensures that the slab has sufficient bulk-like
-                      character in the center while exposing the desired surface. Larger values provide
-                      more accurate representation of bulk properties but increase computational cost. [/DETAILED]
+                      [DETAILED] The minimum thickness of the slab in the direction perpendicular to the surface plane.
+                      This parameter ensures that the slab has sufficient bulk-like character in the center while exposing the desired surface.
+                      Larger values provide more accurate representation of bulk properties but increase computational cost. [/DETAILED]
                       [SYNTACTIC] Format: positive integer representing thickness in Angstroms [/SYNTACTIC]
                       [EXAMPLES] Examples: 12, 15, 8[/EXAMPLES]
         min_vacuum_size: [BRIEF] Minimum vacuum spacing in Angstroms. Defaults to 5. [/BRIEF]
-                        [DETAILED] The minimum vacuum space above the surface to prevent interactions
-                        between periodic images in surface calculations. This parameter is crucial for
-                        accurate surface energy calculations and adsorption studies. Larger values
-                        reduce spurious interactions but increase computational requirements. [/DETAILED]
+                        [DETAILED] The minimum vacuum space above the surface to prevent interactions between periodic images in surface calculations.
+                        This parameter is crucial for accurate surface energy calculations and adsorption studies.
+                        Larger values reduce spurious interactions but increase computational requirements. [/DETAILED]
                         [SYNTACTIC] Format: positive integer representing vacuum thickness in Angstroms [/SYNTACTIC]
                         [EXAMPLES] Examples: 5 (minimal), 10 (standard), 15 (large) [/EXAMPLES]
         primitive: [BRIEF] Whether to create a primitive cell slab. Defaults to True. [/BRIEF]
-                  [DETAILED] Controls whether to use the primitive cell or conventional cell for
-                  slab generation. Primitive cells have the minimum number of atoms while maintaining
-                  the essential symmetry, leading to smaller, more efficient computational models.
+                  [DETAILED] Controls whether to use the primitive cell or conventional cell for slab generation.
+                  Primitive cells have the minimum number of atoms while maintaining the essential symmetry, leading to smaller, more efficient computational models.
                   Setting to False uses the conventional cell which may be larger but more intuitive. [/DETAILED]
                   [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
                   [EXAMPLES] Examples: True, False [/EXAMPLES]
 
     Returns:
         str: [BRIEF] CIF content string of the generated surface slab. [/BRIEF]
-             [DETAILED] A CIF-formatted string containing the surface slab structure with the
-             specified Miller indices, thickness, and vacuum spacing. The structure is oriented
-             with the surface normal along the c-axis and includes all necessary crystallographic
-             information for surface calculations. [/DETAILED]
+             [DETAILED] A CIF-formatted string containing the surface slab structure with the specified Miller indices, thickness, and vacuum spacing.
+             The structure is oriented with the surface normal along the c-axis and includes all necessary crystallographic information for surface calculations. [/DETAILED]
              [EXAMPLES] Example output: CIF string with slab structure having surface atoms and vacuum region [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -305,11 +290,9 @@ def enumerate_slabs_text(
 ) -> str:
     """[BRIEF] Enumerate all possible surface slab terminations from a bulk structure and return as JSON. [/BRIEF]
 
-    [DETAILED] This tool generates all possible surface terminations for a given bulk crystal structure
-    along specified Miller indices. Unlike creating a single slab, this tool explores different ways
-    to terminate the surface, which is crucial for materials with complex structures or multiple
-    chemically distinct layers. Each termination represents a different surface chemistry and reactivity,
-    making this tool essential for comprehensive surface studies. [/DETAILED]
+    [DETAILED] This tool generates all possible surface terminations for a given bulk crystal structure along specified Miller indices.
+    Unlike creating a single slab, this tool explores different ways to terminate the surface, which is crucial for materials with complex structures or multiple chemically distinct layers.
+    Each termination represents a different surface chemistry and reactivity, making this tool essential for comprehensive surface studies. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use when you need to explore all possible surface terminations for a material
@@ -342,40 +325,32 @@ def enumerate_slabs_text(
 
     Args:
         bulk_cif: [BRIEF] Bulk crystal structure in CIF string format. [/BRIEF]
-                 [DETAILED] A properly formatted CIF string containing the bulk crystal structure
-                 from which surface slabs will be generated. This should be a three-dimensional
-                 periodic structure with well-defined atomic positions and lattice parameters.
+                 [DETAILED] A properly formatted CIF string containing the bulk crystal structure from which surface slabs will be generated. This should be a three-dimensional periodic structure with well-defined atomic positions and lattice parameters.
                  The structure will be analyzed to determine all possible surface terminations. [/DETAILED]
                  [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
                  [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
         miller_index: [BRIEF] Miller indices for surface orientation. Defaults to (1,1,1). [/BRIEF]
-                     [DETAILED] A tuple of three integers specifying the crystallographic plane along
-                     which all surface terminations will be generated. This determines the surface
-                     orientation but allows for different terminations along the same plane. Different
-                     Miller indices will produce different surface structures and properties. [/DETAILED]
+                     [DETAILED] A tuple of three integers specifying the crystallographic plane along which all surface terminations will be generated. This determines the surface orientation but allows for different terminations along the same plane.
+                     Different Miller indices will produce different surface structures and properties. [/DETAILED]
                      [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
                      [EXAMPLES] Examples: (1,1,1), (1,0,0), (1,1,0) [/EXAMPLES]
         min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 12. [/BRIEF]
-                      [DETAILED] The minimum thickness of each slab in the direction perpendicular
-                      to the surface plane. This ensures that all generated slabs have sufficient
-                      bulk-like character while exposing different surface terminations. Affects
-                      both the structural accuracy and computational requirements. [/DETAILED]
+                      [DETAILED] The minimum thickness of each slab in the direction perpendicular to the surface plane.
+                      This ensures that all generated slabs have sufficient bulk-like character while exposing different surface terminations.
+                      Affects both the structural accuracy and computational requirements. [/DETAILED]
                       [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
                       [EXAMPLES] Examples: 10.0 (for thin slab), 12.0 (standard), 15.0 (for thick slab) [/EXAMPLES]
         min_vacuum_size: [BRIEF] Minimum vacuum layer thickness in Angstroms. Defaults to 5. [/BRIEF]
-                        [DETAILED] The minimum vacuum space above each surface to prevent interactions
-                        between periodic images. This parameter is applied to all generated slabs
-                        and is crucial for accurate surface calculations. Larger values reduce
-                        spurious interactions but increase computational cost. [/DETAILED]
+                        [DETAILED] The minimum vacuum space above each surface to prevent interactions between periodic images.
+                        This parameter is applied to all generated slabs and is crucial for accurate surface calculations.
+                        Larger values reduce spurious interactions but increase computational cost. [/DETAILED]
                         [SYNTACTIC] Format: positive float representing vacuum thickness in Angstroms [/SYNTACTIC]
                         [EXAMPLES] Examples: 5.0, 10.0, 15.0 [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string mapping slab indices to their CIF representations. [/BRIEF]
-             [DETAILED] A JSON-formatted string containing a dictionary where keys are slab
-             identifiers (e.g., "slab_0", "slab_1") and values are the corresponding CIF
-             strings for each surface termination. This format allows easy selection and
-             comparison of different surface terminations. [/DETAILED]
+             [DETAILED] A JSON-formatted string containing a dictionary where keys are slab identifiers (e.g., "slab_0", "slab_1") and values are the corresponding CIF strings for each surface termination.
+             This format allows easy selection and comparison of different surface terminations. [/DETAILED]
              [EXAMPLES] Example output: '{"slab_0": "CIF content...", "slab_1": "CIF content...", ...}' [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -424,11 +399,9 @@ def enumerate_slabs_text(
 def choose_slab_text(slabs_json: str, index: int = 0) -> str:
     """[BRIEF] Select a specific slab from a JSON dictionary of enumerated slabs by index. [/BRIEF]
 
-    [DETAILED] This tool selects one surface slab from a collection of enumerated slabs based on
-    its index number. It's designed to work with the output from enumerate_slabs_text, allowing
-    users to choose a specific surface termination for further analysis. This selection process
-    is crucial for focusing on the most relevant or interesting surface termination for catalysis
-    or adsorption studies. [/DETAILED]
+    [DETAILED] This tool selects one surface slab from a collection of enumerated slabs based on its index number.
+    It's designed to work with the output from enumerate_slabs_text, allowing users to choose a specific surface termination for further analysis.
+    This selection process is crucial for focusing on the most relevant or interesting surface termination for catalysis or adsorption studies. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use after enumerate_slabs_text to select a specific surface termination
@@ -462,26 +435,23 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
 
     Args:
         slabs_json: [BRIEF] JSON string mapping slab keys to CIF strings. [/BRIEF]
-                   [DETAILED] A JSON-formatted string containing a dictionary where keys are
-                   slab identifiers (e.g., "slab_0", "slab_1") and values are the corresponding
-                   CIF strings. This should be the output from enumerate_slabs_text tool. The
-                   JSON structure must be valid and contain at least one slab entry. [/DETAILED]
+                   [DETAILED] A JSON-formatted string containing a dictionary where keys are slab identifiers (e.g., "slab_0", "slab_1") and values are the corresponding CIF strings.
+                   This should be the output from enumerate_slabs_text tool.
+                   The JSON structure must be valid and contain at least one slab entry. [/DETAILED]
                    [SYNTACTIC] Format: 'Valid JSON string with "slab_X" keys and CIF string values' [/SYNTACTIC]
                    [EXAMPLES] Examples: '{"slab_0": "CIF content...", "slab_1": "CIF content..."}' [/EXAMPLES]
         index: [BRIEF] Index of the slab to select. Defaults to 0. [/BRIEF]
               [DETAILED] The numerical index of the slab to select from the JSON dictionary.
-              This corresponds to the enumeration order from enumerate_slabs_text, where
-              index 0 is the first slab, index 1 is the second, and so on. The tool will
-              look for a key named "slab_{index}" in the JSON dictionary. [/DETAILED]
+              This corresponds to the enumeration order from enumerate_slabs_text, where index 0 is the first slab, index 1 is the second, and so on.
+              The tool will look for a key named "slab_{index}" in the JSON dictionary. [/DETAILED]
               [SYNTACTIC] Format: non-negative integer [/SYNTACTIC]
               [EXAMPLES] Examples: 0 (first slab), 1 (second slab), 2 (third slab) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] CIF string for the selected slab. [/BRIEF]
-             [DETAILED] A properly formatted CIF string containing the structure data for
-             the selected slab. This includes atomic positions, lattice parameters, and
-             all necessary crystallographic information. The CIF can be used directly
-             with other structure analysis tools. [/DETAILED]
+             [DETAILED] A properly formatted CIF string containing the structure data for the selected slab.
+             This includes atomic positions, lattice parameters, and all necessary crystallographic information.
+             The CIF can be used directly with other structure analysis tools. [/DETAILED]
              [EXAMPLES] Example output: CIF string with selected slab structure [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -513,11 +483,9 @@ def choose_slab_text(slabs_json: str, index: int = 0) -> str:
 def get_adsorption_sites_text(slab_cif: str) -> str:
     """[BRIEF] Identify and classify all possible adsorption sites on a surface slab. [/BRIEF]
 
-    [DETAILED] This tool analyzes a surface slab structure to identify and classify potential
-    adsorption sites where molecules can bind. It uses geometric and chemical analysis to
-    determine different types of binding sites such as top sites (above surface atoms),
-    bridge sites (between two atoms), and hollow sites (in multi-atom depressions). This
-    analysis is fundamental for understanding surface reactivity and designing catalysts. [/DETAILED]
+    [DETAILED] This tool analyzes a surface slab structure to identify and classify potential adsorption sites where molecules can bind.
+    It uses geometric and chemical analysis to determine different types of binding sites such as top sites (above surface atoms), bridge sites (between two atoms), and hollow sites (in multi-atom depressions).
+    This analysis is fundamental for understanding surface reactivity and designing catalysts. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use when you need to identify all possible adsorption sites on a surface
@@ -553,19 +521,16 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
 
     Args:
         slab_cif: [BRIEF] CIF string of the surface slab structure. [/BRIEF]
-                 [DETAILED] A properly formatted CIF string containing the surface slab structure
-                 with atomic positions, lattice parameters, and surface geometry. This should be
-                 a two-dimensional periodic structure with a well-defined surface and vacuum
-                 region. The structure is analyzed to identify potential adsorption sites. [/DETAILED]
+                 [DETAILED] A properly formatted CIF string containing the surface slab structure with atomic positions, lattice parameters, and surface geometry.
+                 This should be a two-dimensional periodic structure with a well-defined surface and vacuum region.
+                 The structure is analyzed to identify potential adsorption sites. [/DETAILED]
                  [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
                  [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string containing classified adsorption sites with fractional coordinates. [/BRIEF]
-             [DETAILED] A JSON-formatted string containing a dictionary where keys are site types
-             (e.g., "top", "bridge", "hollow") and values are lists of fractional coordinates
-             for each site of that type. Each coordinate is a list of three numbers [x, y, z]
-             representing the fractional position within the unit cell. [/DETAILED]
+             [DETAILED] A JSON-formatted string containing a dictionary where keys are site types (e.g., "top", "bridge", "hollow") and values are lists of fractional coordinates for each site of that type.
+             Each coordinate is a list of three numbers [x, y, z] representing the fractional position within the unit cell. [/DETAILED]
              [EXAMPLES] Example output: '{"top": [[0.0, 0.0, 0.9], [0.5, 0.5, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}' [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -612,10 +577,8 @@ def choose_adsorption_site_text(
 ) -> list[float]:
     """[BRIEF] Select a specific adsorption site from classified sites by type and index. [/BRIEF]
 
-    [DETAILED] This tool selects one specific adsorption site from a collection of classified
-    sites based on the site type (top, bridge, hollow) and index within that type.
-    This selection is crucial for systematic studies of different
-    binding environments and their effects on adsorption energetics. [/DETAILED]
+    [DETAILED] This tool selects one specific adsorption site from a collection of classified sites based on the site type (top, bridge, hollow) and index within that type.
+    This selection is crucial for systematic studies of different binding environments and their effects on adsorption energetics. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use after identifying all possible adsorption site to select a specific binding site
@@ -650,33 +613,28 @@ def choose_adsorption_site_text(
 
     Args:
         adsorption_sites_json: [BRIEF] JSON string mapping site types to lists of fractional coordinates. [/BRIEF]
-                              [DETAILED] A JSON-formatted string containing a dictionary where keys are
-                              site types (e.g., "top", "bridge", "hollow") and values are lists of
-                              fractional coordinates. This should be the output from get_adsorption_sites_text.
+                              [DETAILED] A JSON-formatted string containing a dictionary where keys are site types (e.g., "top", "bridge", "hollow") and values are lists of fractional coordinates.
+                              This should be the output from get_adsorption_sites_text.
                               Each coordinate is a list of three numbers representing position within the unit cell. [/DETAILED]
                               [SYNTACTIC] Format: 'Valid JSON string with site type keys and coordinate list values' [/SYNTACTIC]
                               [EXAMPLES] Examples: '{"top": [[0.0, 0.0, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}' [/EXAMPLES]
         site_type: [BRIEF] Type of adsorption site to select. [/BRIEF]
-                  [DETAILED] The type of binding site to select from the available options. Common
-                  types include "top" (above surface atoms), "bridge" (between two atoms), and
-                  "hollow" (in multi-atom depressions). The type must exist in the JSON dictionary
-                  and determines the coordination environment of the selected site. [/DETAILED]
+                  [DETAILED] The type of binding site to select from the available options.
+                  Common types include "top" (above surface atoms), "bridge" (between two atoms), and  "hollow" (in multi-atom depressions).
+                  The type must exist in the JSON dictionary and determines the coordination environment of the selected site. [/DETAILED]
                   [SYNTACTIC] Format: string matching available site types [/SYNTACTIC]
                   [EXAMPLES] Examples: "top" (on-top), "bridge" (between atoms), "hollow" (in depression) [/EXAMPLES]
         index: [BRIEF] Index of the site within the specified type. Defaults to 0. [/BRIEF]
-              [DETAILED] The numerical index of the site to select from the list of sites
-              of the specified type. Index 0 selects the first site, index 1 the second,
-              and so on. The index must be within the range of available sites for the
-              specified type. [/DETAILED]
+              [DETAILED] The numerical index of the site to select from the list of sites of the specified type.
+              Index 0 selects the first site, index 1 the second, and so on.
+              The index must be within the range of available sites for the specified type. [/DETAILED]
               [SYNTACTIC] Format: non-negative integer [/SYNTACTIC]
               [EXAMPLES] Examples: 0 (first site), 1 (second site), 2 (third site) [/EXAMPLES]
 
     Returns:
         list[float]: [BRIEF] Fractional coordinates of the selected adsorption site. [/BRIEF]
-                    [DETAILED] A list of three floating-point numbers representing the fractional
-                    coordinates [x, y, z] of the selected adsorption site within the unit cell.
-                    These coordinates can be used directly for adsorbate placement and represent
-                    the optimal binding position for the specified site type. [/DETAILED]
+                    [DETAILED] A list of three floating-point numbers representing the fractional coordinates [x, y, z] of the selected adsorption site within the unit cell.
+                    These coordinates can be used directly for adsorbate placement and represent the optimal binding position for the specified site type. [/DETAILED]
                     [EXAMPLES] Example output: [0.0, 0.0, 0.9] or [0.25, 0.25, 0.85] [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -716,11 +674,9 @@ def add_adsorbate_to_slab_text(
 ) -> str:
     """[BRIEF] Place an adsorbate molecule on a surface slab at a specified adsorption site. [/BRIEF]
 
-    [DETAILED] This tool combines a surface slab with an adsorbate molecule by placing the
-    adsorbate at a specific binding site on the surface. It handles the geometric placement
-    of the molecule at the correct height above the surface and ensures proper structural
-    integration. This is essential for creating realistic surface-adsorbate systems for
-    computational studies of catalysis, adsorption energetics, and surface reactivity. [/DETAILED]
+    [DETAILED] This tool combines a surface slab with an adsorbate molecule by placing the adsorbate at a specific binding site on the surface.
+    It handles the geometric placement of the molecule at the correct height above the surface and ensures proper structural integration.
+    This is essential for creating realistic surface-adsorbate systems for computational studies of catalysis, adsorption energetics, and surface reactivity. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use when you need to create a surface-adsorbate system
@@ -755,40 +711,34 @@ def add_adsorbate_to_slab_text(
 
     Args:
         slab_cif: [BRIEF] CIF string of the surface slab structure. [/BRIEF]
-                 [DETAILED] A properly formatted CIF string containing the surface slab structure
-                 on which the adsorbate will be placed. This should be a two-dimensional periodic
-                 structure with a well-defined surface and vacuum region. The slab provides the
-                 substrate for molecular adsorption. [/DETAILED]
+                 [DETAILED] A properly formatted CIF string containing the surface slab structure on which the adsorbate will be placed.
+                 This should be a two-dimensional periodic structure with a well-defined surface and vacuum region.
+                 The slab provides the substrate for molecular adsorption. [/DETAILED]
                  [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
                  [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
         adsorbate_cif: [BRIEF] CIF string of the adsorbate molecule structure. [/BRIEF]
-                      [DETAILED] A CIF or XYZ formatted string containing the molecular structure
-                      of the adsorbate to be placed on the surface. This can be a small molecule
-                      like CO2, H2O, or more complex organic molecules. The tool will attempt to
-                      parse both CIF and XYZ formats automatically. [/DETAILED]
+                      [DETAILED] A CIF or XYZ formatted string containing the molecular structure of the adsorbate to be placed on the surface.
+                      This can be a small molecule like CO2, H2O, or more complex organic molecules.
+                      The tool will attempt to parse both CIF and XYZ formats automatically. [/DETAILED]
                       [SYNTACTIC] Format: "Valid CIF or XYZ format string with molecular structure" [/SYNTACTIC]
                       [EXAMPLES] Examples: CIF string for molecules [/EXAMPLES]
         height: [BRIEF] Height in Angstroms above the surface for adsorbate placement. Defaults to 2.0. [/BRIEF]
-               [DETAILED] The vertical distance above the surface at which the adsorbate will be
-               placed. This parameter controls the initial separation between the adsorbate and
-               the surface atoms. Typical values range from 1.5 to 3.0 Å depending on the
-               molecular size and expected binding interaction. [/DETAILED]
+               [DETAILED] The vertical distance above the surface at which the adsorbate will be placed.
+               This parameter controls the initial separation between the adsorbate and the surface atoms.
+               Typical values range from 1.5 to 3.0 Å depending on the molecular size and expected binding interaction. [/DETAILED]
                [SYNTACTIC] Format: positive float representing distance in Angstroms [/SYNTACTIC]
                [EXAMPLES] Examples: 1.5 (close to slab), 2.0, 2.5 (distant from molecule) [/EXAMPLES]
         site: [BRIEF] Optional fractional coordinates for adsorbate placement. [/BRIEF]
-             [DETAILED] A list of three floating-point numbers representing the fractional
-             coordinates [x, y, z] where the adsorbate should be placed. If not provided,
-             the tool will automatically select the first available top site. These coordinates
-             should typically come from choose_adsorption_site_text output. [/DETAILED]
+             [DETAILED] A list of three floating-point numbers representing the fractional coordinates [x, y, z] where the adsorbate should be placed
+             If not provided, the tool will automatically select the first available top site.
+             These coordinates should typically come from choose_adsorption_site_text output. [/DETAILED]
              [SYNTACTIC] Format: list of three floats [x, y, z] or None [/SYNTACTIC]
              [EXAMPLES] Examples: [0.0, 0.0, 0.9], [0.5, 0.5, 0.9], None (auto-select) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] CIF string of the combined surface-adsorbate structure. [/BRIEF]
-             [DETAILED] A properly formatted CIF string containing the combined structure
-             with the adsorbate placed on the surface at the specified position and height.
-             This structure includes both the original slab atoms and the adsorbate atoms,
-             properly integrated into a single periodic structure. [/DETAILED]
+             [DETAILED] A properly formatted CIF string containing the combined structure with the adsorbate placed on the surface at the specified position and height.
+             This structure includes both the original slab atoms and the adsorbate atoms, properly integrated into a single periodic structure. [/DETAILED]
              [EXAMPLES] Example output: CIF string with both slab and adsorbate atoms [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -866,12 +816,9 @@ def generate_reconstructed_slab(
 ) -> str:
     """[BRIEF] Generate surface slabs with complex reconstructions from bulk structures using detailed instructions. [/BRIEF]
 
-    [DETAILED] This tool creates reconstructed surface slabs that go beyond simple
-    terminations to include complex surface arrangements, atomic rearrangements, and
-    compositional changes. Surface reconstructions are crucial for understanding real
-    surface behavior as many materials undergo significant structural changes when cleaved
-    to create surfaces. This tool handles sophisticated reconstruction patterns including
-    atomic additions, removals, and rearrangements based on experimental observations. [/DETAILED]
+    [DETAILED] This tool creates reconstructed surface slabs that go beyond simple terminations to include complex surface arrangements, atomic rearrangements, and compositional changes.
+    Surface reconstructions are crucial for understanding real surface behavior as many materials undergo significant structural changes when cleaved to create surfaces.
+    This tool handles sophisticated reconstruction patterns including atomic additions, removals, and rearrangements based on experimental observations. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Best suited for materials known to undergo significant surface rearrangements
@@ -908,56 +855,43 @@ def generate_reconstructed_slab(
 
     Args:
         bulk_cif: [BRIEF] CIF string of the bulk crystal structure. [/BRIEF]
-                 [DETAILED] A properly formatted CIF string containing the bulk crystal structure
-                 that will be used as the starting point for reconstruction. This should be a
-                 three-dimensional periodic structure with well-defined symmetry and atomic
-                 positions. The bulk structure provides the template for surface generation. [/DETAILED]
+                 [DETAILED] A properly formatted CIF string containing the bulk crystal structure that will be used as the starting point for reconstruction.
+                 This should be a three-dimensional periodic structure with well-defined symmetry and atomic positions.
+                 The bulk structure provides the template for surface generation. [/DETAILED]
                  [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
                  [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
         miller_index: [BRIEF] Miller indices for the surface orientation. [/BRIEF]
-                     [DETAILED] A tuple of three integers specifying the crystallographic plane
-                     along which the reconstruction will be performed. These indices must be
-                     compatible with the crystal system and determine the base surface geometry
-                     before reconstruction modifications are applied. [/DETAILED]
+                     [DETAILED] A tuple of three integers specifying the crystallographic plane along which the reconstruction will be performed.
+                     These indices must be compatible with the crystal system and determine the base surface geometry before reconstruction modifications are applied. [/DETAILED]
                      [SYNTACTIC] Format: tuple of three integers (h, k, l) [/SYNTACTIC]
                      [EXAMPLES] Examples: (1,1,1) (close-packed), (1,0,0) (square), (1,1,0) (rectangular) [/EXAMPLES]
         min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. [/BRIEF]
-                      [DETAILED] The minimum thickness of the slab before reconstruction modifications
-                      are applied. This ensures adequate bulk-like behavior in the center of the
-                      slab while providing sufficient surface area for reconstruction. Larger
-                      values improve accuracy but increase computational cost. [/DETAILED]
+                      [DETAILED] The minimum thickness of the slab before reconstruction modifications are applied.
+                      This ensures adequate bulk-like behavior in the center of the slab while providing sufficient surface area for reconstruction.
+                      Larger values improve accuracy but increase computational cost. [/DETAILED]
                       [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
                       [EXAMPLES] Examples: 12.0 (standard), 15.0 (thick), 10.0 (thin) [/EXAMPLES]
         min_vacuum_size: [BRIEF] Minimum vacuum layer thickness in Angstroms. [/BRIEF]
-                        [DETAILED] The minimum vacuum space above the reconstructed surface to
-                        prevent interactions between periodic images. This parameter is crucial
-                        for accurate surface calculations and should be larger for reconstructions
-                        with significant surface protrusions or modifications. [/DETAILED]
+                        [DETAILED] The minimum vacuum space above the reconstructed surface to prevent interactions between periodic images.
+                        This parameter is crucial for accurate surface calculations and should be larger for reconstructions with significant surface protrusions or modifications. [/DETAILED]
                         [SYNTACTIC] Format: positive float representing vacuum thickness in Angstroms [/SYNTACTIC]
                         [EXAMPLES] Examples: 10.0 (standard), 15.0 (large), 5.0 (minimal) [/EXAMPLES]
         reconstruction_instructions: [BRIEF] JSON string containing detailed reconstruction parameters. [/BRIEF]
-                                   [DETAILED] A comprehensive JSON string specifying all aspects of
-                                   the reconstruction including transformation matrices, atomic
-                                   additions/removals, and structural parameters. Must include
-                                   required fields like name, transformation_matrix, and modification
-                                   instructions. See the tool's source code for detailed format. [/DETAILED]
+                                   [DETAILED] A comprehensive JSON string specifying all aspects of the reconstruction including transformation matrices, atomic additions/removals, and structural parameters.
+                                   Must include required fields like name, transformation_matrix, and modification instructions[/DETAILED]
                                    [SYNTACTIC] Format: "Valid JSON string with reconstruction parameters" [/SYNTACTIC]
                                    [EXAMPLES] Examples: JSON with transformation matrix and atomic modifications [/EXAMPLES]
         return_all_variants: [BRIEF] Whether to return all reconstruction variants. Defaults to False. [/BRIEF]
-                           [DETAILED] Controls whether to return a single CIF string (False) or a
-                           comprehensive JSON with all possible reconstruction variants and metadata
-                           (True). When True, provides detailed information about each variant
-                           including structural parameters and characteristics. [/DETAILED]
+                           [DETAILED] Controls whether to return a single CIF string (False) or a comprehensive JSON with all possible reconstruction variants and metadata (True).
+                           When True, provides detailed information about each variant including structural parameters and characteristics. [/DETAILED]
                            [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
                            [EXAMPLES] Examples: False (single CIF), True (all variants with metadata) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] CIF string of reconstructed slab or JSON with all variants depending on return_all_variants. [/BRIEF]
-             [DETAILED] Either a single CIF-formatted string containing the reconstructed surface
-             structure (if return_all_variants=False) or a comprehensive JSON string with all
-             variants, metadata, and structural information (if return_all_variants=True). The
-             JSON format includes detailed characterization of each variant. [/DETAILED]
-             [EXAMPLES] Example output: CIF string with reconstructed surface or JSON with multiple variants [/EXAMPLES]
+             [DETAILED] Either a single CIF-formatted string containing the reconstructed surface structure (if return_all_variants=False) or a comprehensive JSON string with all variants, metadata, and structural information (if return_all_variants=True).
+             The JSON format includes detailed characterization of each variant. [/DETAILED]
+             [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError: [ERROR_WHEN] When reconstruction parameters are invalid or incompatible [/ERROR_WHEN]
@@ -1141,18 +1075,12 @@ def generate_reconstructed_slab(
 def get_bulk_polymorphs_data(composition: str) -> str:
     """[BRIEF] Query Materials Project database to find all polymorphs for a given chemical composition. [/BRIEF]
 
-    [DETAILED] This tool retrieves comprehensive polymorph data from the Materials Project database
-    for a specific chemical composition. Polymorphs are different crystal structures with the same
-    chemical formula but different atomic arrangements, leading to distinct physical and chemical
-    properties. This tool could be relevant for retrieving structures of the same compoisition.
-    Apart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull,
-    formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved. [/DETAILED]
+    [DETAILED] This tool retrieves comprehensive polymorph data from the Materials Project database for a specific chemical composition. Polymorphs are different crystal structures with the same chemical formula but different atomic arrangements, leading to distinct physical and chemical properties. This tool could be relevant for retrieving structures of the same compoisition. Apart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use when you need to explore all known structural variants of a single material composition
     - Suitable for identifying thermodynamically stable and metastable phases and other properties like band gap, density, volume, number of sites, space group of the structure.
-    - Recommended for retrieving structure and Materials Project ID (MP ID), CIF structure, energy above hull,
-    formation energy per atom, band gap, density, volume, number of sites, space group of one single composition
+    - Recommended for retrieving structure and Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group of one single composition
     - Avoid when you only need a single, well-known structure
     - Avoid when you need data for multiple compositions
     [/PROCEDURAL]
@@ -1181,20 +1109,13 @@ def get_bulk_polymorphs_data(composition: str) -> str:
 
     Args:
         composition: [BRIEF] Chemical composition formula. [/BRIEF]
-                    [DETAILED] Chemical formula specifying the composition for which polymorphs
-                    should be retrieved. Should follow standard chemical notation with element
-                    symbols. The tool will find all known crystal structures
-                    with this exact composition in the Materials Project database. [/DETAILED]
+                    [DETAILED] Chemical formula specifying the composition for which polymorphs should be retrieved. Should follow standard chemical notation with element symbols. The tool will find all known crystal structures with this exact composition in the Materials Project database. [/DETAILED]
                     [SYNTACTIC] Format: "Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)" [/SYNTACTIC]
                     [EXAMPLES] Examples: "TiO2" (rutile, anatase, brookite), "SiO2" (quartz, cristobalite), "Fe2O3" (hematite, maghemite) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string containing comprehensive polymorph data sorted by stability. [/BRIEF]
-             [DETAILED] A JSON-formatted string containing a list of dictionaries, each representing
-             a polymorph with properties including Materials Project ID, CIF structure, energy above hull,
-             formation energy per atom, band gap, density, volume, number of sites, space group, and
-             stability information. Results are sorted by energy above hull for easy identification
-             of the most stable phases. [/DETAILED]
+             [DETAILED] A JSON-formatted string containing a list of dictionaries, each representing a polymorph with properties including Materials Project ID, CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information. Results are sorted by energy above hull for easy identification of the most stable phases. [/DETAILED]
              [EXAMPLES] Example output: '[{"material_id": "mp-2657", "cif": "...", "energy_above_hull": 0.0, "formation_energy_per_atom": -4.2, ...}]' [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -1273,17 +1194,13 @@ def get_bulk_polymorphs_data_to_file(
 ) -> str:
     """[BRIEF] Query Materials Project for polymorphs and save comprehensive data to a JSON file to give path. [/BRIEF]
 
-     [DETAILED] This tool performs the same comprehensive polymorph retrieval as get_bulk_polymorphs_data
-     but saves the results directly to a JSON file for persistent storage and later analysis.
-    This tool retrieves comprehensive polymorph data from the Materials Project database
-    for a specific chemical composition. Polymorphs are different crystal structures with the same
-    chemical formula but different atomic arrangements, leading to distinct physical and chemical
-    properties. This tool could be relevant for retrieving structures of the same compoisition.
-    Apart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull,
-    formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved.
+     [DETAILED] This tool performs the same comprehensive polymorph retrieval as get_bulk_polymorphs_data but saves the results directly to a JSON file for persistent storage and later analysis.
+    This tool retrieves comprehensive polymorph data from the Materials Project database for a specific chemical composition.
+    Polymorphs are different crystal structures with the same chemical formula but different atomic arrangements, leading to distinct physical and chemical properties.
+    This tool could be relevant for retrieving structures of the same compoisition.
+    Apart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved.
     The result is then saved a JSON file at the specified save_path.
-    The file-based approach allows for efficient handling of large datasets and facilitates
-    saving context of llm. [/DETAILED]
+    The file-based approach allows for efficient handling of large datasets and facilitates saving context of llm. [/DETAILED]
 
      [PROCEDURAL] When to use this tool:
      - Use when you need to explore all known structural variants of a single material composition.
@@ -1324,25 +1241,24 @@ def get_bulk_polymorphs_data_to_file(
 
      Args:
          composition: [BRIEF] Chemical composition formula. [/BRIEF]
-                     [DETAILED] Chemical formula specifying the composition for which polymorphs
-                     should be retrieved and saved. Should follow standard chemical notation with
-                     element symbols and subscripts. The tool will find all known crystal structures
-                     with this exact composition in the Materials Project database. [/DETAILED]
+                     [DETAILED] Chemical formula specifying the composition for which polymorphs should be retrieved and saved.
+                     Should follow standard chemical notation with element symbols and subscripts.
+                     The tool will find all known crystal structures with this exact composition in the Materials Project database. [/DETAILED]
                      [SYNTACTIC] Format: "Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)" [/SYNTACTIC]
                      [EXAMPLES] Examples: "TiO2" (titanium dioxide), "SiO2" (silicon dioxide), "Fe2O3" (iron oxide) [/EXAMPLES]
          save_path: [BRIEF] File path where JSON data will be saved. [/BRIEF]
-                   [DETAILED] Complete file path including filename and extension where the polymorph
-                   data will be saved. The path should be writable and the directory will be created
-                   if it doesn't exist. Using .json extension is recommended for clarity. If None,
-                   the tool will raise an error as the file path is required. [/DETAILED]
+                   [DETAILED] Complete file path including filename and extension where the polymorph data will be saved.
+                   The path should be writable and the directory will be created if it doesn't exist.
+                   Using .json extension is recommended for clarity.
+                   If None, the tool will raise an error as the file path is required. [/DETAILED]
                    [SYNTACTIC] Format: "Valid file path with .json extension" [/SYNTACTIC]
                    [EXAMPLES] Examples: "data/tio2_polymorphs.json", "save_path/tio2_polymorphs.json", "results/Cu2O_polymorphsides.json" [/EXAMPLES]
 
      Returns:
          str: [BRIEF] File path where the polymorph data was saved. [/BRIEF]
               [DETAILED] Returns the exact file path where the JSON data was successfully written.
-              This path can be used by subsequent tools for data loading and processing. The file
-              contains comprehensive polymorph data in JSON format, sorted by thermodynamic stability. [/DETAILED]
+              This path can be used by subsequent tools for data loading and processing.
+              The file contains comprehensive polymorph data in JSON format, sorted by thermodynamic stability. [/DETAILED]
               [EXAMPLES] Example output: "data/tio2_polymorphs.json" [/EXAMPLES]
 
      [RAISES] Exceptions:
@@ -1423,99 +1339,100 @@ def get_bulk_polymorphs_data_to_file(
 
 
 @tool
-def sort_and_get_first_from_json(
-    polymorph_data_json: str, sort_key: str, return_key: str
-) -> str:
+def sort_and_get_first_from_json(json_data: str, sort_key: str, return_key: str) -> str:
     """[BRIEF] Sort JSON data by specified key and return the first element's specified value. [/BRIEF]
 
-    [DETAILED] This utility tool provides flexible sorting and extraction capabilities for JSON data,
-    particularly useful for materials data analysis where you need to identify optimal structures
-    based on specific criteria. It enables quick identification of the best material according to
-    any numerical property, such as finding the most stable phase, highest band gap material, or
-    densest structure. [/DETAILED]
+        [DETAILED] This utility tool provides flexible sorting and extraction capabilities for JSON data, particularly useful for materials data analysis where you need to identify optimal structures based on specific criteria.
+        It enables quick identification of the best material according to any numerical property, such as finding the most stable phase, highest band gap material, or densest structure. [/DETAILED]
 
-    [PROCEDURAL] When to use this tool:
-    - Use when you need to quickly identify the best material from a dataset
-    - Best suited for extracting optimal values from sorted lists
-    - Recommended for picking materials with desired properties like lowest energy, highest band gap, etc.
-    - Avoid when you need multiple values or complex filtering criteria
-    [/PROCEDURAL]
+        [PROCEDURAL] When to use this tool:
+        - Use when you need to quickly identify the best material from a dataset
+        - Best suited for extracting optimal values from sorted lists
+        - Recommended for picking materials with desired properties like lowest energy, highest band gap, etc.
+        - Avoid when you need multiple values or complex filtering criteria
+        [/PROCEDURAL]
 
-    [CONTEXTUAL] How this tool works:
-    - Parses JSON string into Python data structure
-    - Applies sorting based on specified key using numerical comparison
-    - Extracts the first element after sorting (best/optimal value)
-    - Returns the specified property value from the optimal element
-    - Handles various data types and provides robust error handling
-    - To find the right keys from polymorph data maybe use io tools or python tools
-    [/CONTEXTUAL]
+        [CONTEXTUAL] How this tool works:
+        - Parses JSON string into Python data structure
+        - Applies sorting based on specified key using numerical comparison
+        - Extracts the first element after sorting (best/optimal value)
+        - Returns the specified property value from the optimal element
+        - Handles various data types and provides robust error handling
+        - To find the right keys from polymorph data maybe use io tools or python tools
+        [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] First obtain JSON data from polymorph retrieval tools [/PREREQUISITE]
-    2. [CURRENT] Apply this tool to identify optimal material based on specific criteria [/CURRENT]
-    3. [FOLLOW_UP] Use the returned value for further analysis or material selection [/FOLLOW_UP]
-    [/WORKFLOW_INTEGRATION]
+        [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] First obtain JSON data from polymorph retrieval tools [/PREREQUISITE]
+        2. [CURRENT] Apply this tool to identify optimal material based on specific criteria [/CURRENT]
+        3. [FOLLOW_UP] Use the returned value for further analysis or material selection [/FOLLOW_UP]
+        [/WORKFLOW_INTEGRATION]
 
-    [SYNTACTICAL] Usage examples:
-    `sort_and_get_first_from_json(polymorphs_json, "energy_above_hull", "material_id")`,
-    `sort_and_get_first_from_json(polymorphs_json, "band_gap", "cif")`,
-    `sort_and_get_first_from_json(polymorphs_json, "density", "formation_energy_per_atom")`,
-    [/SYNTACTICAL]
+        [SYNTACTICAL] Usage examples:
+        `sort_and_get_first_from_json(polymorphs_json, "energy_above_hull", "material_id")`,
+        `sort_and_get_first_from_json(polymorphs_json, "band_gap", "cif")`,
+        `sort_and_get_first_from_json(polymorphs_json, "density", "formation_energy_per_atom")`,
+        [/SYNTACTICAL]
 
-    Args:
-        polymorph_data_json: [BRIEF] JSON string containing the data to be sorted. [/BRIEF]
-                            [DETAILED] A JSON-formatted string containing a list of dictionaries,
-                            each representing a material or structure with various properties.
-                            The data should be structured consistently with numerical values
-                            for the sorting key. This is typically output from polymorph
-                            retrieval tools. [/DETAILED]
-                            [SYNTACTIC] Format: "Valid JSON string containing list of dictionaries" [/SYNTACTIC]
-                            [EXAMPLES] Examples: JSON from get_bulk_polymorphs_data output [/EXAMPLES]
-        sort_key: [BRIEF] Property name to sort the data by. [/BRIEF]
-                 [DETAILED] The dictionary key name that will be used for sorting the data.
-                 This should correspond to a numerical property in the JSON data. The sorting
-                 is performed in ascending order, so the first element will have the smallest
-                 value for this property. Common keys include energy_above_hull, band_gap,
-                 density, formation_energy_per_atom. [/DETAILED]
-                 [SYNTACTIC] Format: "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
-                 [EXAMPLES] Examples: "energy_above_hull", "band_gap", "density"[/EXAMPLES]
-        return_key: [BRIEF] Property name to return from the first element after sorting. [/BRIEF]
-                   [DETAILED] The dictionary key name for the value that should be returned
-                   from the first (optimal) element after sorting. This allows extraction
-                   of any property from the optimal structure, such as material_id for
-                   identification, cif for structure, or any other calculated property. [/DETAILED]
-                   [SYNTACTIC] Format: "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
-                   [EXAMPLES] Examples: "material_id", "cif", "formation_energy_per_atom"[/EXAMPLES]
+        Args:
+            json_data: [BRIEF] JSON string containing the data to be sorted. [/BRIEF]
+                                [DETAILED] A JSON-formatted string containing a list of dictionaries, each representing a material or structure with various properties.
+                                The data should be structured consistently with numerical values for the sorting key.
+                                This is typically output from polymorph retrieval tools. [/DETAILED]
+                                [SYNTACTIC] Format: "Valid JSON string containing list of dictionaries" [/SYNTACTIC]
+                                [EXAMPLES] Examples: [
+        {
+            "material_id": "mp-390",
+            "energy_above_hull": 0.0,
+            "formation_energy_per_atom": -3.5080554519444442,
+            "band_gap": 2.0586,
+        },
+        {
+            "material_id": "mp-1840",
+            "energy_above_hull": 0.0030413275,
+            "formation_energy_per_atom": -3.505014124444444,
+            "band_gap": 2.2862,
+        },
+    ] [/EXAMPLES]
+            sort_key: [BRIEF] Property name to sort the data by. [/BRIEF]
+                     [DETAILED] The dictionary key name that will be used for sorting the data.
+                     This should correspond to a numerical property in the JSON data.
+                     The sorting is performed in ascending order, so the first element will have the smallest value for this property.
+                     Common keys include energy_above_hull, band_gap, density, formation_energy_per_atom. [/DETAILED]
+                     [SYNTACTIC] Format: "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
+                     [EXAMPLES] Examples: "energy_above_hull", "band_gap", "density"[/EXAMPLES]
+            return_key: [BRIEF] Property name to return from the first element after sorting. [/BRIEF]
+                       [DETAILED] The dictionary key name for the value that should be returned from the first (optimal) element after sorting.
+                       This allows extraction of any property from the optimal structure, such as material_id for identification, cif for structure, or any other calculated property. [/DETAILED]
+                       [SYNTACTIC] Format: "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
+                       [EXAMPLES] Examples: "material_id", "cif", "formation_energy_per_atom"[/EXAMPLES]
 
-    Returns:
-        str: [BRIEF] Value of the specified return_key from the first element after sorting. [/BRIEF]
-             [DETAILED] The value corresponding to the return_key from the material that has
-             the smallest value for the sort_key. This could be a string (like material_id
-             or CIF), a number (like energy or band gap), or any other data type stored
-             in the JSON. The returned value represents the optimal material according
-             to the specified sorting criterion. [/DETAILED]
-             [EXAMPLES] Example outputs: "mp-2657" (material ID), "1.23" (energy value), CIF structure string [/EXAMPLES]
+        Returns:
+            str: [BRIEF] Value of the specified return_key from the first element after sorting. [/BRIEF]
+                 [DETAILED] The value corresponding to the return_key from the material that has the smallest value for the sort_key.
+                 This could be a string (like material_id or CIF), a number (like energy or band gap), or any other data type stored in the JSON.
+                 The returned value represents the optimal material according to the specified sorting criterion. [/DETAILED]
+                 [EXAMPLES] Example outputs: "mp-2657" (material ID), "1.23" (energy value), CIF structure string [/EXAMPLES]
 
-    [RAISES] Exceptions:
-        JSONDecodeError: [ERROR_WHEN] When the polymorph_data_json string is not valid JSON [/ERROR_WHEN]
-                        [ERROR_DETAILS] Malformed JSON string or incorrect format [/ERROR_DETAILS]
-                        [ERROR_RECOVERY] Verify JSON format and ensure proper string escaping [/ERROR_RECOVERY]
-        KeyError: [ERROR_WHEN] When sort_key or return_key is not found in the data [/ERROR_WHEN]
-                 [ERROR_DETAILS] Specified keys don't exist in the JSON data dictionaries [/ERROR_DETAILS]
-                 [ERROR_RECOVERY] Check available keys in the JSON data and use valid key names [/ERROR_RECOVERY]
-        IndexError: [ERROR_WHEN] When the JSON data is empty or contains no elements [/ERROR_WHEN]
-                   [ERROR_DETAILS] Empty list or no valid data after parsing [/ERROR_DETAILS]
-                   [ERROR_RECOVERY] Ensure JSON data contains at least one element [/ERROR_RECOVERY]
-    [/RAISES]
+        [RAISES] Exceptions:
+            JSONDecodeError: [ERROR_WHEN] When the json_data string is not valid JSON [/ERROR_WHEN]
+                            [ERROR_DETAILS] Malformed JSON string or incorrect format [/ERROR_DETAILS]
+                            [ERROR_RECOVERY] Verify JSON format and ensure proper string escaping [/ERROR_RECOVERY]
+            KeyError: [ERROR_WHEN] When sort_key or return_key is not found in the data [/ERROR_WHEN]
+                     [ERROR_DETAILS] Specified keys don't exist in the JSON data dictionaries [/ERROR_DETAILS]
+                     [ERROR_RECOVERY] Check available keys in the JSON data and use valid key names [/ERROR_RECOVERY]
+            IndexError: [ERROR_WHEN] When the JSON data is empty or contains no elements [/ERROR_WHEN]
+                       [ERROR_DETAILS] Empty list or no valid data after parsing [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Ensure JSON data contains at least one element [/ERROR_RECOVERY]
+        [/RAISES]
 
-    [LIMITATIONS] Known limitations:
-    - Only returns the first element after sorting (single optimal result)
-    - Sorting is performed in ascending order only
-    - Does not handle complex sorting criteria or multiple keys
-    - May not work properly with non-numerical sort keys
-    [/LIMITATIONS]
+        [LIMITATIONS] Known limitations:
+        - Only returns the first element after sorting (single optimal result)
+        - Sorting is performed in ascending order only
+        - Does not handle complex sorting criteria or multiple keys
+        - May not work properly with non-numerical sort keys
+        [/LIMITATIONS]
     """
-    data = json.loads(polymorph_data_json)
+    data = json.loads(json_data)
 
     # Sort the data based on the given key
     sorted_data = sorted(data, key=lambda x: x[sort_key])
@@ -1533,10 +1450,9 @@ def execute_python_code(
 ) -> str:
     """[BRIEF] Execute Python code in a secure environment with data input/output capabilities. [/BRIEF]
 
-    [DETAILED] This tool provides a secure execution environment for custom Python code, essential for
-    data analysis, custom calculations, and algorithm development in materials science workflows. It
-    supports data injection, output capture, and file saving capabilities while maintaining security
-    through process isolation and timeout controls. This enables flexible custom analysis. [/DETAILED]
+    [DETAILED] This tool provides a secure execution environment for custom Python code, essential for data analysis, custom calculations, and algorithm development in materials science workflows.
+    It supports data injection, output capture, and file saving capabilities while maintaining security through process isolation and timeout controls.
+    This enables flexible custom analysis. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use when you need to execute custom Python analysis or calculations
@@ -1569,39 +1485,35 @@ def execute_python_code(
 
     Args:
         python_code: [BRIEF] Python code string to be executed. [/BRIEF]
-                    [DETAILED] A string containing valid Python code to be executed in thes
-                    environment. For best results, assign your main output to a variable named
-                    'result' or 'output'. The code can import standard libraries and perform
-                    complex calculations. The tool will attempt to capture user-defined variables
-                    as execution results. [/DETAILED]
+                    [DETAILED] A string containing valid Python code to be executed in thes environment.
+                    For best results, assign your main output to a variable named 'result' or 'output'.
+                    The code can import standard libraries and perform complex calculations.
+                    The tool will attempt to capture user-defined variables as execution results. [/DETAILED]
                     [SYNTACTIC] Format: "Valid Python code string" [/SYNTACTIC]
                     [EXAMPLES] Examples: "result = 2 + 2", "import json; result = json.loads(data)", "filtered = [x for x in data if x > threshold]" [/EXAMPLES]
         input_data: [BRIEF] Optional JSON string to inject as input_data variable. [/BRIEF]
-                   [DETAILED] An optional JSON string that will be loaded into a Python variable
-                   named 'input_data' within the executed script. This allows the script to
-                   process external data. The JSON will be parsed and made available as a Python
-                   object (dict, list, etc.) depending on the JSON structure. [/DETAILED]
+                   [DETAILED] An optional JSON string that will be loaded into a Python variable named 'input_data' within the executed script.
+                   This allows the script to process external data.
+                   The JSON will be parsed and made available as a Python object (dict, list, etc.) depending on the JSON structure. [/DETAILED]
                    [SYNTACTIC] Format: "Valid JSON string or None" [/SYNTACTIC]
                    [EXAMPLES] Examples: '{"data": [1, 2, 3]}', '[1, 2, 3, 4, 5]', '{"threshold": 0.5, "values": [...]}' [/EXAMPLES]
         save_output_to: [BRIEF] Optional file path to save execution results. [/BRIEF]
-                       [DETAILED] An optional file path where the captured execution results will
-                       be saved as a JSON file. If provided and execution is successful, the
-                       results will be written to this file for persistence and later use.
+                       [DETAILED] An optional file path where the captured execution results will be saved as a JSON file.
+                       If provided and execution is successful, the results will be written to this file for persistence and later use.
                        The directory will be created if it doesn't exist. [/DETAILED]
                        [SYNTACTIC] Format: "Valid file path or None" [/SYNTACTIC]
                        [EXAMPLES] Examples: "results.json", "output/analysis_results.json", "data/processed_output.json" [/EXAMPLES]
         timeout: [BRIEF] Maximum execution time in seconds. Defaults to 300. [/BRIEF]
-                [DETAILED] The maximum time in seconds the subprocess is allowed to run before
-                being terminated. This prevents infinite loops and runaway processes from
-                consuming system resources. If the execution exceeds this limit, a timeout
-                error will be returned. Choose appropriate values based on expected computation time. [/DETAILED]
+                [DETAILED] The maximum time in seconds the subprocess is allowed to run before being terminated.
+                This prevents infinite loops and runaway processes from consuming system resources.
+                If the execution exceeds this limit, a timeout error will be returned.
+                Choose appropriate values based on expected computation time. [/DETAILED]
                 [SYNTACTIC] Format: positive integer representing seconds [/SYNTACTIC]
                 [EXAMPLES] Examples: 30 (quick calculations), 300 (standard), 1800 (long processing) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with detailed execution results and captured output. [/BRIEF]
-             [DETAILED] A comprehensive JSON string containing execution status, standard output,
-             error messages, return code, captured execution results, and file save status.
+             [DETAILED] A comprehensive JSON string containing execution status, standard output, error messages, return code, captured execution results, and file save status.
              The execution_result field contains variables captured from the executed code.
              This enables full visibility into the execution process and results. [/DETAILED]
              [EXAMPLES] Example output: '{"success": true, "execution_result": {"result": 10}, "stdout": "...", "stderr": "", "return_code": 0}' [/EXAMPLES]
@@ -1732,11 +1644,9 @@ def execute_python_script(
 ) -> str:
     """[BRIEF] Execute a Python script file with arguments in a controlled environment. [/BRIEF]
 
-    [DETAILED] This tool executes existing Python script files with command-line arguments, providing
-    a controlled environment for running complex analysis workflows, data processing pipelines, or
-    computational simulations. It captures all output streams and provides comprehensive execution
-    monitoring with timeout protection. This is essential for integrating existing Python scripts
-    into automated workflows and materials analysis pipelines. [/DETAILED]
+    [DETAILED] This tool executes existing Python script files with command-line arguments, providing a controlled environment for running complex analysis workflows, data processing pipelines, or computational simulations.
+    It captures all output streams and provides comprehensive execution monitoring with timeout protection.
+    This is essential for integrating existing Python scripts into automated workflows and materials analysis pipelines. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use when you need to execute existing Python scripts with specific arguments. You can also use io tool to write a script and then execute it.
@@ -1770,39 +1680,37 @@ def execute_python_script(
     Args:
         script_path: [BRIEF] Path to the Python script file to execute. [/BRIEF]
                     [DETAILED] Complete file path to the Python script that should be executed.
-                    The script must exist and be readable. The path can be relative to the
-                    current working directory or absolute. The script should be a valid Python
-                    file with appropriate shebang or run using the Python interpreter. [/DETAILED]
+                    The script must exist and be readable.
+                    The path can be relative to the current working directory or absolute.
+                    The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/DETAILED]
                     [SYNTACTIC] Format: "Valid file path to Python script" [/SYNTACTIC]
                     [EXAMPLES] Examples: "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/EXAMPLES]
         args: [BRIEF] Optional list of command-line arguments for the script. [/BRIEF]
              [DETAILED] A list of strings representing command-line arguments to pass to the script.
-             These arguments will be passed to the script in the order provided. Common arguments
-             include input files, output paths, configuration parameters, and processing options.
+             These arguments will be passed to the script in the order provided.
+             Common arguments include input files, output paths, configuration parameters, and processing options.
              If None, the script will be executed without arguments. [/DETAILED]
              [SYNTACTIC] Format: ["arg1", "arg2", "arg3", ...] or None [/SYNTACTIC]
              [EXAMPLES] Examples: ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/EXAMPLES]
         timeout: [BRIEF] Maximum execution time in seconds. Defaults to 600. [/BRIEF]
-                [DETAILED] The maximum time in seconds the script is allowed to run before being
-                terminated. This prevents runaway processes and ensures resource management.
-                Choose appropriate values based on expected script execution time. For
-                computational simulations, longer timeouts may be necessary. [/DETAILED]
+                [DETAILED] The maximum time in seconds the script is allowed to run before being terminated.
+                This prevents runaway processes and ensures resource management.
+                Choose appropriate values based on expected script execution time.
+                For computational simulations, longer timeouts may be necessary. [/DETAILED]
                 [SYNTACTIC] Format: positive integer representing seconds [/SYNTACTIC]
                 [EXAMPLES] Examples: 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/EXAMPLES]
         working_dir: [BRIEF] Optional working directory for script execution. [/BRIEF]
-                    [DETAILED] The directory from which the script should be executed. This affects
-                    relative path resolution and file I/O operations within the script. If None,
-                    the current working directory will be used. This is useful when scripts
-                    expect to run from specific directories or access relative files. [/DETAILED]
+                    [DETAILED] The directory from which the script should be executed.
+                    This affects relative path resolution and file I/O operations within the script.
+                    If None, the current working directory will be used.
+                    This is useful when scripts expect to run from specific directories or access relative files. [/DETAILED]
                     [SYNTACTIC] Format: "Valid directory path or None" [/SYNTACTIC]
                     [EXAMPLES] Examples: "/path/to/project", "data/analysis", None [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with comprehensive execution results and monitoring data. [/BRIEF]
-             [DETAILED] A JSON-formatted string containing execution status, captured output streams,
-             error messages, return code, and the complete command that was executed. This provides
-             full visibility into the script execution process and enables debugging and monitoring
-             of automated workflows. [/DETAILED]
+             [DETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.
+             This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/DETAILED]
              [EXAMPLES] Example output: '{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}' [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -1870,11 +1778,9 @@ def execute_python_script(
 def get_mp_thermo_data(material_id: str) -> str:
     """[BRIEF] Retrieve comprehensive thermodynamic data for materials from Materials Project database. [/BRIEF]
 
-    [DETAILED] This tool accesses detailed thermodynamic information from the Materials Project database, providing
-    essential data for understanding material stability, phase relationships, and thermodynamic properties. It
-    retrieves formation energies, energy above hull, decomposition pathways, and stability information crucial
-    for materials design and selection. This thermodynamic data enables informed decisions about material
-    synthesis feasibility and provides benchmarks for computational studies. [/DETAILED]
+    [DETAILED] This tool accesses detailed thermodynamic information from the Materials Project database, providing essential data for understanding material stability, phase relationships, and thermodynamic properties.
+    It retrieves formation energies, energy above hull, decomposition pathways, and stability information crucial for materials design and selection.
+    This thermodynamic data enables informed decisions about material synthesis feasibility and provides benchmarks for computational studies. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use when you need comprehensive thermodynamic data for specific materials
@@ -1905,18 +1811,15 @@ def get_mp_thermo_data(material_id: str) -> str:
     Args:
         material_id: [BRIEF] Materials Project ID for the target material. [/BRIEF]
                     [DETAILED] The unique Materials Project identifier for the material of interest.
-                    Should be in the format "mp-XXXXX" where XXXXX is the numerical ID. The material
-                    must exist in the Materials Project database and have thermodynamic calculations
-                    available. [/DETAILED]
+                    Should be in the format "mp-XXXXX" where XXXXX is the numerical ID.
+                    The material must exist in the Materials Project database and have thermodynamic calculations available. [/DETAILED]
                     [SYNTACTIC] Format: "mp-" followed by digits (e.g., "mp-149", "mp-2657") [/SYNTACTIC]
                     [EXAMPLES] Examples: "mp-149" (Silicon), "mp-2657" (TiO2), "mp-1143" (Al2O3) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string containing comprehensive thermodynamic data and stability information. [/BRIEF]
-             [DETAILED] A JSON-formatted string containing thermodynamic properties including material ID,
-             thermodynamic functional used, formation energy per atom, energy above hull, decomposition
-             products, stability status, energy type, and uncorrected energies. Returns error information
-             if thermodynamic data is not available. [/DETAILED]
+             [DETAILED] A JSON-formatted string containing thermodynamic properties including material ID, thermodynamic functional used, formation energy per atom, energy above hull, decomposition products, stability status, energy type, and uncorrected energies.
+             Returns error information if thermodynamic data is not available. [/DETAILED]
              [EXAMPLES] Example output: '[{"material_id": "mp-149", "formation_energy_per_atom": -4.2, "energy_above_hull": 0.0, "is_stable": true, ...}]' [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -2003,11 +1906,7 @@ def find_all_unique_slabs_upto_millerindex(
 ) -> str:
     """[BRIEF] Generate all unique surface slabs for bulk structure up to specified Miller indices systematically. [/BRIEF]
 
-    [DETAILED] This tool provides comprehensive surface generation by systematically creating all unique surface
-    slabs for a given bulk structure across all Miller indices up to a specified maximum. It implements advanced
-    slab generation algorithms that explore different surface orientations and terminations, essential for
-    systematic surface studies, catalysis research, and comprehensive materials characterization. This approach
-    ensures no important surface orientations are missed in analysis. [/DETAILED]
+    [DETAILED] This tool provides comprehensive surface generation by systematically creating all unique surface slabs for a given bulk structure across all Miller indices up to a specified maximum. It implements advanced slab generation algorithms that explore different surface orientations and terminations, essential for systematic surface studies, catalysis research, and comprehensive materials characterization. This approach ensures no important surface orientations are missed in analysis. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use when you need comprehensive exploration of all possible surface orientations
@@ -2039,63 +1938,43 @@ def find_all_unique_slabs_upto_millerindex(
 
     Args:
         bulk_structure_path_or_string: [BRIEF] Path to CIF file or CIF string of bulk structure. [/BRIEF]
-                                      [DETAILED] Either a complete file path to a CIF file containing the bulk crystal
-                                      structure, or a CIF-formatted string containing the structure data, depending on
-                                      the from_path parameter. This structure serves as the basis for all surface
-                                      generation and should be a well-defined three-dimensional crystal. [/DETAILED]
+                                      [DETAILED] Either a complete file path to a CIF file containing the bulk crystal structure, or a CIF-formatted string containing the structure data, depending on the from_path parameter. This structure serves as the basis for all surface generation and should be a well-defined three-dimensional crystal. [/DETAILED]
                                       [SYNTACTIC] Format: "Valid CIF file path or string in valid CIF syntax" [/SYNTACTIC]
                                       [EXAMPLES] Examples: "structures/bulk_si.cif", CIF string from Materials Project [/EXAMPLES]
 
         from_path: [BRIEF] Boolean indicating if input is a file path. Defaults to False. [/BRIEF]
-                  [DETAILED] Boolean flag that determines how to interpret the bulk_structure_path_or_string parameter.
-                  When True, treats the input as a file path to read. When False, treats it as a CIF string to parse
-                  directly. This provides flexibility for different data input patterns in workflows. [/DETAILED]
+                  [DETAILED] Boolean flag that determines how to interpret the bulk_structure_path_or_string parameter. When True, treats the input as a file path to read. When False, treats it as a CIF string to parse directly. This provides flexibility for different data input patterns in workflows. [/DETAILED]
                   [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
                   [EXAMPLES] Examples: True (file input), False (string input) [/EXAMPLES]
 
         max_index: [BRIEF] Maximum Miller index to consider. Defaults to 2. [/BRIEF]
-                  [DETAILED] The maximum value for Miller indices (h, k, l) to include in surface generation.
-                  Higher values explore more surface orientations but increase computational cost exponentially.
-                  Common choices are 1, 2, or 3 depending on the comprehensiveness required and computational
-                  resources available. [/DETAILED]
+                  [DETAILED] The maximum value for Miller indices (h, k, l) to include in surface generation. Higher values explore more surface orientations but increase computational cost exponentially. Common choices are 1, 2, or 3 depending on the comprehensiveness required and computational resources available. [/DETAILED]
                   [SYNTACTIC] Format: positive integer (1, 2, or 3) [/SYNTACTIC]
                   [EXAMPLES] Examples: 1 (basic orientations), 2 (standard), 3 (comprehensive but expensive) [/EXAMPLES]
 
         min_slab_size: [BRIEF] Minimum slab thickness in Angstroms. Defaults to 8. [/BRIEF]
-                      [DETAILED] The minimum thickness of generated slabs in the direction perpendicular to the surface
-                      plane. This ensures adequate bulk-like behavior in the slab center while exposing the desired
-                      surface. Larger values provide more accurate surface representation but increase computational cost. [/DETAILED]
+                      [DETAILED] The minimum thickness of generated slabs in the direction perpendicular to the surface plane. This ensures adequate bulk-like behavior in the slab center while exposing the desired surface. Larger values provide more accurate surface representation but increase computational cost. [/DETAILED]
                       [SYNTACTIC] Format: positive float representing thickness in Angstroms [/SYNTACTIC]
                       [EXAMPLES] Examples: 8.0 (minimal), 12.0 (standard), 15.0 (thick) [/EXAMPLES]
 
         min_vacuum_size: [BRIEF] Minimum vacuum layer thickness in Angstroms. Defaults to 15. [/BRIEF]
-                        [DETAILED] The minimum vacuum space above each surface to prevent interactions between periodic
-                        images in surface calculations. Larger vacuum regions are essential for accurate surface energy
-                        calculations and prevent spurious interactions between surface images. [/DETAILED]
+                        [DETAILED] The minimum vacuum space above each surface to prevent interactions between periodic images in surface calculations. Larger vacuum regions are essential for accurate surface energy calculations and prevent spurious interactions between surface images. [/DETAILED]
                         [SYNTACTIC] Format: positive float representing vacuum thickness in Angstroms [/SYNTACTIC]
                         [EXAMPLES] Examples: 10.0 (minimal), 15.0 (standard), 20.0 (large) [/EXAMPLES]
 
         center_slab: [BRIEF] Whether to center slab in vacuum region. Defaults to True. [/BRIEF]
-                    [DETAILED] Boolean flag controlling whether the slab should be positioned in the center of the
-                    vacuum region. Centering is generally recommended for symmetric boundary conditions and
-                    consistent surface calculations. Setting to False may be useful for specific calculation
-                    requirements or interfacial studies. [/DETAILED]
+                    [DETAILED] Boolean flag controlling whether the slab should be positioned in the center of the vacuum region. Centering is generally recommended for symmetric boundary conditions and consistent surface calculations. Setting to False may be useful for specific calculation requirements or interfacial studies. [/DETAILED]
                     [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
                     [EXAMPLES] Examples: True (centered, recommended), False (offset positioning) [/EXAMPLES]
 
         max_normal_search: [BRIEF] Maximum number of surface normals to search. Defaults to 10. [/BRIEF]
-                          [DETAILED] The maximum number of surface normal directions to explore for each Miller index.
-                          Higher values may find more unique terminations but increase computational cost. This parameter
-                          controls the thoroughness of surface termination exploration for complex structures. [/DETAILED]
+                          [DETAILED] The maximum number of surface normal directions to explore for each Miller index. Higher values may find more unique terminations but increase computational cost. This parameter controls the thoroughness of surface termination exploration for complex structures. [/DETAILED]
                           [SYNTACTIC] Format: positive integer [/SYNTACTIC]
                           [EXAMPLES] Examples: 5 (quick), 10 (standard), 20 (thorough) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON dictionary with comprehensive slab data including properties and metadata. [/BRIEF]
-             [DETAILED] A JSON-formatted string containing a dictionary where keys are slab identifiers and values
-             contain comprehensive slab information including Miller indices, termination numbers, CIF structures,
-             surface areas, atom counts, and slab thicknesses. This provides complete characterization of all
-             generated surfaces for analysis and selection. [/DETAILED]
+             [DETAILED] A JSON-formatted string containing a dictionary where keys are slab identifiers and values contain comprehensive slab information including Miller indices, termination numbers, CIF structures, surface areas, atom counts, and slab thicknesses. This provides complete characterization of all generated surfaces for analysis and selection. [/DETAILED]
              [EXAMPLES] Example output: '{"111_0": {"miller_index": [1,1,1], "cif": "...", "area": 45.2, "num_sites": 24, ...}}' [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -2150,11 +2029,9 @@ def find_all_unique_slabs_upto_millerindex(
 def get_mp_surface_properties(material_id: str) -> str:
     """[BRIEF] Retrieve comprehensive surface properties for materials from Materials Project database. [/BRIEF]
 
-    [DETAILED] This tool retrieves detailed surface properties and energetics for specific materials from the
-    Materials Project database, providing essential information for surface chemistry and catalysis studies.
-    It accesses calculated surface energies, anisotropy factors, shape factors, and reconstruction information
-    that are crucial for understanding surface stability and reactivity. This data enables informed selection
-    of materials for surface applications and provides theoretical benchmarks for computational studies. [/DETAILED]
+    [DETAILED] This tool retrieves detailed surface properties and energetics for specific materials from the Materials Project database, providing essential information for surface chemistry and catalysis studies.
+    It accesses calculated surface energies, anisotropy factors, shape factors, and reconstruction information that are crucial for understanding surface stability and reactivity.
+    This data enables informed selection of materials for surface applications and provides theoretical benchmarks for computational studies. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use when you need comprehensive surface property data for specific materials
@@ -2173,7 +2050,7 @@ def get_mp_surface_properties(material_id: str) -> str:
     [/CONTEXTUAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure MP_API_KEY is set and material ID is valid [/PREREQUISITE]
+    1. [PREREQUISITE] Ensure MPID is valid [/PREREQUISITE]
     2. [CURRENT] Retrieve comprehensive surface properties for target material [/CURRENT]
     3. [FOLLOW_UP] Use surface property data for material selection or computational benchmarking [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
@@ -2187,18 +2064,15 @@ def get_mp_surface_properties(material_id: str) -> str:
     Args:
         material_id: [BRIEF] Materials Project ID for the target material. [/BRIEF]
                     [DETAILED] The unique Materials Project identifier for the material of interest.
-                    Should be in the format "mp-XXXXX" where XXXXX is the numerical ID. The material
-                    must exist in the Materials Project database and have calculated surface properties
-                    available. [/DETAILED]
+                    Should be in the format "mp-XXXXX" where XXXXX is the numerical ID.
+                    The material must exist in the Materials Project database and have calculated surface properties available. [/DETAILED]
                     [SYNTACTIC] Format: "mp-" followed by digits (e.g., "mp-149", "mp-2657") [/SYNTACTIC]
                     [EXAMPLES] Examples: "mp-149" (Silicon), "mp-2657" (TiO2 anatase), "mp-1143" (Al2O3) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string containing comprehensive surface properties and energetics data. [/BRIEF]
-             [DETAILED] A JSON-formatted string containing surface properties including material ID,
-             formula, weighted surface energy, surface energy in eV/Å², surface anisotropy, shape factor,
-             and reconstruction information. Returns error information if surface properties are not
-             available for the specified material. [/DETAILED]
+             [DETAILED] A JSON-formatted string containing surface properties including material ID, formula, weighted surface energy, surface energy in eV/Å², surface anisotropy, shape factor, and reconstruction information.
+             Returns error information if surface properties are not available for the specified material. [/DETAILED]
              [EXAMPLES] Example output: '[{"material_id": "mp-149", "weighted_surface_energy": 1.23, "surface_anisotropy": 0.15, ...}]' [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -2283,10 +2157,9 @@ def generate_adsorbate_slab_configs(
 ) -> str:
     """[BRIEF] Generate adsorbate-slab configurations by placing adsorbate molecules at different surface sites. [/BRIEF]
 
-    [DETAILED] This tool creates multiple adsorbate-slab configurations by systematically placing adsorbate molecules
-    at different adsorption sites on a slab surface. It uses pymatgen's AdsorbateSiteFinder to handle the geometric
-    placement of adsorbates at specified surface sites, including top, bridge, and hollow sites. This is essential
-    for adsorption energy calculations, catalysis studies, and surface reactivity analysis. [/DETAILED]
+    [DETAILED] This tool creates multiple adsorbate-slab configurations by systematically placing adsorbate molecules at different adsorption sites on a slab surface.
+    It uses pymatgen's AdsorbateSiteFinder to handle the geometric placement of adsorbates at specified surface sites, including top, bridge, and hollow sites.
+    This is essential for adsorption energy calculations, catalysis studies, and surface reactivity analysis. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use after identifying adsorption sites on a slab surface
@@ -2321,35 +2194,29 @@ def generate_adsorbate_slab_configs(
 
     Args:
         slab_cif: [BRIEF] CIF string of the slab structure. [/BRIEF]
-                 [DETAILED] A properly formatted CIF string containing the slab structure on which
-                 adsorbates will be placed. The slab should be oriented with the surface normal
-                 along the c-axis for proper adsorbate placement. [/DETAILED]
+                 [DETAILED] A properly formatted CIF string containing the slab structure on which adsorbates will be placed.
+                 The slab should be oriented with the surface normal along the c-axis for proper adsorbate placement. [/DETAILED]
                  [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
                  [EXAMPLES] Examples: Output from slab generation tools [/EXAMPLES]
         adsorbate_cif: [BRIEF] CIF string of the adsorbate molecule. [/BRIEF]
-                      [DETAILED] A CIF-formatted string containing the adsorbate molecule structure
-                      that will be placed on the slab surface. The molecule should be properly
-                      oriented and have reasonable geometry for surface adsorption. [/DETAILED]
+                      [DETAILED] A CIF-formatted string containing the adsorbate molecule structure that will be placed on the slab surface.
+                      The molecule should be properly oriented and have reasonable geometry for surface adsorption. [/DETAILED]
                       [SYNTACTIC] Format: "string in valid CIF syntax" [/SYNTACTIC]
                       [EXAMPLES] Examples: "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
         adsorption_sites_json: [BRIEF] JSON string containing adsorption sites information. [/BRIEF]
-                              [DETAILED] A JSON-formatted string containing information about potential
-                              adsorption sites on the slab surface, typically organized by site type
-                              (top, bridge, hollow) with coordinates for each site. [/DETAILED]
+                              [DETAILED] A JSON-formatted string containing information about potential adsorption sites on the slab surface, typically organized by site type (top, bridge, hollow) with coordinates for each site. [/DETAILED]
                               [SYNTACTIC] Format: "JSON string with site types and coordinates" [/SYNTACTIC]
                               [EXAMPLES] Examples: {"top": [[x1,y1,z1], [x2,y2,z2]], "bridge": [...]} [/EXAMPLES]
         height: [BRIEF] Height in Angstroms for initial adsorbate placement. Defaults to 1.8. [/BRIEF]
                [DETAILED] The initial height above the surface at which the adsorbate will be placed.
-               This is the starting geometry for optimization and should be reasonable for the specific
-               adsorbate-surface system. Typical values are 1.5-2.5 Å. [/DETAILED]
+               This is the starting geometry for optimization and should be reasonable for the specific adsorbate-surface system.
+               Typical values are 1.5-2.5 Å. [/DETAILED]
                [SYNTACTIC] Format: positive float representing height in Angstroms [/SYNTACTIC]
                [EXAMPLES] Examples: 1.5 (close), 1.8 (standard), 2.2 (distant) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string containing all generated adsorbate-slab configurations. [/BRIEF]
-             [DETAILED] A JSON-formatted string containing all successfully generated adsorbate-slab
-             configurations, with each configuration including site information, coordinates, and
-             the complete CIF structure ready for calculations. [/DETAILED]
+             [DETAILED] A JSON-formatted string containing all successfully generated adsorbate-slab configurations, with each configuration including site information, coordinates, and the complete CIF structure ready for calculations. [/DETAILED]
              [EXAMPLES] Example output: {"top_0": {"site_coords": [x,y,z], "cif": "..."}, ...} [/EXAMPLES]
 
     [RAISES] Exceptions:
