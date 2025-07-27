@@ -10,12 +10,13 @@ from hypothesis import given
 # Import your tool objects (these have .execute() methods)
 from ml.tools import (
     evaluate_xgboost_model,
-    execute_python_code,
     get_bulk_polymorphs_data,
     get_structure_from_mp_text,
     sort_and_get_first_from_json,
     train_xgboost_model,
 )
+
+from corral.utils import execute_python_code
 
 # Mock data directory
 MOCK_DATA_DIR = Path(__file__).parent / "mock_data"
