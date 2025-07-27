@@ -186,7 +186,7 @@ def test_get_bulk_polymorphs_data():
 def test_sort_and_get_first_from_json():
     polymorphs_json = get_bulk_polymorphs_data.execute(composition="TiO2")
     stable_id = sort_and_get_first_from_json.execute(
-        polymorph_data_json=polymorphs_json,
+        json_data=polymorphs_json,
         sort_key="energy_above_hull",
         return_key="material_id",
     )
