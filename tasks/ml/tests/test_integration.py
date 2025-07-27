@@ -15,13 +15,14 @@ from ml.tools import (
     batch_retrieve_polymorphs,
     consolidate_polymorph_datasets,
     evaluate_xgboost_model,
-    execute_python_code,
     filter_json_with_strategy,
     perform_cross_validation,
     prepare_tabular_dataset,
     select_polymorphs_with_strategy_to_file,
     train_xgboost_model,
 )
+
+from corral.utils import execute_python_code
 
 
 class TestDataRetrievalWorkflow:
