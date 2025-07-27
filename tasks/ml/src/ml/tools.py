@@ -40,7 +40,7 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     [PROCEDURAL] When to use this tool:
     - Use when you need to retrieve bulk crystal structures from the Materials Project database
     - Best suited for materials with known MP IDs
-    - Usuall first step in simulation workflows
+    - Usually first step in simulation workflows
     - Recommended for obtaining crystal structures for preparing bulk structures, supercells, bulk cells, slabs etc.
     - Avoid when you need multiple structures
     [/PROCEDURAL]
@@ -52,7 +52,7 @@ def get_structure_from_mp_text(mp_id: str) -> str:
     - Returns standardized crystallographic data suitable for further processing
     [/CONTEXTUAL]
     [WORKFLOW_INTEGRATION] Typical workflow integration example:
-    1. [PREREQUISITE] Ensure that the other more specific tools are not suitable and you dont have to retrieve multiple strucutres[/PREREQUISITE]
+    1. [PREREQUISITE] Ensure that the other more specific tools are not suitable and you dont have to retrieve multiple structures[/PREREQUISITE]
     2. [CURRENT] Apply this tool with a valid MP ID to retrieve bulk structure [/CURRENT]
     3. [FOLLOW_UP] Use the CIF output with slab generation tools like enumerate_slabs_text to create slab structures [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
@@ -71,14 +71,14 @@ def get_structure_from_mp_text(mp_id: str) -> str:
                [DETAILED] The unique identifier used by Materials Project to catalog materials.
                Should be in the format "mp-XXXXX" where XXXXX is a numerical ID.
                This ID corresponds to a specific material entry in the Materials Project database. [/DETAILED]
-               [SYNTACTIC] Format: "mp-" followed by digits (e.g., "mp-149", "mp-20066") [/SYNTACTIC]
-               [EXAMPLES] Examples: "mp-149" (Silicon), "mp-20066" (CO2), "mp-2" (Li) [/EXAMPLES]
+               [SYNTACTIC] "mp-" followed by digits (e.g., "mp-149", "mp-20066") [/SYNTACTIC]
+               [EXAMPLES] "mp-149" (Silicon), "mp-20066" (CO2), "mp-2" (Li) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] CIF content string containing the crystal structure data. [/BRIEF]
              [DETAILED] A properly formatted CIF (Crystallographic Information File) string containing all necessary information about the crystal structure including lattice parameters, atomic positions, space group, and symmetry operations.
              This format is widely compatible with crystallographic software and other structure analysis tools. [/DETAILED]
-             [EXAMPLES] Example output: "\n_chemical_formula_structural Si\n_cell_length_a 5.468..." [/EXAMPLES]
+             [EXAMPLES] "# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n" [/EXAMPLES]
 
     [RAISES] Exceptions:
         ConnectionError: [ERROR_WHEN] When unable to connect to Materials Project API [/ERROR_WHEN]
@@ -214,7 +214,7 @@ def get_bulk_polymorphs_data(composition: str) -> str:
     [PROCEDURAL] When to use this tool:
     - Use when you need to explore all known structural variants of a single material composition
     - Suitable for identifying thermodynamically stable and metastable phases and other properties like band gap, density, volume, number of sites, space group of the structure.
-    - Recommended for retrieving structure and Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group of one single compoisition
+    - Recommended for retrieving structure and Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group of one single composition
     - Avoid when you only need a single structure
     - Avoid when you need data for multiple composition
     [/PROCEDURAL]
@@ -246,17 +246,17 @@ def get_bulk_polymorphs_data(composition: str) -> str:
                     [DETAILED] Chemical formula specifying the composition for which polymorphs should be retrieved.
                     Should follow standard chemical notation with element symbols.
                     The tool will find all known crystal structures with this exact composition in the Materials Project database. [/DETAILED]
-                    [SYNTACTIC] Format: "Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)" [/SYNTACTIC]
-                    [EXAMPLES] Examples: "TiO2" (rutile, anatase, brookite), "SiO2" (quartz, cristobalite), "Fe2O3" (hematite, maghemite) [/EXAMPLES]
+                    [SYNTACTIC] "Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)" [/SYNTACTIC]
+                    [EXAMPLES] "TiO2", "SiO2", "Fe2O3"[/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string containing comprehensive polymorph data sorted by stability. [/BRIEF]
              [DETAILED] A JSON-formatted string containing a list of dictionaries, each representing a polymorph with properties including Materials Project ID, CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information.
              Results are sorted by energy above hull for easy identification of the most stable phases. [/DETAILED]
-             [EXAMPLES] Example output: '[{"material_id": "mp-2657", "cif": "...", "energy_above_hull": 0.0, "formation_energy_per_atom": -4.2, ...}]' [/EXAMPLES]
+             [EXAMPLES] '[{"material_id": "mp-2657", "cif": "...", "energy_above_hull": 0.0, "formation_energy_per_atom": -4.2, ...}]' [/EXAMPLES]
 
     [RAISES] Exceptions:
-        KeyError: [ERROR_WHEN] When the specified compoisiton is not found in the database [/ERROR_WHEN]
+        KeyError: [ERROR_WHEN] When the specified composition is not found in the database [/ERROR_WHEN]
             [ERROR_DETAILS] Invalid or non-existent material composition is provided [/ERROR_DETAILS]
             [ERROR_RECOVERY] Verify if the composition is valid[/ERROR_RECOVERY]
         ValueError: [ERROR_WHEN] When Materials Project API key is not available [/ERROR_WHEN]
@@ -382,22 +382,22 @@ def get_bulk_polymorphs_data_to_file(
                     [DETAILED] Chemical formula specifying the composition for which polymorphs should be retrieved and saved.
                     Should follow standard chemical notation with element symbols and subscripts.
                     The tool will find all known crystal structures with this exact composition in the Materials Project database. [/DETAILED]
-                    [SYNTACTIC] Format: "Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)" [/SYNTACTIC]
-                    [EXAMPLES] Examples: "TiO2" (titanium dioxide), "SiO2" (silicon dioxide), "Fe2O3" (iron oxide) [/EXAMPLES]
+                    [SYNTACTIC] "Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)" [/SYNTACTIC]
+                    [EXAMPLES] "TiO2" (titanium dioxide), "SiO2" (silicon dioxide), "Fe2O3" (iron oxide) [/EXAMPLES]
         save_path: [BRIEF] File path where JSON data will be saved. [/BRIEF]
                   [DETAILED] Complete file path including filename and extension where the polymorph data will be saved.
                   The path should be writable and the directory will be created if it doesn't exist.
                   Using .json extension is recommended for clarity.
                   If None, the tool will raise an error as the file path is required. [/DETAILED]
-                  [SYNTACTIC] Format: "Valid file path with .json extension" [/SYNTACTIC]
-                  [EXAMPLES] Examples: "data/tio2_polymorphs.json", "save_path/tio2_polymorphs.json", "results/Cu2O_polymorphsides.json" [/EXAMPLES]
+                  [SYNTACTIC] Valid file path with .json extension [/SYNTACTIC]
+                  [EXAMPLES] "data/tio2_polymorphs.json", "save_path/tio2_polymorphs.json", "results/Cu2O_polymorphsides.json" [/EXAMPLES]
 
     Returns:
         str: [BRIEF] File path where the polymorph data was saved. [/BRIEF]
              [DETAILED] Returns the exact file path where the JSON data was successfully written.
              This path can be used by subsequent tools for data loading and processing.
              The file contains comprehensive polymorph data in JSON format, sorted by thermodynamic stability. [/DETAILED]
-             [EXAMPLES] Example output: "data/tio2_polymorphs.json" [/EXAMPLES]
+             [EXAMPLES] "data/tio2_polymorphs.json" [/EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError: [ERROR_WHEN] When save_path is None or API key is not available [/ERROR_WHEN]
@@ -536,34 +536,34 @@ def batch_retrieve_polymorphs(
                      Each composition should follow standard chemical notation.
                      The tool will process each composition independently and provide detailed success/failure reporting.
                      Large lists are supported but may take significant time to process. [/DETAILED]
-                     [SYNTACTIC] Format: ["composition1", "composition2", ...] [/SYNTACTIC]
-                     [EXAMPLES] Examples: ["TiO2", "SiO2", "Al2O3"], ["CaTiO3", "SrTiO3"], ["FeO", "Fe2O3"] [/EXAMPLES]
+                     [SYNTACTIC] ["composition1", "composition2", ...] [/SYNTACTIC]
+                     [EXAMPLES] ["TiO2", "SiO2", "Al2O3"], ["CaTiO3", "SrTiO3"], ["FeO", "Fe2O3"] [/EXAMPLES]
         max_energy_above_hull: [BRIEF] Maximum energy above hull threshold in eV/atom. Defaults to 0.5. [/BRIEF]
                               [DETAILED] Energy threshold above the convex hull for including polymorphs.
                               Only phases with energy above hull less than or equal to this value will be included.
                               This filters out highly unstable phases while retaining potentially accessible metastable phases.
                               Lower values give more stable phases but may miss interesting metastable structures. [/DETAILED]
-                              [SYNTACTIC] Format: positive float representing energy in eV/atom [/SYNTACTIC]
-                              [EXAMPLES] Examples: 0.1 (very stable), 0.5 (standard), 1.0 (include metastable) [/EXAMPLES]
+                              [SYNTACTIC] positive float representing energy in eV/atom [/SYNTACTIC]
+                              [EXAMPLES] 0.1 (very stable), 0.5 (standard), 1.0 (include metastable) [/EXAMPLES]
         max_per_composition: [BRIEF] Maximum number of polymorphs per composition. Defaults to 10. [/BRIEF]
                             [DETAILED] Maximum number of polymorphs to retrieve for each composition, taken from the most stable phases first.
                             This prevents data explosion for compositions with many known phases while ensuring the most important structures are captured.
                             Higher values provide more comprehensive coverage but increase dataset size and processing time. [/DETAILED]
-                            [SYNTACTIC] Format: positive integer [/SYNTACTIC]
-                            [EXAMPLES] Examples: 5 (focused), 10 (standard), 20 (comprehensive) [/EXAMPLES]
+                            [SYNTACTIC] positive integer [/SYNTACTIC]
+                            [EXAMPLES] 5 , 10 , 20 [/EXAMPLES]
         save_directory: [BRIEF] Directory path for saving individual composition files. Defaults to "polymorph_data". [/BRIEF]
                        [DETAILED] Base directory where individual JSON files for each composition will be saved.
                        The directory will be created if it doesn't exist.
                        Each composition will have its own JSON file named with the composition formula.
                        This organization facilitates easy data management and selective loading of specific compositions. [/DETAILED]
-                       [SYNTACTIC] Format: "Valid directory path" [/SYNTACTIC]
-                       [EXAMPLES] Examples: "data/polymorphs", "materials/oxides", "results/batch_data" [/EXAMPLES]
+                       [SYNTACTIC] "Valid directory path" [/SYNTACTIC]
+                       [EXAMPLES] "data/polymorphs", "materials/oxides", "results/batch_data" [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with batch retrieval results and statistics. [/BRIEF]
              [DETAILED] A comprehensive JSON report containing lists of successfully processed and failed compositions, total number of polymorphs retrieved, file paths for each composition, and summary statistics.
              This enables quality control and tracking of the batch processing workflow. [/DETAILED]
-             [EXAMPLES] Example output: '{"successful_compositions": ["TiO2", "SiO2"], "failed_compositions": ["BadFormula"], "total_polymorphs": 15, "composition_files": {...}}' [/EXAMPLES]
+             [EXAMPLES] "{"successful_compositions": ["TiO2", "SiO2"], "failed_compositions": ["BadFormula"], "total_polymorphs": 15, "composition_files": {...}}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError: [ERROR_WHEN] When parameters are invalid (negative energy, zero max_per_composition) [/ERROR_WHEN]
@@ -670,16 +670,16 @@ def sort_and_get_first_from_json(
     Args:
         polymorph_data_json: [BRIEF] JSON string containing the data to be sorted. [/BRIEF]
                             [DETAILED] A JSON-formatted string containing a list of dictionaries, each representing a material or structure with various properties. The data should be structured consistently with numerical values for the sorting key. This is typically output from polymorph retrieval tools. [/DETAILED]
-                            [SYNTACTIC] Format: "Valid JSON string containing list of dictionaries" [/SYNTACTIC]
-                            [EXAMPLES] Examples: JSON /EXAMPLES]
+                            [SYNTACTIC] "Valid JSON string containing list of dictionaries" [/SYNTACTIC]
+                            [EXAMPLES] { "materials": [ { "material_id": "mp-1234", "energy_above_hull": 0.1, "band_gap": 1.5 }, { "material_id": "mp-5678", "energy_above_hull": 0.2, "band_gap": 2.0 } ] } [/EXAMPLES]
         sort_key: [BRIEF] Property name to sort the data by. [/BRIEF]
                  [DETAILED] The dictionary key name that will be used for sorting the data. This should correspond to a numerical property in the JSON data. The sorting is performed in ascending order, so the first element will have the smallest value for this property. Common keys include energy_above_hull, band_gap, density, formation_energy_per_atom. [/DETAILED]
-                 [SYNTACTIC] Format: "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
-                 [EXAMPLES] Examples: "energy_above_hull", "band_gap", "density"[/EXAMPLES]
+                 [SYNTACTIC] "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
+                 [EXAMPLES] "energy_above_hull", "band_gap", "density"[/EXAMPLES]
         return_key: [BRIEF] Property name to return from the first element after sorting. [/BRIEF]
                    [DETAILED] The dictionary key name for the value that should be returned from the first (optimal) element after sorting. This allows extraction of any property from the optimal structure, such as material_id for identification, cif for structure, or any other calculated property. [/DETAILED]
-                   [SYNTACTIC] Format: "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
-                   [EXAMPLES] Examples: "material_id", "cif", "formation_energy_per_atom"[/EXAMPLES]
+                   [SYNTACTIC] "String matching a key in the JSON data dictionaries" [/SYNTACTIC]
+                   [EXAMPLES] "material_id", "cif", "formation_energy_per_atom"[/EXAMPLES]
 
     Returns:
         str: [BRIEF] Value of the specified return_key from the first element after sorting. [/BRIEF]
@@ -764,38 +764,38 @@ def select_polymorphs_with_strategy(
                         [DETAILED] Either a JSON-formatted string containing polymorph data or a file path to a JSON file, depending on the is_path parameter.
                         The data should contain polymorphs with properties like energy_above_hull, space_group, and other structural/energetic information.
                         This is typically output from polymorph retrieval tools. [/DETAILED]
-                        [SYNTACTIC] Format: "JSON string or valid file path" [/SYNTACTIC]
-                        [EXAMPLES] Examples: JSON string "data/polymorphs.json" [/EXAMPLES]
+                        [SYNTACTIC] "JSON string or valid file path" [/SYNTACTIC]
+                        [EXAMPLES] "data/polymorphs.json" [/EXAMPLES]
         selection_strategy: [BRIEF] Strategy for polymorph selection. Defaults to "diverse_energy". [/BRIEF]
                            [DETAILED] The algorithm used for selecting polymorphs from the dataset "diverse_energy" selects polymorphs distributed across the energy range for representative sampling.
                            "most_stable" prioritizes the most thermodynamically stable phases.
                            "diverse_structure" ensures different space groups are represented to capture structural diversity. [/DETAILED]
-                           [SYNTACTIC] Format: "diverse_energy", "most_stable", or "diverse_structure" [/SYNTACTIC]
-                           [EXAMPLES] Examples: "most_stable" (stability focus), "diverse_structure" (structural diversity), "diverse_energy" (energy sampling) [/EXAMPLES]
+                           [SYNTACTIC] "diverse_energy", "most_stable", or "diverse_structure" [/SYNTACTIC]
+                           [EXAMPLES] "most_stable" (stability focus), "diverse_structure" (structural diversity), "diverse_energy" (energy sampling) [/EXAMPLES]
         max_polymorphs: [BRIEF] Maximum number of polymorphs to select. Defaults to 5. [/BRIEF]
                        [DETAILED] The maximum number of polymorphs to include in the final selection.
                        This parameter controls the size of the resulting dataset and should be chosen based on computational resources and analysis requirements.
                        Larger values provide more comprehensive coverage but increase processing time and computational cost. [/DETAILED]
-                       [SYNTACTIC] Format: positive integer [/SYNTACTIC]
-                       [EXAMPLES] Examples: 3 (focused), 5 (standard), 10 (comprehensive) [/EXAMPLES]
+                       [SYNTACTIC] positive integer [/SYNTACTIC]
+                       [EXAMPLES] 3 (focused), 5 (standard), 10 (comprehensive) [/EXAMPLES]
         energy_threshold: [BRIEF] Maximum energy above hull in eV/atom. Defaults to 0.5. [/BRIEF]
                          [DETAILED] Energy threshold above the convex hull for including polymorphs in the selection process.
                          Only phases with energy above hull less than or equal to this value will be considered.
                          This pre-filtering step ensures that only thermodynamically accessible phases are included in the analysis. [/DETAILED]
-                         [SYNTACTIC] Format: positive float representing energy in eV/atom [/SYNTACTIC]
-                         [EXAMPLES] Examples: 0.1 (very stable), 0.5 (moderate), 1.0 (include metastable) [/EXAMPLES]
+                         [SYNTACTIC] positive float representing energy in eV/atom [/SYNTACTIC]
+                         [EXAMPLES] 0.1 (very stable), 0.5 (moderate), 1.0 (include metastable) [/EXAMPLES]
         is_path: [BRIEF] Whether polymorphs_data is a file path. Defaults to False. [/BRIEF]
                 [DETAILED] Boolean flag indicating whether the polymorphs_data parameter should be treated as a file path (True) or as a JSON string (False).
                 When True, the tool will read the JSON data from the specified file.
                 When False, it will parse the data directly from the string. [/DETAILED]
-                [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
-                [EXAMPLES] Examples: True (file path), False (JSON string) [/EXAMPLES]
+                [SYNTACTIC] boolean value (True/False) [/SYNTACTIC]
+                [EXAMPLES] True (file path), False (JSON string) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string containing selected polymorphs based on the specified strategy. [/BRIEF]
              [DETAILED] A JSON-formatted string containing the selected subset of polymorphs, maintaining the same data structure as the input but with reduced number of entries.
              The selection preserves important characteristics according to the chosen strategy while reducing dataset size for efficient processing. [/DETAILED]
-             [EXAMPLES] Example output: JSON string with 3-10 selected polymorphs based on strategy [/EXAMPLES]
+             [EXAMPLES] JSON string with 3-10 selected polymorphs based on strategy [/EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError: [ERROR_WHEN] When invalid selection strategy is specified [/ERROR_WHEN]
@@ -888,7 +888,7 @@ def consolidate_polymorph_datasets(
     [/CONTEXTUAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] First use batch_retrieve_polymorphs to create multiple composition files or run get_bulk_polymorphs_data multiple times to ahve data for multiple composition [/PREREQUISITE]
+    1. [PREREQUISITE] First use batch_retrieve_polymorphs to create multiple composition files or run get_bulk_polymorphs_data multiple times to have data for multiple composition [/PREREQUISITE]
     2. [CURRENT] Apply this tool to consolidate separate files into unified dataset [/CURRENT]
     3. [FOLLOW_UP] Use prepare_tabular_dataset or prepare_neural_network_dataset for ML preparation [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
@@ -903,20 +903,20 @@ def consolidate_polymorph_datasets(
         composition_files: [BRIEF] Dictionary mapping compositions to their JSON file paths. [/BRIEF]
                           [DETAILED] A dictionary where keys are composition names/formulas and values are file paths to their corresponding JSON files containing polymorph data.
                           The tool will attempt to read each file and integrate the data while maintaining composition information. [/DETAILED]
-                          [SYNTACTIC] Format: '{"composition1": "path1.json", "composition2": "path2.json", ...}' [/SYNTACTIC]
-                          [EXAMPLES] Examples: {"TiO2": "data/tio2_polymorphs.json", "SiO2": "data/sio2_polymorphs.json"} [/EXAMPLES]
+                          [SYNTACTIC] "{"composition1": "path1.json", "composition2": "path2.json", ...}" [/SYNTACTIC]
+                          [EXAMPLES] {"TiO2": "data/tio2_polymorphs.json", "SiO2": "data/sio2_polymorphs.json"} [/EXAMPLES]
         output_path: [BRIEF] Path for the consolidated dataset file. Defaults to "consolidated_polymorphs.json". [/BRIEF]
                     [DETAILED] File path where the consolidated dataset will be saved.
                     The file will contain all polymorphs from all compositions in a single JSON structure with added source composition information.
                     The directory will be created if it doesn't exist. Using .json extension is recommended for clarity. [/DETAILED]
-                    [SYNTACTIC] Format: "Valid file path with .json extension" [/SYNTACTIC]
-                    [EXAMPLES] Examples: "consolidated_polymorphs.json", "data/all_materials.json", "datasets/complete_set.json" [/EXAMPLES]
+                    [SYNTACTIC] Valid file path with .json extension [/SYNTACTIC]
+                    [EXAMPLES] "consolidated_polymorphs.json", "data/all_materials.json", "datasets/complete_set.json" [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with consolidation results and comprehensive statistics. [/BRIEF]
              [DETAILED] A JSON-formatted string containing consolidation status, output file path, and detailed statistics including total number of polymorphs, number of compositions successfully included, average polymorphs per composition, and any processing errors.
              This enables quality control and assessment of the consolidation process. [/DETAILED]
-             [EXAMPLES] Example output: '{"success": true, "output_path": "consolidated.json", "statistics": {"total_polymorphs": 150, "compositions_included": 15, ...}}' [/EXAMPLES]
+             [EXAMPLES] "{"success": true, "output_path": "consolidated.json", "statistics": {"total_polymorphs": 150, "compositions_included": 15, ...}}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         FileNotFoundError: [ERROR_WHEN] When one or more input files cannot be found [/ERROR_WHEN]
@@ -1036,51 +1036,51 @@ def select_polymorphs_with_strategy_to_file(
         polymorphs_data: [BRIEF] JSON string or file path containing polymorph data. [/BRIEF]
                         [DETAILED] Either a JSON-formatted string containing polymorph data or a file path to a JSON file, depending on the is_path parameter.
                         The data should contain polymorphs with properties like energy_above_hull, space_group, and other structural/energetic information for strategic selection. [/DETAILED]
-                        [SYNTACTIC] Format: "JSON string or valid file path" [/SYNTACTIC]
-                        [EXAMPLES] Examples: JSON string from "data/polymorphs.json" [/EXAMPLES]
+                        [SYNTACTIC] "JSON string or valid file path" [/SYNTACTIC]
+                        [EXAMPLES] JSON string from "data/polymorphs.json" [/EXAMPLES]
 
         save_path: [BRIEF] File path where selected polymorphs will be saved. [/BRIEF]
                   [DETAILED] Complete file path where the selected polymorph subset will be saved in JSON format.
                   The directory will be created if it doesn't exist.
                   This file can be used by subsequent tools or shared with collaborators.
                   Using .json extension is recommended for clarity. [/DETAILED]
-                  [SYNTACTIC] Format: "Valid file path with .json extension" [/SYNTACTIC]
-                  [EXAMPLES] Examples: "selected_polymorphs.json", "data/tio2_selected.json", "results/diverse_materials.json" [/EXAMPLES]
+                  [SYNTACTIC] Valid file path with .json extension [/SYNTACTIC]
+                  [EXAMPLES] "selected_polymorphs.json", "data/tio2_selected.json", "results/diverse_materials.json" [/EXAMPLES]
 
         selection_strategy: [BRIEF] Strategy for polymorph selection. Defaults to "diverse_energy". [/BRIEF]
                            [DETAILED] The algorithm used for selecting polymorphs from the dataset.
                            Options include "diverse_energy" for energy range sampling, "most_stable" for thermodynamic stability, and "diverse_structure" for structural diversity.
                            Each strategy optimizes for different research objectives and analysis requirements. [/DETAILED]
-                           [SYNTACTIC] Format: "diverse_energy", "most_stable", or "diverse_structure" [/SYNTACTIC]
-                           [EXAMPLES] Examples: "most_stable" (stability focus), "diverse_structure" (structural variety), "diverse_energy" (representative sampling) [/EXAMPLES]
+                           [SYNTACTIC] "diverse_energy", "most_stable", or "diverse_structure" [/SYNTACTIC]
+                           [EXAMPLES] "most_stable" (stability focus), "diverse_structure" (structural variety), "diverse_energy" (representative sampling) [/EXAMPLES]
 
         max_polymorphs: [BRIEF] Maximum number of polymorphs to select. Defaults to 5. [/BRIEF]
                        [DETAILED] The maximum number of polymorphs to include in the final selection and save to file.
                        This parameter controls dataset size and should be chosen based on computational resources and analysis requirements.
                        Larger values provide more comprehensive coverage but increase processing time. [/DETAILED]
-                       [SYNTACTIC] Format: positive integer [/SYNTACTIC]
-                       [EXAMPLES] Examples: 3 (focused selection), 5 (standard), 10 (comprehensive coverage) [/EXAMPLES]
+                       [SYNTACTIC] positive integer [/SYNTACTIC]
+                       [EXAMPLES] 3 (focused selection), 5 (standard), 10 (comprehensive coverage) [/EXAMPLES]
 
         energy_threshold: [BRIEF] Maximum energy above hull in eV/atom. Defaults to 0.5. [/BRIEF]
                          [DETAILED] Energy threshold above the convex hull for including polymorphs in the selection process.
                          Only phases with energy above hull less than or equal to this value will be considered.
                          This pre-filtering ensures thermodynamic accessibility of selected phases. [/DETAILED]
-                         [SYNTACTIC] Format: positive float representing energy in eV/atom [/SYNTACTIC]
-                         [EXAMPLES] Examples: 0.1 (very stable only), 0.5 (moderate threshold), 1.0 (include metastable) [/EXAMPLES]
+                         [SYNTACTIC] positive float representing energy in eV/atom [/SYNTACTIC]
+                         [EXAMPLES] 0.1, 0.5 (moderate threshold), 1.0 (include metastable) [/EXAMPLES]
 
         is_path: [BRIEF] Whether polymorphs_data is a file path. Defaults to False. [/BRIEF]
                 [DETAILED] Boolean flag indicating whether the polymorphs_data parameter should be treated as a file path (True) or as a JSON string (False).
                 When True, the tool will read the JSON data from the specified file.
                 This enables flexible input handling for different workflow patterns. [/DETAILED]
-                [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
-                [EXAMPLES] Examples: True (file input), False (JSON string input) [/EXAMPLES]
+                [SYNTACTIC] boolean value (True/False) [/SYNTACTIC]
+                [EXAMPLES] True (file input), False (JSON string input) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] File path where the selected polymorphs were saved. [/BRIEF]
              [DETAILED] The complete file path where the selected polymorphs have been successfully saved.
              This path can be used by subsequent tools for loading the selected dataset or for verification that the file was created correctly.
              The file contains the subset of polymorphs selected according to the specified strategy. [/DETAILED]
-             [EXAMPLES] Example output: "data/selected_tio2_polymorphs.json" [/EXAMPLES]
+             [EXAMPLES] "data/selected_tio2_polymorphs.json" [/EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError: [ERROR_WHEN] When invalid selection strategy is specified [/ERROR_WHEN]
@@ -1188,38 +1188,38 @@ def execute_python_code(
 
     Args:
         python_code: [BRIEF] Python code string to be executed. [/BRIEF]
-                    [DETAILED] A string containing valid Python code to be executed in thes environment.
+                    [DETAILED] A string containing valid Python code to be executed in this environment.
                     For best results, assign your main output to a variable named 'result' or 'output'.
                     The code can import standard libraries and perform complex calculations.
                     The tool will attempt to capture user-defined variables as execution results. [/DETAILED]
-                    [SYNTACTIC] Format: "Valid Python code string" [/SYNTACTIC]
-                    [EXAMPLES] Examples: "result = 2 + 2", "import json; result = json.loads(data)", "filtered = [x for x in data if x > threshold]" [/EXAMPLES]
+                    [SYNTACTIC] Valid Python code string [/SYNTACTIC]
+                    [EXAMPLES] "result = 2 + 2", "import json; result = json.loads(data)", "filtered = [x for x in data if x > threshold]" [/EXAMPLES]
         input_data: [BRIEF] Optional JSON string to inject as input_data variable. [/BRIEF]
                    [DETAILED] An optional JSON string that will be loaded into a Python variable named 'input_data' within the executed script.
                    This allows the script to process external data.
                    The JSON will be parsed and made available as a Python object (dict, list, etc.) depending on the JSON structure. [/DETAILED]
-                   [SYNTACTIC] Format: "Valid JSON string or None" [/SYNTACTIC]
-                   [EXAMPLES] Examples: '{"data": [1, 2, 3]}', '[1, 2, 3, 4, 5]', '{"threshold": 0.5, "values": [...]}' [/EXAMPLES]
+                   [SYNTACTIC] Valid JSON string or None [/SYNTACTIC]
+                   [EXAMPLES] "{"data": [1, 2, 3]}", '[1, 2, 3, 4, 5]', "{"threshold": 0.5, "values": [...]}" [/EXAMPLES]
         save_output_to: [BRIEF] Optional file path to save execution results. [/BRIEF]
                        [DETAILED] An optional file path where the captured execution results will be saved as a JSON file.
                        If provided and execution is successful, the results will be written to this file for persistence and later use.
                        The directory will be created if it doesn't exist. [/DETAILED]
-                       [SYNTACTIC] Format: "Valid file path or None" [/SYNTACTIC]
-                       [EXAMPLES] Examples: "results.json", "output/analysis_results.json", "data/processed_output.json" [/EXAMPLES]
+                       [SYNTACTIC] "Valid file path or None" [/SYNTACTIC]
+                       [EXAMPLES] "results.json", "output/analysis_results.json", "data/processed_output.json" [/EXAMPLES]
         timeout: [BRIEF] Maximum execution time in seconds. Defaults to 300. [/BRIEF]
                 [DETAILED] The maximum time in seconds the subprocess is allowed to run before being terminated.
                 This prevents infinite loops and runaway processes from consuming system resources.
                 If the execution exceeds this limit, a timeout error will be returned.
                 Choose appropriate values based on expected computation time. [/DETAILED]
-                [SYNTACTIC] Format: positive integer representing seconds [/SYNTACTIC]
-                [EXAMPLES] Examples: 30 (quick calculations), 300 (standard), 1800 (long processing) [/EXAMPLES]
+                [SYNTACTIC] positive integer representing seconds [/SYNTACTIC]
+                [EXAMPLES] 30 (quick calculations), 300 (standard), 1800 (long processing) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with detailed execution results and captured output. [/BRIEF]
              [DETAILED] A comprehensive JSON string containing execution status, standard output, error messages, return code, captured execution results, and file save status.
              The execution_result field contains variables captured from the executed code.
              This enables full visibility into the execution process and results. [/DETAILED]
-             [EXAMPLES] Example output: '{"success": true, "execution_result": {"result": 10}, "stdout": "...", "stderr": "", "return_code": 0}' [/EXAMPLES]
+             [EXAMPLES] "{"success": true, "execution_result": {"result": 10}, "stdout": "...", "stderr": "", "return_code": 0}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         TimeoutExpired: [ERROR_WHEN] When code execution exceeds the specified timeout [/ERROR_WHEN]
@@ -1388,35 +1388,35 @@ def execute_python_script(
                     The script must exist and be readable.
                     The path can be relative to the current working directory or absolute.
                     The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/DETAILED]
-                    [SYNTACTIC] Format: "Valid file path to Python script" [/SYNTACTIC]
-                    [EXAMPLES] Examples: "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/EXAMPLES]
+                    [SYNTACTIC] "Valid file path to Python script" [/SYNTACTIC]
+                    [EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/EXAMPLES]
         args: [BRIEF] Optional list of command-line arguments for the script. [/BRIEF]
              [DETAILED] A list of strings representing command-line arguments to pass to the script.
              These arguments will be passed to the script in the order provided.
              Common arguments include input files, output paths, configuration parameters, and processing options.
              If None, the script will be executed without arguments. [/DETAILED]
-             [SYNTACTIC] Format: ["arg1", "arg2", "arg3", ...] or None [/SYNTACTIC]
-             [EXAMPLES] Examples: ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/EXAMPLES]
+             [SYNTACTIC] ["arg1", "arg2", "arg3", ...] or None [/SYNTACTIC]
+             [EXAMPLES] ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/EXAMPLES]
         timeout: [BRIEF] Maximum execution time in seconds. Defaults to 600. [/BRIEF]
                 [DETAILED] The maximum time in seconds the script is allowed to run before being terminated.
                 This prevents runaway processes and ensures resource management.
                 Choose appropriate values based on expected script execution time.
                 For computational simulations, longer timeouts may be necessary. [/DETAILED]
-                [SYNTACTIC] Format: positive integer representing seconds [/SYNTACTIC]
-                [EXAMPLES] Examples: 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/EXAMPLES]
+                [SYNTACTIC] positive integer representing seconds [/SYNTACTIC]
+                [EXAMPLES] 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/EXAMPLES]
         working_dir: [BRIEF] Optional working directory for script execution. [/BRIEF]
                     [DETAILED] The directory from which the script should be executed.
                     This affects relative path resolution and file I/O operations within the script.
                     If None, the current working directory will be used.
                     This is useful when scripts expect to run from specific directories or access relative files. [/DETAILED]
-                    [SYNTACTIC] Format: "Valid directory path or None" [/SYNTACTIC]
-                    [EXAMPLES] Examples: "/path/to/project", "data/analysis", None [/EXAMPLES]
+                    [SYNTACTIC] Valid directory path or None [/SYNTACTIC]
+                    [EXAMPLES] "/path/to/project", "data/analysis", None [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with comprehensive execution results and monitoring data. [/BRIEF]
              [DETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.
              This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/DETAILED]
-             [EXAMPLES] Example output: '{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}' [/EXAMPLES]
+             [EXAMPLES] "{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         FileNotFoundError: [ERROR_WHEN] When the specified script file doesn't exist [/ERROR_WHEN]
@@ -1511,7 +1511,7 @@ def filter_json_with_strategy(
     [WORKFLOW_INTEGRATION] Typical workflow integration:
     1. [PREREQUISITE] Ensure input JSON file exists and custom filtering code is prepared [/PREREQUISITE]
     2. [CURRENT] Apply custom filtering logic to process and filter JSON data [/CURRENT]
-    3. [FOLLOW_UP] Use filtered data for further analysis, ML preparation for example use prepare_tabular_dataset to prepare datset from the output file [/FOLLOW_UP]
+    3. [FOLLOW_UP] Use filtered data for further analysis, ML preparation for example use prepare_tabular_dataset to prepare dataset from the output file [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
@@ -1525,27 +1525,27 @@ def filter_json_with_strategy(
                         [DETAILED] Complete file path to the JSON file containing the data to be filtered.
                         The file should contain valid JSON data, typically a list of dictionaries representing materials or structures with various properties.
                         The file must be readable and contain well-formed JSON. [/DETAILED]
-                        [SYNTACTIC] Format: "Valid file path to JSON file" [/SYNTACTIC]
-                        [EXAMPLES] Examples: "data/materials.json", "polymorphs/all_structures.json", "input/dataset.json" [/EXAMPLES]
+                        [SYNTACTIC] "Valid file path to JSON file" [/SYNTACTIC]
+                        [EXAMPLES] "data/materials.json", "polymorphs/all_structures.json", "input/dataset.json" [/EXAMPLES]
         output_json_path: [BRIEF] Path where filtered JSON data will be saved. [/BRIEF]
                          [DETAILED] Complete file path where the filtered JSON data will be written.
                          The directory will be created if it doesn't exist.
                          The output file will contain the filtered subset of the input data in the same JSON format.
                          Using .json extension is recommended for clarity. [/DETAILED]
-                         [SYNTACTIC] Format: "Valid file path with .json extension" [/SYNTACTIC]
-                         [EXAMPLES] Examples: "output/filtered_materials.json", "results/stable_phases.json", "processed/selected_data.json" [/EXAMPLES]
+                         [SYNTACTIC] Valid file path with .json extension [/SYNTACTIC]
+                         [EXAMPLES] "output/filtered_materials.json", "results/stable_phases.json", "processed/selected_data.json" [/EXAMPLES]
         custom_code: [BRIEF] Python code string defining the filtering logic. [/BRIEF]
                     [DETAILED] A string containing Python code that defines the filtering logic.
                     The code should expect the input data in a variable named 'data' and store the filtered results in a variable named 'filtered_data'.
                     The code can use any Python constructs including list comprehensions, complex conditions, and data transformations. [/DETAILED]
-                    [SYNTACTIC] Format: "Valid Python code string with 'data' input and 'filtered_data' output" [/SYNTACTIC]
-                    [EXAMPLES] Examples: "filtered_data = [x for x in data if x['energy'] < threshold]", "filtered_data = [x for x in data if x.get('stable', False)]" [/EXAMPLES]
+                    [SYNTACTIC] "Valid Python code string with 'data' input and 'filtered_data' output" [/SYNTACTIC]
+                    [EXAMPLES] "filtered_data = [x for x in data if x['energy'] < threshold]", "filtered_data = [x for x in data if x.get('stable', False)]" [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with filtering results and comprehensive statistics. [/BRIEF]
              [DETAILED] A JSON-formatted string containing filtering status, original and filtered data counts, output file path, and percentage reduction achieved.
              This provides comprehensive information about the filtering operation's effectiveness and enables quality control of the data processing pipeline. [/DETAILED]
-             [EXAMPLES] Example output: '{"success": true, "original_count": 100, "filtered_count": 25, "output_path": "filtered.json", "reduction_percentage": 75.0}' [/EXAMPLES]
+             [EXAMPLES] "{"success": true, "original_count": 100, "filtered_count": 25, "output_path": "filtered.json", "reduction_percentage": 75.0}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         FileNotFoundError: [ERROR_WHEN] When the input JSON file doesn't exist [/ERROR_WHEN]
@@ -1679,48 +1679,48 @@ def prepare_tabular_dataset(
     Args:
         polymorphs_json_path: [BRIEF] Path to consolidated polymorphs JSON file. [/BRIEF]
                              [DETAILED] Complete file path to a JSON file containing consolidated polymorph data with materials properties and crystal structures.[/DETAILED]
-                             [SYNTACTIC] Format: "Valid file path to JSON file with materials data" [/SYNTACTIC]
-                             [EXAMPLES] Examples: "consolidated_polymorphs.json", "data/materials_database.json", "datasets/all_oxides.json" [/EXAMPLES]
+                             [SYNTACTIC] "Valid file path to JSON file with materials data" [/SYNTACTIC]
+                             [EXAMPLES] "consolidated_polymorphs.json", "data/materials_database.json", "datasets/all_oxides.json" [/EXAMPLES]
 
         output_path: [BRIEF] Base path for saving dataset files. [/BRIEF]
                     [DETAILED] Base directory and filename prefix where the prepared dataset files will be saved.
                     Multiple files will be created including training data, test data, and metadata.
                     The tool will create the directory structure if it doesn't exist. [/DETAILED]
-                    [SYNTACTIC] Format: "Valid directory path and filename prefix" [/SYNTACTIC]
-                    [EXAMPLES] Examples: "ml_datasets/formation_energy", "data/tabular", "output/materials_ml" [/EXAMPLES]
+                    [SYNTACTIC] "Valid directory path and filename prefix" [/SYNTACTIC]
+                    [EXAMPLES] "ml_datasets/formation_energy", "data/tabular", "output/materials_ml" [/EXAMPLES]
 
         target_property: [BRIEF] Property to predict. Defaults to "formation_energy_per_atom". [/BRIEF]
                         [DETAILED] The materials property that will serve as the prediction target for machine learning models.
                         This should be a key present in the polymorphs data with numerical values.
                         Common targets include formation energy, band gap, bulk modulus, and other calculated properties. [/DETAILED]
-                        [SYNTACTIC] Format: "String matching property key in JSON data" [/SYNTACTIC]
-                        [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
+                        [SYNTACTIC] "String matching property key in JSON data" [/SYNTACTIC]
+                        [EXAMPLES] "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
 
         feature_engineering: [BRIEF] Feature engineering strategy. Defaults to "basic". [/BRIEF]
                             [DETAILED] The level of feature engineering to apply to the materials data.
                             "basic" extracts fundamental properties, "advanced" includes structural and electronic descriptors, and "custom" applies specialized feature extraction.[/DETAILED]
-                            [SYNTACTIC] Format: "basic", "advanced", or "custom" [/SYNTACTIC]
-                            [EXAMPLES] Examples: "basic", "advanced" , "custom" [/EXAMPLES]
+                            [SYNTACTIC] "basic", "advanced", or "custom" [/SYNTACTIC]
+                            [EXAMPLES] "basic", "advanced" , "custom" [/EXAMPLES]
 
         test_split: [BRIEF] Fraction of data for test set. Defaults to 0.2. [/BRIEF]
                    [DETAILED] The proportion of the dataset to reserve for testing, expressed as a decimal fraction.
                    The remaining data will be used for training.
                    Common values range from 0.1 to 0.3 depending on dataset size and validation strategy.
                    Larger test sets provide more reliable evaluation but reduce training data. [/DETAILED]
-                   [SYNTACTIC] Format: float between 0.0 and 1.0 [/SYNTACTIC]
-                   [EXAMPLES] Examples: 0.1 (small test set), 0.2 (standard), 0.3 (large test set) [/EXAMPLES]
+                   [SYNTACTIC] float between 0.0 and 1.0 [/SYNTACTIC]
+                   [EXAMPLES] 0.1 (small test set), 0.2 (standard), 0.3 (large test set) [/EXAMPLES]
 
         normalize: [BRIEF] Whether to normalize features. Defaults to True. [/BRIEF]
                   [DETAILED] Boolean flag controlling whether features should be normalized using standard scaling (zero mean, unit variance).
                   Normalization is generally recommended for most ML algorithms as it ensures features have similar scales and prevents any single feature from dominating the model. [/DETAILED]
-                  [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
-                  [EXAMPLES] Examples: True (recommended), False (when features already normalized) [/EXAMPLES]
+                  [SYNTACTIC] boolean value (True/False) [/SYNTACTIC]
+                  [EXAMPLES] True (recommended), False (when features already normalized) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with comprehensive dataset preparation results and file paths. [/BRIEF]
              [DETAILED] A detailed JSON-formatted string containing preparation success status, file paths for training and test data, normalization parameters, dataset statistics, feature information, and metadata.
              This provides complete information about the prepared dataset for subsequent ML workflows. [/DETAILED]
-             [EXAMPLES] Example output: '{"success": true, "train_path": "ml_data_train.csv", "test_path": "ml_data_test.csv", "dataset_info": {...}}' [/EXAMPLES]
+             [EXAMPLES] "{"success": true, "train_path": "ml_data_train.csv", "test_path": "ml_data_test.csv", "dataset_info": {...}}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         FileNotFoundError: [ERROR_WHEN] When polymorphs JSON file doesn't exist [/ERROR_WHEN]
@@ -1971,7 +1971,7 @@ def get_mp_thermo_data(material_id: str) -> str:
     [/CONTEXTUAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure MP_API_KEY is set and material ID is valid [/PREREQUISITE]
+    1. [PREREQUISITE] Ensure Material ID is valid [/PREREQUISITE]
     2. [CURRENT] Retrieve comprehensive thermodynamic data for target material [/CURRENT]
     3. [FOLLOW_UP] Use thermodynamic data for stability analysis or phase diagram studies [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
@@ -1987,14 +1987,14 @@ def get_mp_thermo_data(material_id: str) -> str:
                     [DETAILED] The unique Materials Project identifier for the material of interest.
                     Should be in the format "mp-XXXXX" where XXXXX is the numerical ID.
                     The material must exist in the Materials Project database and have thermodynamic calculations available. [/DETAILED]
-                    [SYNTACTIC] Format: "mp-" followed by digits (e.g., "mp-149", "mp-2657") [/SYNTACTIC]
-                    [EXAMPLES] Examples: "mp-149" (Silicon), "mp-2657" (TiO2), "mp-1143" (Al2O3) [/EXAMPLES]
+                    [SYNTACTIC] "mp-" followed by digits (e.g., "mp-149", "mp-2657") [/SYNTACTIC]
+                    [EXAMPLES] "mp-149" (Silicon), "mp-2657" (TiO2), "mp-1143" (Al2O3) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string containing comprehensive thermodynamic data and stability information. [/BRIEF]
              [DETAILED] A JSON-formatted string containing thermodynamic properties including material ID, thermodynamic functional used, formation energy per atom, energy above hull, decomposition products, stability status, energy type, and uncorrected energies.
              Returns error information if thermodynamic data is not available. [/DETAILED]
-             [EXAMPLES] Example output: '[{"material_id": "mp-149", "formation_energy_per_atom": -4.2, "energy_above_hull": 0.0, "is_stable": true, ...}]' [/EXAMPLES]
+             [EXAMPLES] '[{"material_id": "mp-149", "formation_energy_per_atom": -4.2, "energy_above_hull": 0.0, "is_stable": true, ...}]' [/EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError: [ERROR_WHEN] When Materials Project API key is not available [/ERROR_WHEN]
@@ -2118,39 +2118,39 @@ def train_xgboost_model(
         train_data_path: [BRIEF] Path to training data CSV file. [/BRIEF]
                         [DETAILED] Complete file path to the CSV file containing training data with features and target column.
                         The file should have a header row with column names and be properly formatted with numerical features.[/DETAILED]
-                        [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
-                        [EXAMPLES] Examples: "data/train.csv", "datasets/materials_train.csv", "ml_data/train_features.csv" [/EXAMPLES]
+                        [SYNTACTIC] "Valid file path to CSV file with header" [/SYNTACTIC]
+                        [EXAMPLES] "data/train.csv", "datasets/materials_train.csv", "ml_data/train_features.csv" [/EXAMPLES]
         test_data_path: [BRIEF] Path to test data CSV file. [/BRIEF]
                        [DETAILED] Complete file path to the CSV file containing test data with the same structure as training data.
                        Used for independent model evaluation and performance assessment.
                        Should have identical column structure to training data. [/DETAILED]
-                       [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
-                       [EXAMPLES] Examples: "data/test.csv", "datasets/materials_test.csv", "ml_data/test_features.csv" [/EXAMPLES]
+                       [SYNTACTIC] "Valid file path to CSV file with header" [/SYNTACTIC]
+                       [EXAMPLES] "data/test.csv", "datasets/materials_test.csv", "ml_data/test_features.csv" [/EXAMPLES]
         model_save_path: [BRIEF] Path to save the trained model file. [/BRIEF]
                         [DETAILED] Complete file path where the trained XGBoost model will be saved using joblib serialization.
                         The model can be loaded later for predictions or further analysis.
                         Using .pkl extension is recommended for clarity. [/DETAILED]
-                        [SYNTACTIC] Format: "Valid file path with .pkl extension" [/SYNTACTIC]
-                        [EXAMPLES] Examples: "models/xgb_model.pkl", "trained_models/formation_energy_model.pkl", "results/model.pkl" [/EXAMPLES]
+                        [SYNTACTIC] "Valid file path with .pkl extension" [/SYNTACTIC]
+                        [EXAMPLES] "models/xgb_model.pkl", "trained_models/formation_energy_model.pkl", "results/model.pkl" [/EXAMPLES]
         target_column: [BRIEF] Name of the target column for prediction. Defaults to "formation_energy_per_atom". [/BRIEF]
                       [DETAILED] The column name in the CSV files that contains the target values to predict.
                       This column will be separated from features during training.
                       Common targets include formation energy, band gap, bulk modulus, and other materials properties. [/DETAILED]
-                      [SYNTACTIC] Format: "String matching column name in CSV files" [/SYNTACTIC]
-                      [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
+                      [SYNTACTIC] "String matching column name in CSV files" [/SYNTACTIC]
+                      [EXAMPLES] "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
         hyperparameters: [BRIEF] Optional dictionary of XGBoost hyperparameters. [/BRIEF]
                         [DETAILED] Dictionary containing XGBoost hyperparameters to override default values.
                         Can include parameters like n_estimators, max_depth, learning_rate, subsample, etc.
                         If None, optimized default parameters will be used.
                         Proper hyperparameter tuning can significantly improve model performance. [/DETAILED]
-                        [SYNTACTIC] Format: '{"param_name": value, ...} or None' [/SYNTACTIC]
-                        [EXAMPLES] Examples: {"n_estimators": 200, "max_depth": 8}, {"learning_rate": 0.05}, None [/EXAMPLES]
+                        [SYNTACTIC] "{"param_name": value, ...} or None' [/SYNTACTIC]
+                        [EXAMPLES] {"n_estimators": 200, "max_depth": 8}, {"learning_rate": 0.05}, None [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with comprehensive training results and model performance metrics. [/BRIEF]
              [DETAILED] A detailed JSON-formatted string containing training success status, model performance metrics (MAE, RMSE, R2), feature importance rankings, hyperparameters used, dataset information, and file paths for saved model and results.
              This enables comprehensive model evaluation and comparison. [/DETAILED]
-             [EXAMPLES] Example output: '{"success": true, "test_metrics": {"mae": 0.12, "rmse": 0.18, "r2": 0.85}, "feature_importance": {...}, "model_path": "model.pkl"}' [/EXAMPLES]
+             [EXAMPLES] "{"success": true, "test_metrics": {"mae": 0.12, "rmse": 0.18, "r2": 0.85}, "feature_importance": {...}, "model_path": "model.pkl"}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         FileNotFoundError: [ERROR_WHEN] When training or test data files don't exist [/ERROR_WHEN]
@@ -2316,33 +2316,33 @@ def evaluate_xgboost_model(
                    [DETAILED] Complete file path to the serialized XGBoost model.
                    The model should be saved using joblib or pickle and contain a trained XGBoost regressor ready for evaluation.
                    The file must be readable and contain a valid model object. [/DETAILED]
-                   [SYNTACTIC] Format: "Valid file path to .pkl model file" [/SYNTACTIC]
-                   [EXAMPLES] Examples: "models/xgb_model.pkl", "trained_models/formation_energy_model.pkl", "model.pkl" [/EXAMPLES]
+                   [SYNTACTIC] "Valid file path to .pkl model file" [/SYNTACTIC]
+                   [EXAMPLES] "models/xgb_model.pkl", "trained_models/formation_energy_model.pkl", "model.pkl" [/EXAMPLES]
         test_data_path: [BRIEF] Path to test data CSV file with same structure as training data. [/BRIEF]
                        [DETAILED] Complete file path to CSV file containing test data with identical column structure to the training data used for model creation.
                        Must include both feature columns and the target column for evaluation.
                        The data should be preprocessed consistently with the training data. [/DETAILED]
-                       [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
-                       [EXAMPLES] Examples: "data/test.csv", "datasets/materials_test.csv", "evaluation/test_data.csv" [/EXAMPLES]
+                       [SYNTACTIC] "Valid file path to CSV file with header" [/SYNTACTIC]
+                       [EXAMPLES] "data/test.csv", "datasets/materials_test.csv", "evaluation/test_data.csv" [/EXAMPLES]
         target_column: [BRIEF] Name of the target column for evaluation. Defaults to "formation_energy_per_atom". [/BRIEF]
                       [DETAILED] The column name in the test CSV that contains the true values for comparison with model predictions.
                       This should match the target column used during training.
                       Common targets include formation energy, band gap, and other materials properties. [/DETAILED]
-                      [SYNTACTIC] Format: "String matching column name in test CSV" [/SYNTACTIC]
-                      [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
+                      [SYNTACTIC] "String matching column name in test CSV" [/SYNTACTIC]
+                      [EXAMPLES] "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
         detailed_analysis: [BRIEF] Whether to include detailed analysis and feature importance. Defaults to True. [/BRIEF]
                           [DETAILED] Boolean flag controlling the depth of analysis performed.
                           When True, includes prediction ranges (min, max, std), error analysis (mean error, error std, max errors), and top 10 feature importance rankings.
                           When False, provides only basic metrics (MAE, RMSE, R2, MAPE) for quick assessment.
                           Detailed analysis is recommended for thorough model evaluation and interpretation. [/DETAILED]
-                          [SYNTACTIC] Format: boolean value (True/False) [/SYNTACTIC]
-                          [EXAMPLES] Examples: True (comprehensive analysis), False (basic metrics only) [/EXAMPLES]
+                          [SYNTACTIC] boolean value (True/False) [/SYNTACTIC]
+                          [EXAMPLES] True (comprehensive analysis), False (basic metrics only) [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with comprehensive evaluation metrics and analysis results. [/BRIEF]
              [DETAILED] A detailed JSON-formatted string containing evaluation success status, comprehensive performance metrics (MAE, RMSE, R2, MAPE), prediction statistics (min/max/std), error analysis (mean error, error std, max positive/negative errors), and top 10 feature importance rankings when detailed analysis is enabled.
              This provides complete model assessment for validation and comparison purposes. [/DETAILED]
-             [EXAMPLES] Example output: '{"success": true, "evaluation_metrics": {"mae": 0.15, "rmse": 0.22, "r2": 0.83, "mape": 3.45, "feature_importance": {...}}}' [/EXAMPLES]
+             [EXAMPLES] "{"success": true, "evaluation_metrics": {"mae": 0.15, "rmse": 0.22, "r2": 0.83, "mape": 3.45, "feature_importance": {...}}}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         FileNotFoundError: [ERROR_WHEN] When model file or test data file doesn't exist [/ERROR_WHEN]
@@ -2471,35 +2471,35 @@ def perform_cross_validation(
                         [DETAILED] Complete file path to CSV file containing training data with features and target column.
                         The file should have a header row and be properly formatted for machine learning.
                         This data will be split into k folds for cross-validation, so it should represent the complete training dataset. [/DETAILED]
-                        [SYNTACTIC] Format: "Valid file path to CSV file with header" [/SYNTACTIC]
-                        [EXAMPLES] Examples: "data/train.csv", "datasets/materials_train.csv", "ml_data/training_features.csv" [/EXAMPLES]
+                        [SYNTACTIC] "Valid file path to CSV file with header" [/SYNTACTIC]
+                        [EXAMPLES] "data/train.csv", "datasets/materials_train.csv", "ml_data/training_features.csv" [/EXAMPLES]
         target_column: [BRIEF] Name of the target column for prediction. Defaults to "formation_energy_per_atom". [/BRIEF]
                       [DETAILED] The column name in the CSV that contains the target values for prediction.
                       This column will be separated from features during cross-validation.
                       Should match the target used in subsequent training workflows.
                       Common targets include formation energy, band gap, and other materials properties. [/DETAILED]
-                      [SYNTACTIC] Format: "String matching column name in CSV file" [/SYNTACTIC]
-                      [EXAMPLES] Examples: "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
+                      [SYNTACTIC] "String matching column name in CSV file" [/SYNTACTIC]
+                      [EXAMPLES] "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/EXAMPLES]
         cv_folds: [BRIEF] Number of cross-validation folds. Defaults to 5. [/BRIEF]
                  [DETAILED] The number of folds to use for k-fold cross-validation.
                  Higher values provide more robust estimates but increase computational cost.
                  Common choices are 5 or 10 folds.
                  The value should be chosen based on dataset size - smaller datasets benefit from more folds while larger datasets can use fewer folds. [/DETAILED]
-                 [SYNTACTIC] Format: positive integer between 2 and dataset_size [/SYNTACTIC]
-                 [EXAMPLES] Examples: 5 (standard), 10 (robust), 3 (quick assessment) [/EXAMPLES]
+                 [SYNTACTIC] positive integer between 2 and dataset_size [/SYNTACTIC]
+                 [EXAMPLES] 5 (standard), 10 (robust), 3 (quick assessment) [/EXAMPLES]
         hyperparameters: [BRIEF] Optional XGBoost hyperparameters for cross-validation. [/BRIEF]
                         [DETAILED] Dictionary containing XGBoost hyperparameters to use across all cross-validation folds.
                         If None, optimized default parameters will be used.
                         Consistent hyperparameters across folds ensure fair comparison and reliable performance estimates.
                         Useful for testing specific hyperparameter configurations. [/DETAILED]
-                        [SYNTACTIC] Format: '{"param_name": value, ...} or None' [/SYNTACTIC]
-                        [EXAMPLES] Examples: {"n_estimators": 150, "max_depth": 7}, {"learning_rate": 0.05}, None [/EXAMPLES]
+                        [SYNTACTIC] "{"param_name": value, ...} or None' [/SYNTACTIC]
+                        [EXAMPLES] {"n_estimators": 150, "max_depth": 7}, {"learning_rate": 0.05}, None [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with comprehensive cross-validation results and statistical analysis. [/BRIEF]
              [DETAILED] A detailed JSON-formatted string containing cross-validation success status, individual fold scores, statistical summaries (mean, standard deviation), hyperparameters used, and performance stability assessment.
              This enables comprehensive evaluation of model robustness and generalization capability. [/DETAILED]
-             [EXAMPLES] Example output: '{"success": true, "cross_validation_results": {"r2_mean": 0.85, "r2_std": 0.03, "mae_mean": 0.12, "mae_std": 0.02, ...}}' [/EXAMPLES]
+             [EXAMPLES] "{"success": true, "cross_validation_results": {"r2_mean": 0.85, "r2_std": 0.03, "mae_mean": 0.12, "mae_std": 0.02, ...}}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         FileNotFoundError: [ERROR_WHEN] When training data file doesn't exist [/ERROR_WHEN]
