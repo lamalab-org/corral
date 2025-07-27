@@ -29,6 +29,7 @@ from corral.io import (
 )
 from corral.server import run_server
 from corral.task import TaskDefinition, TaskGroup
+from corral.utils import execute_python_code, execute_python_script
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:
@@ -335,9 +336,14 @@ if __name__ == "__main__":
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)
     # Create environments
+    taskgroup_common_tools = {
+        "execute_python_code": execute_python_code,
+        "execute_python_script": execute_python_script,
+    }
     environments = create_environments(
         task_json_path=tasks_json_path,
         work_dir=work_dir,
+        taskgroup_common_tools=taskgroup_common_tools,
     )
 
     logger.info("\nCreated Environments:")

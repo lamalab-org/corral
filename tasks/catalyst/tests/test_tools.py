@@ -11,7 +11,6 @@ from catalyst.tools import (
     choose_slab_text,
     create_slab_from_structure_text,
     enumerate_slabs_text,
-    execute_python_code,
     get_adsorption_sites_text,
     get_bulk_polymorphs_data,
     get_mp_thermo_data,
@@ -21,6 +20,8 @@ from catalyst.tools import (
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pymatgen.core import Molecule, Structure
+
+from corral.utils import execute_python_code
 
 MOCK_DATA_DIR = Path(Path(__file__).parent / "mock_data")
 

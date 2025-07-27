@@ -20,12 +20,13 @@ from ml.score import (
 # Import the tool objects to test
 from ml.tools import (
     consolidate_polymorph_datasets,
-    execute_python_code,
     filter_json_with_strategy,
     select_polymorphs_with_strategy,
     sort_and_get_first_from_json,
 )
 from ml.utils import extract_path_from_answer, smart_resolve_path
+
+from corral.utils import execute_python_code
 
 
 class TestUtilityFunctions:
@@ -238,50 +239,6 @@ class TestDatasetConsolidation:
         result = json.loads(result_json)
         assert result["success"] is True  # Should succeed but with no data
         assert result["statistics"]["compositions_included"] == 0
-
-
-class TestPythonExecution:
-    """Test Python code execution functions."""
-
-    def test_execute_python_code_simple(self):
-        """Test simple Python code execution."""
-        code = "result = 2 + 2"
-        result_json = execute_python_code.execute(python_code=code)
-
-        result = json.loads(result_json)
-        assert result["success"] is True
-        assert result["execution_result"]["result"] == 4
-
-    def test_execute_python_code_with_input(self):
-        """Test Python code execution with input data."""
-        code = "output = sum(input_data)"
-        input_data = json.dumps([1, 2, 3, 4, 5])
-
-        result_json = execute_python_code.execute(
-            python_code=code, input_data=input_data
-        )
-
-        result = json.loads(result_json)
-        assert result["success"] is True
-        assert result["execution_result"]["output"] == 15
-
-    def test_execute_python_code_syntax_error(self):
-        """Test Python code execution with syntax error."""
-        code = "this is not valid python code {"
-        result_json = execute_python_code.execute(python_code=code)
-
-        result = json.loads(result_json)
-        assert result["success"] is False
-        assert "error" in result
-
-    def test_execute_python_code_runtime_error(self):
-        """Test Python code execution with runtime error."""
-        code = "result = undefined_variable + 1"
-        result_json = execute_python_code.execute(python_code=code)
-
-        result = json.loads(result_json)
-        assert result["success"] is False
-        assert "error" in result
 
 
 class TestFilteringFunctions:
@@ -537,3 +494,47 @@ def test_polymorph_selection_property_based(data_list):
     if len(result) > 1:
         energies = [item["energy_above_hull"] for item in result]
         assert energies == sorted(energies)
+
+
+class TestPythonExecution:
+    """Test Python code execution functions."""
+
+    def test_execute_python_code_simple(self):
+        """Test simple Python code execution."""
+        code = "result = 2 + 2"
+        result_json = execute_python_code.execute(python_code=code)
+
+        result = json.loads(result_json)
+        assert result["success"] is True
+        assert result["execution_result"]["result"] == 4
+
+    def test_execute_python_code_with_input(self):
+        """Test Python code execution with input data."""
+        code = "output = sum(input_data)"
+        input_data = json.dumps([1, 2, 3, 4, 5])
+
+        result_json = execute_python_code.execute(
+            python_code=code, input_data=input_data
+        )
+
+        result = json.loads(result_json)
+        assert result["success"] is True
+        assert result["execution_result"]["output"] == 15
+
+    def test_execute_python_code_syntax_error(self):
+        """Test Python code execution with syntax error."""
+        code = "this is not valid python code {"
+        result_json = execute_python_code.execute(python_code=code)
+
+        result = json.loads(result_json)
+        assert result["success"] is False
+        assert "error" in result
+
+    def test_execute_python_code_runtime_error(self):
+        """Test Python code execution with runtime error."""
+        code = "result = undefined_variable + 1"
+        result_json = execute_python_code.execute(python_code=code)
+
+        result = json.loads(result_json)
+        assert result["success"] is False
+        assert "error" in result
