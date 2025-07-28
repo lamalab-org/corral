@@ -318,6 +318,10 @@ class Environment(ABC):
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
         """Execute a tool and record the call with enhanced error handling"""
+        # Merge hidden_args into arguments if they exist, with hidden_args taking precedence
+        if hasattr(self, "hidden_args") and self.hidden_args is not None:
+            arguments.update(self.hidden_args)
+
         start_time = time.perf_counter()
         # Check if tool exists
         if tool_name not in self.tools:
