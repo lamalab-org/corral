@@ -1,15 +1,22 @@
+
 from __future__ import annotations
 
 import os
-import subprocess
 
-import fsspec
-import modal
-import numpy as np
+import shutil
 
-# import matplotlib.pyplot as plt
-from envs_tools.lammps import _run_lammps, lammps_image
 from modal import App
+import modal
+import subprocess
+import fsspec
+import numpy as np
+# import matplotlib.pyplot as plt
+
+
+from envs_tools.lammps import (
+    _run_lammps,
+    lammps_image
+)
 
 simagent_name = os.getenv("SIMAGENT_NAME", "")
 if simagent_name and not simagent_name.startswith("-"):
@@ -22,22 +29,12 @@ volume_sim = modal.Volume.from_name("simulations", create_if_missing=True)
 volume_struct = modal.Volume.from_name("structures", create_if_missing=True)
 
 # with volume_potential.batch_upload() as batch:
-#     batch.put_directory("/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_5/mat-agent-bench/modal_app/potentials/", "/")
+#     batch.put_directory("./potentials/", "/")
 
 # with volume_struct.batch_upload() as batch:
-#     batch.put_directory("/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_5/mat-agent-bench/modal_app/structures/", "/")
+#     batch.put_directory("./structures/", "/")
 
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})
 def plot_stress_strain(data_file: str, output_image: str) -> str:
     """
     Generate a stress-strain curve plot from a text file and save it as an image.
@@ -48,12 +45,11 @@ def plot_stress_strain(data_file: str, output_image: str) -> str:
         output_image: Path where the image will be saved (e.g., "plot.png").
     """
     import matplotlib.pyplot as plt
-
     try:
         # Load comma or whitespace-separated data
         try:
             data = np.loadtxt(data_file, delimiter=",", skiprows=1)
-        except Exception:
+        except:
             data = np.loadtxt(data_file, skiprows=1)
 
         strain = data[:, 0]
@@ -76,27 +72,16 @@ def plot_stress_strain(data_file: str, output_image: str) -> str:
         plt.savefig(output_image)
         plt.close()
 
-        from pathlib import Path
-
-        return f"Plot saved successfully to {Path(output_image).resolve()}"
+        return f"Plot saved successfully to {os.path.abspath(output_image)}"
 
     except FileNotFoundError:
-        raise ValueError(f"Data file not found at {data_file}") from None
+        raise ValueError(f"Data file not found at {data_file}")
     except Exception as e:
-        raise Exception(f"Failed to generate plot: {e!s}") from e
+        raise Exception(f"Failed to generate plot: {str(e)}")
 
 
-@app.function(
-    image=lammps_image,
-    cpu=4.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
-def run_lammps(input_file: str, log_file: str, num_cpus: int = 1) -> None:
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})
+def run_lammps(input_file: str, log_file: str) -> None:
     """
     Run a LAMMPS simulation.
 
@@ -108,33 +93,18 @@ def run_lammps(input_file: str, log_file: str, num_cpus: int = 1) -> None:
     Raises:
         ValueError: If the simulation fails.
     """
-    from pathlib import Path
-
     volume_sim.reload()
-    input_path = Path(input_file)
-    directory_path = input_path.parent
-    input_file_ = input_path.name
+    directory_path = os.path.dirname(input_file)
+    input_file_ = os.path.basename(input_file)
     try:
-        _run_lammps(input_file_, log_file, str(directory_path), num_cpus=num_cpus)
+        _run_lammps(input_file_, log_file, directory_path)
         volume_sim.commit()
 
     except Exception as e:
-        raise ValueError(f"LAMMPS simulation failed: {e!s}") from e
+        raise ValueError(f"LAMMPS simulation failed: {str(e)}")
 
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
-def convert_structure_to_lammps_data(
-    structure: str, output_file: str, atom_style: str = "charge"
-) -> None:
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})
+def convert_structure_to_lammps_data(structure: str, output_file: str, atom_style: str = "charge") -> None:
     """
     Convert a CIF-format structure into a LAMMPS data file. This function takes a CIF string as input (assumed to be the output from the previous tool),
     converts it to a pymatgen Structure object, and then generates the corresponding LAMMPS data
@@ -156,48 +126,51 @@ def convert_structure_to_lammps_data(
     # Convert CIF string to pymatgen Structure object
     volume_sim.reload()
     try:
+        # Load structure from CIF file
         structure_obj = Structure.from_file(structure)
 
-        # Convert the Structure to LAMMPS data format
-        lammps_data = LammpsData.from_structure(structure_obj, atom_style=atom_style)
+        # Check if the structure contains ONLY Si
+        elements = set([str(el) for el in structure_obj.composition.elements])
+        is_silicon_only = (elements == {"Si"} or elements == {"Cu"} or elements == {"Al"})
 
-        # Write the LAMMPS data to a file
+        # Convert to LAMMPS data
+        lammps_data = LammpsData.from_structure(structure_obj, atom_style=atom_style)
         lammps_data.write_file(output_file)
+
+        # Only modify the file if it's pure silicon
+        if is_silicon_only:
+            with open(output_file, 'r') as f:
+                lines = f.readlines()
+
+            # Insert tilt line after zlo zhi
+            for i, line in enumerate(lines):
+                if 'zlo zhi' in line:
+                    lines.insert(i + 1, "0.0 0.0 0.0 xy xz yz\n")
+                    break
+
+            # Write final file
+            with open(output_file, 'w') as f:
+                f.writelines(lines)
+
         volume_sim.commit()
 
     except Exception as e:
-        raise ValueError(
-            f"An unexpected error occurred while converting to Lammps data format: {e!s}"
-        ) from e
+        raise ValueError(f"An unexpected error occurred while converting to Lammps data format: {str(e)}")
 
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
-def run_bash_command(
-    command: str, args: list[str] | None = None, shell: bool = False
-) -> str:
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})
+def run_bash_command(command: str, args: list[str] = [], shell: bool = False) -> str:
     """Execute a bash command with optional arguments.
 
     Args:
         command: The bash command to execute (e.g., 'mkdir', 'ls').
         args: A list of arguments for the bash command.
     """
-    if args is None:
-        args = []
     # volume_potential.reload()
 
     volume_sim.reload()
     try:
         # Construct the full command with arguments
-        full_command = [command, *args]
+        full_command = [command] + args
 
         # Run the command
         result = subprocess.run(
@@ -205,7 +178,7 @@ def run_bash_command(
             shell=shell,  # Avoid shell injection risks
             check=True,  # Raise CalledProcessError on failure
             capture_output=True,
-            text=True,
+            text=True
         )
 
         # Return the standard output
@@ -213,22 +186,12 @@ def run_bash_command(
         return result.stdout
 
     except subprocess.CalledProcessError as e:
-        raise ValueError(f"Bash command failed: {e.cmd}\n{e.stderr}") from e
+        raise ValueError(f"Bash command failed: {e.cmd}\n{e.stderr}")
 
     except Exception as e:
-        raise ValueError(f"An unexpected error occurred: {e!s}") from e
+        raise ValueError(f"An unexpected error occurred: {str(e)}")
 
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})
 def list_files(path: str, recursive: bool = False) -> list[str]:
     """List files in a directory"""
     fs = fsspec.filesystem("file")
@@ -237,18 +200,8 @@ def list_files(path: str, recursive: bool = False) -> list[str]:
         return fs.ls(path, detail=False, recursive=recursive)
     except Exception as e:
         raise RuntimeError(f"Error listing files: {e}") from e
-
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
+    
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})
 def read_file(path: str) -> str:
     """Read contents of a file"""
     fs = fsspec.filesystem("file")
@@ -258,19 +211,9 @@ def read_file(path: str) -> str:
             return f.read()
     except Exception as e:
         raise RuntimeError(f"Error reading files: {e}") from e
-
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
-def read_large_file(path: str, start: int, length: int, encoding: str) -> str:
+    
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})
+def read_large_file(path: str, start:int, length:int, encoding:str) -> str:
     """Read specific portion of a large file"""
     fs = fsspec.filesystem("file")
     volume_sim.reload()
@@ -282,17 +225,7 @@ def read_large_file(path: str, start: int, length: int, encoding: str) -> str:
     except Exception as e:
         f"[ERROR] Could not read file chunk: {e}"
 
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})
 def write_file(path: str, content: str) -> None:
     fs = fsspec.filesystem("file")
     volume_sim.reload()
@@ -302,18 +235,8 @@ def write_file(path: str, content: str) -> None:
         volume_sim.commit()
     except Exception as e:
         raise RuntimeError(f"Error writing files: {e}") from e
-
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
+   
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})    
 def file_info(path: str) -> dict:
     """Get file information"""
     fs = fsspec.filesystem("file")
@@ -323,17 +246,7 @@ def file_info(path: str) -> dict:
     except Exception as e:
         raise RuntimeError(f"Error getting file info: {e}") from e
 
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})    
 def copy_file(source: str, destination: str) -> None:
     fs = fsspec.filesystem("file")
     volume_sim.reload()
@@ -341,19 +254,11 @@ def copy_file(source: str, destination: str) -> None:
         fs.copy(source, destination)
         volume_sim.commit()
     except Exception as e:
-        raise RuntimeError(f"Error copying from {source} to {destination}: {e}") from e
+        raise RuntimeError(
+            f"Error copying from {source} to {destination}: {e}"
+        ) from e
 
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})    
 def move_file(source: str, destination: str) -> None:
     fs = fsspec.filesystem("file")
     volume_sim.reload()
@@ -365,17 +270,7 @@ def move_file(source: str, destination: str) -> None:
         copy_file(source, destination)
         fs.rm(source)
 
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})    
 def mkdir(path: str, create_parents: bool = False) -> None:
     fs = fsspec.filesystem("file")
     volume_sim.reload()
@@ -390,17 +285,7 @@ def mkdir(path: str, create_parents: bool = False) -> None:
     except Exception as e:
         raise RuntimeError(f"Error creating directory {path}: {e}") from e
 
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})    
 def cat_files(paths: list[str], separator: str = "\n") -> str:
     contents = []
     for path in paths:
@@ -410,17 +295,7 @@ def cat_files(paths: list[str], separator: str = "\n") -> str:
             raise RuntimeError(f"Error reading file {path}: {e}") from e
     return separator.join(contents)
 
-
-@app.function(
-    image=lammps_image,
-    cpu=1.0,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-    },
-)
+@app.function(image=lammps_image, cpu=1.0, memory=5120, volumes = {'/potentials' : volume_potential, '/results' : volume_sim, '/structures' : volume_struct})
 def extract_max_stress(file_path) -> float:
     """
     Extracts the maximum tensile stress (in GPa) along the x-direction
@@ -436,13 +311,12 @@ def extract_max_stress(file_path) -> float:
         Exception: If any error occurs while reading or processing the file.
     """
     import csv
-    from pathlib import Path
 
     try:
-        max_stress = float("-inf")
+        max_stress = float('-inf')
 
-        with Path(file_path).open(newline="") as file:
-            reader = csv.reader(file, delimiter=" ")
+        with open(file_path, newline='') as file:
+            reader = csv.reader(file, delimiter=' ')
             for row in reader:
                 # Remove empty strings caused by multiple spaces
                 row_clean = [val for val in row if val.strip()]
@@ -458,4 +332,9 @@ def extract_max_stress(file_path) -> float:
         return max_stress
 
     except Exception as e:
-        raise Exception(f"Error while processing file '{file_path}': {e}") from e
+        raise Exception(f"Error while processing file '{file_path}': {e}")
+
+
+
+    
+    

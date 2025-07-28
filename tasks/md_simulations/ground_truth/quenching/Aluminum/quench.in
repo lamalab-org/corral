@@ -1,0 +1,67 @@
+#------------------------Silica Melt Simulation------------------#
+
+#Initial setup
+units           metal
+dimension       3
+processors      * * *
+boundary        p p p
+
+#----------------------------Setup----------------------------------#
+#Creating new box
+atom_style      atomic
+
+#lattice        fcc 3.61
+#region	box block 0 10 0 10 0 10 units lattice
+#create_box	1 box
+#create_atoms 1 box
+
+#mass 1 63.54
+
+read_data ../../melting/Aluminum/heatedsystem_3000_reax.dat
+
+
+#-------------------------------Potential--------------------------#
+
+pair_style eam/alloy
+pair_coeff * * ../../../../../../modal_app/potentials/EAM/Al99.eam.alloy Al
+
+neighbor        2.0 bin
+neigh_modify    every 1 check yes
+variable		dt equal 0.001
+timestep        ${dt}
+
+#-----------------------Thermo Output---------------------------------------------#
+
+thermo          1000
+thermo_style    custom step atoms temp pe ke press lx ly lz density
+
+#-----------------------NPT Cooling---------------------------------------------#
+dump            222 all custom 500 mdcool300_reax.lammpstrj id type x y z
+fix             111 all npt temp 1000 300 $(100.0*dt) iso 0 0 $(1000.0*dt)
+#run             540000
+run             10000
+unfix           111
+undump          222
+
+write_restart   cooledsystem_300_reax.restart
+write_data      cooledsystem_300_reax.dat
+
+# relax
+fix             17 all npt temp 300 300 100 iso 0 0 1000
+#run             100000
+run             10000
+unfix           17
+
+write_restart   relaxedcooledsystem_300_reax.restart
+write_data      relaxedcooledsystem_300_reax.dat
+
+#statistical average
+dump            24 all custom 500 mdstatave_reax.lammpstrj id type x y z
+fix             14 all nvt temp 300 300 $(100.0*dt)
+#run             100000
+run             10000
+unfix           14
+undump          24
+
+write_restart   init_system_300_reax.restart
+write_data      init_system_300_reax.dat

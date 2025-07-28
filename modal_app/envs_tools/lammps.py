@@ -86,7 +86,7 @@ lammps_image = _lammps_image.run_function(_install_lammps)
 
 
 def _run_lammps(
-    input_file: str, log_file: str, directory_path: str | None = None, num_cpus: int = 1
+    input_file: str, log_file: str, directory_path: str | None = None
 ) -> None:
     """
     Runs a LAMMPS simulation using a specified input file and writes the log output to a given log file.
@@ -113,23 +113,23 @@ def _run_lammps(
     try:
         # command = ["mpirun", "--allow-run-as-root", "-np", "8", lmp_command, "-in", input_file, "-log", log_file]
         # if use_cpus:
-        logger.info("Running LAMMPS with multiple CPUs")
+        # logger.info("Running LAMMPS with multiple CPUs")
         # command = [lmp_command, "-sf", "gpu", "-pk", "gpu", "1", "-in", input_file, "-log", log_file]
-        command = [
-            "mpirun",
-            "--allow-run-as-root",
-            "-np",
-            str(num_cpus),
-            lmp_command,
-            "-in",
-            input_file,
-            "-log",
-            log_file,
-        ]
+        # command = [
+        #     "mpirun",
+        #     "--allow-run-as-root",
+        #     "-np",
+        #     str(num_cpus),
+        #     lmp_command,
+        #     "-in",
+        #     input_file,
+        #     "-log",
+        #     log_file,
+        # ]
         # else:
         #     logger.info("Running LAMMPS with single CPU")
         #     command = [lmp_command, "-in", input_file, "-log", log_file]
-        # command = [lmp_command, "-in", input_file]
+        command = [lmp_command, "-in", input_file]
         subprocess.run(command, shell=False, check=True, capture_output=True, text=True)
 
     except subprocess.CalledProcessError as e:
