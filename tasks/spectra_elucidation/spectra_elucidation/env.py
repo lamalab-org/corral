@@ -51,33 +51,20 @@ def load_tasks_from_json(json_path: Path, work_dir: str = BASE_WORK_DIR) -> list
 
         with task_file.open() as f:
             task_data = json.load(f)
-        task_id = task_data["id"]
-        initial_input = task_data.get("initial_input", {"work_dir": work_dir})
+        for data in task_data:
+            task_id = data["id"]
+            initial_input = task_data.get("initial_input", {"work_dir": work_dir})
 
-        tasks[task_id] = TaskDefinition(
-            name=task_data["name"],
-            description=task_data["input"]["prompt"],
-            tools=task_data.get("tools", []),
-            scoring_fn=SCORING_FUNCTIONS[task_data["scoring_fn"]],
-            scoring_inputs=task_data["output"][0]["target"],
-            submission_format=task_data.get("submission_format", ""),
-            input_from_tasks=task_data.get("input_from_task", []),
-            initial_input=initial_input,
-        )
-        subtasks = task_data.get("subtasks", [])
-        if subtasks:
-            for subtask in subtasks:
-                subtask_id = subtask["id"]
-                tasks[subtask_id] = TaskDefinition(
-                    name=subtask["name"],
-                    description=subtask["input"]["prompt"],
-                    tools=subtask.get("tools", []),
-                    scoring_fn=SCORING_FUNCTIONS[subtask["scoring_fn"]],
-                    scoring_inputs=subtask["output"][0]["target"],
-                    submission_format=subtask.get("submission_format", ""),
-                    input_from_tasks=[task_id],
-                    initial_input=initial_input,
-                )
+            tasks[task_id] = TaskDefinition(
+                name=task_data["name"],
+                description=task_data["input"]["prompt"],
+                tools=task_data.get("tools", []),
+                scoring_fn=SCORING_FUNCTIONS[task_data["scoring_fn"]],
+                scoring_inputs=task_data["output"][0]["target"],
+                submission_format=task_data.get("submission_format", ""),
+                input_from_tasks=task_data.get("input_from_task", []),
+                initial_input=initial_input,
+            )
     return tasks
 
 
@@ -196,10 +183,14 @@ class TaskEnvironment(Environment):
 
 def create_spectra_elu_environments(
     work_dir: str = BASE_WORK_DIR,
+    subtask_level: bool = False,
 ) -> dict[str, Environment]:
     """Create environments for the spectra elucidation benchmark tasks."""
     logger.info("Creating environments for spectra elucidation tasks...")
-    json_path = Path(__file__).parent / "tasks_open.json"
+    if subtask_level:
+        json_path = Path(__file__).parent / "subtasks_json"
+    else:
+        json_path = Path(__file__).parent / "tasks_json"
     if not json_path.exists():
         raise ValueError(f"Task file {json_path} does not exist.")
 
@@ -250,12 +241,20 @@ if __name__ == "__main__":
         default=int(os.environ.get("CORRAL_PORT", "8000")),
         help="Port to run the server on",
     )
+    parser.add_argument(
+        "--subtask_level",
+        type=bool,
+        default=False,
+        help="Whether to use subtask level",
+    )
     args = parser.parse_args()
 
     Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
 
     # Create all environments with file system tools
-    environments = create_spectra_elu_environments(work_dir=BASE_WORK_DIR)
+    environments = create_spectra_elu_environments(
+        work_dir=BASE_WORK_DIR, subtask_level=args.subtask_level
+    )
 
     logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
