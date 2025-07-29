@@ -169,7 +169,7 @@ def search_by_smiles(smiles: str, top_k: int = 10) -> list[dict[str, Any]]:
 
 
 @tool
-def retrieve_protons_shifts() -> list[dict[str, str]]:
+def retrieve_protons_shifts() -> str:
     """[BRIEF] Retrieve the proton chemical shifts ranges for hydrocarbons. [/BRIEF]
 
     [DETAILED] This function retrieves the proton chemical shifts ranges for various types of hydrocarbons. The chemical shifts (delta) are reported in parts per million (ppm) relative to tetramethylsilane (TMS) as the reference standard. It returns a list of dictionaries, each containing the type of proton and its corresponding chemical shift range. [/DETAILED]
@@ -200,9 +200,9 @@ def retrieve_protons_shifts() -> list[dict[str, str]]:
         None
 
     Returns:
-        list[dict[str, str]]:
-            [BRIEF] A list of dictionaries containing the proton chemical shifts ranges for hydrocarbons [/BRIEF]
-            [DETAILED] Each dictionary contains the type of proton and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various types of protons in hydrocarbons. [/DETAILED]
+        str:
+            [BRIEF] A list of dictionaries as an string containing the proton chemical shifts ranges for hydrocarbons [/BRIEF]
+            [DETAILED] Each dictionary (as string) contains the type of proton and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various types of protons in hydrocarbons. [/DETAILED]
             [EXAMPLES] Examples: [{"Proton": "Aldehyde", "delta / ppm": "9.5 - 10.5"}, {"Proton": "Aromatic", "delta / ppm": "6.5 - 8.2"}, ...] [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -244,7 +244,7 @@ def retrieve_protons_shifts() -> list[dict[str, str]]:
 
 
 @tool
-def retrieve_aromatic_protons_shifts() -> list[dict[str, str]]:
+def retrieve_aromatic_protons_shifts() -> str:
     """[BRIEF] Retrieve the proton shifts ranges for aromatic hydrocarbons. [/BRIEF]
 
     [DETAILED] This function retrieves the proton chemical shifts ranges for aromatic hydrocarbons. The values represent chemical shift changes (in ppm) caused by substituents on a benzene ring. The values show how much a substituent shifts the resonance of protons at ortho, meta, and para positions relative to unsubstituted benzene. Positive values indicate downfield shifts (deshielding), while negative values indicate upfield shifts (shielding). All shifts are relative to tetramethylsilane (TMS) as the reference standard. [/DETAILED]
@@ -275,8 +275,8 @@ def retrieve_aromatic_protons_shifts() -> list[dict[str, str]]:
         None
 
     Returns:
-        list[dict[str, str]]:
-            [BRIEF] A list of dictionaries containing the substituent effects on proton chemical shifts in aromatic rings [/BRIEF]
+        str:
+            [BRIEF] A list of dictionaries as a string, containing the substituent effects on proton chemical shifts in aromatic rings [/BRIEF]
             [DETAILED] Each dictionary contains the substituent name and its corresponding chemical shift changes (in ppm) for ortho, meta, and para positions. The shifts are based on typical values observed in NMR spectroscopy for various substituents on aromatic rings. [/DETAILED]
             [EXAMPLES] Examples: [{"Substituent": "NO2", "Ortho": 0.95, "Meta": 0.17, "Para": 0.33}, {"Substituent": "CHO", "Ortho": 0.58, "Meta": 0.21, "Para": 0.27}, ...] [/EXAMPLES]
 
@@ -330,7 +330,7 @@ def retrieve_aromatic_protons_shifts() -> list[dict[str, str]]:
 
 
 @tool
-def retrieve_carbon_shifts() -> list[dict[str, str]]:
+def retrieve_carbon_shifts() -> str:
     """[BRIEF] Retrieve the carbon chemical shifts ranges for various functional groups in organic compounds. [/BRIEF]
 
     [DETAILED] This function retrieves the carbon chemical shifts ranges for various functional groups in organic compounds. The chemical shifts (deltas) are reported in parts per million (ppm) relative to tetramethylsilane (TMS) as the reference standard. These values can be used to interpret 13C NMR spectra and identify carbon environments in unknown compounds. It returns a list of dictionaries, each containing the functional group and its corresponding chemical shift range. [/DETAILED]
@@ -361,8 +361,8 @@ def retrieve_carbon_shifts() -> list[dict[str, str]]:
         None
 
     Returns:
-        list[dict[str, str]]:
-            [BRIEF] A list of dictionaries containing the carbon chemical shifts ranges for various functional groups in organic compounds [/BRIEF]
+        str:
+            [BRIEF] A list of dictionaries as string containing the carbon chemical shifts ranges for various functional groups in organic compounds [/BRIEF]
             [DETAILED] Each dictionary contains the functional group and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various functional groups in organic compounds. [/DETAILED]
             [EXAMPLES] Examples: [{"Group": "CH3-", "Shift (ppm)": "10-30 ppm"}, {"Group": "R3C-, R₂CH, RCH₂", "Shift (ppm)": "25-50 ppm"}, ...] [/EXAMPLES]
 
@@ -403,6 +403,7 @@ def retrieve_carbon_shifts() -> list[dict[str, str]]:
     )
 
 
+@tool(hidden_args=["h_smiles"])
 def carbon_nmr_spectra(h_smiles: str) -> str:
     """[BRIEF] Execute the 13C NMR spectra for the sample at hand. [/BRIEF]
 
@@ -458,6 +459,7 @@ def carbon_nmr_spectra(h_smiles: str) -> str:
     )
 
 
+@tool(hidden_args=["h_smiles"])
 def proton_nmr_spectra(h_smiles: str) -> str:
     """[BRIEF] Execute the 1H NMR spectra for a given SMILES string. [/BRIEF]
 
@@ -512,6 +514,7 @@ def proton_nmr_spectra(h_smiles: str) -> str:
     )
 
 
+@tool(hidden_args=["h_smiles"])
 def ir_spectra(h_smiles: str) -> str:
     """[BRIEF] Execute the IR spectra for the sample at hand. This spectra may not be accurate for all compounds. It works best for identifying functional groups such as C=O. [/BRIEF]
 
@@ -640,6 +643,7 @@ def format_hsqc_spectrum(zones_dict: dict) -> str:
     return f"HSQC: δH/δC {signals_part}."
 
 
+@tool(hidden_args=["h_smiles"])
 def hsqc_nmr_spectra(h_smiles: str) -> str:
     """[BRIEF] Execute the HSQC NMR spectra for the sample at hand. [/BRIEF]
 
@@ -730,6 +734,7 @@ def convert_ms_spectrum_to_string(spectrum_data):
     return "m/z " + ", ".join(formatted_peaks)
 
 
+@tool(hidden_args=["h_smiles"])
 def mass_spectrometry_spectra(h_smiles: str) -> str:
     """[BRIEF] Execute the mass spectrometry spectra for the sample at hand. [/BRIEF]
 
@@ -1003,7 +1008,7 @@ def obtain_isomers(smiles: str) -> list[str]:
     - Recommended for tasks that require understanding the structural diversity of a molecule, such as chemical structure elucidation or database searches. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. Obtain the SMILES string for the compound of interest.
+        1. Obtain the SMILES string for the compound of interest. You can use the `validate_smiles` tool to ensure the SMILES string is valid.
         2. Call this tool with the SMILES string to retrieve isomers.
         3. Use the list of isomers for further analysis or processing.
     [/WORKFLOW_INTEGRATION]
@@ -1025,7 +1030,11 @@ def obtain_isomers(smiles: str) -> list[str]:
     [/SYNTACTICAL]
 
     Args:
-        smiles (str): The SMILES string for which to obtain isomers.
+        smiles (str):
+            [BRIEF] The SMILES representation of the compound for which to retrieve isomers. [/BRIEF]
+            [DETAILED] The SMILES string representing the chemical structure of the compound for which to retrieve isomers. It should be a valid SMILES notation that can be processed by the isomer retrieval function. [/DETAILED]
+            [SYNTACTICAL] Format: "valid SMILES string" [/SYNTACTICAL]
+            [EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
 
     Returns:
         list[str]:
@@ -1080,7 +1089,11 @@ def validate_smiles(smiles: str) -> bool:
     [/SYNTACTICAL]
 
     Args:
-        smiles (str): The SMILES string to validate.
+        smiles (str):
+            [BRIEF] The SMILES representation to validate [/BRIEF]
+            [DETAILED] The SMILES string representing the chemical structure of the molecule to validate. It should be a valid SMILES notation that can be processed by the validation function. [/DETAILED]
+            [SYNTACTICAL] Format: "valid SMILES string" [/SYNTACTICAL]
+            [EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
 
     Returns:
         bool:
