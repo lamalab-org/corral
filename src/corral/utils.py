@@ -463,10 +463,26 @@ def tool(func: Callable | None = None, *, hidden_args: list[str] | None = None) 
                 f"Hidden args {', '.join(invalid_hidden)} do not exist in function signature."
             )
 
+        # Prepare hidden_args dict for Tool instance
+        hidden_args_dict = {}
+        if hidden_args:
+            sig = inspect.signature(func)
+            for arg in hidden_args:
+                param = sig.parameters[arg]
+                # Use default value if available, else None
+                hidden_args_dict[arg] = (
+                    param.default
+                    if param.default is not inspect.Parameter.empty
+                    else None
+                )
+
         class FunctionTool(Tool):
             def __init__(self):
                 super().__init__(
-                    name=func.__name__, description=description, arguments=arguments
+                    name=func.__name__,
+                    description=description,
+                    arguments=arguments,
+                    hidden_args=hidden_args_dict if hidden_args_dict else None,
                 )
 
             def execute(self, **kwargs):

@@ -111,10 +111,17 @@ class Tool:
     TODO: add descriptions of the arguments of the class, i.e., name, description, arguments
     """
 
-    def __init__(self, name: str, description: str, arguments: list[ToolArgument]):
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        arguments: list[ToolArgument],
+        hidden_args: dict[str, Any] | None = None,
+    ):
         self.name = name
         self.description = description
         self.arguments = arguments
+        self.hidden_args = hidden_args or {}
 
     def validate_arguments(
         self, provided_args: dict[str, Any]
@@ -319,16 +326,12 @@ class Environment(ABC):
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
         """Execute a tool and record the call with enhanced error handling.
 
-        The hidden arguments, if they exist, will be merged into the provided arguments,
+        The hidden arguments, if they exist, will be merged into the call arguments,
         with the hidden arguments taking precedence.
         This is needed for cases in which the arguments are fixed and should not be modified and/or provided by the agent."""
 
         # Store original arguments for the ToolCall record (without hidden args)
         original_arguments = arguments.copy()
-
-        # Merge hidden_args into arguments if they exist, with hidden_args taking precedence
-        if hasattr(self, "hidden_args") and self.hidden_args is not None:
-            arguments.update(self.hidden_args)
 
         start_time = time.perf_counter()
         # Check if tool exists
@@ -347,8 +350,24 @@ class Environment(ABC):
 
         tool = self.tools[tool_name]
 
+        # Merge tool-specific hidden_args if present
+        call_args = arguments.copy()
+        if hasattr(tool, "hidden_args") and tool.hidden_args:
+            # tool.hidden_args is a list of argument names to hide
+            if not hasattr(self, "hidden_args") or self.hidden_args is None:
+                raise AttributeError(
+                    "Environment is missing required 'hidden_args' attribute."
+                )
+            for hidden_arg in tool.hidden_args:
+                if hidden_arg in self.hidden_args:
+                    call_args[hidden_arg] = self.hidden_args[hidden_arg]
+                else:
+                    raise KeyError(
+                        f"Hidden argument '{hidden_arg}' required by tool '{tool_name}' not found in environment's hidden_args."
+                    )
+
         # Validate arguments
-        is_valid, error_message = tool.validate_arguments(arguments)
+        is_valid, error_message = tool.validate_arguments(call_args)
         if not is_valid:
             duration = time.perf_counter() - start_time
             tool_call = ToolCall(
@@ -364,7 +383,7 @@ class Environment(ABC):
 
         # Execute tool
         try:
-            result = tool.execute(**arguments)
+            result = tool.execute(**call_args)
             duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
