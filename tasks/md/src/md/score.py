@@ -47,17 +47,7 @@ def check_numerical(target: float | None = None, tolerance: float | None = None)
                 try:
                     parsed_result = json.loads(result)
                     if isinstance(parsed_result, dict):
-                        for key in (
-                            "answer",
-                            "BULK ENERGY",
-                            "SLAB ENERGY",
-                            "C11",
-                            "C12",
-                            "C13",
-                            "C22",
-                            "C23",
-                            "C33",
-                        ):
+                        for key in ("BULK ENERGY", "SLAB ENERGY", "density"):
                             if key in parsed_result:
                                 answer = float(parsed_result[key])
                                 break
@@ -77,16 +67,8 @@ def check_numerical(target: float | None = None, tolerance: float | None = None)
                 # If already parsed
                 if isinstance(result, dict):
                     for key in (
-                        "answer",
                         "BULK ENERGY",
                         "SLAB ENERGY",
-                        "C11",
-                        "C12",
-                        "C13",
-                        "C22",
-                        "C23",
-                        "C33",
-                        "energy",
                         "density",
                     ):
                         if key in result:
@@ -135,7 +117,7 @@ def check_structure(target, atom_style, use_modal=True):
                 with Path(result).open() as f:
                     content = f.read()
 
-            with Path(result).open() as f:
+            with Path("temp.data").open("w") as f:
                 f.write(content)
 
             ld1 = LammpsData.from_file(target, atom_style=atom_style)
