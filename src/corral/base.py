@@ -425,3 +425,9 @@ class Environment(ABC):
         ]
 
         return stats
+
+    def _configure_external_objects_for_trial(self):
+        """Configure any external objects or services for the trial"""
+        # This can be overridden by subclasses to set up external dependencies
+
+        return "No external object configuration needed for this trial."
