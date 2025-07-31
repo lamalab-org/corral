@@ -1,159 +1,423 @@
-# Material Agent Benchmark
+# Corral: Scientific Agent Benchmark
 
-The system consists of three main components:
+<p align="center">
+    <a href="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yaml">
+        <img alt="Tests" src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yaml/badge.svg" />
+    </a>
+    <a href="https://pypi.org/project/corral">
+        <img alt="PyPI" src="https://img.shields.io/pypi/v/corral" />
+    </a>
+    <a href="https://github.com/lamalab-org/mat-agent-bench/blob/main/LICENSE.md">
+        <img alt="PyPI - License" src="https://img.shields.io/pypi/l/corral" />
+    </a>
+    <a href='https://lamalab-org.github.io/mat-agent-bench/'>
+        <img src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/docs.yaml/badge.svg" alt='Documentation Status' />
+    </a>
+    <a href="https://github.com/lamalab-org/mat-agent-bench/blob/main/CODE_OF_CONDUCT.md">
+        <img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Contributor Covenant"/>
+    </a>
+</p>
 
-- Environment Service (`corral`)- Hosts tasks and tools
-- Benchmark Interface (`MatAgentBenchmark`)- Communicates with the `corral` service, runs evaluations
-- `Agent` - Solves tasks using available tools
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/_static/corral_logo_final.png">
+  <img alt="Corral logo" src="docs/_static/definitive.png" width='300px'>
+</picture>
+</p>
 
-## 1. Create environment and add tools example:
+A comprehensive benchmarking framework for evaluating AI agents on science tasks. The system provides standardized environments, tools, and evaluation metrics to test agent performance across diverse materials science challenges.
 
-example of creating a tool and running the environment server
+## 🚀 Getting Started
 
-```bash
-cd tasks/samplemath/samplemath
-python -m env # start corral service
-```
+### Prerequisites
 
-Creating a simple environment with a math task and a calculator tool
+- Python 3.10 or higher
+- `uv` (recommended) or `pip` for package management
 
-- Create a new environment class that inherits from `Environment` (this comes with tool calling and benchmark, tool instructions)
-- Implement the required methods
-- Add tools to the environment
-- Add scoring logic
+### Installation
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/lamalab-org/mat-agent-bench.git
+   cd mat-agent-bench
+   ```
+
+2. **Install the framework**
+
+   ```bash
+   uv pip install -e .
+   ```
+
+3. **Install specific environment dependencies**
+
+   ```bash
+   # create task environments
+   cd tasks/samplemath && uv venv && uv pip install -e .  # create an env for running sample math
+   # ... repeat for other tasks as needed
+   ```
+
+### Quick Start
+
+1. **Start a task environment server**
+
+   ```bash
+   cd tasks/samplemath/samplemath
+   python env.py  # Starts server on http://localhost:8000
+   ```
+
+2. **Run benchmark in another terminal**
+
+   ```python
+   from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
+   from corral.agents.react import ReActAgent
+   from corral.report import CorralWandbLogger
+
+   # Setup interface
+   interface = BenchmarkInterface("http://localhost:8000")
+   # Setup the WandB logger
+   wandblogger = CorralWandbLogger(
+       project="corral",
+       group="experiment_group",
+       name="run_name",
+   )
+   # Setup the agent
+   agent = ReActAgent(model="gpt-4o", max_iterations=10, temperature=0.1)
+
+   # Run benchmark
+   runner = MatAgentBenchmark(interface, agent, logger=wandblogger)
+   result = runner.bench()
+
+   print(f"Overall score: {result.total_score:.2f}")
+   ```
+
+## 📊 Running Benchmarks
+
+### Single Task Execution
 
 ```python
-class MathEnvironment(Environment):
-    def __init__(self, task_id: str, question: str, answer: float):
-        self.question = question
-        self.correct_answer = answer
-        super().__init__(task_id)
+from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
+from corral.agents.react import ReActAgent
 
-        # Add multiple tools
-        self.add_tool(calculator)
-        self.add_tool(UnitConverterTool())
+interface = BenchmarkInterface("http://localhost:8000")
+agent = ReActAgent(model="gpt-4o")
+runner = MatAgentBenchmark(interface, agent)
 
-    def get_task_prompt(self) -> str:
-        return f"Solve this math problem: {self.question}"
-
-    def score(self) -> float:
-        """Score based on submitted answer"""
-        if self.state.submitted_answer is None:
-            return 0.0
-        try:
-            submitted_result = float(self.state.submitted_answer)
-            return 1.0 if abs(submitted_result - self.correct_answer) < 0.001 else 0.0
-        except ValueError:
-            return 0.0
-
-
-environments = {
-    "math_1": MathEnvironment("math_1", "What is 23 + 45?", 68),
-    "math_2": MathEnvironment("math_2", "What is 12 * 8?", 96),
-    "math_3": MathEnvironment("math_3", "What is 99 * 63 * 999 * 111?", 691614693),
-}
+# Run specific task
+result = runner.bench(task_ids=["math_1"])
 ```
 
-### Create tools with `tool` decorator
+### Multiple Tasks
+
+```python
+# Run specific tasks
+result = runner.bench(task_ids=["math_1", "math_2", "math_3"])
+
+# Run all available tasks
+result = runner.bench()  # Uses all tasks in the environment
+```
+
+### Multiple Trials with Different Parameters
+
+```python
+# Run multiple trials per task
+result = runner.bench(
+    task_ids=["math_1", "math_2"],
+    trials_per_task=3,
+    k_values=[1, 2, 3],  # Evaluate with different k values for pass@k metrics
+    tool_verbosity="MINIMAL",  # Options: FULL, MINIMAL, NONE
+)
+
+# Evaluate with different k values for pass@k metrics
+result = runner.bench(trials_per_task=5, k_values=[1, 2, 3, 4, 5])
+```
+
+## 🏗️ Available Environments
+
+The framework includes several pre-built environments:
+
+| Environment | Description |
+|-------------|-------------|
+| `samplemath` | Basic mathematical operations |
+| `chembench` | Chemical structure analysis |
+| `spectra_elu_easy` | Spectroscopy data analysis |
+| `md_simulations` | Molecular dynamics setup |
+| `catalyst` | Catalysis research tasks |
+| `afm` | Atomic force microscopy |
+| `macbench` | Materials computation |
+| `mp_rag_task` | Materials project retrieval |
+| `md_tutorials` | MD tutorial completion |
+
+## 🤖 Available Agents
+
+The framework includes several built-in agent types:
+
+### ReActAgent
+
+Uses the ReAct (Reasoning and Acting) framework for step-by-step problem solving.
+
+```python
+from corral.agents.react import ReActAgent
+
+agent = ReActAgent(
+    model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model litellm supports
+    temperature=0.1,
+    max_iterations=10,
+)
+```
+
+### ToolCallingAgent
+
+Uses native function calling from LLM providers to solve tasks by leveraging built-in tool/function calling capabilities.
+
+```python
+from corral.agents.tool_calling import ToolCallingAgent
+
+agent = ToolCallingAgent(
+    model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model LiteLLM supports
+    temperature=0.0,
+    max_iterations=10,
+)
+```
+
+### LLMPlanner
+
+Uses hierarchical planning with high-level planning and low-level execution delegation to other agents.
+
+```python
+from corral.agents.llm_planner import LLMPlanner
+
+agent = LLMPlanner(model="gpt-4o", temperature=0.1, max_iterations=5)
+```
+
+## 💾 Checkpoint System
+
+The framework automatically saves checkpoints during benchmark runs.
+
+Checkpoints are automatically searched and loaded when resuming interrupted runs.
+
+## 🔧 Contributing
+
+### Adding a New Environment
+
+1. **Create environment directory**
+
+   ```bash
+   mkdir -p tasks/my_new_env/my_new_env
+   cd tasks/my_new_env
+   ```
+
+2. **Create pyproject.toml**
+
+   ```toml
+   [project]
+   name = "my_new_env"
+   version = "0.1.0"
+   dependencies = [
+       "corral",
+       # Add your specific dependencies
+   ]
+   ```
+
+3. **Create tools**
+
+   ```python
+   # tasks/my_new_env/my_new_env/tools.py
+   from corral.utils import tool
+
+
+   @tool
+   def my_custom_tool(input_param: str) -> str:
+       """Description of what the tool does.
+
+       Args:
+           input_param: Description of the parameter
+
+       Returns:
+           Description of the return value
+       """
+       # Your tool implementation
+       return f"Processed: {input_param}"
+   ```
+
+   Note that the docstring has to be formatted correctly for the tool to be registered properly. This means it has to include a description of the parameters and return values as in the example above.
+
+4. **Implement environment class**
+
+   ```python
+   # tasks/my_new_env/my_new_env/env.py
+   from corral.base import Environment
+   from corral.server import create_benchmark_server
+
+
+   class MyEnvironment(Environment):
+       def __init__(self, task_id: str, problem: str, answer: str):
+           self.problem = problem
+           self.correct_answer = answer
+           super().__init__(task_id)
+
+           # Add your tools
+           self.add_tool(my_custom_tool)
+
+       def get_task_prompt(self) -> str:
+           return f"Solve this problem: {self.problem}"
+
+       def score(self) -> float:
+           if self.state.submitted_answer is None:
+               return 0.0
+           return 1.0 if self.state.submitted_answer == self.correct_answer else 0.0
+
+
+   # Define your tasks
+   environments = {
+       "task_1": MyEnvironment("task_1", "Problem 1", "Answer 1"),
+       "task_2": MyEnvironment("task_2", "Problem 2", "Answer 2"),
+   }
+
+   # Create server
+   if __name__ == "__main__":
+       app = create_benchmark_server(environments)
+       import uvicorn
+
+       uvicorn.run(app, host="0.0.0.0", port=8000)
+   ```
+
+### Adding a New Agent
+
+1. **Create agent file**
+
+   ```python
+   # src/corral/agents/my_agent.py
+   from corral.agents.base_agent import BaseAgent
+   from corral.evaluate import BenchmarkInterface
+
+
+   class MyAgent(BaseAgent):
+       def __init__(self, model: str, **kwargs):
+           super().__init__(model, **kwargs)
+           # Add your agent-specific initialization
+
+       def run(self, interface: BenchmarkInterface, task_id: str) -> str:
+           # Get task information
+           guide = interface.get_task_guide(task_id)
+
+           # Your agent logic here
+           # Use interface.execute_tool() to call tools
+
+           return "Your final answer"
+   ```
+
+2. **Add to agent registry**
+
+   ```python
+   # src/corral/agents/__init__.py
+   from .my_agent import MyAgent
+
+   __all__ = ["MyAgent", ...]
+   ```
+
+3. **Test your agent**
+
+   ```python
+   from corral.agents.my_agent import MyAgent
+   from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
+
+   agent = MyAgent(model="gpt-4o")
+   interface = BenchmarkInterface("http://localhost:8000")
+   runner = MatAgentBenchmark(interface, agent)
+
+   result = runner.bench()
+   ```
+
+### Development Setup
+
+1. **Install development dependencies**
+
+   ```bash
+   uv pip install -e .
+   ```
+
+2. **Install pre-commit hooks with commitizen commits**
+
+   ```bash
+   pre-commit install --hook-type commit-msg --hook-type pre-push
+   ```
+
+## 📋 Advanced Usage
+
+### Tool Creation
+
+#### Standard Tools
 
 ```python
 from corral.utils import tool
 
+
 @tool
-def percentage_calculator(value: float, percentage: float = 100.0) -> float:
-    """Calculate percentage of a value.
+def calculate_molecular_weight(formula: str) -> float:
+    """Calculate molecular weight from chemical formula.
 
     Args:
-        value: The base value
-        percentage: The percentage to calculate (defaults to 100.0)
+        formula: Chemical formula (e.g., 'H2O', 'CH4')
 
     Returns:
-        float: The calculated result
+        Molecular weight in g/mol
     """
-    return (value * percentage) / 100.0
-
+    # Implementation here
+    pass
 ```
 
-### Create tool that would run in [Modal](https://modal.com/) environment
+#### [Modal](https://modal.com) Tools (Cloud Execution)
 
 ```python
 from corral.utils import modal_tool, MODAL_TOOL_REGISTRY
-@modal_tool(app=app, image=Image.debian_slim().pip_install("numerizer"), memory=512)
-def number_convert(text: str, return_float: bool = False) -> str:
-    """
-    Convert number words to numeric representation.
-
-    Args:
-        text: Text containing number words (e.g. 'forty two', 'one million')
-        return_float: Whether to return float for decimal values (choices: [True, False])
-
-    Returns:
-        String containing the numeric representation
-    """
-    from numerizer import numerize
-
-    result = numerize(text)
-    return str(float(result)) if return_float and "." in result else result
+from modal import Image
 
 
-# TODO: decorator could not return the tool instance
-number_converter = MODAL_TOOL_REGISTRY["number_convert"]
-```python
+@modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
+def complex_calculation(data: str) -> str:
+    """Run computationally intensive task in the cloud."""
+    # This runs in Modal's cloud environment
+    pass
 
-## 2. Create agent example:
 
-see an example of a simple agent.
-```python
+# Access the tool
+tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]
+```
+
+### Environment Configuration
+
+For environments requiring file I/O:
+
 ```bash
-cd agents/baseline
+export CORRAL_FS_PROTOCOL=local
+export BASE_IO_PATH=/path/to/work/directory
 ```
 
-Creating an agent
-- Create a new agent class that implements the `Agent` protocol
-- TODO: Toolcalling parsing final answer submission parsing from message to the server
-(see the example on how this is being done now.)
+### Evaluation Metrics
+
+The framework provides comprehensive evaluation metrics:
 
 ```python
-class Agent(Protocol):
-    """Protocol defining what an agent must implement"""
+result = runner.bench(trials_per_task=10, k_values=[1, 3, 5])
 
-    def solve_task(self, interface: BenchmarkInterface, task_id: str) -> str:
-        """Solve a task and return the answer"""
-        ...
-        guide = interface.get_task_guide(task_id) # get instruction on task, tools available and their respective tool calling syntax
-        system_prompt = BASELINESYSTEMPROMPT.format(guide=guide) # set these instructions to the system prompt
-        interface.execute_tool(task_id, tool_request["tool_name"], tool_request["arguments"]) # how to communicate tool calls
+# Access detailed results
+print(f"Total score: {result.total_score}")
+print(f"Pass@1: {result.pass_at_k[1]}")
+print(f"Pass@3: {result.pass_at_k[3]}")
+print(f"Average trials: {result.average_trials}")
 
-
+# Per-task analysis
+for task_id, task_result in result.task_results.items():
+    print(f"Task {task_id}: {task_result.success_rate:.2f} success rate")
 ```
 
-## 3. Benchmark Interface
+## 🤝 Community
 
-Setup benchmark interface
-- Start `corral` service and get the base url. See step 1. (This would `start` corral server, with 3 tasks and 2 tools)
+- **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/lamalab-org/mat-agent-bench/issues)
+- **Discussions**: Join conversations on [GitHub Discussions](https://github.com/lamalab-org/mat-agent-bench/discussions)
+- **Contributing**: See our [Contributing Guide](CONTRIBUTING.md)
 
-```python
-from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
+## 📄 License
 
-interface = BenchmarkInterface(base_url) # defaults to "http://localhost:8000"
-agent = ClaudeAgent(api_key=os.getenv("ANTHROPIC_API_KEY")) # or any other agent
-runner = MatAgentBenchmark(interface, agent)
-
-result = runner.bench()
-```
-
-## Development 
-
-This project uses pre-commit hooks to maintain code quality. The hooks run automatically on each commit to ensure consistent code formatting and catch common issues early.
-
-### Setup
-
-1. Install Python dependencies: `pip install pre-commit`
-2. Install the pre-commit hooks: `pre-commit install`
-
-The checks will run automatically when you commit changes. However, you can also run them manually:
-
-- Run on all files: `pre-commit run --all-files`
-- Run on specific files: `pre-commit run --files path/to/file1.py path/to/file2.py`
-
-For best experience, install `ruff` in your editor to format code on save and to show linting errors.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE.md) file for details.
