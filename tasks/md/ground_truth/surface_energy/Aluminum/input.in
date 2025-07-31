@@ -1,0 +1,68 @@
+# Initialize simulation
+units           metal
+dimension       3
+boundary        p p p  # Fully periodic for bulk system
+atom_style      atomic
+
+read_data       ../../structures/Al.data
+replicate       5 5 5
+
+variable        A1 equal lx*ly  # Surface area in Å²
+
+print          "Initial Area ${A1}"
+
+
+# Define interatomic potential
+pair_style      eam/alloy
+pair_coeff * * ../../../../../../modal_app/potentials/EAM/Al99.eam.alloy Al
+
+
+neighbor 2.0 bin
+neigh_modify delay 10 check yes
+
+# Bulk system relaxation
+reset_timestep  0
+thermo          100
+min_style       cg
+minimize        1.0e-10 1.0e-10 100000 100000
+
+#variable        A1 equal lx*ly  # Surface area in Å²
+
+#print          "Initial Area ${A1}"
+
+# Store bulk energy BEFORE modifying the system
+variable        Ebulk equal pe
+variable        Ebulk_stored equal ${Ebulk}  # This will keep the bulk energy fixed
+
+#print "Bulk Energy (eV): ${Ebulk_stored}"
+
+# Now create a slab system (introduce a free surface)
+change_box      all boundary p p m  # Free surface in z-direction
+#replicate       1 1 2  # Increase thickness along z
+#variable xc equal "lx/2"
+#variable yc equal "ly/2"
+#variable zc equal "lz/2"
+
+#displace_atoms all rotate ${xc} ${yc} ${zc} 0 0 1 10 units box
+
+write_data    al_slab.dat
+
+# Minimize slab system
+minimize        1.0e-10 1.0e-10 100000 100000
+
+# Compute slab energy and surface energy
+variable        Eslab equal pe
+
+print "Slab Energy (eV): ${Eslab}"
+
+print "Bulk Energy (eV): ${Ebulk_stored}"
+
+variable        A equal lx*ly  # Surface area in Å²
+
+print          "Area ${A}"
+
+variable surface_energy equal (${Eslab}-${Ebulk_stored})/(${A}*2)
+
+
+# Print surface energy in eV/Å²
+print "Surface Energy (eV/Å²): ${surface_energy}"
