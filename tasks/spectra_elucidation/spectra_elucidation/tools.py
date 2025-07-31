@@ -407,7 +407,7 @@ def retrieve_carbon_shifts() -> str:
 def carbon_nmr_spectra(h_smiles: str) -> str:
     """[BRIEF] Return the 13C NMR spectra for the sample at hand. [/BRIEF]
 
-    [DETAILED] This function measures the 13C NMR spectra for the sample at hand. It uses the `get_c13_nmr_prediction` function to execute the experiment NMR spectra. The function returns the 13C NMR spectra as a string. [/DETAILED]
+    [DETAILED] This function measures the 13C NMR spectra for the sample at hand. It uses the `get_c13_nmr_prediction` function to measure the experiment NMR spectra. The function returns the 13C NMR spectra as a string. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use it when you want to measure the 13C NMR spectra for the sample at hand.
@@ -416,8 +416,8 @@ def carbon_nmr_spectra(h_smiles: str) -> str:
     [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure that the correct step is to run NMR. [/PREREQUISITE]
-    2. [CURRENT] Apply this tool to run the 13C NMR experiment for the corresponding compound. [/CURRENT]
+    1. [PREREQUISITE] Ensure that the correct step is to measure NMR. [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to measure the 13C NMR experiment for the corresponding compound. [/CURRENT]
     3. [FOLLOW_UP] Use the resulting NMR spectra to analyze the carbon environments in the proposed molecule. You can use the `retrieve_carbon_shifts` tool to validate the carbon chemical shifts.[/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
@@ -451,7 +451,7 @@ def carbon_nmr_spectra(h_smiles: str) -> str:
     [LIMITATIONS] Known Limitations:
         - The cost of measuring the NMR spectra repeatedly may be high, so use it judiciously.
         - The returned NMR spectra may not be accurate for all compounds, especially for complex or unusual structures.
-        - The experiment can only be run for the compound at hand.
+        - The experiment can only measure for the compound at hand.
     [/LIMITATIONS]
     """
     return remote_call(function_name="get_c13_nmr_prediction", env_name="chemenv")(
@@ -659,7 +659,7 @@ def hsqc_nmr_spectra(h_smiles: str) -> str:
 
     [CONTEXTUAL] How this tool works:
     - This function measures the HSQC NMR spectra for the sample at hand.
-    - It makes a POST request to an external API that executes the HSQC NMR experiment for the sample at hand.
+    - It makes a POST request to an external API that measures the HSQC NMR experiment for the sample at hand.
     - The function then parses the data from the measurement to extract the HSQC spectrum data and formats it in standard NMR notation, similar to the ACS convention.
     - If an error occurs during the measurement, it returns an appropriate message. [/CONTEXTUAL]
 
@@ -732,28 +732,27 @@ def convert_ms_spectrum_to_string(spectrum_data):
 
 @tool(hidden_args=["h_smiles"])
 def mass_spectrometry_spectra(h_smiles: str) -> str:
-    """[BRIEF] Execute the mass spectrometry spectra for the sample at hand. [/BRIEF]
+    """[BRIEF] Returns the mass spectrometry spectra for the sample at hand using the Electrospray Ionization (ESI) technique. [/BRIEF]
 
-    [DETAILED] This function executes the mass spectrometry spectra for the sample at hand by making a POST request to an external API that executes the mass spectrometry experiment. The function returns the mass spectrometry spectra as a string in the format "m/z 100.1 (intensity 500), 101.2 (intensity 450), ...". [/DETAILED]
+    [DETAILED] This function returns the mass spectrometry spectra for the sample at hand by making a POST request to an external API that measures the mass spectrometry experiment. The function returns the mass spectrometry spectra as a string in the format "m/z 100.1 (intensity 500), 101.2 (intensity 450), ...". [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - Use it when you want to run the mass spectrometry spectra for the sample to elucidate its structure.
+    - Use it when you want to measure the mass spectrometry spectra for the sample to elucidate its structure.
     - When you need to answer questions about the mass-to-charge ratio (m/z) of the sample.
     - When you need to analyze the isotopic distribution of the sample.
     - When you need to know the number of insaturations in the sample.
     - Recommended for tasks that require understanding the mass spectrum of a molecule, such as mass spectrometry analysis or chemical structure elucidation. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure that the correct step is to run mass spectrometry. Do not run unnecessary experiments. If the task is to elucidate the structure of the sample, then this tool is appropriate to begin with. [/PREREQUISITE]
-    2. [CURRENT] Apply this tool to run the mass spectrometry experiment for the corresponding compound. [/CURRENT]
+    1. [PREREQUISITE] Ensure that the correct step is to measure mass spectrometry. Do not perform unnecessary experiments. If the task is to elucidate the structure of the sample, then this tool is appropriate to begin with. [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to measure the mass spectrometry experiment for the corresponding compound. [/CURRENT]
     3. [FOLLOW_UP] Use the resulting mass spectrometry spectra to analyze the mass-to-charge ratio (m/z) of the proposed molecule. You can use the `retrieve_isotope_distribution` tool to obtain complementary information about the isotopic distribution of the molecule. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - It makes a POST request to an external API that executes the mass spectrometry experiment for the sample at hand.
-    - The function takes the SMILES string of the compound and sends it to the API.
+    - It makes a POST request to an external API that measures the mass spectrometry experiment for the sample at hand.
     - The API returns the mass spectrometry spectra data as a JSON response.
     - The function then parses the response to extract the mass spectrometry spectrum data and formats it in a string format.
-    - If the SMILES string is invalid or no mass spectrometry spectrum is found, it returns an appropriate message. [/CONTEXTUAL]
+    - If some error occurs during the experiment, it returns an appropriate message. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
     [
@@ -767,7 +766,7 @@ def mass_spectrometry_spectra(h_smiles: str) -> str:
     Returns:
         str:
             [BRIEF] The mass spectrometry spectra for the molecule in the sample at hand. [/BRIEF]
-            [DETAILED] The function returns the mass spectrometry spectra as a string in the format "m/z 100.1 (intensity 500), 101.2 (intensity 450), ...". If the SMILES string is invalid or no mass spectrometry spectrum is found, it returns an appropriate message. [/DETAILED]
+            [DETAILED] The function returns the mass spectrometry spectra as a string in the format "m/z 100.1 (intensity 500), 101.2 (intensity 450), ...". If there is some error during the measurement, it returns an appropriate message. [/DETAILED]
             [EXAMPLES] "m/z 100.1 (intensity 500), 101.2 (intensity 450), 102.3 (intensity 400), ..." [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -778,10 +777,9 @@ def mass_spectrometry_spectra(h_smiles: str) -> str:
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
-        - The cost of running the mass spectrometry spectra repeatedly may be high, so use it judiciously.
+        - The cost of measuring the mass spectrometry spectra repeatedly may be high, so use it judiciously.
         - The experiment mass spectrometry spectra may not be accurate for all compounds, especially for complex or unusual structures.
-        - The experiment can only be run for the compound of the sample at hand.
-        - The API may have rate limits or availability issues, which could affect the function's ability to retrieve the mass spectrometry spectrum data.
+        - The experiment can only measure for the compound of the sample at hand.
     [/LIMITATIONS]
     """
     mol = Chem.MolFromSmiles(h_smiles)
@@ -806,7 +804,7 @@ def retrieve_isotope_distribution() -> str:
     - Recommended for tasks that require understanding the isotopic distribution of elements in a molecule, such as mass spectrometry analysis or chemical structure elucidation. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure that the correct step is to retrieve the isotopic distribution. Run the `mass_spectrometry_spectra` tool first to obtain the mass-to-charge ratio (m/z) of the molecule. [/PREREQUISITE]
+    1. [PREREQUISITE] Ensure that the correct step is to retrieve the isotopic distribution. Measure the `mass_spectrometry_spectra` tool first to obtain the mass-to-charge ratio (m/z) of the molecule. [/PREREQUISITE]
     2. [CURRENT] Apply this tool to retrieve the isotopic distribution of common elements in organic chemistry. [/CURRENT]
     3. [FOLLOW_UP] Use the retrieved isotopic distribution to analyze the mass spectrometry spectra of the proposed molecule. After that, proceed with the other spectra tools or answer the task at hand. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
@@ -921,7 +919,7 @@ def retrieve_dbe_formula() -> str:
     - Recommended for tasks that require understanding the structural features of a molecule, such as chemical structure elucidation or database searches. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure that the correct step is to calculate the DBE. Do not run unnecessary calculations. [/PREREQUISITE]
+    1. [PREREQUISITE] Ensure that the correct step is to calculate the DBE. Do not perform unnecessary calculations or measurements. [/PREREQUISITE]
     2. [CURRENT] Apply this tool to retrieve the formula for calculating the DBE. [/CURRENT]
     3. [FOLLOW_UP] Use the retrieved formula to calculate the DBE for a given molecular formula. You can use the `obtain_isomers` tool to explore different structural variations of a compound based on its DBE. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
@@ -999,7 +997,7 @@ Example Calculations:
 def obtain_isomers(smiles: str) -> list[str]:
     """[BRIEF] Obtain isomers for a given SMILES string. [/BRIEF]
 
-    [DETAILED] This function retrieves isomers for a given SMILES string using the `get_isomers` function from the `chemenv` environment. It returns a list of isomer SMILES strings. The list of isomers might not be accurate since it is based on the PubChem database. [/DETAILED]
+    [DETAILED] This function retrieves isomers for a given SMILES string using the `get_isomers` remote function. It returns a list of isomer SMILES strings. The list of isomers might not be accurate since it is based on the PubChem database. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use it when you want to find isomers for a given SMILES string.
@@ -1013,7 +1011,7 @@ def obtain_isomers(smiles: str) -> list[str]:
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-        - It uses the `get_isomers` function from the `chemenv` environment to retrieve isomers.
+        - It uses the `get_isomers` remote function to retrieve isomers for the given SMILES string.
         - The function returns a list of SMILES strings representing the isomers of the input compound that match the molecular formula.
         - The accuracy of the isomers is dependent on the underlying database (e.g., PubChem).
     [/CONTEXTUAL]
