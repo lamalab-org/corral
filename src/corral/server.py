@@ -284,7 +284,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
-        status = env._configure_external_objects_for_trial()
+        status = env.configure_external_objects_for_trial()
 
         return {
             "status": status,
