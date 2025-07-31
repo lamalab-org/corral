@@ -1,0 +1,132 @@
+{
+    "magnesium_structure_retrieval_subtask_melting" : {
+        "name" : "Magnesium Structure Retrieval for Melting",
+        "description" : "Retrieve structure of Magnesium and convert it to LAMMPs data format. Return the absolute path of the final structure.",
+        "tools" : [
+            "get_structure_from_mp_text",
+            "convert_structure_to_lammps_data"
+        ],
+        "scoring_function" : "check_structure",
+        "submission_format" : "absolute path to structure file (eg. /results/structure/structure.data)",
+        "input_from_tasks" : [],
+        "initial_input" : {
+            "materials_project_id" : "mp-153",
+            "atom_style" : "atomic"
+        },
+        "scoring_params" : {
+            "target" : "../../../ground_truth/structures/Mg.data",
+            "atom_style" : "atomic"
+        }
+    },
+
+    "magnesium_potential_file_subtask_melting" : {
+        "name" : "Magnesium Potential File for Melting",
+        "description" : "Procure the appropriate Embedded Atom Method (EAM) potential file for Magnesium for MD simulations. Return the absolute path to the potential file.",
+        "tools" : [
+            "get_potential_metadata"
+        ],
+        "scoring_function" : "check_potential_file",
+        "submission_format" : "absolute path to potential file (eg. /results/potentials/EAM/cu.eam)",
+        "input_from_tasks" : [],
+        "initial_input" : {},
+        "scoring_params" : {
+            "target" : "Mg_Zhou04.eam.alloy"
+        }
+    },
+
+    "magnesium_nvt_subtask_melting" : {
+        "name" : "Magnesium NVT Equilibration for melting",
+        "description" : "Given paths to LAMMPs compatible Magnesium structure file and Embedded Atom Method potential file appropriate for MD simulations, equilibrate the system under NVT conditions with the given simulation parameters. The simulation should replicate the unit cell 5 times in x, y and z direction. Return the absolute path of the equilibrated structure file and the final density in g/cm^3.",
+        "tools" : [
+            "get_potential_metadata",
+            "run_lammps"
+        ],
+
+        "scoring_function" : "check_numerical",
+
+        "submission_format" : "{\"density\" : numerical value without units, \"path to relaxed structure\" : path} eg, {\"density\" : 56.00, \"path to relaxed structure\" : /structures/structure.dat}",
+
+        "input_from_tasks" : ["magnesium_structure_retrieval_subtask_melting", "magnesium_potential_file_subtask_melting"],
+
+        "initial_input" : {
+            "units": "metal",
+            "pbc": "true",
+            "timestep" : "1 femtosecond",
+            "nvt steps": 10000,
+            "nvt temperature": 300,
+            "nvt thermostat": "Nose-Hoover",
+            "atom_style" : "atomic"
+        },
+
+        "scoring_params" : {
+            "target" : 1.8017992,
+            "tolerance" : 2e-2
+        }
+    },
+
+    "magnesium_npt_subtask_melting" : {
+        "name" : "Magnesium NPT Equilibration for melting",
+        "description" : "Given paths to LAMMPs compatible nvt equilibrated Magnesium structure file and Embedded Atom Method potential file appropriate for MD simulations, relax the system under NPT conditions with the given simulation parameters. Return the absolute path of the equilibrated structure file and the final density in gm/cm^3.",
+        "tools" : [
+            "get_potential_metadata",
+            "run_lammps"
+        ],
+
+        "scoring_function" : "check_numerical",
+
+        "submission_format" : "{\"density\" : numerical value without units, \"path to relaxed structure\" : path} eg, {\"density\" : 56.00, \"path to relaxed structure\" : /structures/structure.dat}",
+
+        "input_from_tasks" : ["magnesium_potential_file_subtask_melting", "magnesium_nvt_subtask_melting"],
+
+        "initial_input" : {
+            "units": "metal",
+            "pbc": "true",
+            "timestep" : "1 femtosecond",
+            "npt relaxation steps": 10000,
+            "npt relaxation temperature": 300,
+            "npt relaxation pressure": 0,
+            "npt relaxation thermostat": "Nose-Hoover",
+            "npt relaxation barostat": "Nose-Hoover",
+            "atom_style" : "atomic"
+        },
+
+        "scoring_params" : {
+            "target" : 1.677268,
+            "tolerance" : 2e-2
+        }
+    },
+
+    "magnesium_melting_npt_subtask_melting" : {
+        "name" : "Magnesium NPT Melting",
+        "description" : "Given paths to LAMMPs compatible npt equilibrated Magnesium structure file and Embedded Atom Method potential file appropriate for MD simulations, simulate the melting of the equilibrated system by heating it under NPT where the temperature is gradually increased to induce melting. Report the final density in g/cm^3.",
+        "tools" : [
+            "get_potential_metadata",
+            "run_lammps"
+        ],
+
+        "scoring_function" : "check_numerical",
+
+        "submission_format" : "absolute path to structure file (eg. /results/structure/structure.dat)",
+
+        "input_from_tasks" : ["magnesium_potential_file_subtask_melting", "magnesium_npt_subtask_melting"],
+
+        "initial_input" : {
+            "units": "metal",
+            "pbc": "true",
+            "timestep" : "1 femtosecond",
+            "npt heating steps": 20000,
+            "npt heating initial temperature": 300,
+            "npt heating final temperature": 2000,
+            "npt heating pressure": 0,
+            "npt_heating_thermostat": "Nose-Hoover",
+            "npt_heating_barostat": "Nose-Hoover",
+            "atom_style" : "atomic"
+        },
+
+        "scoring_params" : {
+            "target" : 1.1551529,
+            "tolerance" : 2e-2
+        }
+    }
+
+}
