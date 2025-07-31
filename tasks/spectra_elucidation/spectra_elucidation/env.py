@@ -1,10 +1,19 @@
+"""
+Spectra Elucidation Benchmark Server
+
+Command-line arguments:
+    --host: Host address to run the server (default: value of CORRAL_HOST env var or '0.0.0.0').
+    --port: Port to run the server (default: value of CORRAL_PORT env var or 8000).
+    --subtask_level: Whether to use subtask-level tasks (default: False).
+"""
+
 import argparse
 import json
 import os
 from pathlib import Path
 
 from loguru import logger
-from spectraelucidation.score import (
+from spectra_elucidation.score import (
     score_formula_match,
     score_isotopic_distribution,
     score_molecule,
@@ -16,7 +25,7 @@ from spectraelucidation.score import (
     score_num_hydrogen_symmetry_classes,
     validate_dbe_consistency,
 )
-from spectraelucidation.tools import (
+from spectra_elucidation.tools import (
     create_tools,
 )
 
@@ -39,6 +48,7 @@ SCORING_FUNCTIONS = {
     "8": score_num_carbonyl_groups,
     "9": score_molecule_fragments,
     "10": score_molecule,
+    "score_molecule": score_molecule,
 }
 
 
@@ -53,16 +63,19 @@ def load_tasks_from_json(json_path: Path, work_dir: str = BASE_WORK_DIR) -> list
             task_data = json.load(f)
         for data in task_data:
             task_id = data["id"]
-            initial_input = task_data.get("initial_input", {"work_dir": work_dir})
+            initial_input = data.get("initial_input", {"work_dir": work_dir})
+            input_from_tasks = data.get("input", {}).get("input_from_task", [])
+            if not isinstance(input_from_tasks, list):
+                input_from_tasks = []
 
             tasks[task_id] = TaskDefinition(
-                name=task_data["name"],
-                description=task_data["input"]["prompt"],
-                tools=task_data.get("tools", []),
-                scoring_fn=SCORING_FUNCTIONS[task_data["scoring_fn"]],
-                scoring_inputs=task_data["output"][0]["target"],
-                submission_format=task_data.get("submission_format", ""),
-                input_from_tasks=task_data.get("input_from_task", []),
+                name=data["name"],
+                description=data["input"]["prompt"],
+                tools=data.get("tools", []),
+                scoring_fn=SCORING_FUNCTIONS[str(data["scoring_fn"])],
+                scoring_inputs=data["output"][0]["target"],
+                submission_format=data.get("submission_format", {}),
+                input_from_tasks=input_from_tasks,
                 initial_input=initial_input,
             )
     return tasks
@@ -105,14 +118,6 @@ class TaskEnvironment(Environment):
 
     def _add_task_tools(self):
         """Add tools required for the current task to the environment"""
-        # Add required tools for the task
-        if not self.current_task.tools:
-            if "subtask" in self.current_task.name:
-                logger.warning(f"Task {self.task_id} has no tools defined.")
-            else:
-                for tool_name in self.available_tools:
-                    self.add_tool(self.available_tools[tool_name])
-
         for tool_name in self.current_task.tools:
             if tool_name in self.available_tools:
                 self.add_tool(self.available_tools[tool_name])
@@ -120,13 +125,6 @@ class TaskEnvironment(Environment):
                 logger.warning(
                     f"Tool {tool_name} not found in available tools for task {self.task_id}"
                 )
-
-    def reset_state(self) -> str:
-        """Reset state and update file tools for new workspace"""
-        trial_id = super().reset_state()
-        # Recreate file tools for new workspace
-        self._setup_file_tools()
-        return trial_id
 
     def get_task_prompt(self) -> str:
         prompt = (
@@ -163,7 +161,7 @@ class TaskEnvironment(Environment):
             return 0.0
 
         try:
-            # Clean the submission - take only the numerical answer part
+            # Clean the submission
             submission_str = self.state.submitted_answer.strip()
             logger.info(f"Raw submission: {submission_str}")
             score = self.current_task.scoring_fn(

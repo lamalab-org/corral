@@ -380,7 +380,8 @@ def tool(func: Callable | None = None, *, hidden_args: list[str] | None = None) 
         func (Callable): The function to convert into a tool
         hidden_args (list[str], optional): List of parameter names that exist in the function
             signature but should not be documented in the docstring Args section.
-            These parameters will be excluded from docstring validation.
+            These parameters will be excluded from docstring validation. This allows for defining
+            tools with fixed arguements such that the agent does not need to provide them.
 
     Returns:
         Tool: A Tool instance wrapping the function

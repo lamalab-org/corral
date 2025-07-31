@@ -317,7 +317,11 @@ class Environment(ABC):
 """
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
-        """Execute a tool and record the call with enhanced error handling"""
+        """Execute a tool and record the call with enhanced error handling.
+
+        The hidden arguments, if they exist, will be merged into the provided arguments,
+        with the hidden arguments taking precedence.
+        This is needed for cases in which the arguments are fixed and should not be modified and/or provided by the agent."""
         # Merge hidden_args into arguments if they exist, with hidden_args taking precedence
         if hasattr(self, "hidden_args") and self.hidden_args is not None:
             arguments.update(self.hidden_args)

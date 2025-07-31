@@ -3,17 +3,19 @@ from collections import Counter
 
 from loguru import logger
 from rdkit import Chem
+from rdkit.Chem.MolStandardize import rdMolStandardize
 
 _HALOGENS = {"F", "Cl", "Br", "I"}
 
-_element_pat = re.compile(r"([A-Z][a-z]?)(\d*)")
-_paren_pat = re.compile(r"\(([^()]*)\)(\d*)")
-_dot_pat = re.compile(r"·|\.")
+_ELEMENT_PAT = re.compile(r"([A-Z][a-z]?)(\d*)")
+_PAREN_PAT = re.compile(r"\(([^()]*)\)(\d*)")
+_DOT_PAT = re.compile(r"·|\.")
 
 
 def score_molecule(prediction: str, ground_truth: str) -> float:
     """
     Compare predicted and ground truth SMILES strings and calculate similarity score.
+    Stereochemistry is not considered in the comparison.
 
     Args:
         prediction (str): SMILES string of predicted molecule
@@ -37,7 +39,11 @@ def score_molecule(prediction: str, ground_truth: str) -> float:
     if pred_mol is None:
         return 0.0
 
-    if Chem.MolToSmiles(pred_mol) == Chem.MolToSmiles(true_mol):
+    # Convert to canonical SMILES without stereochemistry
+    pred_canonical = Chem.MolToSmiles(pred_mol, isomericSmiles=False)
+    true_canonical = Chem.MolToSmiles(true_mol, isomericSmiles=False)
+
+    if pred_canonical == true_canonical:
         return 1.0
 
     return 0.0
@@ -97,13 +103,13 @@ def _expand_parentheses(formula: str) -> str:
     Recursively expand parentheses so that C6H5(CH3) becomes C6H5C1H3 etc.
     """
     while True:
-        m = _paren_pat.search(formula)
+        m = _PAREN_PAT.search(formula)
         if not m:
             return formula
         inner, mult = m.groups()
         mult = int(mult or 1)
         expanded = "".join(
-            f"{el}{int(cnt or 1)*mult}" for el, cnt in _element_pat.findall(inner)
+            f"{el}{int(cnt or 1)*mult}" for el, cnt in _ELEMENT_PAT.findall(inner)
         )
         formula = formula[: m.start()] + expanded + formula[m.end() :]
 
@@ -113,7 +119,7 @@ def _parse_simple(formula: str) -> dict[str, int]:
     Parse an already-expanded, dot-free formula into {element: count}.
     """
     counts = Counter()
-    for el, cnt in _element_pat.findall(formula):
+    for el, cnt in _ELEMENT_PAT.findall(formula):
         counts[el] += int(cnt or 1)
     return counts
 
@@ -123,7 +129,7 @@ def parse_formula(formula: str) -> dict[str, int]:
     Parse molecular formula into an element-count mapping, handling
     parentheses and dot adducts.
     """
-    parts = _dot_pat.split(formula.replace(" ", ""))
+    parts = _DOT_PAT.split(formula.replace(" ", ""))
     total = Counter()
     for part in parts:
         expanded = _expand_parentheses(part)
@@ -156,7 +162,6 @@ def validate_dbe_consistency(prediction, ground_truth):
     Args:
         prediction (int or str): Predicted DBE value (should be an integer or string representing an integer).
         ground_truth (str): SMILES string of the ground truth molecule.
-        tol (float, optional): Allowed tolerance for DBE difference. Default is 1.0.
 
     Returns:
         bool: True if the absolute difference between prediction and calculated DBE is within tolerance, False otherwise.
@@ -240,7 +245,9 @@ def score_num_carbon_symmetry_classes(prediction, ground_truth):
 
 
 def score_num_aromatic_carbons(prediction, ground_truth):
-    """Count aromatic carbons in the molecule"""
+    """Count aromatic carbons in the molecule, this is centers on cyclic,
+    planar molecules with a specific number of delocalized pi electrons,
+    exhibiting enhanced stability due to resonance."""
     try:
         prediction = int(prediction)
     except ValueError:
@@ -280,7 +287,7 @@ def score_num_ch3_groups(prediction, ground_truth):
 
 
 def score_num_carbonyl_groups(prediction, ground_truth):
-    """Count carbonyl groups (C=O) in the molecule"""
+    """Count carbonyl groups (C=O) in the molecule, handling tautomers"""
     try:
         prediction = int(prediction)
     except ValueError:
@@ -288,12 +295,18 @@ def score_num_carbonyl_groups(prediction, ground_truth):
             "Prediction must be an integer representing the number of carbonyl groups."
         )
         return 0.0
+
     mol = Chem.MolFromSmiles(ground_truth)
     if mol is None:
         raise ValueError("Invalid ground truth SMILES string.")
+
+    # Canonicalize tautomers to get the most stable form (usually keto)
+    enumerator = rdMolStandardize.TautomerEnumerator()
+    canonical_mol = enumerator.Canonicalize(mol)
+
     carbonyl_groups = sum(
         1
-        for bond in mol.GetBonds()
+        for bond in canonical_mol.GetBonds()
         if bond.GetBondType() == Chem.BondType.DOUBLE
         and (
             (
@@ -306,4 +319,5 @@ def score_num_carbonyl_groups(prediction, ground_truth):
             )
         )
     )
+
     return float(carbonyl_groups == prediction)

@@ -52,14 +52,14 @@ def get_formula_from_smiles(smiles: str) -> str:
         smiles (str):
             [BRIEF] SMILES representation of a molecule [/BRIEF]
             [DETAILED] The SMILES string representing the chemical structure of the molecule. It should be a valid SMILES notation that RDKit can parse. [/DETAILED]
-            [SYNTACTICAL] Format: "valid SMILES string" [/SYNTACTICAL]
-            [EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
+            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
+            [EXAMPLES] "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
 
     Returns:
         str:
             [BRIEF] The chemical formula in Hill notation (C, H, then alphabetical) [/BRIEF]
             [DETAILED] The chemical formula of the molecule represented by the SMILES string, formatted in Hill notation. If the SMILES string is invalid or cannot be parsed, it returns an error message. [/DETAILED]
-            [EXAMPLES] Examples: "C2H6O" for ethanol, "C6H6" for benzene, "C2H5NO" for acetic acid amide, "C7H6O3" for salicylic acid [/EXAMPLES]
+            [EXAMPLES] '"C2H6O" for ethanol, "C6H6" for benzene, "C2H5NO" for acetic acid amide, "C7H6O3" for salicylic acid' [/EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -69,8 +69,8 @@ def get_formula_from_smiles(smiles: str) -> str:
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
-        - The function requires RDKit to be installed and properly configured in the environment.
         - It may return "Invalid SMILES string" if the provided SMILES cannot be parsed.
+        - RDKit may remove certain chemical features or properties during sanitization, which can sometimes lead to unexpected results.
     [/LIMITATIONS]
     """
     try:
@@ -122,20 +122,20 @@ def search_by_smiles(smiles: str, top_k: int = 10) -> list[dict[str, Any]]:
         smiles (str):
             [BRIEF] The SMILES representation of the compound to search for in the NMRShift database [/BRIEF]
             [DETAILED] The SMILES string representing the chemical structure of the molecule to search for in the NMRShift database. It should be a valid SMILES notation that can be processed by the vector database search. [/DETAILED]
-            [SYNTACTICAL] Format: "valid SMILES string" [/SYNTACTICAL]
-            [EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
+            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
+            [EXAMPLES] "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
 
         top_k (int, optional):
             [BRIEF] The maximum number of results to return. Defaults to 10 [/BRIEF]
             [DETAILED] The maximum number of search results to return from the NMRShift database. It should be a positive integer. [/DETAILED]
-            [SYNTACTICAL] Format: "any positive integer (e.g., 10, 20, 50)" [/SYNTACTICAL]
-            [EXAMPLES] Examples: 10, 20, 50 [/EXAMPLES]
+            [SYNTACTICAL] Any positive integer (e.g., 10, 20, 50) [/SYNTACTICAL]
+            [EXAMPLES] 10, 20, 50 [/EXAMPLES]
 
     Returns:
         list[dict[str, Any]]:
             [BRIEF] A list of dictionaries containing the most relevant entries from the NMRShift database [/BRIEF]
             [DETAILED] Each dictionary contains relevant information about the compound, such as its SMILES, chemical shifts, and other properties. The results are sorted by similarity score in descending order. [/DETAILED]
-            [EXAMPLES] Examples: [{"entry_id": "nmrshiftdb2:234", "compound_name": "Benzene", "smiles": "c1ccccc1", "spectrum": {"nucleus": "13C", "field_strength_mhz": 100.6, "temperature_k": 298, "solvent": "CDCl3", "assignment_method": "measured"}, "peaks": [{"atom_id": "a1", "xValue": 128.5, "multiplicity": "s"}]},
+            [EXAMPLES] "[{"entry_id": "nmrshiftdb2:234", "compound_name": "Benzene", "smiles": "c1ccccc1", "spectrum": {"nucleus": "13C",...]" [/EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -203,7 +203,7 @@ def retrieve_protons_shifts() -> str:
         str:
             [BRIEF] A list of dictionaries as an string containing the proton chemical shifts ranges for hydrocarbons [/BRIEF]
             [DETAILED] Each dictionary (as string) contains the type of proton and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various types of protons in hydrocarbons. [/DETAILED]
-            [EXAMPLES] Examples: [{"Proton": "Aldehyde", "delta / ppm": "9.5 - 10.5"}, {"Proton": "Aromatic", "delta / ppm": "6.5 - 8.2"}, ...] [/EXAMPLES]
+            [EXAMPLES] "[{"Proton": "Aldehyde", "delta / ppm": "9.5 - 10.5"}, {"Proton": "Aromatic", "delta / ppm": "6.5 - 8.2"}, ...]" [/EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -278,7 +278,7 @@ def retrieve_aromatic_protons_shifts() -> str:
         str:
             [BRIEF] A list of dictionaries as a string, containing the substituent effects on proton chemical shifts in aromatic rings [/BRIEF]
             [DETAILED] Each dictionary contains the substituent name and its corresponding chemical shift changes (in ppm) for ortho, meta, and para positions. The shifts are based on typical values observed in NMR spectroscopy for various substituents on aromatic rings. [/DETAILED]
-            [EXAMPLES] Examples: [{"Substituent": "NO2", "Ortho": 0.95, "Meta": 0.17, "Para": 0.33}, {"Substituent": "CHO", "Ortho": 0.58, "Meta": 0.21, "Para": 0.27}, ...] [/EXAMPLES]
+            [EXAMPLES] "[{"Substituent": "NO2", "Ortho": 0.95, "Meta": 0.17, "Para": 0.33}, {"Substituent": "CHO", "Ortho": 0.58, "Meta": 0.21, "Para": 0.27}, ...]" [/EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -364,7 +364,7 @@ def retrieve_carbon_shifts() -> str:
         str:
             [BRIEF] A list of dictionaries as string containing the carbon chemical shifts ranges for various functional groups in organic compounds [/BRIEF]
             [DETAILED] Each dictionary contains the functional group and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various functional groups in organic compounds. [/DETAILED]
-            [EXAMPLES] Examples: [{"Group": "CH3-", "Shift (ppm)": "10-30 ppm"}, {"Group": "R3C-, R₂CH, RCH₂", "Shift (ppm)": "25-50 ppm"}, ...] [/EXAMPLES]
+            [EXAMPLES] "[{"Group": "CH3-", "Shift (ppm)": "10-30 ppm"}, {"Group": "R3C-, R₂CH, RCH₂", "Shift (ppm)": "25-50 ppm"}, ...]" [/EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -405,25 +405,25 @@ def retrieve_carbon_shifts() -> str:
 
 @tool(hidden_args=["h_smiles"])
 def carbon_nmr_spectra(h_smiles: str) -> str:
-    """[BRIEF] Execute the 13C NMR spectra for the sample at hand. [/BRIEF]
+    """[BRIEF] Return the 13C NMR spectra for the sample at hand. [/BRIEF]
 
-    [DETAILED] This function executes the 13C NMR spectra for the sample at hand. It uses the `get_c13_nmr_prediction` function from the `chemenv` environment to run the experiment NMR spectra. The function returns the 13C NMR spectra as a string. [/DETAILED]
+    [DETAILED] This function measures the 13C NMR spectra for the sample at hand. It uses the `get_c13_nmr_prediction` function to execute the experiment NMR spectra. The function returns the 13C NMR spectra as a string. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - Use it when you want to run the 13C NMR spectra for the sample at hand.
+    - Use it when you want to measure the 13C NMR spectra for the sample at hand.
     - When you need to answer questions about the carbon environments in the sample.
-    - Recommended for tasks that require understanding the carbon environments in a molecule, such as NMR spectra interpretation or chemical structure elucidation.
+    - Recommended for tasks that require understanding the carbon environments in a molecule.
     [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
     1. [PREREQUISITE] Ensure that the correct step is to run NMR. [/PREREQUISITE]
     2. [CURRENT] Apply this tool to run the 13C NMR experiment for the corresponding compound. [/CURRENT]
-    3. [FOLLOW_UP] Use the resulting NMR spectra to analyze the carbon environments in the proposed molecule. You can use the `retrieve_protons_shifts` tool to validate the carbon chemical shifts.[/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
+    3. [FOLLOW_UP] Use the resulting NMR spectra to analyze the carbon environments in the proposed molecule. You can use the `retrieve_carbon_shifts` tool to validate the carbon chemical shifts.[/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - It uses the `get_c13_nmr_prediction` function from the `chemenv` environment to run the 13C NMR experiment for the sample at hand.
-    - This function takes the sample at hand and run the 13C NMR spectra.
-    - The function returns the 13C NMR spectra as a string, following the conventions of NMR spectra notation.
+    - It uses the `get_c13_nmr_prediction` function to measure the 13C NMR experiment for the sample at hand.
+    - This function takes the sample at hand and measures the 13C NMR spectra.
+    - The function returns the 13C NMR spectra as a string, following the ACS-inspired publication format.
     - If some error occurs during the NMR spectra generation process, the function returns an error message.[/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
@@ -439,18 +439,18 @@ def carbon_nmr_spectra(h_smiles: str) -> str:
         str:
             [BRIEF] The 13C NMR spectra for the molecule in the sample at hand. [/BRIEF]
             [DETAILED] The function returns the 13C NMR spectra as a string. If some error occurs during the NMR spectra generation process, it returns an error message. [/DETAILED]
-            [EXAMPLES] Examples: "Predicted 13C NMR spectra: δC 10.0, 20.0, 30.0 ppm" [/EXAMPLES]
+            [EXAMPLES] "13C NMR spectra: δC 10.0, 20.0, 30.0 ppm" [/EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
-            [ERROR_WHEN] If an error occurs during the NMR spectra generation process, such as errors in the SMILES string or issues with the remote function call. [/ERROR_WHEN]
-            [ERROR_DETAILS] This exception is raised when there is an error in performing the remote function call to generate the NMR spectra, or problems with the experimental machine. [/ERROR_DETAILS]
+            [ERROR_WHEN] If an error occurs during the NMR spectra measurement process. [/ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an error in performing the measurement of the NMR spectra. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Try another tool. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
-        - The cost of running the NMR spectra repeatedly may be high, so use it judiciously.
-        - The experiment NMR spectra may not be accurate for all compounds, especially for complex or unusual structures.
+        - The cost of measuring the NMR spectra repeatedly may be high, so use it judiciously.
+        - The returned NMR spectra may not be accurate for all compounds, especially for complex or unusual structures.
         - The experiment can only be run for the compound at hand.
     [/LIMITATIONS]
     """
@@ -461,24 +461,23 @@ def carbon_nmr_spectra(h_smiles: str) -> str:
 
 @tool(hidden_args=["h_smiles"])
 def proton_nmr_spectra(h_smiles: str) -> str:
-    """[BRIEF] Execute the 1H NMR spectra for a given SMILES string. [/BRIEF]
+    """[BRIEF] Returns the 1H NMR spectra for a given SMILES string. [/BRIEF]
 
-    [DETAILED] This function executes the 1H NMR spectra for a given SMILES string. It uses the `get_h_nmr_prediction` function from the `chemenv` environment to run the experiment NMR spectra. The function returns the 1H NMR spectra as a string. [/DETAILED]
+    [DETAILED] This function returns the 1H NMR spectra for a given SMILES string. It uses the `get_h_nmr_prediction` function to run the experiment NMR spectra. The function returns the 1H NMR spectra as a string. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - Use it when you want to run the 1H NMR spectra for a given SMILES string.
+    - Use it when you want to measure the 1H NMR spectra for a given SMILES string.
     - When you need to answer questions about the proton environments in the sample.
-    - Recommended for tasks that require understanding the proton environments in a molecule, such as NMR spectra interpretation or chemical structure elucidation. [/PROCEDURAL]
+    - Recommended for tasks that require understanding the proton environments in a molecule. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure that the correct step is to run NMR. Do not run unnecessary experiments. [/PREREQUISITE]
-    2. [CURRENT] Apply this tool to run the 1H NMR experiment for the corresponding compound. [/CURRENT]
-    3. [FOLLOW_UP] Use t    3. [FOLLOW_UP] Use the resulting NMR spectra to analyze the proton environments in the proposed molecule. You can use the `retrieve_protons_shifts` and `retrieve_aromatic_protons_shifts` tools to validate the proton chemical shifts. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]]
+    1. [PREREQUISITE] Ensure that the correct step is to measure NMR. Do not perform unnecessary experiments. [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to measure the 1H NMR experiment for the corresponding compound. [/CURRENT]
+    3. [FOLLOW_UP] Use the resulting NMR spectra to analyze the proton environments in the proposed molecule. You can use the `retrieve_protons_shifts` and `retrieve_aromatic_protons_shifts` tools to validate the proton chemical shifts. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]]
 
     [CONTEXTUAL] How this tool works:
-    - It uses the `get_h_nmr_prediction` function from the `chemenv` environment to run the 1H NMR experiment for the sample at hand.
-    - This function takes the sample of the compound and runs the 1H NMR spectra.
-    - The function returns the 1H NMR spectra as a string, following the conventions of NMR spectra notation.
+    - This function takes the sample of the compound and measures the 1H NMR spectra.
+    - The function returns the 1H NMR spectra as a string, following the ACS-inspired publication format.
     - If some error occurs during the NMR spectra generation process, the function returns an error message. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
@@ -494,19 +493,19 @@ def proton_nmr_spectra(h_smiles: str) -> str:
         str:
             [BRIEF] The 1H NMR spectra for the molecule in the sample at hand. [/BRIEF]
             [DETAILED] The function returns the 1H NMR spectra as a string, following the conventions of NMR spectra notation. If some error occurs during the NMR spectra generation process, it returns an error message. [/DETAILED]
-            [EXAMPLES] Examples: "Predicted 1H NMR spectra: δH 7.40 (d, J = 7.9 Hz, 4H), 7.24 (s, 1H), 7.18 (dd, J = 8.0, 1.8 Hz, 4H), 7.03 (d, J = 1.4 Hz, 4H), 2.46 (s, 4H), 1.62 (s, 12H), 1.21 (s, 36H)" [/EXAMPLES]
+            [EXAMPLES] "Predicted 1H NMR spectra: δH 7.40 (d, J = 7.9 Hz, 4H), 7.24 (s, 1H), 7.18 (dd, J = 8.0, 1.8 Hz, 4H), 7.03 (d, J = 1.4 Hz, 4H), 2.46 (s, 4H), 1.62 (s, 12H), 1.21 (s, 36H)" [/EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
             [ERROR_WHEN] If an error occurs during the NMR spectra generation process. [/ERROR_WHEN]
-            [ERROR_DETAILS] This exception is raised when there is an error in generating the NMR spectra, or problems with the experimental machine. [/ERROR_DETAILS]
+            [ERROR_DETAILS] This exception is raised when there is an error in generating the NMR spectra. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Try another tool. Try elucidate the protons with the other tools. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
-        - The cost of running the NMR spectra repeatedly may be high, so use it judiciously.
+        - The cost of measuring the NMR spectra repeatedly may be high, so use it judiciously.
         - The experiment NMR spectra may not be accurate for all compounds, especially for complex or unusual structures.
-        - The experiment can only be run for the compound of the sample at hand.
+        - The experiment can only measure the compound of the sample at hand.
     [/LIMITATIONS]
     """
     return remote_call(function_name="get_h_nmr_prediction", env_name="chemenv")(
@@ -516,25 +515,24 @@ def proton_nmr_spectra(h_smiles: str) -> str:
 
 @tool(hidden_args=["h_smiles"])
 def ir_spectra(h_smiles: str) -> str:
-    """[BRIEF] Execute the IR spectra for the sample at hand. This spectra may not be accurate for all compounds. It works best for identifying functional groups such as C=O. [/BRIEF]
+    """[BRIEF] Returns the IR spectra for the sample at hand. This spectra may not be accurate for all compounds. It works best for identifying functional groups such as C=O. [/BRIEF]
 
-    [DETAILED] The function returns the IR spectra as a string, following the conventions of IR spectra notation. If some error occurs during the IR spectra generation process, it returns an error message. Very recommended for C=O group elucidation. [/DETAILED]
+    [DETAILED] The function returns the IR spectra as a string, following the conventions of IR spectra notation. If some error occurs during the IR spectra measurement process, it returns an error message. Very recommended for C=O group elucidation. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - Use it when you want to run the IR spectra for a given SMILES string.
+    - Use it when you want the IR spectra for the compound at hand.
     - When you need to answer questions about the functional groups in the sample, such as C=O stretching.
-    - Recommended for tasks that require understanding the functional groups in a molecule, such as IR spectra interpretation or chemical structure elucidation. [/PROCEDURAL]
+    - Recommended for tasks that require understanding the functional groups in a molecule. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure that the correct step is to run IR. Do not run unnecessary experiments. [/PREREQUISITE]
-    2. [CURRENT] Apply this tool to run the IR experiment for the corresponding compound. [/CURRENT]
+    1. [PREREQUISITE] Ensure that the correct step is to measure IR. Do not perform unnecessary experiments. [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to measure the IR spectra for the corresponding compound. [/CURRENT]
     3. [FOLLOW_UP] Use the resulting IR spectra to analyze the functional groups in the proposed molecule. You can use the `carbon_nmr_spectra` and `hsqc_nmr_spectra` tools to obtain complementary information. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - It uses the `get_ir_prediction` function from the `chemenv` environment to run the IR experiment for the sample at hand.
-    - This function takes the sample of the compound and runs the IR spectra.
-    - The function returns the IR spectra as a string, following the conventions of IR spectra notation.
-    - If some error occurs during the IR spectra generation process, the function returns an error message. [/CONTEXTUAL]
+    - This function takes the sample of the compound and measures the IR spectra.
+    - The function returns the IR spectra as a string, following a similar format as the ACS guidelines.
+    - If some error occurs during the IR spectra measurement process, the function returns an error message. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
     [
@@ -548,20 +546,20 @@ def ir_spectra(h_smiles: str) -> str:
     Returns:
         str:
             [BRIEF] The IR spectra for the molecule in the sample at hand. [/BRIEF]
-            [DETAILED] The function returns the IR spectra as a string, following the conventions of IR spectra notation. If some error occurs during the IR spectra generation process, it returns an error message. [/DETAILED]
-            [EXAMPLES] Examples: "Predicted IR spectra: 3400 cm⁻¹ (O-H stretch), 1700 cm⁻¹ (C=O stretch), 1600 cm⁻¹ (C=C stretch)" [/EXAMPLES]
+            [DETAILED] The function returns the IR spectra as a string, following the conventions of IR spectra notation. If some error occurs during the IR spectra measurement process, it returns an error message. [/DETAILED]
+            [EXAMPLES] "Predicted IR spectra: 3400 cm-1 (O-H stretch), 1700 cm-1 (C=O stretch), 1600 cm-1 (C=C stretch)" [/EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
-            [ERROR_WHEN] If an error occurs during the IR spectra generation process. [/ERROR_WHEN]
-            [ERROR_DETAILS] This exception is raised when there is an error in generating the IR spectra, or problems with the experimental machine. [/ERROR_DETAILS]
+            [ERROR_WHEN] If an error occurs during the IR spectra measurement process. [/ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an error in measuring the IR spectra. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Try another tool. Try elucidate the functional groups with the other tools. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
-        - The cost of running the IR spectra repeatedly may be high, so use it judiciously.
+        - The cost of measuring the IR spectra repeatedly may be high, so use it judiciously.
         - The experiment IR spectra may not be accurate for all compounds, especially for complex or unusual structures.
-        - The experiment can only be run for the compound of the sample at hand.
+        - The experiment can only measure the IR spectra for the compound of the sample at hand.
     [/LIMITATIONS]
     """
     return remote_call(function_name="get_ir_prediction", env_name="chemenv")(
@@ -640,31 +638,30 @@ def format_hsqc_spectrum(zones_dict: dict) -> str:
     signals_part = ", ".join(formatted_signals)
 
     # Create final HSQC string
-    return f"HSQC: δH/δC {signals_part}."
+    return f"HSQC: delta H/delta C {signals_part}."
 
 
 @tool(hidden_args=["h_smiles"])
 def hsqc_nmr_spectra(h_smiles: str) -> str:
-    """[BRIEF] Execute the HSQC NMR spectra for the sample at hand. [/BRIEF]
+    """[BRIEF] Returns the HSQC (Heteronuclear Single Quantum Coherence) NMR spectra for the sample at hand. [/BRIEF]
 
-    [DETAILED] This function executes the HSQC NMR spectra for the sample at hand by making a POST request to an external API that executes the HSQC NMR experiment. [/DETAILED]
+    [DETAILED] This function returns the HSQC NMR spectra for the sample at hand. It returns the HSQC spectrum data as a string, formatted in standard NMR notation, similar to the ACS conventions. If some error occurs during the measurement, it returns an appropriate message. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - Use it when you want to run the HSQC NMR spectra for the sample to elucidate its structure.
+    - Use it when you want to measure the HSQC NMR spectra for the sample to elucidate its structure.
     - When you need to analyze the correlation between hydrogen and carbon atoms in the sample.
-    - Recommended for tasks that require understanding the connectivity between hydrogen and carbon atoms in a molecule, such as NMR spectra interpretation or chemical structure elucidation. [/PROCEDURAL]
+    - Recommended for tasks that require understanding the connectivity between hydrogen and carbon atoms in a molecule. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure that the correct step is to run HSQC NMR. Do not run unnecessary experiments. Use first the tools `carbon_nmr_spectra` and `proton_nmr_spectra` and try to link the fragments from there. Only run this experiment if some of the peaks are ambiguous. [/PREREQUISITE]
-    2. [CURRENT] Apply this tool to run the HSQC NMR experiment for the corresponding compound. [/CURRENT]
+    1. [PREREQUISITE] Ensure that the correct step is to measure HSQC NMR. Do not perform unnecessary experiments. Use first the tools `carbon_nmr_spectra` and `proton_nmr_spectra` and try to link the fragments from there. Only measure this experiment if some of the peaks are ambiguous. [/PREREQUISITE]
+    2. [CURRENT] Apply this tool to measure the HSQC NMR experiment for the corresponding compound. [/CURRENT]
     3. [FOLLOW_UP] Use the resulting HSQC spectrum to analyze the correlation between hydrogen and carbon atoms in the proposed molecule. You can use the `retrieve_protons_shifts` and `retrieve_carbon_shifts` tools to validate the chemical shifts. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
+    - This function measures the HSQC NMR spectra for the sample at hand.
     - It makes a POST request to an external API that executes the HSQC NMR experiment for the sample at hand.
-    - The function takes the SMILES string of the compound and sends it to the API.
-    - The API returns the HSQC NMR spectra data as a JSON response.
-    - The function then parses the response to extract the HSQC spectrum data and formats it in standard NMR notation.
-    - If the SMILES string is invalid or no HSQC spectrum is found, it returns an appropriate message. [/CONTEXTUAL]
+    - The function then parses the data from the measurement to extract the HSQC spectrum data and formats it in standard NMR notation, similar to the ACS convention.
+    - If an error occurs during the measurement, it returns an appropriate message. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
     [
@@ -678,21 +675,20 @@ def hsqc_nmr_spectra(h_smiles: str) -> str:
     Returns:
         str:
             [BRIEF] The HSQC NMR spectra for the molecule in the sample at hand. [/BRIEF]
-            [DETAILED] The function returns the HSQC NMR spectra as a string, formatted in standard NMR notation. If the SMILES string is invalid or no HSQC spectrum is found, it returns an appropriate message. [/DETAILED]
-            [EXAMPLES] Examples: "HSQC: δH/δC 7.40/128.0 (2H), 7.24/128.5 (2H), 7.18/129.0 (2H), 7.03/130.0 (2H), 2.46/20.0 (3H), 1.62/15.0 (6H), 1.21/10.0 (9H)." [/EXAMPLES]
+            [DETAILED] The function returns the HSQC NMR spectra as a string, formatted in standard NMR notation. If some error occurs during the measurement, it returns an appropriate message. [/DETAILED]
+            [EXAMPLES] "HSQC: delta H/delta C 7.40/128.0 (2H), 7.24/128.5 (2H), 7.18/129.0 (2H), 7.03/130.0 (2H), 2.46/20.0 (3H), 1.62/15.0 (6H), 1.21/10.0 (9H)." [/EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
-            [ERROR_WHEN] If an error occurs during the API call to retrieve the HSQC spectrum data. [/ERROR_WHEN]
-            [ERROR_DETAILS] This exception is raised when there is an error in performing the API call to retrieve the HSQC spectrum data. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] Try another tool. Try elucidate the connectivity with the other tools. [/ERROR_RECOVERY]
+            [ERROR_WHEN] If an error occurs during the HSQC spectrum measurement. [/ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an error in performing the HSQC spectrum measurement. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try another tool. Try elucidate the connectivity with the other tools and by using the data from the Carbon and Proton NMR. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
-        - The cost of running the HSQC NMR spectra repeatedly may be high, so use it judiciously.
+        - The cost of measuring the HSQC NMR spectra repeatedly may be high, so use it judiciously.
         - The experiment HSQC spectra may not be accurate for all compounds, especially for complex or unusual structures.
-        - The experiment can only be run for the compound of the sample at hand.
-        - The API may have rate limits or availability issues, which could affect the function's ability to retrieve the HSQC spectrum data.
+        - The experiment can only measure for the compound of the sample at hand.
     [/LIMITATIONS]
     """
     URL = "https://lamalab-org--nmr-prediction-api-predict-nmr.modal.run"
@@ -772,7 +768,7 @@ def mass_spectrometry_spectra(h_smiles: str) -> str:
         str:
             [BRIEF] The mass spectrometry spectra for the molecule in the sample at hand. [/BRIEF]
             [DETAILED] The function returns the mass spectrometry spectra as a string in the format "m/z 100.1 (intensity 500), 101.2 (intensity 450), ...". If the SMILES string is invalid or no mass spectrometry spectrum is found, it returns an appropriate message. [/DETAILED]
-            [EXAMPLES] Examples: "m/z 100.1 (intensity 500), 101.2 (intensity 450), 102.3 (intensity 400), ..." [/EXAMPLES]
+            [EXAMPLES] "m/z 100.1 (intensity 500), 101.2 (intensity 450), 102.3 (intensity 400), ..." [/EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -798,6 +794,7 @@ def mass_spectrometry_spectra(h_smiles: str) -> str:
     return convert_ms_spectrum_to_string(make_api_call(URL, payload))
 
 
+@tool
 def retrieve_isotope_distribution() -> str:
     """[BRIEF] Retrieve the isotopic distribution of common elements in organic chemistry. [/BRIEF]
 
@@ -832,7 +829,7 @@ def retrieve_isotope_distribution() -> str:
         str:
             [BRIEF] A string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry. [/BRIEF]
             [DETAILED] The function returns a string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry, including their isotopes, natural abundance, m/z values, and m/z peaks. [/DETAILED]
-            [EXAMPLES] Examples: {"Carbon": {"isotopes": {"12C": {"abundance": 98.89, "m/z": 12},"13C": {"abundance": 1.11, "m/z": 13}<more elements...}}} [/EXAMPLES]
+            [EXAMPLES] "{"Carbon": {"isotopes": {"12C": {"abundance": 98.89, "m/z": 12},"13C": {"abundance": 1.11, "m/z": 13}<more elements...}}}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -912,6 +909,7 @@ def retrieve_isotope_distribution() -> str:
     )
 
 
+@tool
 def retrieve_dbe_formula() -> str:
     """[BRIEF] Retrieve the formula for calculating the Double Bond Equivalent (DBE). [/BRIEF]
 
@@ -946,7 +944,7 @@ def retrieve_dbe_formula() -> str:
         str:
             [BRIEF] A string containing the formula for calculating the Double Bond Equivalent (DBE). [/BRIEF]
             [DETAILED] The function returns a string containing the formula for calculating the Double Bond Equivalent (DBE), along with an interpretation of the DBE values and examples of calculations for common organic compounds. [/DETAILED]
-            [EXAMPLES] Examples: "Double Bond Equivalent (DBE) = <more details>." [/EXAMPLES]
+            [EXAMPLES] "Double Bond Equivalent (DBE) = <more details>." [/EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -997,6 +995,7 @@ Example Calculations:
 """
 
 
+@tool
 def obtain_isomers(smiles: str) -> list[str]:
     """[BRIEF] Obtain isomers for a given SMILES string. [/BRIEF]
 
@@ -1033,14 +1032,14 @@ def obtain_isomers(smiles: str) -> list[str]:
         smiles (str):
             [BRIEF] The SMILES representation of the compound for which to retrieve isomers. [/BRIEF]
             [DETAILED] The SMILES string representing the chemical structure of the compound for which to retrieve isomers. It should be a valid SMILES notation that can be processed by the isomer retrieval function. [/DETAILED]
-            [SYNTACTICAL] Format: "valid SMILES string" [/SYNTACTICAL]
-            [EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
+            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
+            [EXAMPLES] "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
 
     Returns:
         list[str]:
             [BRIEF] A list of SMILES strings representing the isomers of the input compound. [/BRIEF]
             [DETAILED] The function returns a list of SMILES strings representing the isomers of the input compound. If no isomers are found, it returns an empty list. [/DETAILED]
-            [EXAMPLES] Examples: `["CCO", "C1=CC=CC=C1"]` [/EXAMPLES]
+            [EXAMPLES] `["CCO", "C1=CC=CC=C1"]` [/EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -1056,6 +1055,7 @@ def obtain_isomers(smiles: str) -> list[str]:
     )(smiles=smiles)
 
 
+@tool
 def validate_smiles(smiles: str) -> bool:
     """[BRIEF] Validate a SMILES string to check if it represents a valid chemical structure. [/BRIEF]
 
@@ -1092,14 +1092,14 @@ def validate_smiles(smiles: str) -> bool:
         smiles (str):
             [BRIEF] The SMILES representation to validate [/BRIEF]
             [DETAILED] The SMILES string representing the chemical structure of the molecule to validate. It should be a valid SMILES notation that can be processed by the validation function. [/DETAILED]
-            [SYNTACTICAL] Format: "valid SMILES string" [/SYNTACTICAL]
-            [EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
+            [SYNTACTICAL] "valid SMILES string" [/SYNTACTICAL]
+            [EXAMPLES] "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
 
     Returns:
         bool:
             [BRIEF] True if the SMILES string is valid, False otherwise. [/BRIEF]
             [DETAILED] The function returns True if the SMILES string can be converted into a valid chemical structure, otherwise it returns False. [/DETAILED]
-            [EXAMPLES] Examples: `True`, `False` [/EXAMPLES]
+            [EXAMPLES] `True`, `False` [/EXAMPLES]
 
     [RAISES] Exceptions:
         None
