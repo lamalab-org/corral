@@ -131,6 +131,12 @@ class BenchmarkInterface:
         response.raise_for_status()
         return response.json()["trial_state"]
 
+    def configure_task_externals(self, task_id: str) -> dict:
+        """Configure external objects for specific task"""
+        response = requests.post(f"{self.base_url}/tasks/{task_id}/configure")
+        response.raise_for_status()
+        return response.json()
+
 
 class Agent(Protocol):
     """Protocol defining what an agent must implement"""
@@ -184,6 +190,8 @@ def execute_single_trial(
 ) -> TaskTrailResult:
     """Execute a single trial - pure function"""
     try:
+        status = interface.configure_task_externals(task_id)
+        logger.info(f"Task {task_id} external objects configured: {status}")
         # Run agent
         answer, token_usage = agent.run_agent(
             interface, task_id, verbose=verbose, tool_verbosity=tool_verbosity

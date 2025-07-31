@@ -277,7 +277,20 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Trial not found")
         return {"trial_state": trial_state}
 
-    # add endpoint for scoring the task
+    @app.post("/tasks/{task_id}/configure")
+    def configure_task_externals(task_id: str):
+        """Configure external objects for this specific task"""
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        env = environments[task_id]
+        status = env._configure_external_objects_for_trial()
+
+        return {
+            "status": status,
+            "task_id": task_id,
+            "trial_id": env.state.trial_id,
+        }
 
     return app
 
