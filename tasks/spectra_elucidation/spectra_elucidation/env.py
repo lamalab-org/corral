@@ -112,7 +112,7 @@ class TaskEnvironment(Environment):
         # Initialize environment
         super().__init__(f"{task_group.group_id}_{task_id}", base_work_dir=work_dir)
 
-        self.hidden_args = {"smiles": self.current_task.scoring_inputs}
+        self.hidden_args = {"h_smiles": self.current_task.scoring_inputs}
 
         self._add_task_tools()
 
@@ -125,6 +125,10 @@ class TaskEnvironment(Environment):
                 logger.warning(
                     f"Tool {tool_name} not found in available tools for task {self.task_id}"
                 )
+        if "subtask" not in self.current_task.name:
+            # Add file system tools if not already included
+            for tool in self.available_tools.values():
+                self.add_tool(self.available_tools[tool.name])
 
     def get_task_prompt(self) -> str:
         prompt = (

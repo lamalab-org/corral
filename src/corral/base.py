@@ -322,6 +322,10 @@ class Environment(ABC):
         The hidden arguments, if they exist, will be merged into the provided arguments,
         with the hidden arguments taking precedence.
         This is needed for cases in which the arguments are fixed and should not be modified and/or provided by the agent."""
+
+        # Store original arguments for the ToolCall record (without hidden args)
+        original_arguments = arguments.copy()
+
         # Merge hidden_args into arguments if they exist, with hidden_args taking precedence
         if hasattr(self, "hidden_args") and self.hidden_args is not None:
             arguments.update(self.hidden_args)
@@ -332,7 +336,7 @@ class Environment(ABC):
             duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
-                arguments=arguments,
+                arguments=original_arguments,
                 result=None,
                 status=ToolCallStatus.INVALID_TOOL,
                 error_message=f"Tool {tool_name} not found",
@@ -349,7 +353,7 @@ class Environment(ABC):
             duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
-                arguments=arguments,
+                arguments=original_arguments,
                 result=None,
                 status=ToolCallStatus.INVALID_ARGS,
                 error_message=error_message,
@@ -364,7 +368,7 @@ class Environment(ABC):
             duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
-                arguments=arguments,
+                arguments=original_arguments,
                 result=result,
                 status=ToolCallStatus.SUCCESS,
                 error_message=None,
@@ -374,7 +378,7 @@ class Environment(ABC):
             duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
-                arguments=arguments,
+                arguments=original_arguments,
                 result=None,
                 status=ToolCallStatus.EXECUTION_ERROR,
                 error_message=str(e),
