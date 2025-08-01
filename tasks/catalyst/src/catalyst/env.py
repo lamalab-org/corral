@@ -1,11 +1,11 @@
 import json
 import os
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from loguru import logger
-from score import (
+from catalyst.score import (
     check_adsorption_sites,
     check_adsorption_structure,
     check_mp_structure,
@@ -13,7 +13,9 @@ from score import (
     check_slabs_json,
     check_valid_json_file,
 )
-from tools import create_tools
+from catalyst.tools import create_tools
+from catalyst.utils import smart_resolve_path
+from loguru import logger
 
 from corral.base import Environment, Tool
 from corral.io import (
@@ -27,11 +29,16 @@ from corral.io import (
 )
 from corral.server import run_server
 from corral.task import TaskDefinition, TaskGroup
+from corral.utils import execute_python_code, execute_python_script
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:
-    raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
-BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+    BASE_WORK_DIR = tempfile.mkdtemp(prefix="catalyst_")
+    logger.info(f"CORRAL_WORK_DIR not set, using temporary directory: {BASE_WORK_DIR}")
+else:
+    BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+
+
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     "mp_structure": check_mp_structure,
@@ -236,12 +243,15 @@ Required submission format:
             # Get and log the raw submission
             answer_value = self.state.submitted_answer.strip()
             logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
-
+            resolved_answer = smart_resolve_path(answer_value)
+            logger.info(f"Resolved answer for {self.task_id}: {resolved_answer!r}")
             # Call the scoring function with the raw answer
-            score = self.current_task.scoring_fn(answer_value)
+            score = self.current_task.scoring_fn(resolved_answer)
 
             # Store result in task group
-            self.task_group.store_result(self.task_id, {"answer": answer_value}, score)
+            self.task_group.store_result(
+                self.task_id, {"answer": resolved_answer}, score
+            )
             logger.info(f"Task {self.task_id} scored: {score}")
 
             return score
@@ -326,9 +336,14 @@ if __name__ == "__main__":
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)
     # Create environments
+    taskgroup_common_tools = {
+        "execute_python_code": execute_python_code,
+        "execute_python_script": execute_python_script,
+    }
     environments = create_environments(
         task_json_path=tasks_json_path,
         work_dir=work_dir,
+        taskgroup_common_tools=taskgroup_common_tools,
     )
 
     logger.info("\nCreated Environments:")
