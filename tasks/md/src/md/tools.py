@@ -90,7 +90,7 @@ def get_potential_metadata(file_path: str) -> str:
 
     [RAISES] Exceptions:
         ValueError:
-            [ERROR_WHEN] If the file name is not recognized. [/ERROR_WHEN]
+            [ERROR_WHEN] If the file name is not recognized or is empty. [/ERROR_WHEN]
             [ERROR_DETAILS] Raised when the filename does not match any known potential files.
             This helps prevent silent failures and makes debugging easier
             in automated workflows. [/ERROR_DETAILS]
@@ -108,6 +108,9 @@ def get_potential_metadata(file_path: str) -> str:
         it relies solely on the file name for metadata extraction.
     [/LIMITATIONS]
     """
+    if not file_path:
+        raise ValueError("File path must not be None or empty.")
+
     potential_name = file_path.split("/")[-1]
     if potential_name == "ffield.reax":
         return (
@@ -535,6 +538,9 @@ def run_lammps(input_file: str) -> str:
         and may not function correctly if the backend is misconfigured or unavailable.
     [/LIMITATIONS]
     """
+    if not input_file:
+        raise ValueError("Input file path must not be None or empty.")
+
     try:
         file_name_without_extension = Path(input_file).stem
         log_file = f"{file_name_without_extension}.log"
@@ -551,108 +557,4 @@ def run_lammps(input_file: str) -> str:
         # Handle unexpected errors
         raise Exception(
             f"An unexpected error occurred while running the LAMMPS simulation: {e!s}"
-        ) from e
-
-
-@tool
-def extract_max_stress(file_path: str) -> float:
-    """
-    [BRIEF] Extracts the maximum tensile stress (GPa) along the x-direction
-    from a stress-strain data file. [/BRIEF]
-
-    [DETAILED] This tool processes a space-delimited text file containing
-    stress-strain data with a header row. It reads the file, parses the stress tensor components,
-    and identifies the maximum tensile stress component along the x-axis (stress_xx) in
-    units of GPa. This value is important for materials mechanical property analysis and
-    failure prediction. [/DETAILED]
-
-    [PROCEDURAL] When to use this tool:
-        - Use when analyzing output stress-strain data from simulations or experiments.
-        - Best suited for datasets formatted as space-delimited text files with a header.
-        - Recommended for quick extraction of peak stress values for materials screening.
-    [/PROCEDURAL]
-
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. [PREREQUISITE] Ensure you have a valid stress-strain data file in the expected format.
-        The file should contain a header row and numeric columns, including stress_xx.
-        Normally this comes as an output of the simulation done with the tool `run_lammps`.
-        [/PREREQUISITE]
-        2. [CURRENT] Use this tool to extract the maximum tensile stress_xx value from the
-        specified file path. The tool will read the file, parse the stress data, and compute
-        the maximum tensile stress_xx value in GPa. [/CURRENT]
-        3. [FOLLOW_UP] The extracted maximum stress value can be used in subsequent analyses,
-        such as material property evaluation, failure analysis, or comparison with theoretical
-        predictions. It can also be logged or stored for further processing in a
-        materials science workflow. [/FOLLOW_UP]
-    [/WORKFLOW_INTEGRATION]
-
-    [CONTEXTUAL] How this tool works:
-        - Reads the stress-strain data file as text.
-        - Parses numeric columns identifying stress_xx.
-        - Computes and returns the maximum tensile stress_xx value (in GPa).
-        - Handles exceptions for file read errors or unexpected file formatting.
-    [/CONTEXTUAL]
-
-    [SYNTACTICAL] Usage examples:
-    [
-        `extract_max_stress("results/stress_strain_01.txt")`,
-        `extract_max_stress("/data/graphene_stress.txt")`,
-        `extract_max_stress("simulations/Al_stress.txt")`,
-        `extract_max_stress("/workspace/stress_strain_data.txt")`,
-        `extract_max_stress("Fe_stress_strain.txt")`
-    ]
-    [/SYNTACTICAL]
-
-    Args:
-        file_path (str):
-            [BRIEF] Absolute Path to the stress-strain data text file. [/BRIEF]
-            [DETAILED] Absolute path, and should point to a valid, space-delimited `.txt`
-            file containing stress-strain data with a header.
-            The file must include a stress_xx column or equivalent. [/DETAILED]
-            [SYNTACTIC] Format: "string file path ending in `.txt`". [/SYNTACTIC]
-            [EXAMPLES] Examples: "data/Al_stress.txt", "/sim_outputs/sample_stress.txt" [/EXAMPLES]
-
-    Returns:
-        float:
-            [BRIEF] Maximum tensile stress_xx value in GPa. [/BRIEF]
-            [DETAILED] Returns the peak stress along the x-direction extracted from the dataset.
-            This is a floating-point value representing gigapascals (GPa). [/DETAILED]
-            [EXAMPLES] Example outputs: 12.45, 56.78, 98.12 [/EXAMPLES]
-
-    [RAISES] Exceptions:
-        Exception:
-            [ERROR_WHEN] Raised if file reading or parsing fails. [/ERROR_WHEN]
-            [ERROR_DETAILS] This may occur due to issues such as:
-                - File not found or inaccessible.
-                - Invalid file format (e.g., missing header, non-numeric data in stress_xx column).
-                - Unexpected data structure that does not match the expected format.
-            The error message will provide context for debugging the issue. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] To resolve this, ensure the file exists at the specified path,
-            check that it is formatted correctly with a header row, and verify that the stress_xx
-            column contains valid numeric data. If the file is malformed,
-            you may need to correct it or use a different file. If the file is missing,
-            ensure that the path is correct and that the file has been generated by the
-            simulation or experiment. If the file is inaccessible due to permissions,
-            check the file system permissions and ensure that the user running the tool has
-            read access to the file. If the file format is not as expected, you may need to
-            preprocess the file to match the expected format or modify the tool
-            to handle different formats. [/ERROR_RECOVERY]
-    [/RAISES]
-
-    [LIMITATIONS] Known limitations:
-        - The tool assumes the file is formatted as space-delimited text with a header row.
-        - It expects a specific column for stress_xx; if the column is missing or named differently,
-        it will raise an error.
-        - The tool does not handle files with multiple stress components or complex tensor formats;
-        it focuses solely on stress_xx.
-        - The maximum tensile stress is returned in GPa; if the file uses different units,
-        conversion must be handled externally.
-    [/LIMITATIONS]
-    """
-    try:
-        extract_max_stress_ = modal.Function.lookup("simagent", "extract_max_stress")
-        return extract_max_stress_.remote(file_path)
-    except Exception as e:
-        raise Exception(
-            f"An unexpected error occurred while extracting maximum stress value: {e!s}"
         ) from e

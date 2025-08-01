@@ -7,7 +7,6 @@ from loguru import logger
 from score import check_numerical, check_potential_file, check_structure
 from tools import (
     convert_structure_to_lammps_data,
-    extract_max_stress,
     get_potential_metadata,
     get_structure_from_mp_text,
     run_lammps,
@@ -318,7 +317,6 @@ def create_environments(
     # Create environments for all tasks
     subtask_specific_tools = {
         "convert_structure_to_lammps_data": convert_structure_to_lammps_data,
-        "extract_max_stress": extract_max_stress,
         "get_potential_metadata": get_potential_metadata,
         "get_structure_from_mp_text": get_structure_from_mp_text,
         "run_lammps": run_lammps,
