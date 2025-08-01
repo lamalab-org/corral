@@ -109,67 +109,6 @@ def check_numerical(target: float, tolerance: float):
     return score_fn
 
 
-# def check_numerical(target: float | None = None, tolerance: float | None = None):
-#     def score_fn(result: str) -> float:
-#         """Score an addition task with expected answer validation"""
-#         import logging
-#         import re
-
-#         logger = logging.getLogger(__name__)
-#         try:
-#             # Handle string submissions
-#             if isinstance(result, str):
-#                 result = result.strip()
-#                 try:
-#                     parsed_result = json.loads(result)
-#                     if isinstance(parsed_result, dict):
-#                         for key in ("BULK ENERGY", "SLAB ENERGY", "density"):
-#                             if key in parsed_result:
-#                                 answer = float(parsed_result[key])
-#                                 break
-#                         else:
-#                             return 0.0  # no valid key
-#                     else:
-#                         # If not a dict, treat as direct numeric
-#                         answer = float(parsed_result)
-#                 except json.JSONDecodeError:
-#                     # If not JSON, try to extract numeric value via regex
-#                     match = re.search(r"[-+]?\d*\.\d+|\d+", result)
-#                     if match:
-#                         answer = float(match.group())
-#                     else:
-#                         return 0.0
-#             else:
-#                 # If already parsed
-#                 if isinstance(result, dict):
-#                     for key in (
-#                         "BULK ENERGY",
-#                         "SLAB ENERGY",
-#                         "density",
-#                     ):
-#                         if key in result:
-#                             answer = float(result[key])
-#                             break
-#                     else:
-#                         return 0.0
-#                 else:
-#                     answer = float(result)
-
-#             if target is not None and tolerance is not None:
-#                 tol = tolerance * abs(target)
-#                 return 1.0 if (target - tol) <= answer <= (target + tol) else 0.0
-
-#             return 0.0
-
-#         except (ValueError, TypeError, KeyError) as e:
-#             logger.warning(
-#                 f"Error parsing result for addition_score: {e}, result was: {result}"
-#             )
-#             return 0.0
-
-#     return score_fn
-
-
 def check_structure(target, atom_style, use_modal=True):
     def score_fn(result: str) -> float:
         import logging
