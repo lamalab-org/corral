@@ -2,11 +2,6 @@ from __future__ import annotations
 
 from modal import Image
 
-# cuda_version = "12.8.0"  # should be no greater than host CUDA version
-# flavor = "devel"  #  includes full CUDA toolkit
-# operating_sys = "ubuntu22.04"
-# tag = f"{cuda_version}-{flavor}-{operating_sys}"
-
 _lammps_image = (
     Image.debian_slim(python_version="3.12")
     # modal.Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.12")
@@ -58,15 +53,6 @@ def _install_lammps():
             "../cmake",
             shell=True,
         )
-        # logger.debug("Running CMake with GPU and KOKKOS support...")
-        # subprocess.check_call(
-        #     "cmake -C ../cmake/presets/most.cmake "
-        #     "-C ../cmake/presets/nolib.cmake "
-        #     "-D PKG_GPU=on "
-        #     "-D GPU_API=cuda "
-        #     "../cmake",
-        #     shell=True
-        # )
 
         logger.debug("CMAKE build...")
         subprocess.check_call("cmake --build .", shell=True)
@@ -111,25 +97,7 @@ def _run_lammps(
     if directory_path:
         os.chdir(directory_path)
     try:
-        # command = ["mpirun", "--allow-run-as-root", "-np", "8", lmp_command, "-in", input_file, "-log", log_file]
-        # if use_cpus:
-        # logger.info("Running LAMMPS with multiple CPUs")
-        # command = [lmp_command, "-sf", "gpu", "-pk", "gpu", "1", "-in", input_file, "-log", log_file]
-        # command = [
-        #     "mpirun",
-        #     "--allow-run-as-root",
-        #     "-np",
-        #     str(num_cpus),
-        #     lmp_command,
-        #     "-in",
-        #     input_file,
-        #     "-log",
-        #     log_file,
-        # ]
-        # else:
-        #     logger.info("Running LAMMPS with single CPU")
-        #     command = [lmp_command, "-in", input_file, "-log", log_file]
-        command = [lmp_command, "-in", input_file]
+        command = [lmp_command, "-in", input_file, "-log", log_file]
         subprocess.run(command, shell=False, check=True, capture_output=True, text=True)
 
     except subprocess.CalledProcessError as e:
