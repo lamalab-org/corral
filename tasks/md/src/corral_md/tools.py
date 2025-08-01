@@ -60,14 +60,14 @@ def get_potential_metadata(file_path: str) -> str:
         file_path:
             [BRIEF] Absolute path to the potential file. [/BRIEF]
             [DETAILED] This is the absolute path to a LAMMPS-compatible potential file (e.g., ReaxFF or EAM formats). The file name is used to determine metadata, so it must match one of the known patterns. [/DETAILED]
-            [SYNTACTICAL] String ending in a recognized potential filename. [/SYNTACTICAL]
-            [EXAMPLES] "/path/to/file/ffield.reax", "ffield_UTA1.ITT" [/EXAMPLES]
+            [SYNTACTICAL] Format: "string ending in a recognized potential filename". [/SYNTACTICAL]
+            [EXAMPLES] Examples: "/path/to/file/ffield.reax", "ffield_UTA1.ITT" [/EXAMPLES]
 
     Returns:
         str :
             [BRIEF] Structured metadata string describing the potential file. [/BRIEF]
             [DETAILED] The returned string includes the type of interatomic potential and a list of chemical elements that it supports. This helps in choosing suitable potentials for simulations involving specific atoms. [/DETAILED]
-            [EXAMPLES] "{potential type : reax, elements supported: Carbon (C), Hydrogen (H), Oxygen (O), Calcium (Ca), Silicon (Si), pair_style: reaxff}" [/EXAMPLES]
+            [EXAMPLES] Example outputs: "{potential type : reax, elements supported : Carbon (C), Hydrogen (H), Oxygen (O), Calcium (Ca), Silicon (Si), pair_style : reaxff}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -78,7 +78,7 @@ def get_potential_metadata(file_path: str) -> str:
     [/RAISES]
 
     [LIMITATIONS] Limitations:
-        - This tool only recognizes a predefined set of potential file names.
+        - This tool only recognizes a predefined set of potential file names. If the file name does not match any of the known patterns, it will raise a ValueError.
         - The metadata returned is static and does not include dynamic information from the file contents, such as specific parameters or coefficients used in the potential.
         - The tool does not validate the actual contents of the potential file; it relies solely on the file name for metadata extraction.
     [/LIMITATIONS]
@@ -112,18 +112,16 @@ def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:
     """
     [BRIEF] Retrieves and saves the conventional crystal structure of a material from the Materials Project as a CIF file. [/BRIEF]
 
-    [DETAILED] This tool retrieves the conventional unit cell structure of a material from the Materials Project using its material ID.
-    It transforms the primitive structure returnedby the database into its conventional crystallographic form using symmetry operations, and exports the result in CIF format to a specified file path.
-    This tool is valuable for workflows that require standardized crystal structure representations — such as simulations, visualization, structure matching, or publication.
-    It avoids the need for manual structure transformation or dealing with primitive cells when conventional representation is needed. [/DETAILED]
+    [DETAILED] This tool retrieves the conventional unit cell structure of a material from the Materials Project using its material ID. It transforms the primitive structure returned by the database into its conventional crystallographic form using symmetry operations, and exports the result in CIF format to a specified file path. This tool is valuable for workflows that require standardized crystal structure representations — such as simulations, visualization, structure matching, or publication. It avoids the need for manual structure transformation or dealing with primitive cells when conventional representation is needed. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
         - Use when you need the conventional crystallographic (not primitive) structure of a material from the Materials Project.
+        - Best suited for preparing simulation-ready input files, visualizing crystal structures, or storing standardized CIFs.
         - Recommended for quick and automated generation of conventional structure files for structure-based computation or crystallographic analysis.
     [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. [PREREQUISITE] Ensure you have the Materials Project ID of the material you want to retrieve. [/PREREQUISITE]
+        1. [PREREQUISITE] Ensure you have the Materials Project ID of the material you want to retrieve. Sometimes the MP ID is in the task description so be sure to fully capture the information there. [/PREREQUISITE]
         2. [CURRENT] Use this tool to fetch the conventional structure in CIF format by providing the MP ID and desired file path. [/CURRENT]
         3. [FOLLOW_UP] The resulting CIF file can be used in subsequent steps such as molecular dynamics simulations (using the tool `run_lammps`), structure visualization, or crystallographic analysis. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
@@ -148,16 +146,14 @@ def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:
     Args:
         mp_id (str):
             [BRIEF] Materials Project ID of the material. [/BRIEF]
-            [DETAILED] A unique identifier used by the Materials Project database to reference a material.
-            The ID typically starts with "mp-" followed by digits.
-            It must correspond to an existing entry. [/DETAILED]
-            [SYNTACTIC] "mp-XXXX" where X is a digit. [/SYNTACTIC]
-            [EXAMPLES] "mp-149", "mp-13", "mp-1234567" [/EXAMPLES]
+            [DETAILED] A unique identifier used by the Materials Project database to reference a material. The ID typically starts with "mp-" followed by digits. It must correspond to an existing entry. [/DETAILED]
+            [SYNTACTIC] Format: '"mp-XXXX" where X is a digit'. [/SYNTACTIC]
+            [EXAMPLES] Examples: "mp-149", "mp-13", "mp-1234567" [/EXAMPLES]
         file_path (str):
             [BRIEF] Destination path for saving the CIF file. [/BRIEF]
             [DETAILED] Absolute path to the file where the CIF content will be written. [/DETAILED]
-            [SYNTACTIC] String path ending in ".cif" corresponding to the path of the CIF file. [/SYNTACTIC]
-            [EXAMPLES] "/tmp/output.cif", "structure_files/Al.cif" [/EXAMPLES]
+            [SYNTACTIC] Format: 'string path ending in ".cif" corresponding to the path of the CIF file'. [/SYNTACTIC]
+            [EXAMPLES] Examples: "/tmp/output.cif", "structure_files/Al.cif" [/EXAMPLES]
 
     Returns:
         str :
@@ -171,12 +167,8 @@ def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:
     [RAISES] Exceptions:
         Exception:
             [ERROR_WHEN] Raised if structure retrieval or file saving fails. [/ERROR_WHEN]
-            [ERROR_DETAILS] This generic exception is returned if any error occurs during Materials Project API access, structure conversion, or remote file write.
-            The error message is descriptive and includes the failure reason. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] To resolve this, check the MP ID for correctness, and verify that the specified file path is writable.
-            If the MP ID is invalid or does not exist, you may need to use a different ID or check the Materials Project database for available materials.
-            If the file path is incorrect or inaccessible, ensure that the directory exists and has the correct permissions for writing files.
-            If the API key is invalid or the Materials Project service is down, you may need to use another tool. [/ERROR_RECOVERY]
+            [ERROR_DETAILS] This generic exception is returned if any error occurs during Materials Project API access, structure conversion, or remote file write. The error message is descriptive and includes the failure reason. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] To resolve this, check the MP ID for correctness, and verify that the specified file path is writable. If the MP ID is invalid or does not exist, you may need to use a different ID or check the Materials Project database for available materials. If the file path is incorrect or inaccessible, ensure that the directory exists and has the correct permissions for writing files. If the API key is invalid or the Materials Project service is down, you may need to use another tool. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
@@ -216,8 +208,7 @@ def convert_structure_to_lammps_data(
     """
     [BRIEF] Converts a CIF-format structure file into a LAMMPS data file using a specified atom style. [/BRIEF]
 
-    [DETAILED] This tool converts a crystal structure provided in CIF format (as a file) into a LAMMPS-compatible data file.
-    It supports configurable atom styles such as "atomic" or "charge", allowing flexibility based on simulation requirements.
+    [DETAILED] This tool converts a crystal structure provided in CIF format (as a file) into a LAMMPS-compatible data file. Internally, it reads the CIF structure file using pymatgen, transforms it into a Structure object, and then serializes it to a LAMMPS data format using the LammpsData class. It supports configurable atom styles such as "atomic" or "charge", allowing flexibility based on simulation requirements.
     This enables seamless transformation of standardized crystallographic data into simulation-ready LAMMPS input files, streamlining the setup process for molecular dynamics workflows. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -228,8 +219,7 @@ def convert_structure_to_lammps_data(
     [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. [PREREQUISITE] Ensure you have a valid CIF file containing the crystallographic structure of the material you want to simulate.
-        Use the tool `get_structure_from_mp_text` to obtain one. [/PREREQUISITE]
+        1. [PREREQUISITE] Ensure you have a valid CIF file containing the crystallographic structure of the material you want to simulate. Use the tool `get_structure_from_mp_text` to obtain one. [/PREREQUISITE]
         2. [CURRENT] Use this tool to convert the CIF file into a LAMMPS data file by providing the path to the CIF file, the desired output file path, and the atom style (if different from the default "charge"). [/CURRENT]
         3. [FOLLOW_UP] The resulting LAMMPS data file can be used directly in LAMMPS simulations, using the tool `run_lammps` to run the simulation. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
@@ -256,14 +246,14 @@ def convert_structure_to_lammps_data(
             [BRIEF] Path to the CIF-format structure file. [/BRIEF]
             [DETAILED] Path to the file containing the crystallographic structure.
             This file is read and converted into a pymatgen `Structure` object internally before being serialized to LAMMPS data format. [/DETAILED]
-            [SYNTACTIC] String ending in ".cif" corresponding to the path of the CIF file. [/SYNTACTIC]
-            [EXAMPLES] "/workspace/graphene.cif", "./data/SiO2.cif" [/EXAMPLES]
+            [SYNTACTIC] Format: 'string ending in ".cif" correspoding to the path of the CIF file.' [/SYNTACTIC]
+            [EXAMPLES] Examples: "/workspace/graphene.cif", "./data/SiO2.cif" [/EXAMPLES]
         output_file (str):
             [BRIEF] Path where the LAMMPS data file will be saved. [/BRIEF]
             [DETAILED] This is the destination file path where the generated LAMMPS-compatible data file will be written.
             The output file will contain the atomic positions, types, and other necessary information formatted for LAMMPS simulations. [/DETAILED]
-            [SYNTACTIC] Valid string representing a writable `.data` file path. [/SYNTACTIC]
-            [EXAMPLES]
+            [SYNTACTIC] Format: 'valid string representing a writable `.data` file path'. [/SYNTACTIC]
+            [EXAMPLES] Examples:
                 - "/workspace/output/graphene.data",
                 -"./converted_data/SiO2.data" [/EXAMPLES]
         atom_style (str):
@@ -275,15 +265,14 @@ def convert_structure_to_lammps_data(
             The choice of style should match the `atom_style` directive in the LAMMPS input script.
             Defaults to "charge" if nothing provided.
             Valid values: "real", "metal", "si", "cgs", "electron", "micro", "nano", "full", "". [/DETAILED]
-            [SYNTACTIC] One of the predefined LAMMPS atom styles as a lowercase string. [/SYNTACTIC]
-            [EXAMPLES] "real", "metal". [/EXAMPLES]
+            [SYNTACTIC] Format: "one of the predefined LAMMPS atom styles as a lowercase string". [/SYNTACTIC]
+            [EXAMPLES] Examples: "real", "metal". [/EXAMPLES]
 
     Returns:
         str:
             [BRIEF] Status message indicating successful LAMMPS data file generation. [/BRIEF]
-            [DETAILED] If the conversion is successful, returns a confirmation message specifying the path where the LAMMPS data file has been saved.
-            This message can be used for logging or downstream validation in automated simulation workflows. [/DETAILED]
-            [EXAMPLES]
+            [DETAILED] If the conversion is successful, returns a confirmation message specifying the path where the LAMMPS data file has been saved. This message can be used for logging or downstream validation in automated simulation workflows. [/DETAILED]
+            [EXAMPLES] Example outputs:
                 - "LAMMPS data file successfully written to: /workspace/output/graphene.data"
                 - "LAMMPS data file successfully written to: ./converted_data/SiO2.data" [/EXAMPLES]
 
@@ -295,8 +284,7 @@ def convert_structure_to_lammps_data(
                 - File I/O errors when writing the output file (e.g., permission issues, invalid paths).
                 - Internal errors in the conversion process (e.g., unsupported atom styles, missing dependencies).
             The error message will provide context for debugging the issue. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] To resolve this, ensure the CIF file is well-formed and accessible, check that the output file path is valid and writable, and verify that the specified atom style is supported by LAMMPS.
-            If the CIF file is malformed, you may need to correct it or use a different file.
+            [ERROR_RECOVERY] To resolve this, ensure the CIF file is well-formed and accessible, check that the output file path is valid and writable, and verify that the specified atom style is supported by LAMMPS. If the CIF file is malformed, you may need to correct it or use a different file.
             If the atom style is unsupported, choose a valid atom style from the LAMMPS documentation. [/ERROR_RECOVERY]
     [/RAISES]
 
@@ -327,9 +315,7 @@ def run_lammps(input_file: str) -> str:
     """
     [BRIEF] Runs a LAMMPS simulation based on the provided input script and generates a corresponding log file. [/BRIEF]
 
-    [DETAILED] This tool executes a LAMMPS molecular dynamics simulation using a specified input script.
-    It takes the path to a LAMMPS input file and automatically triggers the simulation run through a remote execution backend.
-    The tool also generates a corresponding log file (named after the input script, with `.log` extension replacing the original extension) which contains detailed simulation output including thermodynamic data, errors (if any), and runtime diagnostics. [/DETAILED]
+    [DETAILED] This tool executes a LAMMPS molecular dynamics simulation using a specified input script. It takes the path to a LAMMPS input file and automatically triggers the simulation run through a remote execution backend. The tool also generates a corresponding log file (named after the input script, with `.log` extension replacing the original extension) which contains detailed simulation output including thermodynamic data, errors (if any), and runtime diagnostics. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
         - Use when you need to execute a LAMMPS molecular dynamics simulation using a predefined input script.
@@ -339,14 +325,9 @@ def run_lammps(input_file: str) -> str:
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
         1. [PREREQUISITE] Ensure you have a valid LAMMPS input script ready for execution.
-        This script should contain all necessary simulation parameters, atom definitions, force fields, and commands.
-        Additionally, ensure that the .data file is in place.
-        You can create one using the function `convert_structure_to_lammps_data`.  [/PREREQUISITE]
-        2. [CURRENT] Use this tool to run the LAMMPS simulation by providing the path to the input script.
-        The tool will handle the remote execution and log file generation. [/CURRENT]
-        3. [FOLLOW_UP] After the simulation completes, check the generated log file for results, diagnostics, and any errors.
-        The log file will be named based on the input script, with a `.log` extension.
-        You can then proceed to analyze the results or use the output data in subsequent steps of your workflow. [/FOLLOW_UP]
+        This script should contain all necessary simulation parameters, atom definitions, force fields, and commands. Additionally, ensure that the .data file is in place. You can create one using the function `convert_structure_to_lammps_data`.  [/PREREQUISITE]
+        2. [CURRENT] Use this tool to run the LAMMPS simulation by providing the path to the input script. The tool will handle the remote execution and log file generation. [/CURRENT]
+        3. [FOLLOW_UP] After the simulation completes, check the generated log file for results, diagnostics, and any errors. The log file will be named based on the input script, with a `.log` extension. You can then proceed to analyze the results or use the output data in subsequent steps of your workflow. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
@@ -368,11 +349,9 @@ def run_lammps(input_file: str) -> str:
     Args:
         input_file (str):
             [BRIEF] Path to the LAMMPS input script file. [/BRIEF]
-            [DETAILED] This parameter specifies the absolute or relative path to the input script used by LAMMPS.
-            The script typically contains simulation settings such as atom style, force field parameters, boundary conditions, and compute directives.
-            The file must be in LAMMPS-compatible format (`.in` extension is conventional but not required) and should not require interactive input during execution. [/DETAILED]
-            [SYNTACTIC] String representing a file path; must be readable by the backend LAMMPS engine. [/SYNTACTIC]
-            [EXAMPLES]
+            [DETAILED] This parameter specifies the absolute or relative path to the input script used by LAMMPS. The script typically contains simulation settings such as atom style, force field parameters, boundary conditions, and compute directives. The file must be in LAMMPS-compatible format (`.in` extension is conventional but not required) and should not require interactive input during execution. [/DETAILED]
+            [SYNTACTIC] Format: string representing a file path; must be readable by the backend LAMMPS engine. [/SYNTACTIC]
+            [EXAMPLES] Examples:
                 - "/workspace/lammps_inputs/graphene_sim.in"
                 - "./simulations/liquid_water.in"
                 - "minimize_bulk_sio2.in" [/EXAMPLES]
@@ -380,8 +359,7 @@ def run_lammps(input_file: str) -> str:
     Returns:
         str:
             [BRIEF] Message indicating simulation completion with log file location. [/BRIEF]
-            [DETAILED] On success, returns a message confirming the simulation run, the path to the latest input script used, and the corresponding log file.
-            The log file contains detailed runtime diagnostics and output for verification. [/DETAILED]
+            [DETAILED] On success, returns a message confirming the simulation run, the path to the latest input script used, and the corresponding log file. The log file contains detailed runtime diagnostics and output for verification. [/DETAILED]
             [EXAMPLES]
                 - "Simulation ran successfully using input: simulations/run_graphene.in, log saved at: run_graphene.log"
                 - "Simulation ran successfully using input: ./jobs/job123.lmp, log saved at: job123.log" [/EXAMPLES]
@@ -392,16 +370,16 @@ def run_lammps(input_file: str) -> str:
             [ERROR_DETAILS] This exception is raised when the underlying LAMMPS execution raises a ValueError, which can occur due to issues such as missing sections in the input file, invalid parameters, or other LAMMPS-specific errors that prevent the simulation from running successfully.
             The error message will provide context about the failure, such as missing commands or unsupported features in the input script. [/ERROR_DETAILS]
             [ERROR_RECOVERY] To resolve this, check the input file for correctness, ensuring that all required sections are present and properly formatted.
-            Verify that the parameters used in the input script are valid for the LAMMPS version being used.
-            If the error persists, consult the LAMMPS documentation or community forums for guidance on the specific error encountered. [/ERROR_RECOVERY]
+            Verify that the parameters used in the input script are valid for the LAMMPS version being used. If the error persists, consult the LAMMPS documentation or community forums for guidance on the specific error encountered. [/ERROR_RECOVERY]
 
         Exception:
             [ERROR_WHEN] Raised on unexpected backend or runtime errors. [/ERROR_WHEN]
             [ERROR_DETAILS] This generic exception is raised for any unexpected issues that occur during the execution of the LAMMPS simulation, such as backend unavailability, file system errors, or misconfigured modal runtime.
             The error message will include details about the failure, which can help in debugging the issue. [/ERROR_DETAILS]
             [ERROR_RECOVERY] To resolve this, check the backend configuration to ensure it is correctly set up and available.
-            Verify that the input file path is correct and accessible. [/ERROR_RECOVERY]
-
+            Verify that the input file path is correct and accessible.
+            If the backend is misconfigured or unavailable, you may need to adjust the modal settings or ensure that the modal service is running properly.
+            If the error persists, consult the modal documentation or support resources for further assistance. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
