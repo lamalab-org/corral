@@ -52,7 +52,9 @@ SCORING_FUNCTIONS = {
 }
 
 
-def load_tasks_from_json(json_path: Path, work_dir: str = BASE_WORK_DIR) -> list:
+def load_tasks_from_json(
+    json_path: Path, work_dir: str = BASE_WORK_DIR
+) -> dict[str, TaskDefinition]:
     task_files = json_path.glob("*.json")
     tasks = {}
     for task_file in task_files:
@@ -74,7 +76,7 @@ def load_tasks_from_json(json_path: Path, work_dir: str = BASE_WORK_DIR) -> list
                 tools=data.get("tools", []),
                 scoring_fn=SCORING_FUNCTIONS[str(data["scoring_fn"])],
                 scoring_inputs=data["output"][0]["target"],
-                submission_format=data.get("submission_format", {}),
+                submission_format=data.get("submission_format", ""),
                 input_from_tasks=input_from_tasks,
                 initial_input=initial_input,
             )
@@ -135,9 +137,8 @@ class TaskEnvironment(Environment):
             f"Task {self.current_task.name}:\n"
             f"{self.current_task.description}\n\n"
             "Required submission format:\n"
+            f"{self.current_task.submission_format}\n\n"
         )
-        for key, desc in self.current_task.submission_format.items():
-            prompt += f"- {key}: {desc}\n"
 
         prompt += "\nAvailable input data:\n"
 
