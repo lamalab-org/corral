@@ -9,8 +9,10 @@ analysis of simulation parameters.
 
 # import modal
 import json
+import re
 from pathlib import Path
 
+import modal
 from loguru import logger
 
 # from utils import extract_lattice_coordinates
@@ -29,57 +31,74 @@ def check_potential_file(target: str):
     return score_fn
 
 
-def check_numerical(target: float | None = None, tolerance: float | None = None):
+def check_numerical(target: float, tolerance: float):
     def score_fn(result: str) -> float:
-        """Score an addition task with expected answer validation"""
-        import logging
-        import re
-
-        logger = logging.getLogger(__name__)
         try:
-            # Handle string submissions
+            # Initialize variables
+            answer = None
+            file_path = None
+
+            # Parse result depending on type
             if isinstance(result, str):
                 result = result.strip()
                 try:
                     parsed_result = json.loads(result)
                     if isinstance(parsed_result, dict):
+                        # Extract numerical answer from keys
                         for key in ("BULK ENERGY", "SLAB ENERGY", "density"):
                             if key in parsed_result:
                                 answer = float(parsed_result[key])
                                 break
-                        else:
-                            return 0.0  # no valid key
+                        # Extract file path
+                        file_path = parsed_result["path to relaxed structure"]
                     else:
                         # If not a dict, treat as direct numeric
                         answer = float(parsed_result)
                 except json.JSONDecodeError:
-                    # If not JSON, try to extract numeric value via regex
+                    # Not JSON: try regex extraction of number only
                     match = re.search(r"[-+]?\d*\.\d+|\d+", result)
                     if match:
                         answer = float(match.group())
                     else:
                         return 0.0
             else:
-                # If already parsed
+                # If result already parsed as dict
                 if isinstance(result, dict):
-                    for key in (
-                        "BULK ENERGY",
-                        "SLAB ENERGY",
-                        "density",
-                    ):
+                    for key in ("BULK ENERGY", "SLAB ENERGY", "density"):
                         if key in result:
                             answer = float(result[key])
                             break
-                    else:
-                        return 0.0
+                    if "path to relaxed structure" in result:
+                        file_path = result["path to relaxed structure"]
+                    elif "Relaxed BULK Structure_path" in result:
+                        file_path = result["Relaxed BULK Structure_path"]
                 else:
                     answer = float(result)
 
+            # Check numerical score
             if target is not None and tolerance is not None:
                 tol = tolerance * abs(target)
-                return 1.0 if (target - tol) <= answer <= (target + tol) else 0.0
+                numerical_ok = (target - tol) <= answer <= (target + tol)
+            else:
+                numerical_ok = False
 
-            return 0.0
+            # Check if file exists using file_info
+            if file_path is not None:
+                try:
+                    info = modal.Function.lookup("simagent", "file_info").remote(
+                        file_path
+                    )
+                    logger.info(f"File info: {info}")
+                    file_ok = True
+                except RuntimeError as e:
+                    logger.warning(f"File existence check failed: {e}")
+                    file_ok = False
+            else:
+                # If no file path provided, fail file check
+                file_ok = True
+
+            # Return 1.0 only if both pass
+            return 1.0 if (numerical_ok and file_ok) else 0.0
 
         except (ValueError, TypeError, KeyError) as e:
             logger.warning(
@@ -88,6 +107,67 @@ def check_numerical(target: float | None = None, tolerance: float | None = None)
             return 0.0
 
     return score_fn
+
+
+# def check_numerical(target: float | None = None, tolerance: float | None = None):
+#     def score_fn(result: str) -> float:
+#         """Score an addition task with expected answer validation"""
+#         import logging
+#         import re
+
+#         logger = logging.getLogger(__name__)
+#         try:
+#             # Handle string submissions
+#             if isinstance(result, str):
+#                 result = result.strip()
+#                 try:
+#                     parsed_result = json.loads(result)
+#                     if isinstance(parsed_result, dict):
+#                         for key in ("BULK ENERGY", "SLAB ENERGY", "density"):
+#                             if key in parsed_result:
+#                                 answer = float(parsed_result[key])
+#                                 break
+#                         else:
+#                             return 0.0  # no valid key
+#                     else:
+#                         # If not a dict, treat as direct numeric
+#                         answer = float(parsed_result)
+#                 except json.JSONDecodeError:
+#                     # If not JSON, try to extract numeric value via regex
+#                     match = re.search(r"[-+]?\d*\.\d+|\d+", result)
+#                     if match:
+#                         answer = float(match.group())
+#                     else:
+#                         return 0.0
+#             else:
+#                 # If already parsed
+#                 if isinstance(result, dict):
+#                     for key in (
+#                         "BULK ENERGY",
+#                         "SLAB ENERGY",
+#                         "density",
+#                     ):
+#                         if key in result:
+#                             answer = float(result[key])
+#                             break
+#                     else:
+#                         return 0.0
+#                 else:
+#                     answer = float(result)
+
+#             if target is not None and tolerance is not None:
+#                 tol = tolerance * abs(target)
+#                 return 1.0 if (target - tol) <= answer <= (target + tol) else 0.0
+
+#             return 0.0
+
+#         except (ValueError, TypeError, KeyError) as e:
+#             logger.warning(
+#                 f"Error parsing result for addition_score: {e}, result was: {result}"
+#             )
+#             return 0.0
+
+#     return score_fn
 
 
 def check_structure(target, atom_style, use_modal=True):

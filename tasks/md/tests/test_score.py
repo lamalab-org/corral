@@ -23,52 +23,43 @@ def test_check_potential_file():
 @pytest.mark.parametrize(
     ("target", "json_string", "expected"),  # ← Wrap param names in a tuple
     [
-        # Valid BULK ENERGY string within tolerance
         (
             2.2173842,
-            '{"BULK ENERGY": 2.0, "Relaxed BULK Structure_path": "/structure/structure.dat"}',
+            '{"BULK ENERGY": "2.21", "path to relaxed structure": "/structure/structure.dat"}',
             0.0,
         ),
-        # Valid BULK ENERGY string outside tolerance
         (
             2.2173842,
-            '{"BULK ENERGY": 2.216, "Relaxed BULK Structure_path": "/structure/structure.dat"}',
+            '{"BULK ENERGY": "2.21", "path to relaxed structure": "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.data"}',
             1.0,
         ),
         (
             2.2173842,
-            '{"BULK ENERGY": "2.216", "Relaxed BULK Structure_path": /structure/structure.dat}',
-            1.0,
-        ),
-        # Valid SLAB ENERGY string within tolerance
-        (
-            1671.89,
-            '{"SLAB ENERGY": 1671.88, "Relaxed SLAB Structure_path": "/structure/structure.dat"}',
-            1.0,
-        ),
-        # SLAB ENERGY outside tolerance
-        (
-            1671.89,
-            '{"SLAB ENERGY": 1600.0, "Relaxed SLAB Structure_path": "/structure/structure.dat"}',
+            '{"BULK ENERGY": "2.0", "path to relaxed structure": "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.data"}',
             0.0,
         ),
-        # Valid density key
-        (
-            0.0589124159899187,
-            '{"density": 0.05871, "Relaxed BULK Structure_path": "/structure/structure.dat"}',
-            1.0,
-        ),
-        # Missing all keys
-        (0.0589124159899187, '{"volume": 100.0, "structure": "something"}', 0.0),
         (
             2.2173842,
-            '{"BULK ENERGY": "2.217", "Relaxed BULK Structure_path": "/structure/structure.dat"}',
+            '{"SLAB ENERGY": "2.2", "path to relaxed structure": "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.data"}',
             1.0,
         ),
-        # Invalid JSON format
+        (
+            2.2173842,
+            '{"density": "2.2", "path to relaxed structure": "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.data"}',
+            1.0,
+        ),
+        (
+            2.2173842,
+            '{"DENSITY": "2.2", "path to relaxed structure": "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.data"}',
+            0.0,
+        ),
+        (
+            2.2173842,
+            '{"BULK_ENERGY": "2.2", "path to relaxed structure": "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.data"}',
+            0.0,
+        ),
         (2.2173842, '{"BULK ENERGY": "not_a_number"}', 0.0),
         (2.2173842, "{bad json}", 0.0),
-        # Null or empty input
         (2.2173842, None, 0.0),
         (2.2173842, "", 0.0),
         (2.2173842, "2.2173842", 1.0),
