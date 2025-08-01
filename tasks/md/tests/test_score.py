@@ -9,15 +9,15 @@ GROUND_TRUTH_DIR = BASE_DIR / "ground_truth"
 
 
 def test_check_potential_file():
-    target = "valid_file.txt"
+    target = "/potentials/EAM/Al99.eam.alloy"
     score_fn = check_potential_file(target)
 
-    assert score_fn("/some/path/valid_file.txt") == 1.0
-    assert score_fn("/some/path/another_file.txt") == 0.0
+    assert score_fn("/some/path/valid_file.txt") == 0.0
+    assert score_fn("/potentials/EAM/Al99.eam.alloy") == 1.0
     assert score_fn("randomstring") == 0.0
     assert score_fn(None) == 0.0
     assert score_fn("") == 0.0
-    assert score_fn("different_dir/valid_file.txt") == 1.0
+    assert score_fn("/potentials/EAM/Cu_Zhou04.eam.alloy") == 0.0
 
 
 @pytest.mark.parametrize(

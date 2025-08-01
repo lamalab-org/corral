@@ -16,14 +16,10 @@ from loguru import logger
 # from utils import extract_lattice_coordinates
 
 
-def check_potential_file(target):
+def check_potential_file(target: str):
     def score_fn(result: str) -> float:
         try:
-            filename = Path(result).name
-            if filename == target:
-                return 1.0
-            else:
-                return 0.0
+            return 1.0 if result == target else 0.0
         except (ValueError, TypeError, KeyError) as e:
             logger.warning(
                 f"Error parsing result for addition_score: {e}, result was: {result}"
