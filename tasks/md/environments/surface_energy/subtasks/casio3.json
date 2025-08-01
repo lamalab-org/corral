@@ -1,0 +1,111 @@
+{
+    "wollastonite_structure_retrieval_subtask_sa": {
+        "name": "CaSiO3 Structure Retrieval for Surface Area",
+        "description": "Retrieve structure of wollastonite CaSiO3 and convert it to LAMMPs data format. Return the absolute path of the final structure.",
+        "tools": [
+            "get_structure_from_mp_text",
+            "convert_structure_to_lammps_data"
+        ],
+        "scoring_function": "check_structure",
+        "submission_format": "absolute path to structure file (eg. /results/structure.data)",
+        "input_from_tasks": [],
+        "initial_input": {
+            "materials_project_id": "mp-5733",
+            "atom_style" : "full"
+        },
+        "scoring_params": {
+            "target": "../../../ground_truth/structures/CaSiO3.data",
+            "atom_style" : "full"
+        }
+    },
+
+    "wollastonite_potential_file_subtask_sa": {
+        "name": "CaSiO3 Potential File for Surface Energy",
+        "description": "Procure an appropriate ReaxFF potential file for CaSiO3 for MD simulations. Return the absolute path of the potential file.",
+        "tools": [
+            "get_potential_metadata"
+        ],
+        "scoring_function": "check_potential_file",
+        "submission_format": "absolute path to potential file (eg. /results/potentials/EAM/cu.eam)",
+        "input_from_tasks": [],
+        "initial_input": {},
+        "scoring_params": {
+            "target": "/potentials/REAXFF/ffield.reax"
+        }
+    },
+
+    "wollastonite_bulk_energy_minimisation_subtask_sa": {
+        "name": "CaSiO3 bulk minimisation for Surface Energy",
+        "description": "Given paths to LAMMPs-compatible wollastonite CaSiO3 structure file and a ReaxFF potential file appropriate for MD simulations, perform structure relaxation of CaSiO3 based on given simulation parameters. Ensure charge equilibration is included using fix qeq/reaxff, compatible with reaxff. Report the total energy of the relaxed structure in kcal/mol",
+        "tools": [
+            "get_potential_metadata",
+            "run_lammps"
+        ],
+        "scoring_function": "check_numerical",
+        "submission_format": "{\"BULK ENERGY\": \"<numerical_value without units>\", \"path to relaxed structure\": \"<absolute_path>\"} e.g. {\"BULK ENERGY\": \"56.00\", \"path to relaxed structure\": \"/structure/structure.dat\"}",
+        "input_from_tasks": [
+            "wollastonite_structure_retrieval_subtask_sa",
+            "wollastonite_potential_file_subtask_sa"
+        ],
+        "initial_input": {
+            "units": "real",
+            "pbc": "true",
+            "minimiser": "conjugate gradient",
+            "energy_tolerance": 1e-10,
+            "force_tolerance": 1e-10,
+            "maximum_iterations": 1e+5,
+            "maximum_evaluations": 1e+5,
+            "atom_style": "full"
+        },
+        "scoring_params": {
+            "target": -8870.18844007836,
+            "tolerance": 2e-2
+        }
+    },
+
+    "wollastonite_slab_energy_minimisation_subtask_sa": {
+        "name": "CaSiO3 Slab Relaxation for Surface Energy",
+        "description": "Given paths to LAMMPs-compatible wollastonite CaSiO3 structure file and a ReaxFF potential file appropriate for MD simulations, create a slab in the given direction by removing periodic boundary conditions along that direction. Perform structure relaxation of the slab based on given simulation parameters. Ensure charge equilibration is included using fix qeq/reaxff, compatible with reaxff. Report the total energy of the relaxed structure in kcal/mol, and the absolute path of the saved relaxed structure.",
+        "tools": [
+            "get_potential_metadata",
+            "run_lammps"
+        ],
+        "scoring_function": "check_numerical",
+        "submission_format": "{\"SLAB ENERGY\": \"<numerical_value without units>\", \"path to relaxed structure\": \"<absolute_path>\"} e.g. {\"SLAB ENERGY\": \"42.78\", \"path to relaxed structure\": \"/structures/slab_structure.dat\"}",
+        "input_from_tasks": [
+            "wollastonite_structure_retrieval_subtask_sa",
+            "wollastonite_potential_file_subtask_sa"
+        ],
+        "initial_input": {
+            "units": "real",
+            "minimiser": "conjugate gradient",
+            "energy_tolerance": 1e-10,
+            "force_tolerance": 1e-10,
+            "maximum_iterations": 1e+5,
+            "maximum_evaluations": 1e+5,
+            "atom_style": "full",
+            "direction" : [0, 0, 1]
+        },
+        "scoring_params": {
+            "target": -8464.98048998755,
+            "tolerance": 2e-2
+        }
+    },
+
+    "wollastonite_subtask_sa" : {
+        "name" : "Wollastonite Surface Energy Calculation",
+        "description" : "Given the paths to LAMMPS-compatible relaxed bulk and slab structures of wollastonite CaSiO3, and the total energies (in kcal/mol) of its relaxed bulk and slab configurations, compute the surface energy of SiO2. Return the surface energy in kcal/(mol \u00c5\u00b2).",
+        "tools" : [
+            "get_potential_metadata",
+            "run_lammps"
+        ],
+        "scoring_function" : "check_numerical",
+        "submission_format" : "numerical value without units (eg. 56.00)",
+        "input_from_tasks" : ["wollastonite_structure_retrieval_subtask_sa", "wollastonite_slab_energy_minimisation_subtask_sa", "wollastonite_bulk_energy_minimisation_subtask_sa"],
+        "initial_input" : {},
+        "scoring_params" : {
+            "target" : 3.90413926986761,
+            "tolerance" : 2e-2
+        }
+    }
+}
