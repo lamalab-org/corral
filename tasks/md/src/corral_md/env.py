@@ -26,18 +26,20 @@ from corral.io import (
 from corral.server import run_server
 from corral.task import TaskDefinition, TaskGroup
 
-# if "CORRAL_WORK_DIR" not in os.environ:
-#     raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
-# if "ENVIRONMENT" not in os.environ:
-#     raise OSError("MD Environment not specified.")
-# if "TASK_TYPE" not in os.environ:
-#     raise OSError("task type not specified (tasks or subtasks).")
+if "CORRAL_WORK_DIR" not in os.environ:
+    raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
+if "ENVIRONMENT" not in os.environ:
+    raise OSError("MD Environment not specified.")
+if "TASK_TYPE" not in os.environ:
+    raise OSError("task type not specified (tasks or subtasks).")
+if "ELEMENT" not in os.environ:
+    raise OSError("Element not specified (e.g., al, si, cu).")
 
-CORRAL_WORK_DIR = "/results/1_August_2025/MD_TASKS"
-ENVIRONMENT = "surface_energy"
-TASK_TYPE = "tasks"
-ELEMENT = "al"
 
+CORRAL_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+ENVIRONMENT = os.environ["ENVIRONMENT"]
+TASK_TYPE = os.environ["TASK_TYPE"]
+ELEMENT = os.environ["ELEMENT"]
 
 SCORING_FUNCTIONS = {
     "check_numerical": check_numerical,
