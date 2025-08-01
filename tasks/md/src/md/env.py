@@ -35,16 +35,9 @@ from corral.io import (
 from corral.server import run_server
 from corral.task import TaskDefinition, TaskGroup
 
-# BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
-# ENVIRONMENT = os.environ["ENVIRONMENT"]
-# TASK_TYPE = os.environ["TASK_TYPE"]
-
-BASE_WORK_DIR = "/results/test_"
-ENVIRONMENT = "surface_energy"
-TASK_TYPE = "tasks"
-
-
-# BASE_WORK_DIR = "/results/23_July_2025/test/gpt_4o/subtask/"
+BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+ENVIRONMENT = os.environ["ENVIRONMENT"]
+TASK_TYPE = os.environ["TASK_TYPE"]
 
 
 SCORING_FUNCTIONS = {

@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 from src.md.score import check_numerical, check_potential_file, check_structure
 
-# Base directory: wherever pytest is run from (md/)
 BASE_DIR = Path(__file__).parent.parent.resolve()
 
 GROUND_TRUTH_DIR = BASE_DIR / "ground_truth"
