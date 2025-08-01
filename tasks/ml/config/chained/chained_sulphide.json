@@ -1,0 +1,94 @@
+{
+  "batch_retrieve_sulphide_polymorphs": {
+    "name": "Batch Retrieve Sulphide Polymorphs",
+    "description": "Generate a diverse list of sulphide compositions for dataset creation. Retrieve polymorphs for all sulphide compositions from Materials Project database. For each composition, collect multiple polymorphs including both stable and metastable structures. Consolidate all individual polymorph files into a single comprehensive dataset. Add composition-based features and validate data quality including completeness, duplicate detection, and target variable distribution. Ensure the dataset is suitable for machine learning.",
+    "tools": [
+      "batch_retrieve_polymorphs",
+      "execute_python_code",
+      "execute_python_script",
+      "filter_json_with_strategy",
+      "select_polymorphs_with_strategy_to_file",
+      "consolidate_polymorph_datasets",
+      "select_polymorphs_with_strategy",
+      "get_bulk_polymorphs_data",
+      "sort_and_get_first_from_json",
+      "get_bulk_polymorphs_data_to_file"
+    ],
+    "scoring_function": "score_polymorph_dataset",
+    "submission_format": "absolute path to the json file (eg. /results/structure/polymorph_data.json)",
+    "input_from_tasks": [],
+    "initial_input": {
+      "max_energy_above_hull": 0.3,
+      "max_per_composition": 3,
+      "max_compositions": 40
+    }
+  },
+  "prepare_ml_ready_dataset": {
+    "name": "Prepare ML-Ready Dataset",
+    "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Extract structural features, composition features, and ensure proper handling of categorical variables. Create both training and test sets with appropriate data preprocessing.",
+    "tools": [
+      "prepare_tabular_dataset",
+      "execute_python_code",
+      "execute_python_script"
+    ],
+    "scoring_function": "ml_dataset_preparation_quality_binary",
+    "submission_format": "absolute path to the json file (eg. /results/structure/ml_dataset_metadata.json)",
+    "input_from_tasks": [
+      "batch_retrieve_sulphide_polymorphs"
+    ],
+    "initial_input": {
+      "target_property": "formation_energy_per_atom",
+      "feature_engineering": "advanced",
+      "test_split": 0.2,
+      "normalize": true,
+      "output_path": "sulphide_ml_dataset"
+    }
+  },
+  "train_xgboost_formation_energy_model": {
+    "name": "Train XGBoost Formation Energy Model",
+    "description": "Train an XGBoost regression model to predict formation energies of sulphide polymorphs. Use the prepared dataset with optimized hyperparameters for sulphide materials. Focus on achieving good generalization performance across different sulphide families and structural types.",
+    "tools": [
+      "train_xgboost_model",
+      "execute_python_code",
+      "execute_python_script"
+    ],
+    "scoring_function": "model_training_success_binary",
+    "submission_format": "absolute path to the model checkpoint file (eg. /results/structure/trained_xgboost_model.pkl)",
+    "input_from_tasks": [
+      "prepare_ml_ready_dataset"
+    ],
+    "initial_input": {
+      "target_column": "formation_energy_per_atom",
+      "hyperparameters": {
+        "n_estimators": 200,
+        "max_depth": 8,
+        "learning_rate": 0.1,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_alpha": 0.1,
+        "reg_lambda": 0.1
+      }
+    }
+  },
+  "evaluate_model_performance": {
+    "name": "Evaluate Model Performance",
+    "description": "Comprehensively evaluate the trained XGBoost model using test set metrics, cross-validation. Assess model performance and save results as JSON file. The file should have two things mandatory `test_set_evaluation` and `cross_validation_results` use the same key name when saving results for this.",
+    "tools": [
+      "evaluate_xgboost_model",
+      "perform_cross_validation",
+      "execute_python_code",
+      "execute_python_script"
+    ],
+    "scoring_function": "model_evaluation_completeness_binary",
+    "submission_format": "absolute path to the results file (eg. /results/structure/model_evaluation_results.json)",
+    "input_from_tasks": [
+      "train_xgboost_formation_energy_model",
+      "prepare_ml_ready_dataset"
+    ],
+    "initial_input": {
+      "target_column": "formation_energy_per_atom",
+      "detailed_analysis": true,
+      "cv_folds": 5
+    }
+  }
+}
