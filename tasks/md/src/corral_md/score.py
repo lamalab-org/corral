@@ -8,8 +8,10 @@ analysis of simulation parameters.
 """
 
 # import modal
+import contextlib
 import json
 import re
+import tempfile
 from pathlib import Path
 
 import modal
@@ -19,13 +21,30 @@ from loguru import logger
 
 
 def check_potential_file(target: str):
+    target_name = Path(target).name  # Just the filename (e.g., "Al.data")
+
     def score_fn(result: str) -> float:
         try:
-            return 1.0 if result == target else 0.0
-        except (ValueError, TypeError, KeyError) as e:
-            logger.warning(
-                f"Error parsing result for addition_score: {e}, result was: {result}"
-            )
+            result_path = Path(result)
+            result_name = result_path.name
+
+            # Check filename match
+            if result_name != target_name:
+                return 0.0
+
+            # Check file existence using Modal
+            try:
+                info = modal.Function.lookup("simagent", "file_info").remote(
+                    str(result_path)
+                )
+                logger.info(f"File info: {info}")
+                return 1.0  # Both checks passed
+            except RuntimeError as e:
+                logger.warning(f"File existence check failed: {e}")
+                return 0.0
+
+        except Exception as e:
+            logger.warning(f"Error in check_potential_file: {e}, result was: {result}")
             return 0.0
 
     return score_fn
@@ -109,52 +128,49 @@ def check_numerical(target: float, tolerance: float):
     return score_fn
 
 
-def check_structure(target, atom_style, use_modal=True):
+def check_structure(target, atom_style):
     def score_fn(result: str) -> float:
-        import logging
-
         from pymatgen.analysis.structure_matcher import StructureMatcher
         from pymatgen.io.lammps.data import LammpsData
-
-        logger = logging.getLogger(__name__)
 
         if result is None:
             logger.warning("Received None as result in check_structure")
             return 0.0
 
+        tmp_path = None  # Predefine in case of early exception
+
         try:
-            if use_modal:
-                import modal
-
-                read_file = modal.Function.lookup("simagent", "read_file")
-                content = read_file.remote(result)
-            else:
-                with Path(result).open() as f:
-                    content = f.read()
-
-            with Path("temp.data").open("w") as f:
-                f.write(content)
-
+            # Load target structure
             ld1 = LammpsData.from_file(target, atom_style=atom_style)
-            ld2 = LammpsData.from_file("temp.data", atom_style=atom_style)
 
-            s1 = ld1.structure
-            s2 = ld2.structure
+            # Read remote result file content
+            read_file = modal.Function.lookup("simagent", "read_file")
+            content = read_file.remote(result)
 
+            # Write content to a unique temp file
+            with tempfile.NamedTemporaryFile(
+                mode="w+", suffix=".data", delete=False
+            ) as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+
+            # Load predicted structure
+            ld2 = LammpsData.from_file(tmp_path, atom_style=atom_style)
+
+            # Compare structures
             matcher = StructureMatcher()
-            are_equal = matcher.fit(s1, s2)
-
-            temp_file = Path("temp.data")
-            if temp_file.exists():
-                temp_file.unlink()
+            are_equal = matcher.fit(ld1.structure, ld2.structure)
 
             return 1.0 if are_equal else 0.0
 
-        except (ValueError, TypeError, KeyError, FileNotFoundError, Exception) as e:
+        except Exception as e:
             logger.warning(f"Error in check_structure: {e}")
-            temp_file = Path("temp.data")
-            if temp_file.exists():
-                temp_file.unlink()
             return 0.0
+
+        finally:
+            # Clean up temp file
+            if tmp_path:
+                with contextlib.suppress(Exception):
+                    Path(tmp_path).unlink()
 
     return score_fn

@@ -17,7 +17,7 @@ def test_check_potential_file():
     assert score_fn("randomstring") == 0.0
     assert score_fn(None) == 0.0
     assert score_fn("") == 0.0
-    assert score_fn("/potentials/EAM/Cu_Zhou04.eam.alloy") == 0.0
+    assert score_fn("Al99.eam.alloy") == 0.0
 
 
 @pytest.mark.parametrize(
@@ -71,58 +71,58 @@ def test_check_numerical_submission_format(target, json_string, expected):
 
 
 @pytest.mark.parametrize(
-    ("target_path", "result_path", "atom_style", "use_modal", "expected_score"),
+    ("target_path", "result_path", "atom_style", "expected_score"),
     [
-        (f"{GROUND_TRUTH_DIR}/structures/Al.data", None, "atomic", True, 0.0),
-        (f"{GROUND_TRUTH_DIR}/structures/Al.data", "", "atomic", True, 0.0),
+        (
+            (f"{GROUND_TRUTH_DIR}/structures/Al.data"),
+            "/results/1_August_2025/MD_TASKS/aluminum_structure_retrieval_subtask_sa_trial_0/Aluminum_structure.data",
+            "atomic",
+            1.0,
+        ),
+        (f"{GROUND_TRUTH_DIR}/structures/Al.data", None, "atomic", 0.0),
+        (f"{GROUND_TRUTH_DIR}/structures/Al.data", "", "atomic", 0.0),
         (
             f"{GROUND_TRUTH_DIR}/structures/Al.data",
             "/results/23_July_2025/test/gpt_4o/subtask/aluminum_structure_retrieval_subtask_em_trial_0/Aluminum_structure.data",
             "atomic",
-            True,
             1.0,
         ),
         (
             f"{GROUND_TRUTH_DIR}/energy_minimisation/Aluminum/Al_minimised_structure.dat",
             "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.data",
             "atomic",
-            True,
             1.0,
         ),
         (
             f"{GROUND_TRUTH_DIR}/energy_minimisation/Aluminum/Al_minimised_structure.dat",
             "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.in",
             "atomic",
-            True,
             0.0,
         ),
         (
             f"{GROUND_TRUTH_DIR}/structures/Si.data",
             "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.in",
             "atomic",
-            True,
             0.0,
         ),
         (
             f"{GROUND_TRUTH_DIR}/structures/Si.data",
             "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.in",
             "full",
-            True,
             0.0,
         ),
         (
             f"{GROUND_TRUTH_DIR}/structures/Si.data",
             "/results/new_benchmark_data_new/react/gpt_4o/surface_energy/task_10/task_10_4_05142114/silicon.data",
             "full",
-            True,
             1.0,
         ),
     ],
 )
 def test_check_structure_varied_styles(
-    target_path, result_path, atom_style, use_modal, expected_score
+    target_path, result_path, atom_style, expected_score
 ):
-    score_fn = check_structure(target_path, atom_style=atom_style, use_modal=use_modal)
+    score_fn = check_structure(target_path, atom_style=atom_style)
     assert score_fn(result_path) == expected_score
 
 

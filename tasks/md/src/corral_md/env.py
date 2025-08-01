@@ -12,16 +12,7 @@ from tools import (
     run_lammps,
 )
 
-from corral.base import Tool
-
-if "CORRAL_WORK_DIR" not in os.environ:
-    raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
-if "ENVIRONMENT" not in os.environ:
-    raise OSError("MD Environment not specified.")
-if "TASK_TYPE" not in os.environ:
-    raise OSError("task type not specified (tasks or subtasks).")
-
-from corral.base import Environment
+from corral.base import Environment, Tool
 from corral.io import (
     CatFilesTool,
     CopyFileTool,
@@ -35,9 +26,17 @@ from corral.io import (
 from corral.server import run_server
 from corral.task import TaskDefinition, TaskGroup
 
-BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
-ENVIRONMENT = os.environ["ENVIRONMENT"]
-TASK_TYPE = os.environ["TASK_TYPE"]
+# if "CORRAL_WORK_DIR" not in os.environ:
+#     raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
+# if "ENVIRONMENT" not in os.environ:
+#     raise OSError("MD Environment not specified.")
+# if "TASK_TYPE" not in os.environ:
+#     raise OSError("task type not specified (tasks or subtasks).")
+
+CORRAL_WORK_DIR = "/results/1_August_2025/MD_TASKS"
+ENVIRONMENT = "surface_energy"
+TASK_TYPE = "tasks"
+ELEMENT = "al"
 
 
 SCORING_FUNCTIONS = {
@@ -88,6 +87,22 @@ def load_tasks_from_json(
         # Get the scoring function by name from the registry
         scoring_fn_name = task_info.get("scoring_function", "default")
         scoring_params = task_info.get("scoring_params", {})
+
+        # Resolve 'target' if it looks like a relative path
+        target = scoring_params.get("target")
+        if isinstance(target, str) and (target.endswith(".data")):
+            json_dir = Path(json_path).resolve().parent
+            abs_target_path = Path(json_dir, target).resolve()
+
+            if not abs_target_path.is_file():
+                raise FileNotFoundError(
+                    f"[{task_id}] Target path does not exist: {abs_target_path}"
+                )
+
+            scoring_params["target"] = abs_target_path
+
+        # Optionally reassign if task_info is reused later
+        task_info["scoring_params"] = scoring_params
 
         scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
         # Add work_dir to initial input if not already present
@@ -270,7 +285,7 @@ Required submission format:
 def create_environments(
     task_json_path: str | Path,
     taskgroup_common_tools: dict[str, Tool] | None = None,
-    work_dir: str = BASE_WORK_DIR,
+    work_dir: str = CORRAL_WORK_DIR,
 ) -> dict[str, TaskGroupEnvironment]:
     """Create environments for tasks defined in a JSON file
 
@@ -333,10 +348,12 @@ if __name__ == "__main__":
         Path(__file__).parent.parent.parent
         / "environments"
         / ENVIRONMENT
-        / f"{TASK_TYPE}.json"
+        / TASK_TYPE
+        / f"{ELEMENT}.json"
     )
     logger.info(f"task directory {tasks_json_path}")
-    work_dir = BASE_WORK_DIR
+    # work_dir = BASE_WORK_DIR
+    work_dir = CORRAL_WORK_DIR
     host = os.environ.get("CORRAL_HOST", "0.0.0.0")
     port = int(os.environ.get("CORRAL_PORT", "8000"))
     environments = create_environments(
