@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from src.md.score import check_numerical, check_potential_file, check_structure
+from corral_md.score import check_numerical, check_potential_file, check_structure
 
 BASE_DIR = Path(__file__).parent.parent.resolve()
 

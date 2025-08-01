@@ -4,13 +4,13 @@ from unittest.mock import MagicMock, patch
 
 import modal
 import pytest
-from pymatgen.core import Structure
-from src.md.tools import (  # adjust import as needed
+from corral_md.tools import (
     convert_structure_to_lammps_data,
     get_potential_metadata,
     get_structure_from_mp_text,
     run_lammps,
 )
+from pymatgen.core import Structure
 
 
 @pytest.mark.parametrize(
