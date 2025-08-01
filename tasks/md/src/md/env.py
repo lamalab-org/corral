@@ -190,9 +190,7 @@ class TaskGroupEnvironment(Environment):
         """Generate the task prompt for the current task"""
         _combined_input = self.task_group.get_task_input(self.task_id)
 
-        prompt = "All the potentials, can be found at /potentials/. Note that in case of reaxff potentials, pair style 'reax/c' has been renamed to 'reaxff' and always use NULL for the control file (cfile), for example, this syntax is correct : pair_style reaxff NULL."
-
-        prompt += f"""\nTask: {self.current_task.name}
+        prompt = f"""\nTask: {self.current_task.name}
 Description: {self.current_task.description}
 
 Required submission format:
@@ -201,6 +199,8 @@ Required submission format:
 """
 
         prompt += "\nAvailable input data:\n"
+
+        prompt += "All the potentials, can be found at /potentials/. Note that in case of reaxff potentials, pair style 'reax/c' has been renamed to 'reaxff' and always use NULL for the control file (cfile), for example, this syntax is correct : pair_style reaxff NULL.\n\n"
 
         # Display input data from dependencies
         for dep_task_id in self.current_task.input_from_tasks:
