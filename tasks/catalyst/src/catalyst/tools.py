@@ -11,7 +11,8 @@ from mp_api.client import MPRester
 from corral.base import Tool
 from corral.utils import tool
 
-load_dotenv("../.env")
+if "MP_API_KEY" not in os.environ:
+    load_dotenv("../.env")
 
 
 # utility function
@@ -490,7 +491,7 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
     [CONTEXTUAL] How this tool works:
     - Parses the slab CIF structure to identify surface atoms
     - Uses AdsorbateSiteFinder from pymatgen to geometrically analyze the surface topology
-    - Classifies sites based on coordination environment (top, bridge, hollow)
+    - Classifies sites based on coordination environment (ontop, bridge, hollow)
     - Calculates fractional coordinates for each potential binding site
     - Returns sites organized by type in a JSON format for easy selection
     [/CONTEXTUAL]
@@ -523,7 +524,7 @@ def get_adsorption_sites_text(slab_cif: str) -> str:
         str: [BRIEF] JSON string containing classified adsorption sites with fractional coordinates. [/BRIEF]
              [DETAILED] A JSON-formatted string containing a dictionary where keys are site types (e.g., "top", "bridge", "hollow") and values are lists of fractional coordinates for each site of that type.
              Each coordinate is a list of three numbers [x, y, z] representing the fractional position within the unit cell. [/DETAILED]
-             [EXAMPLES] "{"top": [[0.0, 0.0, 0.9], [0.5, 0.5, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}" [/EXAMPLES]
+             [EXAMPLES] "{"ontop": [[0.0, 0.0, 0.9], [0.5, 0.5, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}" [/EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError: [ERROR_WHEN] When the CIF string is malformed or doesn't represent a valid slab [/ERROR_WHEN]
@@ -569,7 +570,7 @@ def choose_adsorption_site_text(
 ) -> list[float]:
     """[BRIEF] Select a specific adsorption site from classified sites by type and index. [/BRIEF]
 
-    [DETAILED] This tool selects one specific adsorption site from a collection of classified sites based on the site type (top, bridge, hollow) and index within that type.
+    [DETAILED] This tool selects one specific adsorption site from a collection of classified sites based on the site type (ontop, bridge, hollow) and index within that type.
     This selection is crucial for systematic studies of different binding environments and their effects on adsorption energetics. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -595,27 +596,27 @@ def choose_adsorption_site_text(
 
     [SYNTACTICAL] Usage examples:
     [
-        `choose_adsorption_site_text(sites_json, "top", 0)`,
+        `choose_adsorption_site_text(sites_json, "ontop", 0)`,
         `choose_adsorption_site_text(sites_json, "bridge", 1)`,
         `choose_adsorption_site_text(sites_json, "hollow", 0)`,
-        `choose_adsorption_site_text(sites_json, "top", 1)`,
+        `choose_adsorption_site_text(sites_json, "ontop", 1)`,
         `choose_adsorption_site_text(sites_json, "bridge", 0)`
     ]
     [/SYNTACTICAL]
 
     Args:
         adsorption_sites_json: [BRIEF] JSON string mapping site types to lists of fractional coordinates. [/BRIEF]
-                              [DETAILED] A JSON-formatted string containing a dictionary where keys are site types (e.g., "top", "bridge", "hollow") and values are lists of fractional coordinates.
+                              [DETAILED] A JSON-formatted string containing a dictionary where keys are site types (e.g., "ontop", "bridge", "hollow") and values are lists of fractional coordinates.
                               This should be the output from get_adsorption_sites_text.
                               Each coordinate is a list of three numbers representing position within the unit cell. [/DETAILED]
                               [SYNTACTIC] 'Valid JSON string with site type keys and coordinate list values' [/SYNTACTIC]
-                              [EXAMPLES] "{"top": [[0.0, 0.0, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}" [/EXAMPLES]
+                              [EXAMPLES] "{"ontop": [[0.0, 0.0, 0.9]], "bridge": [[0.25, 0.25, 0.85]]}" [/EXAMPLES]
         site_type: [BRIEF] Type of adsorption site to select. [/BRIEF]
                   [DETAILED] The type of binding site to select from the available options.
-                  Common types include "top" (above surface atoms), "bridge" (between two atoms), and  "hollow" (in multi-atom depressions).
+                  Common types include "ontop" (above surface atoms), "bridge" (between two atoms), and  "hollow" (in multi-atom depressions).
                   The type must exist in the JSON dictionary and determines the coordination environment of the selected site. [/DETAILED]
                   [SYNTACTIC] string matching available site types [/SYNTACTIC]
-                  [EXAMPLES] "top" (on-top), "bridge" (between atoms), "hollow" (in depression) [/EXAMPLES]
+                  [EXAMPLES] "ontop" (on-top), "bridge" (between atoms), "hollow" (in depression) [/EXAMPLES]
         index: [BRIEF] Index of the site within the specified type. Defaults to 0. [/BRIEF]
               [DETAILED] The numerical index of the site to select from the list of sites of the specified type.
               Index 0 selects the first site, index 1 the second, and so on.
