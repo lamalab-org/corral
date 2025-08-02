@@ -740,8 +740,8 @@ def mass_spectrometry_spectra(h_smiles: str) -> str:
     - Use it when you want to measure the mass spectrometry spectra for the sample to elucidate its structure.
     - When you need to answer questions about the mass-to-charge ratio (m/z) of the sample.
     - When you need to analyze the isotopic distribution of the sample.
-    - When you need to know the number of insaturations in the sample.
-    - Recommended for tasks that require understanding the mass spectrum of a molecule, such as mass spectrometry analysis or chemical structure elucidation. [/PROCEDURAL]
+    - When you need to know the number of double bond equivalents in the sample.
+    - Recommended for tasks that require understanding the mass spectrum of a molecule. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
     1. [PREREQUISITE] Ensure that the correct step is to measure mass spectrometry. Do not perform unnecessary experiments. If the task is to elucidate the structure of the sample, then this tool is appropriate to begin with. [/PREREQUISITE]
@@ -1050,7 +1050,67 @@ def obtain_isomers(smiles: str) -> list[str]:
     """
     return remote_call(
         function_name="get_compound_isomers_pubchem", env_name="chemenv"
-    )(smiles=smiles)
+    )(compound=smiles)
+
+
+@tool
+def obtain_isomers_from_molecular_formula(molecular_formula: str) -> list[str]:
+    """[BRIEF] Obtain isomers for a given molecular formula. [/BRIEF]
+
+    [DETAILED] This function retrieves isomers for a given molecular formula using the `get_isomers_from_molecular_formula` remote function. It returns a list of isomer SMILES strings. The list of isomers might not be accurate since it is based on the PubChem database. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use it when you want to find isomers for a given molecular formula.
+    - When you need to explore different structural variations of a compound.
+    - Recommended for tasks that require understanding the structural diversity of a molecule, such as chemical structure elucidation or database searches. [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. Obtain the molecular formula for the compound of interest. You can use the `get_formula_from_smiles` tool to convert a SMILES string to its molecular formula.
+        2. Call this tool with the molecular formula to retrieve isomers.
+        3. Use the list of isomers for further analysis or processing.
+    [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+        - It uses the `get_isomers_from_molecular_formula` remote function to retrieve isomers for the given molecular formula.
+        - The function returns a list of SMILES strings representing the isomers of the input compound that match the molecular formula.
+        - The accuracy of the isomers is dependent on the underlying database (e.g., PubChem).
+    [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `obtain_isomers_from_molecular_formula("C2H6O")`,
+        `obtain_isomers_from_molecular_formula("C6H6")`,
+        `obtain_isomers_from_molecular_formula("C6H12")`,
+        `obtain_isomers_from_molecular_formula("C6H10O")`,
+        `obtain_isomers_from_molecular_formula("C6H10Cl2")`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        molecular_formula (str):
+            [BRIEF] The molecular formula of the compound for which to retrieve isomers. [/BRIEF]
+            [DETAILED] The molecular formula representing the chemical composition of the compound for which to retrieve isomers. It should be a valid molecular formula notation that can be processed by the isomer retrieval function. [/DETAILED]
+            [SYNTACTICAL] Valid molecular formula string [/SYNTACTICAL]
+            [EXAMPLES] "C2H6O", "C6H6", "C6H12", "C6H10O", "C6H10Cl2" [/EXAMPLES]
+
+    Returns:
+        list[str]:
+            [BRIEF] A list of SMILES strings representing the isomers of the input compound. [/BRIEF]
+            [DETAILED] The function returns a list of SMILES strings representing the isomers of the input compound. If no isomers are found, it returns an empty list. [/DETAILED]
+            [EXAMPLES] `["CCO", "C1=CC=CC=C1"]` [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        None
+    [/RAISES]
+
+    [LIMITATIONS] Known Limitations:
+        - The list of isomers may not be exhaustive or accurate, as it is based on the PubChem database.
+        - The function may not find all possible isomers, especially for complex or unusual structures.
+    [/LIMITATIONS]
+    """
+    return remote_call(
+        function_name="get_compound_isomers_pubchem_by_formula", env_name="chemenv"
+    )(formula=molecular_formula)
 
 
 @tool
@@ -1129,5 +1189,6 @@ def create_tools() -> dict[str, Tool]:
         "retrieve_isotope_distribution": retrieve_isotope_distribution,
         "retrieve_dbe_formula": retrieve_dbe_formula,
         "obtain_isomers": obtain_isomers,
+        "obtain_isomers_from_molecular_formula": obtain_isomers_from_molecular_formula,
         "validate_smiles": validate_smiles,
     }
