@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import litellm
-import openai
 from litellm.types.utils import Message
 from loguru import logger
 from promptstore import PromptStore
@@ -183,7 +182,7 @@ class BaseAgent(ABC):
 
             return response
 
-        except (openai.RateLimitError, litellm.ContextWindowExceededError) as e:
+        except litellm.ContextWindowExceededError as e:
             logger.error(f"API error: {e}")
 
             for message in reversed(self.messages):

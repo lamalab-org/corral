@@ -17,10 +17,11 @@ def run_benchmark(
     task_ids: list | None = None,
     temperature: float = 0.0,
     run_name: str = "corral_benchmark_run",
+    verbose: str = "brief",
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = BenchmarkInterface()
+    interface = BenchmarkInterface(base_url="http://localhost:8002")
     wandblogger = CorralWandbLogger(
         project="corral",
         group="tool_description_ablation",
@@ -36,9 +37,9 @@ def run_benchmark(
         trials_per_task=5,
         k_values=[1, 2, 3, 4, 5],
         verbose=True,
-        tool_verbosity="comprehensive",
+        tool_verbosity=verbose,
     )
-    result.generate_report("gpt-toolcalling-ml_env-full_verbosity.json")
+    result.generate_report(f"{run_name}.json")
     logger.info("Benchmark completed")
 
 
@@ -46,11 +47,18 @@ if __name__ == "__main__":
     load_dotenv()
     setup_litellm()
 
-    try:
-        model = "gpt-4o"
-        run_name = "gpt-toolcalling-ml_env-full_verbosity"
-        run_benchmark(model=model, run_name=run_name)
+    verboses = [
+        "brief",
+        "workflow",
+        "comprehensive",
+    ]
+    for verbose in verboses:
+        logger.info(f"Running benchmark with verbosity: {verbose}")
+        try:
+            model = "claude-3-5-sonnet-20241022"
+            run_name = f"claude-tool_calling-catalyst_env-{verbose}_verbosity"
+            run_benchmark(model=model, run_name=run_name, verbose=verbose)
 
-    except Exception as e:
-        logger.error(f"Benchmark failed: {e!s}")
-        raise
+        except Exception as e:
+            logger.error(f"Benchmark failed: {e!s}")
+            raise
