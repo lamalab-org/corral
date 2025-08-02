@@ -65,12 +65,10 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
 def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefinition]:
     task_files = json_path.glob("*.json")
 
-    # if not Path(json_path).exists():
-    #     raise FileNotFoundError(f"Task definition file not found: {json_path}")
+    if not task_files:
+        raise FileNotFoundError(f"No task definition files found in: {json_path}")
 
-    # with Path(json_path).open() as f:
-    #     task_data = json.load(f)
-
+    logger.info(f"Loading tasks from JSON files in {json_path}")
     tasks = {}
     for task_file in task_files:
         with task_file.open() as f:
@@ -196,7 +194,6 @@ class TaskGroupEnvironment(Environment):
 
     def get_task_prompt(self) -> str:
         """Generate the task prompt for the current task"""
-        _combined_input = self.task_group.get_task_input(self.task_id)
 
         prompt = f"""\nTask: {self.current_task.name}
 Description: {self.current_task.description}

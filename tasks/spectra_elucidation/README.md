@@ -1,9 +1,9 @@
-# Example Environment with Spectra Elucidation Hard
+# Example Environment with Spectra Elucidation
 
 Install environment
 
 ```bash
-cd tasks/spectra_elu
+cd tasks/spectra_elucidation
 uv venv --python 3.11.0
 uv sync
 ```
@@ -11,7 +11,7 @@ uv sync
 Run the environment
 
 ```bash
-cd tasks/spectra_elu_hard/spectra_elu_hard
+cd tasks/spectra_elucidation
 python -m env
 ```
 
