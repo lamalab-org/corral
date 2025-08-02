@@ -1,0 +1,183 @@
+LAMMPS (19 Nov 2024 - Development - patch_19Nov2024-56-ga78aee5731)
+# Initialize simulation
+units           metal
+dimension       3
+boundary        p p p  # Fully periodic for bulk system
+atom_style      atomic
+
+read_data       ../../structures/Al.data
+Reading data file ...
+  orthogonal box = (0 0 0) to (4.03893 4.03893 4.03893)
+  1 by 1 by 1 MPI processor grid
+  reading atoms ...
+  4 atoms
+  read_data CPU = 0.001 seconds
+replicate       5 5 5
+Replication is creating a 5x5x5 = 125 times larger system...
+  orthogonal box = (0 0 0) to (20.19465 20.19465 20.19465)
+  1 by 1 by 1 MPI processor grid
+  500 atoms
+  replicate CPU = 0.000 seconds
+
+variable        A1 equal lx*ly  # Surface area in Å²
+
+print          "Initial Area ${A1}"
+Initial Area 407.8238886225
+
+
+# Define interatomic potential
+pair_style      eam/alloy
+pair_coeff * * ../../../../../../modal_app/potentials/EAM/Al99.eam.alloy Al
+
+
+neighbor 2.0 bin
+neigh_modify delay 10 check yes
+
+# Bulk system relaxation
+reset_timestep  0
+thermo          100
+min_style       cg
+minimize        1.0e-10 1.0e-10 100000 100000
+Switching to 'neigh_modify every 1 delay 0 check yes' setting during minimization
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 8.28721
+  ghost atom cutoff = 8.28721
+  binsize = 4.143605, bins = 5 5 5
+  1 neighbor lists, perpetual/occasional/extra = 1 0 0
+  (1) pair eam/alloy, perpetual
+      attributes: half, newton on
+      pair build: half/bin/atomonly/newton
+      stencil: half/bin/3d
+      bin: standard
+Per MPI rank memory allocation (min/avg/max) = 4.57 | 4.57 | 4.57 Mbytes
+   Step          Temp          E_pair         E_mol          TotEng         Press
+         0   0             -1679.8628      0             -1679.8628      6480.0608
+         1   0             -1679.8628      0             -1679.8628      6480.0608
+Loop time of 0.00391086 on 1 procs for 1 steps with 500 atoms
+
+94.8% CPU use with 1 MPI tasks x no OpenMP threads
+
+Minimization stats:
+  Stopping criterion = energy tolerance
+  Energy initial, next-to-last, final =
+     -1679.86275357967  -1679.86275357967  -1679.86275357967
+  Force two-norm initial, final = 9.8054323e-14 9.8459103e-14
+  Force max component initial, final = 6.0264294e-15 6.0264294e-15
+  Final line search alpha, max atom move = 1 6.0264294e-15
+  Iterations, force evaluations = 1 2
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.0036089  | 0.0036089  | 0.0036089  |   0.0 | 92.28
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 4.9584e-05 | 4.9584e-05 | 4.9584e-05 |   0.0 |  1.27
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 0.0002524  |            |       |  6.45
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2930 ave        2930 max        2930 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          35000 ave       35000 max       35000 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 35000
+Ave neighs/atom = 70
+Neighbor list builds = 0
+Dangerous builds = 0
+
+#variable        A1 equal lx*ly  # Surface area in Å²
+
+#print          "Initial Area ${A1}"
+
+# Store bulk energy BEFORE modifying the system
+variable        Ebulk equal pe
+variable        Ebulk_stored equal ${Ebulk}  # This will keep the bulk energy fixed
+variable        Ebulk_stored equal -1679.86275357967
+
+#print "Bulk Energy (eV): ${Ebulk_stored}"
+
+# Now create a slab system (introduce a free surface)
+change_box      all boundary p p m  # Free surface in z-direction
+Changing box ...
+#replicate       1 1 2  # Increase thickness along z
+#variable xc equal "lx/2"
+#variable yc equal "ly/2"
+#variable zc equal "lz/2"
+
+#displace_atoms all rotate ${xc} ${yc} ${zc} 0 0 1 10 units box
+
+write_data    al_slab.dat
+System init for write_data ...
+
+# Minimize slab system
+minimize        1.0e-10 1.0e-10 100000 100000
+Switching to 'neigh_modify every 1 delay 0 check yes' setting during minimization
+Per MPI rank memory allocation (min/avg/max) = 4.562 | 4.562 | 4.562 Mbytes
+   Step          Temp          E_pair         E_mol          TotEng         Press          Volume
+         1   0             -1631.7587      0             -1631.7587      119.97106      8236.6843
+        12   0             -1631.811       0             -1631.811      -1624.0104      8236.6843
+Loop time of 0.0249041 on 1 procs for 11 steps with 500 atoms
+
+99.8% CPU use with 1 MPI tasks x no OpenMP threads
+
+Minimization stats:
+  Stopping criterion = energy tolerance
+  Energy initial, next-to-last, final =
+     -1631.75868534946  -1631.81097228036  -1631.81097242536
+  Force two-norm initial, final = 0.4940724 0.00062180309
+  Force max component initial, final = 0.046561472 4.6042263e-05
+  Final line search alpha, max atom move = 1 4.6042263e-05
+  Iterations, force evaluations = 11 22
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.024449   | 0.024449   | 0.024449   |   0.0 | 98.17
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.00015982 | 0.00015982 | 0.00015982 |   0.0 |  0.64
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 0.0002953  |            |       |  1.19
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           1305 ave        1305 max        1305 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          29700 ave       29700 max       29700 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 29700
+Ave neighs/atom = 59.4
+Neighbor list builds = 0
+Dangerous builds = 0
+
+# Compute slab energy and surface energy
+variable        Eslab equal pe
+
+print "Slab Energy (eV): ${Eslab}"
+Slab Energy (eV): -1631.81097242536
+
+print "Bulk Energy (eV): ${Ebulk_stored}"
+Bulk Energy (eV): -1679.86275357967
+
+variable        A equal lx*ly  # Surface area in Å²
+
+print          "Area ${A}"
+Area 407.8238886225
+
+variable surface_energy equal (${Eslab}-${Ebulk_stored})/(${A}*2)
+variable surface_energy equal (-1631.81097242536-${Ebulk_stored})/(${A}*2)
+variable surface_energy equal (-1631.81097242536--1679.86275357967)/(${A}*2)
+variable surface_energy equal (-1631.81097242536--1679.86275357967)/(407.8238886225*2)
+
+
+# Print surface energy in eV/Å²
+print "Surface Energy (eV/Å²): ${surface_energy}"
+WARNING: Detected non-ASCII characters in input. Will try to continue by replacing with ASCII equivalents where known. (src/input.cpp:478)
+Surface Energy (eV/��): 0.0589124159899187
+Total wall time: 0:00:00
