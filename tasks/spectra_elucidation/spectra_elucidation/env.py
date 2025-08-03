@@ -116,6 +116,8 @@ class TaskEnvironment(Environment):
 
         self.hidden_args = {"h_smiles": self.current_task.scoring_inputs}
 
+        logger.info(f"Initializing environment for task {self.task_id}")
+        logger.info(f"Task name: {self.current_task}")
         self._add_task_tools()
 
     def _add_task_tools(self):
@@ -144,8 +146,9 @@ class TaskEnvironment(Environment):
 
         # Display input data from dependencies
         for dep_task_id in self.current_task.input_from_tasks:
-            if dep_task_id in self.task_group.results:
-                dep_result = self.task_group.results[dep_task_id]
+            dep_key = f"{self.task_group.group_id}_{dep_task_id}"
+            if dep_key in self.task_group.results:
+                dep_result = self.task_group.results[dep_key]
                 if isinstance(dep_result, dict) and "answer" in dep_result:
                     prompt += f"- Input from {dep_task_id}: {dep_result['answer']}\n"
                 else:
@@ -201,7 +204,7 @@ def create_spectra_elu_environments(
 
     tasks = load_tasks_from_json(json_path, work_dir=work_dir)
 
-    group_id = "spectro_elucidation"
+    group_id = "spectra_elucidation"
     logger.info(f"Creating task group {group_id} with {len(tasks)} tasks")
     task_group = TaskGroup(
         group_id=group_id,
