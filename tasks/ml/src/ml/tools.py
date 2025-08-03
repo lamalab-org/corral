@@ -312,7 +312,7 @@ def get_bulk_polymorphs_data(composition: str) -> str:
         return json.dumps(polymorph_data, indent=2)
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def get_bulk_polymorphs_data_to_file(
     composition: str, save_path: str | None = None, work_dir: str | None = None
 ) -> str:
@@ -465,7 +465,7 @@ def get_bulk_polymorphs_data_to_file(
         return save_path
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def batch_retrieve_polymorphs(
     compositions: list[str],
     max_energy_above_hull: float = 0.5,
@@ -848,7 +848,7 @@ def select_polymorphs_with_strategy(
     return json.dumps(selected, indent=2)
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def consolidate_polymorph_datasets(
     composition_files: dict[str, str],
     output_path: str = "consolidated_polymorphs.json",
@@ -979,7 +979,7 @@ def consolidate_polymorph_datasets(
     )
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def select_polymorphs_with_strategy_to_file(
     polymorphs_data: str,
     save_path: str,
@@ -1137,7 +1137,7 @@ def select_polymorphs_with_strategy_to_file(
     return save_path
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def filter_json_with_strategy(
     input_json_path: str,
     output_json_path: str,
@@ -1293,7 +1293,7 @@ Dataset preparation tools for different ML model types.
 """
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def prepare_tabular_dataset(
     polymorphs_json_path: str,
     output_path: str,
@@ -1735,7 +1735,7 @@ def get_mp_thermo_data(material_id: str) -> str:
 """
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def train_xgboost_model(
     train_data_path: str,
     test_data_path: str,

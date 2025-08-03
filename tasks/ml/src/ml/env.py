@@ -131,11 +131,20 @@ class TaskGroupEnvironment(Environment):
 
         self.current_task = task_group.tasks[task_id]
 
+        self.hidden_args = {}
+
         super().__init__(f"{task_id}", base_work_dir=base_work_dir)
 
+        self._update_hidden_args()
         # Add tools
         self._add_task_tools()
         self._setup_file_tools()
+
+    def _update_hidden_args(self):
+        """Update hidden args with current work directory"""
+        current_work_dir = self.get_current_work_dir()
+        self.hidden_args = {"work_dir": current_work_dir}
+        logger.info(f"Updated hidden_args work_dir to: {current_work_dir}")
 
     def _add_task_tools(self):
         """Add required tools for the task"""
@@ -179,6 +188,7 @@ class TaskGroupEnvironment(Environment):
     def reset_state(self) -> str:
         """Reset state and update file tools for new workspace"""
         trial_id = super().reset_state()
+        self._update_hidden_args()
         # Recreate file tools for new workspace
         self._setup_file_tools()
         return trial_id
