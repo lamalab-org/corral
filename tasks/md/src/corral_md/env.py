@@ -30,16 +30,12 @@ if "CORRAL_WORK_DIR" not in os.environ:
     raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
 if "ENVIRONMENT" not in os.environ:
     raise OSError("MD Environment not specified.")
-if "TASK_TYPE" not in os.environ:
-    raise OSError("task type not specified (tasks or subtasks).")
-if "ELEMENT" not in os.environ:
-    raise OSError("Element not specified (e.g., al, si, cu).")
 
 
 CORRAL_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
 ENVIRONMENT = os.environ["ENVIRONMENT"]
 TASK_TYPE = os.environ["TASK_TYPE"]
-ELEMENT = os.environ["ELEMENT"]
+
 
 SCORING_FUNCTIONS = {
     "check_numerical": check_numerical,
@@ -66,60 +62,53 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
         return fn
 
 
-def load_tasks_from_json(
-    json_path: str | Path, work_dir: str
-) -> dict[str, TaskDefinition]:
-    """Load task definitions from a JSON file.
+def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefinition]:
+    task_files = json_path.glob("*.json")
 
-    Args:
-        json_path: Path to the JSON file containing task definitions
-        work_dir: Working directory to use for task execution
+    if not task_files:
+        raise FileNotFoundError(f"No task definition files found in: {json_path}")
 
-    Returns:
-        dictionary of task definitions keyed by task ID
-    """
-    if not Path(json_path).exists():
-        raise FileNotFoundError(f"Task definition file not found: {json_path}")
-
-    with Path(json_path).open() as f:
-        task_data = json.load(f)
-
+    logger.info(f"Loading tasks from JSON files in {json_path}")
     tasks = {}
-    for task_id, task_info in task_data.items():
-        # Get the scoring function by name from the registry
-        scoring_fn_name = task_info.get("scoring_function", "default")
-        scoring_params = task_info.get("scoring_params", {})
+    for task_file in task_files:
+        with task_file.open() as f:
+            task_data = json.load(f)
+        for task_id, task_info in task_data.items():
+            # Get the scoring function by name from the registry
+            scoring_fn_name = task_info.get("scoring_function", "default")
+            scoring_params = task_info.get("scoring_params", {})
 
-        # Resolve 'target' if it looks like a relative path
-        target = scoring_params.get("target")
-        if isinstance(target, str) and (target.endswith(".data")):
-            json_dir = Path(json_path).resolve().parent
-            abs_target_path = Path(json_dir, target).resolve()
+            # Resolve 'target' if it looks like a relative path
+            target = scoring_params.get("target")
+            if isinstance(target, str) and (target.endswith(".data")):
+                json_dir = Path(task_file).resolve().parent
+                abs_target_path = Path(json_dir, target).resolve()
+                logger.info(f"Resolving target path: {abs_target_path}")
 
-            if not abs_target_path.is_file():
-                raise FileNotFoundError(
-                    f"[{task_id}] Target path does not exist: {abs_target_path}"
-                )
+                if not abs_target_path.is_file():
+                    raise FileNotFoundError(
+                        f"[{task_id}] Target path does not exist: {abs_target_path}"
+                    )
 
-            scoring_params["target"] = abs_target_path
+                scoring_params["target"] = abs_target_path
 
-        # Optionally reassign if task_info is reused later
-        task_info["scoring_params"] = scoring_params
+            # Optionally reassign if task_info is reused later
+            task_info["scoring_params"] = scoring_params
 
-        scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
-        # Add work_dir to initial input if not already present
-        initial_input = task_info.get("initial_input", {}).copy()
-        if "work_dir" not in initial_input:
-            initial_input["work_dir"] = work_dir
-        tasks[task_id] = TaskDefinition(
-            name=task_info["name"],
-            description=task_info["description"],
-            tools=task_info.get("tools", []),
-            scoring_fn=scoring_fn,
-            submission_format=task_info.get("submission_format", ""),
-            input_from_tasks=task_info.get("input_from_tasks", []),
-            initial_input=initial_input,
-        )
+            scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
+            # Add work_dir to initial input if not already present
+            initial_input = task_info.get("initial_input", {}).copy()
+            if "work_dir" not in initial_input:
+                initial_input["work_dir"] = work_dir
+            tasks[task_id] = TaskDefinition(
+                name=task_info["name"],
+                description=task_info["description"],
+                tools=task_info.get("tools", []),
+                scoring_fn=scoring_fn,
+                submission_format=task_info.get("submission_format", ""),
+                input_from_tasks=task_info.get("input_from_tasks", []),
+                initial_input=initial_input,
+            )
 
     return tasks
 
@@ -205,7 +194,6 @@ class TaskGroupEnvironment(Environment):
 
     def get_task_prompt(self) -> str:
         """Generate the task prompt for the current task"""
-        _combined_input = self.task_group.get_task_input(self.task_id)
 
         prompt = f"""\nTask: {self.current_task.name}
 Description: {self.current_task.description}
@@ -236,7 +224,7 @@ Required submission format:
 
         # Add workspace info
         if self.current_work_dir:
-            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir}. when using tools use this path\n"
+            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir} when using tools use this path.\n"
 
         # Add note about dependencies
         if self.current_task.input_from_tasks:
@@ -285,29 +273,31 @@ Required submission format:
 
 
 def create_environments(
-    task_json_path: str | Path,
-    taskgroup_common_tools: dict[str, Tool] | None = None,
     work_dir: str = CORRAL_WORK_DIR,
+    subtask_level: bool = False,
+    taskgroup_common_tools: dict[str, Tool] | None = None,
 ) -> dict[str, TaskGroupEnvironment]:
-    """Create environments for tasks defined in a JSON file
+    logger.info("Creating environments for MD")
 
-    Args:
-        task_json_path: Path to the JSON file with task definitions
-        taskgroup_common_tools: dictionary of Tools which are common for subtasks, for example file system tools
-        work_dir: Working directory for task execution
-
-    Returns:
-        dictionary of environments keyed by task ID
-    """
-
-    logger.info(f"Creating environments from {task_json_path} with work_dir {work_dir}")
+    if subtask_level:
+        logger.info("Creating environments with subtask level enabled")
+        json_path = (
+            Path(__file__).parent.parent.parent
+            / "environments"
+            / ENVIRONMENT
+            / "subtasks"
+        )
+    else:
+        json_path = (
+            Path(__file__).parent.parent.parent / "environments" / ENVIRONMENT / "tasks"
+        )
 
     # Load tasks from JSON
-    tasks = load_tasks_from_json(task_json_path, work_dir)
+    tasks = load_tasks_from_json(json_path, work_dir)
 
     # Create task group
-    group_id = Path(task_json_path).stem  # Use filename (without extension) as group ID
-    logger.info(f"Creating task group with ID: {group_id}")
+    group_id = f"MD-{ENVIRONMENT}"
+    logger.info(f"Creating task group {group_id} with {len(tasks)} tasks")
     task_group = TaskGroup(group_id=group_id, tasks=tasks)
 
     # Print task dependencies for reference
@@ -320,9 +310,6 @@ def create_environments(
     logger.info("\nTask Execution Order:")
     for i, task_id in enumerate(ordered_tasks):
         logger.info(f"{i+1}. {task_id}")
-
-    # Create all available tools
-    # subtask_specific_tools = create_ml_tools()
 
     # Create environments for all tasks
     subtask_specific_tools = {
@@ -346,22 +333,34 @@ def create_environments(
 
 
 if __name__ == "__main__":
-    tasks_json_path = (
-        Path(__file__).parent.parent.parent
-        / "environments"
-        / ENVIRONMENT
-        / TASK_TYPE
-        / f"{ELEMENT}.json"
+    import argparse
+
+    parser = argparse.ArgumentParser(description="MD Benchmark Server")
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
+        help="Host to run the server on",
     )
-    logger.info(f"task directory {tasks_json_path}")
-    # work_dir = BASE_WORK_DIR
-    work_dir = CORRAL_WORK_DIR
-    host = os.environ.get("CORRAL_HOST", "0.0.0.0")
-    port = int(os.environ.get("CORRAL_PORT", "8000"))
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("CORRAL_PORT", "8000")),
+        help="Port to run the server on",
+    )
+    parser.add_argument(
+        "--subtask_level",
+        type=bool,
+        default=False,
+        help="Whether to use subtask level",
+    )
+    args = parser.parse_args()
+
+    # Create all environments with file system tools
     environments = create_environments(
-        task_json_path=tasks_json_path,
-        work_dir=work_dir,
+        work_dir=CORRAL_WORK_DIR, subtask_level=args.subtask_level
     )
+
     logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
         logger.info(f"- {env_id}")
@@ -369,5 +368,8 @@ if __name__ == "__main__":
         if env.current_task.input_from_tasks:
             logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
 
-    # Run server
-    run_server(environments, host, port)
+    run_server(
+        environments=environments,
+        host=args.host,
+        port=args.port,
+    )

@@ -215,6 +215,13 @@ class ReActAgent(BaseAgent):
                             name=action.tool_name,
                         )
                     )
+            else:
+                self.messages.append(
+                    LiteLLMMessage(
+                        role="user",
+                        content=str(llm_response),
+                    )
+                )
 
         self.messages.append(
             LiteLLMMessage(
