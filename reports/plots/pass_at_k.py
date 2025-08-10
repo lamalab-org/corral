@@ -154,3 +154,65 @@ def plot_performance(model_scores, outname):
 
 
 plot_performance(model_scores, "pass_at_5.pdf")
+
+# Collect token usage and scores for scatter plot
+scatter_data = []
+for path in PATHS:
+    for file in path.glob("*.json"):
+        with file.open() as f:
+            data = json.load(f)
+        model, agent, desc = extract_info_from_filename(file)
+        score = data["metrics"]["pass@5"]
+        tokens = data["metrics"]["total_token_usage"]["completion_tokens"]
+        label = f"{model}-{agent}-{desc.replace('_verbosity', '')}"
+        scatter_data.append((tokens, score, label))
+
+# Scatter plot: tokens vs pass@5
+fig, ax = plt.subplots(figsize=(8, 6))
+for tokens, score, label in scatter_data:
+    if label.startswith("claude_35_sonnet-"):
+        color = "#ff6b35"  # Orange for Claude
+    elif label.startswith("gpt4o-"):
+        color = "#28a745"  # Green for GPT-4o
+    else:
+        color = "#007acc"  # Default blue
+    ax.scatter(tokens, score, s=60, alpha=0.7, color=color)
+    ax.text(tokens, score, label, fontsize=8, ha="center", va="bottom", color=color)
+
+tokens_arr = np.array([t for t, s, li in scatter_data])
+scores_arr = np.array([s for t, s, li in scatter_data])
+range_frame(ax, np.array([300000, 1000000]), np.array([0.3, 0.5]), pad=0.1)
+ax.set_xlabel("Completion Tokens")
+ax.set_ylabel("pass@5 Score")
+fig.savefig("tokens_vs_pass_at_5.pdf", bbox_inches="tight")
+
+# Collect tool calls data for scatter plot
+scatter_data = []
+for path in PATHS:
+    for file in path.glob("*.json"):
+        with file.open() as f:
+            data = json.load(f)
+        model, agent, desc = extract_info_from_filename(file)
+        score = data["metrics"]["pass@5"]
+        tokens = data["metrics"]["total_tool_calls"]
+        label = f"{model}-{agent}-{desc.replace('_verbosity', '')}"
+        scatter_data.append((tokens, score, label))
+
+# Scatter plot: tool calls vs pass@5
+fig, ax = plt.subplots(figsize=(8, 6))
+for tokens, score, label in scatter_data:
+    if label.startswith("claude_35_sonnet-"):
+        color = "#ff6b35"  # Orange for Claude
+    elif label.startswith("gpt4o-"):
+        color = "#28a745"  # Green for GPT-4o
+    else:
+        color = "#007acc"  # Default blue
+    ax.scatter(tokens, score, s=60, alpha=0.7, color=color)
+    ax.text(tokens, score, label, fontsize=8, ha="center", va="bottom", color=color)
+
+tokens_arr = np.array([t for t, s, li in scatter_data])
+scores_arr = np.array([s for t, s, li in scatter_data])
+range_frame(ax, np.array([1200, 1900]), np.array([0.3, 0.5]), pad=0.1)
+ax.set_xlabel("Total Tool Calls")
+ax.set_ylabel("pass@5 Score")
+fig.savefig("tools_vs_pass_at_5.pdf", bbox_inches="tight")

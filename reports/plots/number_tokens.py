@@ -55,7 +55,7 @@ for path in PATHS:
         with file.open() as f:
             data = json.load(f)
         model, agent, desc = extract_info_from_filename(file)
-        score = data["metrics"]["total_token_usage"]["total_tokens"]
+        score = data["metrics"]["total_token_usage"]["completion_tokens"]
         results[(model, agent)][desc] = score
         desc_levels.add(desc)
 
