@@ -10,11 +10,11 @@ load_dotenv("../../.env", override=True)
 client = OpenAI()
 
 SPECTRA_PATH = Path(
-    "../../tasks/spectra_elucidation/spectra_elucidation/subtasks_json/task_1.json"
+    "../../tasks/spectra_elucidation/spectra_elucidation/tasks_json/task_1.json"
 )
-ML_PATH = Path("../../tasks/ml/config/chained/chained_oxide.json")
-CATALYST_PATH = Path("../../tasks/catalyst/config/chained/chained_si.json")
-MD_PATH = Path("../../tasks/corral_md/environments/melting/subtasks/al.json")
+ML_PATH = Path("../../tasks/ml/config/single/single.json")
+CATALYST_PATH = Path("../../tasks/catalyst/config/single/single.json")
+MD_PATH = Path("../../tasks/corral_md/environments/melting/tasks/al.json")
 
 
 def embed_text(text: str) -> list[float]:
@@ -48,10 +48,10 @@ def embed_ml_task(path_path=ML_PATH):
     if embeddings:
         embeddings_array = np.array(embeddings)
 
-        embeddings_file = f"embeddings/{task}_tasks_embeddings.npy"
+        embeddings_file = f"embeddings/{task}_tasks_embeddings_full.npy"
         np.save(embeddings_file, embeddings_array)
 
-        task_names_file = f"embeddings/{task}_task_names.npy"
+        task_names_file = f"embeddings/{task}_task_names_full.npy"
         np.save(task_names_file, np.array(task_names))
         logger.info("Embeddings saved successfully.")
     else:
@@ -82,10 +82,10 @@ def embed_spectra():
     if embeddings:
         embeddings_array = np.array(embeddings)
 
-        embeddings_file = "embeddings/spectra_elucidation_tasks_embeddings.npy"
+        embeddings_file = "embeddings/spectra_elucidation_tasks_embeddings_full.npy"
         np.save(embeddings_file, embeddings_array)
 
-        task_names_file = "embeddings/spectra_elucidation_task_names.npy"
+        task_names_file = "embeddings/spectra_elucidation_task_names_full.npy"
         np.save(task_names_file, np.array(task_names))
         logger.info("Embeddings saved successfully.")
 

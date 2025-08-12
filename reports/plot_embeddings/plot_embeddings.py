@@ -88,6 +88,7 @@ def plot_embeddings(task, verbosity):
     plt.legend()
     plt.tight_layout()
     plt.savefig(Path(save_dir) / f"{task}_{verbosity}_embeddings_combined_pca_plot.pdf")
+    plt.savefig(Path(save_dir) / f"{task}_{verbosity}_embeddings_combined_pca_plot.png")
     plt.close()
 
     # Plot tools only
@@ -128,6 +129,9 @@ def plot_embeddings(task, verbosity):
     plt.savefig(
         Path(save_dir) / f"{task}_{verbosity}_embeddings_tools_only_pca_plot.pdf"
     )
+    plt.savefig(
+        Path(save_dir) / f"{task}_{verbosity}_embeddings_tools_only_pca_plot.png"
+    )
     plt.close()
 
     # Plot tasks only
@@ -167,6 +171,9 @@ def plot_embeddings(task, verbosity):
     plt.tight_layout()
     plt.savefig(
         Path(save_dir) / f"{task}_{verbosity}_embeddings_tasks_only_pca_plot.pdf"
+    )
+    plt.savefig(
+        Path(save_dir) / f"{task}_{verbosity}_embeddings_tasks_only_pca_plot.png"
     )
     plt.close()
 
@@ -344,6 +351,7 @@ def plot_all_tasks_combined(verbosity):
         save_dir.mkdir(parents=True)
 
     plt.savefig(save_dir / f"all_tasks_{verbosity}_embeddings_combined_pca_plot.pdf")
+    plt.savefig(save_dir / f"all_tasks_{verbosity}_embeddings_combined_pca_plot.png")
     plt.close()
 
 
