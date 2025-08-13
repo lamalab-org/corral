@@ -1,7 +1,12 @@
+import random
+import re
 import traceback
+from collections import Counter
+from itertools import combinations
 from pathlib import Path
 from typing import Any
 
+import modal
 import requests
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
@@ -12,6 +17,12 @@ from corral.utils import (
     tool,
     vector_database_search,
 )
+
+_ELEMENT_PAT = re.compile(r"([A-Z][a-z]?)(\d*)")
+_PAREN_PAT = re.compile(r"\(([^()]*)\)(\d*)")
+_DOT_PAT = re.compile(r"·|\.")
+
+get_isomers = modal.Function.lookup("chemenv", "get_compound_isomers_pubchem")
 
 
 @tool
@@ -994,66 +1005,6 @@ Example Calculations:
 
 
 @tool
-def obtain_isomers(smiles: str) -> list[str]:
-    """[BRIEF] Obtain isomers for a given SMILES string. [/BRIEF]
-
-    [DETAILED] This function retrieves isomers for a given SMILES string using the `get_isomers` remote function. It returns a list of isomer SMILES strings. The list of isomers might not be accurate since it is based on the PubChem database. [/DETAILED]
-
-    [PROCEDURAL] When to use this tool:
-    - Use it when you want to find isomers for a given SMILES string.
-    - When you need to explore different structural variations of a compound.
-    - Recommended for tasks that require understanding the structural diversity of a molecule, such as chemical structure elucidation or database searches. [/PROCEDURAL]
-
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. Obtain the SMILES string for the compound of interest. You can use the `validate_smiles` tool to ensure the SMILES string is valid.
-        2. Call this tool with the SMILES string to retrieve isomers.
-        3. Use the list of isomers for further analysis or processing.
-    [/WORKFLOW_INTEGRATION]
-
-    [CONTEXTUAL] How this tool works:
-        - It uses the `get_isomers` remote function to retrieve isomers for the given SMILES string.
-        - The function returns a list of SMILES strings representing the isomers of the input compound that match the molecular formula.
-        - The accuracy of the isomers is dependent on the underlying database (e.g., PubChem).
-    [/CONTEXTUAL]
-
-    [SYNTACTICAL] Usage examples:
-    [
-        `obtain_isomers("CCO")`,  # Example SMILES for ethanol
-        `obtain_isomers("C1=CC=CC=C1")`,  # Example SMILES for benzene
-        `obtain_isomers("C1CCCCC1")`,  # Example SMILES for cyclohexane
-        `obtain_isomers("C1=CC=CC=C1O")`,  # Example SMILES for phenol
-        `obtain_isomers("C1=CC=C(C=C1)O")`,  # Example SMILES for catechol
-    ]
-    [/SYNTACTICAL]
-
-    Args:
-        smiles (str):
-            [BRIEF] The SMILES representation of the compound for which to retrieve isomers. [/BRIEF]
-            [DETAILED] The SMILES string representing the chemical structure of the compound for which to retrieve isomers. It should be a valid SMILES notation that can be processed by the isomer retrieval function. [/DETAILED]
-            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
-            [EXAMPLES] "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
-
-    Returns:
-        list[str]:
-            [BRIEF] A list of SMILES strings representing the isomers of the input compound. [/BRIEF]
-            [DETAILED] The function returns a list of SMILES strings representing the isomers of the input compound. If no isomers are found, it returns an empty list. [/DETAILED]
-            [EXAMPLES] `["CCO", "C1=CC=CC=C1"]` [/EXAMPLES]
-
-    [RAISES] Exceptions:
-        None
-    [/RAISES]
-
-    [LIMITATIONS] Known Limitations:
-        - The list of isomers may not be exhaustive or accurate, as it is based on the PubChem database.
-        - The function may not find all possible isomers, especially for complex or unusual structures.
-    [/LIMITATIONS]
-    """
-    return remote_call(
-        function_name="get_compound_isomers_pubchem", env_name="chemenv"
-    )(compound=smiles)
-
-
-@tool
 def obtain_isomers_from_molecular_formula(molecular_formula: str) -> list[str]:
     """[BRIEF] Obtain isomers for a given molecular formula. [/BRIEF]
 
@@ -1173,6 +1124,210 @@ def validate_smiles(smiles: str) -> bool:
     return mol is not None
 
 
+def differs_by_one_atom(parent_formula, fragment_formula):
+    """Check if fragment differs from parent by exactly one atom"""
+    fragment_dict = parse_molecular_formula(fragment_formula)
+
+    total_diff = 0
+    all_elements = set(parent_formula.keys()) | set(fragment_dict.keys())
+
+    for element in all_elements:
+        parent_count = parent_formula.get(element, 0)
+        fragment_count = fragment_dict.get(element, 0)
+        diff = abs(parent_count - fragment_count)
+        total_diff += diff
+
+    # If total difference is exactly 1, it means one atom was added/removed
+    return total_diff == 1 or total_diff == 0
+
+
+def _parse_simple(formula: str) -> dict[str, int]:
+    """
+    Parse an already-expanded, dot-free formula into {element: count}.
+    """
+    counts = Counter()
+    for el, cnt in _ELEMENT_PAT.findall(formula):
+        counts[el] += int(cnt or 1)
+    return counts
+
+
+def _expand_parentheses(formula: str) -> str:
+    """
+    Recursively expand parentheses so that C6H5(CH3) becomes C6H5C1H3 etc.
+    """
+    while True:
+        m = _PAREN_PAT.search(formula)
+        if not m:
+            return formula
+        inner, mult = m.groups()
+        mult = int(mult or 1)
+        expanded = "".join(
+            f"{el}{int(cnt or 1)*mult}" for el, cnt in _ELEMENT_PAT.findall(inner)
+        )
+        formula = formula[: m.start()] + expanded + formula[m.end() :]
+
+
+def parse_molecular_formula(formula: str) -> dict[str, int]:
+    """
+    Parse molecular formula into an element-count mapping, handling
+    parentheses and dot adducts.
+    """
+    parts = _DOT_PAT.split(formula.replace(" ", ""))
+    total = Counter()
+    for part in parts:
+        expanded = _expand_parentheses(part)
+        total += _parse_simple(expanded)
+    return dict(total)
+
+
+def enumerate_fragments_from_smiles(
+    smi: str,
+    max_cuts: int = 2,
+    skip_ring_bonds: bool = True,
+    min_heavy_atoms: int = 2,
+    max_combos: int = 100000,
+):
+    """
+    Generate fragment SMILES by breaking up to `max_cuts` bonds.
+    Returns a sorted list of unique canonical SMILES of fragments.
+    """
+    mol = Chem.MolFromSmiles(smi)
+    if mol is None:
+        raise ValueError("Invalid SMILES")
+
+    # Candidate bonds: heavy-atom bonds only; optionally skip ring bonds
+    cand_bond_idxs = []
+    for b in mol.GetBonds():
+        a1, a2 = b.GetBeginAtom(), b.GetEndAtom()
+        if a1.GetAtomicNum() == 1 or a2.GetAtomicNum() == 1:
+            continue
+        if skip_ring_bonds and b.IsInRing():
+            continue
+        cand_bond_idxs.append(b.GetIdx())
+
+    # Early exit: nothing to cut
+    if not cand_bond_idxs or max_cuts < 1:
+        # Still return the whole molecule as one "fragment"
+        return [Chem.MolToSmiles(mol, isomericSmiles=True, canonical=True)]
+
+    uniq = set()
+    tried = 0
+
+    # Always include the intact molecule as a "fragment"
+    uniq.add(Chem.MolToSmiles(mol, isomericSmiles=True, canonical=True))
+
+    for ncuts in range(1, min(max_cuts, len(cand_bond_idxs)) + 1):
+        for cutset in combinations(cand_bond_idxs, ncuts):
+            tried += 1
+            if tried > max_combos:
+                # Safety valve against combinatorial explosion
+                break
+
+            # Make a copy and remove the selected bonds
+            rw = Chem.RWMol(mol)
+            for bidx in cutset:
+                b = rw.GetBondWithIdx(bidx)
+                rw.RemoveBond(b.GetBeginAtomIdx(), b.GetEndAtomIdx())
+
+            # Get connected components as fragments; don't resanitize each time
+            frags = Chem.rdmolops.GetMolFrags(
+                rw.GetMol(), asMols=True, sanitizeFrags=False
+            )
+
+            for frag in frags:
+                # Filter tiny pieces
+                if (
+                    sum(1 for a in frag.GetAtoms() if a.GetAtomicNum() > 1)
+                    < min_heavy_atoms
+                ):
+                    continue
+
+                # You can optionally sanitize; radicals/valence issues are fine for MS-like fragments
+                # Chem.SanitizeMol(frag, catchErrors=True)  # optional
+                smi_frag = Chem.MolToSmiles(frag, isomericSmiles=True, canonical=True)
+                uniq.add(smi_frag)
+        else:
+            continue
+        break  # broke due to max_combos
+
+    return sorted(uniq)
+
+
+@tool(hidden_args=["h_smiles"])
+def return_possible_fragments(h_smiles: str) -> list[str]:
+    """[BRIEF] Return possible fragments for the sample at hand. [/BRIEF]
+
+    [DETAILED] This function generates some possible fragments by web lookup, and similarity check with similar spectra. It returns a list of unique fragment SMILES strings. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - When you need to generate possible fragments for the sample at hand.
+    - When you want to explore different possible options based on the spectra.
+    - When you are at an endpoint and need to consider all potential fragments. [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Ensure that the correct step is to generate possible fragments. Ensure that you really tried to guess all the posibilities from the information available. [/PREREQUISITE]
+    2. [CURRENT] Call this tool to generate possible fragments for the sample at hand. [/CURRENT]
+    3. [FOLLOW_UP] Evaluate the generated fragments for relevance and potential. Use the fragments that you consider most promising for further analysis. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+    - This tool takes the spectra information and generates possible fragments based on similar spectra of known molecules.
+    - It uses a combination of cheminformatics techniques to identify potential fragment structures.
+    - It leverages existing databases and algorithms to find the most relevant fragments.
+    [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `return_possible_fragments()`
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        None
+
+    Returns:
+        list[str]:
+            [BRIEF] A list of unique fragment SMILES strings. [/BRIEF]
+            [DETAILED] This list contains all the unique SMILES representations of the candidate fragments found by database lookup. [/DETAILED]
+            [EXAMPLES] Example SMILES strings: ["C1=CC=CC=C1", "C1=CC=CC=C1O", ...] [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        None
+    [/RAISES]
+
+    [LIMITATIONS] Known Limitations:
+        - The function may not find all possible fragments, especially for complex molecules.
+        - The quality of the generated fragments depends on the underlying database and its coverage.
+    [/LIMITATIONS]
+    """
+    mol = Chem.MolFromSmiles(h_smiles)
+    if mol is None:
+        raise ValueError("Invalid SMILES string provided.")
+
+    parent_formula = mol.GetFormula()
+
+    fragments = enumerate_fragments_from_smiles(h_smiles)
+
+    final_fragments = []
+    isomers = []
+    for fragment in fragments:
+        try:
+            Chem.MolFromSmiles(fragment)
+        except Exception:
+            continue
+        if fragment is None:
+            continue
+        if not differs_by_one_atom(parent_formula, fragment):
+            isomers.extend(get_isomers.remote(fragment))
+            final_fragments.append(fragment)
+
+    while len(final_fragments) < 3 * len(fragments):
+        final_fragments.append(random.choice(isomers))
+
+    random.shuffle(final_fragments)
+    return final_fragments
+
+
 def create_tools() -> dict[str, Tool]:
     """Create a dictionary of all available tools for the agent environment"""
     return {
@@ -1188,7 +1343,7 @@ def create_tools() -> dict[str, Tool]:
         "mass_spectrometry_spectra": mass_spectrometry_spectra,
         "retrieve_isotope_distribution": retrieve_isotope_distribution,
         "retrieve_dbe_formula": retrieve_dbe_formula,
-        "obtain_isomers": obtain_isomers,
         "obtain_isomers_from_molecular_formula": obtain_isomers_from_molecular_formula,
         "validate_smiles": validate_smiles,
+        "return_possible_fragments": return_possible_fragments,
     }
