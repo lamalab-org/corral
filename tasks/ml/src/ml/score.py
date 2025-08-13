@@ -554,9 +554,10 @@ def model_evaluation_completeness_binary(evaluation_results_path: str) -> int:
             return 0
 
         # Criteria 3: Check performance quality (r2 >= 0.7)
-        if not ("r2" in metrics and metrics["r2"] >= 0.7):
+        r2_value = metrics.get("r2")
+        if not (isinstance(r2_value, int | float) and r2_value >= 0.7):
             logger.info(
-                f"Binary check failed: R2 ({metrics.get('r2', 'N/A')}) is below 0.7."
+                f"Binary check failed: R2 ({r2_value}) is not a valid number or is below 0.7."
             )
             return 0
 

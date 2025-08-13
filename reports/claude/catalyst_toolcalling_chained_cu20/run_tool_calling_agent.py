@@ -21,7 +21,7 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = BenchmarkInterface(base_url="http://localhost:8005")
+    interface = BenchmarkInterface(base_url="http://localhost:8004")
     wandblogger = CorralWandbLogger(
         project="corral",
         group="tool_description_ablation",

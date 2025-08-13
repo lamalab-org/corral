@@ -1788,7 +1788,7 @@ def train_xgboost_model(
                        Should have identical column structure to training data. [/DETAILED]
                        [SYNTACTIC] "Valid file path to CSV file with header" [/SYNTACTIC]
                        [EXAMPLES] "data/test.csv", "datasets/materials_test.csv", "ml_data/test_features.csv" [/EXAMPLES]
-        model_save_path: [BRIEF] Path to save the trained model file. [/BRIEF]
+        model_save_path: [BRIEF] Path to save the trained model file in .pkl format [/BRIEF]
                         [DETAILED] Complete file path where the trained XGBoost model will be saved using joblib serialization.
                         The model can be loaded later for predictions or further analysis.
                         Using .pkl extension is recommended for clarity. [/DETAILED]

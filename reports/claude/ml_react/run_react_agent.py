@@ -48,7 +48,6 @@ if __name__ == "__main__":
     setup_litellm()
 
     verboses = [
-        "brief",
         "workflow",
         "comprehensive",
     ]
