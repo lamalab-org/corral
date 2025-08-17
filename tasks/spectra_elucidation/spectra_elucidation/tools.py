@@ -24,8 +24,6 @@ _PAREN_PAT = re.compile(r"\(([^()]*)\)(\d*)")
 _DOT_PAT = re.compile(r"·|\.")
 
 get_isomers = modal.Function.lookup("chemenv", "get_compound_isomers_pubchem")
-get_proton_spectrum = modal.Function.lookup("chemenv", "get_h_nmr_prediction")
-get_carbon_spectrum = modal.Function.lookup("chemenv", "get_c13_nmr_prediction")
 
 
 @tool
@@ -1191,6 +1189,7 @@ def enumerate_fragments_from_smiles(
     """
     Generate fragment SMILES by breaking up to `max_cuts` bonds.
     Returns a sorted list of unique canonical SMILES of fragments.
+    Preserves ions by setting formal charges instead of adding hydrogens.
     """
     mol = Chem.MolFromSmiles(smi)
     if mol is None:
@@ -1208,14 +1207,10 @@ def enumerate_fragments_from_smiles(
 
     # Early exit: nothing to cut
     if not cand_bond_idxs or max_cuts < 1:
-        # Still return the whole molecule as one "fragment"
-        return [Chem.MolToSmiles(mol, isomericSmiles=True, canonical=True)]
+        return []
 
     uniq = set()
     tried = 0
-
-    # Always include the intact molecule as a "fragment"
-    uniq.add(Chem.MolToSmiles(mol, isomericSmiles=True, canonical=True))
 
     for ncuts in range(1, min(max_cuts, len(cand_bond_idxs)) + 1):
         for cutset in combinations(cand_bond_idxs, ncuts):
@@ -1224,29 +1219,69 @@ def enumerate_fragments_from_smiles(
                 # Safety valve against combinatorial explosion
                 break
 
-            # Make a copy and remove the selected bonds
             rw = Chem.RWMol(mol)
+            cut_atom_info = {}
+
+            # Count how many bonds each atom will lose
             for bidx in cutset:
+                b = rw.GetBondWithIdx(bidx)
+                begin_idx = b.GetBeginAtomIdx()
+                end_idx = b.GetEndAtomIdx()
+
+                cut_atom_info[begin_idx] = cut_atom_info.get(begin_idx, 0) + 1
+                cut_atom_info[end_idx] = cut_atom_info.get(end_idx, 0) + 1
+
+            # Before removing bonds, adjust formal charges on cut atoms
+            for atom_idx, bonds_lost in cut_atom_info.items():
+                atom = rw.GetAtomWithIdx(atom_idx)
+                current_charge = atom.GetFormalCharge()
+
+                # Adjust charge based on bonds lost
+                new_charge = current_charge - bonds_lost
+                atom.SetFormalCharge(new_charge)
+
+            # Now remove the selected bonds
+            for bidx in sorted(
+                cutset, reverse=True
+            ):  # Remove in reverse order to maintain indices
                 b = rw.GetBondWithIdx(bidx)
                 rw.RemoveBond(b.GetBeginAtomIdx(), b.GetEndAtomIdx())
 
-            # Get connected components as fragments; don't resanitize each time
-            frags = Chem.rdmolops.GetMolFrags(
-                rw.GetMol(), asMols=True, sanitizeFrags=False
-            )
+            # Get connected components as fragments
+            try:
+                frags = Chem.rdmolops.GetMolFrags(
+                    rw.GetMol(), asMols=True, sanitizeFrags=False
+                )
 
-            for frag in frags:
-                # Filter tiny pieces
-                if (
-                    sum(1 for a in frag.GetAtoms() if a.GetAtomicNum() > 1)
-                    < min_heavy_atoms
-                ):
-                    continue
+                for frag in frags:
+                    # Filter tiny pieces
+                    if (
+                        sum(1 for a in frag.GetAtoms() if a.GetAtomicNum() > 1)
+                        < min_heavy_atoms
+                    ):
+                        continue
 
-                # You can optionally sanitize; radicals/valence issues are fine for MS-like fragments
-                # Chem.SanitizeMol(frag, catchErrors=True)  # optional
-                smi_frag = Chem.MolToSmiles(frag, isomericSmiles=True, canonical=True)
-                uniq.add(smi_frag)
+                    try:
+                        # Try to sanitize the fragment with ionic charges
+                        Chem.SanitizeMol(frag, catchErrors=False)
+                        smi_frag = Chem.MolToSmiles(
+                            frag, isomericSmiles=True, canonical=True
+                        )
+                        uniq.add(smi_frag)
+                    except Exception:
+                        # If sanitization fails with ionic charges, try without sanitization
+                        try:
+                            smi_frag = Chem.MolToSmiles(
+                                frag, isomericSmiles=True, canonical=True
+                            )
+                            uniq.add(smi_frag)
+                        except Exception:
+                            continue  # Skip this fragment if it can't be processed
+
+            except Exception:
+                # If fragmentation fails completely, skip this cut combination
+                continue
+
         else:
             continue
         break  # broke due to max_combos
@@ -1254,7 +1289,7 @@ def enumerate_fragments_from_smiles(
     return sorted(uniq)
 
 
-@tool(hidden_args=["h_smiles"])
+# @tool(hidden_args=["h_smiles"])
 def return_possible_fragments(h_smiles: str) -> list[str]:
     """[BRIEF] Return possible fragments for the sample at hand. [/BRIEF]
 
@@ -1310,7 +1345,6 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
     fragments = enumerate_fragments_from_smiles(h_smiles)
 
     final_fragments = []
-    isomers = []
     for fragment in fragments:
         try:
             fragment_mol = Chem.MolFromSmiles(fragment)
@@ -1323,193 +1357,10 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
             parse_molecular_formula(parent_formula),
             parse_molecular_formula(fragment_formula),
         ):
-            try:
-                isomers.extend(get_isomers.remote(fragment))
-            except Exception:
-                continue
             final_fragments.append(fragment)
-
-    target_len = 3 * len(fragments)
-    while len(final_fragments) < target_len and isomers:
-        isomer = random.choice(isomers)
-        mol = Chem.MolFromSmiles(isomer)
-        if mol is not None:
-            final_fragments.append(isomer)
 
     random.shuffle(final_fragments)
     return final_fragments
-
-
-def parse_c13_nmr(c13_data: str) -> list[float]:
-    """Parse C13 NMR delta values from string."""
-    if not c13_data or "failed" in c13_data.lower():
-        return []
-
-    # Extract numbers from the delta string
-    deltas = re.findall(r"\d+\.\d+", c13_data)
-    return [float(d) for d in deltas]
-
-
-def parse_h_nmr(h_data: str) -> list[float]:
-    """Parse H NMR delta values from string."""
-    if not h_data or "failed" in h_data.lower():
-        return []
-
-    # Extract delta values (numbers before parentheses or commas)
-    deltas = re.findall(r"(\d+\.\d+)\s*\(", h_data)
-    return [float(d) for d in deltas]
-
-
-def compare_nmr_spectra(
-    ground_spectra: dict, fragment_spectra: dict, tolerance: float = 0.5
-) -> str:
-    """
-    Compare NMR spectra between ground truth and fragment.
-    """
-    results = []
-
-    # Compare C13 NMR
-    ground_c13 = parse_c13_nmr(ground_spectra.get("c13_nmr", ""))
-    fragment_c13 = parse_c13_nmr(fragment_spectra.get("c13_nmr", ""))
-
-    if not ground_c13 and not fragment_c13:
-        c13_match = "C13 NMR: Both spectra failed - no comparison possible"
-    elif not ground_c13:
-        c13_match = "C13 NMR: Ground truth failed - no comparison possible"
-    elif not fragment_c13:
-        c13_match = "C13 NMR: Fragment failed - no comparison possible"
-    else:
-        # Check if fragment signals are subset of ground truth signals
-        matched_signals = 0
-        total_fragment_signals = len(fragment_c13)
-
-        for frag_delta in fragment_c13:
-            for ground_delta in ground_c13:
-                if abs(frag_delta - ground_delta) <= tolerance:
-                    matched_signals += 1
-                    break
-
-        if matched_signals == total_fragment_signals and total_fragment_signals > 0:
-            c13_match = f"C13 NMR: MATCHED - All {total_fragment_signals} fragment signals found in ground truth"
-        else:
-            c13_match = f"C13 NMR: NOT MATCHED - Only {matched_signals}/{total_fragment_signals} fragment signals found in ground truth"
-
-    results.append(c13_match)
-
-    # Compare H NMR
-    ground_h = parse_h_nmr(ground_spectra.get("h_nmr", ""))
-    fragment_h = parse_h_nmr(fragment_spectra.get("h_nmr", ""))
-
-    if not ground_h and not fragment_h:
-        h_match = "H NMR: Both spectra failed - no comparison possible"
-    elif not ground_h:
-        h_match = "H NMR: Ground truth failed - no comparison possible"
-    elif not fragment_h:
-        h_match = "H NMR: Fragment failed - no comparison possible"
-    else:
-        # Check if fragment signals are subset of ground truth signals
-        matched_signals = 0
-        total_fragment_signals = len(fragment_h)
-
-        for frag_delta in fragment_h:
-            for ground_delta in ground_h:
-                if abs(frag_delta - ground_delta) <= tolerance:
-                    matched_signals += 1
-                    break
-
-        if matched_signals == total_fragment_signals and total_fragment_signals > 0:
-            h_match = f"H NMR: MATCHED - All {total_fragment_signals} fragment signals found in ground truth"
-        else:
-            h_match = f"H NMR: NOT MATCHED - Only {matched_signals}/{total_fragment_signals} fragment signals found in ground truth"
-
-    results.append(h_match)
-
-    return " | ".join(results)
-
-
-@tool(hidden_args=["h_smiles"])
-def validate_fragment_matching(fragment: str, h_smiles: str) -> dict[str, list[str]]:
-    """[BRIEF] Validate fragment matching with the NMR spectra of the sample at hand. [/BRIEF]
-
-    [DETAILED] This tool compares the NMR spectra of a fragment with the ground truth spectra obtained from the full molecule. It checks for matching signals within a specified tolerance. If the fragment's signals are found within the ground truth signals, it is considered a valid match. [/DETAILED]
-
-    [PROCEDURAL] When to use this tool:
-    - When you have a fragment and want to validate its NMR spectra against the full molecule's spectra.
-    - When you need to ensure that the fragment's signals are present in the ground truth spectra.
-    - When you want to confirm that the fragment is a valid representation of the full molecule based on NMR data. [/PROCEDURAL]
-
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. Obtain some candidates fragments. This can be done either by joining pieces from the different spectra or with the tool `return_possible_fragments`.
-    2. Call this tool with the fragment SMILES to validate the fragment's NMR spectra.
-    3. Analyze the results and determine if the fragment is a valid representation of the full molecule. [/WORKFLOW_INTEGRATION]
-
-    [CONTEXTUAL] How this tool works:
-    - The tool takes a fragment SMILES string as the input.
-    - It simulates the NMR spectra for the fragment.
-    - The spectra of the fragment is then compared to the spectra of the sample at hand.
-    - If the fragment's signals are found within the sample signals, it is considered a valid match. [/CONTEXTUAL]
-
-    [SYNTACTICAL] Usage examples:
-    [
-        `validate_fragment_matching("C1=CC=CC=C1")`,
-        `validate_fragment_matching("C1=CC=CC=C1O")`,
-        `validate_fragment_matching("C1=CC=CC=C1N")`,
-        `validate_fragment_matching("C1=CC=CC=C1C")`,
-        `validate_fragment_matching("C1=CC=CC=C1F")`
-    ]
-    [/SYNTACTICAL]
-
-    Args:
-        fragment (str):
-            [BRIEF] The SMILES representation of the fragment to validate. [/BRIEF]
-            [DETAILED] The SMILES string representing the chemical structure of the fragment to validate. It should be a valid SMILES notation that can be processed by the validation function. [/DETAILED]
-            [SYNTACTICAL] "valid SMILES string" [/SYNTACTICAL]
-            [EXAMPLES] "C1=CC=CC=C1", "C1=CC=CC=C1O", "C1=CC=CC=C1N", "C1=CC=CC=C1C", "C1=CC=CC=C1F" [/EXAMPLES]
-
-    Returns:
-        dict[str, list[str]]:
-            [BRIEF] A dictionary containing the validation results and spectra comparison. [/BRIEF]
-            [DETAILED] The dictionary will include keys for "valid", "invalid", and "spectra_comparison", with corresponding values based on the validation process. [/DETAILED]
-            [EXAMPLES] {'valid': 'Cc1ccccc1CCl', 'invalid': '', 'spectra_comparison': 'C13 NMR: NOT MATCHED - Only 4/8 fragment signals found in ground truth | H NMR: MATCHED - All 3 fragment signals found in ground truth'} [/EXAMPLES]
-
-    [RAISES] Exceptions:
-        ValueError:
-            [ERROR_WHEN] The provided SMILES string is invalid. [/ERROR_WHEN]
-            [ERROR_DETAILS] The SMILES string could not be parsed into a valid molecular structure. [/ERROR_DETAILS]
-            [ERROR_SOLUTION] Please provide a valid SMILES string that can be processed by the validation function. [/ERROR_SOLUTION]
-    [/RAISES]
-
-    [LIMITATIONS] Known Limitations:
-        - The function relies on the RDKit library for SMILES parsing.
-        - The accuracy of the NMR spectra simulation may vary depending on the complexity of the fragment.
-        - The simulation might fail or produce inaccurate results for highly complex or unusual molecular structures.
-    [/LIMITATIONS]
-
-    """
-    if Chem.MolFromSmiles(h_smiles) is None:
-        raise ValueError("Invalid SMILES string provided.")
-
-    if Chem.MolFromSmiles(fragment) is None:
-        return {"invalid": [fragment]}
-
-    # Get spectra for both molecules
-    ground_spectra = {
-        "c13_nmr": get_carbon_spectrum.remote(h_smiles),
-        "h_nmr": get_proton_spectrum.remote(h_smiles),
-    }
-    fragment_spectra = {
-        "c13_nmr": get_carbon_spectrum.remote(fragment),
-        "h_nmr": get_proton_spectrum.remote(fragment),
-    }
-
-    # Compare the spectra
-    comparison_result = compare_nmr_spectra(ground_spectra, fragment_spectra)
-
-    return {
-        "valid": fragment if Chem.MolFromSmiles(fragment) is not None else "",
-        "invalid": "" if Chem.MolFromSmiles(fragment) is not None else fragment,
-        "spectra_comparison": comparison_result,
-    }
 
 
 def create_tools() -> dict[str, Tool]:
@@ -1530,5 +1381,4 @@ def create_tools() -> dict[str, Tool]:
         "obtain_isomers_from_molecular_formula": obtain_isomers_from_molecular_formula,
         "validate_smiles": validate_smiles,
         "return_possible_fragments": return_possible_fragments,
-        "validate_fragment_matching": validate_fragment_matching,
     }
