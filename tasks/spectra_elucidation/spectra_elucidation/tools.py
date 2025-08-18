@@ -1289,27 +1289,27 @@ def enumerate_fragments_from_smiles(
     return sorted(uniq)
 
 
-# @tool(hidden_args=["h_smiles"])
+@tool(hidden_args=["h_smiles"])
 def return_possible_fragments(h_smiles: str) -> list[str]:
-    """[BRIEF] Return possible fragments for the sample at hand. [/BRIEF]
+    """[BRIEF] Return a list of fragments of the sample at hand by removing one or two atoms from the molecule. [/BRIEF]
 
-    [DETAILED] This function generates some possible fragments by web lookup, and similarity check with similar spectra. It returns a list of unique fragment SMILES strings. [/DETAILED]
+    [DETAILED] This function generates some fragments from the sample at hand. It returns a list of unique fragment SMILES strings. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - When you need to generate possible fragments for the sample at hand.
+    - When you need to generate fragments for the sample at hand.
     - When you want to explore different possible options based on the spectra.
     - When you are at an endpoint and need to consider some potential fragments. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Ensure that the correct step is to generate possible fragments. Ensure that you really tried to guess all the posibilities from the information available. [/PREREQUISITE]
-    2. [CURRENT] Call this tool to generate possible fragments for the sample at hand. [/CURRENT]
-    3. [FOLLOW_UP] Evaluate the generated fragments for relevance and potential. Use the fragments that you consider most promising for further analysis. [/FOLLOW_UP]
+    1. [PREREQUISITE] Ensure that the correct step is to generate fragments. Ensure that you really tried to guess all the posibilities from the information available. [/PREREQUISITE]
+    2. [CURRENT] Call this tool to generate fragments for the sample at hand. [/CURRENT]
+    3. [FOLLOW_UP] Evaluate the fragments for getting the final molecule. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - This tool takes the spectra information and generates possible fragments based on known molecules.
+    - This tool takes the spectra information and generates fragments based on known molecules.
     - It uses a combination of cheminformatics techniques to identify potential fragment structures.
-    - It leverages existing databases and algorithms to find some possible candidates.
+    - It leverages existing databases and algorithms to find some candidates.
     [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
@@ -1324,7 +1324,7 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
     Returns:
         list[str]:
             [BRIEF] A list of unique fragment SMILES strings. [/BRIEF]
-            [DETAILED] This list contains all the unique SMILES representations of the candidate fragments found by database lookup. [/DETAILED]
+            [DETAILED] This list contains all the unique SMILES representations of the fragments found by database lookup. [/DETAILED]
             [EXAMPLES] Example SMILES strings: ["C1=CC=CC=C1", "C1=CC=CC=C1O", ...] [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -1332,7 +1332,7 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
-        - The function may not find all possible fragments, especially for complex molecules.
+        - This tool might not return all the fragments, but there the ones returned are 100% accurate.
         - The quality of the generated fragments depends on the underlying database and its coverage.
     [/LIMITATIONS]
     """
