@@ -1,0 +1,108 @@
+LAMMPS (19 Nov 2024 - Development - patch_19Nov2024-56-ga78aee5731)
+# ---------- Initialize Simulation ---------------------
+clear
+units           metal
+dimension       3
+processors      * * *
+atom_style      atomic
+boundary        p p p
+
+# ---------- Create Atoms ---------------------
+read_data       ../../structures/Mg.data
+Reading data file ...
+  triclinic box = (0 0 0) to (3.172023 2.747053 5.141205) with tilt (-1.586012 0 0)
+WARNING: Triclinic box skew is large. LAMMPS will run inefficiently. (src/domain.cpp:221)
+  1 by 1 by 1 MPI processor grid
+  reading atoms ...
+  2 atoms
+  read_data CPU = 0.004 seconds
+replicate       5 5 5
+Replication is creating a 5x5x5 = 125 times larger system...
+  triclinic box = (0 0 0) to (15.860115 13.735265 25.706025) with tilt (-7.93006 0 0)
+WARNING: Triclinic box skew is large. LAMMPS will run inefficiently. (src/domain.cpp:221)
+  1 by 1 by 1 MPI processor grid
+  250 atoms
+  replicate CPU = 0.001 seconds
+
+pair_style eam/alloy
+pair_coeff * * ../../../../../modal_app/potentials/EAM/Mg_Zhou04.eam.alloy Mg
+Reading eam/alloy potential file ../../../../../modal_app/potentials/EAM/Mg_Zhou04.eam.alloy with DATE: 2018-03-30
+
+neighbor 2.0 bin
+neigh_modify delay 10 check yes
+
+# ---------- Define Settings ---------------------
+compute eng all pe/atom
+compute eatoms all reduce sum c_eng
+
+# ---------- Run Minimization ---------------------
+reset_timestep 0
+#fix 1 all box/relax iso 0.0 vmax 0.001
+thermo 10
+thermo_style custom step pe lx ly lz press pxx pyy pzz c_eatoms
+min_style cg
+minimize 1.0e-10 1.0e-10 100000 100000
+Switching to 'neigh_modify every 1 delay 0 check yes' setting during minimization
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 9.147124
+  ghost atom cutoff = 9.147124
+  binsize = 4.573562, bins = 6 4 6
+  1 neighbor lists, perpetual/occasional/extra = 1 0 0
+  (1) pair eam/alloy, perpetual
+      attributes: half, newton on
+      pair build: half/bin/atomonly/newton/tri
+      stencil: half/bin/3d/tri
+      bin: standard
+Per MPI rank memory allocation (min/avg/max) = 4.619 | 4.619 | 4.619 Mbytes
+   Step         PotEng           Lx             Ly             Lz           Press           Pxx            Pyy            Pzz          c_eatoms
+         0  -386.87699      15.860115      13.735265      25.706025      11618.606      10562.981      10562.954      13729.884     -386.87699
+         1  -386.87699      15.860115      13.735265      25.706025      11618.606      10562.984      10562.951      13729.884     -386.87699
+Loop time of 0.00227144 on 1 procs for 1 steps with 250 atoms
+
+99.6% CPU use with 1 MPI tasks x no OpenMP threads
+
+Minimization stats:
+  Stopping criterion = energy tolerance
+  Energy initial, next-to-last, final =
+     -386.876989491211  -386.876989491211  -386.876989491255
+  Force two-norm initial, final = 2.8204036e-05 6.1486547e-06
+  Force max component initial, final = 1.7211884e-06 3.1734196e-07
+  Final line search alpha, max atom move = 1 3.1734196e-07
+  Iterations, force evaluations = 1 2
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.0021955  | 0.0021955  | 0.0021955  |   0.0 | 96.66
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 2.9732e-05 | 2.9732e-05 | 2.9732e-05 |   0.0 |  1.31
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 4.622e-05  |            |       |  2.03
+
+Nlocal:            250 ave         250 max         250 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           1928 ave        1928 max        1928 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          18250 ave       18250 max       18250 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 18250
+Ave neighs/atom = 73
+Neighbor list builds = 0
+Dangerous builds = 0
+
+# ---------- Save Final Structure ---------------------
+write_data Mg_minimised_structure.dat
+System init for write_data ...
+
+# ---------- Save Energy Output ---------------------
+variable teng equal "c_eatoms"
+print "${teng}" file Mg_energy.txt
+-386.87698949127
+
+#print "All done!"
+
+Total wall time: 0:00:00

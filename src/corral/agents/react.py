@@ -121,6 +121,9 @@ class ReActAgent(BaseAgent):
             tool_name = action_match.group(1).strip()
             try:
                 action_input = action_match.group(2).strip()
+                action_input = action_input.replace("True", "true").replace(
+                    "False", "false"
+                )
                 arguments = json.loads(action_input)
                 actions.append(Action(tool_name=tool_name, arguments=arguments))
             except json.JSONDecodeError:
@@ -215,6 +218,13 @@ class ReActAgent(BaseAgent):
                             name=action.tool_name,
                         )
                     )
+            else:
+                self.messages.append(
+                    LiteLLMMessage(
+                        role="user",
+                        content=str(llm_response),
+                    )
+                )
 
         self.messages.append(
             LiteLLMMessage(

@@ -9,10 +9,10 @@ from lama_aesthetics.plotutils import range_frame
 
 lama_aesthetics.get_style("main")
 
-CLAUDE_PATH_REACT = Path("../claude/spectra")
-CLAUDE_PATH_TOOL_CALLING = Path("../claude/spectra")
-GPT_PATH_REACT = Path("../gpt4o/spectra")
-GPT_PATH_TOOL_CALLING = Path("../gpt4o/spectra")
+CLAUDE_PATH_REACT = Path("../claude/spectra_chained")
+CLAUDE_PATH_TOOL_CALLING = Path("../claude/spectra_chained/tool_calling")
+GPT_PATH_REACT = Path("../gpt4o/spectra_chained")
+GPT_PATH_TOOL_CALLING = Path("../gpt4o/spectra_chained/tool_calling")
 
 PATHS = [
     CLAUDE_PATH_REACT,
@@ -55,7 +55,7 @@ for path in PATHS:
         with file.open() as f:
             data = json.load(f)
         model, agent, desc = extract_info_from_filename(file)
-        score = data["metrics"]["total_token_usage"]["total_tokens"]
+        score = data["metrics"]["total_token_usage"]["completion_tokens"]
         results[(model, agent)][desc] = score
         desc_levels.add(desc)
 

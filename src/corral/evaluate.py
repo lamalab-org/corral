@@ -269,7 +269,10 @@ def run_chained_trials(
             task_results[task_id].trials.append(result)
 
             if not result.success:
-                logger.error(f"Trial failed for task {task_id}")
+                logger.error(
+                    f"Trial failed for task {task_id}: {getattr(result, 'error_message', 'No error message')}"
+                )
+                logger.error(f"Full result: {result}")
                 success = False
         # Save checkpoint after each round
         checkpoint_saver(task_results, trial_round + 1 if success else trial_round)

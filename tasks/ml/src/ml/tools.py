@@ -14,12 +14,27 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from corral.base import Tool
 from corral.utils import tool
 
-load_dotenv("../.env")
-
+if "MP_API_KEY" not in os.environ:
+    load_dotenv("../.env")
 
 ####################
 # Tools that will return text strings - Catalyst environment
 ####################
+
+
+def resolve_working_dir_path(path_or_str: str, work_dir: str | None = None) -> str:
+    """Resolve path relative to the current working directory"""
+    if not Path(path_or_str).is_absolute():
+        if work_dir:
+            return str(Path(work_dir) / path_or_str)
+        else:
+            work_dir = os.getenv("CORRAL_WORK_DIR")
+            if work_dir:
+                return str(Path(work_dir) / path_or_str)
+
+            # Fallback to current directory if no work_dir provided
+            return str(Path.cwd() / path_or_str)
+    return path_or_str
 
 
 @tool
@@ -297,9 +312,9 @@ def get_bulk_polymorphs_data(composition: str) -> str:
         return json.dumps(polymorph_data, indent=2)
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def get_bulk_polymorphs_data_to_file(
-    composition: str, save_path: str | None = None
+    composition: str, save_path: str | None = None, work_dir: str | None = None
 ) -> str:
     """[BRIEF] Query Materials Project for polymorphs and save comprehensive data to a JSON file to give path. [/BRIEF]
 
@@ -443,18 +458,20 @@ def get_bulk_polymorphs_data_to_file(
 
         # Save to file if path is provided
         if save_path:
+            save_path = resolve_working_dir_path(save_path, work_dir)
             with Path(save_path).open("w") as f:
                 f.write(json_str)
 
         return save_path
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def batch_retrieve_polymorphs(
     compositions: list[str],
     max_energy_above_hull: float = 0.5,
     max_per_composition: int = 10,
     save_directory: str = "polymorph_data",
+    work_dir: str | None = None,
 ) -> str:
     """[BRIEF] Retrieve polymorphs for multiple chemical compositions efficiently in batch mode and save it to given directory as json. [/BRIEF]
 
@@ -561,6 +578,7 @@ def batch_retrieve_polymorphs(
         max_per_composition = int(max_per_composition)
 
     # Create save directory
+    save_directory = resolve_working_dir_path(save_directory, work_dir)
     Path(save_directory).mkdir(exist_ok=True)
 
     results = {
@@ -830,10 +848,11 @@ def select_polymorphs_with_strategy(
     return json.dumps(selected, indent=2)
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def consolidate_polymorph_datasets(
     composition_files: dict[str, str],
     output_path: str = "consolidated_polymorphs.json",
+    work_dir: str | None = None,
 ) -> str:
     """[BRIEF] Consolidate multiple polymorph JSON files into a single comprehensive dataset. [/BRIEF]
 
@@ -947,6 +966,7 @@ def consolidate_polymorph_datasets(
         stats["average_per_composition"] = 0
 
     # Save consolidated dataset
+    output_path = resolve_working_dir_path(output_path, work_dir)
     try:
         with Path(output_path).open("w") as f:
             json.dump(all_polymorphs, f, indent=2)
@@ -959,7 +979,7 @@ def consolidate_polymorph_datasets(
     )
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def select_polymorphs_with_strategy_to_file(
     polymorphs_data: str,
     save_path: str,
@@ -967,6 +987,7 @@ def select_polymorphs_with_strategy_to_file(
     max_polymorphs: int = 5,
     energy_threshold: float = 0.5,
     is_path: bool = False,
+    work_dir: str | None = None,
 ) -> str:
     """[BRIEF] Select polymorphs using strategic criteria and save results to file for persistent storage. [/BRIEF]
 
@@ -1109,17 +1130,19 @@ def select_polymorphs_with_strategy_to_file(
         selected = filtered[:max_polymorphs]
 
     # Save to file
+    save_path = resolve_working_dir_path(save_path, work_dir)
     with Path(save_path).open("w") as f:
         json.dump(selected, f, indent=2)
 
     return save_path
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def filter_json_with_strategy(
     input_json_path: str,
     output_json_path: str,
     custom_code: str | None = None,
+    work_dir: str | None = None,
 ) -> str:
     """[BRIEF] Filter JSON data using custom Python code and save results to a new file. [/BRIEF]
 
@@ -1228,6 +1251,7 @@ def filter_json_with_strategy(
         filtered_data = exec_locals["filtered_data"]
 
         # Save filtered data
+        output_json_path = resolve_working_dir_path(output_json_path, work_dir)
         Path(output_json_path).parent.mkdir(parents=True, exist_ok=True)
         with Path(output_json_path).open("w") as f:
             json.dump(filtered_data, f, indent=2)
@@ -1269,7 +1293,7 @@ Dataset preparation tools for different ML model types.
 """
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def prepare_tabular_dataset(
     polymorphs_json_path: str,
     output_path: str,
@@ -1277,6 +1301,7 @@ def prepare_tabular_dataset(
     feature_engineering: str = "basic",
     test_split: float = 0.2,
     normalize: bool = True,
+    work_dir: str | None = None,
 ) -> str:
     """[BRIEF] Prepare tabular dataset for traditional ML models with feature engineering. [/BRIEF]
 
@@ -1386,7 +1411,7 @@ def prepare_tabular_dataset(
 
     try:
         # Create output directory if it doesn't exist
-        output_dir = Path(output_path)
+        output_dir = Path(resolve_working_dir_path(output_path, work_dir))
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Load polymorphs data
@@ -1710,13 +1735,14 @@ def get_mp_thermo_data(material_id: str) -> str:
 """
 
 
-@tool
+@tool(hidden_args=["work_dir"])
 def train_xgboost_model(
     train_data_path: str,
     test_data_path: str,
     model_save_path: str,
     target_column: str = "formation_energy_per_atom",
     hyperparameters: dict | None = None,
+    work_dir: str | None = None,
 ) -> str:
     """[BRIEF] Train XGBoost regression model for property prediction with evaluation. [/BRIEF]
 
@@ -1762,7 +1788,7 @@ def train_xgboost_model(
                        Should have identical column structure to training data. [/DETAILED]
                        [SYNTACTIC] "Valid file path to CSV file with header" [/SYNTACTIC]
                        [EXAMPLES] "data/test.csv", "datasets/materials_test.csv", "ml_data/test_features.csv" [/EXAMPLES]
-        model_save_path: [BRIEF] Path to save the trained model file. [/BRIEF]
+        model_save_path: [BRIEF] Path to save the trained model file in .pkl format [/BRIEF]
                         [DETAILED] Complete file path where the trained XGBoost model will be saved using joblib serialization.
                         The model can be loaded later for predictions or further analysis.
                         Using .pkl extension is recommended for clarity. [/DETAILED]
@@ -1861,6 +1887,7 @@ def train_xgboost_model(
         }
 
         # Save model
+        model_save_path = resolve_working_dir_path(model_save_path, work_dir)
         joblib.dump(model, model_save_path)
 
         # Save predictions
