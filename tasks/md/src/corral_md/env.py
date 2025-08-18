@@ -1,5 +1,4 @@
 import json
-import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -26,15 +25,15 @@ from corral.io import (
 from corral.server import run_server
 from corral.task import TaskDefinition, TaskGroup
 
-if "CORRAL_WORK_DIR" not in os.environ:
-    raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
-if "ENVIRONMENT" not in os.environ:
-    raise OSError("MD Environment not specified.")
+# if "CORRAL_WORK_DIR" not in os.environ:
+#     raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
+# if "ENVIRONMENT" not in os.environ:
+#     raise OSError("MD Environment not specified.")
 
 
-CORRAL_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
-ENVIRONMENT = os.environ["ENVIRONMENT"]
-TASK_TYPE = os.environ["TASK_TYPE"]
+# CORRAL_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+# ENVIRONMENT = os.environ["ENVIRONMENT"]
+# TASK_TYPE = os.environ["TASK_TYPE"]
 
 
 SCORING_FUNCTIONS = {
@@ -273,8 +272,9 @@ Required submission format:
 
 
 def create_environments(
-    work_dir: str = CORRAL_WORK_DIR,
-    subtask_level: bool = False,
+    work_dir: str,
+    subtask_level: bool,
+    environment: str,
     taskgroup_common_tools: dict[str, Tool] | None = None,
 ) -> dict[str, TaskGroupEnvironment]:
     logger.info("Creating environments for MD")
@@ -284,19 +284,19 @@ def create_environments(
         json_path = (
             Path(__file__).parent.parent.parent
             / "environments"
-            / ENVIRONMENT
+            / environment
             / "subtasks"
         )
     else:
         json_path = (
-            Path(__file__).parent.parent.parent / "environments" / ENVIRONMENT / "tasks"
+            Path(__file__).parent.parent.parent / "environments" / environment / "tasks"
         )
 
     # Load tasks from JSON
     tasks = load_tasks_from_json(json_path, work_dir)
 
     # Create task group
-    group_id = f"MD-{ENVIRONMENT}"
+    group_id = f"MD-{environment}"
     logger.info(f"Creating task group {group_id} with {len(tasks)} tasks")
     task_group = TaskGroup(group_id=group_id, tasks=tasks)
 
@@ -335,30 +335,20 @@ def create_environments(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="MD Benchmark Server")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dir", required=True)
+    parser.add_argument("--port", type=int, required=True)
     parser.add_argument(
-        "--host",
-        type=str,
-        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
-        help="Host to run the server on",
+        "--subtask_level", type=lambda x: x.lower() == "true", required=True
     )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.environ.get("CORRAL_PORT", "8000")),
-        help="Port to run the server on",
-    )
-    parser.add_argument(
-        "--subtask_level",
-        type=bool,
-        default=False,
-        help="Whether to use subtask level",
-    )
+    parser.add_argument("--environment", required=True)
     args = parser.parse_args()
 
     # Create all environments with file system tools
     environments = create_environments(
-        work_dir=CORRAL_WORK_DIR, subtask_level=args.subtask_level
+        work_dir=args.dir,
+        subtask_level=args.subtask_level,
+        environment=args.environment,
     )
 
     logger.info("\nCreated Environments:")
@@ -370,6 +360,5 @@ if __name__ == "__main__":
 
     run_server(
         environments=environments,
-        host=args.host,
         port=args.port,
     )
