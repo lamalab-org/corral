@@ -1,11 +1,28 @@
+import ast
 import re
 from collections import Counter
 
 from loguru import logger
 from rdkit import Chem
+from rdkit.Chem import rdMolDescriptors
 from rdkit.Chem.MolStandardize import rdMolStandardize
 
-_HALOGENS = {"F", "Cl", "Br", "I"}
+_ELEMENTS_WITH_ISOTOPIC_DISTRIBUTION = [
+    "C",  # Carbon
+    "N",  # Nitrogen
+    "O",  # Oxygen
+    "S",  # Sulfur
+    "Cl",  # Chlorine
+    "Br",  # Bromine
+    "Fe",  # Iron
+    "Cu",  # Copper
+    "Zn",  # Zinc
+    "Sn",  # Tin
+    "Pb",  # Lead
+    "Hg",  # Mercury
+    "Pt",  # Platinum
+]
+
 
 _ELEMENT_PAT = re.compile(r"([A-Z][a-z]?)(\d*)")
 _PAREN_PAT = re.compile(r"\(([^()]*)\)(\d*)")
@@ -60,10 +77,29 @@ def score_molecule_fragments(prediction: list[str], ground_truth: str) -> float:
         float: 1.0 if all fragments are substructures of the ground truth molecule,
                0.0 otherwise.
     """
+    # If prediction is a string representation of a list, parse it
+    if isinstance(prediction, list):
+        seq = prediction
+    elif isinstance(prediction, str):
+        try:
+            seq = ast.literal_eval(prediction)
+        except Exception:
+            return 0.0  # signal bad input
+    else:
+        return 0.0
+
+    # Enforce: must be a list, not tuple/set/etc.
+    if not isinstance(seq, list):
+        return 0.0
+
+    # Enforce: list[str]
+    if not all(isinstance(x, str) for x in seq):
+        return 0.0
+
     target_mol = Chem.MolFromSmiles(ground_truth)
     if target_mol is None:
         raise ValueError("Invalid ground truth SMILES string.")
-    for frag in prediction:
+    for frag in seq:
         frag_mol = Chem.MolFromSmiles(frag)
         if frag_mol is None:
             return 0.0
@@ -82,7 +118,7 @@ def validate_molecular_formula(prediction, ground_truth):
     mol = Chem.MolFromSmiles(ground_truth)
     if mol is None:
         raise ValueError("Invalid ground truth SMILES string.")
-    actual_formula = Chem.rdMolDescriptors.CalcMolFormula(mol)
+    actual_formula = rdMolDescriptors.CalcMolFormula(mol)
     # Use parse_formula to compare element counts
     try:
         pred_counts = parse_formula(prediction)
@@ -137,22 +173,33 @@ def parse_formula(formula: str) -> dict[str, int]:
     return dict(total)
 
 
-def calculate_dbe(molecular_formula: str) -> float:
+def calculate_dbe(mol):
     """
-    Calculate the Double Bond Equivalent (degree of unsaturation).
-
-    DBE = (2·C + 2 + N - H - X) / 2
-    where X = total halogens (F, Cl, Br, I)
+    Calculate the Degree of Unsaturation (DBE) for a molecule.
+    The formula is C - (H / 2) + (N / 2)
+    where C is the number of carbons, H is the number of hydrogens,
+    N is the number of nitrogens, and X is the number of halogens.
+    Halogens count like hydrogens.
+    It is needed to declare the explicit hydrogens to get the correct count.
     """
-    elems = parse_formula(molecular_formula)
+    mH = Chem.AddHs(mol)
+    C = H = N = X = 0  # X will be halogens
 
-    c = elems.get("C", 0)
-    n = elems.get("N", 0)
-    h = elems.get("H", 0)
+    for atom in mH.GetAtoms():
+        symbol = atom.GetSymbol()
+        if symbol == "C":
+            C += 1
+        elif symbol == "H":
+            H += 1
+        elif symbol == "N":
+            N += 1
+        elif symbol in ("F", "Cl", "Br", "I"):
+            X += 1
 
-    x = sum(elems.get(hal, 0) for hal in _HALOGENS)
+    # Halogens count like hydrogens
+    H += X
 
-    return (2 * c + 2 + n - h - x) / 2
+    return C - (H / 2) + (N / 2) + 1
 
 
 def validate_dbe_consistency(prediction, ground_truth):
@@ -175,10 +222,8 @@ def validate_dbe_consistency(prediction, ground_truth):
     if mol is None:
         raise ValueError("Invalid SMILES string provided.")
     # ground_truth can be a formula or a DBE value
-    if isinstance(ground_truth, str):
-        expected_dbe = calculate_dbe(ground_truth)
-    else:
-        expected_dbe = ground_truth
+    expected_dbe = calculate_dbe(mol) if isinstance(ground_truth, str) else ground_truth
+    logger.debug(f"Calculated DBE: {expected_dbe}, Predicted DBE: {prediction}")
     return float(prediction == expected_dbe)
 
 
@@ -192,11 +237,15 @@ def score_isotopic_distribution(prediction, ground_truth):
     if mol is None:
         logger.error("Invalid ground truth SMILES string.")
         return 0.0
-    formula = Chem.rdMolDescriptors.CalcMolFormula(mol)
+    formula = rdMolDescriptors.CalcMolFormula(mol)
     elems = parse_formula(formula)
+    elems = {
+        k: v for k, v in elems.items() if k in _ELEMENTS_WITH_ISOTOPIC_DISTRIBUTION
+    }
+
     if prediction is None and not elems:
         return 1.0
-    if set(prediction) == set(elems.keys()):
+    if set(prediction) == set(elems):
         return 1.0
     else:
         return 0.0
@@ -220,6 +269,7 @@ def score_num_hydrogen_symmetry_classes(prediction, ground_truth):
     for atom, sym_class in zip(mh.GetAtoms(), orders, strict=False):
         if atom.GetAtomicNum() == 1:  # Hydrogen
             h_classes.add(sym_class)
+    logger.debug(f"Found {len(h_classes)} hydrogen symmetry classes.")
     return float(len(h_classes) == prediction)
 
 
@@ -241,6 +291,8 @@ def score_num_carbon_symmetry_classes(prediction, ground_truth):
     for atom, sym_class in zip(mc.GetAtoms(), orders, strict=False):
         if atom.GetAtomicNum() == 6:  # Carbon
             c_classes.add(sym_class)
+    logger.debug(f"Found {len(c_classes)} carbon symmetry classes.")
+
     return float(len(c_classes) == prediction)
 
 
@@ -263,6 +315,7 @@ def score_num_aromatic_carbons(prediction, ground_truth):
         for atom in mol.GetAtoms()
         if atom.GetAtomicNum() == 6 and atom.GetIsAromatic()
     )
+    logger.debug(f"Found {aromatic_carbons} aromatic carbons.")
     return float(aromatic_carbons == prediction)
 
 

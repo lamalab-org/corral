@@ -41,8 +41,8 @@ SCORING_FUNCTIONS = {
     "1": score_formula_match,
     "2": validate_dbe_consistency,
     "3": score_isotopic_distribution,
-    "4": score_num_hydrogen_symmetry_classes,
-    "5": score_num_carbon_symmetry_classes,
+    "4": score_num_carbon_symmetry_classes,
+    "5": score_num_hydrogen_symmetry_classes,
     "6": score_num_aromatic_carbons,
     "7": score_num_ch3_groups,
     "8": score_num_carbonyl_groups,
@@ -149,10 +149,11 @@ class TaskEnvironment(Environment):
             dep_key = f"{self.task_group.group_id}_{dep_task_id}"
             if dep_key in self.task_group.results:
                 dep_result = self.task_group.results[dep_key]
+                task_prompt = self.task_group.tasks[dep_task_id].description
                 if isinstance(dep_result, dict) and "answer" in dep_result:
-                    prompt += f"- Input from {dep_task_id}: {dep_result['answer']}\n"
+                    prompt += f"- Input from '{dep_task_id}' with question: '{task_prompt}' and answer: '{dep_result['answer']}'\n"
                 else:
-                    prompt += f"- Input from {dep_task_id}: {dep_result}\n"
+                    prompt += f"- Input from '{dep_task_id}' with description: '{task_prompt}' and answer: '{dep_result}'\n"
 
         # Display initial input data
         if self.current_task.initial_input:

@@ -626,6 +626,9 @@ class BenchmarkResult:
                         trial_data = {
                             "trial_id": trial.trial_id,
                             "score": trial.score,
+                            "submitted_answer": trial.state.get("submitted_answer")
+                            if trial.state and isinstance(trial.state, dict)
+                            else None,
                             "success": trial.success,
                             "tool_execution_duration": self.get_trial_tool_execution_duration(
                                 trial
