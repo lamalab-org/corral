@@ -323,6 +323,69 @@ class Environment(ABC):
 {tools_guide}
 """
 
+    def _preprocess_arguments(
+        self, tool_name: str, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Parse JSON strings based on the tool's expected argument types"""
+        import json
+
+        # Get the tool definition
+        tool = self.tools.get(tool_name)
+        if not tool:
+            return args
+
+        # Build a map of argument name -> expected type
+        expected_types = {}
+        for arg in tool.arguments:
+            expected_types[arg.name] = arg.type
+
+        def should_parse_as_json(expected_type: str) -> bool:
+            """Determine if a type should be parsed from JSON string"""
+            if expected_type is None:
+                return False
+
+            # Handle union types like "dict | None", "list[str] | None"
+            type_parts = [part.strip() for part in expected_type.split("|")]
+
+            for type_part in type_parts:
+                # Skip None type
+                if type_part.lower() in ("none", "nonetype"):
+                    continue
+
+                # Check if any part of the union should be parsed
+                if (
+                    type_part in ["dict", "object", "list", "array"]
+                    or "dict[" in type_part
+                    or "list[" in type_part
+                    or type_part.startswith(("list", "array"))
+                ):
+                    return True
+
+            return False
+
+        def parse_value(key: str, value: Any) -> Any:
+            expected_type = expected_types.get(key)
+
+            if isinstance(value, str) and value.startswith(("{", "[")):
+                if should_parse_as_json(expected_type):
+                    try:
+                        parsed = json.loads(value)
+                        logger.debug(
+                            f"🎯 Parsed {key} from JSON string (type: {expected_type})"
+                        )
+                        return parsed
+                    except json.JSONDecodeError as e:
+                        logger.error(
+                            f"Failed to parse JSON for argument '{key}': {e}. Returning original value."
+                        )
+                        return value
+                else:
+                    logger.debug(f"⏭️  Skipping {key} (expected type: {expected_type})")
+                    return value
+            return value
+
+        return {key: parse_value(key, val) for key, val in args.items()}
+
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
         """Execute a tool and record the call with enhanced error handling.
 
@@ -330,7 +393,19 @@ class Environment(ABC):
         with the hidden arguments taking precedence.
         This is needed for cases in which the arguments are fixed and should not be modified and/or provided by the agent."""
 
-        # Store original arguments for the ToolCall record (without hidden args)
+        logger.debug(f"🔍 BEFORE preprocessing - {tool_name}:")
+        logger.debug(f"   Arguments: {arguments}")
+        for key, value in arguments.items():
+            logger.debug(f"   {key}: {type(value)} = {value!r}")
+
+        arguments = self._preprocess_arguments(tool_name, arguments)
+
+        logger.debug(f"✅ AFTER preprocessing - {tool_name}:")
+        logger.debug(f"   Arguments: {arguments}")
+        for key, value in arguments.items():
+            logger.debug(f"   {key}: {type(value)} = {value!r}")
+
+        # Store original arguments for the ToolCall record (after preprocessing)
         original_arguments = arguments.copy()
 
         start_time = time.perf_counter()
