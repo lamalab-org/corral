@@ -159,27 +159,44 @@ class ToolCallingAgent(BaseAgent):
                     self.messages.append(llm_response)
 
                     for called_tool in tool_calls:
-                        action = Action(
-                            tool_name=called_tool.function.name,
-                            arguments=json.loads(called_tool.function.arguments),
-                        )
+                        # Initialize variables for error handling
+                        result = None
+                        function_name = str(called_tool.function.name)
+
                         try:
+                            # Parse arguments - this can fail
+                            raw_arguments = json.loads(called_tool.function.arguments)
+
+                            # Create action
+                            action = Action(
+                                tool_name=called_tool.function.name,
+                                arguments=raw_arguments,
+                            )
+
+                            # Execute tool - this can also fail
                             function_call = interface.execute_tool(
                                 task_id, action.tool_name, action.arguments
                             )
                             result = str(function_call.result)
                             if result is None:
                                 result = str(function_call.error)
-                        except Exception as e:
-                            result = str(e)
 
-                        function_name = str(called_tool.function.name)
+                        except json.JSONDecodeError as e:
+                            result = f"Error parsing tool arguments: {e!s}"
+                            logger.error(
+                                f"JSON parsing error for tool {function_name}: {e}"
+                            )
+                        except Exception as e:
+                            result = f"Error executing tool: {e!s}"
+                            logger.error(
+                                f"Tool execution error for {function_name}: {e}"
+                            )
 
                         self.messages.append(
                             LiteLLMMessage(
                                 role="tool",
                                 tool_call_id=called_tool.id,
-                                content=result,
+                                content=result or "Unknown error occurred",
                                 name=function_name,
                             )
                         )
