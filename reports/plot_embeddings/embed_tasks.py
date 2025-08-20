@@ -20,7 +20,18 @@ SPECTRA_PATH = Path(
 )
 ML_PATH = Path("../../tasks/ml/config/chained/chained_oxide.json")
 CATALYST_PATH = Path("../../tasks/catalyst/config/chained/chained_si.json")
-MD_PATH = Path("../../tasks/md/environments/melting/subtasks/al.json")
+MELTING_PATH = Path("../../tasks/corral_md/environments/melting/subtasks/al.json")
+QUENCHING_PATH = Path("../../tasks/corral_md/environments/quenching/subtasks/al.json")
+SE_PATH = Path("../../tasks/corral_md/environments/surface_energy/subtasks/al.json")
+SPECTRA_FULL_PATH = Path(
+    "../../tasks/spectra_elucidation/spectra_elucidation/tasks_json/task_1.json"
+)
+ML_FULL_PATH = Path("../../tasks/ml/config/single/single.json")
+CATALYST_FULL_PATH = Path("../../tasks/catalyst/config/single/single.json")
+MELTING_FULL_PATH = Path("../../tasks/corral_md/environments/melting/tasks/al.json")
+QUENCHING_FULL_PATH = Path("../../tasks/corral_md/environments/quenching/tasks/al.json")
+SE_FULL_PATH = Path("../../tasks/corral_md/environments/surface_energy/tasks/al.json")
+
 
 # Overarching task descriptions (to be filled by user)
 OVERARCHING_SPECTRA_TASK = "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process."
@@ -126,7 +137,27 @@ def rate_subtask_to_overarching_similarity(
 
 
 def embed_ml_task(path_path=ML_PATH):
-    task = str(path_path).split("/")[3]
+    # Extract task name with special handling for corral_md tasks
+    path_parts = str(path_path).split("/")
+    if "corral_md" in path_parts:
+        # For corral_md tasks, just use the environment type
+        # e.g., "melting", "quenching", "surface_energy"
+        env_index = path_parts.index("environments") + 1
+        env_type = path_parts[env_index]
+        task = env_type
+    else:
+        # For other tasks, use the original logic
+        task = path_parts[3]
+
+    # Check if this is a FULL path by looking for specific FULL path patterns
+    is_full_path = path_path in (
+        ML_FULL_PATH,
+        CATALYST_FULL_PATH,
+        MELTING_FULL_PATH,
+        QUENCHING_FULL_PATH,
+        SE_FULL_PATH,
+    )
+
     with path_path.open("r") as f:
         ml_tasks = json.load(f)
 
@@ -135,6 +166,8 @@ def embed_ml_task(path_path=ML_PATH):
     for k, v in ml_tasks.items():
         prompt = v["description"]
         task_name = k
+        if "aluminum_" in task_name:
+            task_name = task_name.replace("aluminum_", "")
         embed_input = prompt
         try:
             embedding = embed_text(embed_input)
@@ -148,10 +181,15 @@ def embed_ml_task(path_path=ML_PATH):
     if embeddings:
         embeddings_array = np.array(embeddings)
 
-        embeddings_file = f"embeddings/{task}_tasks_embeddings_full.npy"
-        np.save(embeddings_file, embeddings_array)
+        # Use different naming convention for FULL paths
+        if is_full_path:
+            embeddings_file = f"embeddings/{task}_tasks_embeddings_full.npy"
+            task_names_file = f"embeddings/{task}_task_names_full.npy"
+        else:
+            embeddings_file = f"embeddings/{task}_tasks_embeddings.npy"
+            task_names_file = f"embeddings/{task}_task_names.npy"
 
-        task_names_file = f"embeddings/{task}_task_names_full.npy"
+        np.save(embeddings_file, embeddings_array)
         np.save(task_names_file, np.array(task_names))
         logger.info("Embeddings saved successfully.")
     else:
@@ -317,7 +355,7 @@ def run_similarity_analysis():
     )
 
     # MD tasks
-    with MD_PATH.open("r") as f:
+    with MELTING_PATH.open("r") as f:
         md_tasks = json.load(f)
     analyze_consecutive_similarity(md_tasks, "md")
     analyze_subtask_overarching_similarity(md_tasks, OVERARCHING_MD_TASK, "md")
@@ -342,9 +380,18 @@ def run_similarity_analysis():
 
 
 if __name__ == "__main__":
-    # embed_spectra()
-    # embed_ml_task(ML_PATH)
-    # embed_ml_task(CATALYST_PATH)
-    # embed_ml_task(MD_PATH)
+    embed_spectra()
+    embed_ml_task(ML_PATH)
+    embed_ml_task(CATALYST_PATH)
+    embed_ml_task(MELTING_PATH)
+    embed_ml_task(QUENCHING_PATH)
+    embed_ml_task(SE_PATH)
 
-    run_similarity_analysis()
+    # Process FULL paths
+    embed_ml_task(ML_FULL_PATH)
+    embed_ml_task(CATALYST_FULL_PATH)
+    embed_ml_task(MELTING_FULL_PATH)
+    embed_ml_task(QUENCHING_FULL_PATH)
+    embed_ml_task(SE_FULL_PATH)
+
+    # run_similarity_analysis()

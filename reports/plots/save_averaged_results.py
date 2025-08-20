@@ -12,10 +12,8 @@ with path_file.open() as file:
 
 all_subtasks = []
 for task in data:
-    # Only process if chained is True and verbosity_level is 'comprehensive'
-    if not (
-        task.get("chained") is True and task.get("verbosity_level") == "comprehensive"
-    ):
+    # Only process if chained is True
+    if task.get("chained") is not True:
         continue
 
     source_files = task.get("source_files", [])
@@ -74,6 +72,7 @@ for task in data:
                     "name": task_name,
                     "agent_type": task.get("agent_type"),
                     "model": task.get("model"),
+                    "verbosity_level": task.get("verbosity_level"),
                     "subtasks": names_in_order,
                     "scores": subtask_scores,
                 }
@@ -113,6 +112,7 @@ for task in data:
                     "name": "Spectra",
                     "agent_type": task.get("agent_type"),
                     "model": task.get("model"),
+                    "verbosity_level": task.get("verbosity_level"),
                     "subtasks": names_in_order,
                     "scores": subtask_scores,
                 }
@@ -161,17 +161,18 @@ for task in data:
             else:
                 subtask_scores.append(None)
 
-            _name = "ML" if task.get("env") == "ML" else "Catalyst"
+        _name = "ML" if task.get("env") == "ML" else "Catalyst"
 
-            all_subtasks.append(
-                {
-                    "name": _name,
-                    "agent_type": task.get("agent_type"),
-                    "model": task.get("model"),
-                    "subtasks": names_in_order,
-                    "scores": subtask_scores,
-                }
-            )
+        all_subtasks.append(
+            {
+                "name": _name,
+                "agent_type": task.get("agent_type"),
+                "model": task.get("model"),
+                "verbosity_level": task.get("verbosity_level"),
+                "subtasks": names_in_order,
+                "scores": subtask_scores,
+            }
+        )
 
 
 # Consistency check: for all entries with the same name, subtasks must be identical and scores length must match subtasks length
@@ -193,15 +194,15 @@ for name, entries in subtasks_by_name.items():
                 f"Scores length does not match subtasks length for name '{name}': {len(entry['scores'])} != {len(entry['subtasks'])}"
             )
 
-# NEW: Average scores for entries with the same name, agent_type, and model
+# NEW: Average scores for entries with the same name, agent_type, model, and verbosity_level
 grouped_entries = defaultdict(list)
 for entry in all_subtasks:
-    key = (entry["name"], entry["agent_type"], entry["model"])
+    key = (entry["name"], entry["agent_type"], entry["model"], entry["verbosity_level"])
     grouped_entries[key].append(entry)
 
 averaged_subtasks = []
 for key, entries in grouped_entries.items():
-    name, agent_type, model = key
+    name, agent_type, model, verbosity_level = key
 
     if len(entries) == 1:
         # Only one entry, no averaging needed
@@ -229,10 +230,54 @@ for key, entries in grouped_entries.items():
             "name": name,
             "agent_type": agent_type,
             "model": model,
+            "verbosity_level": verbosity_level,
             "subtasks": subtasks,
             "scores": averaged_scores,
         }
         averaged_subtasks.append(averaged_entry)
+
+# Load the comprehensive distance matrices data
+distance_matrices_path = Path(
+    "../plot_embeddings/heatmaps/all_distance_matrices_comprehensive.json"
+)
+with distance_matrices_path.open("r") as f:
+    distance_matrices_data = json.load(f)
+
+# Merge distance matrices data with averaged results
+for entry in averaged_subtasks:
+    # Create the key for looking up in distance matrices
+    # Map task names to match the distance matrices keys
+    task_name_mapping = {
+        "Spectra": "spectra_elucidation",
+        "ML": "ml",
+        "Catalyst": "catalyst",
+        "melting": "melting",
+        "quenching": "quenching",
+        "surface_energy": "surface_energy",
+    }
+
+    mapped_task_name = task_name_mapping.get(entry["name"], entry["name"].lower())
+
+    # Map verbosity levels to match the distance matrices keys
+    verbosity = entry["verbosity_level"]
+    if verbosity == "comprehensive":
+        verbosity = "full"
+
+    distance_key = f"{mapped_task_name}_{verbosity}_cosine_normalized"
+
+    # Look up the corresponding data in distance matrices
+    if distance_key in distance_matrices_data.get("results", {}):
+        distance_data = distance_matrices_data["results"][distance_key].copy()
+
+        # Remove the specified keys
+        keys_to_remove = ["task", "verbosity", "distance_metric", "normalized"]
+        for key in keys_to_remove:
+            distance_data.pop(key, None)
+
+        # Merge the remaining data into the entry
+        entry.update(distance_data)
+    else:
+        logger.warning(f"No distance matrix data found for key: {distance_key}")
 
 with Path("averaged_results_subtasks.json").open("w") as f:
     json.dump(averaged_subtasks, f, indent=4)
