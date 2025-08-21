@@ -6,6 +6,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from lama_aesthetics.plotutils import range_frame
 from matplotlib.lines import Line2D
+from scipy.constants import golden
+
+# Figure dimensions
+ONE_COL_WIDTH_INCH = 3
+TWO_COL_WIDTH_INCH = 7.25
+ONE_COL_GOLDEN_RATIO_HEIGHT_INCH = ONE_COL_WIDTH_INCH / golden
+TWO_COL_GOLDEN_RATIO_HEIGHT_INCH = TWO_COL_WIDTH_INCH / golden
 
 lama_aesthetics.get_style("main")
 
@@ -16,13 +23,16 @@ with JSON_PATH.open("r") as file:
 
 SPECTRA_ENVS = ["spectra_ablations_env", "Spectra"]
 
+# Define model colors
+MODEL_COLORS = {"Claude-3.5": "#768eab", "GPT-4o": "#a285a6"}
+
 
 def get_model_color(model):
     """Get color for model based on naming variations."""
     if "claude" in model.lower():
-        return "#768eab"  # Orange for Claude
+        return MODEL_COLORS["Claude-3.5"]
     elif "gpt" in model.lower():
-        return "#a285a6"  # Green for GPT-4o
+        return MODEL_COLORS["GPT-4o"]
     else:
         return "gray"  # Default color
 
@@ -50,7 +60,7 @@ for entry in data:
     if environment not in SPECTRA_ENVS or verbosity != "comprehensive":
         continue
     model = entry.get("model")
-    model = "gpt_4o" if "gpt" in model.lower else "claude_35_sonnet"
+    model = "gpt_4o" if "gpt" in model.lower() else "claude_35_sonnet"
     agent_type = entry.get("agent_type")
     chained = entry.get("chained") if environment == "Spectra" else None
     score = entry.get("pass@5")
@@ -64,7 +74,7 @@ for entry in data:
     results.setdefault(model, {}).setdefault(agent_type, {})[step] = score
 
 # Plotting
-fig, ax = plt.subplots(figsize=(7.2, 4))
+fig, ax = plt.subplots(figsize=(TWO_COL_WIDTH_INCH, ONE_COL_GOLDEN_RATIO_HEIGHT_INCH))
 
 for model, agent_types in results.items():
     for agent_type, step_scores in agent_types.items():
@@ -91,7 +101,7 @@ for model, agent_types in results.items():
                 xi,
                 yi,
                 marker=marker,
-                s=100,
+                s=36,
                 facecolors=facecolor,
                 edgecolors=edgecolor,
                 linewidths=2,
@@ -101,53 +111,27 @@ for model, agent_types in results.items():
             )
 
 # Custom legend
-legend_elements = []
-
-# Model section header
-legend_elements.append(Line2D([0], [0], color="none", label="Model"))
-
-# Get unique models and their colors
-unique_models = list(results.keys())
-for model in unique_models:
-    color = get_model_color(model)
-    # Map model names to display names
-    if "claude" in model.lower():
-        display_name = "Claude 3.5 Sonnet"
-    elif "gpt" in model.lower():
-        display_name = "GPT-4o"
-    else:
-        display_name = model
-    legend_elements.append(
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            label=display_name,
-            markerfacecolor=color,
-            markeredgecolor=color,
-            markersize=10,
-        )
-    )
-
-# Add spacing
-legend_elements.append(Line2D([0], [0], color="none", label=""))
-
-# Agent section header
-legend_elements.append(Line2D([0], [0], color="none", label="Agent"))
-
-legend_elements += [
-    Line2D([0], [0], marker="o", color="k", label="ReAct", linestyle="-"),
-    Line2D([0], [0], marker="D", color="k", label="Tool Calling", linestyle="--"),
-]
-
-# Add spacing
-legend_elements.append(Line2D([0], [0], color="none", label=""))
-
-# Task Type section header
-legend_elements.append(Line2D([0], [0], color="none", label="Task Type"))
-
-legend_elements += [
+handles = [
+    Line2D([0], [0], color=MODEL_COLORS["Claude-3.5"], lw=4, label="Claude 3.5 Sonnet"),
+    Line2D([0], [0], color=MODEL_COLORS["GPT-4o"], lw=4, label="GPT-4o"),
+    Line2D(
+        [0],
+        [0],
+        color="gray",
+        marker="o",
+        markersize=8,
+        linestyle="None",
+        label="React Agent",
+    ),
+    Line2D(
+        [0],
+        [0],
+        color="gray",
+        marker="D",
+        markersize=8,
+        linestyle="None",
+        label="Tool-Calling Agent",
+    ),
     Line2D(
         [0],
         [0],
@@ -156,7 +140,8 @@ legend_elements += [
         label="Single",
         markerfacecolor="k",
         markeredgecolor="k",
-        markersize=10,
+        markersize=8,
+        linestyle="None",
     ),
     Line2D(
         [0],
@@ -166,20 +151,23 @@ legend_elements += [
         label="Chained",
         markerfacecolor="none",
         markeredgecolor="k",
-        markersize=10,
+        markersize=8,
+        linestyle="None",
     ),
 ]
 ax.legend(
-    handles=legend_elements,
+    handles=handles,
     loc="center left",
     bbox_to_anchor=(1.02, 0.5),
     borderaxespad=0,
+    fontsize=10,
 )
 fig.subplots_adjust(right=0.75)
 
 ax.set_xticks([0, 1, 2])
 ax.set_xticklabels(["Single", "Chained", "Ablation\n(single)"])
-ax.set_ylabel("pass@5")
+ax.set_ylabel("pass@5", fontsize=12)
+ax.tick_params(axis="both", which="major", labelsize=10)
 range_frame(ax, np.array([0, 1, 2]), np.array([0, 1]))
 plt.tight_layout()
 pdf_path = Path(__file__).parent / "ablation_plot.pdf"

@@ -10,7 +10,7 @@ with Path("processed_results.json").open() as f:
     data = json.load(f)
 
 # Define the environments and columns (removed Model from columns)
-envs = ["MD", "ML", "Catalyst", "Spectra"]
+envs = ["MD", "ML", "OpenCatalyst", "Spectra"]
 columns = [
     "Agent",
     "Verbosity",
@@ -18,8 +18,8 @@ columns = [
     "MD (chained)",
     "ML (single)",
     "ML (chained)",
-    "Catalyst (single)",
-    "Catalyst (chained)",
+    "OpenCatalyst (single)",
+    "OpenCatalyst (chained)",
     "Spectra (single)",
     "Spectra (chained)",
 ]
@@ -160,7 +160,7 @@ def create_latex_table_with_multirow(df, columns, best_scores):
     latex_lines.append("\\begin{tabular}{lccccccccc}")
     latex_lines.append("\\toprule")
     latex_lines.append(
-        "\\multirow{2}{*}{Agent} & \\multirow{2}{*}{Verbosity} & \\multicolumn{2}{c}{MD} & \\multicolumn{2}{c}{ML} & \\multicolumn{2}{c}{Catalyst} & \\multicolumn{2}{c}{Spectra} \\\\"
+        "\\multirow{2}{*}{Agent} & \\multirow{2}{*}{Verbosity} & \\multicolumn{2}{c}{\\md} & \\multicolumn{2}{c}{\\ml} & \\multicolumn{2}{c}{\\opencatalyst} & \\multicolumn{2}{c}{\\spectra} \\\\"
     )
     latex_lines.append(
         "\\cmidrule(lr){3-4} \\cmidrule(lr){5-6} \\cmidrule(lr){7-8} \\cmidrule(lr){9-10}"
@@ -275,7 +275,7 @@ def create_latex_table_with_multirow(df, columns, best_scores):
 
 
 table = create_latex_table_with_multirow(results_table, columns, best_scores)
-table = table.replace("tool_calling", "Tool Calling")
+table = table.replace("tool_calling", "Tool-Calling")
 table = table.replace("react", "ReAct")
 table = table.replace("CLAUDE", "Claude 3.5 Sonnet")
 table = table.replace("GPT-4O", "GPT-4o")

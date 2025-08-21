@@ -511,7 +511,7 @@ if __name__ == "__main__":
             "averaged_melting_quenching_surface_energy": "MD",
             "spectra_chained_env": "Spectra",
             "spectra_env": "Spectra",
-            "catalyst_env": "Catalyst",
+            "catalyst_env": "OpenCatalyst",
             "ml_env": "ML",
         }
 

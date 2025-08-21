@@ -3,11 +3,25 @@ from collections import defaultdict
 from pathlib import Path
 
 import lama_aesthetics
+import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 import numpy as np
 from lama_aesthetics.plotutils import range_frame
+from scipy.constants import golden
+
+# Figure dimensions
+ONE_COL_WIDTH_INCH = 3
+TWO_COL_WIDTH_INCH = 7.25
+ONE_COL_GOLDEN_RATIO_HEIGHT_INCH = ONE_COL_WIDTH_INCH / golden
+TWO_COL_GOLDEN_RATIO_HEIGHT_INCH = TWO_COL_WIDTH_INCH / golden
 
 lama_aesthetics.get_style("main")
+
+# Define model colors
+MODEL_COLORS = {
+    "Claude-3.5": "#768eab",
+    "GPT-4o": "#a285a6",
+}
 
 # Load processed results
 data_path = Path("processed_results.json")
@@ -33,42 +47,31 @@ for r in filtered:
     score_pow = r["pass^5"]
     plot_data[env][agent_type].append((model, score_at, score_pow))
 
-# Get all envs and agent_types in sorted order for consistent plotting
-envs = sorted(plot_data.keys())
+# Define domain expertise order (from lower to higher expertise)
+domain_order = ["ML", "OpenCatalyst", "MD", "Spectra"]
+envs = [env for env in domain_order if env in plot_data]
 agent_types = sorted({a for env in plot_data.values() for a in env})
 
-# Prepare data for horizontal lines and dots (preserving original grouping)
+# Prepare data for horizontal bars
 bars = []
-group_indices = []
-env_centers = []  # Store the center position for each environment group
 
 for env in envs:
-    env_start = len(bars)
-
     for agent_type in agent_types:
         if "react" not in agent_type and "tool" not in agent_type:
             continue  # Skip agent types that don't contain "react" or "tool"
 
         entries = plot_data[env].get(agent_type, [])
         for model, score_at, score_pow in entries:
-            # Only label with agent_type (exclude env and model) - preserving original logic
+            # Label with agent_type only
             label = f"{agent_type}"
             bars.append((label, score_at, score_pow, model))
 
-    # Mark group boundary after each environment and calculate center
-    if len(bars) > env_start:
-        group_indices.append(len(bars) - 0.5)
-        # Calculate center position between 2nd and 3rd bar of this environment group
-        # Position between index env_start+1 and env_start+2 (2nd and 3rd bars)
-        env_center = env_start + 1.5  # Between 2nd and 3rd bar
-        env_centers.append((env_center, env))
+fig, ax = plt.subplots(
+    1, 1, figsize=(TWO_COL_WIDTH_INCH, TWO_COL_GOLDEN_RATIO_HEIGHT_INCH)
+)
 
-fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
-# Add some space between subplots for the center labels
-fig.subplots_adjust(wspace=0.3)
 y_pos = np.arange(len(bars))
 scores_at = [s[1] for s in bars]  # pass@5 scores
-scores_pow = [s[2] for s in bars]  # pass^5 scores
 
 # Clean up labels and determine colors and markers
 labels = []
@@ -77,122 +80,120 @@ markers = []
 for label, _score_at, _score_pow, model in bars:
     labels.append(label)
     if "claude" in model.lower():
-        colors.append("#ff6b35")  # Orange for Claude
+        colors.append(MODEL_COLORS["Claude-3.5"])
     elif "gpt" in model.lower():
-        colors.append("#28a745")  # Green for GPT-4o
+        colors.append(MODEL_COLORS["GPT-4o"])
 
     # Different markers for different agent types
     if "tool" in label.lower():
-        markers.append("s")  # Square for tool_calling
+        markers.append("D")  # Diamond for tool_calling
     else:
         markers.append("o")  # Circle for react
 
-# Create left plot (pass@5) with bars going from right to left
+# Create horizontal lines with markers
 for _i, (y, score, color, marker) in enumerate(
     zip(y_pos, scores_at, colors, markers, strict=False)
 ):
-    ax_left.hlines(
-        y,
-        score,  # Start from score
-        0,  # End at 0 (right to left)
-        color=color,
-        alpha=0.2,
-        linewidth=5,
-    )
-    ax_left.plot(
-        score,
-        y,
-        marker,
-        markersize=5,
-        color=color,
-        alpha=0.6,
-    )
-
-# Create right plot (pass^5) with bars going from left to right
-for _i, (y, score, color, marker) in enumerate(
-    zip(y_pos, scores_pow, colors, markers, strict=False)
-):
-    ax_right.hlines(
+    # Draw horizontal line from 0 to score
+    ax.hlines(
         y,
         0,
         score,
         color=color,
-        alpha=0.2,
+        alpha=0.5,
         linewidth=5,
     )
-    ax_right.plot(
+    # Add marker at the end of each line
+    ax.plot(
         score,
         y,
         marker,
-        markersize=5,
+        markersize=6,
         color=color,
-        alpha=0.6,
     )
 
-# Remove y-ticks since we're using centered labels between plots
-# ax_left.set_yticks([pos for pos, _ in env_centers])
-# ax_left.set_yticklabels([env for _, env in env_centers])
+# Create environment-only y-axis labels
+env_lookup = []
+for env in envs:
+    for agent_type in agent_types:
+        if "react" not in agent_type and "tool" not in agent_type:
+            continue
 
-# Add group separators visually (gray lines) on both plots
-for idx in group_indices[:-1]:
-    ax_left.axhline(idx, color="gray", linestyle=":", linewidth=1, alpha=0.5)
-    ax_right.axhline(idx, color="gray", linestyle=":", linewidth=1, alpha=0.5)
+        entries = plot_data[env].get(agent_type, [])
+        for _model, _, _ in entries:
+            env_lookup.append(env)
 
-# Remove y-axis from both plots and add centered labels between plots
-ax_left.tick_params(left=False, labelleft=False)
-ax_left.spines["left"].set_visible(False)
-ax_right.spines["left"].set_visible(False)
+# Calculate the center position for each environment's group of bars
+env_positions = {}
+current_pos = 0
+for env in envs:
+    # Count how many bars this environment has
+    bar_count = 0
+    for agent_type in agent_types:
+        if "react" not in agent_type and "tool" not in agent_type:
+            continue
+        entries = plot_data[env].get(agent_type, [])
+        bar_count += len(entries)
 
-# Add environment labels in the center between the two plots
-for pos, env in env_centers:
-    # Calculate the y position in data coordinates, then transform to figure coordinates
-    # pos is already the center of the group of bars for this environment
-    y_data = pos
-    # Transform from data coordinates to figure coordinates
-    # The y-axis goes from -0.5 to len(bars)-0.5 in data coordinates
-    y_fig = (y_data + 0.5) / len(bars)
+    # Calculate center position for this environment
+    if bar_count > 0:
+        env_positions[env] = current_pos + (bar_count - 1) / 2
+        current_pos += bar_count
 
-    # Position the text in the middle between the two subplots
-    fig.text(0.5, y_fig, env, ha="center", va="center", fontsize=10)
+# Set y-axis labels at the center of each environment's group
+env_ticks = list(env_positions.values())
+env_labels = list(env_positions.keys())
+ax.set_yticks(env_ticks)
+ax.set_yticklabels(env_labels)
 
-# Add legend only to the right plot
+# Add environment group separators
+current_env = env_lookup[0] if env_lookup else None
+separator_positions = []
+for i, env in enumerate(env_lookup[1:], 1):
+    if env != current_env:
+        separator_positions.append(i - 0.5)
+        current_env = env
+
+for pos in separator_positions:
+    ax.axhline(pos, color="gray", linestyle=":", linewidth=1, alpha=0.5)
+
+# Add legend
 handles = [
-    plt.Line2D([0], [0], color="#ff6b35", lw=4, label="Claude"),
-    plt.Line2D([0], [0], color="#28a745", lw=4, label="GPT-4o"),
-    plt.Line2D(
+    mlines.Line2D(
+        [0], [0], color=MODEL_COLORS["Claude-3.5"], lw=4, label="Claude 3.5 Sonnet"
+    ),
+    mlines.Line2D([0], [0], color=MODEL_COLORS["GPT-4o"], lw=4, label="GPT-4o"),
+    mlines.Line2D(
         [0],
         [0],
         color="gray",
         marker="o",
-        markersize=5,
+        markersize=8,
         linestyle="None",
         label="React Agent",
     ),
-    plt.Line2D(
+    mlines.Line2D(
         [0],
         [0],
         color="gray",
-        marker="s",
-        markersize=5,
+        marker="D",
+        markersize=8,
         linestyle="None",
-        label="Tool Calling Agent",
+        label="Tool-Calling Agent",
     ),
 ]
-ax_right.legend(handles=handles, loc="upper right")
+range_frame(ax, np.array([0, 1]), y_pos, pad=0.05)
+ax.legend(handles=handles, loc="upper right", fontsize=10)
 
-# Adjust xlim for both plots
-range_frame(ax_left, np.array([0, 1]), y_pos, pad=0.05)
-range_frame(ax_right, np.array([0, 1]), y_pos, pad=0.05)
+# Set axis labels and limits
+ax.set_xlabel("pass@5 Score", fontsize=12)
+ax.set_ylabel("Required Domain Expertise", fontsize=12)
 
-# Invert the x-axis on the left plot so bars go from right to left
-ax_left.invert_xaxis()
+# Set tick labels fontsize for both axes
+ax.tick_params(axis="x", labelsize=10)
+ax.tick_params(axis="y", labelsize=10)
 
-# Set labels
-ax_left.set_xlabel("pass@5 Score")
-ax_right.set_xlabel("pass^5 Score")
-
-# Remove the right y-axis ticks since we're sharing the y-axis
-ax_right.tick_params(left=False, labelleft=False)
+# Don't invert y-axis - keep natural order where ML (lower expertise) is at bottom
 
 fig.tight_layout()
-fig.savefig("pass_at_5_by_env.pdf", bbox_inches="tight")
+fig.savefig("pass_at_5_by_domain_expertise.pdf", bbox_inches="tight")

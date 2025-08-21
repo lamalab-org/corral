@@ -6,84 +6,109 @@ import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
 from lama_aesthetics.plotutils import range_frame
-from loguru import logger
 from matplotlib.lines import Line2D
+from scipy.constants import golden
+
+# Figure dimensions
+ONE_COL_WIDTH_INCH = 3
+TWO_COL_WIDTH_INCH = 7.25
+ONE_COL_GOLDEN_RATIO_HEIGHT_INCH = ONE_COL_WIDTH_INCH / golden
+TWO_COL_GOLDEN_RATIO_HEIGHT_INCH = TWO_COL_WIDTH_INCH / golden
 
 lama_aesthetics.get_style("main")
 
-MAPPING = {
-    "melting": "Melting",
-    "quenching": "Quenching",
-    "surface_energy": "Surface Energy",
-}
+# Read the task mapping
+with Path("tasks.json").open() as f:
+    task_mapping = json.load(f)
 
 # Read the averaged results
 with Path("averaged_results_subtasks.json").open() as f:
     data = json.load(f)
 
-# Group data by name
-data_by_name = defaultdict(list)
+
+# Normalize model names to handle different naming conventions
+def normalize_model_name(model_name):
+    model_lower = model_name.lower()
+    if any(
+        claude_variant in model_lower
+        for claude_variant in ["claude_35", "claude35", "claude_35_sonnet", "claude"]
+    ):
+        return "claude"
+    elif any(gpt_variant in model_lower for gpt_variant in ["gpt_4o", "gpt4o"]):
+        return "gpt4o"
+    else:
+        return model_name
+
+
+# Group data by normalized model and agent type
+data_by_model_agent = defaultdict(lambda: defaultdict(list))
 for entry in data:
-    data_by_name[entry["name"]].append(entry)
+    model = normalize_model_name(entry["model"])
+    agent_type = entry["agent_type"]
+    data_by_model_agent[model][agent_type].append(entry)
 
-# Get unique names (should be 6 for 6 subplots)
-names = list(data_by_name.keys())
-logger.info(f"Found {len(names)} different task names: {names}")
+# Define task categories in the desired order
+task_categories = [
+    "retrieval",
+    "code_execution",
+    "experiment_execution",
+    "reasoning",
+    "validation",
+]
 
-# Create the plot with 2 rows and 3 columns
-fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-
-# Flatten axes for easier indexing
-axes_flat = axes.flatten()
+# Create a single plot
+fig, ax = plt.subplots(
+    1, 1, figsize=(TWO_COL_WIDTH_INCH, ONE_COL_GOLDEN_RATIO_HEIGHT_INCH)
+)
 
 # Color and marker combinations for different model-agent pairs
-
-# Mapping from data keys to legend display names and styles
 model_display = {
-    "claude_35": "Claude",
-    "gpt_4o": "GPT-4o",
+    "claude": "Claude",
+    "gpt4o": "GPT-4o",
 }
 agent_display = {
     "react": "React",
     "tool_calling": "Tool Call",
 }
 model_colors = {
-    "claude_35": "#ff6b35",
-    "claude35": "#ff6b35",
-    "claude": "#ff6b35",
-    "claude_35_sonnet": "#ff6b35",
-    "gpt_4o": "#28a745",
-    "gpt4o": "#28a745",
+    "claude": "#768eab",
+    "gpt4o": "#a285a6",
 }
 agent_markers = {
     "react": "o",
-    "tool_calling": "s",
+    "tool_calling": "D",
 }
 agent_linestyle = {
     "react": "-",
-    "tool_calling": ":",  # Changed to dotted line
+    "tool_calling": "--",  # Dashed line
 }
 
-for i, name in enumerate(names):
-    if i >= 6:  # Only plot first 6 names
-        break
+# Process each model-agent combination
+for model in data_by_model_agent:
+    for agent_type in data_by_model_agent[model]:
+        entries = data_by_model_agent[model][agent_type]
 
-    ax = axes_flat[i]
-    entries = data_by_name[name]
+        # Collect scores for each task category
+        category_scores = {category: [] for category in task_categories}
 
-    if not entries:
-        ax.set_title(f"{name}\n(No data)")
-        continue
+        for entry in entries:
+            subtasks = entry["subtasks"]
+            scores = entry["scores"]
 
-    # Get subtasks from first entry (they should be consistent)
-    subtasks = entries[0]["subtasks"]
-    x_positions = range(len(subtasks))
+            for subtask, score in zip(subtasks, scores, strict=False):
+                if subtask in task_mapping:
+                    category = task_mapping[subtask]
+                    if score is not None:
+                        category_scores[category].append(score)
 
-    # Plot each model-agent combination
-    for _j, entry in enumerate(entries):
-        model = entry["model"]
-        agent_type = entry["agent_type"]
-        scores = entry["scores"]
+        # Calculate average scores for each category
+        avg_scores = []
+        for category in task_categories:
+            if category_scores[category]:
+                avg_score = np.mean(category_scores[category])
+            else:
+                avg_score = np.nan
+            avg_scores.append(avg_score)
 
         # Map to display names for legend
         model_disp = model_display.get(model, model)
@@ -93,110 +118,73 @@ for i, name in enumerate(names):
         # Use fixed color and marker codes
         color = model_colors.get(model, "gray")
         marker = agent_markers.get(agent_type, "o")
-        linestyle = agent_linestyle.get(agent_type, "-")  # Use agent-based linestyle
-
-        # Convert None values to NaN for plotting
-        scores_plot = [score if score is not None else np.nan for score in scores]
+        linestyle = agent_linestyle.get(agent_type, "-")
 
         # Plot the line
+        x_positions = range(len(task_categories))
         ax.plot(
             x_positions,
-            scores_plot,
+            avg_scores,
             color=color,
             marker=marker,
             linestyle=linestyle,
-            linewidth=2,
             markersize=6,
             label=label,
             alpha=0.8,
+            fillstyle="none",
         )
 
-    # Customize the subplot
-    # Use MAPPING dict for display name if available
-    display_name = MAPPING.get(name, name)
-    ax.set_title(f"{display_name}", fontsize=12, fontweight="bold")
-    ax.set_ylabel("Scores", fontsize=10)
-    ax.set_ylim(0, 1)
+# Customize the plot
+ax.set_ylabel("Average pass@5", fontsize=12)
+ax.set_xlabel("Task Categories", fontsize=12)
+ax.set_ylim(0, 1)
 
-    # Set y-axis ticks to prevent overlap
-    ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
-    ax.tick_params(axis="y", labelsize=8)
+# Set y-axis ticks
+ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+ax.tick_params(axis="y", labelsize=10)
 
-    # Set x-axis ticks and labels with improved rotation
-    ax.set_xticks(x_positions)
-    # Increased rotation angle and reduced font size for better spacing
-    range_frame(ax, np.array([0, len(x_positions)]), np.array([0, 1]), pad=0.05)
-    ax.set_xticklabels(subtasks, rotation=60, ha="right", fontsize=10)
-
-    # Alternative: Use vertical rotation if labels are very long
-    # ax.set_xticklabels(subtasks, rotation=90, ha='center', fontsize=7)
-
-    # No per-subplot legend; will add a global legend later
-
-# Hide any unused subplots
-for i in range(len(names), 6):
-    axes_flat[i].set_visible(False)
+# Set x-axis ticks and labels
+ax.set_xticks(range(len(task_categories)))
+ax.set_xticklabels(
+    [cat.replace("_", " ").title() for cat in task_categories], fontsize=10
+)
+range_frame(ax, np.array([0, len(task_categories) - 1]), np.array([0, 1]), pad=0.05)
 
 
-# Adjust layout to prevent overlap with more bottom space for rotated labels
+# Adjust layout
 plt.tight_layout()
-plt.subplots_adjust(top=0.93, bottom=0.15)  # Increased bottom margin for rotated labels
 
-
-# Create a more compact global legend
-fancy_handles = [
+# Add legend
+handles = [
+    Line2D([0], [0], color="#768eab", lw=4),
+    Line2D([0], [0], color="#a285a6", lw=4),
     Line2D(
         [0],
         [0],
-        color="#ff6b35",
+        color="gray",
         marker="o",
-        markersize=5,
-        linestyle="-",
-        label="Claude (React)",
+        markersize=8,
+        linestyle="None",
+        fillstyle="none",
     ),
     Line2D(
         [0],
         [0],
-        color="#ff6b35",
-        marker="s",
-        markersize=5,
-        linestyle=":",
-        label="Claude (Tool Calling)",
-    ),
-    Line2D(
-        [0],
-        [0],
-        color="#28a745",
-        marker="o",
-        markersize=5,
-        linestyle="-",
-        label="GPT-4o (React)",
-    ),
-    Line2D(
-        [0],
-        [0],
-        color="#28a745",
-        marker="s",
-        markersize=5,
-        linestyle=":",
-        label="GPT-4o (Tool Calling)",
+        color="gray",
+        marker="D",
+        markersize=8,
+        linestyle="None",
+        fillstyle="none",
     ),
 ]
-fancy_labels = [
-    "Claude (React)",
-    "Claude (Tool Call)",
-    "GPT-4o (React)",
-    "GPT-4o (Tool Call)",
-]
-fig.legend(
-    fancy_handles,
-    fancy_labels,
-    loc="lower center",
-    ncol=4,
+labels = ["Claude 3.5 Sonnet", "GPT-4o", "React Agent", "Tool-Calling Agent"]
+ax.legend(
+    handles,
+    labels,
+    bbox_to_anchor=(1.05, 1),
+    loc="upper left",
     fontsize=10,
-    frameon=False,
-    bbox_to_anchor=(0.5, -0.1),
 )
 
 # Save the plot as PNG and PDF
-plt.savefig("subtask_performance_comparison.pdf", dpi=300, bbox_inches="tight")
+plt.savefig("task_category_performance_comparison.pdf", dpi=300, bbox_inches="tight")
