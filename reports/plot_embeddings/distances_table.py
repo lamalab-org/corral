@@ -4,17 +4,25 @@ from pathlib import Path
 # Collect data from all JSON files
 table_data = []
 
-for file in Path("heatmaps").rglob("*.json"):
+for file in Path("heatmaps").rglob("*/*.json"):
+    if (
+        "melting" in file.name
+        or "quenching" in file.name
+        or "surface_energy" in file.name
+    ):
+        continue
+    if "distances" in file.name:
+        continue
     with file.open() as f:
         data = json.load(f)
 
     # Extract and format the data
     task_with_tools = data["task"]
     # Apply replacements to task name
-    task_with_tools = task_with_tools.replace("catalyst", "Catalyst")
-    task_with_tools = task_with_tools.replace("corral_md", "MD")
-    task_with_tools = task_with_tools.replace("ml", "ML")
-    task_with_tools = task_with_tools.replace("spectra_elucidation", "Spectra")
+    task_with_tools = task_with_tools.replace("catalyst", "\\opencatalyst")
+    task_with_tools = task_with_tools.replace("corral_md", "\\md")
+    task_with_tools = task_with_tools.replace("ml", "\\ml")
+    task_with_tools = task_with_tools.replace("spectra_elucidation", "\\spectra")
 
     number_tools = data["tool_count"]
     verbosity = data["verbosity"]
@@ -37,8 +45,9 @@ for file in Path("heatmaps").rglob("*.json"):
     )
 
 # Sort data by task first, then by verbosity to group them properly
+task_order = {"\\spectra": 1, "\\md": 2, "\\opencatalyst": 3, "\\ml": 4}
 verbosity_order = {"brief": 1, "workflow": 2, "full": 3}
-table_data.sort(key=lambda x: (x[0], verbosity_order.get(x[3], 4)))
+table_data.sort(key=lambda x: (task_order.get(x[0], 5), verbosity_order.get(x[3], 4)))
 
 table_lines = []
 # Print LaTeX table
@@ -47,8 +56,10 @@ table_lines.append(
 )
 table_lines.append("\\toprule")
 table_lines.append(
-    "Task & Tools & Mean of consecutive tasks & Verbosity & Mean Distance between tools and tasks & Mean of min distances between tools and tasks \\\\"
+    "\\multirow{2}{*}{Task} & \\multirow{2}{*}{Tools} & \\multirow{2}{*}{\\parbox{2cm}{\\centering Mean of consecutive tasks}} & \\multirow{2}{*}{Verbosity} & \\multicolumn{2}{c}{Distance Tools-Tasks} \\\\"
 )
+table_lines.append("\\cmidrule(lr){5-6}")
+table_lines.append("& & & & Mean & Mean of Minimum \\\\")
 table_lines.append("\\midrule")
 table_lines.append("\\midrule")
 

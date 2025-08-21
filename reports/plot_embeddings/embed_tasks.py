@@ -163,6 +163,14 @@ def embed_ml_task(path_path=ML_PATH):
 
     embeddings = []
     task_names = []
+
+    # For full paths of catalyst or ML tasks, only embed the first task
+    if is_full_path and (task == "ml" or task == "catalyst"):
+        # Get only the first task
+        first_key = next(iter(ml_tasks.keys()))
+        ml_tasks = {first_key: ml_tasks[first_key]}
+        logger.info(f"Processing only first task for full {task} path: {first_key}")
+
     for k, v in ml_tasks.items():
         prompt = v["description"]
         task_name = k
