@@ -29,7 +29,6 @@ from corral.io import (
 )
 from corral.server import run_server
 from corral.task import TaskDefinition, TaskGroup
-from corral.utils import execute_python_code, execute_python_script
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:
@@ -132,7 +131,11 @@ class TaskGroupEnvironment(Environment):
 
         self.current_task = task_group.tasks[task_id]
 
+        self.hidden_args = {}
+
         super().__init__(f"{task_id}", base_work_dir=base_work_dir)
+
+        self.hidden_args = {"work_dir": self.get_current_work_dir()}
 
         # Add tools
         self._add_task_tools()
@@ -180,6 +183,10 @@ class TaskGroupEnvironment(Environment):
     def reset_state(self) -> str:
         """Reset state and update file tools for new workspace"""
         trial_id = super().reset_state()
+
+        if hasattr(self, "hidden_args"):
+            self.hidden_args = {"work_dir": self.get_current_work_dir()}
+
         # Recreate file tools for new workspace
         self._setup_file_tools()
         return trial_id
@@ -215,7 +222,7 @@ Required submission format:
 
         # Add workspace info
         if self.current_work_dir:
-            prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n"
+            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace {self.current_work_dir}\n"
 
         # Add note about dependencies
         if self.current_task.input_from_tasks:
@@ -336,10 +343,11 @@ if __name__ == "__main__":
     Path(work_dir).mkdir(parents=True, exist_ok=True)
     # Create environments
     # add common tools execute_python_code, execute_python_script
-    taskgroup_common_tools = {
-        "execute_python_code": execute_python_code,
-        "execute_python_script": execute_python_script,
-    }
+    # taskgroup_common_tools = {
+    #     "execute_python_code": execute_python_code,
+    #     "execute_python_script": execute_python_script,
+    # }
+    taskgroup_common_tools = None
     environments = create_environments(
         task_json_path=tasks_json_path,
         work_dir=work_dir,

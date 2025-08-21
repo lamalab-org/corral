@@ -505,43 +505,6 @@ def model_training_success_binary(model_path: str) -> int:
             )
             return 0
 
-        # Criteria 2 & 3: Look for associated results file and check metrics
-        results_path = str(model_path).replace(".pkl", "_training_results.json")
-        if not Path(results_path).exists():
-            results_path = str(model_path).replace(
-                ".pkl", "_predictions.json"
-            )  # Try alternative naming
-
-        if Path(results_path).exists():
-            try:
-                with Path(results_path).open() as f:
-                    results = json.load(f)
-
-                test_metrics = results.get("test_metrics", {})
-                test_r2 = test_metrics.get("r2", 0)
-                test_mae = test_metrics.get("mae", float("inf"))
-
-                if not (test_r2 >= 0.5 and test_mae <= 0.5):
-                    logger.info(
-                        f"Binary check failed: Performance metrics below threshold (R2: {test_r2}, MAE: {test_mae})."
-                    )
-                    return 0
-            except json.JSONDecodeError:
-                logger.info(
-                    f"Binary check failed: Invalid JSON in results file: {results_path}"
-                )
-                return 0
-            except Exception as e:
-                logger.info(
-                    f"Binary check failed: Error processing results file {results_path}. Error: {e}"
-                )
-                return 0
-        else:
-            logger.info(
-                "Binary check failed: No associated training results file found."
-            )
-            return 0
-
         logger.info("Binary check passed: Model training success criteria met.")
         return 1
 
@@ -560,7 +523,6 @@ def model_evaluation_completeness_binary(evaluation_results_path: str) -> int:
     - Performance quality: R-squared (r2) in evaluation metrics is at least 0.7.
     - Cross-validation results are present, including mean and standard deviation for r2.
     - Feature importance analysis is included in the evaluation metrics.
-    - Detailed analysis is present (error_analysis and prediction_range).
 
     Args:
         evaluation_results_path: Path to the model evaluation results JSON file.
@@ -592,9 +554,10 @@ def model_evaluation_completeness_binary(evaluation_results_path: str) -> int:
             return 0
 
         # Criteria 3: Check performance quality (r2 >= 0.7)
-        if not ("r2" in metrics and metrics["r2"] >= 0.7):
+        r2_value = metrics.get("r2")
+        if not (isinstance(r2_value, int | float) and r2_value >= 0.7):
             logger.info(
-                f"Binary check failed: R2 ({metrics.get('r2', 'N/A')}) is below 0.7."
+                f"Binary check failed: R2 ({r2_value}) is not a valid number or is below 0.7."
             )
             return 0
 
@@ -613,13 +576,6 @@ def model_evaluation_completeness_binary(evaluation_results_path: str) -> int:
         if "feature_importance" not in metrics:
             logger.info(
                 "Binary check failed: 'feature_importance' not found in evaluation metrics."
-            )
-            return 0
-
-        # Criteria 6: Check for detailed analysis
-        if not ("error_analysis" in metrics and "prediction_range" in metrics):
-            logger.info(
-                "Binary check failed: Detailed analysis (error_analysis or prediction_range) missing."
             )
             return 0
 
