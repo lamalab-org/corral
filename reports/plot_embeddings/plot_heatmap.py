@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -263,6 +264,64 @@ def plot_embedding_heatmaps_fixed(
     plt.close("all")
     sns.reset_defaults()
     sns.reset_orig()
+
+    # 4. Statistical analysis for tools vs original tasks (excluding full_task_embeddings)
+    tools_vs_original_tasks_distances = distance_func(tool_embeddings, task_embeddings)
+
+    # Calculate statistical measures
+    mean_distance = tools_vs_original_tasks_distances.mean()
+    min_distance = tools_vs_original_tasks_distances.min()
+    max_distance = tools_vs_original_tasks_distances.max()
+
+    # Calculate mean of minimum distance for each task with tools
+    min_distances_per_task = tools_vs_original_tasks_distances.min(
+        axis=0
+    )  # Min distance for each task across all tools
+    mean_of_min_distances = min_distances_per_task.mean()
+
+    # Calculate mean distance between consecutive tasks
+    consecutive_distances = []
+    if len(task_embeddings) > 1:
+        for i in range(len(task_embeddings) - 1):
+            dist = distance_func(
+                task_embeddings[i : i + 1], task_embeddings[i + 1 : i + 2]
+            )[0, 0]
+            consecutive_distances.append(dist)
+        mean_consecutive_distance = np.mean(consecutive_distances)
+    else:
+        mean_consecutive_distance = 0.0
+
+    # Create statistics dictionary
+    stats = {
+        "task": task,
+        "verbosity": verbosity,
+        "distance_metric": distance_metric,
+        "normalized": normalize_embeddings,
+        "mean_distance_tools_vs_tasks": float(mean_distance),
+        "min_distance_tools_vs_tasks": float(min_distance),
+        "max_distance_tools_vs_tasks": float(max_distance),
+        "mean_of_min_distances_per_task": float(mean_of_min_distances),
+        "mean_consecutive_task_distance": float(mean_consecutive_distance),
+        "tool_count": len(tool_names),
+        "task_count": len(task_names),
+    }
+
+    # Save statistics to JSON file
+    stats_filename = (
+        f"{task}_{verbosity}_tools_vs_tasks_stats_{distance_metric}{norm_suffix}.json"
+    )
+    stats_path = save_dir / stats_filename
+
+    with Path(stats_path).open("w") as f:
+        json.dump(stats, f, indent=2)
+
+    logger.info(f"Saved statistics: {stats_path}")
+    logger.info("Tools vs Original Tasks Statistics:")
+    logger.info(f"  Mean distance: {mean_distance:.4f}")
+    logger.info(f"  Min distance: {min_distance:.4f}")
+    logger.info(f"  Max distance: {max_distance:.4f}")
+    logger.info(f"  Mean of min distances per task: {mean_of_min_distances:.4f}")
+    logger.info(f"  Mean consecutive task distance: {mean_consecutive_distance:.4f}")
 
     norm_status = (
         "with L2 normalization" if normalize_embeddings else "without normalization"
