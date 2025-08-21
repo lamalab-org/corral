@@ -9,18 +9,7 @@ from sklearn.metrics.pairwise import cosine_distances, euclidean_distances
 from sklearn.preprocessing import normalize
 
 ML_TOOLS = [
-    "batch_retrieve_polymorphs",
-    "filter_json_with_strategy",
-    "select_polymorphs_with_strategy_to_file",
-    "consolidate_polymorph_datasets",
-    "select_polymorphs_with_strategy",
-    "get_bulk_polymorphs_data",
-    "sort_and_get_first_from_json",
-    "get_bulk_polymorphs_data_to_file",
-    "prepare_tabular_dataset",
     "train_xgboost_model",
-    "evaluate_xgboost_model",
-    "perform_cross_validation",
 ]
 CATALYST_TOOLS = [
     "get_structure_from_mp_text",
