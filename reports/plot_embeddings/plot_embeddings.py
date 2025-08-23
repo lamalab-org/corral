@@ -1,3 +1,14 @@
+"""
+This script generates PCA plots for tool and task embeddings.
+The PCA plots visualize the high-dimensional embeddings in a 2D space.
+The plots will be created for constrasting tools, tasks and tools and tasks.
+One plot will be created for each verbosity level (brief, workflow, comprehensive) and each of the specified environments.
+The embeddings are loaded from .npy files located in the 'embeddings' directory.
+The tool embeddings can be generated with the script `embedding_tool_analysis.py`.
+The task embeddings can be generated with the script `embed_tasks.py`.
+The figures will be saved in the 'figures' directory.
+"""
+
 from pathlib import Path
 
 import lama_aesthetics

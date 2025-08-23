@@ -1,3 +1,16 @@
+"""
+Embed the tool descriptions of the tools with the different verbosity levels:
+- Brief
+- Workflow
+- Comprehensive
+The script reads the tools files of the specified environments and extracts the tool descriptions for each verbosity level.
+This works by parsing the Python files in the tools directory and looking for functions decorated with @tool.
+Then embed them using OpenAI's embedding model (text-embedding-3-large).
+The embeddings are saved as numpy files following the next path:
+- tool embeddings: f"embeddings/{task_name}_embeddings_{level}.npy"
+- tool names: f"embeddings/{task_name}_tool_names_{level}.npy"
+"""
+
 import ast
 from pathlib import Path
 

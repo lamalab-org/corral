@@ -1,3 +1,9 @@
+"""
+Creates a tex file with the table showing the mean distances between tasks and tools
+The script loads the data from the JSON files parsing the correct ones by their names.
+The table is saved in the .tex file "distances_table.tex"
+"""
+
 import json
 from pathlib import Path
 
