@@ -1,3 +1,14 @@
+"""
+Parse the results from the results JSON file.
+The script extract the relevant information (model, agent_type, env, verbosity_level, and if it is chained or single) from the JSON filename.
+It avoids the bulk modulus files, since we did not consider them in our analysis.
+It averages or sums the results for each environment with the same model, agent_type, and verbosity_level.
+The MD environments are all joined under the "MD" key.
+Pass@ks and Pass^ks are the averaged metrics.
+total_tool_calls, successful_tool_calls, failed_tool_calls, completion_tokens, and total_tool_execution_duration are also included in the results by adding them from all the tasks.
+The results are saved to processed_results.json.
+"""
+
 import json
 import os
 import re
@@ -511,7 +522,7 @@ if __name__ == "__main__":
             "averaged_melting_quenching_surface_energy": "MD",
             "spectra_chained_env": "Spectra",
             "spectra_env": "Spectra",
-            "catalyst_env": "Catalyst",
+            "catalyst_env": "OpenCatalyst",
             "ml_env": "ML",
         }
 

@@ -1,3 +1,14 @@
+"""
+The script embeds task descriptions into a vector space using OpenAI's embedding model (text-embedding-3-large).
+It processes tasks from the available environments.
+Additionally, the function `run_similarity_analysis` compares the tasks and tools using LLM calls.
+The embeddings are saved in the next files as numpy arrays:
+    - Single: f"embeddings/{task}_tasks_embeddings_full.npy"
+    - Single tasks names: f"embeddings/{task}_task_names_full.npy"
+    - Chained: f"embeddings/{task}_tasks_embeddings.npy"
+    - Chained tasks names: f"embeddings/{task}_task_names.npy"
+"""
+
 import json
 from pathlib import Path
 
@@ -136,7 +147,7 @@ def rate_subtask_to_overarching_similarity(
     return response.choices[0].message.parsed
 
 
-def embed_ml_task(path_path=ML_PATH):
+def embed_task(path_path=ML_PATH):
     # Extract task name with special handling for corral_md tasks
     path_parts = str(path_path).split("/")
     if "corral_md" in path_parts:
@@ -205,7 +216,7 @@ def embed_ml_task(path_path=ML_PATH):
         raise ValueError("No embeddings were created. Check the input data.")
 
 
-def embed_spectra():
+def embed_spectra_tasks():
     with SPECTRA_PATH.open("r") as f:
         spectra_tasks = json.load(f)
 
@@ -388,18 +399,18 @@ def run_similarity_analysis():
 
 
 if __name__ == "__main__":
-    embed_spectra()
-    embed_ml_task(ML_PATH)
-    embed_ml_task(CATALYST_PATH)
-    embed_ml_task(MELTING_PATH)
-    embed_ml_task(QUENCHING_PATH)
-    embed_ml_task(SE_PATH)
+    embed_spectra_tasks()
+    embed_task(ML_PATH)
+    embed_task(CATALYST_PATH)
+    embed_task(MELTING_PATH)
+    embed_task(QUENCHING_PATH)
+    embed_task(SE_PATH)
 
     # Process FULL paths
-    embed_ml_task(ML_FULL_PATH)
-    embed_ml_task(CATALYST_FULL_PATH)
-    embed_ml_task(MELTING_FULL_PATH)
-    embed_ml_task(QUENCHING_FULL_PATH)
-    embed_ml_task(SE_FULL_PATH)
+    embed_task(ML_FULL_PATH)
+    embed_task(CATALYST_FULL_PATH)
+    embed_task(MELTING_FULL_PATH)
+    embed_task(QUENCHING_FULL_PATH)
+    embed_task(SE_FULL_PATH)
 
     # run_similarity_analysis()
