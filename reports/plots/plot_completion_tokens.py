@@ -1,10 +1,10 @@
 """
-Plot the pass@5 for for single comprehensive tasks.
-It creates a bar plot with the pass@5 for each environment.
+Plot the total completion tokens for for single comprehensive tasks.
+It creates a bar plot with the total completion tokens for each environment.
 The environments are in the y-axis in the order of their domain expertise.
-Pass@5 are represented for each environment, agent and model.
+The number of completion tokens are represented for each environment, agent and model.
 The data is loaded from the processed_results.json file.
-The figure is saved as pass_at_5_by_domain_expertise.pdf
+The figure is saved as completion_tokens_by_domain_expertise.pdf
 """
 
 import json
@@ -47,14 +47,13 @@ filtered = [
 # Group by env, then by agent_type
 plot_data = defaultdict(
     lambda: defaultdict(list)
-)  # env -> agent_type -> list of (model, pass@5, pass^5)
+)  # env -> agent_type -> list of (model, completion_tokens)
 for r in filtered:
     env = r["env"]
     agent_type = r["agent_type"]
     model = r["model"]
-    score_at = r["pass@5"]
-    score_pow = r["pass^5"]
-    plot_data[env][agent_type].append((model, score_at, score_pow))
+    completion_tokens = r["completion_tokens"]
+    plot_data[env][agent_type].append((model, completion_tokens))
 
 # Define domain expertise order (from lower to higher expertise)
 domain_order = ["ML", "OpenCatalyst", "MD", "Spectra"]
@@ -70,23 +69,23 @@ for env in envs:
             continue  # Skip agent types that don't contain "react" or "tool"
 
         entries = plot_data[env].get(agent_type, [])
-        for model, score_at, score_pow in entries:
+        for model, completion_tokens in entries:
             # Label with agent_type only
             label = f"{agent_type}"
-            bars.append((label, score_at, score_pow, model))
+            bars.append((label, completion_tokens, model))
 
 fig, ax = plt.subplots(
     1, 1, figsize=(TWO_COL_WIDTH_INCH, TWO_COL_GOLDEN_RATIO_HEIGHT_INCH)
 )
 
 y_pos = np.arange(len(bars))
-scores_at = [s[1] for s in bars]  # pass@5 scores
+tokens = [s[1] for s in bars]  # completion_tokens
 
 # Clean up labels and determine colors and markers
 labels = []
 colors = []
 markers = []
-for label, _score_at, _score_pow, model in bars:
+for label, _tokens, model in bars:
     labels.append(label)
     if "claude" in model.lower():
         colors.append(MODEL_COLORS["Claude-3.5"])
@@ -100,21 +99,21 @@ for label, _score_at, _score_pow, model in bars:
         markers.append("o")  # Circle for react
 
 # Create horizontal lines with markers
-for _i, (y, score, color, marker) in enumerate(
-    zip(y_pos, scores_at, colors, markers, strict=False)
+for _i, (y, token_count, color, marker) in enumerate(
+    zip(y_pos, tokens, colors, markers, strict=False)
 ):
-    # Draw horizontal line from 0 to score
+    # Draw horizontal line from 0 to token_count
     ax.hlines(
         y,
         0,
-        score,
+        token_count,
         color=color,
         alpha=0.5,
         linewidth=5,
     )
     # Add marker at the end of each line
     ax.plot(
-        score,
+        token_count,
         y,
         marker,
         markersize=6,
@@ -129,7 +128,7 @@ for env in envs:
             continue
 
         entries = plot_data[env].get(agent_type, [])
-        for _model, _, _ in entries:
+        for _model, _ in entries:
             env_lookup.append(env)
 
 # Calculate the center position for each environment's group of bars
@@ -191,11 +190,11 @@ handles = [
         label="Tool-Calling Agent",
     ),
 ]
-range_frame(ax, np.array([0, 1]), y_pos, pad=0.05)
+range_frame(ax, np.array([0, 250000]), y_pos, pad=0.05)
 ax.legend(handles=handles, loc="upper right", fontsize=10)
 
 # Set axis labels and limits
-ax.set_xlabel("pass@5 Score", fontsize=12)
+ax.set_xlabel("Completion Tokens", fontsize=12)
 ax.set_ylabel("Required Domain Expertise", fontsize=12)
 
 # Set tick labels fontsize for both axes
@@ -205,4 +204,4 @@ ax.tick_params(axis="y", labelsize=10)
 # Don't invert y-axis - keep natural order where ML (lower expertise) is at bottom
 
 fig.tight_layout()
-fig.savefig("pass_at_5_by_domain_expertise.pdf", bbox_inches="tight")
+fig.savefig("completion_tokens_by_domain_expertise.pdf", bbox_inches="tight")

@@ -1,3 +1,10 @@
+"""
+Plot ablation study results from processed_results.json. This is three columns (single, chained and single plus fragments tool) with the results for spectra environment.
+The results are plotted for each agent and model.
+The data is loaded from the processed_results.json file.
+The plot is saved to ablation_plot.pdf
+"""
+
 import json
 from pathlib import Path
 

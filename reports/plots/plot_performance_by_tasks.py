@@ -1,3 +1,11 @@
+"""
+Plot pass@5 for each group of tasks: retrieval, code_execution, experiment_execution, reasoning, validation.
+The different agent types and models are represented with distinct colors and markers.
+The data is loaded from the averaged_results_subtasks.json file.
+The task categories for each subtask are defined in the task_mapping dictionary.
+The figure is saved in task_category_performance_comparison.pdf
+"""
+
 import json
 from collections import defaultdict
 from pathlib import Path

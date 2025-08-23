@@ -1,10 +1,10 @@
 """
-Plot the pass@5 for for single comprehensive tasks.
-It creates a bar plot with the pass@5 for each environment.
+Plot the pass^5 for for single comprehensive tasks.
+It creates a bar plot with the pass^5 for each environment.
 The environments are in the y-axis in the order of their domain expertise.
-Pass@5 are represented for each environment, agent and model.
+Pass^5 are represented for each environment, agent and model.
 The data is loaded from the processed_results.json file.
-The figure is saved as pass_at_5_by_domain_expertise.pdf
+The figure is saved as pass_pow_5_by_domain_expertise.pdf
 """
 
 import json
@@ -80,7 +80,7 @@ fig, ax = plt.subplots(
 )
 
 y_pos = np.arange(len(bars))
-scores_at = [s[1] for s in bars]  # pass@5 scores
+scores_pow = [s[2] for s in bars]  # pass^5 scores
 
 # Clean up labels and determine colors and markers
 labels = []
@@ -101,7 +101,7 @@ for label, _score_at, _score_pow, model in bars:
 
 # Create horizontal lines with markers
 for _i, (y, score, color, marker) in enumerate(
-    zip(y_pos, scores_at, colors, markers, strict=False)
+    zip(y_pos, scores_pow, colors, markers, strict=False)
 ):
     # Draw horizontal line from 0 to score
     ax.hlines(
@@ -195,7 +195,7 @@ range_frame(ax, np.array([0, 1]), y_pos, pad=0.05)
 ax.legend(handles=handles, loc="upper right", fontsize=10)
 
 # Set axis labels and limits
-ax.set_xlabel("pass@5 Score", fontsize=12)
+ax.set_xlabel("pass^5 Score", fontsize=12)
 ax.set_ylabel("Required Domain Expertise", fontsize=12)
 
 # Set tick labels fontsize for both axes
@@ -205,4 +205,4 @@ ax.tick_params(axis="y", labelsize=10)
 # Don't invert y-axis - keep natural order where ML (lower expertise) is at bottom
 
 fig.tight_layout()
-fig.savefig("pass_at_5_by_domain_expertise.pdf", bbox_inches="tight")
+fig.savefig("pass_pow_5_by_domain_expertise.pdf", bbox_inches="tight")

@@ -1,3 +1,9 @@
+"""
+This script generates a TEX table with the different verbosity levels for each agent type and environment.
+The results are taken from `processed_results.json` which is generated using the `parse_results.py` script.
+The table is saved as `summary_table.tex`.
+"""
+
 import json
 from collections import defaultdict
 from pathlib import Path

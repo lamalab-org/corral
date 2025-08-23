@@ -1,3 +1,9 @@
+"""
+Generate averaged results (pass@5) for each subtask for the existing environments. Only consider tasks with 'chained' set to True and 'verbosity_level' set to 'comprehensive'.
+It takes the data form the processed_results.json file.
+Saves the results to averaged_results.json.
+"""
+
 import json
 from collections import defaultdict
 from pathlib import Path
