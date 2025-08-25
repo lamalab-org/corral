@@ -21,7 +21,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pymatgen.core import Molecule, Structure
 
-from corral.utils import execute_python_code
+from corral.utils.code_tools import execute_python_code
 
 MOCK_DATA_DIR = Path(Path(__file__).parent / "mock_data")
 
