@@ -9,7 +9,8 @@ from typing import Any
 
 from loguru import logger
 
-from corral.backend.tool import Tool, ToolCall, ToolCallStatus
+from corral.backend.schema import ToolCall, ToolCallStatus
+from corral.backend.tool import Tool
 
 
 class Role(StrEnum):

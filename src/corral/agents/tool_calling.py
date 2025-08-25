@@ -12,7 +12,7 @@ from corral.agents.utils import (
     LiteLLMMessage,
     convert_to_openai_tool_format,
 )
-from corral.types import TypeRouter
+from corral.router.routes import CorralRouter as TypeRouter
 
 
 @dataclass

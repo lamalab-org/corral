@@ -1,6 +1,6 @@
 import json
 
-from corral.utils import execute_python_code
+from corral.utils.code_tools import execute_python_code
 
 
 class TestPythonExecutionTools:

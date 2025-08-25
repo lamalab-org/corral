@@ -4,17 +4,14 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from loguru import logger
 
+from corral.agents.base_agent import BaseAgent as TypeAgent
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 from corral.report.wandb_logger import CorralWandbLogger
-
-if TYPE_CHECKING:
-    from corral.types import TypeAgent, TypeRouter
-else:
-    TypeAgent, TypeRouter = Any, Any
+from corral.router.routes import CorralRouter as TypeRouter
 
 
 def create_session_id() -> str:

@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, Query
 from loguru import logger
 
 from corral.backend.env import Environment
-from corral.backend.tool import ToolRequest
+from corral.backend.schema import ToolRequest
 from corral.router.verbosity import (
     ToolVerbosity,
     VerbosityConfig,

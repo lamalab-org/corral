@@ -13,7 +13,7 @@ from corral.agents.utils import (
     llm_call,
     save_agent_messages,
 )
-from corral.types import TypeRouter
+from corral.router.routes import CorralRouter as TypeRouter
 
 
 class BaseAgent(ABC):

@@ -6,7 +6,7 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 
 from loguru import logger
 
-from corral.backend.tool import ToolArgument
+from corral.backend.schema import ToolArgument
 
 
 def format_type_annotation(annotation) -> str:

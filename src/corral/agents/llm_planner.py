@@ -5,7 +5,7 @@ from corral.agents.prompt_utils import create_prompt
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.agents.utils import LiteLLMMessage
-from corral.types import TypeRouter
+from corral.router.routes import CorralRouter as TypeRouter
 
 
 class LLMPlanner(BaseAgent):
