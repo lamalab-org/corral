@@ -11,7 +11,7 @@ from pathlib import Path
 
 import modal
 
-from corral.utils import tool
+from corral.backend.tool import tool
 
 
 @tool
