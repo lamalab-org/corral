@@ -11,8 +11,11 @@ from tools import (
     run_lammps,
 )
 
-from corral.base import Environment, Tool
-from corral.io import (
+from corral.backend.env import Environment
+from corral.backend.server import run_server
+from corral.backend.task import TaskDefinition, TaskGroup
+from corral.backend.tool import Tool
+from corral.utils.io_tools import (
     CatFilesTool,
     CopyFileTool,
     FileInfoTool,
@@ -22,19 +25,6 @@ from corral.io import (
     ReadFileTool,
     WriteFileTool,
 )
-from corral.server import run_server
-from corral.task import TaskDefinition, TaskGroup
-
-# if "CORRAL_WORK_DIR" not in os.environ:
-#     raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
-# if "ENVIRONMENT" not in os.environ:
-#     raise OSError("MD Environment not specified.")
-
-
-# CORRAL_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
-# ENVIRONMENT = os.environ["ENVIRONMENT"]
-# TASK_TYPE = os.environ["TASK_TYPE"]
-
 
 SCORING_FUNCTIONS = {
     "check_numerical": check_numerical,

@@ -25,8 +25,9 @@ from chembench.baseline import Generation, Generations
 from chembench.evaluate import ChemBenchmark
 from chembench.prompter import PrompterBuilder
 from chembench.task import Task
-from corral.base import Environment
-from corral.io import (
+from corral.backend.env import Environment
+from corral.backend.server import create_benchmark_server
+from corral.utils.io_tools import (
     CatFilesTool,
     CopyFileTool,
     FileInfoTool,
@@ -35,7 +36,6 @@ from corral.io import (
     ReadFileTool,
     WriteFileTool,
 )
-from corral.server import create_benchmark_server
 
 load_dotenv("../.env", override=True)
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/temp")

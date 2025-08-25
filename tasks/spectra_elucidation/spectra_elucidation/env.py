@@ -29,9 +29,9 @@ from spectra_elucidation.tools import (
     create_tools,
 )
 
-from corral.base import Environment
-from corral.server import run_server
-from corral.task import TaskDefinition, TaskGroup
+from corral.backend.env import Environment
+from corral.backend.server import run_server
+from corral.backend.task import TaskDefinition, TaskGroup
 
 BASE_WORK_DIR = os.environ.get(
     "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/spectra_elucidation"

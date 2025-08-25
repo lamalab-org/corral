@@ -5,7 +5,7 @@ import numpy as np
 from loguru import logger
 from tool_utils import Document_Retriever
 
-from corral.utils import tool
+from corral.backend.tool import tool
 
 # app = modal.App("corral-test")
 
