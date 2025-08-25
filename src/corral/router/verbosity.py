@@ -204,7 +204,7 @@ class VerbosityConfig:
         elif sections.get("BASIC"):
             # Take first paragraph from basic content
             basic_lines = sections["BASIC"].split("\n")
-            first_paragraph = []
+            first_paragraph: list[str] = []
             for line in basic_lines:
                 stripped_line = line.strip()
                 if (

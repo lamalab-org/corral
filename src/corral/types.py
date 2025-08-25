@@ -1,5 +1,11 @@
 from dataclasses import dataclass
 
+from corral.agents.base_agent import BaseAgent
+from corral.router.routes import CorralRouter
+
+TypeAgent = BaseAgent
+TypeRouter = CorralRouter
+
 
 @dataclass
 class ToolResponse:
