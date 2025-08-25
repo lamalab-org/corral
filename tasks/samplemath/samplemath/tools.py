@@ -1,6 +1,6 @@
+from corral.backend.schema import ToolArgument
 from corral.backend.tool import (
     Tool,
-    ToolArgument,
     tool,
 )
 
