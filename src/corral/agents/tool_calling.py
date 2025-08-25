@@ -12,7 +12,7 @@ from corral.agents.utils import (
     LiteLLMMessage,
     convert_to_openai_tool_format,
 )
-from corral.evaluate import BenchmarkInterface
+from corral.types import TypeRouter
 
 
 @dataclass
@@ -102,7 +102,7 @@ class ToolCallingAgent(BaseAgent):
 
     def run(
         self,
-        interface: BenchmarkInterface,
+        interface: TypeRouter,
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
@@ -111,7 +111,7 @@ class ToolCallingAgent(BaseAgent):
         """Run the agent to solve the task
 
         Args:
-            interface (BenchmarkInterface): The interface to use
+            interface (TypeRouter): The interface to use
             task_id (str): The task ID to solve
             history (list[LiteLLMMessage]], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.

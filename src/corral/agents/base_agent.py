@@ -2,7 +2,7 @@ import importlib.resources
 from abc import ABC, abstractmethod
 from typing import Any
 
-import litellm
+from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import Message
 from loguru import logger
 from promptstore import PromptStore
@@ -13,7 +13,7 @@ from corral.agents.utils import (
     llm_call,
     save_agent_messages,
 )
-from corral.evaluate import BenchmarkInterface
+from corral.types import TypeRouter
 
 
 class BaseAgent(ABC):
@@ -128,8 +128,8 @@ class BaseAgent(ABC):
         self.max_iterations = max_iterations
         self.api_endpoint = api_endpoint
         self.temperature = temperature
-        self.messages = []
-        self.token_usage = []  # Track token usage per LLM call
+        self.messages: list = []
+        self.token_usage: list = []  # Track token usage per LLM call
 
         if prompt_store:
             self.store = prompt_store
@@ -182,7 +182,7 @@ class BaseAgent(ABC):
 
             return response
 
-        except litellm.ContextWindowExceededError as e:
+        except ContextWindowExceededError as e:
             logger.error(f"API error: {e}")
 
             for message in reversed(self.messages):
@@ -205,7 +205,7 @@ class BaseAgent(ABC):
     @abstractmethod
     def run(
         self,
-        interface: BenchmarkInterface,
+        interface: TypeRouter,
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
@@ -230,7 +230,7 @@ class BaseAgent(ABC):
 
     def run_agent(
         self,
-        interface: BenchmarkInterface,
+        interface: TypeRouter,
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,

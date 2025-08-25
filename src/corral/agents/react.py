@@ -8,7 +8,7 @@ from promptstore import PromptStore
 from corral.agents.base_agent import BaseAgent
 from corral.agents.prompt_utils import create_prompt
 from corral.agents.utils import LiteLLMMessage
-from corral.evaluate import BenchmarkInterface
+from corral.types import TypeRouter
 
 
 @dataclass
@@ -133,7 +133,7 @@ class ReActAgent(BaseAgent):
 
     def run(
         self,
-        interface: BenchmarkInterface,
+        interface: TypeRouter,
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
@@ -142,7 +142,7 @@ class ReActAgent(BaseAgent):
         """Main ReAct loop implementation
 
         Args:
-            interface (BenchmarkInterface): The interface to use
+            interface (TypeRouter): The interface to use
             task_id (str): The task ID to solve
             history (List[Dict[str, Any]], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. `task_prompt` is intended to be a plan or description about the task, that should always be provided when this agent is called as a subagent of a main orchestrator. Defaults to None.
