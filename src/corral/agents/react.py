@@ -165,11 +165,6 @@ class ReActAgent(BaseAgent):
         )
 
         for _iteration in range(self.max_iterations):
-            # # add a delay of 5 second to avoid hitting rate limits
-            # import time
-
-            # time.sleep(10)
-
             # Create prompt and get LLM response
             llm_response = self.get_llm_response().content
 
