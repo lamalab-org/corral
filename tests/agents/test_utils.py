@@ -2,8 +2,8 @@ import json
 import tempfile
 from pathlib import Path
 from typing import cast
-from unittest.mock import Mock, patch
 
+import openai
 import pytest
 
 from corral.agents.utils import (
@@ -21,45 +21,127 @@ from corral.agents.utils import (
     serialize_messages,
 )
 
-
-def test_type_mapping_completeness():
-    """Test that TYPE_MAPPING contains expected type mappings."""
-    expected_mappings = {
-        "str": "string",
-        "bool": "boolean",
-        "int": "integer",
-        "float": "number",
-        "list[str]": "array",
-        "none": "null",
-        "dict": "object",
-    }
-    assert expected_mappings == TYPE_MAPPING
+from .conftest import MockFunction, MockToolCall
 
 
-def test_retry_exceptions_tuple():
-    """Test that RETRY_EXCEPTIONS contains expected exception types."""
-    try:
-        import openai
-
-        expected_exceptions = (
-            openai.APITimeoutError,
-            openai.APIConnectionError,
-            openai.APIError,
-            openai.APIStatusError,
-            openai.InternalServerError,
-        )
-        assert expected_exceptions == RETRY_EXCEPTIONS
-    except ImportError:
-        # Skip test if openai not available
-        pass
+# Shared mock classes for LiteLLM testing
+class MockLiteLLMMessage:
+    """Mock message class for LiteLLM responses."""
 
 
-@patch("corral.agents.utils.logger")
-def test_before_sleep_loguru_logs_retry_info(mock_logger):
+class MockLiteLLMChoice:
+    """Mock choice class for LiteLLM responses."""
+
+    def __init__(self):
+        self.message = MockLiteLLMMessage()
+
+
+class MockLiteLLMResponse:
+    """Mock response class for LiteLLM."""
+
+    def __init__(self, include_usage=False):
+        self.choices = [MockLiteLLMChoice()]
+        if include_usage:
+            self.usage = MockLiteLLMUsage()
+
+
+class MockLiteLLMUsage:
+    """Mock usage class for LiteLLM responses."""
+
+    def __init__(self):
+        self.prompt_tokens = 10
+        self.completion_tokens = 20
+        self.total_tokens = 30
+
+
+class MockLiteLLM:
+    """Mock LiteLLM class."""
+
+    def __init__(self):
+        self.completion = MockFunction()
+
+
+def setup_mock_litellm(monkeypatch, return_usage=False):
+    """Helper to set up LiteLLM mocking."""
+    mock_litellm = MockLiteLLM()
+    mock_response = MockLiteLLMResponse(include_usage=return_usage)
+    mock_litellm.completion.return_value = mock_response
+    monkeypatch.setattr("corral.agents.utils.litellm", mock_litellm)
+    return mock_litellm, mock_response
+
+
+def setup_mock_logger(monkeypatch):
+    """Helper to set up logger mocking."""
+    mock_logger = MockFunction()
+    mock_logger.warning = MockFunction()
+    monkeypatch.setattr("corral.agents.utils.logger", mock_logger)
+    return mock_logger
+
+
+class MockRetryState:
+    """Mock retry state for testing retry functionality."""
+
+    def __init__(self, attempt_number=2, sleep_time=30.0):
+        self.attempt_number = attempt_number
+        self.next_action = type("NextAction", (), {"sleep": sleep_time})()
+
+
+class MockSerializableMessage:
+    """Mock message class for serialization testing."""
+
+    def __init__(
+        self,
+        role="assistant",
+        content="I'll help you",
+        tool_calls=None,
+        tool_call_id=None,
+        name=None,
+    ):
+        self.role = role
+        self.content = content
+        self.tool_calls = tool_calls or []
+        self.tool_call_id = tool_call_id
+        self.name = name
+
+
+def test_type_mapping_functionality():
+    """Test that TYPE_MAPPING correctly maps Python types to JSON types."""
+    # Test that common Python types are correctly mapped
+    test_cases = [
+        ("str", "string"),
+        ("bool", "boolean"),
+        ("int", "integer"),
+        ("float", "number"),
+        ("list[str]", "array"),
+        ("none", "null"),
+        ("dict", "object"),
+    ]
+
+    for python_type, expected_json_type in test_cases:
+        assert TYPE_MAPPING.get(python_type) == expected_json_type
+
+    # Test that unknown types return None (graceful fallback)
+    assert TYPE_MAPPING.get("unknown_type") is None
+
+
+def test_retry_exceptions_are_openai_exceptions():
+    """Test that RETRY_EXCEPTIONS contains valid OpenAI exception types."""
+    # Test that all exceptions in RETRY_EXCEPTIONS are OpenAI exceptions
+    for exception_type in RETRY_EXCEPTIONS:
+        assert hasattr(openai, exception_type.__name__)
+        assert issubclass(exception_type, Exception)
+
+    # Test that the tuple is not empty
+    assert len(RETRY_EXCEPTIONS) > 0
+
+
+def test_before_sleep_loguru_logs_retry_info(monkeypatch):
     """Test that before_sleep_loguru logs retry information."""
-    mock_retry_state = Mock()
-    mock_retry_state.attempt_number = 2
-    mock_retry_state.next_action.sleep = 30.0
+    mock_logger = MockFunction()
+    mock_logger.info = MockFunction()
+    monkeypatch.setattr("corral.agents.utils.logger", mock_logger)
+
+    mock_retry_state = MockRetryState()
 
     before_sleep_loguru(mock_retry_state)
 
@@ -84,81 +166,70 @@ def test_litellm_message_structure():
     assert msg2["name"] == "assistant"
 
 
-@patch("corral.agents.utils.litellm")
-def test_llm_call_basic(mock_litellm):
+def test_llm_call_basic(monkeypatch):
     """Test basic llm_call without tools."""
-    mock_response = Mock()
-    mock_message = Mock()
-    mock_response.choices = [Mock(message=mock_message)]
-    mock_litellm.completion.return_value = mock_response
+    mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
 
-    messages = cast(list[LiteLLMMessage], [{"role": "user", "content": "Hello"}])
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
     result = llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
 
-    assert result == mock_message
-    mock_litellm.completion.assert_called_once()
-    call_args = mock_litellm.completion.call_args[1]
-    assert call_args["model"] == "gpt-3.5-turbo"
-    assert call_args["messages"] == messages
-    assert call_args["temperature"] == 0.7
-    assert call_args["api_base"] is None
+    assert result == mock_response.choices[0].message
+    mock_litellm.completion.assert_called_once_with(
+        model="gpt-3.5-turbo",
+        messages=messages,
+        temperature=0.7,
+        api_base=None,
+    )
 
 
-@patch("corral.agents.utils.litellm")
-def test_llm_call_with_tools(mock_litellm):
+def test_llm_call_with_tools(monkeypatch):
     """Test llm_call with tools."""
-    mock_response = Mock()
-    mock_message = Mock()
-    mock_response.choices = [Mock(message=mock_message)]
-    mock_litellm.completion.return_value = mock_response
+    mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
 
-    messages = cast(list[LiteLLMMessage], [{"role": "user", "content": "Hello"}])
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
     tools = [{"type": "function", "function": {"name": "test_tool"}}]
 
     result = llm_call(
         model="gpt-3.5-turbo", messages=messages, temperature=0.7, tools=tools
     )
 
-    assert result == mock_message
-    call_args = mock_litellm.completion.call_args[1]
-    assert call_args["tools"] == tools
-    assert call_args["tool_choice"] == "auto"
+    assert result == mock_response.choices[0].message
+    mock_litellm.completion.assert_called_once_with(
+        model="gpt-3.5-turbo",
+        messages=messages,
+        temperature=0.7,
+        tools=tools,
+        tool_choice="auto",
+        api_base=None,
+    )
 
 
-@patch("corral.agents.utils.litellm")
-def test_llm_call_anthropic_model(mock_litellm):
+def test_llm_call_anthropic_model(monkeypatch):
     """Test llm_call with anthropic model adds max_tokens."""
-    mock_response = Mock()
-    mock_message = Mock()
-    mock_response.choices = [Mock(message=mock_message)]
-    mock_litellm.completion.return_value = mock_response
+    mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
 
-    messages = cast(list[LiteLLMMessage], [{"role": "user", "content": "Hello"}])
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
     result = llm_call(
         model="anthropic/claude-3-sonnet", messages=messages, temperature=0.7
     )
 
-    assert result == mock_message
-    call_args = mock_litellm.completion.call_args[1]
-    assert call_args["max_tokens"] == 8192
+    assert result == mock_response.choices[0].message
+    mock_litellm.completion.assert_called_once_with(
+        model="anthropic/claude-3-sonnet",
+        messages=messages,
+        temperature=0.7,
+        max_tokens=8192,
+        api_base=None,
+    )
 
 
-@patch("corral.agents.utils.litellm")
-def test_llm_call_with_usage_info(mock_litellm):
+def test_llm_call_with_usage_info(monkeypatch):
     """Test llm_call with return_usage=True."""
-    mock_response = Mock()
-    mock_message = Mock()
-    mock_usage = Mock()
-    mock_usage.prompt_tokens = 10
-    mock_usage.completion_tokens = 20
-    mock_usage.total_tokens = 30
-    mock_response.choices = [Mock(message=mock_message)]
-    mock_response.usage = mock_usage
-    mock_litellm.completion.return_value = mock_response
+    mock_litellm, mock_response = setup_mock_litellm(monkeypatch, return_usage=True)
 
-    messages = cast(list[LiteLLMMessage], [{"role": "user", "content": "Hello"}])
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
     result = llm_call(
         model="gpt-3.5-turbo", messages=messages, temperature=0.7, return_usage=True
@@ -166,7 +237,7 @@ def test_llm_call_with_usage_info(mock_litellm):
 
     assert isinstance(result, tuple)
     message, usage_info = result
-    assert message == mock_message
+    assert message == mock_response.choices[0].message
     assert usage_info == {
         "prompt_tokens": 10,
         "completion_tokens": 20,
@@ -174,12 +245,13 @@ def test_llm_call_with_usage_info(mock_litellm):
     }
 
 
-@patch("corral.agents.utils.litellm")
-def test_llm_call_exception_handling(mock_litellm):
+def test_llm_call_exception_handling(monkeypatch):
     """Test llm_call exception handling."""
+    mock_litellm = MockLiteLLM()
     mock_litellm.completion.side_effect = Exception("API Error")
+    monkeypatch.setattr("corral.agents.utils.litellm", mock_litellm)
 
-    messages = cast(list[LiteLLMMessage], [{"role": "user", "content": "Hello"}])
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
     with pytest.raises(Exception) as exc_info:
         llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
@@ -268,9 +340,10 @@ def test_convert_dict_arg_with_default():
     assert result == expected
 
 
-@patch("corral.agents.utils.logger")
-def test_convert_dict_arg_unknown_type(mock_logger):
+def test_convert_dict_arg_unknown_type(monkeypatch):
     """Test convert_dict_arg with unknown type."""
+    mock_logger = setup_mock_logger(monkeypatch)
+
     arg = {
         "name": "unknown",
         "type": "unknown_type",
@@ -279,13 +352,13 @@ def test_convert_dict_arg_unknown_type(mock_logger):
     result = convert_dict_arg(arg)
     expected = {"description": "Unknown type argument", "type": "string"}
     assert result == expected
-    mock_logger.warning.assert_called_once()
+    assert mock_logger.warning.call_count == 1
 
 
 def test_convert_dict_arg_not_dict():
     """Test convert_dict_arg with non-dict input."""
     with pytest.raises(TypeError) as exc_info:
-        convert_dict_arg(cast(dict, "not a dict"))
+        convert_dict_arg(cast("dict", "not a dict"))
 
     assert "Expected argument specification to be a dictionary" in str(exc_info.value)
 
@@ -339,13 +412,14 @@ def test_parse_argument_string_with_default():
     assert result == expected
 
 
-@patch("corral.agents.utils.logger")
-def test_parse_argument_string_invalid_format(mock_logger):
+def test_parse_argument_string_invalid_format(monkeypatch):
     """Test parsing invalid argument string format."""
+    mock_logger = setup_mock_logger(monkeypatch)
+
     arg_string = "invalid format"
     result = _parse_argument_string_to_dict(arg_string)
     assert result is None
-    mock_logger.warning.assert_called_once()
+    assert mock_logger.warning.call_count == 1
 
 
 def test_convert_to_openai_tool_format_basic():
@@ -410,26 +484,28 @@ def test_convert_to_openai_tool_format_string_arguments():
     assert tool["function"]["parameters"]["required"] == ["name"]
 
 
-@patch("corral.agents.utils.logger")
-def test_convert_to_openai_tool_format_no_tools(mock_logger):
+def test_convert_to_openai_tool_format_no_tools(monkeypatch):
     """Test tool conversion with no tools."""
+    mock_logger = setup_mock_logger(monkeypatch)
+
     tools_dict = {}
 
     result = convert_to_openai_tool_format(tools_dict)
     assert result == []
-    mock_logger.warning.assert_called_once()
+    assert mock_logger.warning.call_count == 1
 
 
-@patch("corral.agents.utils.logger")
-def test_convert_to_openai_tool_format_malformed_tool(mock_logger):
+def test_convert_to_openai_tool_format_malformed_tool(monkeypatch):
     """Test tool conversion with malformed tool."""
+    mock_logger = setup_mock_logger(monkeypatch)
+
     tools_dict = {
         "tools": [{"name": "incomplete_tool", "description": "Missing arguments"}]
     }
 
     result = convert_to_openai_tool_format(tools_dict)
     assert result == []
-    mock_logger.warning.assert_called_once()
+    assert mock_logger.warning.call_count == 1
 
 
 def test_parse_string_argument_required():
@@ -468,7 +544,7 @@ def test_parse_string_argument_invalid_format():
 def test_serialize_messages_dict_messages():
     """Test serializing dictionary messages."""
     messages = cast(
-        list[LiteLLMMessage],
+        "list[LiteLLMMessage]",
         [
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi there"},
@@ -482,17 +558,8 @@ def test_serialize_messages_dict_messages():
 
 def test_serialize_messages_with_tool_calls():
     """Test serializing messages with tool calls."""
-    mock_tool_call = Mock()
-    mock_tool_call.id = "call_123"
-    mock_tool_call.function.name = "test_function"
-    mock_tool_call.function.arguments = '{"arg": "value"}'
-
-    mock_message = Mock()
-    mock_message.role = "assistant"
-    mock_message.content = "I'll help you"
-    mock_message.tool_calls = [mock_tool_call]
-    mock_message.tool_call_id = None
-    mock_message.name = None
+    mock_tool_call = MockToolCall("call_123", "test_function", {"arg": "value"})
+    mock_message = MockSerializableMessage(tool_calls=[mock_tool_call])
 
     result = serialize_messages([mock_message])
 
@@ -510,7 +577,7 @@ def test_save_agent_messages_basic():
     """Test basic save_agent_messages functionality."""
     with tempfile.TemporaryDirectory() as temp_dir:
         messages = cast(
-            list[LiteLLMMessage],
+            "list[LiteLLMMessage]",
             [
                 {"role": "user", "content": "Hello"},
                 {"role": "assistant", "content": "Hi there"},
@@ -537,24 +604,23 @@ def test_save_agent_messages_basic():
         assert data["messages"] == messages
 
 
-def test_save_agent_messages_with_tools():
+def test_save_agent_messages_with_tools(tmp_path):
     """Test save_agent_messages with tools."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        messages = cast(list[LiteLLMMessage], [{"role": "user", "content": "Hello"}])
-        tools = [{"name": "test_tool", "description": "A test tool"}]
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
+    tools = [{"name": "test_tool", "description": "A test tool"}]
 
-        result_path = save_agent_messages(
-            messages=messages,
-            task_id="test_task",
-            agent_name="test_agent",
-            output_dir=temp_dir,
-            tools=tools,
-        )
+    result_path = save_agent_messages(
+        messages=messages,
+        task_id="test_task",
+        agent_name="test_agent",
+        output_dir=str(tmp_path),
+        tools=tools,
+    )
 
-        with open(result_path) as f:
-            data = json.load(f)
+    with open(result_path) as f:
+        data = json.load(f)
 
-        assert data["tools"] == tools
+    assert data["tools"] == tools
 
 
 def test_save_agent_messages_creates_directory():
@@ -562,7 +628,7 @@ def test_save_agent_messages_creates_directory():
     with tempfile.TemporaryDirectory() as temp_dir:
         output_dir = Path(temp_dir) / "new_logs"
 
-        messages = cast(list[LiteLLMMessage], [{"role": "user", "content": "Hello"}])
+        messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
         result_path = save_agent_messages(
             messages=messages,
@@ -575,13 +641,22 @@ def test_save_agent_messages_creates_directory():
         assert Path(result_path).exists()
 
 
-@patch("corral.agents.utils.datetime")
-def test_save_agent_messages_filename_format(mock_datetime):
+def test_save_agent_messages_filename_format(monkeypatch):
     """Test that save_agent_messages generates correct filename format."""
     with tempfile.TemporaryDirectory() as temp_dir:
-        messages = cast(list[LiteLLMMessage], [{"role": "user", "content": "Hello"}])
+        messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
-        mock_datetime.now.return_value.strftime.return_value = "20240101_120000"
+        class MockDatetime:
+            @staticmethod
+            def now(tz=None):
+                class MockNow:
+                    def strftime(self, fmt):
+                        return "20240101_120000"
+
+                return MockNow()
+
+        mock_datetime = MockDatetime()
+        monkeypatch.setattr("corral.agents.utils.datetime", mock_datetime)
 
         result_path = save_agent_messages(
             messages=messages,
@@ -632,13 +707,9 @@ def test_message_serialization_and_saving():
     """Test message serialization and saving working together."""
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create mock messages with various types
-        mock_message1 = Mock()
-        mock_message1.role = "user"
-        mock_message1.content = "Hello"
-        mock_message1.tool_call_id = None
-        mock_message1.name = None
-        mock_message1.tool_calls = None
-
+        mock_message1 = MockSerializableMessage(
+            role="user", content="Hello", tool_calls=None
+        )
         mock_message2 = {"role": "assistant", "content": "Hi there"}
 
         messages = [mock_message1, mock_message2]

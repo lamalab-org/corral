@@ -1,7 +1,5 @@
 """Tests for the prompt_utils module."""
 
-from unittest.mock import Mock
-
 import pytest
 
 from corral.agents.prompt_utils import (
@@ -49,31 +47,74 @@ class TestStringPrompt:
     def test_fill_missing_placeholder(self):
         """Test filling a prompt where not all placeholders are provided."""
         prompt = StringPrompt("Hello {name}, you are {age} years old!")
-        result = prompt.fill({"name": "Charlie"})
-        assert result == "Hello Charlie, you are {age} years old!"
+        with pytest.raises(KeyError, match="Missing values for placeholders"):
+            prompt.fill({"name": "Charlie"})
+
+    def test_fill_missing_numeric_placeholder(self):
+        """Test filling a prompt with numeric placeholders that are missing."""
+        prompt = StringPrompt("Item {0} costs ${1}")
+        with pytest.raises(KeyError, match="Missing values for placeholders"):
+            prompt.fill({"0": "Apple"})  # Missing "1"
+
+    def test_fill_empty_placeholder_name(self):
+        """Test that empty placeholder names are handled correctly."""
+        prompt = StringPrompt("Hello {} world!")
+        with pytest.raises(KeyError, match="Missing values for placeholders"):
+            prompt.fill({})
 
     def test_fill_extra_replacements(self):
         """Test filling a prompt with extra replacements that don't match placeholders."""
         prompt = StringPrompt("Hello {name}!")
-        result = prompt.fill({"name": "David", "extra": "ignored"})
+        with pytest.raises(
+            KeyError, match="Extra keys provided that don't match any placeholders"
+        ):
+            prompt.fill({"name": "David", "extra": "ignored"})
+
+    def test_fill_extra_replacements_with_underscore_prefix(self):
+        """Test that framework keys with underscore prefix are allowed as extra replacements."""
+        prompt = StringPrompt("Hello {name}!")
+        result = prompt.fill({"name": "David", "_internal_key": "framework_value"})
         assert result == "Hello David!"
+
+    def test_fill_legitimate_extra_field(self):
+        """Test filling a prompt where 'extra' is a legitimate placeholder."""
+        prompt = StringPrompt("Hello {name}, here's {extra} info!")
+        result = prompt.fill({"name": "Alice", "extra": "bonus"})
+        assert result == "Hello Alice, here's bonus info!"
+
+    def test_fill_typo_in_extra_field_caught(self):
+        """Test that typos in field names are now caught."""
+        prompt = StringPrompt("Hello {name}, here's {extra} info!")
+        with pytest.raises(
+            KeyError, match="Extra keys provided that don't match any placeholders"
+        ):
+            prompt.fill(
+                {"name": "Alice", "extra": "bonus", "exrta": "typo"}
+            )  # typo in 'extra'
 
 
 class TestGetPrompt:
     """Test cases for the get_prompt function."""
 
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.mock_store = Mock()
-        self.mock_prompt = Mock()
-        self.mock_prompt.fill = Mock(return_value="filled content")
-        self.mock_store.get = Mock(return_value=self.mock_prompt)
+    @pytest.fixture()
+    def mock_prompt(self, mocker):
+        """Create a mock prompt."""
+        mock = mocker.Mock()
+        mock.fill = mocker.Mock(return_value="filled content")
+        return mock
 
-    def test_get_prompt_with_none_input_and_default_uuid(self):
+    @pytest.fixture()
+    def mock_store(self, mocker, mock_prompt):
+        """Create a mock store."""
+        mock = mocker.Mock()
+        mock.get = mocker.Mock(return_value=mock_prompt)
+        return mock
+
+    def test_get_prompt_with_none_input_and_default_uuid(self, mock_store, mock_prompt):
         """Test getting prompt with None input and valid default UUID."""
-        result = get_prompt(self.mock_store, None, "test-uuid")
-        assert result == self.mock_prompt
-        self.mock_store.get.assert_called_once_with("test-uuid")
+        result = get_prompt(mock_store, None, "test-uuid")
+        assert result == mock_prompt
+        mock_store.get.assert_called_once_with("test-uuid")
 
     def test_get_prompt_with_none_input_and_none_default_uuid(self):
         """Test getting prompt with None input and None default UUID raises ValueError."""
@@ -82,43 +123,47 @@ class TestGetPrompt:
         ):
             get_prompt(self.mock_store, None, None)
 
-    def test_get_prompt_with_string_input(self):
+    def test_get_prompt_with_string_input(self, mock_store):
         """Test getting prompt with string input creates StringPrompt."""
-        result = get_prompt(self.mock_store, "test content", "unused-uuid")
+        result = get_prompt(mock_store, "test content", "unused-uuid")
         assert isinstance(result, StringPrompt)
         assert result.content == "test content"
-        self.mock_store.get.assert_not_called()
+        mock_store.get.assert_not_called()
 
-    def test_get_prompt_with_existing_prompt_object(self):
+    def test_get_prompt_with_existing_prompt_object(self, mock_store, mocker):
         """Test getting prompt with existing prompt object returns it unchanged."""
-        existing_prompt = Mock()
-        result = get_prompt(self.mock_store, existing_prompt, "unused-uuid")
+        existing_prompt = mocker.Mock()
+        result = get_prompt(mock_store, existing_prompt, "unused-uuid")
         assert result is existing_prompt
-        self.mock_store.get.assert_not_called()
+        mock_store.get.assert_not_called()
 
 
 class TestCreatePrompt:
     """Test cases for the create_prompt function."""
 
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.mock_system_prompt = Mock()
-        self.mock_user_prompt = Mock()
-        self.mock_user_prompt.fill = Mock(return_value="filled user content")
+    @pytest.fixture()
+    def mock_system_prompt(self, mocker):
+        """Create a mock system prompt."""
+        return mocker.Mock()
 
-    def test_create_prompt_basic(self):
+    @pytest.fixture()
+    def mock_user_prompt(self, mocker):
+        """Create a mock user prompt."""
+        mock = mocker.Mock()
+        mock.fill = mocker.Mock(return_value="filled user content")
+        return mock
+
+    def test_create_prompt_basic(self, mock_system_prompt, mock_user_prompt):
         """Test creating a basic prompt with system and user prompts."""
-        result = create_prompt(
-            self.mock_system_prompt, self.mock_user_prompt, "test task guide"
-        )
+        result = create_prompt(mock_system_prompt, mock_user_prompt, "test task guide")
 
         assert len(result) == 2
         assert result[0].get("role") == "system"
-        assert result[0].get("content") == self.mock_system_prompt
+        assert result[0].get("content") == mock_system_prompt
         assert result[1].get("role") == "user"
         assert result[1].get("content") == "filled user content"
 
-    def test_create_prompt_with_history(self):
+    def test_create_prompt_with_history(self, mock_system_prompt, mock_user_prompt):
         """Test creating a prompt with message history."""
         history = [
             LiteLLMMessage(role="user", content="previous message"),
@@ -126,8 +171,8 @@ class TestCreatePrompt:
         ]
 
         result = create_prompt(
-            self.mock_system_prompt,
-            self.mock_user_prompt,
+            mock_system_prompt,
+            mock_user_prompt,
             "test task guide",
             history=history,
         )
@@ -138,32 +183,41 @@ class TestCreatePrompt:
         assert result[1].get("role") == "assistant"
         assert result[1].get("content") == "previous response"
         assert result[2].get("role") == "system"
-        assert result[2].get("content") == self.mock_system_prompt
+        assert result[2].get("content") == mock_system_prompt
         assert result[3].get("role") == "user"
         assert result[3].get("content") == "filled user content"
 
-    def test_create_prompt_with_none_system_prompt(self):
+    def test_create_prompt_with_none_system_prompt(self, mock_user_prompt):
         """Test creating a prompt with None system prompt."""
-        result = create_prompt(None, self.mock_user_prompt, "test task guide")
+        result = create_prompt(None, mock_user_prompt, "test task guide")
 
         assert len(result) == 1
         assert result[0].get("role") == "user"
         assert result[0].get("content") == "filled user content"
 
-    def test_create_prompt_with_kwargs(self):
+    def test_create_prompt_with_kwargs(self, mock_system_prompt, mock_user_prompt):
         """Test creating a prompt with additional keyword arguments."""
+        create_prompt(
+            mock_system_prompt,
+            mock_user_prompt,
+            "test task guide",
+            extra_param="test value",
+        )
+
         # Verify that the user prompt's fill method was called with the extra parameter
         expected_call_args = {
             "task_guide": "test task guide",
             "extra_param": "test value",
         }
-        self.mock_user_prompt.fill.assert_called_once_with(expected_call_args)
+        mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
-    def test_create_prompt_with_empty_history(self):
+    def test_create_prompt_with_empty_history(
+        self, mock_system_prompt, mock_user_prompt
+    ):
         """Test creating a prompt with empty history list."""
         result = create_prompt(
-            self.mock_system_prompt,
-            self.mock_user_prompt,
+            mock_system_prompt,
+            mock_user_prompt,
             "test task guide",
             history=[],
         )
@@ -176,15 +230,17 @@ class TestCreatePrompt:
 class TestBuildUserContent:
     """Test cases for the build_user_content function."""
 
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.mock_user_prompt = Mock()
-        self.mock_user_prompt.fill = Mock(return_value="filled content")
+    @pytest.fixture()
+    def mock_user_prompt(self, mocker):
+        """Create a mock user prompt."""
+        mock = mocker.Mock()
+        mock.fill = mocker.Mock(return_value="filled content")
+        return mock
 
-    def test_build_user_content_with_string_task_guide(self):
+    def test_build_user_content_with_string_task_guide(self, mock_user_prompt):
         """Test building user content with string task guide."""
         result = build_user_content(
-            self.mock_user_prompt, "test task guide", param1="value1", param2="value2"
+            mock_user_prompt, "test task guide", param1="value1", param2="value2"
         )
 
         assert result == "filled content"
@@ -193,16 +249,16 @@ class TestBuildUserContent:
             "param1": "value1",
             "param2": "value2",
         }
-        self.mock_user_prompt.fill.assert_called_once_with(expected_call_args)
+        mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
-    def test_build_user_content_with_list_task_guide(self):
+    def test_build_user_content_with_list_task_guide(self, mock_user_prompt):
         """Test building user content with list task guide."""
         task_guide = [
             {"type": "image", "image_url": "test.jpg"},
             {"type": "text", "text": "analyze this"},
         ]
 
-        result = build_user_content(self.mock_user_prompt, task_guide, param1="value1")
+        result = build_user_content(mock_user_prompt, task_guide, param1="value1")
 
         assert isinstance(result, list)
         assert len(result) == 3  # text + 2 task guide items
@@ -216,49 +272,47 @@ class TestBuildUserContent:
             "task_guide": "The task is to correctly answer the question with an image specified below.",
             "param1": "value1",
         }
-        self.mock_user_prompt.fill.assert_called_once_with(expected_call_args)
+        mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
-    def test_build_user_content_with_invalid_task_guide_type(self):
+    def test_build_user_content_with_invalid_task_guide_type(self, mock_user_prompt):
         """Test building user content with invalid task guide type."""
         with pytest.raises(ValueError, match="task_guide should be str or list"):
             build_user_content(
-                self.mock_user_prompt,
+                mock_user_prompt,
                 123,  # type: ignore # Invalid type for testing
                 param1="value1",
             )
 
-    def test_build_user_content_string_task_guide_fill_error(self):
+    def test_build_user_content_string_task_guide_fill_error(self, mock_user_prompt):
         """Test building user content with string task guide when fill raises exception."""
-        self.mock_user_prompt.fill.side_effect = Exception("Missing placeholder")
+        mock_user_prompt.fill.side_effect = Exception("Missing placeholder")
 
         with pytest.raises(
             KeyError, match="Prompt template contains undefined placeholders"
         ):
-            build_user_content(
-                self.mock_user_prompt, "test task guide", param1="value1"
-            )
+            build_user_content(mock_user_prompt, "test task guide", param1="value1")
 
-    def test_build_user_content_list_task_guide_fill_error(self):
+    def test_build_user_content_list_task_guide_fill_error(self, mock_user_prompt):
         """Test building user content with list task guide when fill raises exception."""
-        self.mock_user_prompt.fill.side_effect = Exception("Missing placeholder")
+        mock_user_prompt.fill.side_effect = Exception("Missing placeholder")
         task_guide = [{"type": "text", "text": "test"}]
 
         with pytest.raises(
             KeyError, match="Prompt template contains undefined placeholders"
         ):
-            build_user_content(self.mock_user_prompt, task_guide, param1="value1")
+            build_user_content(mock_user_prompt, task_guide, param1="value1")
 
-    def test_build_user_content_no_additional_kwargs(self):
+    def test_build_user_content_no_additional_kwargs(self, mock_user_prompt):
         """Test building user content with only task guide, no additional kwargs."""
-        result = build_user_content(self.mock_user_prompt, "test task guide")
+        result = build_user_content(mock_user_prompt, "test task guide")
 
         assert result == "filled content"
         expected_call_args = {"task_guide": "test task guide"}
-        self.mock_user_prompt.fill.assert_called_once_with(expected_call_args)
+        mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
-    def test_build_user_content_empty_list_task_guide(self):
+    def test_build_user_content_empty_list_task_guide(self, mock_user_prompt):
         """Test building user content with empty list task guide."""
-        result = build_user_content(self.mock_user_prompt, [], param1="value1")
+        result = build_user_content(mock_user_prompt, [], param1="value1")
 
         assert isinstance(result, list)
         assert len(result) == 1  # Only text content

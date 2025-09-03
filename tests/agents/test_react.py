@@ -1,75 +1,12 @@
 """Comprehensive tests for the ReActAgent class."""
 
-from typing import Any
-from unittest.mock import Mock, patch
+import pytest
 
 from corral.agents.react import Action, ReActAgent, Thought
 from corral.agents.utils import LiteLLMMessage
 from corral.report import ToolResponse
 
-# Try to import pytest if available
-try:
-    import pytest
-
-    HAS_PYTEST = True
-except ImportError:
-    pytest = None
-    HAS_PYTEST = False
-
-try:
-    from promptstore import PromptStore
-except ImportError:
-    PromptStore = None
-
-
-class MockPrompt:
-    """Mock prompt class that implements the required fill method."""
-
-    def __init__(self, content: str):
-        self.content = content
-
-    def fill(self, replacements: dict[str, Any]) -> str:
-        """Fill the prompt with replacements."""
-        result = self.content
-        for key, value in replacements.items():
-            result = result.replace(f"{{{{{key}}}}}", str(value))
-        return result
-
-
-class MockBenchmarkInterface:
-    """Mock BenchmarkInterface for testing."""
-
-    def __init__(self):
-        self.task_guide = "Test task guide"
-        self.tool_responses = []
-        self.tool_calls = []
-
-    def get_task_guide(self, task_id: str) -> str:
-        return self.task_guide
-
-    def execute_tool(
-        self, task_id: str, tool_name: str, arguments: dict
-    ) -> ToolResponse:
-        self.tool_calls.append(
-            {"task_id": task_id, "tool_name": tool_name, "arguments": arguments}
-        )
-        if self.tool_responses:
-            return self.tool_responses.pop(0)
-        return ToolResponse(success=True, result="Mock tool result", error=None)
-
-
-def create_mock_prompt_store():
-    """Create mock PromptStore for testing."""
-    if PromptStore is None:
-        return None
-    store = Mock(spec=PromptStore)
-    store.get.return_value = MockPrompt("Test prompt: {{task_guide}}")
-    return store
-
-
-def create_mock_interface():
-    """Create mock BenchmarkInterface for testing."""
-    return MockBenchmarkInterface()
+from .conftest import MockLLMResponse
 
 
 def create_react_agent():
@@ -77,33 +14,10 @@ def create_react_agent():
     return ReActAgent(model="test-model", max_iterations=3, temperature=0.5)
 
 
-# Conditionally set up pytest fixtures if available
-if HAS_PYTEST and pytest is not None:
-
-    @pytest.fixture
-    def mock_prompt_store():
-        """Mock PromptStore for testing."""
-        return create_mock_prompt_store()
-
-    @pytest.fixture
-    def mock_interface():
-        """Mock BenchmarkInterface for testing."""
-        return create_mock_interface()
-
-    @pytest.fixture
-    def react_agent():
-        """Create a ReActAgent instance for testing."""
-        return create_react_agent()
-else:
-    # Define regular functions for non-pytest usage
-    def mock_prompt_store():
-        return create_mock_prompt_store()
-
-    def mock_interface():
-        return create_mock_interface()
-
-    def react_agent():
-        return create_react_agent()
+@pytest.fixture()
+def react_agent():
+    """Create a ReActAgent instance for testing."""
+    return create_react_agent()
 
 
 class TestThought:
@@ -199,8 +113,6 @@ class TestReActAgentInitialization:
 
     def test_initialization_with_prompt_store(self, mock_prompt_store):
         """Test ReActAgent initialization with PromptStore."""
-        if PromptStore is None:
-            return  # Skip test if PromptStore not available
         agent = ReActAgent(prompt_store=mock_prompt_store)
         assert agent.store == mock_prompt_store
 
@@ -221,11 +133,15 @@ class TestReActAgentParsing:
         """Test parsing response with only a thought."""
         response = "Thought: I need to analyze this problem carefully."
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
 
         assert thought is not None
         assert thought.content == "I need to analyze this problem carefully."
         assert actions is None
+        assert is_final is False
+        assert parsing_error is None
 
     def test_parse_llm_response_thought_and_action(self, react_agent):
         """Test parsing response with thought and action."""
@@ -233,7 +149,9 @@ class TestReActAgentParsing:
 Action: search
 Action Input: {"query": "test query", "limit": 10}"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
 
         assert thought is not None
         assert thought.content == "I need to search for information."
@@ -241,6 +159,8 @@ Action Input: {"query": "test query", "limit": 10}"""
         assert len(actions) == 1
         assert actions[0].tool_name == "search"
         assert actions[0].arguments == {"query": "test query", "limit": 10}
+        assert is_final is False
+        assert parsing_error is None
 
     def test_parse_llm_response_multiple_actions(self, react_agent):
         """Test parsing response with multiple actions."""
@@ -250,7 +170,9 @@ Action Input: {"query": "test"}
 Action: calculate
 Action Input: {"expression": "2+2"}"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
 
         assert thought is not None
         assert actions is not None
@@ -259,17 +181,23 @@ Action Input: {"expression": "2+2"}"""
         assert actions[0].arguments == {"query": "test"}
         assert actions[1].tool_name == "calculate"
         assert actions[1].arguments == {"expression": "2+2"}
+        assert is_final is False
+        assert parsing_error is None
 
     def test_parse_llm_response_final_answer(self, react_agent):
         """Test parsing response with final answer."""
         response = """Thought: I have found the answer.
 Final Answer: The result is 42."""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
 
         assert thought is not None
         assert thought.content == "I have found the answer."
         assert actions is None
+        assert is_final is True
+        assert parsing_error is None
 
     def test_parse_llm_response_invalid_json(self, react_agent):
         """Test parsing response with invalid JSON in action input."""
@@ -277,31 +205,46 @@ Final Answer: The result is 42."""
 Action: search
 Action Input: {invalid json}"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
 
         assert thought is not None
         assert actions is None  # Should be None due to JSON parsing error
+        assert is_final is False
+        assert parsing_error is not None  # Should capture the parsing error
+        assert "Invalid JSON in Action Input for 'search'" in parsing_error
+        assert "json" in parsing_error.lower()  # Should mention JSON error
 
     def test_parse_llm_response_no_thought(self, react_agent):
         """Test parsing response with no thought."""
         response = """Action: search
 Action Input: {"query": "test"}"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
 
         assert thought is None
         assert actions is not None
         assert len(actions) == 1
         assert actions[0].tool_name == "search"
+        assert actions[0].arguments == {"query": "test"}
+        assert is_final is False
+        assert parsing_error is None
 
     def test_parse_llm_response_empty_response(self, react_agent):
         """Test parsing empty response."""
         response = ""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
 
         assert thought is None
         assert actions is None
+        assert is_final is False
+        assert parsing_error is None
 
     def test_parse_llm_response_multiline_thought(self, react_agent):
         """Test parsing response with multiline thought."""
@@ -311,7 +254,9 @@ Let me break it down step by step.
 Action: search
 Action Input: {"query": "complex problem"}"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
 
         assert thought is not None
         assert (
@@ -320,52 +265,135 @@ Action Input: {"query": "complex problem"}"""
         )
         assert actions is not None
         assert len(actions) == 1
+        assert is_final is False
+        assert parsing_error is None
+
+    def test_parse_llm_response_empty_thought_variations(self, react_agent):
+        """Test parsing responses with various empty thought patterns."""
+        test_cases = [
+            ("Thought:", "Empty thought with colon only"),
+            ("Thought: ", "Empty thought with space"),
+            ("Thought:\n", "Empty thought with newline"),
+            ("Thought: \n", "Empty thought with space and newline"),
+            (
+                "Thought:   \nAction: test\nAction Input: {}",
+                "Whitespace-only thought with action",
+            ),
+        ]
+
+        for response, description in test_cases:
+            thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+                response
+            )
+            # All empty thought variations should return None for thought
+            assert thought is None, f"Failed for case: {description}"
+            assert is_final is False, f"Failed for case: {description}"
+            assert parsing_error is None, f"Failed for case: {description}"
+
+            # Check if actions are parsed correctly when present
+            if "Action:" in response:
+                assert actions is not None, f"Failed for case: {description}"
+                assert len(actions) == 1, f"Failed for case: {description}"
+            else:
+                assert actions is None, f"Failed for case: {description}"
+
+    def test_parse_llm_response_final_answer_only(self, react_agent):
+        """Test parsing response with only final answer."""
+        response = "Final Answer: Direct answer without thought"
+
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
+
+        assert thought is None
+        assert actions is None
+        assert is_final is True
+        assert parsing_error is None
+
+    def test_parse_llm_response_all_components(self, react_agent):
+        """Test parsing response with thought, actions, and final answer."""
+        response = """Thought: I need to search and then provide an answer.
+Action: search
+Action Input: {"query": "test"}
+Action: analyze
+Action Input: {"data": "results"}
+Final Answer: Based on my analysis, the answer is 42."""
+
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
+
+        assert thought is not None
+        assert thought.content == "I need to search and then provide an answer."
+        assert actions is not None
+        assert len(actions) == 2
+        assert actions[0].tool_name == "search"
+        assert actions[1].tool_name == "analyze"
+        assert is_final is True
+        assert parsing_error is None
 
 
 class TestReActAgentRun:
     """Test cases for ReActAgent.run method."""
 
-    @patch("corral.agents.base_agent.BaseAgent.get_llm_response")
-    @patch("corral.agents.react.create_prompt")
-    def test_run_with_final_answer(
-        self, mock_create_prompt, mock_get_llm_response, react_agent, mock_interface
-    ):
+    def test_run_with_final_answer(self, react_agent, mock_interface, monkeypatch):
         """Test run method that returns final answer immediately."""
         # Mock the LLM response
-        mock_response = Mock()
-        mock_response.content = "Thought: I can answer this directly.\nFinal Answer: 42"
-        mock_get_llm_response.return_value = mock_response
+        mock_response = MockLLMResponse(
+            content="Thought: I can answer this directly.\nFinal Answer: 42"
+        )
 
-        # Mock create_prompt
-        mock_create_prompt.return_value = []
+        # Mock the methods using monkeypatch
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return mock_response
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            return []
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
 
         result = react_agent.run(mock_interface, "test_task_id")
 
         assert result == "42"
-        mock_create_prompt.assert_called_once()
-        mock_get_llm_response.assert_called_once()
+        assert call_tracker["create_prompt"] == 1
+        assert call_tracker["get_llm_response"] == 1
 
-    @patch("corral.agents.base_agent.BaseAgent.get_llm_response")
-    @patch("corral.agents.react.create_prompt")
-    def test_run_with_tool_execution(
-        self, mock_create_prompt, mock_get_llm_response, react_agent, mock_interface
-    ):
+    def test_run_with_tool_execution(self, react_agent, mock_interface, monkeypatch):
         """Test run method that executes tools before finding answer."""
         # Mock the LLM responses
-        response1 = Mock()
-        response1.content = """Thought: I need to search for information.
+        response1 = MockLLMResponse(
+            content="""Thought: I need to search for information.
 Action: search
 Action Input: {"query": "test"}"""
-
-        response2 = Mock()
-        response2.content = (
-            "Thought: Based on the search results.\nFinal Answer: Found it!"
         )
 
-        mock_get_llm_response.side_effect = [response1, response2]
+        response2 = MockLLMResponse(
+            content=("Thought: Based on the search results.\nFinal Answer: Found it!")
+        )
 
-        # Mock create_prompt
-        mock_create_prompt.return_value = []
+        # Mock the methods using monkeypatch
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+        responses = [response1, response2]
+
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return responses[call_tracker["get_llm_response"] - 1]
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            return []
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
 
         # Set up tool response
         mock_interface.tool_responses = [
@@ -379,52 +407,117 @@ Action Input: {"query": "test"}"""
         assert mock_interface.tool_calls[0]["tool_name"] == "search"
         assert mock_interface.tool_calls[0]["arguments"] == {"query": "test"}
 
-    @patch("corral.agents.base_agent.BaseAgent.get_llm_response")
-    @patch("corral.agents.react.create_prompt")
-    def test_run_with_tool_error(
-        self, mock_create_prompt, mock_get_llm_response, react_agent, mock_interface
-    ):
+    def test_run_with_tool_error(self, react_agent, mock_interface, monkeypatch):
         """Test run method with tool execution error."""
-        # Mock the LLM responses
-        response1 = Mock()
-        response1.content = """Thought: I need to use a tool.
-Action: failing_tool
-Action Input: {"param": "value"}"""
-
-        response2 = Mock()
-        response2.content = "Thought: The tool failed.\nFinal Answer: Handled error"
-
-        mock_get_llm_response.side_effect = [response1, response2]
-
         # Mock create_prompt
-        mock_create_prompt.return_value = []
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            return []
+
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
 
         # Set up tool error response
         mock_interface.tool_responses = [
             ToolResponse(success=False, result=None, error="Tool failed")
         ]
 
+        # Define test scenarios: (response_content, expected_final_result, expected_tool_calls_count, iteration_description)
+        test_scenarios = [
+            (
+                """Thought: I need to use a tool.
+Action: failing_tool
+Action Input: {"param": "value"}""",
+                None,  # No final result yet, should continue iterating
+                1,  # Should have made 1 tool call
+                "First iteration: tool action with error",
+            ),
+            (
+                "Thought: The tool failed.\nFinal Answer: Handled error",
+                "Handled error",  # Should return this as final result
+                1,  # Still just 1 tool call total
+                "Second iteration: final answer after tool error",
+            ),
+        ]
+
+        responses = []
+
+        def mock_llm_response(*args, **kwargs):
+            if call_tracker["get_llm_response"] < len(test_scenarios):
+                response = MockLLMResponse(
+                    content=test_scenarios[call_tracker["get_llm_response"]][0]
+                )
+                responses.append(response)
+                call_tracker["get_llm_response"] += 1
+                return response
+            else:
+                # Fallback to prevent infinite loops in testing
+                return MockLLMResponse(content="Final Answer: Fallback result")
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_llm_response
+        )
+
+        # Run the agent
         result = react_agent.run(mock_interface, "test_task_id")
 
+        # Verify final result
         assert result == "Handled error"
         assert len(mock_interface.tool_calls) == 1
+        assert mock_interface.tool_calls[0]["tool_name"] == "failing_tool"
+        assert mock_interface.tool_calls[0]["arguments"] == {"param": "value"}
 
-    @patch("corral.agents.base_agent.BaseAgent.get_llm_response")
-    @patch("corral.agents.react.create_prompt")
+        # Verify that we made the expected number of LLM calls
+        assert call_tracker["get_llm_response"] == 2
+        assert len(responses) == 2
+
+        # Additional verification: check that the agent's message history reflects the error handling
+        messages = react_agent.messages
+
+        # Should contain the tool action
+        assert any(
+            msg.get("role") == "assistant"
+            and "Action: failing_tool" in msg.get("content", "")
+            for msg in messages
+        )
+
+        # Should contain the error observation
+        assert any(
+            msg.get("role") == "user" and "Error: Tool failed" in msg.get("content", "")
+            for msg in messages
+        )
+
+        # Should contain the final answer
+        assert any(
+            msg.get("role") == "assistant"
+            and "Final Answer: Handled error" in msg.get("content", "")
+            for msg in messages
+        )
+
     def test_run_max_iterations_exceeded(
-        self, mock_create_prompt, mock_get_llm_response, react_agent, mock_interface
+        self, react_agent, mock_interface, monkeypatch
     ):
         """Test run method when max iterations is exceeded."""
         # Mock the LLM response that never returns final answer
-        mock_response = Mock()
-        mock_response.content = """Thought: I'm thinking about this problem.
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return MockLLMResponse(
+                content="""Thought: I'm thinking about this problem.
 Action: search
 Action Input: {"query": "test"}"""
+            )
 
-        mock_get_llm_response.return_value = mock_response
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            return []
 
-        # Mock create_prompt
-        mock_create_prompt.return_value = []
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
 
         # Set up tool response
         mock_interface.tool_responses = [
@@ -441,27 +534,38 @@ Action Input: {"query": "test"}"""
             len(mock_interface.tool_calls) == 3
         )  # max_iterations is 3 for this test agent
 
-    @patch("corral.agents.base_agent.BaseAgent.get_llm_response")
-    @patch("corral.agents.react.create_prompt")
     def test_run_with_multiple_tools_in_one_response(
-        self, mock_create_prompt, mock_get_llm_response, react_agent, mock_interface
+        self, react_agent, mock_interface, monkeypatch
     ):
         """Test run method with multiple tools in one response."""
-        # Mock the LLM response
-        response1 = Mock()
-        response1.content = """Thought: I need to use multiple tools.
+        # Mock the LLM responses
+        response1 = MockLLMResponse(
+            content="""Thought: I need to use multiple tools.
 Action: search
 Action Input: {"query": "test"}
 Action: calculate
 Action Input: {"expression": "2+2"}"""
+        )
 
-        response2 = Mock()
-        response2.content = "Thought: Got all results.\nFinal Answer: Complete"
+        response2 = MockLLMResponse(
+            content="Thought: Got all results.\nFinal Answer: Complete"
+        )
 
-        mock_get_llm_response.side_effect = [response1, response2]
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+        responses = [response1, response2]
 
-        # Mock create_prompt
-        mock_create_prompt.return_value = []
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return responses[call_tracker["get_llm_response"] - 1]
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            return []
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
 
         # Set up tool responses
         mock_interface.tool_responses = [
@@ -476,19 +580,27 @@ Action Input: {"expression": "2+2"}"""
         assert mock_interface.tool_calls[0]["tool_name"] == "search"
         assert mock_interface.tool_calls[1]["tool_name"] == "calculate"
 
-    @patch("corral.agents.base_agent.BaseAgent.get_llm_response")
-    @patch("corral.agents.react.create_prompt")
     def test_run_with_custom_task_prompt(
-        self, mock_create_prompt, mock_get_llm_response, react_agent, mock_interface
+        self, react_agent, mock_interface, monkeypatch
     ):
         """Test run method with custom task prompt."""
         # Mock the LLM response
-        mock_response = Mock()
-        mock_response.content = "Thought: Custom task.\nFinal Answer: Done"
-        mock_get_llm_response.return_value = mock_response
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+        create_prompt_calls = []
 
-        # Mock create_prompt
-        mock_create_prompt.return_value = []
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return MockLLMResponse(content="Thought: Custom task.\nFinal Answer: Done")
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            create_prompt_calls.append((args, kwargs))
+            return []
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
 
         custom_task_prompt = "Custom task description"
         result = react_agent.run(
@@ -498,24 +610,32 @@ Action Input: {"expression": "2+2"}"""
         assert result == "Done"
 
         # Verify create_prompt was called with custom task prompt
-        call_args = mock_create_prompt.call_args
-        assert call_args[1]["task_guide"] == custom_task_prompt
+        assert len(create_prompt_calls) == 1
+        assert create_prompt_calls[0][1]["task_guide"] == custom_task_prompt
 
-    @patch("corral.agents.base_agent.BaseAgent.get_llm_response")
-    @patch("corral.agents.react.create_prompt")
     def test_run_with_history_and_examples(
-        self, mock_create_prompt, mock_get_llm_response, react_agent, mock_interface
+        self, react_agent, mock_interface, monkeypatch
     ):
         """Test run method with history and examples."""
         # Mock the LLM response
-        mock_response = Mock()
-        mock_response.content = (
-            "Thought: Using history and examples.\nFinal Answer: Success"
-        )
-        mock_get_llm_response.return_value = mock_response
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+        create_prompt_calls = []
 
-        # Mock create_prompt
-        mock_create_prompt.return_value = []
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return MockLLMResponse(
+                content=("Thought: Using history and examples.\nFinal Answer: Success")
+            )
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            create_prompt_calls.append((args, kwargs))
+            return []
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
 
         history = [LiteLLMMessage(role="user", content="Previous message")]
         examples = ["Example 1", "Example 2"]
@@ -527,35 +647,47 @@ Action Input: {"expression": "2+2"}"""
         assert result == "Success"
 
         # Verify create_prompt was called with history and examples
-        call_args = mock_create_prompt.call_args
+        assert len(create_prompt_calls) == 1
+        call_args = create_prompt_calls[0]
         assert call_args[1]["history"] == history
         assert call_args[1]["examples"] == examples
 
-    @patch("corral.agents.base_agent.BaseAgent.get_llm_response")
-    @patch("corral.agents.react.create_prompt")
-    def test_run_message_construction(
-        self, mock_create_prompt, mock_get_llm_response, react_agent, mock_interface
-    ):
+    def test_run_message_construction(self, react_agent, mock_interface, monkeypatch):
         """Test that messages are constructed correctly during run."""
         # Mock the LLM responses
-        response1 = Mock()
-        response1.content = """Thought: I need to search.
+        response1 = MockLLMResponse(
+            content="""Thought: I need to search.
 Action: search
 Action Input: {"query": "test"}"""
+        )
 
-        response2 = Mock()
-        response2.content = "Thought: Found it.\nFinal Answer: Result"
+        response2 = MockLLMResponse(content="Thought: Found it.\nFinal Answer: Result")
 
-        mock_get_llm_response.side_effect = [response1, response2]
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+        responses = [response1, response2]
+
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return responses[call_tracker["get_llm_response"] - 1]
 
         # Mock create_prompt to return a list we can modify
         initial_messages = [LiteLLMMessage(role="system", content="System prompt")]
-        mock_create_prompt.return_value = initial_messages
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            return initial_messages
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
 
         # Set up tool response
         mock_interface.tool_responses = [
             ToolResponse(success=True, result="Search result", error=None)
         ]
+
+        react_agent.run(mock_interface, "test_task_id")
 
         # Check that messages were added correctly
         assert (
@@ -590,20 +722,67 @@ class TestReActAgentEdgeCases:
 Action: search
 Action Input: not valid json at all"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
 
         assert thought is not None
         assert actions is None
+        assert is_final is False
+        assert parsing_error is not None  # Should capture the parsing error
+        assert "Invalid JSON in Action Input for 'search'" in parsing_error
+
+    def test_parse_llm_response_parsing_error_feedback(self, react_agent):
+        """Test that parsing errors provide detailed feedback."""
+        response = """Thought: I'll try using a tool with malformed JSON.
+Action: test_tool
+Action Input: {malformed: "json", missing_quotes: value}"""
+
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
+
+        assert thought is not None
+        assert thought.content == "I'll try using a tool with malformed JSON."
+        assert actions is None  # Should be None due to JSON parsing error
+        assert is_final is False
+        assert parsing_error is not None
+        assert "Invalid JSON in Action Input for 'test_tool'" in parsing_error
+        assert "json" in parsing_error.lower()  # Should mention JSON error
+
+    def test_parse_llm_response_multiple_parsing_errors(self, react_agent):
+        """Test that only the first parsing error is captured."""
+        response = """Thought: Testing multiple malformed actions.
+Action: first_tool
+Action Input: {invalid: json}
+Action: second_tool
+Action Input: {also invalid}"""
+
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
+
+        assert thought is not None
+        assert actions is None  # Should be None due to JSON parsing errors
+        assert is_final is False
+        assert parsing_error is not None
+        # Should capture only the first error
+        assert "first_tool" in parsing_error
+        assert "second_tool" not in parsing_error
 
     def test_parse_response_with_nested_final_answer(self, react_agent):
         """Test parsing response with nested final answer pattern."""
         response = """Thought: The answer mentions "Final Answer: not really" in the text.
 Final Answer: The actual final answer is 42."""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
 
         assert thought is not None
         assert actions is None
+        assert is_final is True
+        assert parsing_error is None
 
     def test_parse_response_with_special_characters(self, react_agent):
         """Test parsing response with special characters in JSON."""
@@ -611,7 +790,9 @@ Final Answer: The actual final answer is 42."""
 Action: search
 Action Input: {"query": "test with \\"quotes\\" and \\n newlines", "special": "chars: !@#$%^&*()"}"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
 
         assert thought is not None
         assert actions is not None
@@ -619,20 +800,28 @@ Action Input: {"query": "test with \\"quotes\\" and \\n newlines", "special": "c
         assert actions[0].tool_name == "search"
         assert "quotes" in actions[0].arguments["query"]
         assert actions[0].arguments["special"] == "chars: !@#$%^&*()"
+        assert is_final is False
+        assert parsing_error is None
 
-    @patch("corral.agents.base_agent.BaseAgent.get_llm_response")
-    @patch("corral.agents.react.create_prompt")
     def test_run_with_empty_llm_response(
-        self, mock_create_prompt, mock_get_llm_response, react_agent, mock_interface
+        self, react_agent, mock_interface, monkeypatch
     ):
         """Test run method with empty LLM response."""
         # Mock empty LLM response
-        mock_response = Mock()
-        mock_response.content = ""
-        mock_get_llm_response.return_value = mock_response
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
 
-        # Mock create_prompt
-        mock_create_prompt.return_value = []
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return MockLLMResponse(content="")
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            return []
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
 
         result = react_agent.run(mock_interface, "test_task_id")
 
@@ -666,37 +855,45 @@ Action Input: {"query": "test with \\"quotes\\" and \\n newlines", "special": "c
 class TestReActAgentIntegration:
     """Integration tests for ReActAgent with real-like scenarios."""
 
-    @patch("corral.agents.base_agent.BaseAgent.get_llm_response")
-    @patch("corral.agents.react.create_prompt")
-    def test_complete_react_cycle(
-        self, mock_create_prompt, mock_get_llm_response, mock_interface
-    ):
+    def test_complete_react_cycle(self, mock_interface, monkeypatch):
         """Test a complete ReAct cycle with realistic interaction."""
         agent = ReActAgent(model="test-model", max_iterations=5)
 
         # Mock realistic LLM responses
         responses = [
             # First iteration - analyze problem
-            Mock(
+            MockLLMResponse(
                 content="""Thought: I need to understand the problem first.
 Action: analyze
 Action Input: {"text": "problem statement"}"""
             ),
             # Second iteration - search for information
-            Mock(
+            MockLLMResponse(
                 content="""Thought: Now I need to search for relevant information.
 Action: search
 Action Input: {"query": "relevant information", "limit": 5}"""
             ),
             # Third iteration - process results and provide answer
-            Mock(
+            MockLLMResponse(
                 content="""Thought: Based on the analysis and search results, I can now provide the answer.
 Final Answer: The solution is X because of Y and Z."""
             ),
         ]
 
-        mock_get_llm_response.side_effect = responses
-        mock_create_prompt.return_value = []
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return responses[call_tracker["get_llm_response"] - 1]
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            return []
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
 
         # Set up tool responses
         mock_interface.tool_responses = [
@@ -720,37 +917,45 @@ Final Answer: The solution is X because of Y and Z."""
             len(agent.messages) >= 5
         )  # 2 tool calls + 2 observations + final answer (create_prompt mocked to return empty list)
 
-    @patch("corral.agents.base_agent.BaseAgent.get_llm_response")
-    @patch("corral.agents.react.create_prompt")
-    def test_error_recovery_scenario(
-        self, mock_create_prompt, mock_get_llm_response, mock_interface
-    ):
+    def test_error_recovery_scenario(self, mock_interface, monkeypatch):
         """Test ReActAgent handling tool errors and recovery."""
         agent = ReActAgent(model="test-model", max_iterations=5)
 
         # Mock responses with error recovery
         responses = [
             # First iteration - try a tool that fails
-            Mock(
+            MockLLMResponse(
                 content="""Thought: I'll try using this tool.
 Action: failing_tool
 Action Input: {"param": "value"}"""
             ),
             # Second iteration - recover from error
-            Mock(
+            MockLLMResponse(
                 content="""Thought: The tool failed, let me try a different approach.
 Action: backup_tool
 Action Input: {"alternative": "approach"}"""
             ),
             # Third iteration - provide answer
-            Mock(
+            MockLLMResponse(
                 content="""Thought: This approach worked.
 Final Answer: Successfully recovered and found the answer."""
             ),
         ]
 
-        mock_get_llm_response.side_effect = responses
-        mock_create_prompt.return_value = []
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return responses[call_tracker["get_llm_response"] - 1]
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            return []
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
 
         # Set up tool responses - first fails, second succeeds
         mock_interface.tool_responses = [

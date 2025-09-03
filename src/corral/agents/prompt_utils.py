@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -15,9 +16,29 @@ class StringPrompt:
         self.content = content
 
     def fill(self, replacements):
+        # Extract all placeholders from the template
+        template_placeholders = set(re.findall(r"\{([^}]*)\}", self.content))
+
+        # Separate framework keys (with underscore prefix) from user keys
+        framework_keys = {k for k in replacements if k.startswith("_")}
+        user_keys = set(replacements.keys()) - framework_keys
+
+        # Check for extra user keys that don't match any placeholders
+        extra_keys = user_keys - template_placeholders
+        if extra_keys:
+            raise KeyError(
+                f"Extra keys provided that don't match any placeholders: {sorted(extra_keys)}"
+            )
+
         result = self.content
         for key, value in replacements.items():
             result = result.replace(f"{{{key}}}", str(value))
+
+        # Check for any remaining unfilled placeholders
+        remaining_placeholders = re.findall(r"\{([^}]*)\}", result)
+        if remaining_placeholders:
+            raise KeyError(f"Missing values for placeholders: {remaining_placeholders}")
+
         return result
 
 
