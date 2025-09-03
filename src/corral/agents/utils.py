@@ -12,7 +12,8 @@ from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
-    wait_exponential,
+    wait_chain,
+    wait_fixed,
 )
 
 RETRY_EXCEPTIONS = (
@@ -50,7 +51,7 @@ class LiteLLMMessage(TypedDict, total=False):
 
 @retry(
     stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=2, min=1),
+    wait=wait_chain(wait_fixed(30), wait_fixed(60), wait_fixed(90)),
     retry=retry_if_exception_type(RETRY_EXCEPTIONS),
     before_sleep=before_sleep_loguru,
     reraise=True,
@@ -362,7 +363,10 @@ def save_agent_messages(
     messages: list[LiteLLMMessage],
     task_id: str,
     agent_name: str,
-    output_dir: str = "agent_logs",
+    model: str,
+    output_dir: str | None = None,
+    tools: list[dict] | None = None,
+    tool_verbosity: str = "brief",
 ) -> str:
     """Save agent conversation to a JSON file for logging and analysis purposes.
 
@@ -374,10 +378,14 @@ def save_agent_messages(
         task_id (str): The ID of the task being solved
         agent_name (str): The name of the agent that generated the messages
         output_dir (str, optional): Directory to save the logs (will be created if it doesn't exist). Default is "agent_logs".
+        tools (list[dict], optional): List of available tools used by the agent. Defaults to None.
+        tool_verbosity (str, optional): Verbosity level for tool descriptions. Defaults to "brief".
 
     Returns:
         str: Path to the saved file
     """
+    if output_dir is None:
+        output_dir = f"agent_logs-{agent_name}-{model}-{tool_verbosity}"
     Path(output_dir).mkdir(exist_ok=True, parents=True)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -387,15 +395,21 @@ def save_agent_messages(
     # Convert messages to serializable format
     serializable_messages = serialize_messages(messages)
 
+    # Prepare log data with metadata
+    log_data = {
+        "task_id": task_id,
+        "model": model,
+        "agent": agent_name,
+        "tool_verbosity": tool_verbosity,
+        "tools": tools,
+        "timestamp": timestamp,
+        "messages": serializable_messages,
+    }
+
     # Write to file with metadata and pretty formatting
     with Path(file_path).open("w") as f:
         json.dump(
-            {
-                "task_id": task_id,
-                "agent": agent_name,
-                "timestamp": timestamp,
-                "messages": serializable_messages,
-            },
+            log_data,
             f,
             indent=2,
         )

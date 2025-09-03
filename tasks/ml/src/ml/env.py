@@ -1,12 +1,12 @@
 import json
 import os
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
-from score import (
-    composition_list_quality,
+from ml.score import (
     ml_dataset_preparation_quality_binary,
     ml_pipeline_score,
     model_evaluation_completeness_binary,
@@ -14,7 +14,8 @@ from score import (
     polymorph_retrieval_success,
     score_polymorph_dataset,
 )
-from tools import create_ml_tools
+from ml.tools import create_ml_tools
+from ml.utils import smart_resolve_path
 
 from corral.base import Environment, Tool
 from corral.io import (
@@ -31,8 +32,13 @@ from corral.task import TaskDefinition, TaskGroup
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:
-    raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
-BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+    BASE_WORK_DIR = tempfile.mkdtemp(prefix="catalyst_")
+    logger.info(f"CORRAL_WORK_DIR not set, using temporary directory: {BASE_WORK_DIR}")
+else:
+    BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+    logger.info(f"Using CORRAL_WORK_DIR: {BASE_WORK_DIR}")
+
+
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     "ml_pipeline_score": ml_pipeline_score,
@@ -41,7 +47,6 @@ SCORING_FUNCTIONS = {
     "polymorph_retrieval_success": polymorph_retrieval_success,
     "score_polymorph_dataset": score_polymorph_dataset,
     "ml_dataset_preparation_quality_binary": ml_dataset_preparation_quality_binary,
-    "composition_list_quality": composition_list_quality,
 }
 
 
@@ -64,7 +69,7 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
 
 
 def load_tasks_from_json(
-    json_path: str | Path, work_dir: str
+    json_path: str | Path, work_dir: str | Path
 ) -> dict[str, TaskDefinition]:
     """Load task definitions from a JSON file.
 
@@ -114,7 +119,7 @@ class TaskGroupEnvironment(Environment):
         task_id: str,
         task_group: TaskGroup,
         subtask_specific_tools: dict[str, Tool],
-        base_work_dir: str,
+        base_work_dir: str | Path,
         taskgroup_common_tools: dict[str, Tool] | None = None,
     ):
         self.task_group = task_group
@@ -126,7 +131,11 @@ class TaskGroupEnvironment(Environment):
 
         self.current_task = task_group.tasks[task_id]
 
+        self.hidden_args = {}
+
         super().__init__(f"{task_id}", base_work_dir=base_work_dir)
+
+        self.hidden_args = {"work_dir": self.get_current_work_dir()}
 
         # Add tools
         self._add_task_tools()
@@ -174,6 +183,10 @@ class TaskGroupEnvironment(Environment):
     def reset_state(self) -> str:
         """Reset state and update file tools for new workspace"""
         trial_id = super().reset_state()
+
+        if hasattr(self, "hidden_args"):
+            self.hidden_args = {"work_dir": self.get_current_work_dir()}
+
         # Recreate file tools for new workspace
         self._setup_file_tools()
         return trial_id
@@ -209,7 +222,7 @@ Required submission format:
 
         # Add workspace info
         if self.current_work_dir:
-            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir}. when using tools use this path\n"
+            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace {self.current_work_dir}\n"
 
         # Add note about dependencies
         if self.current_task.input_from_tasks:
@@ -236,12 +249,15 @@ Required submission format:
             # Get and log the raw submission
             answer_value = self.state.submitted_answer.strip()
             logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
-
+            resolved_answer = smart_resolve_path(answer_value)
+            logger.info(f"Resolved answer for {self.task_id}: {resolved_answer!r}")
             # Call the scoring function with the raw answer
-            score = self.current_task.scoring_fn(answer_value)
+            score = self.current_task.scoring_fn(resolved_answer)
 
             # Store result in task group
-            self.task_group.store_result(self.task_id, {"answer": answer_value}, score)
+            self.task_group.store_result(
+                self.task_id, {"answer": resolved_answer}, score
+            )
             logger.info(f"Task {self.task_id} scored: {score}")
 
             return score
@@ -258,7 +274,7 @@ Required submission format:
 def create_environments(
     task_json_path: str | Path,
     taskgroup_common_tools: dict[str, Tool] | None = None,
-    work_dir: str = BASE_WORK_DIR,
+    work_dir: str | Path = BASE_WORK_DIR,
 ) -> dict[str, TaskGroupEnvironment]:
     """Create environments for tasks defined in a JSON file
 
@@ -317,7 +333,7 @@ if __name__ == "__main__":
     else:
         tasks_json_path = os.environ.get(
             "CORRAL_TASKS_PATH",
-            Path(__file__).parent / "tasks" / "catalysis_tasks.json",
+            str(Path(__file__).parent.parent.parent / "config" / "dataset.json"),
         )
 
     # Get server settings from environment if provided
@@ -326,9 +342,16 @@ if __name__ == "__main__":
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)
     # Create environments
+    # add common tools execute_python_code, execute_python_script
+    # taskgroup_common_tools = {
+    #     "execute_python_code": execute_python_code,
+    #     "execute_python_script": execute_python_script,
+    # }
+    taskgroup_common_tools = None
     environments = create_environments(
         task_json_path=tasks_json_path,
         work_dir=work_dir,
+        taskgroup_common_tools=taskgroup_common_tools,
     )
 
     logger.info("\nCreated Environments:")
