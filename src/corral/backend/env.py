@@ -400,3 +400,10 @@ class Environment(ABC):
         ]
 
         return stats
+
+    def configure_additional_apps(self):
+        """Configure any external apps/services (for example, experimental instruments or robots) needed for the environment.
+        This method is called at the start of each trial."""
+        # This can be overridden by subclasses to set up external dependencies
+
+        return "No external app/service configuration needed for this trial."

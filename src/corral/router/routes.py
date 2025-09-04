@@ -119,3 +119,9 @@ class CorralRouter:
         response = requests.get(f"{self.base_url}/tasks/{task_id}/trials/{trial_id}")
         response.raise_for_status()
         return response.json()["trial_state"]
+
+    def configure_additional_apps(self, task_id: str) -> dict:
+        """Configure additional apps/services for specific task"""
+        response = requests.post(f"{self.base_url}/tasks/{task_id}/configure")
+        response.raise_for_status()
+        return response.json()

@@ -62,13 +62,12 @@ def execute_single_trial(
 ) -> TaskTrialResult:
     """Execute a single trial - pure function"""
     try:
-        # Run agent
-        if tool_verbosity is not None:
-            answer, token_usage = agent.run_agent(
-                interface, task_id, verbose=verbose, tool_verbosity=tool_verbosity
-            )
-        else:
-            answer, token_usage = agent.run_agent(interface, task_id, verbose=verbose)
+        status = interface.configure_additional_apps(task_id)
+        logger.info(f"Task {task_id} additional apps/services configured: {status}")
+
+        answer, token_usage = agent.run_agent(
+            interface, task_id, verbose=verbose, tool_verbosity=tool_verbosity
+        )
 
         # Submit answer
         try:
