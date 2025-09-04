@@ -15,7 +15,7 @@ class DummyEnv(Environment):
         return 1.0
 
     def configure_additional_apps(self):
-        return "configured ok"
+        return "No external app/service configuration needed for this trial."
 
 
 def create_app_with_env(task_id: str = "task_a") -> TestClient:
@@ -31,7 +31,10 @@ class TestConfigureAdditionalAppsEndpoint:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "configured ok"
+        assert (
+            data["status"]
+            == "No external app/service configuration needed for this trial."
+        )
         assert data["task_id"] == "task_a"
         # trial_id starts at "0" on first reset_state during env init
         assert data["trial_id"] == "0"
@@ -64,3 +67,23 @@ class TestCorralRouterConfigureAdditionalApps:
         assert data["trial_id"] == "3"
 
         mock_post.assert_called_once_with("http://example.com/tasks/task_a/configure")
+
+    def test_router_passes_timeout_when_provided(self):
+        router = CorralRouter(base_url="http://example.com")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "status": "ok",
+            "task_id": "t",
+            "trial_id": "1",
+        }
+
+        with patch(
+            "corral.router.routes.requests.post", return_value=mock_response
+        ) as mock_post:
+            _ = router.configure_additional_apps("t", timeout=5.5)
+
+        mock_post.assert_called_once_with(
+            "http://example.com/tasks/t/configure", timeout=5.5
+        )

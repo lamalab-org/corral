@@ -1,6 +1,6 @@
 from typing import Any
 
-import requests
+import requests  # type: ignore[import-untyped]
 from loguru import logger
 
 from corral.report.results import TaskTrialResult
@@ -120,8 +120,20 @@ class CorralRouter:
         response.raise_for_status()
         return response.json()["trial_state"]
 
-    def configure_additional_apps(self, task_id: str) -> dict:
-        """Configure additional apps/services for specific task"""
-        response = requests.post(f"{self.base_url}/tasks/{task_id}/configure")
+    def configure_additional_apps(
+        self, task_id: str, timeout: float | None = None
+    ) -> dict:
+        """Configure additional apps/services for specific task
+
+        Args:
+            task_id: The task identifier to configure.
+            timeout: Optional timeout in seconds for the HTTP request.
+        """
+        if timeout is None:
+            response = requests.post(f"{self.base_url}/tasks/{task_id}/configure")
+        else:
+            response = requests.post(
+                f"{self.base_url}/tasks/{task_id}/configure", timeout=timeout
+            )
         response.raise_for_status()
         return response.json()
