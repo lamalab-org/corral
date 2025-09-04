@@ -2,8 +2,8 @@ from typing import Optional, Union
 
 import pytest
 
-from corral.base import Tool
-from corral.utils import format_type_annotation, tool
+from corral.backend.tool import Tool, tool
+from corral.backend.tool_utils import format_type_annotation
 
 
 # Sample functions for testing

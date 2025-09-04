@@ -4,76 +4,13 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from loguru import logger
 
-from corral.ablations import ToolVerbosity, VerbosityConfig
-from corral.base import Environment, ToolRequest
-
-
-def get_tools_guide_with_verbosity(
-    env: Environment, verbosity: ToolVerbosity | None
-) -> str:
-    """Generate tools guide with specified verbosity level"""
-    if not env.tools:
-        return "No tools available."
-    if verbosity is None:
-        verbosity = ToolVerbosity.FULL
-    tools_descriptions = []
-
-    for tool in env.tools.values():
-        # Filter tool description
-        filtered_description = VerbosityConfig.filter_tool_description(
-            tool.description, verbosity
-        )
-
-        # Format arguments based on verbosity
-        if verbosity == ToolVerbosity.MINIMAL:
-            args_desc = ", ".join(arg.name for arg in tool.arguments)
-            tools_descriptions.append(
-                f"**{tool.name}**: {filtered_description}\nArguments: {args_desc}"
-            )
-        else:
-            args_desc = []
-            for arg in tool.arguments:
-                filtered_arg_desc = VerbosityConfig.filter_argument_description(
-                    arg.description, verbosity
-                )
-
-                required = (
-                    "required" if arg.required else f"optional, default: {arg.default}"
-                )
-                args_desc.append(
-                    f"- {arg.name} ({arg.type}, {required}): {filtered_arg_desc}"
-                )
-
-            tool_guide = f"""Tool: {tool.name}
-Description: {filtered_description}
-Arguments:
-{chr(10).join(args_desc)}"""
-            tools_descriptions.append(tool_guide)
-
-    tools_guide = "\n\n".join(tools_descriptions)
-
-    # Add usage instructions based on verbosity
-    if verbosity == ToolVerbosity.MINIMAL:
-        return f"Available Tools:\n{tools_guide}"
-    else:
-        return f"""Available Tools:
-{tools_guide}
-
-How to use tools:
-1. Each tool call must specify the tool name and required arguments
-2. Tools may return errors if arguments are invalid
-3. You can make multiple tool calls as needed
-4. All tool calls are recorded and affect your final score
-
-Example tool call format:
-{{
-    "tool_name": "tool_name",
-    "arguments": {{
-        "arg1": value1,
-        "arg2": value2
-    }}
-}}
-"""
+from corral.backend.env import Environment
+from corral.backend.schema import ToolRequest
+from corral.router.verbosity import (
+    ToolVerbosity,
+    VerbosityConfig,
+    get_tools_guide_with_verbosity,
+)
 
 
 def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:

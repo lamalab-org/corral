@@ -5,7 +5,8 @@ from pathlib import Path
 import fsspec
 import modal
 
-from corral.base import Tool, ToolArgument
+from corral.backend.schema import ToolArgument
+from corral.backend.tool import Tool
 
 
 class FSManager:

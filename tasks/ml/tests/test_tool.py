@@ -16,7 +16,7 @@ from ml.tools import (
     train_xgboost_model,
 )
 
-from corral.utils import execute_python_code
+from corral.utils.code_tools import execute_python_code
 
 # Mock data directory
 MOCK_DATA_DIR = Path(__file__).parent / "mock_data"

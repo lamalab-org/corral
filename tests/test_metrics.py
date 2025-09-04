@@ -1,11 +1,9 @@
 import pytest
 
-from corral.report import (
-    BenchmarkResult,
+from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
+from corral.types import (
     InsufficientTrialsError,
     TaskNotFoundError,
-    TaskTrailResult,
-    TaskTrialResults,
 )
 
 
@@ -14,21 +12,21 @@ def create_dummy_results():
         "task_1": TaskTrialResults(
             task_id="task_1",
             trials=[
-                TaskTrailResult(
+                TaskTrialResult(
                     task_id="task_1",
                     trial_id="1",
                     score=1.0,
                     state={},
                     tool_statistics={},
                 ),
-                TaskTrailResult(
+                TaskTrialResult(
                     task_id="task_1",
                     trial_id="2",
                     score=0.0,
                     state={},
                     tool_statistics={},
                 ),
-                TaskTrailResult(
+                TaskTrialResult(
                     task_id="task_1",
                     trial_id="3",
                     score=1.0,
@@ -40,14 +38,14 @@ def create_dummy_results():
         "task_2": TaskTrialResults(
             task_id="task_2",
             trials=[
-                TaskTrailResult(
+                TaskTrialResult(
                     task_id="task_2",
                     trial_id="1",
                     score=0.0,
                     state={},
                     tool_statistics={},
                 ),
-                TaskTrailResult(
+                TaskTrialResult(
                     task_id="task_2",
                     trial_id="2",
                     score=0.0,
@@ -59,21 +57,21 @@ def create_dummy_results():
         "task_3": TaskTrialResults(
             task_id="task_3",
             trials=[
-                TaskTrailResult(
+                TaskTrialResult(
                     task_id="task_3",
                     trial_id="1",
                     score=1.0,
                     state={},
                     tool_statistics={},
                 ),
-                TaskTrailResult(
+                TaskTrialResult(
                     task_id="task_3",
                     trial_id="2",
                     score=1.0,
                     state={},
                     tool_statistics={},
                 ),
-                TaskTrailResult(
+                TaskTrialResult(
                     task_id="task_3",
                     trial_id="3",
                     score=1.0,

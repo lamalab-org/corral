@@ -12,12 +12,9 @@ from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
 from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 
-from corral.base import Tool
-from corral.utils import (
-    remote_call,
-    tool,
-    vector_database_search,
-)
+from corral.backend.tool import Tool, tool
+from corral.utils.modal import remote_call
+from corral.utils.rag import vector_database_search
 
 _ELEMENT_PAT = re.compile(r"([A-Z][a-z]?)(\d*)")
 _PAREN_PAT = re.compile(r"\(([^()]*)\)(\d*)")

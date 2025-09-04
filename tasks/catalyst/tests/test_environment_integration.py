@@ -18,7 +18,7 @@ from catalyst.score import check_mp_structure, check_slabs_json, check_valid_jso
 from hypothesis import given
 from hypothesis import strategies as st
 
-from corral.task import TaskDefinition, TaskGroup
+from corral.backend.task import TaskDefinition, TaskGroup
 
 TEMP_DIR = Path(os.environ["CORRAL_WORK_DIR"])
 

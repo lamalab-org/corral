@@ -25,8 +25,9 @@ from tools import (
     search_nmr_guide,
 )
 
-from corral.base import Environment
-from corral.io import (
+from corral.backend.env import Environment
+from corral.backend.server import create_benchmark_server
+from corral.utils.io_tools import (
     CatFilesTool,
     CopyFileTool,
     FileInfoTool,
@@ -35,8 +36,7 @@ from corral.io import (
     ReadFileTool,
     WriteFileTool,
 )
-from corral.server import create_benchmark_server
-from corral.utils import (
+from corral.utils.rag import (
     chunk_text,
     create_vector_database,
 )

@@ -11,8 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from corral.base import Tool
-from corral.utils import tool
+from corral.backend.tool import Tool, tool
 
 if "MP_API_KEY" not in os.environ:
     load_dotenv("../.env")
