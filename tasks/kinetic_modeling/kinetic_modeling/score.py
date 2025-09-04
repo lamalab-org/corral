@@ -29,5 +29,5 @@ def score_parameters(submitted: dict, ground_truth: dict) -> float:
         else:
             scores.append(0.0)
 
-    return sum(scores) / len(scores) if scores else 0.0
-    return 1.0 if all(scores == 1.0) else 0.0
+    # all() expects an iterable of booleans; compare each element to 1.0
+    return 1.0 if all(s == 1.0 for s in scores) else 0.0
