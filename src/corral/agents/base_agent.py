@@ -13,7 +13,7 @@ from corral.agents.utils import (
     llm_call,
     save_agent_messages,
 )
-from corral.router.routes import CorralRouter as TypeRouter
+from corral.router.routes import CorralRouter
 
 
 class BaseAgent(ABC):
@@ -205,7 +205,7 @@ class BaseAgent(ABC):
     @abstractmethod
     def run(
         self,
-        interface: TypeRouter,
+        interface: CorralRouter,
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
@@ -230,7 +230,7 @@ class BaseAgent(ABC):
 
     def run_agent(
         self,
-        interface: TypeRouter,
+        interface: CorralRouter,
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,

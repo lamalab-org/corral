@@ -11,7 +11,7 @@ from loguru import logger
 from corral.agents.base_agent import BaseAgent as TypeAgent
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 from corral.report.wandb_logger import CorralWandbLogger
-from corral.router.routes import CorralRouter as TypeRouter
+from corral.router.routes import CorralRouter
 
 
 def create_session_id() -> str:
@@ -51,7 +51,7 @@ def filter_incomplete_tasks(
 def execute_single_trial(
     task_id: str,
     trial_index: int,
-    interface: TypeRouter,
+    interface: CorralRouter,
     agent: TypeAgent,
     verbose: bool = False,
     tool_verbosity: str | None = None,
@@ -169,7 +169,7 @@ class CorralRunner:
 
     def __init__(
         self,
-        interface: TypeRouter,
+        interface: CorralRouter,
         agent: TypeAgent,
         checkpoint_dir: str = "./benchmark_checkpoints",
         checkpoint_name: str | None = None,
