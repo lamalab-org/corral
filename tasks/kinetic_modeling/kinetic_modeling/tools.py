@@ -15,8 +15,8 @@ from kinetic_modeling.utils.parameter_fitting import (
 from kinetic_modeling.utils.rate_laws import generate_rate_law
 from kinetic_modeling.utils.reaction_parser import parse_reactions
 
-from corral.base import Tool
-from corral.utils import tool, vector_database_search
+from corral.backend.tool import Tool, tool
+from corral.utils.rag import vector_database_search
 
 # Module-level storage for reaction networks
 # Tools do not have access to the env state which force us to do this.
