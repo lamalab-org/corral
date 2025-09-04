@@ -7,8 +7,11 @@ from pathlib import Path
 from loguru import logger
 from tools import calculator, number_converter
 
-from corral.base import Environment, Tool
-from corral.io import (
+from corral.backend.env import Environment
+from corral.backend.server import run_server
+from corral.backend.task import TaskDefinition, TaskGroup
+from corral.backend.tool import Tool
+from corral.utils.io_tools import (
     CatFilesTool,
     CopyFileTool,
     FileInfoTool,
@@ -17,8 +20,6 @@ from corral.io import (
     ReadFileTool,
     WriteFileTool,
 )
-from corral.server import run_server
-from corral.task import TaskDefinition, TaskGroup
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:

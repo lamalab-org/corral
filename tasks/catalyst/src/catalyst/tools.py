@@ -8,8 +8,7 @@ from catalyst.tool_utils import (
 from dotenv import load_dotenv
 from mp_api.client import MPRester
 
-from corral.base import Tool
-from corral.utils import tool
+from corral.backend.tool import Tool, tool
 
 if "MP_API_KEY" not in os.environ:
     load_dotenv("../.env")

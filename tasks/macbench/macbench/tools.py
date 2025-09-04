@@ -11,13 +11,10 @@ from corral.agents.utils import (
     LiteLLMMessage,
     llm_call,
 )
-from corral.utils import (
-    MODAL_TOOL_REGISTRY,
-    modal_tool,
-    tool,
-    vector_database_search,
-    web_search,
-)
+from corral.backend.tool import tool
+from corral.utils.modal import MODAL_TOOL_REGISTRY, modal_tool
+from corral.utils.rag import vector_database_search
+from corral.utils.search_tools import web_search
 
 current_file_dir = Path(__file__).parent
 store = PromptStore(current_file_dir / "prompts")

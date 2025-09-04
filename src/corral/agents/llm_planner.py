@@ -5,7 +5,7 @@ from corral.agents.prompt_utils import create_prompt
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.agents.utils import LiteLLMMessage
-from corral.evaluate import BenchmarkInterface
+from corral.router.routes import CorralRouter
 
 
 class LLMPlanner(BaseAgent):
@@ -92,7 +92,7 @@ class LLMPlanner(BaseAgent):
 
     def run(
         self,
-        interface: BenchmarkInterface,
+        interface: CorralRouter,
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
@@ -101,7 +101,7 @@ class LLMPlanner(BaseAgent):
         """Run the LLM planner agent
 
         Args:
-            interface (BenchmarkInterface): The benchmark interface to use
+            interface (CorralRouter): The benchmark interface to use
             task_id (str): The task ID to solve
             history (List[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.

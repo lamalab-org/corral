@@ -69,12 +69,12 @@ A comprehensive benchmarking framework for evaluating AI agents on science tasks
 2. **Run benchmark in another terminal**
 
    ```python
-   from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
-   from corral.agents.react import ReActAgent
+   from corral import CorralRunner, CorralRouter
+   from corral.agents import ReActAgent
    from corral.report import CorralWandbLogger
 
    # Setup interface
-   interface = BenchmarkInterface("http://localhost:8000")
+   interface = CorralRouter("http://localhost:8000")
    # Setup the WandB logger
    wandblogger = CorralWandbLogger(
        project="corral",
@@ -85,7 +85,7 @@ A comprehensive benchmarking framework for evaluating AI agents on science tasks
    agent = ReActAgent(model="gpt-4o", max_iterations=10, temperature=0.1)
 
    # Run benchmark
-   runner = MatAgentBenchmark(interface, agent, logger=wandblogger)
+   runner = CorralRunner(interface, agent, logger=wandblogger)
    result = runner.bench()
 
    print(f"Overall score: {result.total_score:.2f}")
@@ -96,12 +96,12 @@ A comprehensive benchmarking framework for evaluating AI agents on science tasks
 ### Single Task Execution
 
 ```python
-from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
-from corral.agents.react import ReActAgent
+from corral import CorralRunner, CorralRouter
+from corral.agents import ReActAgent
 
-interface = BenchmarkInterface("http://localhost:8000")
+interface = CorralRouter("http://localhost:8000")
 agent = ReActAgent(model="gpt-4o")
-runner = MatAgentBenchmark(interface, agent)
+runner = CorralRunner(interface, agent)
 
 # Run specific task
 result = runner.bench(task_ids=["math_1"])
@@ -157,7 +157,7 @@ The framework includes several built-in agent types:
 Uses the ReAct (Reasoning and Acting) framework for step-by-step problem solving.
 
 ```python
-from corral.agents.react import ReActAgent
+from corral.agents import ReActAgent
 
 agent = ReActAgent(
     model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model litellm supports
@@ -171,7 +171,7 @@ agent = ReActAgent(
 Uses native function calling from LLM providers to solve tasks by leveraging built-in tool/function calling capabilities.
 
 ```python
-from corral.agents.tool_calling import ToolCallingAgent
+from corral.agents import ToolCallingAgent
 
 agent = ToolCallingAgent(
     model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model LiteLLM supports
@@ -185,7 +185,7 @@ agent = ToolCallingAgent(
 Uses hierarchical planning with high-level planning and low-level execution delegation to other agents.
 
 ```python
-from corral.agents.llm_planner import LLMPlanner
+from corral.agents import LLMPlanner
 
 agent = LLMPlanner(model="gpt-4o", temperature=0.1, max_iterations=5)
 ```
@@ -223,7 +223,7 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
 
    ```python
    # tasks/my_new_env/my_new_env/tools.py
-   from corral.utils import tool
+   from corral.backend.tool import tool
 
 
    @tool
@@ -246,8 +246,8 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
 
    ```python
    # tasks/my_new_env/my_new_env/env.py
-   from corral.base import Environment
-   from corral.server import create_benchmark_server
+   from corral.backend import Environment
+   from corral.backend.server import create_benchmark_server
 
 
    class MyEnvironment(Environment):
@@ -288,8 +288,8 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
 
    ```python
    # src/corral/agents/my_agent.py
-   from corral.agents.base_agent import BaseAgent
-   from corral.evaluate import BenchmarkInterface
+   from corral.agents import BaseAgent
+   from corral import CorralRunner
 
 
    class MyAgent(BaseAgent):
@@ -297,7 +297,7 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
            super().__init__(model, **kwargs)
            # Add your agent-specific initialization
 
-       def run(self, interface: BenchmarkInterface, task_id: str) -> str:
+       def run(self, interface: CorralRouter, task_id: str) -> str:
            # Get task information
            guide = interface.get_task_guide(task_id)
 
@@ -320,11 +320,11 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
 
    ```python
    from corral.agents.my_agent import MyAgent
-   from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
+   from corral import CorralRunner, CorralRouter
 
    agent = MyAgent(model="gpt-4o")
-   interface = BenchmarkInterface("http://localhost:8000")
-   runner = MatAgentBenchmark(interface, agent)
+   interface = CorralRouter("http://localhost:8000")
+   runner = CorralRunner(interface, agent)
 
    result = runner.bench()
    ```
@@ -350,7 +350,7 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
 #### Standard Tools
 
 ```python
-from corral.utils import tool
+from corral.backend.tool import tool
 
 
 @tool
@@ -370,7 +370,7 @@ def calculate_molecular_weight(formula: str) -> float:
 #### [Modal](https://modal.com) Tools (Cloud Execution)
 
 ```python
-from corral.utils import modal_tool, MODAL_TOOL_REGISTRY
+from corral.utils.modal import modal_tool, MODAL_TOOL_REGISTRY
 from modal import Image
 
 

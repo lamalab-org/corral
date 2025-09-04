@@ -29,9 +29,9 @@ from spectra_elucidation.tools import (
     create_tools,
 )
 
-from corral.base import Environment
-from corral.server import run_server
-from corral.task import TaskDefinition, TaskGroup
+from corral.backend.env import Environment
+from corral.backend.server import run_server
+from corral.backend.task import TaskDefinition, TaskGroup
 
 BASE_WORK_DIR = os.environ.get(
     "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/spectra_elucidation"
@@ -41,8 +41,8 @@ SCORING_FUNCTIONS = {
     "1": score_formula_match,
     "2": validate_dbe_consistency,
     "3": score_isotopic_distribution,
-    "4": score_num_hydrogen_symmetry_classes,
-    "5": score_num_carbon_symmetry_classes,
+    "4": score_num_carbon_symmetry_classes,
+    "5": score_num_hydrogen_symmetry_classes,
     "6": score_num_aromatic_carbons,
     "7": score_num_ch3_groups,
     "8": score_num_carbonyl_groups,
@@ -116,6 +116,8 @@ class TaskEnvironment(Environment):
 
         self.hidden_args = {"h_smiles": self.current_task.scoring_inputs}
 
+        logger.info(f"Initializing environment for task {self.task_id}")
+        logger.info(f"Task name: {self.current_task}")
         self._add_task_tools()
 
     def _add_task_tools(self):
@@ -144,12 +146,14 @@ class TaskEnvironment(Environment):
 
         # Display input data from dependencies
         for dep_task_id in self.current_task.input_from_tasks:
-            if dep_task_id in self.task_group.results:
-                dep_result = self.task_group.results[dep_task_id]
+            dep_key = f"{self.task_group.group_id}_{dep_task_id}"
+            if dep_key in self.task_group.results:
+                dep_result = self.task_group.results[dep_key]
+                task_prompt = self.task_group.tasks[dep_task_id].description
                 if isinstance(dep_result, dict) and "answer" in dep_result:
-                    prompt += f"- Input from {dep_task_id}: {dep_result['answer']}\n"
+                    prompt += f"- Input from '{dep_task_id}' with question: '{task_prompt}' and answer: '{dep_result['answer']}'\n"
                 else:
-                    prompt += f"- Input from {dep_task_id}: {dep_result}\n"
+                    prompt += f"- Input from '{dep_task_id}' with description: '{task_prompt}' and answer: '{dep_result}'\n"
 
         # Display initial input data
         if self.current_task.initial_input:
@@ -201,7 +205,7 @@ def create_spectra_elu_environments(
 
     tasks = load_tasks_from_json(json_path, work_dir=work_dir)
 
-    group_id = "spectro_elucidation"
+    group_id = "spectra_elucidation"
     logger.info(f"Creating task group {group_id} with {len(tasks)} tasks")
     task_group = TaskGroup(
         group_id=group_id,

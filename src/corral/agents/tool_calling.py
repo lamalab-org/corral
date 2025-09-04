@@ -12,7 +12,7 @@ from corral.agents.utils import (
     LiteLLMMessage,
     convert_to_openai_tool_format,
 )
-from corral.evaluate import BenchmarkInterface
+from corral.router.routes import CorralRouter
 
 
 @dataclass
@@ -102,7 +102,7 @@ class ToolCallingAgent(BaseAgent):
 
     def run(
         self,
-        interface: BenchmarkInterface,
+        interface: CorralRouter,
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
@@ -111,7 +111,7 @@ class ToolCallingAgent(BaseAgent):
         """Run the agent to solve the task
 
         Args:
-            interface (BenchmarkInterface): The interface to use
+            interface (CorralRouter): The interface to use
             task_id (str): The task ID to solve
             history (list[LiteLLMMessage]], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
@@ -159,27 +159,44 @@ class ToolCallingAgent(BaseAgent):
                     self.messages.append(llm_response)
 
                     for called_tool in tool_calls:
-                        action = Action(
-                            tool_name=called_tool.function.name,
-                            arguments=json.loads(called_tool.function.arguments),
-                        )
+                        # Initialize variables for error handling
+                        result = None
+                        function_name = str(called_tool.function.name)
+
                         try:
+                            # Parse arguments - this can fail
+                            raw_arguments = json.loads(called_tool.function.arguments)
+
+                            # Create action
+                            action = Action(
+                                tool_name=called_tool.function.name,
+                                arguments=raw_arguments,
+                            )
+
+                            # Execute tool - this can also fail
                             function_call = interface.execute_tool(
                                 task_id, action.tool_name, action.arguments
                             )
                             result = str(function_call.result)
                             if result is None:
                                 result = str(function_call.error)
-                        except Exception as e:
-                            result = str(e)
 
-                        function_name = str(called_tool.function.name)
+                        except json.JSONDecodeError as e:
+                            result = f"Error parsing tool arguments: {e!s}"
+                            logger.error(
+                                f"JSON parsing error for tool {function_name}: {e}"
+                            )
+                        except Exception as e:
+                            result = f"Error executing tool: {e!s}"
+                            logger.error(
+                                f"Tool execution error for {function_name}: {e}"
+                            )
 
                         self.messages.append(
                             LiteLLMMessage(
                                 role="tool",
                                 tool_call_id=called_tool.id,
-                                content=result,
+                                content=result or "Unknown error occurred",
                                 name=function_name,
                             )
                         )

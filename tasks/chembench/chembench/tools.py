@@ -10,14 +10,11 @@ from loguru import logger
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
 
-from corral.utils import (
-    create_vector_database,
-    make_api_request,
-    remote_call,
-    tool,
-    vector_database_search,
-    web_search,
-)
+from corral.backend.tool import tool
+from corral.utils.modal import remote_call
+from corral.utils.rag import create_vector_database, vector_database_search
+from corral.utils.search_tools import web_search
+from corral.utils.tool_helpers import make_api_request
 
 
 @tool
