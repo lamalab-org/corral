@@ -2,8 +2,9 @@
 
 
 def score_base_model() -> float:
-    """Score the submitted base model against the ground truth."""
     # TODO add the Jacob model and compare with the scores from that model
+    """Score the submitted base model against the ground truth."""
+    raise NotImplementedError("score_base_model is not yet implemented")
 
 
 def score_parameters(submitted: dict, ground_truth: dict) -> float:

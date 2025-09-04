@@ -1,3 +1,4 @@
+import ast
 from types import SimpleNamespace
 from typing import Any
 
@@ -245,13 +246,18 @@ def fit_parameters(
             reaction_network = ode_code
         else:
             # Assume ode_code contains reaction network in some parseable format
-            # For now, try to evaluate it as a Python list
+            # For now, try to safely evaluate it as a Python list using ast.literal_eval
             try:
-                reaction_network = eval(ode_code)
-            except Exception:
+                reaction_network = ast.literal_eval(ode_code)
+                # Ensure the result is a list
+                if not isinstance(reaction_network, list):
+                    raise ValueError(
+                        "ode_code must evaluate to a list of reaction strings"
+                    )
+            except (ValueError, SyntaxError) as e:
                 raise ValueError(
-                    "ode_code must be a list of reaction strings or evaluable string"
-                ) from None
+                    "ode_code must be a list of reaction strings or a string representation of a list"
+                ) from e
 
         # Create and configure the fitting model
         model = FittingModel(reaction_network)
