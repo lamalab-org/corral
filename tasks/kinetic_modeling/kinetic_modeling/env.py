@@ -140,7 +140,7 @@ def create_task_environments(env_level: int, rag: bool):
             {
                 "kinetic_fit_first_order": TaskDefinition(
                     name="kinetic_fit_first_order",
-                    description="Fit the rate constant for a simple first-order reaction A → B. The reaction follows first-order kinetics with respect to A.",
+                    description="Fit the rate constant for a simple first-order reaction A -> B. The reaction follows first-order kinetics with respect to A.",
                     tools=[
                         "setup_reaction_network",
                         "derive_rate_law",
@@ -156,7 +156,7 @@ def create_task_environments(env_level: int, rag: bool):
                 ),
                 "kinetic_fit_second_order": TaskDefinition(
                     name="kinetic_fit_second_order",
-                    description="Determine the rate constant for a second-order reaction A + B → C. Both reactants have equal initial concentrations.",
+                    description="Determine the rate constant for a second-order reaction A + B -> C. Both reactants have equal initial concentrations.",
                     tools=[
                         "setup_reaction_network",
                         "derive_rate_law",
@@ -179,7 +179,7 @@ def create_task_environments(env_level: int, rag: bool):
             {
                 "consecutive_reactions": TaskDefinition(
                     name="consecutive_reactions",
-                    description="Analyze the kinetics of consecutive reactions A → B → C. Determine if the mechanism is simple consecutive steps or involves parallel pathways.",
+                    description="Analyze the kinetics of consecutive reactions A -> B -> C. Determine if the mechanism is simple consecutive steps or involves parallel pathways.",
                     tools=[
                         "setup_reaction_network",
                         "derive_rate_law",
@@ -219,7 +219,7 @@ def create_task_environments(env_level: int, rag: bool):
                 {
                     "jacob_o2_discovery": TaskDefinition(
                         name="jacob_o2_discovery",
-                        description="Analyze oxygen concentration time-series from high-throughput photocatalytic experiments.\nThe data shows complex O₂ depletion patterns that suggest multiple reaction pathways.\nYour task is to discover the underlying reaction network and kinetic parameters that explain these observations.",
+                        description="Analyze oxygen concentration time-series from high-throughput photocatalytic experiments.\nThe data shows complex O2 depletion patterns that suggest multiple reaction pathways.\nYour task is to discover the underlying reaction network and kinetic parameters that explain these observations.",
                         tools=[
                             "setup_reaction_network",
                             "derive_rate_law",
@@ -241,7 +241,7 @@ def create_task_environments(env_level: int, rag: bool):
                 {
                     "jacob_o2_discovery_with_rag": TaskDefinition(
                         name="jacob_o2_discovery_with_rag",
-                        description="Analyze oxygen concentration time-series from high-throughput photocatalytic experiments.\nThe data shows complex O₂ depletion patterns that suggest multiple reaction pathways.\nYour task is to discover the underlying reaction network and kinetic parameters that explain these observations.",
+                        description="Analyze oxygen concentration time-series from high-throughput photocatalytic experiments.\nThe data shows complex O2 depletion patterns that suggest multiple reaction pathways.\nYour task is to discover the underlying reaction network and kinetic parameters that explain these observations.",
                         tools=[
                             "setup_reaction_network",
                             "derive_rate_law",
