@@ -14,7 +14,7 @@ from corral.backend.tool import tool
 from corral.utils.modal import remote_call
 from corral.utils.rag import create_vector_database, vector_database_search
 from corral.utils.search_tools import web_search
-from corral.utils.tool_utils import make_api_request
+from corral.utils.tool_helpers import make_api_request
 
 
 @tool

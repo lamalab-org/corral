@@ -8,10 +8,14 @@ from typing import Any
 
 from loguru import logger
 
-from corral.agents.base_agent import BaseAgent as TypeAgent
-from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
-from corral.report.wandb_logger import CorralWandbLogger
-from corral.router.routes import CorralRouter
+from corral.agents import BaseAgent
+from corral.report import (
+    BenchmarkResult,
+    CorralWandbLogger,
+    TaskTrialResult,
+    TaskTrialResults,
+)
+from corral.router import CorralRouter
 
 
 def create_session_id() -> str:
@@ -52,16 +56,19 @@ def execute_single_trial(
     task_id: str,
     trial_index: int,
     interface: CorralRouter,
-    agent: TypeAgent,
+    agent: BaseAgent,
     verbose: bool = False,
     tool_verbosity: str | None = None,
 ) -> TaskTrialResult:
     """Execute a single trial - pure function"""
     try:
         # Run agent
-        answer, token_usage = agent.run_agent(
-            interface, task_id, verbose=verbose, tool_verbosity=tool_verbosity
-        )
+        if tool_verbosity is not None:
+            answer, token_usage = agent.run_agent(
+                interface, task_id, verbose=verbose, tool_verbosity=tool_verbosity
+            )
+        else:
+            answer, token_usage = agent.run_agent(interface, task_id, verbose=verbose)
 
         # Submit answer
         try:
@@ -152,7 +159,7 @@ def run_chained_trials(
         checkpoint_saver(task_results, trial_round + 1 if success else trial_round)
 
 
-def create_wandb_config(agent: TypeAgent, session_id: str, **kwargs) -> dict[str, Any]:
+def create_wandb_config(agent: BaseAgent, session_id: str, **kwargs) -> dict[str, Any]:
     """Create wandb configuration"""
     return {
         "agent_type": agent.__class__.__name__,
@@ -170,7 +177,7 @@ class CorralRunner:
     def __init__(
         self,
         interface: CorralRouter,
-        agent: TypeAgent,
+        agent: BaseAgent,
         checkpoint_dir: str = "./benchmark_checkpoints",
         checkpoint_name: str | None = None,
         logger: CorralWandbLogger | None = None,
@@ -210,13 +217,15 @@ class CorralRunner:
         task_results = self._load_or_initialize_results(task_ids, session_id)
 
         # Create execution functions
-        trial_executor = partial(
-            execute_single_trial,
-            interface=self.interface,
-            agent=self.agent,
-            verbose=verbose,
-            tool_verbosity=tool_verbosity,
-        )
+        def trial_executor(task_id: str, trial_index: int) -> TaskTrialResult:
+            return execute_single_trial(
+                task_id=task_id,
+                trial_index=trial_index,
+                interface=self.interface,
+                agent=self.agent,
+                verbose=verbose,
+                tool_verbosity=tool_verbosity,
+            )
 
         checkpoint_saver = partial(self._save_checkpoint, session_id)
 

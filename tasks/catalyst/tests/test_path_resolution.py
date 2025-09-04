@@ -4,7 +4,7 @@ from pathlib import Path
 os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_files")
 import pytest
 
-from corral.utils.tool_utils import (
+from corral.utils.tool_helpers import (
     extract_path_from_answer,
     find_file_by_name,
     smart_resolve_path,
