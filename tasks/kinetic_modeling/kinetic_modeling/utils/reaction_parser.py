@@ -1,57 +1,123 @@
 import re
+from collections import defaultdict
 
 
-def validate_species(species: list[str]) -> list[str]:
+def parse_reactions(reactions: list | str) -> tuple[list[dict], list]:
     """
-    Ensure species names are valid chemical identifiers.
-    Allows element symbols, numbers, parentheses, and charges.
-    Examples: H2O, O2, Fe(OH)3, SO4^2-, NH4+, CH3-CH2-OH
+    Parse a list of chemical reaction strings into structured dictionaries.
+
+    This function processes reaction strings with the format:
+    "[A] + 2 [B] > [C] + [D], k1 ; hv1, sigma1"
+
+    Where:
+    - Chemical species are enclosed in square brackets
+    - Stoichiometric coefficients can be integers or decimals (e.g., 0.5 [A])
+    - Reactants and products are separated by ">"
+    - The rate constant identifier follows after a comma
+    - Optional additional parameters follow a semicolon and are comma-separated
+
+    Examples:
+        >>> reactions = ['[A] + 2 [B] > [C], k1', '[C] > [A] + [B], k2 ; hv1, sigma1']
+        >>> parsed, species = parse_reactions(reactions)
+        >>> parsed
+            [{'reactants': {'[A]': 1.0, '[B]': 2.0}, 'products': {'[C]': 1.0},
+            'rate_constant': 'k1', 'other_multipliers': []},
+            {'reactants': {'[C]': 1.0}, 'products': {'[A]': 1.0, '[B]': 1.0},
+            'rate_constant': 'k2', 'other_multipliers': ['hv1', 'sigma1']}]
+        >>> species
+            ['[A]', '[B]', '[C]']
+
+    Args:
+        reactions (list | str): List of reaction strings to parse.
+
+    Returns:
+        tuple:
+            A tuple containing:
+            - parsed_reactions: list of dict
+                Each dictionary contains:
+                    * 'reactants': dict mapping species to stoichiometric coefficients
+                    * 'products': dict mapping species to stoichiometric coefficients
+                    * 'rate_constant': str, identifier of the rate constant
+                    * 'other_multipliers': list of str, optional parameters for the reaction
+            - sorted_species: list
+                Alphabetically sorted list of all unique chemical species in the reaction network
     """
-    cleaned = []
-    chem_pattern = re.compile(r"^[A-Za-z0-9()^+\-·]+$")
-    for s in species:
-        if not chem_pattern.match(s):
-            raise ValueError(f"Invalid species name: {s}")
-        cleaned.append(s)
-    return cleaned
+
+    parsed_reactions = []
+    species_set = set()
+
+    for reaction in reactions:
+        reaction_dict = {
+            "reactants": {},
+            "products": {},
+            "rate_constant": "",
+            "other_multipliers": [],
+        }
+
+        # Split the reaction into main components
+        reaction_part, rate_part = reaction.split(",", 1)
+        rate_details = [x.strip() for x in rate_part.split(";")]
+
+        reaction_dict["rate_constant"] = rate_details[
+            0
+        ]  # First element is the rate constant
+
+        if len(rate_details) > 1:
+            reaction_dict["other_multipliers"] = [
+                item.strip() for item in rate_details[1].split(",")
+            ]
+
+        # Split reactants and products
+        reactants_str, products_str = reaction_part.split(">")
+
+        def parse_species(side):
+            species_count = defaultdict(float)
+            species_matches = re.findall(r"(?:([\d\.]+)\s*)?(\[[^\]]+\])", side)
+
+            for count_str, species in species_matches:
+                count = float(count_str) if count_str else 1.0
+                species_count[species] += count
+                species_set.add(species)
+
+            return dict(species_count)
+
+        reaction_dict["reactants"] = parse_species(reactants_str)
+        reaction_dict["products"] = parse_species(products_str)
+
+        parsed_reactions.append(reaction_dict)
+
+    return parsed_reactions, sorted(species_set)
 
 
-def parse_reactions(reactions: list[str], species: list[str]) -> list[dict]:
-    """Parse reaction strings like '2A + B -> C' into stoichiometry dicts."""
-    parsed = []
-    for rxn in reactions:
-        if "->" not in rxn:
-            raise ValueError(f"Invalid reaction format: {rxn}")
-        lhs, rhs = rxn.split("->")
-        reactants = _parse_side(lhs.strip(), species)
-        products = _parse_side(rhs.strip(), species)
-        parsed.append({"reactants": reactants, "products": products, "raw": rxn})
-    return parsed
+def reaction_string_to_matrix(reaction_string: str) -> dict:
+    """
+    Convert reaction strings to matrix representation (stoichiometry matrix equivalent).
 
+    Args:
+        reaction_string (str): The reaction string to convert.
 
-def _parse_side(side: str, species: list[str]) -> dict[str, int]:
-    parts = [p.strip() for p in side.split("+")]
-    coeffs = {}
-    for p in parts:
-        m = re.match(r"^(\d*)([A-Za-z0-9_]+)$", p)
-        if not m:
-            raise ValueError(f"Invalid term: {p}")
-        coeff = int(m.group(1)) if m.group(1) else 1
-        sp = m.group(2)
-        if sp not in species:
-            raise ValueError(f"Species {sp} not in species list")
-        coeffs[sp] = coeffs.get(sp, 0) + coeff
-    return coeffs
+    Returns:
+        dict: Matrix representation of the reaction.
+    """
+    # This is a placeholder implementation - would need to be enhanced
+    # based on the specific matrix format required
+    parsed_reactions, species = parse_reactions([reaction_string])
 
+    if not parsed_reactions:
+        return {}
 
-def build_stoichiometry_matrix(reactions: list[dict], species: list[str]):
-    """Build stoichiometry matrix (n_species x n_reactions)."""
-    import numpy as np
+    reaction = parsed_reactions[0]
+    matrix_data = {
+        "species": species,
+        "reactants": reaction["reactants"],
+        "products": reaction["products"],
+        "net_stoichiometry": {},
+    }
 
-    S = np.zeros((len(species), len(reactions)), dtype=int)
-    for j, rxn in enumerate(reactions):
-        for sp, coeff in rxn["products"].items():
-            S[species.index(sp), j] += coeff
-        for sp, coeff in rxn["reactants"].items():
-            S[species.index(sp), j] -= coeff
-    return S
+    # Calculate net stoichiometry for each species
+    for spec in species:
+        reactant_coeff = reaction["reactants"].get(spec, 0)
+        product_coeff = reaction["products"].get(spec, 0)
+        matrix_data["net_stoichiometry"][spec] = product_coeff - reactant_coeff
+
+    return matrix_data

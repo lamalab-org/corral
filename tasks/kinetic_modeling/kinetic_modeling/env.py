@@ -1,218 +1,58 @@
-import json
 import os
-from collections.abc import Callable
-from pathlib import Path
 
+from kinetic_modeling.score import score_base_model, score_parameters
+from kinetic_modeling.tools import create_tools
 from loguru import logger
-from score import check_numerical
-from tools import (
-    derive_rate_law,
-    fit_kinetic_parameters,
-    generate_ode_system,
-    setup_reaction_network,
-)
 
-from corral.base import Environment, Tool
-from corral.io import (
-    CatFilesTool,
-    CopyFileTool,
-    FileInfoTool,
-    FSManager,
-    GrepTool,
-    ListFilesTool,
-    ReadFileTool,
-    WriteFileTool,
-)
+from corral.base import Environment
 from corral.server import run_server
 from corral.task import TaskDefinition, TaskGroup
 
-# if "CORRAL_WORK_DIR" not in os.environ:
-#     raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
-# if "ENVIRONMENT" not in os.environ:
-#     raise OSError("MD Environment not specified.")
+CORRAL_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+BASE_WORK_DIR = os.environ.get(
+    "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/spectra_elucidation"
+)
 
 
-# CORRAL_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
-# ENVIRONMENT = os.environ["ENVIRONMENT"]
-# TASK_TYPE = os.environ["TASK_TYPE"]
-
-
-SCORING_FUNCTIONS = {"check_numerical": check_numerical}
-
-
-def get_scoring_function(name: str, params: dict | None = None) -> Callable:
-    """Get a scoring function by name from the registry, with optional parameters"""
-    fn = SCORING_FUNCTIONS.get(name)
-    if fn is None:
-        raise ValueError(f"Scoring function '{name}' not found in the registry")
-
-    # If it's a factory function (i.e., takes arguments), call with params
-    if params:
-        try:
-            return fn(**params)
-        except Exception as e:
-            raise ValueError(
-                f"Error initializing scoring function '{name}' with params {params}: {e}"
-            ) from e
-    else:
-        return fn
-
-
-def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefinition]:
-    task_files = json_path.glob("*.json")
-
-    if not task_files:
-        raise FileNotFoundError(f"No task definition files found in: {json_path}")
-
-    logger.info(f"Loading tasks from JSON files in {json_path}")
-    tasks = {}
-    for task_file in task_files:
-        with task_file.open() as f:
-            task_data = json.load(f)
-        for task_id, task_info in task_data.items():
-            # Get the scoring function by name from the registry
-            scoring_fn_name = task_info.get("scoring_function", "default")
-            scoring_params = task_info.get("scoring_params", {})
-            task_info["scoring_params"] = scoring_params
-
-            scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
-            # Add work_dir to initial input if not already present
-            initial_input = task_info.get("initial_input", {}).copy()
-            if "experimental_data_path" in initial_input:
-                exp_data_path = initial_input["experimental_data_path"]
-                if isinstance(exp_data_path, str) and exp_data_path.endswith(".csv"):
-                    json_dir = Path(task_file).resolve().parent.parent
-                    abs_exp_data_path = Path(
-                        json_dir, "kinetic_modelling", exp_data_path
-                    ).resolve()
-                    logger.info(
-                        f"Resolving experimental data path: {abs_exp_data_path}"
-                    )
-
-                    # if not abs_exp_data_path.is_file():
-                    #     raise FileNotFoundError(
-                    #         f"[{task_id}] Experimental data path does not exist: {abs_exp_data_path}"
-                    #     )
-
-                    initial_input["experimental_data_path"] = str(abs_exp_data_path)
-            if "work_dir" not in initial_input:
-                initial_input["work_dir"] = work_dir
-
-            tasks[task_id] = TaskDefinition(
-                name=task_info["name"],
-                description=task_info["description"],
-                tools=task_info.get("tools", []),
-                scoring_fn=scoring_fn,
-                submission_format=task_info.get("submission_format", ""),
-                input_from_tasks=task_info.get("input_from_tasks", []),
-                initial_input=initial_input,
-            )
-
-    return tasks
-
-
-class TaskGroupEnvironment(Environment):
+class KineticEnvironment(Environment):
     """Environment that works with a task group - simple composition approach"""
 
     def __init__(
         self,
         task_id: str,
         task_group: TaskGroup,
-        subtask_specific_tools: dict[str, Tool],
-        base_work_dir: str,
-        taskgroup_common_tools: dict[str, Tool] | None = None,
+        work_dir: str,
     ):
+        self.task_id = task_id
         self.task_group = task_group
-        self.subtask_specific_tools = subtask_specific_tools
-        self.taskgroup_common_tools = taskgroup_common_tools or {}
+        self.available_tools = create_tools()
+        self.work_dir = work_dir
 
         if task_id not in task_group.tasks:
             raise ValueError(f"Task {task_id} not found in task group")
 
         self.current_task = task_group.tasks[task_id]
 
-        super().__init__(
-            f"{task_id}",
-            base_work_dir=base_work_dir,
-            fs_manager=FSManager("file", base_path=base_work_dir),
-        )
+        # Initialize environment
+        super().__init__(f"{task_group.group_id}_{task_id}", base_work_dir=work_dir)
 
-        # Add tools
         self._add_task_tools()
-        self._setup_file_tools()
 
     def _add_task_tools(self):
-        """Add required tools for the task"""
+        """Add tools required for the current task to the environment"""
         for tool_name in self.current_task.tools:
-            if tool_name in self.subtask_specific_tools:
-                self.add_tool(self.subtask_specific_tools[tool_name])
+            if tool_name in self.available_tools:
+                self.add_tool(self.available_tools[tool_name])
             else:
                 logger.warning(
-                    f"Tool {tool_name} required for task {self.task_id} not found"
+                    f"Tool {tool_name} not found in available tools for task {self.task_id}"
                 )
-
-        for tool in self.taskgroup_common_tools.values():
-            self.add_tool(tool)
-
-    def _setup_file_tools(self):
-        """Setup file tools for current workspace"""
-        if self.current_work_dir:
-            logger.info(
-                f"DEBUG: Setting up FSManager with base_path: {self.current_work_dir}"
-            )
-            # Create new FSManager for current workspace
-            fs_manager = FSManager("file", base_path=self.current_work_dir)
-
-            # Add/update file tools
-            self.tools.update(
-                {
-                    "list_files": ListFilesTool(fs_manager),
-                    "read_file": ReadFileTool(fs_manager),
-                    "write_file": WriteFileTool(fs_manager),
-                    "file_info": FileInfoTool(fs_manager),
-                    "cat_files": CatFilesTool(fs_manager),
-                    "copy_file": CopyFileTool(fs_manager),
-                    "grep": GrepTool(fs_manager),
-                }
-            )
-            logger.info(
-                f"DEBUG: File tools setup complete for workspace: {self.current_work_dir}"
-            )
-        else:
-            logger.warning("DEBUG: No current_work_dir set, skipping file tools setup")
-
-    def reset_state(self) -> str:
-        """Reset state and update file tools for new workspace"""
-        trial_id = super().reset_state()
-        # Recreate file tools for new workspace
-        self._setup_file_tools()
-        return trial_id
-
-    def _describe_experimental_data(self) -> str:
-        """Generate description of available experimental data."""
-        # data = self.experimental_data
-        # description = [
-        #     f"- Time points: {len(data)} measurements",
-        #     f"- Time range: {data['time'].min():.1f} to {data['time'].max():.1f} time units",
-        #     f"- Species monitored: {', '.join([col for col in data.columns if col != 'time'])}"
-        # ]
-
-        # # Add data quality information
-        # missing_data = data.isnull().sum().sum()
-        # if missing_data > 0:
-        #     description.append(f"- Missing data points: {missing_data}")
-
-        # return "\n".join(description)
-        return ""
 
     def get_task_prompt(self) -> str:
         """Generate the task prompt for the current task"""
 
-        data_description = self._describe_experimental_data()
-
         prompt = f"""\nTask: {self.current_task.name}
 Description: {self.current_task.description}
-**Experimental Data Available:** {data_description}
 
 **Your Goal:**
 Develop a kinetic model that accurately describes the experimental observations. Your final model should include:
@@ -248,10 +88,6 @@ Required submission format:
                 if key != "work_dir":
                     prompt += f"- {key}: {value}\n"
 
-        # Add workspace info
-        if self.current_work_dir:
-            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir} when using tools use this path.\n"
-
         # Add note about dependencies
         if self.current_task.input_from_tasks:
             status = []
@@ -272,54 +108,165 @@ Required submission format:
     def score(self) -> float:
         """Score the submitted answer"""
         if not self.state.submitted_answer:
-            logger.warning(f"No submission found for task {self.task_id}")
             return 0.0
 
         try:
-            # Get and log the raw submission
-            answer_value = self.state.submitted_answer.strip()
-            logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
-
-            # Call the scoring function with the raw answer
-            score = self.current_task.scoring_fn(answer_value)
-
-            # Store result in task group
-            self.task_group.store_result(self.task_id, {"answer": answer_value}, score)
-            logger.info(f"Task {self.task_id} scored: {score}")
-
+            # Clean the submission
+            submission_str = self.state.submitted_answer.strip()
+            logger.info(f"Raw submission: {submission_str}")
+            score = self.current_task.scoring_fn(
+                prediction=submission_str, ground_truth=self.current_task.scoring_inputs
+            )
+            self.task_group.store_result(
+                self.task_id, {"answer": submission_str}, score
+            )
+            logger.info(f"Score for task {self.task_id}: {score}")
             return score
 
         except Exception as e:
-            logger.error(
-                f"Error scoring submission for task {self.task_id}: {e!s}",
-                exc_info=True,
-            )
-            logger.error(f"Submission was: {self.state.submitted_answer!r}")
+            logger.error(f"Error scoring submission for task {self.task_id}: {e!s}")
+            logger.error(f"Submission was: {self.state.submitted_answer}")
             return 0.0
 
 
-def create_environments(
-    work_dir: str,
-    subtask_level: bool = False,
-    taskgroup_common_tools: dict[str, Tool] | None = None,
-) -> dict[str, TaskGroupEnvironment]:
-    logger.info("Creating environments for MD")
+def create_task_environments(env_level: int, rag: bool):
+    """Create all task environments for the kinetic modeling benchmark."""
 
-    if subtask_level:
-        logger.info("Creating environments with subtask level enabled")
-        json_path = Path(__file__).parent.parent / "subtasks"
+    tasks = {}
+
+    if env_level == 1:
+        # Level 1: Basic Parameter Fitting
+        tasks.update(
+            {
+                "kinetic_fit_first_order": TaskDefinition(
+                    name="kinetic_fit_first_order",
+                    description="Fit the rate constant for a simple first-order reaction A → B. The reaction follows first-order kinetics with respect to A.",
+                    tools=[
+                        "setup_reaction_network",
+                        "derive_rate_law",
+                        "generate_ode_system",
+                        "fit_kinetic_parameters",
+                        "validate_model_fit",
+                    ],
+                    scoring_fn=score_parameters,
+                    scoring_inputs={"k1": 0.025},
+                    submission_format="Return a dictionary with the fitted parameters, e.g., {'k1': 0.0}",
+                    input_from_tasks=[],
+                    initial_input={"experiment": "results_mrg_059_zn_12_2"},
+                ),
+                "kinetic_fit_second_order": TaskDefinition(
+                    name="kinetic_fit_second_order",
+                    description="Determine the rate constant for a second-order reaction A + B → C. Both reactants have equal initial concentrations.",
+                    tools=[
+                        "setup_reaction_network",
+                        "derive_rate_law",
+                        "generate_ode_system",
+                        "fit_kinetic_parameters",
+                        "validate_model_fit",
+                    ],
+                    scoring_fn=score_parameters,
+                    scoring_inputs={"k1": 0.15},
+                    submission_format="Return a dictionary with the fitted parameters, e.g., {'k1': 0.0}",
+                    input_from_tasks=[],
+                    initial_input={"experiment": "results_mrg_059_zn_12_2"},
+                ),
+            }
+        )
+
+    elif env_level == 2:
+        # Level 2: Mechanism Selection
+        tasks.update(
+            {
+                "consecutive_reactions": TaskDefinition(
+                    name="consecutive_reactions",
+                    description="Analyze the kinetics of consecutive reactions A → B → C. Determine if the mechanism is simple consecutive steps or involves parallel pathways.",
+                    tools=[
+                        "setup_reaction_network",
+                        "derive_rate_law",
+                        "generate_ode_system",
+                        "fit_kinetic_parameters",
+                        "validate_model_fit",
+                    ],
+                    scoring_fn=score_parameters,
+                    scoring_inputs={"k1": 0.05, "k2": 0.03},
+                    submission_format="Return a dictionary with the fitted parameters, e.g., {'k1': 0.0}",
+                    input_from_tasks=[],
+                    initial_input={"experiment": "results_mrg_059_zn_12_2"},
+                ),
+                "competitive_inhibition": TaskDefinition(
+                    name="competitive_inhibition",
+                    description="Model enzyme kinetics with competitive inhibition. Determine kinetic parameters for both substrate binding and inhibitor competition.",
+                    tools=[
+                        "setup_reaction_network",
+                        "derive_rate_law",
+                        "generate_ode_system",
+                        "fit_kinetic_parameters",
+                        "validate_model_fit",
+                    ],
+                    scoring_fn=score_parameters,
+                    scoring_inputs={"Km": 2.5, "Vmax": 10.0, "Ki": 1.2},
+                    submission_format="Return a dictionary with the fitted parameters, e.g., {'k1': 0.0}",
+                    input_from_tasks=[],
+                    initial_input={"experiment": "results_mrg_059_zn_12_2"},
+                ),
+            }
+        )
+
+    elif env_level == 3:
+        if not rag:
+            # Level 3: Actual experimental Data
+            tasks.update(
+                {
+                    "jacob_o2_discovery": TaskDefinition(
+                        name="jacob_o2_discovery",
+                        description="Analyze oxygen concentration time-series from high-throughput photocatalytic experiments.\nThe data shows complex O₂ depletion patterns that suggest multiple reaction pathways.\nYour task is to discover the underlying reaction network and kinetic parameters that explain these observations.",
+                        tools=[
+                            "setup_reaction_network",
+                            "derive_rate_law",
+                            "generate_ode_system",
+                            "fit_kinetic_parameters",
+                            "validate_model_fit",
+                        ],
+                        scoring_fn=score_base_model,
+                        scoring_inputs="reference_models.py",
+                        submission_format="Return a dictionary with the fitted parameters, e.g., {'k1': 0.0}",
+                        input_from_tasks=[],
+                        initial_input={"experiment": "results_mrg_059_zn_12_2"},
+                    )
+                }
+            )
+        else:
+            # Level 3: Experimental data + RAG tools
+            tasks.update(
+                {
+                    "jacob_o2_discovery_with_rag": TaskDefinition(
+                        name="jacob_o2_discovery_with_rag",
+                        description="Analyze oxygen concentration time-series from high-throughput photocatalytic experiments.\nThe data shows complex O₂ depletion patterns that suggest multiple reaction pathways.\nYour task is to discover the underlying reaction network and kinetic parameters that explain these observations.",
+                        tools=[
+                            "setup_reaction_network",
+                            "derive_rate_law",
+                            "generate_ode_system",
+                            "fit_kinetic_parameters",
+                            "validate_model_fit",
+                            "lookup_previous_works",
+                        ],
+                        scoring_fn=score_base_model,
+                        scoring_inputs="reference_models.py",
+                        submission_format="Return a dictionary with the fitted parameters, e.g., {'k1': 0.0}",
+                        input_from_tasks=[],
+                        initial_input={"experiment": "results_mrg_059_zn_12_2"},
+                    )
+                }
+            )
+
     else:
-        json_path = Path(__file__).parent.parent / "tasks"
+        raise ValueError("Invalid environment level")
 
-    # Load tasks from JSON
-    tasks = load_tasks_from_json(json_path, work_dir)
+    group_id = f"kinetic_modeling_level_{env_level}"
 
-    # Create task group
-    group_id = "KINETIC-MODELLING"
-    logger.info(f"Creating task group {group_id} with {len(tasks)} tasks")
+    logger.info(f"Creating task group {group_id} with tasks: {list(tasks.keys())}")
     task_group = TaskGroup(group_id=group_id, tasks=tasks)
 
-    # Print task dependencies for reference
     logger.info("\nTask Dependencies:")
     for task_id, deps in task_group.get_task_dependencies().items():
         logger.info(f"- {task_id}: depends on {deps}")
@@ -330,31 +277,22 @@ def create_environments(
     for i, task_id in enumerate(ordered_tasks):
         logger.info(f"{i+1}. {task_id}")
 
-    # Create environments for all tasks
-    subtask_specific_tools = {
-        "setup_reaction_network": setup_reaction_network,
-        "derive_rate_law": derive_rate_law,
-        "generate_ode_system": generate_ode_system,
-        "fit_kinetic_parameters": fit_kinetic_parameters,
-    }
-
     environments = {}
     for task_id in task_group.tasks:
-        environments[task_id] = TaskGroupEnvironment(
+        environments[task_id] = KineticEnvironment(
             task_id=task_id,
             task_group=task_group,
-            subtask_specific_tools=subtask_specific_tools,
-            taskgroup_common_tools=taskgroup_common_tools,
-            base_work_dir=work_dir,
+            work_dir=BASE_WORK_DIR,
         )
 
     return environments
 
 
+# Server setup
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="MD Benchmark Server")
+    parser = argparse.ArgumentParser(description="Kinetic Modeling Server")
     parser.add_argument(
         "--host",
         type=str,
@@ -373,16 +311,21 @@ if __name__ == "__main__":
         default=False,
         help="Whether to use subtask level",
     )
-    args = parser.parse_args()
-
-    # Create all environments with file system tools
-
-    CORRAL_WORK_DIR = "/Users/chandan21gupta/Desktop/iit_delhi/agent_llms_6/mat-agent-bench/tasks/kinetic_modeling/corral_work_dir/"
-
-    environments = create_environments(
-        work_dir=CORRAL_WORK_DIR, subtask_level=args.subtask_level
+    parser.add_argument(
+        "--env_level",
+        type=int,
+        help="Environment level to use (1-3)",
     )
-
+    parser.add_argument(
+        "--rag",
+        type=bool,
+        default=False,
+        help="Whether to use RAG tools",
+    )
+    args = parser.parse_args()
+    environments = create_task_environments(
+        subtask_level=args.subtask_level, env_level=args.env_level, rag=args.rag
+    )
     logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
         logger.info(f"- {env_id}")

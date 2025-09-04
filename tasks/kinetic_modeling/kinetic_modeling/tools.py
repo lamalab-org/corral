@@ -1,44 +1,58 @@
 import json
+import uuid
+from typing import Any
 
+from kinetic_modeling.utils.ode_generator import (
+    build_ode_system,
+    build_stoichiometry_matrix,
+    extract_parameters,
+)
+from kinetic_modeling.utils.parameter_fitting import (
+    calculate_confidence_intervals,
+    fit_parameters,
+    load_experimental_data,
+)
+from kinetic_modeling.utils.rate_laws import generate_rate_law
+from kinetic_modeling.utils.reaction_parser import parse_reactions
+
+from corral.base import Tool
 from corral.utils import tool
+
+# Module-level storage for reaction networks
+# Tools do not have access to the env state which force us to do this.
+_NETWORK_STORAGE = {}
 
 
 @tool
-def setup_reaction_network(species: list[str], reactions: list[str]) -> str:
+def setup_reaction_network(reactions: list[str]) -> str:
     """Create reaction network from species and reaction descriptions.
 
     Args:
         species: List of chemical species (e.g., ['A', 'B', 'O2', 'H2O'])
         reactions: List of reaction strings (e.g., ['A + O2 -> B + H2O', '2A -> A2'])
     """
-    import uuid
-
-    from .utils.reaction_parser import (
-        parse_reactions,
-        validate_species,
-    )
-
     network_id = str(uuid.uuid4())
 
     # Validate species and reactions
-    validated_species = validate_species(species)
-    parsed_reactions = parse_reactions(reactions, validated_species)
+    parsed_reactions, sorted_species = parse_reactions(reactions)
 
-    # # Store network in environment state
-    # network_data = {
-    #     "species": validated_species,
-    #     "reactions": parsed_reactions,
-    #     "stoichiometry_matrix": build_stoichiometry_matrix(
-    #         parsed_reactions, validated_species
-    #     ),
-    # }
+    # Store network in environment state
+    network_data = {
+        "species": sorted_species,
+        "reactions": parsed_reactions,
+        "stoichiometry_matrix": build_stoichiometry_matrix(
+            parsed_reactions, sorted_species
+        ),
+    }
 
-    # Save to environment state (accessible via self.state in environment)
+    # Save to module-level storage (accessible globally)
+    _NETWORK_STORAGE[network_id] = network_data
+
     return json.dumps(
         {
             "network_id": network_id,
             "status": "created",
-            "n_species": len(validated_species),
+            "n_species": len(sorted_species),
             "n_reactions": len(parsed_reactions),
         }
     )
@@ -55,7 +69,6 @@ def derive_rate_law(reaction: str, mechanism: str = "elementary") -> str:
     Returns:
         Rate law parameters and mathematical expression as JSON string
     """
-    from .utils.rate_laws import generate_rate_law
 
     rate_law = generate_rate_law(reaction, mechanism)
 
@@ -70,6 +83,37 @@ def derive_rate_law(reaction: str, mechanism: str = "elementary") -> str:
     )
 
 
+def _get_network_storage():
+    return _NETWORK_STORAGE
+
+
+def get_network_by_id(network_id: str) -> dict[str, Any]:
+    """
+    Retrieve network by ID from module-level storage.
+
+    Parameters:
+    -----------
+    network_id : str
+        Network identifier
+
+    Returns:
+    --------
+    dict
+        Network data
+
+    Raises:
+    -------
+    ValueError
+        If network_id is not found in storage
+    """
+    network_storage = _get_network_storage()
+
+    if network_id not in network_storage:
+        raise ValueError(f"Network {network_id} not found in storage")
+
+    return network_storage[network_id]
+
+
 @tool
 def generate_ode_system(network_id: str, rate_laws: list[str]) -> str:
     """Generate system of ODEs from reaction network and rate laws.
@@ -81,82 +125,99 @@ def generate_ode_system(network_id: str, rate_laws: list[str]) -> str:
     Returns:
         ODE system as executable Python code string
     """
-
     # Retrieve network from environment state
-    # network = get_network_by_id(network_id)
+    network = get_network_by_id(network_id)
     parsed_rate_laws = [json.loads(rl) for rl in rate_laws]
 
-    # Build ODE system code from network + rate laws
-    # ode_code = build_ode_system(network, parsed_rate_laws)
+    # Extract rate constants from rate laws
+    rate_constants = {}
+    for rate_law in parsed_rate_laws:
+        if "parameters" in rate_law:
+            for param in rate_law["parameters"]:
+                rate_constants[param] = 1.0  # Default value, will be fitted later
 
-    # Collect all parameters from rate laws
-    parameters_needed = {
-        pname: pval
-        for rl in parsed_rate_laws
-        for pname, pval in rl["parameters"].items()
-    }
+    ode_code = build_ode_system(
+        parsed_reactions=network["reactions"],
+        species=network["species"],
+        rate_constants=rate_constants,
+    )
 
     return json.dumps(
         {
             "network_id": network_id,
-            # "ode_system_code": ode_code,
-            # "n_equations": len(network["species"]),
-            "parameters_needed": parameters_needed,
+            "ode_system_code": ode_code,
+            "n_equations": len(network["species"]),
+            "parameters_needed": extract_parameters(parsed_rate_laws),
         }
     )
 
 
-# @tool
-# def fit_kinetic_parameters(
-#     ode_system: str, experimental_data: str, initial_params: str, bounds: str = "{}"
-# ) -> str:
-#     """Fit kinetic parameters to experimental time-series data.
+@tool
+def fit_kinetic_parameters(
+    ode_system: str, experiment: str, initial_params: str, bounds: str = "{}"
+) -> str:
+    """Fit kinetic parameters to experimental time-series data.
 
-#     Args:
-#         ode_system: JSON string from generate_ode_system containing Python code
-#         experimental_data: Path to CSV file with columns ['time', 'species1', 'species2', ...]
-#         initial_params: JSON string with parameter initial guesses {'k1': 0.1, 'k2': 0.05}
-#         bounds: JSON string with parameter bounds {'k1': [0, 10], 'k2': [0, 1]}
+    Args:
+        ode_system: JSON string from generate_ode_system containing Python code
+        experiment: name of the experiment to fit
+        initial_params: JSON string with parameter initial guesses {'k1': 0.1, 'k2': 0.05}
+        bounds: JSON string with parameter bounds {'k1': [0, 10], 'k2': [0, 1]}
 
-#     Returns:
-#         Fitted parameters with confidence intervals and goodness-of-fit metrics
-#     """
-#     from .utils.parameter_fitting import fit_parameters
+    Returns:
+        Fitted parameters with confidence intervals and goodness-of-fit metrics
+    """
 
-#     ode_data = json.loads(ode_system)
-#     initial_params_dict = json.loads(initial_params)
-#     bounds_dict = json.loads(bounds) if bounds != "{}" else {}
+    try:
+        ode_data = json.loads(ode_system)
+        initial_params_dict = json.loads(initial_params)
+        bounds_dict = json.loads(bounds) if bounds != "{}" else {}
 
-#     # Load experimental data
-#     # exp_data = load_experimental_data(experimental_data)
+        # Load experimental data with improved error handling
+        try:
+            exp_data = load_experimental_data(experiment)
+        except RuntimeError as e:
+            # Return detailed error information about available experiments
+            return json.dumps(
+                {
+                    "error": "Dataset loading failed",
+                    "message": str(e),
+                    "experiment_requested": experiment,
+                    "success": False,
+                }
+            )
 
-#     # Perform fitting
-#     result = fit_parameters(
-#         ode_code=ode_data["ode_system_code"],
-#         # exp_data=exp_data,
-#         initial_params=initial_params_dict,
-#         bounds=bounds_dict,
-#     )
+        # Perform fitting
+        result = fit_parameters(
+            ode_code=ode_data["ode_system_code"],
+            exp_data=exp_data,
+            initial_params=initial_params_dict,
+            bounds=bounds_dict,
+        )
 
-#     return json.dumps(
-#         {
-#             "fitted_params": result["params"],
-#             "param_errors": result["errors"],
-#             "goodness_of_fit": {
-#                 "r_squared": result["r_squared"],
-#                 "rmse": result["rmse"],
-#                 "aic": result["aic"],
-#                 "bic": result["bic"],
-#             },
-#             "convergence": result["success"],
-#         }
-#     )
+        return json.dumps(
+            {
+                "fitted_params": result["params"],
+                "param_errors": result["errors"],
+                "goodness_of_fit": {
+                    "r_squared": result["r_squared"],
+                    "rmse": result["rmse"],
+                    "aic": result["aic"],
+                    "bic": result["bic"],
+                },
+                "convergence": result["success"],
+            }
+        )
+
+    except Exception as e:
+        # Handle any other errors that might occur during fitting
+        return json.dumps(
+            {"error": "Parameter fitting failed", "message": str(e), "success": False}
+        )
 
 
 @tool
-def validate_model_fit(
-    fitted_params: str, experimental_data: str, ode_system: str
-) -> str:
+def validate_model_fit(fitted_params: str, experimental_data: str) -> str:
     """Perform comprehensive validation of fitted kinetic model.
 
     Args:
@@ -167,60 +228,69 @@ def validate_model_fit(
     Returns:
         Validation metrics, residual analysis, and prediction intervals
     """
-    import json
+    try:
+        fitted_data = json.loads(fitted_params)
 
-    import numpy as np
-    from scipy.integrate import solve_ivp
+        # Load experimental data with improved error handling
+        try:
+            exp_data = load_experimental_data(experimental_data)
+        except RuntimeError as e:
+            # Return detailed error information about available experiments
+            return json.dumps(
+                {
+                    "error": "Dataset loading failed",
+                    "message": str(e),
+                    "experiment_requested": experimental_data,
+                    "success": False,
+                }
+            )
 
-    from .utils.data_utils import load_experimental_data
-    from .utils.parameter_fitting import build_ode_function
+        # Calculate confidence intervals
+        confidence_intervals = calculate_confidence_intervals(
+            fitted_data["fitted_params"],
+            exp_data,
+            param_errors=fitted_data.get("param_errors", None),
+        )
 
-    # Load inputs
-    params = json.loads(fitted_params)["fitted_params"]
-    exp_data = load_experimental_data(experimental_data)
-    ode_data = json.loads(ode_system)
-    ode_code = ode_data["ode_system_code"]
+        # Use actual goodness-of-fit metrics from fitted parameters
+        goodness_of_fit = fitted_data.get("goodness_of_fit", {})
 
-    # Build ODE function from generated code
-    f = build_ode_function(ode_code, params)
-
-    # Initial conditions from first row of exp data
-    y0 = np.array([v[0] for v in exp_data["concentrations"].values()])
-    tspan = (exp_data["time"][0], exp_data["time"][-1])
-    t_eval = exp_data["time"]
-
-    sol = solve_ivp(f, tspan, y0, t_eval=t_eval)
-
-    # Compute residuals
-    sim = {sp: sol.y[i, :] for i, sp in enumerate(exp_data["concentrations"].keys())}
-    residuals = {}
-    for sp, obs in exp_data["concentrations"].items():
-        residuals[sp] = (obs - sim[sp]).tolist()
-
-    # Compute validation metrics
-    metrics = {}
-    for sp, obs in exp_data["concentrations"].items():
-        pred = sim[sp]
-        ss_res = np.sum((obs - pred) ** 2)
-        ss_tot = np.sum((obs - np.mean(obs)) ** 2)
-        r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-        rmse = np.sqrt(np.mean((obs - pred) ** 2))
-        metrics[sp] = {"r2": r2, "rmse": rmse}
-
-    # Prediction intervals (very naive: ± std of residuals)
-    intervals = {
-        sp: {
-            "lower": (sim[sp] - np.std(res)).tolist(),
-            "upper": (sim[sp] + np.std(res)).tolist(),
+        validation_results = {
+            "confidence_intervals": confidence_intervals,
+            "goodness_of_fit": goodness_of_fit,
+            "parameter_correlations": {},  # Not available in current implementation
+            "residual_analysis": {
+                "rmse": goodness_of_fit.get("rmse", "not_available"),
+                "r_squared": goodness_of_fit.get("r_squared", "not_available"),
+            },
+            "model_selection": {
+                "aic": goodness_of_fit.get("aic", "not_available"),
+                "bic": goodness_of_fit.get("bic", "not_available"),
+            },
+            "convergence_status": fitted_data.get("convergence", "unknown"),
         }
-        for sp, res in residuals.items()
+
+        return json.dumps(validation_results)
+
+    except Exception as e:
+        # Handle any other errors that might occur during validation
+        return json.dumps(
+            {"error": "Model validation failed", "message": str(e), "success": False}
+        )
+
+
+@tool
+def lookup_previous_works():
+    return "This tool is not implemented yet."
+
+
+def create_tools() -> dict[str, Tool]:
+    """Create a dictionary of all available tools for the agent environment"""
+    return {
+        "setup_reaction_network": setup_reaction_network,
+        "derive_rate_law": derive_rate_law,
+        "generate_ode_system": generate_ode_system,
+        "fit_kinetic_parameters": fit_kinetic_parameters,
+        "validate_model_fit": validate_model_fit,
+        "lookup_previous_works": lookup_previous_works,
     }
-
-    return json.dumps(
-        {
-            "metrics": metrics,
-            "residuals": residuals,
-            "prediction_intervals": intervals,
-            "success": True,
-        }
-    )
