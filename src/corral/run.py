@@ -59,16 +59,19 @@ def execute_single_trial(
     agent: BaseAgent,
     verbose: bool = False,
     tool_verbosity: str | None = None,
+    configure_timeout: float | None = None,
 ) -> TaskTrialResult:
     """Execute a single trial - pure function"""
     try:
-        # Run agent
-        if tool_verbosity is not None:
-            answer, token_usage = agent.run_agent(
-                interface, task_id, verbose=verbose, tool_verbosity=tool_verbosity
-            )
-        else:
-            answer, token_usage = agent.run_agent(interface, task_id, verbose=verbose)
+        status = interface.configure_additional_apps(task_id, timeout=configure_timeout)
+        logger.info(f"Task {task_id} additional apps/services configured: {status}")
+
+        answer, token_usage = agent.run_agent(
+            interface,
+            task_id,
+            verbose=verbose,
+            tool_verbosity=tool_verbosity or "brief",
+        )
 
         # Submit answer
         try:
@@ -199,6 +202,7 @@ class CorralRunner:
         verbose: bool = False,
         session_id: str | None = None,
         tool_verbosity: str | None = None,
+        configure_timeout: float | None = None,
     ) -> BenchmarkResult:
         """Run benchmark with functional approach"""
 
@@ -225,6 +229,7 @@ class CorralRunner:
                 agent=self.agent,
                 verbose=verbose,
                 tool_verbosity=tool_verbosity,
+                configure_timeout=configure_timeout,
             )
 
         checkpoint_saver = partial(self._save_checkpoint, session_id)

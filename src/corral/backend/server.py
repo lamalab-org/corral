@@ -214,7 +214,20 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Trial not found")
         return {"trial_state": trial_state}
 
-    # add endpoint for scoring the task
+    @app.post("/tasks/{task_id}/configure")
+    def configure_additional_apps(task_id: str):
+        """Configure external apps/services for this specific task at the beginning of each trail"""
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        env = environments[task_id]
+        status = env.configure_additional_apps()
+
+        return {
+            "status": status,
+            "task_id": task_id,
+            "trial_id": env.state.trial_id,
+        }
 
     return app
 
