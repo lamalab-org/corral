@@ -5,7 +5,7 @@ import numpy as np
 from loguru import logger
 from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 
-from corral.utils.tool_utils import embed_text, make_api_request
+from corral.utils.tool_helpers import embed_text, make_api_request
 
 
 def make_brave_search_request(query: str, api_key: str) -> list[dict[str, Any]]:

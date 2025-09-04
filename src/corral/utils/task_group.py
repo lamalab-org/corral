@@ -12,7 +12,7 @@ from corral.utils.io_tools import (
     ReadFileTool,
     WriteFileTool,
 )
-from corral.utils.tool_utils import smart_resolve_path
+from corral.utils.tool_helpers import smart_resolve_path
 
 
 class TaskGroupEnvironment(Environment):

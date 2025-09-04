@@ -7,7 +7,7 @@ import more_itertools
 import tiktoken
 from loguru import logger
 
-from corral.utils.tool_utils import embed_text
+from corral.utils.tool_helpers import embed_text
 
 
 def vector_database_search(
