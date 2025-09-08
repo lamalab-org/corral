@@ -103,33 +103,154 @@ class ReActAgent(BaseAgent):
 
     def parse_llm_response(
         self, response: str
-    ) -> tuple[Thought | None, list[Action] | None]:
-        """Parse LLM response into Thought and Actions"""
-        thought_match = re.search(
-            r"Thought: (.*?)(?=\nAction:|Final Answer:|$)", response, re.DOTALL
-        )
-        action_matches = re.finditer(
-            r"Action: (\w+)\nAction Input: ({.*?}(?=\nAction:|\nThought:|\nFinal Answer:|$))",
-            response,
-            re.DOTALL,
-        )
+    ) -> tuple[Thought | None, list[Action] | None, bool, str | None]:
+        """
+        Parse LLM response into Thought, Actions, final flag, and parsing error.
 
-        thought = Thought(thought_match.group(1).strip()) if thought_match else None
+        This parser:
+        1. Returns a boolean flag for final answer detection (eliminates duplicate parsing)
+        2. Handles empty/whitespace-only thoughts consistently (returns None)
+        3. Uses robust line-by-line parsing for better accuracy
+        4. Properly handles multiline thoughts and multiple actions
+        5. Captures JSON parsing errors for better error feedback
 
+        Returns:
+            tuple: (thought, actions, is_final, parsing_error)
+            - thought: Thought object or None if no meaningful thought found
+            - actions: List of Action objects or None if no actions found
+            - is_final: True if response contains "Final Answer:", False otherwise
+            - parsing_error: String describing parsing error or None if no error
+        """
+        lines = response.split("\n")
+
+        # Check for final answer
+        is_final = any(line.startswith("Final Answer:") for line in lines)
+
+        # Parse thought
+        thought = None
+        thought_lines = []
+        in_thought = False
+
+        # Parse actions
         actions = []
-        for action_match in action_matches:
-            tool_name = action_match.group(1).strip()
-            try:
-                action_input = action_match.group(2).strip()
-                action_input = action_input.replace("True", "true").replace(
-                    "False", "false"
-                )
-                arguments = json.loads(action_input)
-                actions.append(Action(tool_name=tool_name, arguments=arguments))
-            except json.JSONDecodeError:
-                pass
+        current_action_name = None
+        current_action_input_lines = []
+        in_action_input = False
+        parsing_error = None
 
-        return thought, actions if actions else None
+        for line in lines:
+            if line.startswith("Thought:"):
+                # Finish any pending action first
+                if (
+                    in_action_input
+                    and current_action_name
+                    and current_action_input_lines
+                ):
+                    try:
+                        action_input_str = "\n".join(current_action_input_lines)
+                        arguments = json.loads(action_input_str)
+                        actions.append(
+                            Action(tool_name=current_action_name, arguments=arguments)
+                        )
+                    except json.JSONDecodeError as e:
+                        if parsing_error is None:  # Only capture first parsing error
+                            parsing_error = f"Invalid JSON in Action Input for '{current_action_name}': {e!s}"
+                    current_action_name = None
+                    current_action_input_lines = []
+
+                # Start thought parsing
+                thought_content = line[8:].strip()  # Remove "Thought:" prefix
+                thought_lines = [thought_content] if thought_content else []
+                in_thought = True
+                in_action_input = False
+
+            elif line.startswith("Action:"):
+                # Finish previous thought if any
+                if in_thought and thought_lines:
+                    content = "\n".join(thought_lines).strip()
+                    if content:
+                        thought = Thought(content=content)
+                in_thought = False
+
+                # Finish any pending action first
+                if (
+                    in_action_input
+                    and current_action_name
+                    and current_action_input_lines
+                ):
+                    try:
+                        action_input_str = "\n".join(current_action_input_lines)
+                        arguments = json.loads(action_input_str)
+                        actions.append(
+                            Action(tool_name=current_action_name, arguments=arguments)
+                        )
+                    except json.JSONDecodeError as e:
+                        if parsing_error is None:  # Only capture first parsing error
+                            parsing_error = f"Invalid JSON in Action Input for '{current_action_name}': {e!s}"
+
+                # Start new action parsing
+                current_action_name = line[7:].strip()  # Remove "Action:" prefix
+                current_action_input_lines = []
+                in_action_input = False
+
+            elif line.startswith("Action Input:"):
+                # Start action input parsing
+                action_input_content = line[
+                    13:
+                ].strip()  # Remove "Action Input:" prefix
+                current_action_input_lines = (
+                    [action_input_content] if action_input_content else []
+                )
+                in_action_input = True
+                in_thought = False
+
+            elif line.startswith("Final Answer:"):
+                # Finish any pending parsing
+                if in_thought and thought_lines:
+                    content = "\n".join(thought_lines).strip()
+                    if content:
+                        thought = Thought(content=content)
+                if (
+                    in_action_input
+                    and current_action_name
+                    and current_action_input_lines
+                ):
+                    try:
+                        action_input_str = "\n".join(current_action_input_lines)
+                        arguments = json.loads(action_input_str)
+                        actions.append(
+                            Action(tool_name=current_action_name, arguments=arguments)
+                        )
+                    except json.JSONDecodeError as e:
+                        if parsing_error is None:  # Only capture first parsing error
+                            parsing_error = f"Invalid JSON in Action Input for '{current_action_name}': {e!s}"
+                break
+
+            else:
+                # Continue current context
+                if in_thought:
+                    thought_lines.append(line)
+                elif in_action_input:
+                    current_action_input_lines.append(line)
+
+        # Handle end of response (no Final Answer found)
+        if not is_final:
+            if in_thought and thought_lines:
+                content = "\n".join(thought_lines).strip()
+                if content:
+                    thought = Thought(content=content)
+            if in_action_input and current_action_name and current_action_input_lines:
+                try:
+                    action_input_str = "\n".join(current_action_input_lines)
+                    arguments = json.loads(action_input_str)
+                    actions.append(
+                        Action(tool_name=current_action_name, arguments=arguments)
+                    )
+                except json.JSONDecodeError as e:
+                    if parsing_error is None:  # Only capture first parsing error
+                        parsing_error = f"Invalid JSON in Action Input for '{current_action_name}': {e!s}"
+
+        return thought, actions if actions else None, is_final, parsing_error
 
     def run(
         self,
@@ -168,29 +289,44 @@ class ReActAgent(BaseAgent):
             # Create prompt and get LLM response
             llm_response = self.get_llm_response().content
 
-            # Parse response
-            thought, actions = self.parse_llm_response(llm_response)
+            # Parse response using improved parser
+            thought, actions, is_final, parsing_error = self.parse_llm_response(
+                llm_response
+            )
             thought_prefix = f"Thought: {thought.content}\n" if thought else ""
 
-            # Check for final answer
-            final_answer_match = re.search(r"Final Answer: (.*)", llm_response)
+            # Check for final answer using the parser's flag
+            if is_final:
+                final_answer_match = re.search(r"Final Answer: (.*)", llm_response)
+                if final_answer_match:
+                    self.messages.append(
+                        LiteLLMMessage(
+                            role="assistant",
+                            content=f"{thought_prefix}Final Answer: {final_answer_match.group(1)}",
+                        )
+                    )
+                    return final_answer_match.group(1).strip()
 
-            if final_answer_match:
+            # Provide feedback for parsing errors
+            if parsing_error:
                 self.messages.append(
                     LiteLLMMessage(
-                        role="assistant",
-                        content=f"{thought_prefix}Final Answer: {final_answer_match.group(1)}",
+                        role="assistant", content=f"{thought_prefix}Action: (attempted)"
                     )
                 )
-                return final_answer_match.group(1).strip()
+                self.messages.append(
+                    LiteLLMMessage(
+                        role="user",
+                        content=f"Error: {parsing_error}. Please ensure your Action Input is valid JSON format.",
+                        name="parsing-error",
+                    )
+                )
+                continue  # Skip to next iteration to let agent try again
 
             # Execute tools if actions exist
             if actions:
                 for action in actions:
-                    action_content = f"{thought_prefix}Action: {
-                        action.tool_name}\nAction Input: {
-                        json.dumps(
-                            action.arguments)}"
+                    action_content = f"{thought_prefix}Action: {action.tool_name}\nAction Input: {json.dumps(action.arguments)}"
                     self.messages.append(
                         LiteLLMMessage(role="assistant", content=action_content)
                     )
