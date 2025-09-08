@@ -8,7 +8,7 @@ from promptstore import PromptStore
 from corral.agents.base_agent import BaseAgent
 from corral.agents.tool_calling import Action, ToolCallingAgent
 from corral.agents.utils import LiteLLMMessage
-from corral.report import ToolResponse
+from corral.types import ToolResponse
 
 # Import shared mock classes from conftest.py
 from .conftest import MockFunction, MockLLMResponse, MockPrompt, MockToolCall
@@ -79,6 +79,7 @@ def test_tool_calling_agent_init_with_defaults():
     assert agent.max_iterations == 10
     assert agent.temperature == 0.7
     assert agent.api_endpoint is None
+    assert agent._available_tools is None
 
 
 def test_tool_calling_agent_init_with_custom_params():
@@ -140,6 +141,11 @@ def test_tool_calling_agent_run_setup(tool_calling_agent, mock_interface, monkey
     assert mock_interface.call_counts.get("get_task_prompt", 0) == 1
     assert mock_convert_tools.call_count == 1
     assert mock_create_prompt.call_count == 1
+
+    # Verify tools are stored
+    assert tool_calling_agent._available_tools == [
+        {"type": "function", "function": {"name": "test_tool"}}
+    ]
 
     assert result == "Test result"
 
@@ -240,9 +246,7 @@ def test_tool_calling_agent_run_with_tool_error(
 ):
     """Test run method when tool execution fails."""
     # Mock tool execution failure
-    mock_tool_response = ToolResponse(
-        success=False, result=None, error="Tool execution failed"
-    )
+    mock_tool_response = ToolResponse(result=None, error="Tool execution failed")
     mock_interface.tool_responses = [mock_tool_response]
 
     tool_call = MockToolCall("call_1", "test_tool", {"query": "test"})
@@ -486,16 +490,20 @@ def test_tools_conversion_called_correctly(
 
 
 def test_available_tools_storage(tool_calling_agent, mock_interface, monkeypatch):
-    """Test that available tools are processed correctly."""
+    """Test that available tools are stored correctly."""
     mock_llm_response = MockFunction(
         return_value=MockLLMResponse(content="Final Answer: Test")
     )
     monkeypatch.setattr(tool_calling_agent, "get_llm_response", mock_llm_response)
 
-    result = tool_calling_agent.run(mock_interface, "test_task")
+    # Initially no tools
+    assert tool_calling_agent._available_tools is None
 
-    # Verify the run completed successfully
-    assert result == "Test"
+    tool_calling_agent.run(mock_interface, "test_task")
+
+    # Tools should be stored after run
+    assert tool_calling_agent._available_tools is not None
+    assert isinstance(tool_calling_agent._available_tools, list)
 
 
 def test_json_parsing_in_tool_calls(tool_calling_agent, mock_interface, monkeypatch):
@@ -564,8 +572,8 @@ def test_tool_calling_agent_default_system_prompt_content():
 
         # Check that it contains expected content
         content = system_prompt.content
-        assert "helpful" in content.lower()
-        assert "assistant" in content.lower()
+        assert "autonomous agent" in content.lower()
+        assert "environment" in content.lower()
 
 
 def test_tool_calling_agent_default_user_prompt_content():

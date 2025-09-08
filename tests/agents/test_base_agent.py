@@ -7,7 +7,7 @@ from litellm.types.utils import Message
 
 from corral.agents.base_agent import BaseAgent
 from corral.agents.utils import LiteLLMMessage
-from corral.evaluate import BenchmarkInterface
+from corral.router import CorralRouter
 
 # Import shared mock classes from conftest.py
 from .conftest import MockBenchmarkInterface, MockLLMResponse, MockPrompt
@@ -18,7 +18,7 @@ class ConcreteAgent(BaseAgent):
 
     def run(
         self,
-        interface: BenchmarkInterface,
+        interface: CorralRouter,
         task_id: str,
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
@@ -30,7 +30,7 @@ class ConcreteAgent(BaseAgent):
 
 @pytest.fixture()
 def mock_benchmark_interface():
-    """Mock BenchmarkInterface for testing."""
+    """Mock CorralRouter for testing."""
     return MockBenchmarkInterface()
 
 

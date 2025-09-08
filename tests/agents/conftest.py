@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from corral.report import ToolResponse
+from corral.types import ToolResponse
 
 
 class MockPrompt:

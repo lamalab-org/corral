@@ -4,7 +4,7 @@ import pytest
 
 from corral.agents.react import Action, ReActAgent, Thought
 from corral.agents.utils import LiteLLMMessage
-from corral.report import ToolResponse
+from corral.types import ToolResponse
 
 from .conftest import MockLLMResponse
 
