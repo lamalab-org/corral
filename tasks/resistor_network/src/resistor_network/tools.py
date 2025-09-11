@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from corral.backend.tool import tool
+from corral.backend.tool import Tool, tool
 
 
 @dataclass
@@ -52,7 +52,7 @@ def calculate_series_resistance(resistances: list[float]) -> float:
         calculate_series_resistance([10, 20, 30]) -> 60.0
     """
     if not resistances:
-        return 0.0
+        raise ValueError("No resistances provided")
     return sum(resistances)
 
 
@@ -82,12 +82,11 @@ def calculate_parallel_resistance(resistances: list[float]) -> float:
         calculate_parallel_resistance([10, 20]) -> 6.67
     """
     if not resistances:
-        return float("inf")
+        raise ValueError("No resistances provided")
     if any(r <= 0 for r in resistances):
         raise ValueError("All resistances must be positive")
 
-    reciprocal_sum = sum(1 / r for r in resistances)
-    return 1 / reciprocal_sum
+    return 1 / sum(1 / r for r in resistances)
 
 
 @tool
@@ -293,8 +292,8 @@ def validate_measurements(topology: str, measurements: str) -> dict[str, float]:
             node_b = measurement["node_b"]
 
             try:
-                predicted_resistance = simulate_circuit_resistance(
-                    topology, [node_a, node_b]
+                predicted_resistance = simulate_circuit_resistance.execute(
+                    topology=topology, terminal_nodes=[node_a, node_b]
                 )
 
                 if "resistance" in measurement:
@@ -455,8 +454,8 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
                 for i, resistor in enumerate(resistor_names):
                     test_topology["resistors"][resistor] = values[i]
 
-                validation = validate_measurements(
-                    json.dumps(test_topology), measurements
+                validation = validate_measurements.execute(
+                    topology=json.dumps(test_topology), measurements=measurements
                 )
                 if (
                     "total_error" in validation
@@ -473,8 +472,8 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
                 for resistor in resistor_names:
                     test_topology["resistors"][resistor] = base_value
 
-                validation = validate_measurements(
-                    json.dumps(test_topology), measurements
+                validation = validate_measurements.execute(
+                    topology=json.dumps(test_topology), measurements=measurements
                 )
                 if (
                     "total_error" in validation
@@ -545,3 +544,18 @@ def generate_test_measurements(topology: str, terminal_pairs: list[list[str]]) -
 
     except Exception as e:
         return json.dumps({"error": f"Measurement generation failed: {e!s}"})
+
+
+def create_tools() -> dict[str, Tool]:
+    """Create all available tools"""
+    return {
+        "calculate_series_resistance": calculate_series_resistance,
+        "calculate_parallel_resistance": calculate_parallel_resistance,
+        "delta_to_wye_transform": delta_to_wye_transform,
+        "wye_to_delta_transform": wye_to_delta_transform,
+        "simulate_circuit_resistance": simulate_circuit_resistance,
+        "validate_measurements": validate_measurements,
+        "propose_simple_topology": propose_simple_topology,
+        "estimate_resistor_values": estimate_resistor_values,
+        "generate_test_measurements": generate_test_measurements,
+    }
