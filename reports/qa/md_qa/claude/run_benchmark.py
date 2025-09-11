@@ -1,8 +1,8 @@
 from dotenv import load_dotenv
 from litellm import completion
-from stadium import PrompterBuilder, StadiumBenchmark, StadiumModel
-from stadium.evaluate import save_topic_reports
-from stadium.utils import enable_logging
+from manege import ManegeBenchmark, ManegeModel, PrompterBuilder
+from manege.evaluate import save_topic_reports
+from manege.utils import enable_logging
 
 # import litellm
 # litellm.set_verbose = True
@@ -13,7 +13,7 @@ from stadium.utils import enable_logging
 load_dotenv("../../../../.env", override=True)
 
 
-class Claude(StadiumModel):
+class Claude(ManegeModel):
     """Claude model wrapper for use with ChemBench framework."""
 
     def __init__(self, name: str = "anthropic/claude-sonnet-4-20250514"):
@@ -36,7 +36,7 @@ def main():
     """Run all example experiments."""
     enable_logging()
     model = Claude()
-    benchmark = StadiumBenchmark.from_directory("../tasks_json", verbose=True)
+    benchmark = ManegeBenchmark.from_directory("../tasks_json", verbose=True)
     prompter = PrompterBuilder.from_model_object(model=model)
     results = benchmark.bench(prompter=prompter)
     save_topic_reports(benchmark, results, "claude_sonnet4")
