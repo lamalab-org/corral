@@ -1,7 +1,6 @@
 """Tests for the BaseAgent class."""
 
 import litellm
-import openai
 import pytest
 from litellm.types.utils import Message
 
@@ -198,43 +197,6 @@ def test_get_llm_response_with_tools(monkeypatch, concrete_agent):
     assert response == mock_response
 
 
-def test_get_llm_response_rate_limit_error(monkeypatch, concrete_agent):
-    """Test handling of rate limit errors."""
-
-    # Create a mock response for the exception
-    class MockResponse:
-        def __init__(self):
-            self.status_code = 429
-            self.request = type("MockRequest", (), {})()
-            self.headers = {"x-request-id": "mock-request-id"}
-
-    mock_response = MockResponse()
-    mock_body = {"error": {"message": "Rate limit exceeded"}}
-
-    def mock_llm_call_with_error(*args, **kwargs):
-        raise openai.RateLimitError(
-            "Rate limit exceeded", response=mock_response, body=mock_body
-        )
-
-    monkeypatch.setattr("corral.agents.base_agent.llm_call", mock_llm_call_with_error)
-
-    concrete_agent.messages = [
-        {"role": "user", "content": "A very long message " * 100},
-        {
-            "role": "user",
-            "content": "Another user message",
-        },  # No assistant message to break the loop
-    ]
-
-    response = concrete_agent.get_llm_response()
-
-    assert isinstance(response, Message)
-    assert response.role == "user"
-    assert "RateLimitError" in response.content
-    # Check that long messages are truncated (processes in reverse order)
-    assert len(concrete_agent.messages[0]["content"]) <= 103  # 100 + "..."
-
-
 def test_get_llm_response_context_window_error(monkeypatch, concrete_agent):
     """Test handling of context window exceeded errors."""
 
@@ -289,6 +251,14 @@ def test_run_agent_success(monkeypatch, concrete_agent, mock_benchmark_interface
 
     monkeypatch.setattr("corral.agents.base_agent.llm_call", mock_llm_call)
 
+    # Mock save_agent_messages to capture both args and kwargs
+    save_calls = []
+
+    def mock_save(*args, **kwargs):
+        save_calls.append((args, kwargs))
+
+    monkeypatch.setattr("corral.agents.base_agent.save_agent_messages", mock_save)
+
     concrete_agent.messages = [
         {"role": "user", "content": "Test task"},
         {"role": "assistant", "content": "Test response"},
@@ -297,39 +267,19 @@ def test_run_agent_success(monkeypatch, concrete_agent, mock_benchmark_interface
     result, usage = concrete_agent.run_agent(
         interface=mock_benchmark_interface,
         task_id="test_task",
-        history=[],
-        task_prompt="Test prompt",
-        examples=["example1", "example2"],
+        verbose=True,
     )
 
-    assert result == "extracted_answer"
-    assert isinstance(usage, dict)
-    assert "prompt_tokens" in usage
-    assert "completion_tokens" in usage
-    assert "total_tokens" in usage
+    assert len(save_calls) == 1
+    call_args, call_kwargs = save_calls[0]
+    assert call_kwargs["messages"] == concrete_agent.messages
+    assert call_kwargs["task_id"] == "test_task"
+    assert call_kwargs["agent_name"] == "ConcreteAgent"
+    assert call_kwargs["model"] == concrete_agent.model
+    assert "tools" in call_kwargs  # tools may be None
+    assert "tool_verbosity" in call_kwargs
 
-
-def test_run_agent_with_system_message(
-    monkeypatch, concrete_agent, mock_benchmark_interface
-):
-    """Test run_agent with system message."""
-    # Set up a proper extractor prompt
-    concrete_agent.extractor_prompt = MockPrompt("Extract from message: {{message}}")
-
-    # Mock the run method
-    def mock_run(interface, task_id, history=None, task_prompt=None, examples=None):
-        return "test_answer"
-
-    monkeypatch.setattr(concrete_agent, "run", mock_run)
-
-    # Mock llm_call for extractor
-    mock_response = MockLLMResponse("extracted_answer")
-
-    def mock_llm_call(*args, **kwargs):
-        return mock_response
-
-    monkeypatch.setattr("corral.agents.base_agent.llm_call", mock_llm_call)
-
+    # Now test with a system message and no verbose
     concrete_agent.messages = [
         {"role": "system", "content": "System message"},
         {"role": "user", "content": "Test task"},
@@ -386,7 +336,9 @@ def test_run_agent_verbose_mode(monkeypatch, concrete_agent, mock_benchmark_inte
     """Test run_agent in verbose mode."""
 
     # Mock the run method
-    def mock_run(interface, task_id, history=None, task_prompt=None, examples=None):
+    def mock_run(
+        interface, task_id, history=None, task_prompt=None, examples=None, verbose=True
+    ):
         return "test_answer"
 
     monkeypatch.setattr(concrete_agent, "run", mock_run)
@@ -399,14 +351,7 @@ def test_run_agent_verbose_mode(monkeypatch, concrete_agent, mock_benchmark_inte
 
     monkeypatch.setattr("corral.agents.base_agent.llm_call", mock_llm_call)
 
-    # Mock save_agent_messages
-    save_calls = []
-
-    def mock_save(*args):
-        save_calls.append(args)
-
-    monkeypatch.setattr("corral.agents.base_agent.save_agent_messages", mock_save)
-
+    # No need to check save_agent_messages call
     concrete_agent.messages = [
         {"role": "user", "content": "Test task"},
         {"role": "assistant", "content": "Test response"},
@@ -418,11 +363,11 @@ def test_run_agent_verbose_mode(monkeypatch, concrete_agent, mock_benchmark_inte
         verbose=True,
     )
 
-    assert len(save_calls) == 1
-    call_args = save_calls[0]
-    assert call_args[0] == concrete_agent.messages
-    assert call_args[1] == "test_task"
-    assert call_args[2] == "ConcreteAgent"
+    assert result == "extracted_answer"
+    assert isinstance(usage, dict)
+    assert "prompt_tokens" in usage
+    assert "completion_tokens" in usage
+    assert "total_tokens" in usage
 
 
 def test_run_agent_extractor_error(

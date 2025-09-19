@@ -508,6 +508,187 @@ def test_convert_to_openai_tool_format_malformed_tool(monkeypatch):
     assert mock_logger.warning.call_count == 1
 
 
+def test_convert_to_openai_tool_format_dict_arguments():
+    """Test tool conversion with dict/object arguments."""
+    tools_dict = {
+        "tools": [
+            {
+                "name": "config_processor",
+                "description": "Process configuration data",
+                "arguments": [
+                    {
+                        "name": "config",
+                        "type": "dict",
+                        "description": "Configuration dictionary",
+                        "required": True,
+                    },
+                    {
+                        "name": "metadata",
+                        "type": "dict",
+                        "description": "Optional metadata",
+                        "required": False,
+                    },
+                ],
+            }
+        ]
+    }
+
+    result = convert_to_openai_tool_format(tools_dict)
+
+    assert len(result) == 1
+    tool = result[0]
+    assert tool["type"] == "function"
+    assert tool["function"]["name"] == "config_processor"
+    assert tool["function"]["description"] == "Process configuration data"
+
+    # Check dict type conversion
+    config_prop = tool["function"]["parameters"]["properties"]["config"]
+    assert config_prop["type"] == "object"
+    assert config_prop["description"] == "Configuration dictionary"
+
+    metadata_prop = tool["function"]["parameters"]["properties"]["metadata"]
+    assert metadata_prop["type"] == "object"
+    assert metadata_prop["description"] == "Optional metadata"
+
+    # Check required fields
+    assert tool["function"]["parameters"]["required"] == ["config"]
+
+
+def test_convert_to_openai_tool_format_mixed_argument_types():
+    """Test tool conversion with multiple argument types in one tool."""
+    tools_dict = {
+        "tools": [
+            {
+                "name": "complex_processor",
+                "description": "Process data with various types",
+                "arguments": [
+                    {
+                        "name": "name",
+                        "type": "str",
+                        "description": "Process name",
+                        "required": True,
+                    },
+                    {
+                        "name": "count",
+                        "type": "int",
+                        "description": "Number of items",
+                        "required": True,
+                    },
+                    {
+                        "name": "threshold",
+                        "type": "float",
+                        "description": "Processing threshold",
+                        "required": False,
+                    },
+                    {
+                        "name": "enabled",
+                        "type": "bool",
+                        "description": "Whether processing is enabled",
+                        "required": False,
+                    },
+                    {
+                        "name": "tags",
+                        "type": "list[str]",
+                        "description": "Processing tags",
+                        "required": False,
+                    },
+                    {
+                        "name": "options",
+                        "type": "dict",
+                        "description": "Processing options",
+                        "required": False,
+                    },
+                ],
+            }
+        ]
+    }
+
+    result = convert_to_openai_tool_format(tools_dict)
+
+    assert len(result) == 1
+    tool = result[0]
+    assert tool["type"] == "function"
+    assert tool["function"]["name"] == "complex_processor"
+    assert tool["function"]["description"] == "Process data with various types"
+
+    properties = tool["function"]["parameters"]["properties"]
+
+    # Check string type
+    assert properties["name"]["type"] == "string"
+    assert properties["name"]["description"] == "Process name"
+
+    # Check integer type
+    assert properties["count"]["type"] == "integer"
+    assert properties["count"]["description"] == "Number of items"
+
+    # Check float type
+    assert properties["threshold"]["type"] == "number"
+    assert properties["threshold"]["description"] == "Processing threshold"
+
+    # Check boolean type
+    assert properties["enabled"]["type"] == "boolean"
+    assert properties["enabled"]["description"] == "Whether processing is enabled"
+
+    # Check array type
+    assert properties["tags"]["type"] == "array"
+    assert properties["tags"]["items"]["type"] == "string"
+    assert "Provide as an array of strings" in properties["tags"]["description"]
+
+    # Check object type
+    assert properties["options"]["type"] == "object"
+    assert properties["options"]["description"] == "Processing options"
+
+    # Check required fields (only name and count are required)
+    assert tool["function"]["parameters"]["required"] == ["name", "count"]
+
+
+def test_convert_to_openai_tool_format_array_arguments():
+    """Test tool conversion with array/list arguments."""
+    tools_dict = {
+        "tools": [
+            {
+                "name": "list_processor",
+                "description": "Process a list of items",
+                "arguments": [
+                    {
+                        "name": "items",
+                        "type": "list[str]",
+                        "description": "List of items to process",
+                        "required": True,
+                    },
+                    {
+                        "name": "categories",
+                        "type": "list[str]",
+                        "description": "Optional categories",
+                        "required": False,
+                    },
+                ],
+            }
+        ]
+    }
+
+    result = convert_to_openai_tool_format(tools_dict)
+
+    assert len(result) == 1
+    tool = result[0]
+    assert tool["type"] == "function"
+    assert tool["function"]["name"] == "list_processor"
+    assert tool["function"]["description"] == "Process a list of items"
+
+    # Check array type conversion
+    items_prop = tool["function"]["parameters"]["properties"]["items"]
+    assert items_prop["type"] == "array"
+    assert items_prop["items"]["type"] == "string"
+    assert "Provide as an array of strings" in items_prop["description"]
+
+    categories_prop = tool["function"]["parameters"]["properties"]["categories"]
+    assert categories_prop["type"] == "array"
+    assert categories_prop["items"]["type"] == "string"
+
+    # Check required fields
+    assert tool["function"]["parameters"]["required"] == ["items"]
+
+
 def test_parse_string_argument_required():
     """Test parsing required string argument."""
     arg_string = "path (str, required): Path to the directory"
@@ -588,6 +769,7 @@ def test_save_agent_messages_basic():
             messages=messages,
             task_id="test_task",
             agent_name="test_agent",
+            model="test_model",
             output_dir=temp_dir,
         )
 
@@ -613,6 +795,7 @@ def test_save_agent_messages_with_tools(tmp_path):
         messages=messages,
         task_id="test_task",
         agent_name="test_agent",
+        model="test_model",
         output_dir=str(tmp_path),
         tools=tools,
     )
@@ -634,6 +817,7 @@ def test_save_agent_messages_creates_directory():
             messages=messages,
             task_id="test_task",
             agent_name="test_agent",
+            model="test_model",
             output_dir=str(output_dir),
         )
 
@@ -662,6 +846,7 @@ def test_save_agent_messages_filename_format(monkeypatch):
             messages=messages,
             task_id="test_task",
             agent_name="test_agent",
+            model="test_model",
             output_dir=temp_dir,
         )
 
@@ -719,6 +904,7 @@ def test_message_serialization_and_saving():
             messages=messages,
             task_id="integration_test",
             agent_name="test_agent",
+            model="test_model",
             output_dir=temp_dir,
         )
 

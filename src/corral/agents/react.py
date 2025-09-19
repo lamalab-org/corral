@@ -101,6 +101,78 @@ class ReActAgent(BaseAgent):
             **kwargs,
         )
 
+    def _finish_pending_action(
+        self,
+        actions: list[Action],
+        current_action_name: str | None,
+        current_action_input_lines: list[str],
+        parsing_error: str | None,
+        in_action_input: bool,
+    ) -> str | None:
+        """
+        Helper function to finish a pending action by parsing its input and adding to actions list.
+        Only processes if we're in action input mode and have an action name.
+        If no input lines are provided, defaults to empty arguments {}.
+
+        Returns:
+            str | None: Updated parsing error if JSON parsing fails, otherwise the original parsing_error
+        """
+        if in_action_input and current_action_name:
+            try:
+                if current_action_input_lines:
+                    action_input_str = "\n".join(current_action_input_lines)
+                    arguments = json.loads(action_input_str)
+                else:
+                    # Default to empty arguments if no action input is provided
+                    arguments = {}
+
+                actions.append(
+                    Action(tool_name=current_action_name, arguments=arguments)
+                )
+            except json.JSONDecodeError as e:
+                if parsing_error is None:  # Only capture first parsing error
+                    parsing_error = f"Invalid JSON in Action Input for '{current_action_name}': {e!s}"
+        return parsing_error
+
+    def _finish_previous_thought(
+        self, thought_lines: list[str], in_thought: bool
+    ) -> Thought | None:
+        """
+        Helper function to finish previous thought by joining lines and creating Thought object.
+        Only processes if in_thought is True and thought_lines exist
+
+        Returns:
+            Thought | None: Thought object if meaningful content exists, otherwise None
+        """
+        if in_thought and thought_lines:
+            content = "\n".join(thought_lines).strip()
+            if content:
+                return Thought(content=content)
+        return None
+
+    def extract_final_answer(self, response: str) -> tuple[bool, str | None]:
+        """
+        Extract final answer from response in a case-insensitive way.
+
+        Args:
+            response (str): The response text to search for final answer
+
+        Returns:
+            tuple: (is_final, final_answer)
+            - is_final: True if "Final Answer:" is found (case-insensitive), False otherwise
+            - final_answer: The extracted answer text or None if not found
+        """
+        # Use case-insensitive regex to find "Final Answer:" pattern
+        pattern = r"final\s+answer:\s*(.*)"
+        match = re.search(pattern, response, re.IGNORECASE | re.DOTALL)
+
+        if match:
+            # Extract the answer text and strip whitespace
+            answer = match.group(1).strip()
+            return True, answer
+
+        return False, None
+
     def parse_llm_response(
         self, response: str
     ) -> tuple[Thought | None, list[Action] | None, bool, str | None]:
@@ -123,8 +195,8 @@ class ReActAgent(BaseAgent):
         """
         lines = response.split("\n")
 
-        # Check for final answer
-        is_final = any(line.startswith("Final Answer:") for line in lines)
+        # Check for final answer using the new extract_final_answer function
+        is_final, _ = self.extract_final_answer(response)
 
         # Parse thought
         thought = None
@@ -141,22 +213,15 @@ class ReActAgent(BaseAgent):
         for line in lines:
             if line.startswith("Thought:"):
                 # Finish any pending action first
-                if (
-                    in_action_input
-                    and current_action_name
-                    and current_action_input_lines
-                ):
-                    try:
-                        action_input_str = "\n".join(current_action_input_lines)
-                        arguments = json.loads(action_input_str)
-                        actions.append(
-                            Action(tool_name=current_action_name, arguments=arguments)
-                        )
-                    except json.JSONDecodeError as e:
-                        if parsing_error is None:  # Only capture first parsing error
-                            parsing_error = f"Invalid JSON in Action Input for '{current_action_name}': {e!s}"
-                    current_action_name = None
-                    current_action_input_lines = []
+                parsing_error = self._finish_pending_action(
+                    actions,
+                    current_action_name,
+                    current_action_input_lines,
+                    parsing_error,
+                    in_action_input,
+                )
+                current_action_name = None
+                current_action_input_lines = []
 
                 # Start thought parsing
                 thought_content = line[8:].strip()  # Remove "Thought:" prefix
@@ -165,28 +230,19 @@ class ReActAgent(BaseAgent):
                 in_action_input = False
 
             elif line.startswith("Action:"):
-                # Finish previous thought if any
-                if in_thought and thought_lines:
-                    content = "\n".join(thought_lines).strip()
-                    if content:
-                        thought = Thought(content=content)
+                # Finish previous thought if any (only if not already processed)
+                if thought is None:
+                    thought = self._finish_previous_thought(thought_lines, in_thought)
                 in_thought = False
 
                 # Finish any pending action first
-                if (
-                    in_action_input
-                    and current_action_name
-                    and current_action_input_lines
-                ):
-                    try:
-                        action_input_str = "\n".join(current_action_input_lines)
-                        arguments = json.loads(action_input_str)
-                        actions.append(
-                            Action(tool_name=current_action_name, arguments=arguments)
-                        )
-                    except json.JSONDecodeError as e:
-                        if parsing_error is None:  # Only capture first parsing error
-                            parsing_error = f"Invalid JSON in Action Input for '{current_action_name}': {e!s}"
+                parsing_error = self._finish_pending_action(
+                    actions,
+                    current_action_name,
+                    current_action_input_lines,
+                    parsing_error,
+                    in_action_input,
+                )
 
                 # Start new action parsing
                 current_action_name = line[7:].strip()  # Remove "Action:" prefix
@@ -204,26 +260,17 @@ class ReActAgent(BaseAgent):
                 in_action_input = True
                 in_thought = False
 
-            elif line.startswith("Final Answer:"):
-                # Finish any pending parsing
-                if in_thought and thought_lines:
-                    content = "\n".join(thought_lines).strip()
-                    if content:
-                        thought = Thought(content=content)
-                if (
-                    in_action_input
-                    and current_action_name
-                    and current_action_input_lines
-                ):
-                    try:
-                        action_input_str = "\n".join(current_action_input_lines)
-                        arguments = json.loads(action_input_str)
-                        actions.append(
-                            Action(tool_name=current_action_name, arguments=arguments)
-                        )
-                    except json.JSONDecodeError as e:
-                        if parsing_error is None:  # Only capture first parsing error
-                            parsing_error = f"Invalid JSON in Action Input for '{current_action_name}': {e!s}"
+            elif line.lower().startswith("final answer:"):
+                # Finish any pending parsing (only if not already processed)
+                if thought is None:
+                    thought = self._finish_previous_thought(thought_lines, in_thought)
+                parsing_error = self._finish_pending_action(
+                    actions,
+                    current_action_name,
+                    current_action_input_lines,
+                    parsing_error,
+                    in_action_input,
+                )
                 break
 
             else:
@@ -235,20 +282,16 @@ class ReActAgent(BaseAgent):
 
         # Handle end of response (no Final Answer found)
         if not is_final:
-            if in_thought and thought_lines:
-                content = "\n".join(thought_lines).strip()
-                if content:
-                    thought = Thought(content=content)
-            if in_action_input and current_action_name and current_action_input_lines:
-                try:
-                    action_input_str = "\n".join(current_action_input_lines)
-                    arguments = json.loads(action_input_str)
-                    actions.append(
-                        Action(tool_name=current_action_name, arguments=arguments)
-                    )
-                except json.JSONDecodeError as e:
-                    if parsing_error is None:  # Only capture first parsing error
-                        parsing_error = f"Invalid JSON in Action Input for '{current_action_name}': {e!s}"
+            # Only finish thought if we haven't already processed it
+            if thought is None:
+                thought = self._finish_previous_thought(thought_lines, in_thought)
+            parsing_error = self._finish_pending_action(
+                actions,
+                current_action_name,
+                current_action_input_lines,
+                parsing_error,
+                in_action_input,
+            )
 
         return thought, actions if actions else None, is_final, parsing_error
 
@@ -295,17 +338,17 @@ class ReActAgent(BaseAgent):
             )
             thought_prefix = f"Thought: {thought.content}\n" if thought else ""
 
-            # Check for final answer using the parser's flag
+            # Check for final answer using the new extract_final_answer function
             if is_final:
-                final_answer_match = re.search(r"Final Answer: (.*)", llm_response)
-                if final_answer_match:
+                is_final_check, final_answer = self.extract_final_answer(llm_response)
+                if is_final_check and final_answer:
                     self.messages.append(
                         LiteLLMMessage(
                             role="assistant",
-                            content=f"{thought_prefix}Final Answer: {final_answer_match.group(1)}",
+                            content=f"{thought_prefix}Final Answer: {final_answer}",
                         )
                     )
-                    return final_answer_match.group(1).strip()
+                    return final_answer
 
             # Provide feedback for parsing errors
             if parsing_error:

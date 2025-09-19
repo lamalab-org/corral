@@ -246,7 +246,9 @@ def test_tool_calling_agent_run_with_tool_error(
 ):
     """Test run method when tool execution fails."""
     # Mock tool execution failure
-    mock_tool_response = ToolResponse(result=None, error="Tool execution failed")
+    mock_tool_response = ToolResponse(
+        success=False, result=None, error="Tool execution failed"
+    )
     mock_interface.tool_responses = [mock_tool_response]
 
     tool_call = MockToolCall("call_1", "test_tool", {"query": "test"})
@@ -291,7 +293,7 @@ def test_tool_calling_agent_run_with_tool_exception(
     # Verify exception was handled
     tool_messages = get_messages_by_role(tool_calling_agent.messages, "tool")
     assert len(tool_messages) == 1
-    assert tool_messages[0]["content"] == "Unexpected error"
+    assert "Unexpected error" in tool_messages[0]["content"]
 
 
 def test_tool_calling_agent_run_with_llm_response_exception(

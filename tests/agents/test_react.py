@@ -70,6 +70,25 @@ class TestAction:
             "bool_param": True,
             "list_param": [1, 2, 3],
             "dict_param": {"nested": "value"},
+            "list_of_strings": ["Cu2O", "TiO2", "Si"],
+            "complex_dict": {
+                "materials": [
+                    {
+                        "material_id": "mp-1234",
+                        "energy_above_hull": 0.1,
+                        "band_gap": 1.5,
+                    },
+                    {
+                        "material_id": "mp-5678",
+                        "energy_above_hull": 0.05,
+                        "band_gap": 2.0,
+                    },
+                ],
+                "query_metadata": {
+                    "source": "database_search",
+                    "date": "2025-09-08",
+                },
+            },
         }
         action = Action(tool_name="complex_tool", arguments=arguments)
         assert action.arguments == arguments
@@ -800,6 +819,138 @@ Action Input: {"query": "test with \\"quotes\\" and \\n newlines", "special": "c
         assert actions[0].tool_name == "search"
         assert "quotes" in actions[0].arguments["query"]
         assert actions[0].arguments["special"] == "chars: !@#$%^&*()"
+        assert is_final is False
+        assert parsing_error is None
+
+    def test_parse_response_batch_retrieve_polymorphs(self, react_agent):
+        """Test parsing response with batch_retrieve_polymorphs action containing large arrays."""
+        response = """Thought: I'll use batch_retrieve_polymorphs with common nitride compositions. I'll include binary and ternary nitrides to ensure diversity.
+Action: batch_retrieve_polymorphs
+Action Input: {"compositions": ["AlN", "GaN", "InN", "TiN", "ZrN", "HfN", "VN", "NbN", "TaN", "CrN", "MoN", "WN", "ScN", "YN", "LaN", "Si3N4", "Ge3N4", "Sn3N4", "Li3N", "Na3N", "K3N", "Be3N2", "Mg3N2", "Ca3N2", "Sr3N2", "Ba3N2", "BN", "GaN", "InN", "TlN", "PN", "AsN", "SbN", "BiN", "ZnN", "CdN", "HgN", "MnN", "FeN", "CoN"], "max_energy_above_hull": 0.3, "max_per_composition": 3, "save_directory": "polymorph_data"}"""
+
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
+
+        assert thought is not None
+        assert "nitride compositions" in thought.content
+        assert actions is not None
+        assert len(actions) == 1
+        assert actions[0].tool_name == "batch_retrieve_polymorphs"
+        assert len(actions[0].arguments["compositions"]) == 40
+        assert "AlN" in actions[0].arguments["compositions"]
+        assert "CoN" in actions[0].arguments["compositions"]
+        assert actions[0].arguments["max_energy_above_hull"] == 0.3
+        assert actions[0].arguments["max_per_composition"] == 3
+        assert actions[0].arguments["save_directory"] == "polymorph_data"
+        assert is_final is False
+        assert parsing_error is None
+
+    def test_parse_response_xgboost_evaluation(self, react_agent):
+        """Test parsing response with XGBoost model evaluation action."""
+        response = """Thought: Let me break this down into steps:
+1. First, I need to evaluate the XGBoost model using the test set
+2. Then perform cross-validation
+3. Finally combine the results and save them in the required JSON format
+
+Let's start by evaluating the model performance on the test set.
+Action: evaluate_xgboost_model
+Action Input: {"model_path": "/Users/n0w0f/nitride_ml_claude_react/train_xgboost_formation_energy_model_trial_1/trained_xgboost_model.pkl", "test_data_path": "/Users/n0w0f/nitride_ml_claude_react/prepare_ml_ready_dataset_trial_1/nitride_ml_dataset/metadata.json", "target_column": "formation_energy_per_atom", "detailed_analysis": true}"""
+
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
+
+        assert thought is not None
+        assert "break this down into steps" in thought.content
+        assert "XGBoost model" in thought.content
+        assert actions is not None
+        assert len(actions) == 1
+        assert actions[0].tool_name == "evaluate_xgboost_model"
+        assert (
+            "/Users/n0w0f/nitride_ml_claude_react/"
+            in actions[0].arguments["model_path"]
+        )
+        assert "trained_xgboost_model.pkl" in actions[0].arguments["model_path"]
+        assert "metadata.json" in actions[0].arguments["test_data_path"]
+        assert actions[0].arguments["target_column"] == "formation_energy_per_atom"
+        assert actions[0].arguments["detailed_analysis"] is True
+        assert is_final is False
+        assert parsing_error is None
+
+    def test_parse_response_prepare_tabular_dataset(self, react_agent):
+        """Test parsing response with prepare_tabular_dataset action."""
+        response = """Thought: Let me break down the task and create a plan:
+1. First, I need to prepare the ML-ready dataset using the provided input data
+2. The requirements specify advanced feature engineering, 0.2 test split, and normalization
+3. After preparation, I need to verify the output and provide the path to the metadata json file
+
+Let's start by preparing the dataset using the prepare_tabular_dataset tool with the specified parameters.
+Action: prepare_tabular_dataset
+Action Input: {"polymorphs_json_path": "/Users/n0w0f/nitride_ml_claude_react/batch_retrieve_nitride_polymorphs_trial_8/nitride_polymorphs_dataset.json", "output_path": "nitride_ml_dataset", "target_property": "formation_energy_per_atom", "feature_engineering": "advanced", "test_split": 0.2, "normalize": true}"""
+
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
+
+        assert thought is not None
+        assert "break down the task" in thought.content
+        assert "ML-ready dataset" in thought.content
+        assert actions is not None
+        assert len(actions) == 1
+        assert actions[0].tool_name == "prepare_tabular_dataset"
+        assert (
+            "nitride_polymorphs_dataset.json"
+            in actions[0].arguments["polymorphs_json_path"]
+        )
+        assert actions[0].arguments["output_path"] == "nitride_ml_dataset"
+        assert actions[0].arguments["target_property"] == "formation_energy_per_atom"
+        assert actions[0].arguments["feature_engineering"] == "advanced"
+        assert actions[0].arguments["test_split"] == 0.2
+        assert actions[0].arguments["normalize"] is True
+        assert is_final is False
+        assert parsing_error is None
+
+    def test_parse_response_final_answer_with_file_reference(self, react_agent):
+        """Test parsing response with final answer referencing a file."""
+        response = """Thought: The task has been completed successfully. I have:
+1. Read the bulk structure CIF file
+2. Generated possible slabs using the specified parameters (miller_index=[1,1,1], min_slab_size=12, min_vacuum_size=5)
+3. Saved the enumerated slabs to slabs.json
+Final Answer: slabs.json"""
+
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
+
+        assert thought is not None
+        assert "task has been completed successfully" in thought.content
+        assert "slabs.json" in thought.content
+        assert actions is None
+        assert is_final is True
+        assert parsing_error is None
+
+    def test_parse_response_write_file_with_large_content(self, react_agent):
+        """Test parsing response with write_file action containing large CIF content."""
+        response = """Thought: Now that I have the combined structure, I need to save it as a CIF file. I'll write the result to a new file called "slab_with_co2.cif".
+Action: write_file
+Action Input: {"path": "slab_with_co2.cif", "content": "# generated using pymatgen\\ndata_Cu10CO7\\n_symmetry_space_group_name_H-M   'P 1'\\n_cell_length_a   6.00573977\\n_cell_length_b   6.00573977\\n_cell_length_c   33.97359456\\n_cell_angle_alpha   90.00000000\\n_cell_angle_beta   45.00000000\\n_cell_angle_gamma   60.00000000\\n_symmetry_Int_Tables_number   1\\n_chemical_formula_structural   Cu10CO7\\n_chemical_formula_sum   'Cu20 C2 O14'\\n_cell_volume   612.69526542\\n_cell_formula_units_Z   2\\nloop_\\n _symmetry_equiv_pos_site_id\\n _symmetry_equiv_pos_as_xyz\\n  1  'x, y, z'\\nloop_\\n _atom_site_type_symbol\\n _atom_site_label\\n _atom_site_symmetry_multiplicity\\n _atom_site_fract_x\\n _atom_site_fract_y\\n _atom_site_fract_z\\n _atom_site_occupancy\\n  Cu  Cu0  1  0.50000000  0.00000000  0.10937500  1.0\\n  Cu  Cu1  1  0.50000000  0.50000000  0.10937500  1.0\\n  Cu  Cu2  1  0.00000000  0.50000000  0.10937500  1.0\\n  Cu  Cu3  1  0.00000000  0.00000000  0.10937500  1.0\\n  Cu  Cu4  1  0.50000000  0.00000000  0.23437500  1.0\\n  Cu  Cu5  1  0.50000000  0.50000000  0.23437500  1.0\\n  Cu  Cu6  1  0.00000000  0.50000000  0.23437500  1.0\\n  Cu  Cu7  1  0.00000000  0.00000000  0.23437500  1.0\\n  Cu  Cu8  1  0.50000000  0.00000000  0.35937500  1.0\\n  Cu  Cu9  1  0.50000000  0.50000000  0.35937500  1.0\\n  Cu  Cu10  1  0.00000000  0.50000000  0.35937500  1.0\\n  Cu  Cu11  1  0.00000000  0.00000000  0.35937500  1.0\\n  Cu  Cu12  1  0.50000000  0.00000000  0.48437500  1.0\\n  Cu  Cu13  1  0.50000000  0.50000000  0.48437500  1.0\\n  Cu  Cu14  1  0.00000000  0.50000000  0.48437500  1.0\\n  Cu  Cu15  1  0.00000000  0.00000000  0.48437500  1.0\\n  Cu  Cu16  1  0.50000000  0.00000000  0.60937500  1.0\\n  Cu  Cu17  1  0.50000000  0.50000000  0.60937500  1.0\\n  Cu  Cu18  1  0.00000000  0.50000000  0.60937500  1.0\\n  Cu  Cu19  1  0.00000000  0.00000000  0.60937500  1.0\\n  O  O20  1  0.50000000  0.75000000  0.01562500  1.0\\n  O  O21  1  0.50000000  0.25000000  0.07812500  1.0\\n  O  O22  1  0.50000000  0.75000000  0.14062500  1.0\\n  O  O23  1  0.50000000  0.25000000  0.20312500  1.0\\n  O  O24  1  0.50000000  0.75000000  0.26562500  1.0\\n  O  O25  1  0.50000000  0.25000000  0.32812500  1.0\\n  O  O26  1  0.50000000  0.75000000  0.39062500  1.0\\n  O  O27  1  0.50000000  0.25000000  0.45312500  1.0\\n  O  O28  1  0.50000000  0.75000000  0.51562500  1.0\\n  O  O29  1  0.50000000  0.25000000  0.57812500  1.0\\n  C  C30  1  0.48007745  1.87973315  24.15907524  1\\n  C  C31  1  0.96864912  1.15470054  24.03957863  1\\n  O  O32  1  0.26338899  2.03836011  24.15907524  1\\n  O  O33  1  0.69676592  1.72110618  24.15907524  1\\n  O  O34  1  1.02671062  1.31332750  24.03957863  1\\n  O  O35  1  1.20807476  1.80882355  24.03957863  1\\n"}"""
+
+        thought, actions, is_final, parsing_error = react_agent.parse_llm_response(
+            response
+        )
+
+        assert thought is not None
+        assert "combined structure" in thought.content
+        assert "slab_with_co2.cif" in thought.content
+        assert actions is not None
+        assert len(actions) == 1
+        assert actions[0].tool_name == "write_file"
+        assert actions[0].arguments["path"] == "slab_with_co2.cif"
+        assert "# generated using pymatgen" in actions[0].arguments["content"]
+        assert "data_Cu10CO7" in actions[0].arguments["content"]
+        assert "Cu20 C2 O14" in actions[0].arguments["content"]
+        assert "_atom_site_type_symbol" in actions[0].arguments["content"]
         assert is_final is False
         assert parsing_error is None
 
