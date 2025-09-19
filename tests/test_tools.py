@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Union
 
 import pytest
 
@@ -214,7 +214,7 @@ def test_format_type_annotation():
     assert format_type_annotation(union_type_old) == "str | int"
 
     # Optional type (which is Union[T, None])
-    optional_type = Optional[str]  # noqa: UP007
+    optional_type = str | None
     assert format_type_annotation(optional_type) == "str | None"
 
     # Nested unions and complex types
