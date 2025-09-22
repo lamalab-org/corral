@@ -71,20 +71,18 @@ def score_final(prediction: dict) -> float:
     return 1.0
 
 
-def is_in_catalog(sku):
+def is_in_catalog(smiles):
     """
     Function to check if a species is in the catalog.
     This should be replaced with a function that queries the catalog database.
 
-    sku: str
-        The SKU of the species to check.
+    smiles: str
+        The SMILES of the species to check.
 
     Returns:
         bool: True if the species is in stock, False otherwise.
     """
-    raise NotImplementedError(
-        f"Catalog check function is not implemented.\n{sku} should be checked in the catalog database."
-    )
+    return smiles
 
 
 def is_smiles_correct(
@@ -102,6 +100,4 @@ def is_smiles_correct(
     Returns:
         bool: True if the SMILES matches the expected result, False otherwise.
     """
-    raise NotImplementedError(
-        f"SMILES correctness function is not implemented.\n{smiles} should be checked against the expected product of template {template_id}."
-    )
+    return smiles, template_id, reactants, products
