@@ -47,6 +47,17 @@ def molecule_properties(molecule_smiles: str) -> dict[str, Any]:
     return molecule_smiles
 
 
+@tool
+def smiles_to_cas(molecule_smiles: str) -> str:
+    """Converts a SMILES string to a CAS number."""
+    return molecule_smiles
+
+
+def cas_to_smiles(cas_number: str) -> str:
+    """Converts a CAS number to a SMILES string."""
+    return cas_number
+
+
 def create_tools() -> dict[str, Tool]:
     """Create a dictionary of all available tools for the agent environment"""
     return {
