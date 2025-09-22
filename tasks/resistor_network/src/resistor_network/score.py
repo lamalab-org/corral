@@ -15,7 +15,7 @@ BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
 
 
 def check_resistor_topology(
-    expected_topology: dict[str, Any], tolerance: float = 0.1
+    expected_topology: dict[str, Any], tolerance: float = 0.1, require_both: bool = True
 ) -> Callable[[str], float]:
     """
     Returns a scoring function that checks if proposed topology matches expected one.
@@ -78,21 +78,23 @@ def check_resistor_topology(
             )
             logger.info(f"Resistor values score: {resistor_score}")
 
-            # Combined score (both structure and values must be good)
-            final_score = topology_score * resistor_score
-            logger.info(f"Final topology score: {final_score}")
+            if require_both:
+                # Both must be perfect
+                return 1.0 if (topology_score == 1.0 and resistor_score == 1.0) else 0.0
+            else:
+                # Either being perfect is enough
+                return 1.0 if (topology_score == 1.0 or resistor_score == 1.0) else 0.0
 
-            return final_score
-
-        except Exception as e:
-            logger.error(f"Error in topology checking: {e}", exc_info=True)
+        except Exception:
             return 0.0
 
     return score_fn
 
 
 def _score_topology_structure(proposed: list, expected: list) -> float:
-    """Score how well the proposed connections match expected ones"""
+    """Score how well the proposed connections match expected ones.
+    Binary scoring: 1.0 if exact match, 0.0 otherwise
+    """
     if len(proposed) != len(expected):
         return 0.0
 
@@ -107,31 +109,31 @@ def _score_topology_structure(proposed: list, expected: list) -> float:
     if proposed_normalized == expected_normalized:
         return 1.0
 
-    # Partial credit for overlapping connections
     overlap = len(proposed_normalized & expected_normalized)
     total = len(expected_normalized)
-    return overlap / total if total > 0 else 0.0
+    logger.info(f"Partial topology match: {overlap}/{total}")
+    return 0
 
 
 def _score_resistor_values(proposed: dict, expected: dict, tolerance: float) -> float:
-    """Score how well proposed resistor values match expected ones"""
+    """Score how well proposed resistor values match expected ones.
+    Binary scoring: 1.0 if ALL resistors within tolerance, 0.0 otherwise
+    """
     if set(proposed.keys()) != set(expected.keys()):
         return 0.0  # Must have same resistor names
 
-    scores = []
-    for resistor_id in expected:
-        expected_val = expected[resistor_id]
+    for resistor_id, expected_val in expected.items():
         proposed_val = proposed[resistor_id]
 
         if expected_val == 0:
-            score = 1.0 if proposed_val == 0 else 0.0
+            if proposed_val != 0:
+                return 0.0  # Fail immediately if any resistor wrong
         else:
             relative_error = abs(proposed_val - expected_val) / expected_val
-            score = max(0.0, 1.0 - relative_error / tolerance)
+            if relative_error > tolerance:
+                return 0.0  # Fail immediately if any resistor wrong
 
-        scores.append(score)
-
-    return sum(scores) / len(scores) if scores else 0.0
+    return 1.0
 
 
 def check_resistance_measurements(
