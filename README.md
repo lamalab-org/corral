@@ -139,13 +139,10 @@ The framework includes several pre-built environments:
 | Environment | Description |
 |-------------|-------------|
 | `samplemath` | Basic mathematical operations |
-| `chembench` | Chemical structure analysis |
 | `spectra_elu_easy` | Spectroscopy data analysis |
 | `md_simulations` | Molecular dynamics setup |
 | `catalyst` | Catalysis research tasks |
 | `afm` | Atomic force microscopy |
-| `macbench` | Materials computation |
-| `mp_rag_task` | Materials project retrieval |
 | `md_tutorials` | MD tutorial completion |
 
 ## 🤖 Available Agents
