@@ -1,8 +1,8 @@
-import itertools
 import json
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.optimize import minimize
 
 from corral.backend.tool import Tool, tool
 
@@ -90,7 +90,7 @@ def calculate_parallel_resistance(resistances: list[float]) -> float:
 
 
 @tool
-def delta_to_wye_transform(ra: float, rb: float, rc: float) -> dict[str, float]:
+def delta_to_wye_transform(ra: float, rb: float, rc: float) -> str:
     """[BRIEF] Convert delta (triangle) resistor configuration to wye (star) configuration. [/BRIEF]
 
     [DETAILED] Transforms a three-resistor delta network into an equivalent three-resistor
@@ -124,11 +124,12 @@ def delta_to_wye_transform(ra: float, rb: float, rc: float) -> dict[str, float]:
     r2 = (ra * rc) / total  # Connected to node B
     r3 = (ra * rb) / total  # Connected to node C
 
-    return {"r1": r1, "r2": r2, "r3": r3}
+    result = {"r1": r1, "r2": r2, "r3": r3}
+    return json.dumps(result)
 
 
 @tool
-def wye_to_delta_transform(r1: float, r2: float, r3: float) -> dict[str, float]:
+def wye_to_delta_transform(r1: float, r2: float, r3: float) -> str:
     """[BRIEF] Convert wye (star) resistor configuration to delta (triangle) configuration. [/BRIEF]
 
     [DETAILED] Transforms a three-resistor wye network into an equivalent three-resistor
@@ -151,7 +152,8 @@ def wye_to_delta_transform(r1: float, r2: float, r3: float) -> dict[str, float]:
     rb = denominator / r1  # Between nodes B and C
     rc = denominator / r2  # Between nodes C and A
 
-    return {"ra": ra, "rb": rb, "rc": rc}
+    result = {"ra": ra, "rb": rb, "rc": rc}
+    return json.dumps(result)
 
 
 @tool
@@ -255,7 +257,7 @@ def simulate_circuit_resistance(topology: str, terminal_nodes: list[str]) -> flo
 
 
 @tool
-def validate_measurements(topology: str, measurements: str) -> dict[str, float]:
+def validate_measurements(topology: str, measurements: str) -> str:
     """[BRIEF] Validate if proposed topology matches all given measurements. [/BRIEF]
 
     [DETAILED] Compares the resistance/voltage/current predictions of a proposed circuit
@@ -323,16 +325,17 @@ def validate_measurements(topology: str, measurements: str) -> dict[str, float]:
                     }
                 )
 
-        return {
+        result = {
             "total_error": sum(errors),
             "max_error": max(errors) if errors else 0,
             "mean_error": sum(errors) / len(errors) if errors else 0,
             "detailed_errors": detailed_errors,
             "num_measurements": len(measurements_data),
         }
+        return json.dumps(result, indent=2)
 
     except Exception as e:
-        return {"error": f"Validation failed: {e!s}"}
+        return json.dumps({"error": f"Validation failed: {e!s}"}, indent=2)
 
 
 @tool
@@ -415,74 +418,97 @@ def propose_simple_topology(num_resistors: int, topology_type: str) -> str:
 
 @tool
 def estimate_resistor_values(topology: str, measurements: str) -> str:
-    """[BRIEF] Estimate resistor values for a given topology to match measurements. [/BRIEF]
+    """[BRIEF] Estimate resistor values using numerical optimization (robust approach). [/BRIEF]
 
-    [DETAILED] Uses optimization techniques to find resistor values that best fit the
-    given measurements for a fixed circuit topology. This tool helps complete a
-    topology hypothesis by determining appropriate component values. [/DETAILED]
-
-    [PROCEDURAL] When to use this tool:
-    - After determining the likely circuit topology
-    - When you have the connections but need to find resistor values
-    - For fine-tuning an initial guess of resistor values
-    - As final step before validation
-    [/PROCEDURAL]
+    [DETAILED] Uses scipy optimization to find resistor values that minimize the squared error
+    between predicted and measured resistances. Much more robust than brute-force search. [/DETAILED]
 
     Args:
-        topology: JSON string with circuit topology (resistor values will be optimized)
-        measurements: JSON string with measurement data to fit
+        topology: JSON string describing circuit topology with initial resistor value guesses
+        measurements: JSON string with actual measurements
 
     Returns:
-        str: JSON string with optimized topology including estimated resistor values
+        str: JSON string with optimized resistor values and optimization info
     """
     try:
         circuit = json.loads(topology)
-        _measurements_data = json.loads(measurements)
+        measurements_data = json.loads(measurements)
 
-        # Simple optimization: try different resistance combinations
+        # Extract resistor names and initial values
         resistor_names = list(circuit["resistors"].keys())
-        best_topology = circuit.copy()
-        best_error = float("inf")
+        initial_values = [circuit["resistors"][name] for name in resistor_names]
 
-        # Try common resistance values
-        common_values = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
+        def objective_function(resistor_values: np.ndarray) -> float:
+            """Calculate total squared error for given resistor values"""
+            # Create test topology with current resistor values
+            test_topology = circuit.copy()
+            test_topology["resistors"] = dict(
+                zip(resistor_names, resistor_values, strict=False)
+            )
 
-        # For small numbers of resistors, try all combinations
-        if len(resistor_names) <= 3:
-            for values in itertools.product(common_values, repeat=len(resistor_names)):
-                test_topology = circuit.copy()
-                for i, resistor in enumerate(resistor_names):
-                    test_topology["resistors"][resistor] = values[i]
+            total_error = 0.0
+            for measurement in measurements_data:
+                try:
+                    # Use the simulation tool to predict resistance
+                    predicted = simulate_circuit_resistance.execute(
+                        topology=json.dumps(test_topology),
+                        terminal_nodes=[measurement["node_a"], measurement["node_b"]],
+                    )
+                    predicted = float(predicted)  # Convert string to float
+                    actual = measurement["resistance"]
+                    error = (predicted - actual) ** 2  # Squared error
+                    total_error += error
 
-                validation = validate_measurements.execute(
-                    topology=json.dumps(test_topology), measurements=measurements
-                )
-                if (
-                    "total_error" in validation
-                    and validation["total_error"] < best_error
-                ):
-                    best_error = validation["total_error"]
-                    best_topology = test_topology.copy()
+                except Exception:
+                    # Penalize simulation failures heavily
+                    total_error += 1e6
 
-        # For larger circuits, use a simple heuristic approach
+            return total_error
+
+        # Define bounds (resistors should be positive, reasonable range)
+        bounds = [(0.1, 10000) for _ in resistor_names]  # 0.1Ω to 10kΩ
+
+        # Run optimization
+        result = minimize(
+            objective_function,
+            x0=initial_values,
+            method="L-BFGS-B",  # Good for bounded problems
+            bounds=bounds,
+            options={"ftol": 1e-9, "maxiter": 1000},
+        )
+
+        if result.success:
+            # Create optimized topology
+            optimized_topology = circuit.copy()
+            optimized_topology["resistors"] = {
+                name: round(float(value), 0)
+                for name, value in zip(resistor_names, result.x, strict=False)
+            }
+
+            return json.dumps(
+                {
+                    "resistors": optimized_topology["resistors"],
+                    "connections": circuit["connections"],
+                    "optimization_info": {
+                        "success": True,
+                        "final_error": float(result.fun),
+                        "iterations": result.nit,
+                        "message": result.message,
+                    },
+                },
+                indent=2,
+            )
         else:
-            # Start with equal values and adjust based on measurements
-            for base_value in common_values:
-                test_topology = circuit.copy()
-                for resistor in resistor_names:
-                    test_topology["resistors"][resistor] = base_value
-
-                validation = validate_measurements.execute(
-                    topology=json.dumps(test_topology), measurements=measurements
-                )
-                if (
-                    "total_error" in validation
-                    and validation["total_error"] < best_error
-                ):
-                    best_error = validation["total_error"]
-                    best_topology = test_topology.copy()
-
-        return json.dumps(best_topology, indent=2)
+            return json.dumps(
+                {
+                    "error": f"Optimization failed: {result.message}",
+                    "optimization_info": {
+                        "success": False,
+                        "final_error": float(result.fun),
+                        "iterations": result.nit,
+                    },
+                }
+            )
 
     except Exception as e:
         return json.dumps({"error": f"Estimation failed: {e!s}"})
