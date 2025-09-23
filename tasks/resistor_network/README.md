@@ -52,7 +52,7 @@ When to use: You encounter a triangular arrangement of resistors that blocks nor
 ```python
 # Triangle with 30Ω resistors becomes star with 10Ω resistors
 result = delta_to_wye_transform(30, 30, 30)
-# Returns: {'r1': 10, 'r2': 10, 'r3': 10}
+# Returns json{'r1': 10, 'r2': 10, 'r3': 10}
 ```
 
 
@@ -64,7 +64,7 @@ When to use: Delta configuration provides cleaner analysis path
 
 ```python
 result = wye_to_delta_transform(10, 10, 10)
-# Returns: {'ra': 30, 'rb': 30, 'rc': 30}
+# Returns json {'ra': 30, 'rb': 30, 'rc': 30}
 ```
 
 **Circuit Resistance Simulator**
