@@ -166,29 +166,75 @@ def delta_to_wye_transform(ra: float, rb: float, rc: float) -> str:
     [DETAILED] Transforms a three-resistor delta network into an equivalent three-resistor
     wye network. This is essential for solving complex resistor networks that cannot be
     reduced using simple series/parallel combinations. The transformation preserves the
-    resistance between any two external nodes. [/DETAILED]
+    resistance between any two external nodes, simplifying nodal analysis. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - When encountering triangle configurations that block series/parallel reduction
-    - As part of network analysis strategy for complex topologies
-    - When testing circuit topology hypotheses involving triangular connections
-    - Before applying nodal analysis to simplify the network
+    - Use when encountering triangle (delta) configurations that block series/parallel reduction in a circuit.
+    - Best suited as part of a network analysis strategy for complex topologies, especially bridge circuits.
+    - Recommended when testing circuit topology hypotheses involving triangular connections.
+    - Use before applying nodal analysis to simplify the network's structure.
     [/PROCEDURAL]
 
+    [CONTEXTUAL] How this tool works:
+    - Takes three resistance values (Ra, Rb, Rc) representing the resistors in a delta configuration.
+    - Calculates the equivalent Wye (star) resistances (R1, R2, R3) using standard transformation formulas:
+        - R1 = (Rb * Rc) / (Ra + Rb + Rc)
+        - R2 = (Ra * Rc) / (Ra + Rb + Rc)
+        - R3 = (Ra * Rb) / (Ra + Rb + Rc)
+    - Returns these three calculated resistances.
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Identify a delta (triangle) configuration in the circuit that prevents further series/parallel simplification. [/PREREQUISITE]
+        2. [CURRENT] Apply this tool with the three delta resistor values to obtain their equivalent wye resistor values. [/CURRENT]
+        3. [FOLLOW_UP] Substitute the original delta network with the equivalent wye network in the circuit diagram, which should now allow for series/parallel reduction or simpler nodal analysis. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - `delta_to_wye_transform(30, 30, 30)`
+    - `delta_to_wye_transform(100, 50, 75)`
+    [/SYNTACTICAL]
+
     Args:
-        ra: Resistance between nodes A and B in delta configuration
-        rb: Resistance between nodes B and C in delta configuration
-        rc: Resistance between nodes C and A in delta configuration
+        ra : [BRIEF] Resistance between nodes A and B in delta configuration. [/BRIEF]
+             [DETAILED] A positive floating-point number representing the resistance of the resistor connected between nodes A and B in the delta network. [/DETAILED]
+             [SYNTACTIC] Format: `float` (positive) [/SYNTACTIC]
+             [EXAMPLES] `30`, `100` [/EXAMPLES]
+        rb : [BRIEF] Resistance between nodes B and C in delta configuration. [/BRIEF]
+             [DETAILED] A positive floating-point number representing the resistance of the resistor connected between nodes B and C in the delta network. [/DETAILED]
+             [SYNTACTIC] Format: `float` (positive) [/SYNTACTIC]
+             [EXAMPLES] `30`, `50` [/EXAMPLES]
+        rc : [BRIEF] Resistance between nodes C and A in delta configuration. [/BRIEF]
+             [DETAILED] A positive floating-point number representing the resistance of the resistor connected between nodes C and A in the delta network. [/DETAILED]
+             [SYNTACTIC] Format: `float` (positive) [/SYNTACTIC]
+             [EXAMPLES] `30`, `75` [/EXAMPLES]
 
     Returns:
-        Dict with keys 'r1', 'r2', 'r3' for wye resistor values
+        str: [BRIEF] JSON string with keys 'r1', 'r2', 'r3' for wye resistor values. [/BRIEF]
+             [DETAILED] A JSON string containing a dictionary with three keys: 'r1', 'r2', and 'r3', whose values are the calculated equivalent resistances for the wye network, each being a floating-point number. R1 is connected to original node A, R2 to B, and R3 to C. [/DETAILED]
+             [EXAMPLES] `{"r1": 10.0, "r2": 10.0, "r3": 10.0}` (for `delta_to_wye_transform(30, 30, 30)`) [/EXAMPLES]
 
-    Example:
-        delta_to_wye_transform(30, 30, 30) -> {'r1': 10, 'r2': 10, 'r3': 10}
+    [RAISES] Exceptions:
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When the sum of delta resistances (ra + rb + rc) is zero. [/ERROR_WHEN]
+            [ERROR_DETAILS] A zero sum in the denominator of the transformation formulas would lead to division by zero, indicating an invalid or non-physical delta configuration. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure all input resistances `ra`, `rb`, and `rc` are positive values. [/ERROR_RECOVERY]
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When any input resistance (ra, rb, or rc) is zero or negative. [/ERROR_WHEN]
+            [ERROR_DETAILS] Physical resistors have positive resistance values. Zero or negative values would result in non-physical wye resistances. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure `ra`, `rb`, and `rc` are all positive floating-point numbers. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Assumes ideal resistors.
+    - Only applicable for 3-resistor delta configurations.
+    [/LIMITATIONS]
     """
     total = ra + rb + rc
     if total == 0:
         raise ValueError("Sum of delta resistances cannot be zero")
+    if any(r <= 0 for r in [ra, rb, rc]):
+        raise ValueError("All resistances must be positive")
 
     r1 = (rb * rc) / total  # Connected to node A
     r2 = (ra * rc) / total  # Connected to node B
@@ -204,15 +250,65 @@ def wye_to_delta_transform(r1: float, r2: float, r3: float) -> str:
 
     [DETAILED] Transforms a three-resistor wye network into an equivalent three-resistor
     delta network. This is the inverse of delta-to-wye transformation and is useful when
-    the delta form provides easier analysis or when testing different topology hypotheses. [/DETAILED]
+    the delta form provides easier analysis or when testing different topology hypotheses. This transformation is key for circuit simplification in cases where a wye configuration is encountered. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to convert a wye (star) configuration into an equivalent delta (triangle) configuration.
+    - Best suited for situations where the delta form simplifies further series/parallel reductions or nodal analysis.
+    - Recommended when testing different topology hypotheses where converting a wye to a delta might offer a clearer path to a solution.
+    - Use when a wye configuration makes direct analysis difficult.
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Takes three resistance values (R1, R2, R3) representing the resistors in a wye configuration.
+    - Calculates the equivalent Delta (triangle) resistances (Ra, Rb, Rc) using standard inverse transformation formulas:
+        - Ra = (R1*R2 + R2*R3 + R3*R1) / R3
+        - Rb = (R1*R2 + R2*R3 + R3*R1) / R1
+        - Rc = (R1*R2 + R2*R3 + R3*R1) / R2
+    - Returns these three calculated resistances.
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Identify a wye (star) configuration in the circuit that is difficult to analyze directly. [/PREREQUISITE]
+        2. [CURRENT] Apply this tool with the three wye resistor values to obtain their equivalent delta resistor values. [/CURRENT]
+        3. [FOLLOW_UP] Substitute the original wye network with the equivalent delta network in the circuit diagram, which should now allow for simpler analysis or further circuit reduction. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - `wye_to_delta_transform(10, 10, 10)`
+    - `wye_to_delta_transform(50, 75, 100)`
+    [/SYNTACTICAL]
 
     Args:
-        r1: Wye resistor connected to node A
-        r2: Wye resistor connected to node B
-        r3: Wye resistor connected to node C
+        r1 : [BRIEF] Wye resistor connected to node A. [/BRIEF]
+             [DETAILED] A positive floating-point number representing the resistance of the resistor connected from the center of the wye to node A. [/DETAILED]
+             [SYNTACTIC] Format: `float` (positive) [/SYNTACTIC]
+             [EXAMPLES] `10`, `50` [/EXAMPLES]
+        r2 : [BRIEF] Wye resistor connected to node B. [/BRIEF]
+             [DETAILED] A positive floating-point number representing the resistance of the resistor connected from the center of the wye to node B. [/DETAILED]
+             [SYNTACTIC] Format: `float` (positive) [/SYNTACTIC]
+             [EXAMPLES] `10`, `75` [/EXAMPLES]
+        r3 : [BRIEF] Wye resistor connected to node C. [/BRIEF]
+             [DETAILED] A positive floating-point number representing the resistance of the resistor connected from the center of the wye to node C. [/DETAILED]
+             [SYNTACTIC] Format: `float` (positive) [/SYNTACTIC]
+             [EXAMPLES] `10`, `100` [/EXAMPLES]
 
     Returns:
-        Dict with keys 'ra', 'rb', 'rc' for delta resistor values
+        str: [BRIEF] JSON string with keys 'ra', 'rb', 'rc' for delta resistor values. [/BRIEF]
+             [DETAILED] A JSON string containing a dictionary with three keys: 'ra', 'rb', and 'rc', whose values are the calculated equivalent resistances for the delta network, each being a floating-point number. Ra is between original nodes A and B, Rb between B and C, and Rc between C and A. [/DETAILED]
+             [EXAMPLES] `{"ra": 30.0, "rb": 30.0, "rc": 30.0}` (for `wye_to_delta_transform(10, 10, 10)`) [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When any input resistance (r1, r2, or r3) is zero or negative. [/ERROR_WHEN]
+            [ERROR_DETAILS] Physical resistors have positive resistance values. Zero or negative values would lead to non-physical delta resistances or division by zero in the transformation formulas. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure `r1`, `r2`, and `r3` are all positive floating-point numbers. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Assumes ideal resistors.
+    - Only applicable for 3-resistor wye configurations.
+    [/LIMITATIONS]
     """
     denominator = r1 * r2 + r2 * r3 + r3 * r1
     if any(r <= 0 for r in [r1, r2, r3]):
