@@ -47,16 +47,10 @@ class TestDeltaToWyeTransform:
         with pytest.raises(ValueError, match="Sum of delta resistances cannot be zero"):
             delta_to_wye_transform.execute(ra=0.0, rb=0.0, rc=0.0)
 
-    def test_negative_resistors(self):
-        """Test with negative resistors (should still work mathematically)"""
-        result_json = delta_to_wye_transform.execute(ra=10.0, rb=-5.0, rc=15.0)
-        result = json.loads(result_json)
-
-        # Should not raise error, just calculate the transformation
-        assert isinstance(result, dict)
-        assert "r1" in result
-        assert "r2" in result
-        assert "r3" in result
+    def test_negative_resistors_raises_error(self):
+        """Test with negative resistors should raise ValueError"""
+        with pytest.raises(ValueError, match="All resistances must be positive"):
+            delta_to_wye_transform.execute(ra=10.0, rb=-5.0, rc=15.0)
 
     def test_large_values(self):
         """Test with large resistance values"""
