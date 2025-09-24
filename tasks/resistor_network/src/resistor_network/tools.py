@@ -327,28 +327,81 @@ def simulate_circuit_resistance(topology: str, terminal_nodes: list[str]) -> flo
     """[BRIEF] Simulate total resistance between specified terminals in a given circuit topology. [/BRIEF]
 
     [DETAILED] Takes a circuit topology description and calculates the equivalent resistance
-    between two terminal nodes using nodal analysis. This tool allows testing of topology
-    hypotheses by comparing calculated resistance with measured values. [/DETAILED]
+    between two specified terminal nodes using nodal analysis. This tool allows for the
+    testing and validation of topology hypotheses by comparing calculated resistance with
+    measured values. It provides a foundational capability for circuit analysis and design. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - To validate a proposed circuit topology against measurements
-    - After constructing a hypothesis about resistor values and connections
-    - For iterative testing of different network configurations
-    - As verification step before final answer submission
+    - Use to validate a proposed circuit topology against known or measured values.
+    - Best suited after constructing a hypothesis about resistor values and their connections.
+    - Recommended for iterative testing of different network configurations to see their impact on equivalent resistance.
+    - Use as a verification step before finalizing a circuit design or submitting a solution.
     [/PROCEDURAL]
 
+    [CONTEXTUAL] How this tool works:
+    - Parses a JSON string representing the circuit's resistors and their connections.
+    - Identifies all unique nodes in the circuit and creates a mapping to numerical indices.
+    - Constructs a conductance matrix (G matrix) based on the connections and resistor values.
+    - Applies a 1A current source between the specified `terminal_nodes`.
+    - Solves the resulting system of linear equations (G * V = I) to find the node voltages.
+    - The equivalent resistance is then calculated as the absolute voltage difference between the `terminal_nodes` (V_terminal1 - V_terminal2) since the applied current is 1A.
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Have a defined circuit `topology` (resistors and connections) and the `terminal_nodes` between which to measure resistance. [/PREREQUISITE]
+        2. [CURRENT] Apply this tool with the `topology` and `terminal_nodes` to get the simulated resistance. [/CURRENT]
+        3. [FOLLOW_UP] Compare the `simulate_circuit_resistance` output with actual measurements or desired specifications to validate the topology using `validate_measurements`. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - `simulate_circuit_resistance('{"resistors": {"R1": 10, "R2": 20}, "connections": [["A", "B", "R1"], ["B", "C", "R2"]]}', ["A", "C"])`
+    - `simulate_circuit_resistance('{"resistors": {"R1": 50, "R2": 50, "R3": 100}, "connections": [["N1", "N2", "R1"], ["N1", "N2", "R2"], ["N2", "N3", "R3"]]}', ["N1", "N3"])`
+    [/SYNTACTICAL]
+
     Args:
-        topology: JSON string describing circuit with format:
-                 {"resistors": {"R1": 10, "R2": 20},
-                  "connections": [["node1", "node2", "R1"], ["node2", "node3", "R2"]]}
-        terminal_nodes: List of two node names to measure resistance between
+        topology : [BRIEF] JSON string describing circuit. [/BRIEF]
+                   [DETAILED] A JSON string that defines the circuit's components and their interconnections. It must contain a "resistors" dictionary (mapping resistor IDs to their resistance values) and a "connections" list (each entry being a list `[node1, node2, resistor_id]`). [/DETAILED]
+                   [SYNTACTIC] Format: `{"resistors": {"R1": 10, "R2": 20}, "connections": [["node1", "node2", "R1"]]}` [/SYNTACTIC]
+                   [EXAMPLES] `'{"resistors": {"R1": 10, "R2": 20}, "connections": [["A", "B", "R1"], ["B", "C", "R2"]]}'`, `'{"resistors": {"R_par1": 30, "R_par2": 60}, "connections": [["N_in", "N_out", "R_par1"], ["N_in", "N_out", "R_par2"]]}` [/EXAMPLES]
+        terminal_nodes : [BRIEF] List of two node names to measure resistance between. [/BRIEF]
+                         [DETAILED] A list containing exactly two strings, where each string is the name of a node in the circuit. The tool will calculate the equivalent resistance between these two specified nodes. [/DETAILED]
+                         [SYNTACTIC] Format: `["node_start", "node_end"]` [/SYNTACTIC]
+                         [EXAMPLES] `["A", "C"]`, `["input_node", "output_node"]` [/EXAMPLES]
 
     Returns:
-        float: Equivalent resistance between terminals in ohms
+        float: [BRIEF] Equivalent resistance between terminals in ohms. [/BRIEF]
+               [DETAILED] A floating-point number representing the total equivalent resistance measured between the two specified terminal nodes in the given circuit topology. [/DETAILED]
+               [EXAMPLES] `30.0` (for a 10Ω and 20Ω resistor in series) [/EXAMPLES]
 
-    Example:
-        topology = '{"resistors": {"R1": 10, "R2": 20}, "connections": [["A", "B", "R1"], ["B", "C", "R2"]]}'
-        simulate_circuit_resistance(topology, ["A", "C"]) -> 30.0
+    [RAISES] Exceptions:
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When the `topology` JSON string is invalid or malformed. [/ERROR_WHEN]
+            [ERROR_DETAILS] `json.loads` fails, or required keys ("resistors", "connections") are missing. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure the `topology` string is a valid JSON and adheres to the specified structure. [/ERROR_RECOVERY]
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When `terminal_nodes` does not contain exactly two node names. [/ERROR_WHEN]
+            [ERROR_DETAILS] Resistance is defined between two distinct points. Fewer or more nodes are ambiguous. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Provide a list with exactly two string elements for `terminal_nodes`. [/ERROR_RECOVERY]
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When a `resistor_id` in `connections` is not found in the `resistors` dictionary. [/ERROR_WHEN]
+            [ERROR_DETAILS] An undefined resistor ID indicates an inconsistency in the circuit description. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure all resistor IDs used in `connections` are defined in the `resistors` dictionary. [/ERROR_RECOVERY]
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When a resistor has a non-positive resistance value (<= 0). [/ERROR_WHEN]
+            [ERROR_DETAILS] Nodal analysis assumes positive resistances. Zero or negative resistance can cause mathematical issues. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure all resistor values in the `resistors` dictionary are positive floating-point numbers. [/ERROR_RECOVERY]
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When the circuit is not solvable (e.g., disconnected). [/ERROR_WHEN]
+            [ERROR_DETAILS] `np.linalg.solve` might fail if the conductance matrix is singular, implying the circuit is ill-posed or disconnected. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Review the circuit `topology` for open circuits, short circuits, or disconnected components that prevent a unique solution. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Assumes ideal resistors (no inductance, capacitance).
+    - Only calculates equivalent resistance; does not simulate transient behavior or AC circuits.
+    - Circuit must be a passive network for resistance calculation.
+    - Numerical stability issues can arise for extremely large/small resistance values.
+    [/LIMITATIONS]
     """
     try:
         circuit = json.loads(topology)
@@ -397,19 +450,37 @@ def simulate_circuit_resistance(topology: str, terminal_nodes: list[str]) -> flo
         Ia[term2_idx] = -1.0
 
         # Remove one equation (use term2 as reference)
-        G_reduced = (
-            G[:-1, :-1]
-            if term2_idx == n - 1
-            else np.delete(np.delete(G, term2_idx, 0), term2_idx, 1)
-        )
-        I_reduced = Ia[:-1] if term2_idx == n - 1 else np.delete(Ia, term2_idx)
+        # This handles cases where term2_idx is the last element
+        if n == 1:  # Handle single-node circuit, which implies shorted
+            return 0.0
+
+        if term2_idx == n - 1:
+            G_reduced = G[:-1, :-1]
+            I_reduced = Ia[:-1]
+        else:
+            G_reduced = np.delete(np.delete(G, term2_idx, 0), term2_idx, 1)
+            I_reduced = np.delete(Ia, term2_idx)
 
         try:
+            # Handle cases where G_reduced might be empty or singular (e.g., two nodes directly connected with no resistors to other nodes)
+            if G_reduced.size == 0:
+                # If only two nodes and directly connected without other paths, resistance is sum of direct path.
+                # This specific case is handled by the loop over connections
+                # If G_reduced is empty after removing rows/cols, it implies a 2-node circuit with no other connections.
+                # In such cases, if a direct resistor exists between term1 and term2, its value is the resistance.
+                # This logic is complex and better handled by checking for direct connections first.
+                # For simplicity here, if the reduced matrix is empty or singular, it's likely an error unless it's a very simple 2-node series circuit.
+                raise np.linalg.LinAlgError(
+                    "Reduced conductance matrix is empty or singular"
+                )
+
             V_reduced = np.linalg.solve(G_reduced, I_reduced)
         except np.linalg.LinAlgError as err:
-            raise ValueError("Circuit is not solvable (possibly disconnected)") from err
+            raise ValueError(
+                "Circuit is not solvable (possibly disconnected or ill-conditioned)"
+            ) from err
 
-        # Insert reference voltage
+        # Insert reference voltage (0V at term2)
         if term2_idx == n - 1:
             V = np.append(V_reduced, 0)
         else:
@@ -426,30 +497,72 @@ def simulate_circuit_resistance(topology: str, terminal_nodes: list[str]) -> flo
 def validate_measurements(topology: str, measurements: str) -> str:
     """[BRIEF] Validate if proposed topology matches all given measurements. [/BRIEF]
 
-    [DETAILED] Compares the resistance/voltage/current predictions of a proposed circuit
-    topology against actual measurements. Returns error metrics to assess how well the
-    proposed solution matches the experimental data. Essential for validating hypotheses. [/DETAILED]
+    [DETAILED] Compares the resistance predictions of a proposed circuit topology against
+    actual measurements. It quantifies the discrepancy by calculating error metrics,
+    which are essential for validating hypotheses about circuit structure and resistor values.
+    This tool helps in refining and confirming circuit designs. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - After proposing a complete circuit topology and resistor values
-    - To quantify how well your hypothesis matches the measurements
-    - Before final submission to check solution quality
-    - During iterative refinement of topology hypotheses
+    - Use after proposing a complete circuit topology and its corresponding resistor values.
+    - Best suited to quantify how well your hypothesis matches available experimental measurement data.
+    - Recommended before final solution submission to assess the quality and accuracy of the proposed circuit.
+    - Use during iterative refinement of topology hypotheses to guide adjustments.
     [/PROCEDURAL]
 
+    [CONTEXTUAL] How this tool works:
+    - Parses the input JSON strings for the proposed circuit `topology` and the `measurements`.
+    - Iterates through each measurement provided in the `measurements` list.
+    - For each measurement, it calls `simulate_circuit_resistance` to predict the resistance between the specified nodes in the proposed `topology`.
+    - Compares the `predicted_resistance` with the `actual_resistance` from the measurement.
+    - Calculates the absolute error and relative error for each measurement.
+    - Aggregates these errors to provide `total_error`, `max_error`, and `mean_error`, along with detailed error for each measurement.
+    - Returns a JSON string summarizing the validation results.
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Have a proposed `topology` (e.g., from `propose_simple_topology` and `estimate_resistor_values`) and a set of `measurements` (actual data). [/PREREQUISITE]
+        2. [CURRENT] Apply this tool with the `topology` and `measurements` to get a quantitative assessment of the match. [/CURRENT]
+        3. [FOLLOW_UP] If errors are high, iterate back to refining the `topology` or re-estimating resistor values using `estimate_resistor_values`. If errors are acceptable, consider the topology validated. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - `validate_measurements('{"resistors": {"R1": 10, "R2": 20}, "connections": [["A", "B", "R1"]]}', '[{"node_a": "A", "node_b": "B", "resistance": 15.0}]')`
+    - `validate_measurements(proposed_circuit_topology, experimental_data)`
+    [/SYNTACTICAL]
+
     Args:
-        topology: JSON string describing proposed circuit topology
-        measurements: JSON string with actual measurements format:
-                     [{"node_a": "A", "node_b": "B", "resistance": 10.0}, ...]
+        topology : [BRIEF] JSON string describing proposed circuit topology. [/BRIEF]
+                   [DETAILED] A JSON string conforming to the `CircuitTopology` structure, including resistor IDs, their estimated values, and the connections between nodes. This represents your hypothesis about the circuit's structure. [/DETAILED]
+                   [SYNTACTIC] Format: {"resistors": {"R1": 10, "R2": 20}, "connections": [["node1", "node2", "R1"]]} [/SYNTACTIC]
+                [EXAMPLES] '{"resistors": {"R1": 100, "R2": 50}, "connections": [["A", "B", "R1"], ["B", "C", "R2"]]}' [/EXAMPLES]
+        measurements : [BRIEF] JSON string with actual measurements. [/BRIEF]
+                [DETAILED] A JSON string representing a list of CircuitMeasurement objects. Each object should contain node_a, node_b, and at least resistance (though voltage and current are also possible if the tool were to be extended for them). These are the real-world observations. [/DETAILED]
+                [SYNTACTIC] Format: [{"node_a": "A", "node_b": "B", "resistance": 10.0}, ...] [/SYNTACTIC]
+                [EXAMPLES] '[{"node_a": "A", "node_b": "B", "resistance": 15.0}]', '[{"node_a": "N1", "node_b": "N3", "resistance": 150.0}, {"node_a": "N2", "node_b": "N4", "resistance": 75.0}]' [/EXAMPLES]
 
     Returns:
-        Dict with validation results including total_error, max_error, and per_measurement errors
+    str: [BRIEF] JSON string with validation results including error metrics. [/BRIEF]
+         [DETAILED] A JSON string containing a dictionary with various error metrics: `total_error`, `max_error`, `mean_error`, and `detailed_errors` (a list of per-measurement errors including predicted, actual, absolute error, and relative error). It also includes `num_measurements`. This output helps quantify the accuracy of the proposed topology. [/DETAILED]
+         [EXAMPLES] `{"total_error": 5.0, "max_error": 5.0, "mean_error": 5.0, "detailed_errors": [{"nodes": "A-B", "predicted": 10.0, "actual": 15.0, "error": 5.0, "relative_error": 0.333}], "num_measurements": 1}` [/EXAMPLES]
 
-    Example:
-        measurements = '[{"node_a": "A", "node_b": "B", "resistance": 15.0}]'
-        topology = '{"resistors": {"R1": 10, "R2": 20}, "connections": [["A", "B", "R1"]]}'
-        validate_measurements(topology, measurements) -> {"total_error": 5.0, "max_error": 5.0, ...}
+    [RAISES] Exceptions:
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When the `topology` or `measurements` JSON strings are malformed or invalid. [/ERROR_WHEN]
+            [ERROR_DETAILS] `json.loads` fails, or required keys are missing from the input dictionaries/lists. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure both input strings are valid JSON and adhere to the specified data structures. [/ERROR_RECOVERY]
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When `simulate_circuit_resistance` fails for a given measurement. [/ERROR_WHEN]
+            [ERROR_DETAILS] Indicates an issue with the proposed `topology` itself (e.g., disconnected nodes, invalid resistor IDs) preventing a simulation. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Examine the `error_type` in the `detailed_errors` for specific simulation failures and debug the `topology` accordingly. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Currently only validates resistance measurements. Voltage and current validation are not yet implemented.
+    - Assumes the measurement data is accurate and reliable.
+    - Large errors can occur if the proposed topology is drastically different from the actual circuit or if resistor values are far off.
+    [/LIMITATIONS]
     """
+
     try:
         measurements_data = json.loads(measurements)
         errors = []
@@ -508,28 +621,69 @@ def validate_measurements(topology: str, measurements: str) -> str:
 def propose_simple_topology(num_resistors: int, topology_type: str) -> str:
     """[BRIEF] Generate a simple circuit topology hypothesis for testing. [/BRIEF]
 
-    [DETAILED] Creates standard circuit configurations (series, parallel, series-parallel)
-    with placeholder resistor values. Useful for starting hypothesis generation when you
-    have an idea about the circuit complexity but need a structured starting point. [/DETAILED]
+        [DETAILED] Creates standard, foundational circuit configurations (series, parallel,
+    series-parallel, bridge) with placeholder resistor values (defaulting to 10.0 ohms).
+    This tool is invaluable for initiating the hypothesis generation process when you
+    have a basic idea about the circuit's complexity or expected structure but need a
+    structured, pre-defined starting point for exploration. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - At the beginning of analysis to generate initial topology hypotheses
-    - When you know approximately how many resistors are present
-    - To create templates for manual modification
-    - For systematic exploration of possible configurations
+    - Use at the beginning of circuit analysis to generate initial, basic topology hypotheses.
+    - Best suited when you have an approximate idea of how many resistors are present in the circuit.
+    - Recommended to create templates for manual modification and refinement based on measurements.
+    - Use for systematic exploration of common resistor configurations.
     [/PROCEDURAL]
 
+    [CONTEXTUAL] How this tool works:
+    - Initializes an empty circuit topology dictionary.
+    - Adds `num_resistors` placeholder resistors (R1, R2, ...) with a default value of 10.0 ohms.
+    - Based on `topology_type`:
+        - "series": Connects resistors end-to-end (A-R1-B-R2-C...).
+        - "parallel": Connects all resistors between two common nodes (A and B).
+        - "series_parallel": Creates a basic configuration with one resistor in series, and two in parallel, adding others in series if `num_resistors` is greater than 3.
+        - "bridge": Creates a Wheatstone bridge configuration (requires at least 5 resistors).
+        - If `topology_type` is not recognized or `num_resistors` is too low for complex types, it defaults to a series configuration.
+    - Returns the constructed topology as a JSON string.
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Have a preliminary idea of the number of resistors and a general type of circuit (e.g., "series", "parallel"). [/PREREQUISITE]
+        2. [CURRENT] Apply this tool with `num_resistors` and `topology_type` to get a starting `topology`. [/CURRENT]
+        3. [FOLLOW_UP] Use `estimate_resistor_values` with this generated topology and actual `measurements` to refine the resistor values. Then, `validate_measurements` to check the fit. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - `propose_simple_topology(3, "series")`
+    - `propose_simple_topology(2, "parallel")`
+    - `propose_simple_topology(5, "bridge")`
+    [/SYNTACTICAL]
+
     Args:
-        num_resistors: Number of resistors in the circuit
-        topology_type: Type of configuration ("series", "parallel", "series_parallel", "bridge")
+        num_resistors : [BRIEF] Number of resistors in the circuit. [/BRIEF]
+                        [DETAILED] An integer indicating how many individual resistors should be included in the generated topology. This influences the complexity and number of elements in the proposed circuit. [/DETAILED]
+                        [SYNTACTIC] Format: `int` (positive) [/SYNTACTIC]
+                        [EXAMPLES] `3`, `5`, `2` [/EXAMPLES]
+        topology_type : [BRIEF] Type of configuration. [/BRIEF]
+                        [DETAILED] A string specifying the desired basic arrangement of resistors. Valid options are "series", "parallel", "series_parallel", or "bridge". If an invalid type is provided or `num_resistors` is too low for the chosen type, it defaults to "series". [/DETAILED]
+                        [SYNTACTIC] Format: `"series"`, `"parallel"`, `"series_parallel"`, `"bridge"` [/SYNTACTIC]
+                        [EXAMPLES] `"series"`, `"parallel"`, `"bridge"` [/EXAMPLES]
+                        [CHOICES] Valid options: "series", "parallel", "series_parallel", "bridge"
 
     Returns:
-        str: JSON string with proposed topology structure
+        str: [BRIEF] JSON string with proposed topology structure. [/BRIEF]
+             [DETAILED] A JSON string representing a `CircuitTopology` object. It includes a "resistors" dictionary (with `R1`, `R2`, etc., initially set to 10.0 ohms) and a "connections" list defining how these resistors are wired based on the `topology_type`. [/DETAILED]
+             [EXAMPLES] `'{"resistors": {"R1": 10, "R2": 10, "R3": 10}, "connections": [["A", "B", "R1"], ["B", "C", "R2"], ["C", "D", "R3"]]}'` (for `propose_simple_topology(3, "series")`) [/EXAMPLES]
 
-    Example:
-        propose_simple_topology(3, "series") ->
-        '{"resistors": {"R1": 10, "R2": 10, "R3": 10},
-          "connections": [["A", "B", "R1"], ["B", "C", "R2"], ["C", "D", "R3"]]}'
+    [RAISES] Exceptions:
+        None explicitly raised by the tool itself, but downstream tools using this output might raise errors if the generated topology is invalid for their operations.
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Generates only basic, predefined topologies. Complex or arbitrary circuit designs require manual modification.
+    - Resistor values are placeholders (10.0 ohms) and need to be refined using `estimate_resistor_values`.
+    - Node naming is sequential (A, B, C, ...) and may not align with complex real-world naming conventions.
+    - "series_parallel" and "bridge" types have minimum `num_resistors` requirements.
+    [/LIMITATIONS]
     """
     topology = {"resistors": {}, "connections": []}
 
@@ -586,15 +740,75 @@ def propose_simple_topology(num_resistors: int, topology_type: str) -> str:
 def estimate_resistor_values(topology: str, measurements: str) -> str:
     """[BRIEF] Estimate resistor values using numerical optimization (robust approach). [/BRIEF]
 
-    [DETAILED] Uses scipy optimization to find resistor values that minimize the squared error
-    between predicted and measured resistances. Much more robust than brute-force search. [/DETAILED]
+        [DETAILED] Utilizes the SciPy `minimize` function to find the optimal resistor values
+    that minimize the total squared error between the resistance predicted by the
+    `simulate_circuit_resistance` tool and the actual `measurements`. This approach
+    is robust and efficient for refining initial resistor value guesses within a
+    known or hypothesized circuit topology. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you have a proposed circuit `topology` (connections are fixed) but need to determine the precise resistor values.
+    - Best suited for refining placeholder resistor values obtained from tools like `propose_simple_topology`.
+    - Recommended for iterative improvement of a circuit model by fitting it to experimental data.
+    - Use when brute-force search for resistor values is computationally infeasible or inefficient.
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Parses the input JSON strings for the initial `topology` (with resistor IDs and initial guesses) and the `measurements`.
+    - Extracts the names of all resistors in the topology.
+    - Defines an `objective_function` that takes a set of resistor values, constructs a temporary circuit `topology` with these values, and then uses `simulate_circuit_resistance` to predict resistances for all measurement pairs.
+    - The `objective_function` calculates the sum of squared differences between predicted and actual resistances, returning this total error.
+    - `scipy.optimize.minimize` (using the 'L-BFGS-B' method) is then employed to find the set of resistor values that minimizes this `objective_function`, subject to bounds (e.g., resistances must be positive).
+    - If successful, it returns the optimized resistor values and optimization details.
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Have a fixed circuit `topology` (e.g., from `propose_simple_topology` or a known design) and a set of `measurements` from the actual circuit. [/PREREQUISITE]
+        2. [CURRENT] Apply this tool with the `topology` (containing initial resistor value guesses) and `measurements` to find optimized resistor values. [/CURRENT]
+        3. [FOLLOW_UP] Use the `validate_measurements` tool with the optimized topology to confirm the improved fit, or proceed with the refined resistor values in further circuit analysis. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - `estimate_resistor_values('{"resistors": {"R1": 10, "R2": 20}, "connections": [["A", "B", "R1"]]}', '[{"node_a": "A", "node_b": "B", "resistance": 15.0}]')`
+    - `estimate_resistor_values(initial_topology_json, experimental_measurements_json)`
+    [/SYNTACTICAL]
 
     Args:
-        topology: JSON string describing circuit topology with initial resistor value guesses
-        measurements: JSON string with actual measurements
+        topology : [BRIEF] JSON string describing circuit topology with initial resistor value guesses. [/BRIEF]
+                   [DETAILED] A JSON string conforming to the `CircuitTopology` structure. It must include a "resistors" dictionary with resistor IDs and their *initial estimated* resistance values, and a "connections" list defining the circuit structure. These initial values are the starting point for optimization. [/DETAILED]
+                   [SYNTACTIC] Format: `{"resistors": {"R1": 10, "R2": 20}, "connections": [["node1", "node2", "R1"]]}` [/SYNTACTIC]
+                   [EXAMPLES] `'{"resistors": {"R1": 10, "R2": 10, "R3": 10}, "connections": [["A", "B", "R1"], ["B", "C", "R2"], ["C", "D", "R3"]]}'` [/EXAMPLES]
+        measurements : [BRIEF] JSON string with actual measurements. [/BRIEF]
+                       [DETAILED] A JSON string representing a list of `CircuitMeasurement` objects, each containing `node_a`, `node_b`, and `resistance`. These are the actual observed resistance values against which the model will be optimized. [/DETAILED]
+                       [SYNTACTIC] Format: `[{"node_a": "A", "node_b": "B", "resistance": 10.0}, ...]` [/SYNTACTIC]
+                       [EXAMPLES] `'[{"node_a": "A", "node_b": "B", "resistance": 15.0}, {"node_a": "C", "node_b": "D", "resistance": 35.0}]'` [/EXAMPLES]
 
     Returns:
-        str: JSON string with optimized resistor values and optimization info
+        str: [BRIEF] JSON string with optimized resistor values and optimization info. [/BRIEF]
+             [DETAILED] A JSON string containing a dictionary. If successful, it includes the `optimized_resistors` (mapping resistor IDs to their newly estimated values, rounded to integers), the original `connections`, and an `optimization_info` sub-dictionary with details like `success` status, `final_error`, `iterations`, and `message`. If optimization fails, it provides an `error` message. [/DETAILED]
+             [EXAMPLES] `{"resistors": {"R1": 15, "R2": 30}, "connections": [...], "optimization_info": {"success": true, "final_error": 0.001, "iterations": 50, "message": "CONVERGENCE: NORM_OF_GRADIENT_<=_TF_GAUSSIAN_SUM"}` (on success) [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When the `topology` or `measurements` JSON strings are malformed or invalid. [/ERROR_WHEN]
+            [ERROR_DETAILS] `json.loads` fails, or required keys are missing from the input dictionaries/lists. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure both input strings are valid JSON and adhere to the specified data structures. [/ERROR_RECOVERY]
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When `simulate_circuit_resistance` encounters an error during optimization (e.g., invalid intermediate topology). [/ERROR_WHEN]
+            [ERROR_DETAILS] The objective function will assign a large penalty, but persistent simulation errors can lead to optimization failure. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure the initial `topology` is valid and the bounds for resistor values are reasonable, as extreme values might cause simulation instability. [/ERROR_RECOVERY]
+        RuntimeError: [ERRORS]
+            [ERROR_WHEN] When the numerical optimization algorithm fails to converge to a solution. [/ERROR_WHEN]
+            [ERROR_DETAILS] Indicated by `result.success` being `False` and a `message` explaining the failure (e.g., maximum iterations reached, bounds violated). [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Adjust initial resistor value guesses, widen the bounds, increase `maxiter`, or re-evaluate if the chosen `topology` is appropriate for the measurements. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Numerical optimization can get stuck in local minima if initial guesses are poor, or the solution space is complex.
+    - Requires a robust `simulate_circuit_resistance` function; errors in simulation propagate to the optimization.
+    - Assumes the provided topology (connections) is correct, only optimizing resistor values.
+    - Computationally intensive for very large circuits with many unknown resistors.
+    [/LIMITATIONS]
     """
     try:
         circuit = json.loads(topology)
@@ -684,28 +898,75 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
 def generate_test_measurements(topology: str, terminal_pairs: list[list[str]]) -> str:
     """[BRIEF] Generate theoretical measurements for a given circuit topology. [/BRIEF]
 
-    [DETAILED] Calculates what the resistance measurements would be between specified
-    terminal pairs for a given circuit. Useful for testing your tools and understanding
-    how different topologies produce different measurement patterns. [/DETAILED]
+        [DETAILED] Calculates what the resistance measurements would be between specified
+    terminal pairs for a given circuit topology. This tool is exceptionally useful
+    for testing your circuit analysis tools, understanding the behavior of different
+    topologies, and generating synthetic datasets for validation or educational purposes.
+    It provides a ground truth for a given circuit design. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - To understand what measurements a proposed topology would produce
-    - For testing and debugging your circuit analysis approach
-    - To generate additional synthetic measurements for validation
-    - When exploring how topology changes affect measurements
+    - Use to understand what resistance measurements a proposed or known topology would produce.
+    - Best suited for testing and debugging your circuit analysis approach or custom tools.
+    - Recommended to generate additional synthetic measurements for validation of `estimate_resistor_values` or `validate_measurements`.
+    - Use when exploring how changes in topology or resistor values affect the overall circuit measurements.
     [/PROCEDURAL]
 
+    [CONTEXTUAL] How this tool works:
+    - Parses the input `topology` JSON string.
+    - Iterates through each `terminal_pair` provided in the list.
+    - For each pair, it calls the `simulate_circuit_resistance` tool to calculate the equivalent resistance between those two nodes.
+    - Stores the calculated resistance along with the `node_a` and `node_b` in a list of measurement dictionaries.
+    - If a simulation fails for a specific `terminal_pair`, it records an error message for that measurement.
+    - Returns a JSON string containing the list of theoretical measurements.
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Have a fully defined circuit `topology` (including resistor values) and a list of `terminal_pairs` where measurements are desired. [/PREREQUISITE]
+        2. [CURRENT] Apply this tool with the `topology` and `terminal_pairs` to obtain a set of theoretical resistance measurements. [/CURRENT]
+        3. [FOLLOW_UP] Use these generated measurements to test the `estimate_resistor_values` tool (by trying to recover the original resistor values), or to test the `validate_measurements` tool (by comparing against the same topology). [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - `generate_test_measurements(my_topology_json, [["A", "B"], ["A", "C"], ["B", "C"]])`
+    - `generate_test_measurements('{"resistors": {"R1": 10, "R2": 20}, "connections": [["N1", "N2", "R1"], ["N2", "N3", "R2"]]}', [["N1", "N3"]])`
+    [/SYNTACTICAL]
+
     Args:
-        topology: JSON string describing the circuit
-        terminal_pairs: List of node pairs to measure between
+        topology : [BRIEF] JSON string describing the circuit. [/BRIEF]
+                   [DETAILED] A JSON string conforming to the `CircuitTopology` structure, containing both the resistor IDs with their precise resistance values and the connections between nodes. This is the circuit for which theoretical measurements are to be generated. [/DETAILED]
+                   [SYNTACTIC] Format: `{"resistors": {"R1": 10, "R2": 20}, "connections": [["node1", "node2", "R1"]]}` [/SYNTACTIC]
+                   [EXAMPLES] `'{"resistors": {"R1": 100, "R2": 200, "R3": 300}, "connections": [["A", "B", "R1"], ["B", "C", "R2"], ["A", "C", "R3"]]}'` [/EXAMPLES]
+        terminal_pairs : [BRIEF] List of node pairs to measure between. [/BRIEF]
+                         [DETAILED] A list of lists, where each inner list contains two strings representing the names of the nodes between which the equivalent resistance should be calculated. Each pair signifies one theoretical measurement point. [/DETAILED]
+                         [SYNTACTIC] Format: `[["node_a", "node_b"], ["node_x", "node_y"], ...]` [/SYNTACTIC]
+                         [EXAMPLES] `[["A", "B"], ["A", "C"], ["B", "C"]]`, `[["input", "output"]]` [/EXAMPLES]
 
     Returns:
-        str: JSON string with theoretical measurements
+        str: [BRIEF] JSON string with theoretical measurements. [/BRIEF]
+             [DETAILED] A JSON string representing a list of measurement dictionaries. Each dictionary will include `node_a`, `node_b`, and the `resistance` (rounded to 3 decimal places) between those nodes, as calculated by the `simulate_circuit_resistance` tool. If a simulation fails for a pair, an "error" key will be present instead of "resistance". [/DETAILED]
+             [EXAMPLES] `'[{"node_a": "A", "node_b": "B", "resistance": 15.0}, {"node_a": "A", "node_b": "C", "resistance": 45.0}]'` [/EXAMPLES]
 
-    Example:
-        terminal_pairs = [["A", "B"], ["A", "C"], ["B", "C"]]
-        generate_test_measurements(topology, terminal_pairs) ->
-        '[{"node_a": "A", "node_b": "B", "resistance": 15.0}, ...]'
+    [RAISES] Exceptions:
+        json.JSONDecodeError: [BRIEF] If `topology` is not a valid JSON string.
+                              [DETAILED] This occurs if the input `topology` string cannot be parsed into a valid JSON object, which is required for circuit definition.
+        Exception: [BRIEF] General error during measurement generation.
+                   [DETAILED] Catches any other unforeseen errors that might occur during the iteration through terminal pairs or calls to `simulate_circuit_resistance`, returning an error message for the overall process. Specific measurement errors are handled per-pair.
+
+    [PERFORMANCE] Performance notes:
+    - Time complexity: O(M * S), where M is the number of `terminal_pairs` and S is the time complexity of `simulate_circuit_resistance`.
+    - Memory usage: Proportional to the size of the `topology` and the number of `terminal_pairs`.
+    - Network calls: None (assuming `simulate_circuit_resistance` is an internal function or tool).
+    - File I/O: None.
+
+    [LIMITATIONS] Known limitations:
+    - Relies entirely on the accuracy and robustness of the `simulate_circuit_resistance` tool.
+    - Does not validate the `topology` for circuit correctness (e.g., disconnected components, short circuits) beyond what `simulate_circuit_resistance` handles.
+    - Handles only resistance measurements; cannot generate other types of circuit measurements (e.g., voltage, current).
+
+    [RELATED] Related tools:
+    - `simulate_circuit_resistance()`: Directly called by this tool to perform individual resistance calculations.
+    - `estimate_resistor_values()`: Can use the output of this tool as input for validation.
+    - `validate_measurements()`: Can use the output of this tool to compare against actual measurements or another theoretical set.
     """
     try:
         measurements = []
