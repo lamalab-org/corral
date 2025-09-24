@@ -5,6 +5,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 from corral.backend.tool import Tool, tool
+from resistor_network.utils import get_resistance_between_nodes
 
 
 @dataclass
@@ -513,7 +514,7 @@ def validate_measurements(topology: str, measurements: str) -> str:
     [CONTEXTUAL] How this tool works:
     - Parses the input JSON strings for the proposed circuit `topology` and the `measurements`.
     - Iterates through each measurement provided in the `measurements` list.
-    - For each measurement, it calls `simulate_circuit_resistance` to predict the resistance between the specified nodes in the proposed `topology`.
+    - For each measurement, it calls `get_resistance_between_nodes` to predict the resistance between the specified nodes in the proposed `topology`.
     - Compares the `predicted_resistance` with the `actual_resistance` from the measurement.
     - Calculates the absolute error and relative error for each measurement.
     - Aggregates these errors to provide `total_error`, `max_error`, and `mean_error`, along with detailed error for each measurement.
@@ -552,7 +553,7 @@ def validate_measurements(topology: str, measurements: str) -> str:
             [ERROR_DETAILS] `json.loads` fails, or required keys are missing from the input dictionaries/lists. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Try: Ensure both input strings are valid JSON and adhere to the specified data structures. [/ERROR_RECOVERY]
         ValueError: [ERRORS]
-            [ERROR_WHEN] When `simulate_circuit_resistance` fails for a given measurement. [/ERROR_WHEN]
+            [ERROR_WHEN] When `get_resistance_between_nodes` fails for a given measurement. [/ERROR_WHEN]
             [ERROR_DETAILS] Indicates an issue with the proposed `topology` itself (e.g., disconnected nodes, invalid resistor IDs) preventing a simulation. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Try: Examine the `error_type` in the `detailed_errors` for specific simulation failures and debug the `topology` accordingly. [/ERROR_RECOVERY]
     [/RAISES]
@@ -574,7 +575,7 @@ def validate_measurements(topology: str, measurements: str) -> str:
             node_b = measurement["node_b"]
 
             try:
-                predicted_resistance = simulate_circuit_resistance.execute(
+                predicted_resistance = get_resistance_between_nodes(
                     topology=topology, terminal_nodes=[node_a, node_b]
                 )
 
@@ -743,7 +744,7 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
 
         [DETAILED] Utilizes the SciPy `minimize` function to find the optimal resistor values
     that minimize the total squared error between the resistance predicted by the
-    `simulate_circuit_resistance` tool and the actual `measurements`. This approach
+    `get_resistance_between_nodes` tool and the actual `measurements`. This approach
     is robust and efficient for refining initial resistor value guesses within a
     known or hypothesized circuit topology. [/DETAILED]
 
@@ -757,7 +758,7 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
     [CONTEXTUAL] How this tool works:
     - Parses the input JSON strings for the initial `topology` (with resistor IDs and initial guesses) and the `measurements`.
     - Extracts the names of all resistors in the topology.
-    - Defines an `objective_function` that takes a set of resistor values, constructs a temporary circuit `topology` with these values, and then uses `simulate_circuit_resistance` to predict resistances for all measurement pairs.
+    - Defines an `objective_function` that takes a set of resistor values, constructs a temporary circuit `topology` with these values, and then uses `get_resistance_between_nodes` to predict resistances for all measurement pairs.
     - The `objective_function` calculates the sum of squared differences between predicted and actual resistances, returning this total error.
     - `scipy.optimize.minimize` (using the 'L-BFGS-B' method) is then employed to find the set of resistor values that minimizes this `objective_function`, subject to bounds (e.g., resistances must be positive).
     - If successful, it returns the optimized resistor values and optimization details.
@@ -795,7 +796,7 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
             [ERROR_DETAILS] `json.loads` fails, or required keys are missing from the input dictionaries/lists. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Try: Ensure both input strings are valid JSON and adhere to the specified data structures. [/ERROR_RECOVERY]
         ValueError: [ERRORS]
-            [ERROR_WHEN] When `simulate_circuit_resistance` encounters an error during optimization (e.g., invalid intermediate topology). [/ERROR_WHEN]
+            [ERROR_WHEN] When `get_resistance_between_nodes` encounters an error during optimization (e.g., invalid intermediate topology). [/ERROR_WHEN]
             [ERROR_DETAILS] The objective function will assign a large penalty, but persistent simulation errors can lead to optimization failure. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Try: Ensure the initial `topology` is valid and the bounds for resistor values are reasonable, as extreme values might cause simulation instability. [/ERROR_RECOVERY]
         RuntimeError: [ERRORS]
@@ -806,7 +807,7 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
 
     [LIMITATIONS] Known limitations:
     - Numerical optimization can get stuck in local minima if initial guesses are poor, or the solution space is complex.
-    - Requires a robust `simulate_circuit_resistance` function; errors in simulation propagate to the optimization.
+    - Requires a robust `get_resistance_between_nodes` function; errors in simulation propagate to the optimization.
     - Assumes the provided topology (connections) is correct, only optimizing resistor values.
     - Computationally intensive for very large circuits with many unknown resistors.
     [/LIMITATIONS]
@@ -831,7 +832,7 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
             for measurement in measurements_data:
                 try:
                     # Use the simulation tool to predict resistance
-                    predicted = simulate_circuit_resistance.execute(
+                    predicted = get_resistance_between_nodes(
                         topology=json.dumps(test_topology),
                         terminal_nodes=[measurement["node_a"], measurement["node_b"]],
                     )
@@ -915,7 +916,7 @@ def generate_test_measurements(topology: str, terminal_pairs: list[list[str]]) -
     [CONTEXTUAL] How this tool works:
     - Parses the input `topology` JSON string.
     - Iterates through each `terminal_pair` provided in the list.
-    - For each pair, it calls the `simulate_circuit_resistance` tool to calculate the equivalent resistance between those two nodes.
+    - For each pair, it calls the `get_resistance_between_nodes` tool to calculate the equivalent resistance between those two nodes.
     - Stores the calculated resistance along with the `node_a` and `node_b` in a list of measurement dictionaries.
     - If a simulation fails for a specific `terminal_pair`, it records an error message for that measurement.
     - Returns a JSON string containing the list of theoretical measurements.
@@ -951,21 +952,21 @@ def generate_test_measurements(topology: str, terminal_pairs: list[list[str]]) -
         json.JSONDecodeError: [BRIEF] If `topology` is not a valid JSON string.
                               [DETAILED] This occurs if the input `topology` string cannot be parsed into a valid JSON object, which is required for circuit definition.
         Exception: [BRIEF] General error during measurement generation.
-                   [DETAILED] Catches any other unforeseen errors that might occur during the iteration through terminal pairs or calls to `simulate_circuit_resistance`, returning an error message for the overall process. Specific measurement errors are handled per-pair.
+                   [DETAILED] Catches any other unforeseen errors that might occur during the iteration through terminal pairs or calls to `get_resistance_between_nodes`, returning an error message for the overall process. Specific measurement errors are handled per-pair.
 
     [PERFORMANCE] Performance notes:
-    - Time complexity: O(M * S), where M is the number of `terminal_pairs` and S is the time complexity of `simulate_circuit_resistance`.
+    - Time complexity: O(M * S), where M is the number of `terminal_pairs` and S is the time complexity of `get_resistance_between_nodes`.
     - Memory usage: Proportional to the size of the `topology` and the number of `terminal_pairs`.
-    - Network calls: None (assuming `simulate_circuit_resistance` is an internal function or tool).
+    - Network calls: None (assuming `get_resistance_between_nodes` is an internal function or tool).
     - File I/O: None.
 
     [LIMITATIONS] Known limitations:
-    - Relies entirely on the accuracy and robustness of the `simulate_circuit_resistance` tool.
-    - Does not validate the `topology` for circuit correctness (e.g., disconnected components, short circuits) beyond what `simulate_circuit_resistance` handles.
+    - Relies entirely on the accuracy and robustness of the `get_resistance_between_nodes` tool.
+    - Does not validate the `topology` for circuit correctness (e.g., disconnected components, short circuits) beyond what `get_resistance_between_nodes` handles.
     - Handles only resistance measurements; cannot generate other types of circuit measurements (e.g., voltage, current).
 
     [RELATED] Related tools:
-    - `simulate_circuit_resistance()`: Directly called by this tool to perform individual resistance calculations.
+    - `get_resistance_between_nodes()`: Directly called by this tool to perform individual resistance calculations.
     - `estimate_resistor_values()`: Can use the output of this tool as input for validation.
     - `validate_measurements()`: Can use the output of this tool to compare against actual measurements or another theoretical set.
     """
@@ -977,7 +978,7 @@ def generate_test_measurements(topology: str, terminal_pairs: list[list[str]]) -
                 continue
 
             try:
-                resistance = simulate_circuit_resistance(topology, pair)
+                resistance = get_resistance_between_nodes(topology, pair)
                 measurements.append(
                     {
                         "node_a": pair[0],

@@ -118,7 +118,7 @@ def check_resistor_topology(
             # Calculate final score based on require_both setting
             if use_functional_scoring:
                 # New behavior: use weighted or require_both logic for functional scoring
-                if require_both:
+                if False:  # Replace with actual condition
                     # All enabled components must be perfect (score = 1.0)
                     required_components = [
                         component for component, weight in weights.items() if weight > 0

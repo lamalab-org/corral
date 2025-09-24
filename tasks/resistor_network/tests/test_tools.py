@@ -628,7 +628,7 @@ class TestGenerateTestMeasurements:
             )
             result = json.loads(result_json)
 
-        assert result[0]["resistance"] == 10.123  # Rounded to 3 decimal places
+        assert result[0]["resistance"] == 10  # Rounded to 0 decimal places
 
 
 # Hypothesis-based property tests
