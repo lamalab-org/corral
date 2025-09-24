@@ -15,50 +15,58 @@ BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
 
 
 def check_resistor_topology(
-    expected_topology: dict[str, Any], tolerance: float = 0.1, require_both: bool = True
+    expected_topology: dict[str, Any],
+    tolerance: float = 0.1,
+    require_both: bool = True,
+    expected_measurements: list[dict[str, Any]] | None = None,
+    use_functional_scoring: bool = False,
+    topology_weight: float = 0.5,
+    functional_weight: float = 0.0,
+    exact_values_weight: float = 0.5,
 ) -> Callable[[str], float]:
     """
-    Returns a scoring function that checks if proposed topology matches expected one.
+    Enhanced scoring function that checks:
+    1. Topology structure (connections)
+    2. Functional behavior (does it produce expected measurements?)
+    3. Optionally: exact resistor values
 
     Args:
-        expected_topology: dict containing the correct circuit topology and resistor values
-        tolerance: Relative tolerance for resistor value comparison (default 10%)
-
-    Returns:
-        Scoring function that takes a topology JSON string/path and returns score 0.0-1.0
+        expected_topology: Expected circuit topology
+        tolerance: Tolerance for measurements and resistor values
+        require_both: Legacy parameter - ignored when use_functional_scoring=True
+        expected_measurements: List of expected resistance measurements
+        use_functional_scoring: Whether to use functional validation instead of exact values
+        topology_weight: Weight for topology structure score
+        functional_weight: Weight for functional behavior score
+        exact_values_weight: Weight for exact resistor values score
     """
-    logger.info(f"Creating topology checker with tolerance {tolerance}")
+    logger.info(
+        f"Creating enhanced topology checker - functional: {use_functional_scoring}"
+    )
 
     def score_fn(topology_input: str) -> float:
         try:
-            logger.info(f"check_resistor_topology: input={topology_input!r}")
+            logger.info(f"ENHANCED SCORING INPUT: {topology_input!r}")
+            logger.info(f"EXPECTED TOPOLOGY: {expected_topology}")
 
-            # Try to resolve as path first
-            resolved_input = smart_resolve_path(topology_input.strip())
-            logger.info(f"check_resistor_topology: resolved={resolved_input!r}")
-
-            # Load topology data
+            # Parse topology (same logic as before)
             topology_data = None
-            if Path(resolved_input).exists():
-                with Path(resolved_input).open() as f:
-                    topology_data = json.load(f)
-                logger.info("Loaded topology from file")
-            else:
-                # Try parsing as JSON string
+            input_stripped = topology_input.strip()
+
+            if input_stripped.startswith("{") and input_stripped.endswith("}"):
                 try:
-                    topology_data = json.loads(topology_input)
-                    logger.info("Parsed topology from JSON string")
-                except json.JSONDecodeError:
-                    topology_data = json.loads(resolved_input)
-                    logger.info("Parsed topology from resolved string")
+                    topology_data = json.loads(input_stripped)
+                    logger.info("Parsed topology from direct JSON string")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse as direct JSON: {e}")
+                    return 0.0
 
-            if not topology_data:
-                logger.error("No topology data found")
-                return 0.0
-
-            # Check if required keys exist
-            if "resistors" not in topology_data or "connections" not in topology_data:
-                logger.error("Missing required keys: resistors or connections")
+            if (
+                not topology_data
+                or "resistors" not in topology_data
+                or "connections" not in topology_data
+            ):
+                logger.error("Invalid topology data")
                 return 0.0
 
             proposed_resistors = topology_data["resistors"]
@@ -66,29 +74,159 @@ def check_resistor_topology(
             expected_resistors = expected_topology["resistors"]
             expected_connections = expected_topology["connections"]
 
-            # Score topology structure (connections)
+            logger.info(f"PROPOSED TOPOLOGY: {topology_data}")
+
+            # 1. Score topology structure (connections)
             topology_score = _score_topology_structure(
                 proposed_connections, expected_connections
             )
             logger.info(f"Topology structure score: {topology_score}")
 
-            # Score resistor values
-            resistor_score = _score_resistor_values(
-                proposed_resistors, expected_resistors, tolerance
+            scores = {"topology": topology_score}
+            weights = {"topology": topology_weight}
+
+            logger.info(
+                f"Function parameters - use_functional_scoring: {use_functional_scoring}, functional_weight: {functional_weight}, exact_values_weight: {exact_values_weight}"
             )
-            logger.info(f"Resistor values score: {resistor_score}")
 
-            if require_both:
-                # Both must be perfect
-                return 1.0 if (topology_score == 1.0 and resistor_score == 1.0) else 0.0
+            # 2. Score functional behavior
+            if (
+                use_functional_scoring
+                and expected_measurements
+                and functional_weight > 0
+            ):
+                functional_score = _score_functional_behavior(
+                    topology_data, expected_measurements, tolerance
+                )
+                scores["functional"] = functional_score
+                weights["functional"] = functional_weight
+                logger.info(f"Functional behavior score: {functional_score}")
+
+            # 3. Score exact resistor values (should be enabled by default for backward compatibility)
+            if exact_values_weight > 0:
+                exact_values_score = _score_resistor_values(
+                    proposed_resistors, expected_resistors, tolerance
+                )
+                scores["exact_values"] = exact_values_score
+                weights["exact_values"] = exact_values_weight
+                logger.info(f"Exact values score: {exact_values_score}")
             else:
-                # Either being perfect is enough
-                return 1.0 if (topology_score == 1.0 or resistor_score == 1.0) else 0.0
+                logger.info(
+                    f"Exact values scoring disabled (weight={exact_values_weight})"
+                )
 
-        except Exception:
+            # Calculate final score based on require_both setting
+            if use_functional_scoring:
+                # New behavior: use weighted or require_both logic for functional scoring
+                if require_both:
+                    # All enabled components must be perfect (score = 1.0)
+                    required_components = [
+                        component for component, weight in weights.items() if weight > 0
+                    ]
+                    all_perfect = all(
+                        scores[component] == 1.0 for component in required_components
+                    )
+                    final_score = 1.0 if all_perfect else 0.0
+                    logger.info(
+                        f"FUNCTIONAL REQUIRE_BOTH=True: All components perfect? {all_perfect}"
+                    )
+                else:
+                    # Use weighted scoring for functional mode
+                    total_weight = sum(weights.values())
+                    if total_weight == 0:
+                        logger.error("No scoring components enabled")
+                        return 0.0
+
+                    final_score = (
+                        sum(
+                            scores[component] * weight
+                            for component, weight in weights.items()
+                        )
+                        / total_weight
+                    )
+                    logger.info("FUNCTIONAL REQUIRE_BOTH=False: Using weighted scoring")
+            else:
+                # Original behavior: binary logic for backward compatibility
+                topology_score = scores.get("topology", 0.0)
+                resistor_score = scores.get("exact_values", 0.0)
+
+                if require_both:
+                    # Both topology AND resistors must be perfect
+                    final_score = (
+                        1.0
+                        if (topology_score == 1.0 and resistor_score == 1.0)
+                        else 0.0
+                    )
+                    logger.info(
+                        f"ORIGINAL REQUIRE_BOTH=True: topology={topology_score}, resistors={resistor_score}, result={final_score}"
+                    )
+                else:
+                    # Either topology OR resistors being perfect is enough
+                    final_score = (
+                        1.0 if (topology_score == 1.0 or resistor_score == 1.0) else 0.0
+                    )
+                    logger.info(
+                        f"ORIGINAL REQUIRE_BOTH=False: topology={topology_score}, resistors={resistor_score}, result={final_score}"
+                    )
+
+            logger.info(f"COMPONENT SCORES: {scores}")
+            logger.info(f"WEIGHTS: {weights}")
+            logger.info(f"FINAL SCORE: {final_score}")
+
+            return final_score
+
+        except Exception as e:
+            logger.error(f"ENHANCED SCORING ERROR: {e}", exc_info=True)
             return 0.0
 
     return score_fn
+
+
+def _score_functional_behavior(
+    topology_data: dict, expected_measurements: list[dict], tolerance: float
+) -> float:
+    """
+    Score how well the topology functionally matches expected resistance measurements.
+    Uses the existing _simulate_resistance function.
+    """
+    if not expected_measurements:
+        logger.warning("No expected measurements provided for functional scoring")
+        return 1.0  # Default to success if no measurements to check
+
+    scores = []
+
+    for measurement in expected_measurements:
+        try:
+            node_a = measurement["node_a"]
+            node_b = measurement["node_b"]
+            expected_resistance = measurement["resistance"]
+
+            # Simulate the resistance using existing function
+            predicted_resistance = _simulate_resistance(topology_data, node_a, node_b)
+
+            if expected_resistance == 0:
+                score = 1.0 if abs(predicted_resistance) < 1e-6 else 0.0
+            else:
+                relative_error = (
+                    abs(predicted_resistance - expected_resistance)
+                    / expected_resistance
+                )
+                # Give partial credit based on how close it is
+                score = max(0.0, 1.0 - relative_error / tolerance)
+
+            scores.append(score)
+            logger.info(
+                f"Functional test {node_a}-{node_b}: expected={expected_resistance}, "
+                f"predicted={predicted_resistance}, score={score}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to test measurement {measurement}: {e}")
+            scores.append(0.0)
+
+    final_functional_score = sum(scores) / len(scores) if scores else 0.0
+    logger.info(f"Overall functional score: {final_functional_score}")
+    return final_functional_score
 
 
 def _score_topology_structure(proposed: list, expected: list) -> float:

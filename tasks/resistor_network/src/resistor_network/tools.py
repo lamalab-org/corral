@@ -26,6 +26,7 @@ class CircuitTopology:
     connections: list[tuple[str, str, str]]  # (node1, node2, resistor_id)
 
 
+@tool
 def calculate_series_resistance(resistances: list[float]) -> float:
     """[BRIEF] Calculate total resistance of resistors connected in series. [/BRIEF]
 

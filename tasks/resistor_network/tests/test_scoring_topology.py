@@ -1,7 +1,6 @@
 import json
 import os
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 import pytest
 
@@ -234,25 +233,6 @@ class TestMainTopologyChecker:
         )
 
         assert checker(proposed_json) == 0.0  # Neither is perfect
-
-    def test_file_input(self):
-        """Test with file input"""
-        checker = check_resistor_topology(self.expected_topology)
-
-        topology_data = {
-            "resistors": {"R1": 100.0, "R2": 200.0},
-            "connections": [("A", "B", "R1"), ("B", "C", "R2")],
-        }
-
-        with NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(topology_data, f)
-            temp_path = f.name
-
-        try:
-            score = checker(temp_path)
-            assert score == 1.0
-        finally:
-            Path(temp_path).unlink()
 
     def test_malformed_json(self):
         """Test with malformed JSON"""
