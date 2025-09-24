@@ -26,7 +26,6 @@ class CircuitTopology:
     connections: list[tuple[str, str, str]]  # (node1, node2, resistor_id)
 
 
-@tool
 def calculate_series_resistance(resistances: list[float]) -> float:
     """[BRIEF] Calculate total resistance of resistors connected in series. [/BRIEF]
 
@@ -36,20 +35,55 @@ def calculate_series_resistance(resistances: list[float]) -> float:
     This is fundamental for analyzing any resistor network. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - When you have identified a series branch in a circuit
-    - To simplify complex networks by combining series elements
-    - As a building block for more complex resistance calculations
-    - When testing hypotheses about circuit topology
+    - Use when you have identified a series branch in a circuit.
+    - Best suited for simplifying complex networks by combining series elements.
+    - Recommended as a building block for more complex resistance calculations.
+    - Use when testing hypotheses about circuit topology where series connections are assumed.
     [/PROCEDURAL]
 
+    [CONTEXTUAL] How this tool works:
+    - Takes a list of individual resistance values.
+    - Sums all the provided resistance values.
+    - The result represents the total equivalent resistance.
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Identify a series connection of resistors within a larger circuit diagram. [/PREREQUISITE]
+        2. [CURRENT] Apply this tool to calculate their combined resistance. [/CURRENT]
+        3. [FOLLOW_UP] Replace the series resistors with their equivalent resistance in the circuit for further analysis or simplification. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - `calculate_series_resistance([10, 20, 30])`
+    - `calculate_series_resistance([5.5, 12.3, 7.2, 1.0])`
+    [/SYNTACTICAL]
+
     Args:
-        resistances: List of resistance values in ohms
+        resistances : [BRIEF] List of resistance values in ohms. [/BRIEF]
+                      [DETAILED] A list containing floating-point numbers, each representing the resistance of an individual resistor. All values must be positive. [/DETAILED]
+                      [SYNTACTIC] Format: `[float, float, ...]` [/SYNTACTIC]
+                      [EXAMPLES] `[10, 20, 30]`, `[100.5, 200]` [/EXAMPLES]
 
     Returns:
-        float: Total series resistance in ohms
+        float: [BRIEF] Total series resistance in ohms. [/BRIEF]
+               [DETAILED] A single floating-point number representing the sum of all input resistances. [/DETAILED]
+               [EXAMPLES] `60.0` (for `[10, 20, 30]`), `300.5` (for `[100.5, 200]`) [/EXAMPLES]
 
-    Example:
-        calculate_series_resistance([10, 20, 30]) -> 60.0
+    [RAISES] Exceptions:
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When an empty list of resistances is provided. [/ERROR_WHEN]
+            [ERROR_DETAILS] The sum of an empty list is undefined in this context, indicating no resistors are present. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure the `resistances` list contains at least one valid resistance value. [/ERROR_RECOVERY]
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When a resistance value is not a positive number. [/ERROR_WHEN]
+            [ERROR_DETAILS] Resistances in a physical circuit are typically positive. Zero or negative values would lead to non-physical results. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure all resistance values in the input list are positive floating-point numbers. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Assumes ideal resistors.
+    - Only applicable for purely series connections.
+    [/LIMITATIONS]
     """
     if not resistances:
         raise ValueError("No resistances provided")
@@ -63,23 +97,59 @@ def calculate_parallel_resistance(resistances: list[float]) -> float:
     [DETAILED] Computes the equivalent resistance when multiple resistors are connected
     across the same two nodes. In parallel configuration, current divides among the
     resistors, and the reciprocal of total resistance equals the sum of reciprocals
-    of individual resistances. [/DETAILED]
+    of individual resistances. This calculation is crucial for simplifying parallel branches in a circuit. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - When you have identified parallel branches in a circuit
-    - To simplify complex networks by combining parallel elements
-    - When testing different topology hypotheses
-    - As part of iterative network reduction
+    - Use when you have identified parallel branches in a circuit.
+    - Best suited for simplifying complex networks by combining parallel elements.
+    - Recommended when testing different topology hypotheses involving parallel connections.
+    - Use as part of iterative network reduction strategies.
     [/PROCEDURAL]
 
+    [CONTEXTUAL] How this tool works:
+    - Takes a list of individual resistance values.
+    - Calculates the reciprocal of each resistance.
+    - Sums these reciprocal values.
+    - Takes the reciprocal of the sum to find the total parallel resistance.
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Identify a parallel connection of resistors within a larger circuit diagram. [/PREREQUISITE]
+        2. [CURRENT] Apply this tool to calculate their combined resistance. [/CURRENT]
+        3. [FOLLOW_UP] Replace the parallel resistors with their equivalent resistance in the circuit for further analysis or simplification. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    - `calculate_parallel_resistance([10, 20])`
+    - `calculate_parallel_resistance([100, 200, 300])`
+    [/SYNTACTICAL]
+
     Args:
-        resistances: List of resistance values in ohms
+        resistances : [BRIEF] List of resistance values in ohms. [/BRIEF]
+                      [DETAILED] A list containing floating-point numbers, each representing the resistance of an individual resistor. All values must be positive. [/DETAILED]
+                      [SYNTACTIC] Format: `[float, float, ...]` [/SYNTACTIC]
+                      [EXAMPLES] `[10, 20]`, `[100.5, 200, 50]` [/EXAMPLES]
 
     Returns:
-        float: Total parallel resistance in ohms
+        float: [BRIEF] Total parallel resistance in ohms. [/BRIEF]
+               [DETAILED] A single floating-point number representing the equivalent resistance of all input resistors connected in parallel. [/DETAILED]
+               [EXAMPLES] `6.67` (for `[10, 20]`), `54.545` (for `[100, 200, 300]`) [/EXAMPLES]
 
-    Example:
-        calculate_parallel_resistance([10, 20]) -> 6.67
+    [RAISES] Exceptions:
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When an empty list of resistances is provided. [/ERROR_WHEN]
+            [ERROR_DETAILS] An empty list means no resistors are in parallel, making the calculation undefined. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure the `resistances` list contains at least one positive resistance value. [/ERROR_RECOVERY]
+        ValueError: [ERRORS]
+            [ERROR_WHEN] When any resistance value is zero or negative. [/ERROR_WHEN]
+            [ERROR_DETAILS] Resistances in parallel must be positive for a valid physical interpretation and to avoid division by zero. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Try: Ensure all resistance values in the input list are positive floating-point numbers. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Assumes ideal resistors.
+    - Only applicable for purely parallel connections.
+    [/LIMITATIONS]
     """
     if not resistances:
         raise ValueError("No resistances provided")
