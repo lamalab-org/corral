@@ -4,9 +4,30 @@ from pathlib import Path
 from loguru import logger
 
 MOLECULES = [
-    "CCO",  # Ethanol
+    "C=C(C1=CC=CC=C1)[C@@H]2CCC[C@@]2(O)C(F)(F)F",  # Carbony-En Reaction
+    "COC([C@]12CC=CC[C@H]1C(C2)=O)=O",  # Diels-Alder
+    "COC(C1(C=C1[Si](C)(C)C)/C=C/C2=CC=CC=C2)=O",  # Cycloaddition
+    "C=C(C1=CC=C(OC)C=C1)C2=CC=C(OC)C=C2",  # Peterson olefination
+    "C=C(C1=CC([C@H]([C@@]1(CC(C(CO[Si](C)(C(C)(C)C)C)=C)=O)[H])C)=O)C",  # Nozaki Hiyama Kishi Reaction
+    # Difficult ones
+    "O[C@H]1C[C@@H](O[C@@H]([C@@H]1C)/C=C(CO)/C)C/C=C/C=C/C(O)=O",  # Still-Gennari + Horner-Wadsworth-Emmons
+    "O[C@H]1C2=CC3=CC=CC=C3O[C@H]2CCC1",  # Baylis-Hillman Reaction + cyclic stereocontrol
+    "CC(c1c(CCCC2)c2c(OS(=O)(C(F)(F)F)=O)cc1)=O",
+    "COc1ccc2c(c1)cc(-c1ccccc1)n2Cc1cccc(-c2noc(=O)[nH]2)n1",
+    "O=S(NC1=CC2=C(OC3(CC2)CCC3)C(N4CCNCC4)=C1)(C5=C(F)C=CC=C5)=O",
 ]
-PRIZES = [100]
+PRIZES = [
+    300.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    9999.0,
+]
 
 
 def main():

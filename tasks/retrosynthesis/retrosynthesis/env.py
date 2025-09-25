@@ -1,5 +1,5 @@
 """
-Rethrosynthesis Benchmark Server
+Retrosynthesis Benchmark Server
 
 Command-line arguments:
     --host: Host address to run the server (default: value of CORRAL_HOST env var or '0.0.0.0').
@@ -7,22 +7,22 @@ Command-line arguments:
     --subtask_level: Whether to use subtask-level tasks (default: False).
 """
 
+# '{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}'
+
 import argparse
 import json
 import os
 from pathlib import Path
 
 from loguru import logger
-from rethrosynthesis.score import score_final
-from rethrosynthesis.tools import create_tools
+from retrosynthesis.score import score_final
+from retrosynthesis.tools import create_tools
 
 from corral.backend.env import Environment
 from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
 
-BASE_WORK_DIR = os.environ.get(
-    "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/spectra_elucidation"
-)
+BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/rethrosynthesis")
 
 SCORING_FUNCTIONS = {
     "final_score": score_final,

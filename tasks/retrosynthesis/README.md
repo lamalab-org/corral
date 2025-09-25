@@ -1,9 +1,9 @@
-# Environment with Rethrosynthesis Task
+# Environment with Retrosynthesis Task
 
 Install environment
 
 ```bash
-cd tasks/rethrosynthesis
+cd tasks/retrosynthesis
 uv venv --python 3.11.0
 uv sync
 ```
@@ -11,7 +11,7 @@ uv sync
 Run the environment
 
 ```bash
-cd tasks/rethrosynthesis
+cd tasks/retrosynthesis
 python -m env
 ```
 
