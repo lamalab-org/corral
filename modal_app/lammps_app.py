@@ -18,22 +18,30 @@ app = App(f"simagent{simagent_name}")
 volume_potential = modal.Volume.from_name("potentials", create_if_missing=True)
 volume_sim = modal.Volume.from_name("simulations", create_if_missing=True)
 volume_struct = modal.Volume.from_name("structures", create_if_missing=True)
+volume_test_files = modal.Volume.from_name("test_files", create_if_missing=True)
 
-with volume_potential.batch_upload() as batch:
-    batch.put_directory("./potentials/", "/")
+CPUS = 1
 
-with volume_struct.batch_upload() as batch:
-    batch.put_directory("./structures/", "/")
+# with volume_potential.batch_upload() as batch:
+#     batch.put_directory("./potentials/", "/")
+
+# with volume_struct.batch_upload() as batch:
+#     batch.put_directory("./structures/", "/")
+
+# with volume_test_files.batch_upload() as batch:
+#     batch.put_directory("./test_files/", "/")
 
 
 @app.function(
     image=lammps_image,
-    cpu=1.0,
+    cpu=CPUS,
+    timeout=3600,
     memory=5120,
     volumes={
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def run_lammps(input_file: str, log_file: str) -> None:
@@ -53,7 +61,7 @@ def run_lammps(input_file: str, log_file: str) -> None:
     directory_path = input_path.parent
     input_file_ = input_path.name
     try:
-        _run_lammps(input_file_, log_file, str(directory_path))
+        _run_lammps(input_file_, log_file, str(directory_path), CPUS)
         volume_sim.commit()
 
     except Exception as e:
