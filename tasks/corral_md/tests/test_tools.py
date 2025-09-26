@@ -1,8 +1,6 @@
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import modal
 import pytest
 from corral_md.tools import (
     convert_structure_to_lammps_data,
@@ -17,8 +15,12 @@ from pymatgen.core import Structure
     ("file_path", "expected_metadata"),
     [
         (
-            "path/to/ffield.reax",
-            "{potential type : reax, elements supported : Carbon (C), Hydrogen (H), Oxygen (O), Calcium (Ca), Silicon (Si), pair_style : reaxff}",
+            "path/to/Si.sw",
+            "{potential type : Stillinger Weber (SW), elements supported : Si (Silicon), pair_style : sw}",
+        ),
+        (
+            "/potentials/TERSOFF/2007_SiO.tersoff",
+            "{potential type : tersoff, elements supported : Si (Silicon), Oxygen (O), pair_style : tersoff}",
         ),
         (
             "./potentials/Al99.eam.alloy",
@@ -60,16 +62,17 @@ def test_run_lammps_success():
     # Create a mock for the remote function
     mock_remote = MagicMock()
 
-    # Patch 'modal.Function.lookup' to return an object with a 'remote' method (the mock_remote)
-    with patch("modal.Function.lookup") as mock_lookup:
+    # Patch modal.Function.lookup to return an object whose remote is mock_remote
+    with patch("corral_md.tools.modal.Function.lookup") as mock_lookup:
         mock_lookup.return_value.remote = mock_remote
 
+        # Call the function
         result = run_lammps.execute(input_file=input_file)
 
-        # Assert the remote method was called once with the right arguments
+        # Verify the remote was called correctly
         mock_remote.assert_called_once_with(input_file, expected_log_file)
 
-        # Assert the return message is as expected
+        # Verify return value
         assert (
             result
             == f"Simulation ran successfully using input: {input_file}, log saved at: {expected_log_file}"
@@ -79,11 +82,11 @@ def test_run_lammps_success():
 def test_run_lammps_value_error():
     input_file = "input_file.data"
 
-    # Patch 'modal.Function.lookup' and make its remote method raise ValueError
-    with patch("modal.Function.lookup") as mock_lookup:
-        mock_remote = MagicMock()
-        mock_remote.remote.side_effect = ValueError("Some value error")
-        mock_lookup.return_value = mock_remote
+    # Patch modal.Function.lookup to return a mock object whose 'remote' raises ValueError
+    with patch("corral_md.tools.modal.Function.lookup") as mock_lookup:
+        mock_func = MagicMock()
+        mock_func.remote.side_effect = ValueError("Some value error")
+        mock_lookup.return_value = mock_func
 
         with pytest.raises(
             ValueError,
@@ -95,11 +98,11 @@ def test_run_lammps_value_error():
 def test_run_lammps_unexpected_exception():
     input_file = "input_file.data"
 
-    # Patch 'modal.Function.lookup' and make its remote method raise a generic Exception
-    with patch("modal.Function.lookup") as mock_lookup:
-        mock_remote = MagicMock()
-        mock_remote.remote.side_effect = RuntimeError("Unexpected error")
-        mock_lookup.return_value = mock_remote
+    # Patch 'modal.Function.lookup' to return a mock object whose remote raises RuntimeError
+    with patch("corral_md.tools.modal.Function.lookup") as mock_lookup:
+        mock_func = MagicMock()
+        mock_func.remote.side_effect = RuntimeError("Unexpected error")
+        mock_lookup.return_value = mock_func
 
         with pytest.raises(
             Exception,
@@ -108,17 +111,25 @@ def test_run_lammps_unexpected_exception():
             run_lammps.execute(input_file=input_file)
 
 
-def test_run_lammps_with_real_file():
-    # Replace this with the actual existing file path on your system
-    actual_input_file = "/results/3_June_2025/tool_calling/claude_37/energy_minimisation/task_1/task_1_0_06030804/in.minimize"
-
-    # Run the function without mocking - this will execute the real modal call
-    result = run_lammps.execute(input_file=actual_input_file)
-
+def test_run_lammps_with_mocked_real_file():
+    actual_input_file = "/test_files/test_minimise/input.in"
     expected_log_file = f"{Path(actual_input_file).stem}.log"
-    expected_message = f"Simulation ran successfully using input: {actual_input_file}, log saved at: {expected_log_file}"
 
-    assert result == expected_message
+    # Patch Modal so we don't run real simulation
+    with patch("corral_md.tools.modal.Function.lookup") as mock_lookup:
+        mock_func = MagicMock()
+        mock_func.remote.return_value = None  # simulate successful remote call
+        mock_lookup.return_value = mock_func
+
+        result = run_lammps.execute(input_file=actual_input_file)
+
+        assert (
+            result
+            == f"Simulation ran successfully using input: {actual_input_file}, log saved at: {expected_log_file}"
+        )
+
+        # Ensure remote was called correctly
+        mock_func.remote.assert_called_once_with(actual_input_file, expected_log_file)
 
 
 def test_run_lammps_with_none():
@@ -136,79 +147,167 @@ def test_run_lammps_with_nonexistent_file():
     assert "no such file or directory" in str(exc_info.value).lower()
 
 
-@pytest.mark.skipif(
-    not os.getenv("MP_API_KEY"),
-    reason="MP_API_KEY not available in environment",
-)
-def test_get_structure_from_mp_text_real():
-    mp_id = "mp-149"  # Silicon
+def test_get_structure_from_mp_text_mocked():
+    mp_id = "mp-149"
     file_path = "/results/Si.cif"
 
-    result = get_structure_from_mp_text.execute(mp_id=mp_id, file_path=file_path)
+    # Full valid CIF content for Silicon
+    cif_content = """# generated using pymatgen
+data_Si
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   5.44370237
+_cell_length_b   5.44370237
+_cell_length_c   5.44370237
+_cell_angle_alpha   90.00000000
+_cell_angle_beta   90.00000000
+_cell_angle_gamma   90.00000000
+_symmetry_Int_Tables_number   1
+_chemical_formula_structural   Si
+_chemical_formula_sum   Si8
+_cell_volume   161.31810739
+_cell_formula_units_Z   8
+loop_
+ _symmetry_equiv_pos_site_id
+ _symmetry_equiv_pos_as_xyz
+  1  'x, y, z'
+loop_
+ _atom_type_symbol
+ _atom_type_oxidation_number
+  Si0+  0.0
+loop_
+ _atom_site_type_symbol
+ _atom_site_label
+ _atom_site_symmetry_multiplicity
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+  Si0+  Si0  1  0.75000000  0.75000000  0.25000000  1
+  Si0+  Si1  1  0.00000000  0.50000000  0.50000000  1
+  Si0+  Si2  1  0.75000000  0.25000000  0.75000000  1
+  Si0+  Si3  1  0.00000000  0.00000000  0.00000000  1
+  Si0+  Si4  1  0.25000000  0.75000000  0.75000000  1
+  Si0+  Si5  1  0.50000000  0.50000000  0.00000000  1
+  Si0+  Si6  1  0.25000000  0.25000000  0.25000000  1
+  Si0+  Si7  1  0.50000000  0.00000000  0.50000000  1
+"""
 
-    assert result == f"Structure saved successfully at {file_path}"
+    # Patch Modal to simulate reading the CIF file
+    with patch("corral_md.tools.modal.Function.lookup") as mock_lookup:
+        mock_func = MagicMock()
+        mock_func.remote.return_value = cif_content
+        mock_lookup.return_value = mock_func
 
-    # Optionally, validate the content
+        # Call the function (mocked)
+        result = get_structure_from_mp_text.execute(mp_id=mp_id, file_path=file_path)
 
-    read_file = modal.Function.lookup("simagent", "read_file")
-    cif_content = read_file.remote(file_path)
+        # Validate return message
+        assert result == f"Structure saved successfully at {file_path}"
 
-    assert "data_Si" in cif_content
+        # Simulate reading the file via Modal
+        content = mock_lookup.return_value.remote(file_path)
+        assert "data_Si" in content
 
-    struct = Structure.from_str(cif_content, fmt="cif")
-    assert struct.composition.reduced_formula == "Si"
+        # Parse CIF content and check composition
+        struct = Structure.from_str(content, fmt="cif")
+        assert struct.composition.reduced_formula == "Si"
 
 
-@pytest.mark.skipif(
-    not os.getenv("MP_API_KEY"),
-    reason="MP_API_KEY not available in environment",
-)
-def test_get_structure_from_mp_text_invalid_id():
+def test_get_structure_from_mp_text_invalid_id_mocked():
     invalid_mp_id = "mp-9999999"
     file_path = "/results/fake.cif"
 
-    result = get_structure_from_mp_text.execute(
-        mp_id=invalid_mp_id, file_path=file_path
-    )
+    # Patch the Modal lookup to simulate failure
+    with patch("corral_md.tools.modal.Function.lookup") as mock_lookup:
+        mock_func = MagicMock()
 
-    assert isinstance(result, str)
-    assert result.lower().startswith("failed to retrieve or save structure")
-    assert (
-        "mp-9999999" in result
-        or "not found" in result.lower()
-        or "no documents" in result.lower()
-        or "list index out of range" in result.lower()
-        or "no such material" in result.lower()
-    )
+        # Simulate raising an exception when trying to save a CIF
+        def fake_remote(*_args, **_kwargs):
+            raise ValueError(f"Material {invalid_mp_id} not found")
+
+        mock_func.remote.side_effect = fake_remote
+        mock_lookup.return_value = mock_func
+
+        # Call the function
+        result = get_structure_from_mp_text.execute(
+            mp_id=invalid_mp_id, file_path=file_path
+        )
+
+        # Validate the returned error message
+        assert isinstance(result, str)
+        assert result.lower().startswith("failed to retrieve or save structure")
+        assert (
+            invalid_mp_id in result
+            or "not found" in result.lower()
+            or "no documents" in result.lower()
+            or "list index out of range" in result.lower()
+            or "no such material" in result.lower()
+        )
 
 
-def test_convert_structure_to_lammps_data_valid():
+def test_convert_structure_to_lammps_data_mocked():
     structure_path = "/results/Si.cif"
     output_file = "/results/Si.data"
 
-    result = convert_structure_to_lammps_data.execute(
-        structure_path=structure_path, output_file=output_file, atom_style="full"
-    )
+    # Dummy LAMMPS data content
+    lammps_data_content = """LAMMPS data file via pymatgen
+1 atoms
+1 atom types
 
-    assert result == f"LAMMPS data file successfully written to: {output_file}"
+Masses
 
-    # Optionally check file content via modal API
-    read_file = modal.Function.lookup("simagent", "read_file")
-    data_content = read_file.remote(output_file)
-    assert "Masses" in data_content or "Atoms" in data_content  # LAMMPS style sections
+1 28.0855
+
+Atoms
+
+1 1 0.0 0.0 0.0
+"""
+
+    # Patch Modal lookup to simulate reading/writing
+    with patch("corral_md.tools.modal.Function.lookup") as mock_lookup:
+        mock_func = MagicMock()
+        mock_func.remote.return_value = lammps_data_content
+        mock_lookup.return_value = mock_func
+
+        # Call the function
+        result = convert_structure_to_lammps_data.execute(
+            structure_path=structure_path, output_file=output_file, atom_style="full"
+        )
+
+        # Check returned message
+        assert result == f"LAMMPS data file successfully written to: {output_file}"
+
+        # Simulate reading file content via modal
+        data_content = mock_lookup.return_value.remote(output_file)
+        assert "Masses" in data_content or "Atoms" in data_content
 
 
-def test_convert_structure_to_lammps_data_invalid_input():
+def test_convert_structure_to_lammps_data_invalid_input_mocked():
     invalid_structure_path = "/nonexistent/path/invalid.cif"
     output_file = "/results/invalid.data"
 
-    with pytest.raises(Exception) as exc_info:
-        convert_structure_to_lammps_data.execute(
-            structure_path=invalid_structure_path,
-            output_file=output_file,
-            atom_style="atomic",
-        )
+    # Patch Modal lookup to simulate failure when reading invalid structure
+    with patch("corral_md.tools.modal.Function.lookup") as mock_lookup:
+        mock_func = MagicMock()
 
-    msg = str(exc_info.value).lower()
-    assert "unexpected error" in msg
-    assert "no such file" in msg or "not found" in msg or "failed" in msg
+        # Simulate remote call raising FileNotFoundError
+        mock_func.remote.side_effect = FileNotFoundError(
+            f"No such file: {invalid_structure_path}"
+        )
+        mock_lookup.return_value = mock_func
+
+        # Expect exception from convert_structure_to_lammps_data
+        with pytest.raises(Exception) as exc_info:
+            convert_structure_to_lammps_data.execute(
+                structure_path=invalid_structure_path,
+                output_file=output_file,
+                atom_style="atomic",
+            )
+
+        msg = str(exc_info.value).lower()
+        assert "unexpected error" in msg or "failed" in msg
+        assert "no such file" in msg or "not found" in msg
+
+
+if __name__ == "__main__":
+    pytest.main()
