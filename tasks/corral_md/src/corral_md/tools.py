@@ -87,11 +87,11 @@ def get_potential_metadata(file_path: str) -> str:
         raise ValueError("File path must not be None or empty.")
 
     potential_name = file_path.split("/")[-1]
-    if potential_name == "ffield.reax":
-        return (
-            "{potential type : reax, elements supported : "
-            "Carbon (C), Hydrogen (H), Oxygen (O), Calcium (Ca), Silicon (Si), pair_style : reaxff}"
-        )
+
+    if potential_name == "Si.sw":
+        return "{potential type : Stillinger Weber (SW), elements supported : Si (Silicon), pair_style : sw}"
+    elif potential_name == "2007_SiO.tersoff":
+        return "{potential type : tersoff, elements supported : Si (Silicon), Oxygen (O), pair_style : tersoff}"
     elif potential_name == "Al99.eam.alloy":
         return "{potential type : EAM, elements supported : Al (Aluminum), pair_style : eam/alloy}"
     elif potential_name == "Cu_Zhou04.eam.alloy":
