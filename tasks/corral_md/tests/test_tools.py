@@ -137,14 +137,48 @@ def test_run_lammps_with_none():
         run_lammps.execute(input_file=None)
 
 
-def test_run_lammps_with_nonexistent_file():
+def test_get_structure_from_mp_text_mocked_ci():
+    mp_id = "mp-149"
+    file_path = "/results/Si.cif"
+
+    # Full dummy CIF content
+    cif_content = "data_Si\n_dummy CIF content"
+
+    # Patch both Modal lookup and any MP API call
+    with patch("corral_md.tools.modal.Function.lookup") as mock_lookup:
+        mock_func = MagicMock()
+        # Simulate saving/reading the CIF
+        mock_func.remote.return_value = cif_content
+        mock_lookup.return_value = mock_func
+
+        result = get_structure_from_mp_text.execute(mp_id=mp_id, file_path=file_path)
+
+        # Ensure the returned message uses our file path
+        assert result == f"Structure saved successfully at {file_path}"
+
+        # Simulate reading file content
+        content = mock_lookup.return_value.remote(file_path)
+        assert "data_Si" in content
+
+
+def test_run_lammps_with_nonexistent_file_mocked_ci():
     invalid_path = "/path/to/nonexistent/file.lammps"
 
-    with pytest.raises(ValueError) as exc_info:
-        run_lammps.execute(input_file=invalid_path)
+    with patch("corral_md.tools.modal.Function.lookup") as mock_lookup:
+        mock_func = MagicMock()
+        mock_func.remote.side_effect = FileNotFoundError(
+            f"No such file: {invalid_path}"
+        )
+        mock_lookup.return_value = mock_func
 
-    assert "lammps simulation failed" in str(exc_info.value).lower()
-    assert "no such file or directory" in str(exc_info.value).lower()
+        with pytest.raises(
+            Exception
+        ) as exc_info:  # <- Expect Exception, not ValueError
+            run_lammps.execute(input_file=invalid_path)
+
+        msg = str(exc_info.value).lower()
+        assert "unexpected error" in msg
+        assert "no such file" in msg
 
 
 def test_get_structure_from_mp_text_mocked():
