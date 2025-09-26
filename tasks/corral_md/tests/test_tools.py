@@ -226,13 +226,20 @@ loop_
   Si0+  Si7  1  0.50000000  0.00000000  0.50000000  1
 """
 
-    # Patch Modal to simulate reading the CIF file
-    with patch("corral_md.tools.modal.Function.lookup") as mock_lookup:
+    with (
+        patch("corral_md.tools.modal.Function.lookup") as mock_lookup,
+        patch(
+            "pymatgen.ext.matproj.MPRester.get_structure_by_material_id"
+        ) as mock_mprester,
+    ):
         mock_func = MagicMock()
         mock_func.remote.return_value = cif_content
         mock_lookup.return_value = mock_func
 
-        # Call the function (mocked)
+        # Mock MP API to return a dummy Structure
+        dummy_structure = Structure.from_str(cif_content, fmt="cif")
+        mock_mprester.return_value = dummy_structure
+
         result = get_structure_from_mp_text.execute(mp_id=mp_id, file_path=file_path)
 
         # Validate return message
