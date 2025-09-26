@@ -5,6 +5,7 @@ from typing import Any
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 from rdkit import Chem
+from retrosynthesis.constants import FG_PATTERNS, SUPPRESS_RULES
 from rxnutils.chem.reaction import ChemicalReaction
 
 from corral.utils.modal import remote_call
@@ -215,3 +216,176 @@ def apply_template_forward(reactants: str, template_id: str) -> list[str]:
     rxn = ChemicalReaction(reaction_data["mapped_rxn"])
     rxn.generate_reaction_template()
     return rxn.canonical_template.apply(reactants)
+
+
+def _fragment_mapped_smiles(mol: Chem.Mol, atom_indices: tuple[int, ...]) -> str:
+    """
+    Returns a fragment SMILES for the specified atoms with atom-map numbers set to
+    their original indices + 1. Only the fragment is emitted.
+    """
+    # Work on a copy to avoid mutating the caller's mol
+    mc = Chem.Mol(mol)
+    # Clear any pre-existing map numbers
+    for a in mc.GetAtoms():
+        a.SetAtomMapNum(0)
+    # Assign map numbers (index + 1 so it's easy to read)
+    for idx in atom_indices:
+        mc.GetAtomWithIdx(idx).SetAtomMapNum(idx + 1)
+    # Emit just the fragment; RDKit preserves atom-map numbers (":n") in SMILES
+    return Chem.MolFragmentToSmiles(
+        mc,
+        atomsToUse=list(atom_indices),
+        isomericSmiles=True,
+        canonical=True,
+        rootedAtAtom=atom_indices[0],
+        allHsExplicit=False,
+        allBondsExplicit=False,
+    )
+
+
+def _get_full_mapped_smiles(
+    mol: Chem.Mol, all_atom_indices: list[tuple[int, ...]]
+) -> str:
+    """
+    Returns the full molecule SMILES with atom-map numbers for all detected functional group atoms.
+    """
+    # Work on a copy to avoid mutating the caller's mol
+    mc = Chem.Mol(mol)
+    # Clear any pre-existing map numbers
+    for a in mc.GetAtoms():
+        a.SetAtomMapNum(0)
+
+    # Collect all unique atom indices from all functional groups
+    mapped_atoms = set()
+    for atom_indices in all_atom_indices:
+        mapped_atoms.update(atom_indices)
+
+    # Assign map numbers (index + 1 so it's easy to read)
+    for idx in sorted(mapped_atoms):
+        mc.GetAtomWithIdx(idx).SetAtomMapNum(idx + 1)
+
+    # Return the full molecule SMILES with mappings
+    return Chem.MolToSmiles(mc, isomericSmiles=True, canonical=True)
+
+
+def detect_fgs(smiles: str, collapse: bool = True):
+    """
+    Return a dict with:
+      - 'raw': list of {'group', 'positions', 'mapped_smiles', 'smarts'}
+      - 'collapsed': same structure with generic sub-matches suppressed (if collapse=True)
+    """
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError("Invalid SMILES")
+
+    raw = []
+    # Collect matches similar to your deprotection loop: uniquify across each pattern
+    for name, patt in FG_PATTERNS:
+        group_matches = set()
+        for match in mol.GetSubstructMatches(patt, uniquify=True):
+            group_matches.add(tuple(match))
+
+        raw.extend(
+            {
+                "group": name,
+                "positions": tup,  # atom indices in 'mol'
+                "mapped_smiles": _fragment_mapped_smiles(mol, tup),
+                "smarts": Chem.MolToSmarts(patt),
+            }
+            for tup in sorted(group_matches)
+        )
+
+    if not collapse:
+        return {"raw": raw, "collapsed": raw}
+
+    # Build quick lookup of hits per group
+    present = {}
+    for i, hit in enumerate(raw):
+        present.setdefault(hit["group"], []).append((i, set(hit["positions"])))
+
+    suppressed_idxs = set()
+    # Iterate in library order: earlier (more specific) groups suppress later generic ones
+    for parent, _ in FG_PATTERNS:
+        if parent not in present:
+            continue
+        children = SUPPRESS_RULES.get(parent, set())
+        par_hits = [atoms for _, atoms in present[parent]]
+        for child in children:
+            if child not in present:
+                continue
+            for ch_idx, ch_atoms in present[child]:
+                # suppress child if fully contained in any parent hit
+                if any(ch_atoms.issubset(pa) for pa in par_hits):
+                    suppressed_idxs.add(ch_idx)
+
+    collapsed = [hit for i, hit in enumerate(raw) if i not in suppressed_idxs]
+    return {"raw": raw, "collapsed": collapsed}
+
+
+def summarize_groups_with_full_mapping(smiles: str, result_dict, use_collapsed=True):
+    """
+    Enhanced version that includes the full molecule SMILES with all functional group atoms mapped.
+    Returns a dict where:
+    - Keys are mapped SMILES fragments
+    - Values are dicts containing:
+      - 'group': functional group name
+      - 'positions': tuple of atom indices
+      - 'full_mapped_smiles': full molecule with all functional group atoms mapped
+    """
+    data = result_dict["collapsed"] if use_collapsed else result_dict["raw"]
+
+    if not data:
+        return {"groups": {}, "full_mapped_smiles": smiles}
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return {"groups": {}, "full_mapped_smiles": smiles}
+
+    # Get all positions for full mapping
+    all_positions = [hit["positions"] for hit in data]
+    full_mapped_smiles = _get_full_mapped_smiles(mol, all_positions)
+
+    groups = {}
+    for hit in data:
+        mapped_smiles = hit["mapped_smiles"]
+        groups[mapped_smiles] = {
+            "group": hit["group"],
+            "positions": hit["positions"],
+            "smarts": hit["smarts"],
+        }
+
+    return {"groups": groups, "full_mapped_smiles": full_mapped_smiles}
+
+
+def get_molecule_summary(smiles: str, result_dict, use_collapsed=True) -> str:
+    """
+    Format a molecule's functional group analysis as a formatted string.
+
+    Args:
+        name: Name/identifier for the molecule
+        smiles: The original SMILES string
+        result_dict: Result from detect_functional_groups()
+        use_collapsed: Whether to use collapsed results
+
+    Returns:
+        Formatted string with molecule info and functional groups
+    """
+    lines = []
+    lines.append(f"{smiles}")
+
+    # Using the enhanced version with full mapping
+    summary = summarize_groups_with_full_mapping(smiles, result_dict, use_collapsed)
+    lines.append(f"Full mapped SMILES: {summary['full_mapped_smiles']}")
+    lines.append("Groups found:")
+
+    if summary["groups"]:
+        for mapped_smiles, info in summary["groups"].items():
+            # Convert 0-based positions to 1-based to match the atom map numbers in SMILES
+            mapped_positions = tuple(pos + 1 for pos in info["positions"])
+            lines.append(
+                f"  - {info['group']:16s} pos={mapped_positions}  frag={mapped_smiles}"
+            )
+    else:
+        lines.append("  - No functional groups detected")
+
+    return "\n".join(lines)

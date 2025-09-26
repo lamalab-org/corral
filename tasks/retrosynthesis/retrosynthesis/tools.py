@@ -2,11 +2,15 @@ import json
 from pathlib import Path
 from typing import Any
 
+from rdkit import Chem
+from rdkit.Chem.rdDeprotect import AllChem, Deprotect, rdDeprotect
 from retrosynthesis.types import FunctionalGroup
 from retrosynthesis.utils import (
     _is_buyable,
     apply_template_forward,
     apply_template_retro,
+    detect_fgs,
+    get_molecule_summary,
     search_catalog,
     species_match,
 )
@@ -197,6 +201,66 @@ def cas_to_smiles(cas_number: str) -> str:
     )
 
 
+@tool
+def deprotect_molecule(molecule_smiles: str) -> str:
+    mol = Chem.MolFromSmiles(molecule_smiles)
+    if mol is None:
+        raise ValueError("Invalid SMILES string provided.")
+    return Deprotect(mol)
+
+
+@tool
+def detect_pgs_with_positions(smiles: str) -> dict[str, Any]:
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError("Invalid SMILES")
+
+    # Make a copy with atom-map numbers equal to (index+1)
+    mol_mapped = Chem.Mol(mol)
+    for i, a in enumerate(mol_mapped.GetAtoms()):
+        a.SetAtomMapNum(i + 1)  # map numbers show in SMILES
+
+    mapped_smiles = Chem.MolToSmiles(mol_mapped, isomericSmiles=True)
+
+    results = []
+    for dep in rdDeprotect.GetDeprotections():
+        # Build reaction from the catalog entry and use each reactant template as a query
+        rxn = AllChem.ReactionFromSmarts(dep.reaction_smarts)
+        reactant_templates = [
+            rxn.GetReactantTemplate(i) for i in range(rxn.GetNumReactantTemplates())
+        ]
+
+        # Collect all unique matches (as tuples of atom indices) across all reactant templates
+        group_matches = set()
+        for rt in reactant_templates:
+            for match in mol.GetSubstructMatches(rt, uniquify=True):
+                group_matches.add(tuple(match))
+
+        if group_matches:
+            results.append(
+                {
+                    "abbrev": dep.abbreviation,  # e.g., Boc, Fmoc, Cbz, Bn
+                    "name": dep.full_name,  # human-readable
+                    "class": dep.deprotection_class,  # amine, alcohol, etc.
+                    "positions": sorted(
+                        group_matches
+                    ),  # tuples of 0-based atom indices in 'mol'
+                }
+            )
+
+    return {
+        "input_smiles": smiles,
+        "mapped_smiles": mapped_smiles,
+        "protecting_groups": results,
+    }
+
+
+@tool
+def detect_functional_groups(smiles: str) -> str:
+    res = detect_fgs(smiles)
+    return get_molecule_summary(smiles, res)
+
+
 def create_tools() -> dict[str, Tool]:
     """Create a dictionary of all available tools for the agent environment"""
     return {
@@ -207,6 +271,9 @@ def create_tools() -> dict[str, Tool]:
         "search_catalog": search_catalog_by_cas,
         "is_buyable": is_buyable,
         "suggest_protecting_groups": suggest_protecting_groups,
+        "deprotect_molecule": deprotect_molecule,
+        "detect_protection_groups": detect_pgs_with_positions,
+        "detect_functional_groups": detect_functional_groups,
         "smiles_to_cas": smiles_to_cas,
         "cas_to_smiles": cas_to_smiles,
     }
