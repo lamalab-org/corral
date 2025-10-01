@@ -513,8 +513,18 @@ def _create_fit_plot(
     y_pred: np.ndarray,
     exp_name: str,
     metadata: dict,
+    save_path: str = None,
 ) -> str:
-    """Create fit visualization and return as base64 string."""
+    """Create fit visualization and return as base64 string.
+    
+    Args:
+        time: Time points
+        y_exp: Experimental data
+        y_pred: Model predictions  
+        exp_name: Experiment name
+        metadata: Experimental metadata
+        save_path: Optional path to save plot file
+    """
     residuals = y_exp - y_pred
     r2 = 1 - np.sum(residuals ** 2) / np.sum((y_exp - np.mean(y_exp)) ** 2)
     rmse = np.sqrt(np.mean(residuals ** 2))
@@ -548,6 +558,10 @@ def _create_fit_plot(
     ax2.grid(alpha=0.3, linestyle="--")
     
     plt.tight_layout()
+    
+    # Save to file if requested
+    if save_path:
+        plt.savefig(save_path, format="png", dpi=150, bbox_inches="tight")
     
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
@@ -665,6 +679,17 @@ def fit_single_experiment(
             "y_pred": result["y_pred"],
         }
         
+        # Create and save fit plot
+        plot_filename = f"fit_plot_{exp_name}.png"
+        _create_fit_plot(
+            np.array(exp_data["time"]),
+            np.array(exp_data["oxygen"]),
+            np.array(result["y_pred"]),
+            exp_name,
+            exp_data["metadata"],
+            save_path=plot_filename,
+        )
+        
         # Save results
         with open(results_path, 'w') as f:
             json.dump(all_results, f, indent=2)
@@ -673,7 +698,8 @@ def fit_single_experiment(
             f"Fit results for {exp_name}:\n"
             f"  R² = {result['r2']:.4f}\n"
             f"  RMSE = {np.sqrt(result['rss'] / len(result['y_pred'])):.4f} µM\n"
-            f"  RSS = {result['rss']:.2f}"
+            f"  RSS = {result['rss']:.2f}\n"
+            f"  Plot saved to: {plot_filename}"
         )
         
     except Exception as e:
@@ -696,8 +722,9 @@ def fit_all_experiments(data_path: str, network_path: str, results_path: str) ->
         all_results = {"experiments": {}}
         successful = 0
         total_rss = 0.0
+        plots_saved = []
         
-        for exp_name, exp_data in data.items():
+        for i, (exp_name, exp_data) in enumerate(data.items()):
             result = fit_reaction_network(
                 np.array(exp_data["time"]),
                 np.array(exp_data["oxygen"]),
@@ -712,6 +739,19 @@ def fit_all_experiments(data_path: str, network_path: str, results_path: str) ->
                 "params": result.get("params", {}),
                 "y_pred": result.get("y_pred", []),
             }
+            
+            # Save plots for first 5 experiments for inspection
+            if result.get("success", False) and i < 5:
+                plot_filename = f"fit_plot_{exp_name}.png"
+                _create_fit_plot(
+                    np.array(exp_data["time"]),
+                    np.array(exp_data["oxygen"]),
+                    np.array(result["y_pred"]),
+                    exp_name,
+                    exp_data["metadata"],
+                    save_path=plot_filename,
+                )
+                plots_saved.append(plot_filename)
             
             if result.get("success", False):
                 successful += 1
@@ -730,11 +770,14 @@ def fit_all_experiments(data_path: str, network_path: str, results_path: str) ->
         with open(results_path, 'w') as f:
             json.dump(all_results, f, indent=2)
         
+        plot_info = f"\n  Plots saved: {', '.join(plots_saved)}" if plots_saved else ""
+        
         return (
             f"Fitted all experiments:\n"
             f"  Successful: {successful}/{len(data)}\n"
             f"  Total RSS: {total_rss:.2f}\n"
             f"  Average RSS: {avg_rss:.2f}"
+            f"{plot_info}"
         )
         
     except Exception as e:
@@ -915,13 +958,15 @@ def analyze_fit_with_vision(
         if not result.get("success"):
             return "Cannot analyze: fit failed"
         
-        # Create plot
+        # Create plot and save to file
+        plot_filename = f"fit_plot_{exp_name}.png"
         plot_b64 = _create_fit_plot(
             np.array(exp_data["time"]),
             np.array(exp_data["oxygen"]),
             np.array(result["y_pred"]),
             exp_name,
             exp_data["metadata"],
+            save_path=plot_filename,
         )
         
         # Call vision model
