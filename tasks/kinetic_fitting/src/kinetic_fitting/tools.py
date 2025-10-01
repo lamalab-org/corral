@@ -6,8 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Use non-GUI backend to prevent threading issues
 import matplotlib.pyplot as plt
+
+import numpy as np
 import io
 import base64
 import h5py
