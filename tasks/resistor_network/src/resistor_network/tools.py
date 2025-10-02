@@ -900,11 +900,9 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
 def generate_test_measurements(topology: str, terminal_pairs: list[list[str]]) -> str:
     """[BRIEF] Generate theoretical measurements for a given circuit topology. [/BRIEF]
 
-        [DETAILED] Calculates what the resistance measurements would be between specified
-    terminal pairs for a given circuit topology. This tool is exceptionally useful
-    for testing your circuit analysis tools, understanding the behavior of different
-    topologies, and generating synthetic datasets for validation or educational purposes.
-    It provides a ground truth for a given circuit design. [/DETAILED]
+        [DETAILED] Calculates what the resistance measurements would be between specified terminal pairs for a given circuit topology.
+        This tool is useful for testing your circuit analysis tools, understanding the behavior of different topologies.
+        It provides a ground truth for a given circuit design. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use to understand what resistance measurements a proposed or known topology would produce.
