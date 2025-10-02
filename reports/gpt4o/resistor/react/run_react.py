@@ -21,7 +21,7 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = CorralRouter(base_url="http://localhost:8000")
+    interface = CorralRouter(base_url="http://localhost:8001")
     wandblogger = CorralWandbLogger(
         project="corral_ml",
         group="tool_description_ablation",
@@ -34,8 +34,8 @@ def run_benchmark(
     logger.info(f"Starting benchmark with model: {model}")
     result = runner.bench(
         task_ids,
-        trials_per_task=1,
-        k_values=[1],
+        trials_per_task=5,
+        k_values=[1, 2, 3, 4, 5],
         verbose=True,
         tool_verbosity=verbose,
     )
@@ -54,7 +54,7 @@ if __name__ == "__main__":
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
             model = "gpt-4o-2024-08-06"
-            run_name = f"gpt4o-react-ml_env-{verbose}_verbosity"
+            run_name = f"gpt4o-react-resistor_env-{verbose}_verbosity"
             run_benchmark(model=model, run_name=run_name, verbose=verbose)
 
         except Exception as e:

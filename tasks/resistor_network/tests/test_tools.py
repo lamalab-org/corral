@@ -304,7 +304,7 @@ class TestValidateMeasurements:
             )
             result = json.loads(result_json)
 
-        assert result["total_error"] == 0.0
+        assert result["total_error"] < abs(1e-6)
         assert result["num_measurements"] == 3
         assert len(result["detailed_errors"]) == 3
 

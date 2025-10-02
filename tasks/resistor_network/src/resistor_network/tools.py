@@ -33,13 +33,11 @@ def calculate_series_resistance(resistances: list[float]) -> float:
 
     [DETAILED] Computes the equivalent resistance when multiple resistors are connected
     end-to-end in a single path. In series configuration, current flows through each
-    resistor sequentially, and the total resistance is the sum of individual resistances.
-    This is fundamental for analyzing any resistor network. [/DETAILED]
+    resistor sequentially, and the total resistance is the sum of individual resistances.[/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use when you have identified a series branch in a circuit.
     - Best suited for simplifying complex networks by combining series elements.
-    - Recommended as a building block for more complex resistance calculations.
     - Use when testing hypotheses about circuit topology where series connections are assumed.
     [/PROCEDURAL]
 
@@ -50,9 +48,9 @@ def calculate_series_resistance(resistances: list[float]) -> float:
     [/CONTEXTUAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. [PREREQUISITE] Identify a series connection of resistors within a larger circuit diagram. [/PREREQUISITE]
+        1. [PREREQUISITE] Identify a series connection of resistors within a larger circuit. [/PREREQUISITE]
         2. [CURRENT] Apply this tool to calculate their combined resistance. [/CURRENT]
-        3. [FOLLOW_UP] Replace the series resistors with their equivalent resistance in the circuit for further analysis or simplification. [/FOLLOW_UP]
+        3. [FOLLOW_UP] Consider the series resistors with their equivalent resistance in the circuit for further analysis or simplification. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
@@ -105,7 +103,6 @@ def calculate_parallel_resistance(resistances: list[float]) -> float:
     - Use when you have identified parallel branches in a circuit.
     - Best suited for simplifying complex networks by combining parallel elements.
     - Recommended when testing different topology hypotheses involving parallel connections.
-    - Use as part of iterative network reduction strategies.
     [/PROCEDURAL]
 
     [CONTEXTUAL] How this tool works:
@@ -740,7 +737,7 @@ def propose_simple_topology(num_resistors: int, topology_type: str) -> str:
 
 @tool
 def estimate_resistor_values(topology: str, measurements: str) -> str:
-    """[BRIEF] Estimate resistor values using numerical optimization (robust approach). [/BRIEF]
+    """[BRIEF] Estimate resistor values using numerical optimization. [/BRIEF]
 
         [DETAILED] Utilizes the SciPy `minimize` function to find the optimal resistor values
     that minimize the total squared error between the resistance predicted by the
