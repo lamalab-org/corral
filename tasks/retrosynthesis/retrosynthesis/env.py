@@ -7,8 +7,6 @@ Command-line arguments:
     --subtask_level: Whether to use subtask-level tasks (default: False).
 """
 
-# '{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}'
-
 import argparse
 import json
 import os

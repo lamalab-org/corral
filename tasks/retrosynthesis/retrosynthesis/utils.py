@@ -37,9 +37,14 @@ def apply_template_retro(product_smiles: str, template_id: str) -> list[str]:
         list[str]: A list of SMILES strings representing the predicted reactants.
     """
     reaction_data = search_by_template(template_id)
-    rxn = ChemicalReaction(reaction_data["mapped_rxn"])
-    rxn.generate_reaction_template()
-    return rxn.retro_template.apply(product_smiles)
+    try:
+        rxn = ChemicalReaction(reaction_data["mapped_rxn"])
+        rxn.generate_reaction_template()
+        return rxn.retro_template.apply(product_smiles)
+    except Exception as e:
+        raise Exception(
+            f"Error applying template {template_id} to {product_smiles}: {e}"
+        ) from e
 
 
 def extract_chemical_info(element: Tag) -> dict[str, Any]:
@@ -123,16 +128,19 @@ def search_catalog(cas: str) -> list[dict[str, Any]] | str:
     """Searches a catalog for available precursors. Returns a list of chemical info dicts or a not-found message."""
 
     sleep(5)
-    response = make_api_request(
-        url=f"https://www.chemicalsuppliers.com/buy-?cas_numbers%5B%5D={cas}&physical_state_filter=all",
-        method="GET",
-        headers=HEADERS,
-        params={},
-        verbose=False,
-        json=False,
-    )
-    chemicals = extract_chemicals(response)
-    return chemicals if chemicals else []
+    try:
+        response = make_api_request(
+            url=f"https://www.chemicalsuppliers.com/buy-?cas_numbers%5B%5D={cas}&physical_state_filter=all",
+            method="GET",
+            headers=HEADERS,
+            params={},
+            verbose=False,
+            json=False,
+        )
+        chemicals = extract_chemicals(response)
+        return chemicals if chemicals else []
+    except Exception as e:
+        raise Exception(f"Error searching catalog for CAS {cas}: {e}") from e
 
 
 def _is_buyable(smiles: str) -> bool:
@@ -213,9 +221,14 @@ def apply_template_forward(reactants: str, template_id: str) -> list[str]:
         list[str]: The predicted product SMILES strings.
     """
     reaction_data = search_by_template(template_id)
-    rxn = ChemicalReaction(reaction_data["mapped_rxn"])
-    rxn.generate_reaction_template()
-    return rxn.canonical_template.apply(reactants)
+    try:
+        rxn = ChemicalReaction(reaction_data["mapped_rxn"])
+        rxn.generate_reaction_template()
+        return rxn.canonical_template.apply(reactants)
+    except Exception as e:
+        raise Exception(
+            f"Error applying template {template_id} to {reactants}: {e}"
+        ) from e
 
 
 def _fragment_mapped_smiles(mol: Chem.Mol, atom_indices: tuple[int, ...]) -> str:
