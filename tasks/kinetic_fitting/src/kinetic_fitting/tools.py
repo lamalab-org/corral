@@ -1,14 +1,28 @@
 """Tools for kinetic model fitting and analysis."""
 
+import os
 import json
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Set matplotlib backend environment variables before any matplotlib imports
+os.environ['MPLBACKEND'] = 'Agg'
+os.environ['DISPLAY'] = ''  # Disable display
+
 import matplotlib
 matplotlib.use('Agg')  # Use non-GUI backend to prevent threading issues
 import matplotlib.pyplot as plt
+
+# Additional safety: explicitly configure pyplot for non-interactive use
+plt.ioff()  # Turn off interactive mode
+
+# Import threading to help with matplotlib threading issues
+import threading
+
+# Create a lock for matplotlib operations
+_matplotlib_lock = threading.Lock()
 
 import numpy as np
 import io
@@ -20,6 +34,14 @@ from scipy.stats import linregress
 
 from corral.backend.tool import tool, Tool
 from litellm import completion
+
+
+def _get_persistent_output_dir() -> Path:
+    """Get or create persistent output directory for plots and results."""
+    # Use the task directory's parent to ensure persistence across runs
+    output_dir = Path(__file__).parent.parent.parent / "persistent_outputs"
+    output_dir.mkdir(exist_ok=True)
+    return output_dir
 
 
 @dataclass
@@ -39,7 +61,7 @@ class Reaction:
         equation = rxn_dict["equation"]
         
         if "->" not in equation:
-            raise ValueError(f"Invalid equation format: {equation}")
+            raise ValueError(f"Invalid equation format: '{equation}'. Must be a chemical equation with -> arrow (e.g. 'A + B -> C + D'), not a rate expression (e.g. 'k*A*B').")
         
         left, right = equation.split("->")
         reactants = [s.strip() for s in left.split("+")]
@@ -295,6 +317,12 @@ def save_reaction_network(network_path: str, network: Dict[str, Any]) -> None:
     """Save reaction network to JSON file."""
     with open(network_path, 'w') as f:
         json.dump(network, f, indent=2)
+        
+    # Also save to persistent directory
+    persistent_dir = _get_persistent_output_dir()
+    persistent_network_path = persistent_dir / "current_network.json"
+    with open(persistent_network_path, 'w') as f:
+        json.dump(network, f, indent=2)
 
 
 def create_ode_system(
@@ -338,6 +366,9 @@ def create_ode_system(
                             rate *= y[species_idx[reactant]] ** 2
                         else:
                             rate *= y[species_idx[reactant]]
+                    elif reactant in ["H2O", "H+"]:
+                        # Water and H+ are in large excess, treat as constants
+                        rate *= 1.0  # No concentration dependence
         
             for species, coeff in rxn.stoichiometry.items():
                 if species in species_idx:
@@ -353,7 +384,7 @@ def fit_reaction_network(
     oxygen_exp: np.ndarray,
     reaction_network: dict,
     experimental_conditions: dict,
-    maxiter: int = 30,  # Reduced from 100
+    maxiter: int = 100,  # Increased for better optimization
 ) -> dict:
     """Fit reaction network parameters to experimental oxygen evolution data."""
     ode_func, species_list, species_idx = create_ode_system(
@@ -397,10 +428,47 @@ def fit_reaction_network(
                 )
             
             o2_pred = y_pred[:, species_idx["O2"]] if "O2" in species_idx else np.zeros_like(time_exp)
-            rss = np.sum((oxygen_exp - o2_pred) ** 2)
             
-            if np.any(y_pred < -1e-6):
-                rss += 1e10
+            # Multiple checks for poor solutions
+            o2_range = np.max(o2_pred) - np.min(o2_pred)
+            o2_max = np.max(o2_pred)
+            o2_mean = np.mean(o2_pred)
+            exp_range = np.max(oxygen_exp) - np.min(oxygen_exp)
+            exp_max = np.max(oxygen_exp)
+            
+            # Very harsh penalties for different types of bad solutions
+            penalty_factor = 0
+            
+            # Penalty 1: Essentially zero solutions (all values near zero)
+            if o2_max < 0.01 * exp_max or o2_max < 0.05:
+                penalty_factor += 1e10  # Massive penalty for zero solutions
+                
+            # Penalty 2: Flat line solutions (no dynamics)
+            elif o2_range < 0.02 * exp_range or o2_range < 0.2:
+                penalty_factor += 1e9  # Huge penalty for flat solutions
+                
+            # Penalty 3: Solutions that don't reach reasonable magnitude
+            elif o2_max < 0.1 * exp_max:
+                penalty_factor += 1e8  # Large penalty for too-small solutions
+                
+            # Penalty 4: Solutions with wrong trend (decreasing when should increase)
+            if len(o2_pred) > 2:
+                if o2_pred[-1] < o2_pred[1]:  # Final < early value
+                    penalty_factor += 1e7
+            
+            if penalty_factor > 0:
+                rss = penalty_factor
+            else:
+                # Normal RSS calculation only for reasonable solutions
+                rss = np.sum((oxygen_exp - o2_pred) ** 2)
+                
+                # Add smaller penalties for fine-tuning
+                if np.any(y_pred < -1e-6):
+                    rss += 1e5  # Penalty for negative concentrations
+                    
+                # Bonus for solutions that show proper growth curves
+                if o2_pred[-1] > 2 * o2_pred[0] and o2_range > 0.5 * exp_range:
+                    rss *= 0.9  # Small bonus for good growth behavior
             
             return rss
             
@@ -411,9 +479,9 @@ def fit_reaction_network(
         result = differential_evolution(
             objective, bounds, 
             maxiter=maxiter, 
-            popsize=10,  # Reduced from 15
+            popsize=15,  # Increased population size
             seed=42, workers=1, updating="deferred",
-            atol=1e-3, tol=0.05,  # Relaxed tolerances
+            atol=1e-6, tol=0.01,  # Tightened tolerances
         )
         
         params_dict = {}
@@ -433,30 +501,67 @@ def fit_reaction_network(
         
         o2_pred = y_final[:, species_idx["O2"]] if "O2" in species_idx else np.zeros_like(time_exp)
         
-        # Calculate R²
-        residuals = oxygen_exp - o2_pred
-        r2 = 1 - np.sum(residuals ** 2) / np.sum((oxygen_exp - np.mean(oxygen_exp)) ** 2)
+        # Check if this is a reasonable solution before returning success
+        o2_range = np.max(o2_pred) - np.min(o2_pred)
+        o2_max = np.max(o2_pred)
+        exp_range = np.max(oxygen_exp) - np.min(oxygen_exp)
+        exp_max = np.max(oxygen_exp)
+        
+        # Determine if solution is acceptable
+        solution_acceptable = True
+        failure_reason = ""
+        
+        if o2_max < 0.01 * exp_max or o2_max < 0.05:
+            solution_acceptable = False
+            failure_reason = "Solution essentially zero"
+        elif o2_range < 0.02 * exp_range or o2_range < 0.2:
+            solution_acceptable = False  
+            failure_reason = "Solution is flat line"
+        elif o2_max < 0.1 * exp_max:
+            solution_acceptable = False
+            failure_reason = "Solution magnitude too small"
+        elif result.fun > 1e7:  # If RSS is very high (penalty was applied)
+            solution_acceptable = False
+            failure_reason = "High RSS indicates penalty was applied"
+        
+        # Calculate R² only for reasonable solutions
+        if solution_acceptable:
+            residuals = oxygen_exp - o2_pred
+            r2 = 1 - np.sum(residuals ** 2) / np.sum((oxygen_exp - np.mean(oxygen_exp)) ** 2)
+            
+            # Additional R² check
+            if r2 < -1.0:  # R² shouldn't be extremely negative
+                solution_acceptable = False
+                failure_reason = f"R² too negative: {r2:.3f}"
+        else:
+            r2 = -999.0  # Clearly bad R²
         
         return {
             "params": params_dict,
             "rss": result.fun,
             "r2": r2,
             "y_pred": o2_pred.tolist(),
-            "success": result.success,
+            "success": result.success and solution_acceptable,
             "species_list": species_list,
             "full_solution": y_final.tolist(),
             "species_idx": species_idx,
+            "failure_reason": failure_reason if not solution_acceptable else "",
+            "o2_range": o2_range,
+            "o2_max": o2_max,
         }
         
     except Exception as e:
         return {
             "params": {},
             "rss": 1e10,
-            "r2": 0.0,
+            "r2": -999.0,
             "y_pred": np.zeros_like(time_exp).tolist(),
             "success": False,
             "species_list": species_list,
             "error": str(e),
+            "failure_reason": f"Exception during fitting: {str(e)}",
+            "o2_range": 0.0,
+            "o2_max": 0.0,
         }
 
 
@@ -525,50 +630,149 @@ def _create_fit_plot(
         metadata: Experimental metadata
         save_path: Optional path to save plot file
     """
-    residuals = y_exp - y_pred
-    r2 = 1 - np.sum(residuals ** 2) / np.sum((y_exp - np.mean(y_exp)) ** 2)
-    rmse = np.sqrt(np.mean(residuals ** 2))
-    
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), height_ratios=[3, 1])
-    
-    ax1.scatter(time, y_exp, alpha=0.6, s=30, label="Experimental", color="#1f77b4", zorder=3)
-    ax1.plot(time, y_pred, linewidth=2.5, label="Model", color="#ff7f0e", zorder=2)
-    ax1.set_ylabel("[O₂] (µM)", fontsize=12, fontweight="bold")
-    ax1.set_title(f"{exp_name}\nR² = {r2:.4f}, RMSE = {rmse:.2f} µM", fontsize=13, fontweight="bold")
-    ax1.legend(fontsize=11, frameon=True, shadow=True)
-    ax1.grid(alpha=0.3, linestyle="--")
-    
-    conditions = (
-        f"[Ru] = {metadata.get('c_Ru', '?')} µM  |  "
-        f"[S₂O₈²⁻] = {metadata.get('c_S2O8', '?')} µM  |  "
-        f"Power = {metadata.get('irradiance', '?')} W/m²  |  "
-        f"pH = {metadata.get('pH', '?')}"
-    )
-    ax1.text(
-        0.02, 0.98, conditions, transform=ax1.transAxes,
-        fontsize=9, verticalalignment="top",
-        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8)
-    )
-    
-    ax2.scatter(time, residuals, alpha=0.6, s=20, color="#d62728", zorder=3)
-    ax2.axhline(y=0, color="black", linestyle="--", linewidth=1.5, zorder=2)
-    ax2.fill_between(time, residuals, 0, alpha=0.2, color="#d62728")
-    ax2.set_xlabel("Time (s)", fontsize=12, fontweight="bold")
-    ax2.set_ylabel("Residuals (µM)", fontsize=11)
-    ax2.grid(alpha=0.3, linestyle="--")
-    
-    plt.tight_layout()
-    
-    # Save to file if requested
-    if save_path:
-        plt.savefig(save_path, format="png", dpi=150, bbox_inches="tight")
-    
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-    plt.close()
-    buf.seek(0)
-    
-    return base64.b64encode(buf.read()).decode("utf-8")
+    with _matplotlib_lock:
+        # Ensure matplotlib works properly in threads by forcing backend
+        import matplotlib
+        matplotlib.use('Agg', force=True)
+        import matplotlib.pyplot as plt
+        plt.ioff()
+        
+        residuals = y_exp - y_pred
+        r2 = 1 - np.sum(residuals ** 2) / np.sum((y_exp - np.mean(y_exp)) ** 2)
+        rmse = np.sqrt(np.mean(residuals ** 2))
+        
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), height_ratios=[3, 1])
+        
+        ax1.scatter(time, y_exp, alpha=0.6, s=30, label="Experimental", color="#1f77b4", zorder=3)
+        ax1.plot(time, y_pred, linewidth=2.5, label="Model", color="#ff7f0e", zorder=2)
+        ax1.set_ylabel("[O₂] (µM)", fontsize=12, fontweight="bold")
+        ax1.set_title(f"{exp_name}\nR² = {r2:.4f}, RMSE = {rmse:.2f} µM", fontsize=13, fontweight="bold")
+        ax1.legend(fontsize=11, frameon=True, shadow=True)
+        ax1.grid(alpha=0.3, linestyle="--")
+        
+        conditions = (
+            f"[Ru] = {metadata.get('c_Ru', '?')} µM  |  "
+            f"[S₂O₈²⁻] = {metadata.get('c_S2O8', '?')} µM  |  "
+            f"Power = {metadata.get('irradiance', '?')} W/m²  |  "
+            f"pH = {metadata.get('pH', '?')}"
+        )
+        ax1.text(
+            0.02, 0.98, conditions, transform=ax1.transAxes,
+            fontsize=9, verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8)
+        )
+        
+        ax2.scatter(time, residuals, alpha=0.6, s=20, color="#d62728", zorder=3)
+        ax2.axhline(y=0, color="black", linestyle="--", linewidth=1.5, zorder=2)
+        ax2.fill_between(time, residuals, 0, alpha=0.2, color="#d62728")
+        ax2.set_xlabel("Time (s)", fontsize=12, fontweight="bold")
+        ax2.set_ylabel("Residuals (µM)", fontsize=11)
+        ax2.grid(alpha=0.3, linestyle="--")
+        
+        plt.tight_layout()
+        
+        # Save to file if requested
+        if save_path:
+            plt.savefig(save_path, format="png", dpi=150, bbox_inches="tight")
+        
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        plt.close()
+        buf.seek(0)
+        
+        return base64.b64encode(buf.read()).decode("utf-8")
+
+
+def _create_phenomenological_plots(
+    data: dict,
+    save_dir: str = None,
+) -> str:
+    """Create phenomenological trend plots for [Ru], [S2O8], and irradiance."""
+    with _matplotlib_lock:
+        import matplotlib
+        matplotlib.use('Agg', force=True)
+        import matplotlib.pyplot as plt
+        plt.ioff()
+        
+        # Collect trend data
+        trends = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}}
+        
+        for exp_name, exp_data in data.items():
+            meta = exp_data["metadata"]
+            oxygen = np.array(exp_data["oxygen"])
+            time = np.array(exp_data["time"])
+            
+            # Calculate maximum rate
+            rates = np.gradient(oxygen, time)
+            max_rate = np.max(rates)
+            
+            for param in ["c_Ru", "c_S2O8", "irradiance"]:
+                param_val = meta.get(param)
+                if param_val is not None:
+                    if param_val not in trends[param]:
+                        trends[param][param_val] = []
+                    trends[param][param_val].append(max_rate)
+        
+        # Create plots
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        
+        # [Ru] trend plot
+        if trends["c_Ru"]:
+            concentrations = np.array(sorted(trends["c_Ru"].keys()))
+            rates = [np.mean(trends["c_Ru"][c]) for c in concentrations]
+            rates_std = [np.std(trends["c_Ru"][c]) if len(trends["c_Ru"][c]) > 1 else 0 
+                        for c in concentrations]
+            
+            axes[0].errorbar(concentrations, rates, yerr=rates_std, 
+                           marker='o', capsize=5, markersize=8, linewidth=2)
+            axes[0].set_xlabel('[Ru(bpy)₃²⁺] (µM)', fontweight='bold')
+            axes[0].set_ylabel('Max O₂ Rate (µM/s)', fontweight='bold')
+            axes[0].set_title('Ru Concentration Dependence', fontweight='bold')
+            axes[0].grid(True, alpha=0.3)
+        
+        # [S2O8] trend plot  
+        if trends["c_S2O8"]:
+            concentrations = np.array(sorted(trends["c_S2O8"].keys()))
+            rates = [np.mean(trends["c_S2O8"][c]) for c in concentrations]
+            rates_std = [np.std(trends["c_S2O8"][c]) if len(trends["c_S2O8"][c]) > 1 else 0 
+                        for c in concentrations]
+            
+            axes[1].errorbar(concentrations, rates, yerr=rates_std,
+                           marker='s', capsize=5, markersize=8, linewidth=2, color='orange')
+            axes[1].set_xlabel('[S₂O₈²⁻] (µM)', fontweight='bold') 
+            axes[1].set_ylabel('Max O₂ Rate (µM/s)', fontweight='bold')
+            axes[1].set_title('Persulfate Concentration Dependence', fontweight='bold')
+            axes[1].grid(True, alpha=0.3)
+        
+        # Irradiance trend plot
+        if trends["irradiance"]:
+            irradiances = np.array(sorted(trends["irradiance"].keys()))
+            rates = [np.mean(trends["irradiance"][c]) for c in irradiances]
+            rates_std = [np.std(trends["irradiance"][c]) if len(trends["irradiance"][c]) > 1 else 0 
+                        for c in irradiances]
+            
+            axes[2].errorbar(irradiances, rates, yerr=rates_std,
+                           marker='^', capsize=5, markersize=8, linewidth=2, color='green')
+            axes[2].set_xlabel('Irradiance (W/m²)', fontweight='bold')
+            axes[2].set_ylabel('Max O₂ Rate (µM/s)', fontweight='bold') 
+            axes[2].set_title('Irradiance Dependence', fontweight='bold')
+            axes[2].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        # Save plot
+        if save_dir:
+            plot_path = Path(save_dir) / "phenomenological_trends.png"
+            plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        
+        # Also save to persistent directory
+        persistent_dir = _get_persistent_output_dir()
+        persistent_path = persistent_dir / "phenomenological_trends.png"
+        plt.savefig(persistent_path, dpi=150, bbox_inches='tight')
+        
+        plt.close()
+        
+        return f"Phenomenological trend plots saved to {persistent_path}"
 
 
 # File-based tool functions
@@ -615,21 +819,24 @@ def get_current_network(network_path: str) -> str:
     """
     try:
         network = load_reaction_network(network_path)
-        
-        lines = [f"Current reaction network ({len(network['reactions'])} reactions):\n"]
-        
-        for i, rxn in enumerate(network['reactions']):
-            lines.append(f"{i:2d}: {rxn['equation']} ({rxn['type']})")
-            if rxn['type'] == 'light' and 'quantum_yield' in rxn:
-                lines.append(f"     QY range: {rxn['quantum_yield']}")
-            elif 'k_range' in rxn:
-                lines.append(f"     k range: {rxn['k_range']}")
-            lines.append("")
-        
-        return "\n".join(lines)
-        
+    except FileNotFoundError:
+        # Create default network if it doesn't exist
+        network = initialize_default_network()
+        save_reaction_network(network_path, network)
     except Exception as e:
         return f"Error loading network: {e}"
+    
+    lines = [f"Current reaction network ({len(network['reactions'])} reactions):\n"]
+    
+    for i, rxn in enumerate(network['reactions']):
+        lines.append(f"{i:2d}: {rxn['equation']} ({rxn['type']})")
+        if rxn['type'] == 'light' and 'quantum_yield' in rxn:
+            lines.append(f"     QY range: {rxn['quantum_yield']}")
+        elif 'k_range' in rxn:
+            lines.append(f"     k range: {rxn['k_range']}")
+        lines.append("")
+    
+    return "\n".join(lines)
 
 
 @tool
@@ -652,7 +859,13 @@ def fit_single_experiment(
         if exp_name not in data:
             return f"Error: Experiment {exp_name} not found"
         
-        network = load_reaction_network(network_path)
+        try:
+            network = load_reaction_network(network_path)
+        except FileNotFoundError:
+            # Create default network if it doesn't exist
+            network = initialize_default_network()
+            save_reaction_network(network_path, network)
+        
         exp_data = data[exp_name]
         
         result = fit_reaction_network(
@@ -663,7 +876,20 @@ def fit_single_experiment(
         )
         
         if not result.get("success", False):
-            return f"Fit failed for {exp_name}: {result.get('error', 'Unknown error')}"
+            failure_reason = result.get('failure_reason', result.get('error', 'Unknown error'))
+            rss = result.get('rss', 'N/A')
+            r2 = result.get('r2', 'N/A')
+            o2_max = result.get('o2_max', 'N/A') 
+            o2_range = result.get('o2_range', 'N/A')
+            
+            return (f"Fit failed for {exp_name}:\n"
+                   f"  Reason: {failure_reason}\n"
+                   f"  RSS: {rss}\n"
+                   f"  R²: {r2}\n"  
+                   f"  O₂ max: {o2_max}\n"
+                   f"  O₂ range: {o2_range}\n"
+                   f"  This indicates the model is producing flat/zero solutions.\n"
+                   f"  Consider: 1) Adding more reactions, 2) Adjusting parameter ranges, 3) Checking reaction network connectivity")
         
         # Load existing results or create new
         try:
@@ -679,19 +905,25 @@ def fit_single_experiment(
             "y_pred": result["y_pred"],
         }
         
-        # Create and save fit plot
-        plot_filename = f"fit_plot_{exp_name}.png"
+        # Create and save fit plot to persistent directory
+        persistent_dir = _get_persistent_output_dir()
+        plot_filename = persistent_dir / f"fit_plot_{exp_name}.png"
         _create_fit_plot(
             np.array(exp_data["time"]),
             np.array(exp_data["oxygen"]),
             np.array(result["y_pred"]),
             exp_name,
             exp_data["metadata"],
-            save_path=plot_filename,
+            save_path=str(plot_filename),
         )
         
-        # Save results
+        # Save results both to workspace and persistent directory
         with open(results_path, 'w') as f:
+            json.dump(all_results, f, indent=2)
+            
+        # Also save to persistent directory
+        persistent_results_path = persistent_dir / "fit_results.json"
+        with open(persistent_results_path, 'w') as f:
             json.dump(all_results, f, indent=2)
         
         return (
@@ -699,7 +931,8 @@ def fit_single_experiment(
             f"  R² = {result['r2']:.4f}\n"
             f"  RMSE = {np.sqrt(result['rss'] / len(result['y_pred'])):.4f} µM\n"
             f"  RSS = {result['rss']:.2f}\n"
-            f"  Plot saved to: {plot_filename}"
+            f"  Plot saved to: {plot_filename}\n"
+            f"  Persistent copy saved to: {persistent_dir}"
         )
         
     except Exception as e:
@@ -717,7 +950,12 @@ def fit_all_experiments(data_path: str, network_path: str, results_path: str) ->
     """
     try:
         data = load_experimental_data(data_path)
-        network = load_reaction_network(network_path)
+        try:
+            network = load_reaction_network(network_path)
+        except FileNotFoundError:
+            # Create default network if it doesn't exist
+            network = initialize_default_network()
+            save_reaction_network(network_path, network)
         
         all_results = {"experiments": {}}
         successful = 0
@@ -740,18 +978,19 @@ def fit_all_experiments(data_path: str, network_path: str, results_path: str) ->
                 "y_pred": result.get("y_pred", []),
             }
             
-            # Save plots for first 5 experiments for inspection
-            if result.get("success", False) and i < 5:
-                plot_filename = f"fit_plot_{exp_name}.png"
+            # Save plots for all successful experiments
+            if result.get("success", False):
+                persistent_dir = _get_persistent_output_dir()
+                plot_filename = persistent_dir / f"fit_plot_{exp_name}.png"
                 _create_fit_plot(
                     np.array(exp_data["time"]),
                     np.array(exp_data["oxygen"]),
                     np.array(result["y_pred"]),
                     exp_name,
                     exp_data["metadata"],
-                    save_path=plot_filename,
+                    save_path=str(plot_filename),
                 )
-                plots_saved.append(plot_filename)
+                plots_saved.append(str(plot_filename))
             
             if result.get("success", False):
                 successful += 1
@@ -766,8 +1005,14 @@ def fit_all_experiments(data_path: str, network_path: str, results_path: str) ->
             "avg_rss": avg_rss,
         }
         
-        # Save results
+        # Save results both to workspace and persistent directory
         with open(results_path, 'w') as f:
+            json.dump(all_results, f, indent=2)
+            
+        # Also save to persistent directory
+        persistent_dir = _get_persistent_output_dir() 
+        persistent_results_path = persistent_dir / "fit_results.json"
+        with open(persistent_results_path, 'w') as f:
             json.dump(all_results, f, indent=2)
         
         plot_info = f"\n  Plots saved: {', '.join(plots_saved)}" if plots_saved else ""
@@ -776,7 +1021,8 @@ def fit_all_experiments(data_path: str, network_path: str, results_path: str) ->
             f"Fitted all experiments:\n"
             f"  Successful: {successful}/{len(data)}\n"
             f"  Total RSS: {total_rss:.2f}\n"
-            f"  Average RSS: {avg_rss:.2f}"
+            f"  Average RSS: {avg_rss:.2f}\n"
+            f"  All plots and results saved to: {persistent_dir}"
             f"{plot_info}"
         )
         
@@ -848,13 +1094,17 @@ def evaluate_phenomenological_trends(
         with open(results_path, 'w') as f:
             json.dump(all_results, f, indent=2)
         
+        # Create phenomenological trend plots
+        plot_info = _create_phenomenological_plots(data)
+        
         return (
             f"Phenomenological trend scores:\n"
             f"  Ru concentration trend: {ru_score:.3f}\n"
             f"  S2O8 concentration trend: {s2o8_score:.3f}\n"
             f"  Irradiance trend: {irr_score:.3f}\n"
             f"  Overall score: {overall_score:.3f}\n"
-            f"  Best score so far: {all_results['best_phenomenological_score']:.3f}"
+            f"  Best score so far: {all_results['best_phenomenological_score']:.3f}\n\n"
+            f"{plot_info}"
         )
         
     except Exception as e:
@@ -871,26 +1121,60 @@ def modify_reaction_network(
 ) -> str:
     """Modify the current reaction network.
     
+    IMPORTANT: Use CHEMICAL EQUATIONS with -> arrows, NOT rate expressions!
+    
     Args:
         network_path: Path to reaction network JSON file
-        add_reactions: JSON string of list of reaction dictionaries to add
+        add_reactions: JSON string of list of reaction dictionaries to add. 
+            Each reaction MUST have this exact format:
+            {
+                "equation": "A + B -> C + D",        // Chemical equation with -> arrow (REQUIRED)
+                "type": "light" or "dark",           // Reaction type (REQUIRED)
+                "k_range": [min, max],               // For dark reactions only
+                "quantum_yield": [min, max],         // For light reactions only (0-1)
+                "description": "..."                 // Optional description
+            }
+            
+            CORRECT examples:
+            - Light reaction: '[{"equation": "RuII + hv -> RuII_ex", "type": "light", "quantum_yield": [0.1, 1.0]}]'
+            - Dark reaction: '[{"equation": "RuII_ex + S2O8 -> RuIII + SO4", "type": "dark", "k_range": [1e6, 1e9]}]'
+            - Dimerization: '[{"equation": "RuIII + RuIII -> Ru2_dim", "type": "dark", "k_range": [1e5, 1e8]}]'
+            
+            WRONG examples (DO NOT USE):
+            - "k1*S0" (this is a rate expression, not a chemical equation)
+            - "k1*C0" (this is a rate expression, not a chemical equation)
+            - "k1*y0" (this is a rate expression, not a chemical equation)
+            - "A -> B" without proper species names
+            
         remove_reactions: JSON string of list of reaction indices to remove  
         modify_k_ranges: JSON string of dict {index: [new_min, new_max]}
         modify_quantum_yields: JSON string of dict {index: [new_min, new_max]}
     """
     try:
-        network = load_reaction_network(network_path)
+        try:
+            network = load_reaction_network(network_path)
+        except FileNotFoundError:
+            # Create default network if it doesn't exist
+            network = initialize_default_network()
+            save_reaction_network(network_path, network)
+        
         changes = []
         
         if remove_reactions:
-            indices = json.loads(remove_reactions)
+            try:
+                indices = json.loads(remove_reactions)
+            except json.JSONDecodeError as e:
+                return f"Error: Invalid JSON format in remove_reactions parameter: {e}"
             for idx in sorted(indices, reverse=True):
                 if 0 <= idx < len(network["reactions"]):
                     removed = network["reactions"].pop(idx)
                     changes.append(f"Removed reaction {idx}: {removed['equation']}")
         
         if modify_k_ranges:
-            k_ranges = json.loads(modify_k_ranges)
+            try:
+                k_ranges = json.loads(modify_k_ranges)
+            except json.JSONDecodeError as e:
+                return f"Error: Invalid JSON format in modify_k_ranges parameter: {e}"
             for idx, new_range in k_ranges.items():
                 idx = int(idx)
                 if 0 <= idx < len(network["reactions"]):
@@ -898,7 +1182,10 @@ def modify_reaction_network(
                     changes.append(f"Modified k_range for reaction {idx}")
         
         if modify_quantum_yields:
-            qy_ranges = json.loads(modify_quantum_yields)
+            try:
+                qy_ranges = json.loads(modify_quantum_yields)
+            except json.JSONDecodeError as e:
+                return f"Error: Invalid JSON format in modify_quantum_yields parameter: {e}"
             for idx, new_range in qy_ranges.items():
                 idx = int(idx)
                 if 0 <= idx < len(network["reactions"]):
@@ -907,8 +1194,22 @@ def modify_reaction_network(
                     changes.append(f"Modified quantum_yield for reaction {idx}")
         
         if add_reactions:
-            new_rxns = json.loads(add_reactions)
+            try:
+                new_rxns = json.loads(add_reactions)
+            except json.JSONDecodeError as e:
+                return f"Error: Invalid JSON format in add_reactions parameter: {e}"
+            
             for rxn in new_rxns:
+                # Validate required fields
+                if "equation" not in rxn:
+                    return "Error: Each reaction must have an 'equation' field"
+                if "type" not in rxn:
+                    return "Error: Each reaction must have a 'type' field ('light' or 'dark')"
+                    
+                # Validate equation format early
+                if "->" not in rxn["equation"]:
+                    return f"Error: Invalid equation format '{rxn['equation']}'. Must be chemical equation with -> arrow (e.g. 'RuII + S2O8 -> RuIII + SO4'), not rate expression (e.g. 'k*S*Ru')."
+                
                 network["reactions"].append(rxn)
                 changes.append(f"Added reaction: {rxn['equation']}")
         
@@ -945,7 +1246,13 @@ def analyze_fit_with_vision(
         if exp_name not in data:
             return f"Error: Experiment {exp_name} not found"
         
-        network = load_reaction_network(network_path)
+        try:
+            network = load_reaction_network(network_path)
+        except FileNotFoundError:
+            # Create default network if it doesn't exist
+            network = initialize_default_network()
+            save_reaction_network(network_path, network)
+        
         exp_data = data[exp_name]
         
         result = fit_reaction_network(
@@ -1003,21 +1310,51 @@ def analyze_fit_with_vision(
 
 
 def initialize_default_network() -> Dict[str, Any]:
-    """Initialize with reactions from Akhtar 2016."""
+    """Initialize with our 6-reaction network for Ru-catalyzed water oxidation."""
     return {
-        'reactions': [
-            {'equation': 'RuII + hv -> RuII*', 'type': 'light', 'quantum_yield': [0.8, 1.0]},
-            {'equation': 'RuII* + S2O8 -> RuIII + SO4_rad + SO4', 'type': 'dark', 'k_range': [1e7, 1e9]},
-            {'equation': 'RuII + SO4_rad -> RuIII + SO4', 'type': 'dark', 'k_range': [1e8, 1e10]},
-            {'equation': 'RuIII + OH -> RuII + OH_rad', 'type': 'dark', 'k_range': [1e3, 1e5]},
-            {'equation': '2 OH_rad -> H2O2', 'type': 'dark', 'k_range': [1e9, 1e10]},
-            {'equation': '2 RuIII + H2O2 -> 2 RuII + O2 + 2 H', 'type': 'dark', 'k_range': [1e3, 1e5]},
-            {'equation': 'RuIII + hv -> RuIII*', 'type': 'light', 'quantum_yield': [0.8, 1.0]},
-            {'equation': 'RuIII* + S2O8 -> RuIV_intermediate', 'type': 'dark', 'k_range': [1e7, 1e9]},
-            {'equation': '2 RuIV_intermediate -> Ru_Dimer_active', 'type': 'dark', 'k_range': [1e5, 1e7]},
-            {'equation': 'RuIV_intermediate + RuIV_intermediate -> Ru_oligomer_inactive', 'type': 'dark', 'k_range': [1e6, 1e8]},
-            {'equation': 'OH_rad + RuII -> decomposed_Ru', 'type': 'dark', 'k_range': [1e8, 1e10]},
-        ]
+        "reactions": [
+            {
+                "equation": "RuII + hv -> RuII_ex",
+                "type": "light",
+                "quantum_yield": [0.1, 1.0],  # Broader range for optimization
+                "description": "Photoexcitation of Ru catalyst"
+            },
+            {
+                "equation": "RuII_ex -> RuII",
+                "type": "dark", 
+                "k_range": [1e5, 1e8],
+                "description": "Excited state decay"
+            },
+            {
+                "equation": "RuII_ex + S2O8 -> RuIII + SO4",
+                "type": "dark",
+                "k_range": [1e7, 1e10],
+                "description": "Excited Ru oxidation by persulfate"
+            },
+            {
+                "equation": "RuIII + H2O -> H2O2 + RuII + H+",
+                "type": "dark",
+                "k_range": [1e1, 1e4],  # Changed to dark reaction
+                "description": "Ru(III) reduction with H2O2 formation"
+            },
+            {
+                "equation": "H2O2 -> O2",
+                "type": "dark",
+                "k_range": [1e3, 1e6],
+                "description": "H2O2 decomposition to O2"
+            },
+            {
+                "equation": "RuIII -> Inactive",
+                "type": "dark",
+                "k_range": [1e-2, 1e1],
+                "description": "Catalyst deactivation"
+            }
+        ],
+        "metadata": {
+            "created_by": "initialize_default_network",
+            "description": "Initial 6-reaction network for Ru-catalyzed water oxidation - agent should discover additional mechanisms like dimerization pathways",
+            "version": "2.1"
+        }
     }
 
 

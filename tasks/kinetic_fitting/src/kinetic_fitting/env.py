@@ -7,6 +7,10 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
+# Configure matplotlib early to prevent GUI threading issues
+os.environ['MPLBACKEND'] = 'Agg'
+os.environ['DISPLAY'] = ''
+
 import h5py
 import numpy as np
 from loguru import logger

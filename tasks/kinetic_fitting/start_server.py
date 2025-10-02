@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 
 # Configure matplotlib to use non-GUI backend before any imports that might use it
+os.environ['MPLBACKEND'] = 'Agg'
+os.environ['DISPLAY'] = ''  # Disable display
 import matplotlib
 matplotlib.use('Agg')
 
