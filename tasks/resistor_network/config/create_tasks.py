@@ -17,6 +17,13 @@ from loguru import logger
 # CIRCUIT SIMULATION FUNCTION
 # ============================================================================
 
+SUBNETWORK_LIBRARY = json.load(
+    Path(__file__).parent.joinpath("NETWORK_DICT_EASY.json").open()
+)["SUBNETWORK_LIBRARY"]
+BACKBONE_LIBRARY = json.load(
+    Path(__file__).parent.joinpath("NETWORK_DICT_EASY.json").open()
+)["BACKBONE_LIBRARY"]
+
 
 def simulate_circuit_resistance(topology: dict, terminal_nodes: list[str]) -> float:
     """
@@ -97,70 +104,6 @@ def simulate_circuit_resistance(topology: dict, terminal_nodes: list[str]) -> fl
         V = np.insert(V_reduced, term2_idx, 0)
 
     return abs(V[term1_idx] - V[term2_idx])
-
-
-# ============================================================================
-# SUBNETWORK LIBRARY
-# ============================================================================
-
-SUBNETWORK_LIBRARY = {
-    "series_2r": {
-        "name": "Series 2 Resistors",
-        "resistors": {"R1": 5.0, "R2": 10.0},
-        "connections": [["A", "B", "R1"], ["B", "C", "R2"]],
-        "terminals": ["A", "C"],
-    },
-    "parallel_2r": {
-        "name": "Parallel 2 Resistors",
-        "resistors": {"R1": 10.0, "R2": 15.0},
-        "connections": [["A", "B", "R1"], ["A", "B", "R2"]],
-        "terminals": ["A", "B"],
-    },
-    "bridge": {
-        "name": "Bridge Network",
-        "resistors": {"R1": 5.0, "R2": 10.0, "R3": 15.0},
-        "connections": [["A", "B", "R1"], ["A", "C", "R2"], ["B", "C", "R3"]],
-        "terminals": ["A", "C"],
-    },
-    "tee": {
-        "name": "T Network",
-        "resistors": {"R1": 8.0, "R2": 12.0, "R3": 6.0},
-        "connections": [["A", "B", "R1"], ["B", "C", "R2"], ["B", "D", "R3"]],
-        "terminals": ["A", "C"],
-    },
-    "series_parallel": {
-        "name": "Series-Parallel Combo",
-        "resistors": {"R1": 10.0, "R2": 20.0, "R3": 30.0},
-        "connections": [["A", "B", "R1"], ["B", "C", "R2"], ["B", "C", "R3"]],
-        "terminals": ["A", "C"],
-    },
-}
-
-
-# ============================================================================
-# BACKBONE LIBRARY
-# ============================================================================
-
-BACKBONE_LIBRARY = {
-    "linear_3": {
-        "name": "Linear 3-Gap Backbone",
-        "gaps": ["a", "b", "c"],
-        "structure": "A-[a]-X1-[b]-X2-[c]-B",
-        "description": "Three gaps in series from A to B",
-    },
-    "linear_2": {
-        "name": "Linear 2-Gap Backbone",
-        "gaps": ["a", "b"],
-        "structure": "A-[a]-X1-[b]-B",
-        "description": "Two gaps in series from A to B",
-    },
-    "parallel_branch": {
-        "name": "Parallel Branch Backbone",
-        "gaps": ["a", "b"],
-        "structure": "A splits to [a] and [b], both end at B",
-        "description": "Two parallel paths from A to B",
-    },
-}
 
 
 # ============================================================================
@@ -382,7 +325,6 @@ def generate_task(
                 "wye_to_delta_transform",
                 "simulate_circuit_resistance",
                 "validate_measurements",
-                "generate_test_measurements",
             ],
             "scoring_function": "resistor_topology",
             "scoring_params": {
@@ -400,8 +342,9 @@ def generate_task(
                 "measurements": measurements,
                 "notes": [
                     f"There are {num_resistors} resistors total",
-                    f"Network uses backbone: {BACKBONE_LIBRARY[backbone_key]['name']}",
-                    f"Assume ideal resistors; treat measurements as exact within ±{tolerance}Ω.",
+                    # f"Network uses backbone: {BACKBONE_LIBRARY[backbone_key]['name']}",
+                    f"Assume ideal resistors; treat measurements as exact within ±{tolerance} ohm.",
+                    "The resistances are labeled from left to right as R1, R2, R3, ..., etc.",
                 ],
             },
         }
@@ -446,7 +389,10 @@ def generate_subtasks(
             "tools": [
                 "calculate_series_resistance",
                 "calculate_parallel_resistance",
+                "delta_to_wye_transform",
+                "wye_to_delta_transform",
                 "simulate_circuit_resistance",
+                "validate_measurements",
             ],
             "scoring_function": "resistor_topology",
             "scoring_params": {
@@ -464,6 +410,8 @@ def generate_subtasks(
                 "notes": [
                     f"This is subnetwork {i+1} of the complete circuit",
                     f"Terminals: {subnet['terminals'][0]} to {subnet['terminals'][1]}",
+                    SUBNETWORK_LIBRARY[subnetwork_keys[i]].get("description", ""),
+                    "The resistances are labeled from left to right as R1, R2, R3, ..., etc.",
                 ],
             },
         }
@@ -574,25 +522,25 @@ if __name__ == "__main__":
     logger.info("Example 1: Creating specific task")
     logger.info("=" * 70)
 
-    task = generate_task(
-        task_id="circuit_linear_3",
-        backbone_key="linear_3",
-        subnetwork_keys=["series_2r", "bridge", "parallel_2r"],
-        resistance_scale=1.0,
-    )
+    # task = generate_task(
+    #     task_id="circuit_linear_3",
+    #     backbone_key="parallel_branch",
+    #     subnetwork_keys=["series_2r", "parallel_2r"],
+    #     resistance_scale=1.0,
+    # )
 
-    subtasks = generate_subtasks(
-        task_id="circuit_linear_3",
-        backbone_key="linear_3",
-        subnetwork_keys=["series_2r", "bridge", "parallel_2r"],
-    )
+    # subtasks = generate_subtasks(
+    #     task_id="circuit_linear_3",
+    #     backbone_key="parallel_branch",
+    #     subnetwork_keys=["series_2r", "parallel_2r"],
+    # )
 
-    logger.info(json.dumps(task, indent=2))
-    logger.info("\nNumber of subtasks:", len(subtasks))
+    # logger.info(json.dumps(task, indent=2))
+    # logger.info("\nNumber of subtasks:", len(subtasks))
 
-    save_single_task_to_file(task, "example_main_task.json")
-    save_single_task_to_file(subtasks, "example_subtasks.json")
-    # save to a json file
+    # # save_single_task_to_file(task, "example_main_task.json")
+    # # save_single_task_to_file(subtasks, "example_subtasks.json")
+    # # save to a json file
     # save_tasks_to_file(task, subtasks, "example_resistor_tasks.json")
 
     # Example 2: Create random task
@@ -600,10 +548,20 @@ if __name__ == "__main__":
     # logger.info("Example 2: Creating random task")
     # logger.info("=" * 70)
 
-    # random_task, random_subtasks = create_random_task(
-    #     "random_circuit_1", num_subnetworks=2
-    # )
-    # logger.info(f"Created task with {len(random_subtasks)} subtasks")
+    counter = 0
+    for sub in [2, 3, 4]:
+        for _ in range(3):
+            logger.info(
+                f"\nCreating random task with {sub} subnetworks (trial {counter})"
+            )
 
-    # # Save to file
-    # save_tasks_to_file(random_task, random_subtasks, "example_resistor_tasks.json")
+            # These lines need to be INSIDE the inner loop
+            random_task, random_subtasks = create_random_task(
+                f"task_{counter}", num_subnetworks=sub
+            )
+            logger.info(f"Created task with {len(random_subtasks)} subtasks")
+            save_tasks_to_file(random_task, random_subtasks, f"task_{counter}.json")
+            save_single_task_to_file(random_task, f"task_{counter}_main.json")
+            save_single_task_to_file(random_subtasks, f"task_{counter}_subtasks.json")
+
+            counter += 1
