@@ -149,8 +149,11 @@ def run_debugging_sequence():
     print("-" * 50)
     print("Testing if ODE system works with known good parameters...")
     
-    # Optimized parameters for this experimental system (from successful fit: R²=0.993)
-    reference_params = {"qy_0": 0.994, "k_1": 56.3, "k_2": 0.773, "k_3": 0.077, "k_4": 0.348, "k_5": 0.010}
+    # Reference parameters for Akhtar network (moderate starting values to avoid overflow)
+    reference_params = {
+        "qy_0": 0.5, "k_1": 1e6, "k_2": 1e7, "k_3": 1e2, "k_4": 1e7, 
+        "k_5": 1e2, "qy_6": 0.5, "k_7": 1e6, "k_8": 1e4, "k_9": 1e5, "k_10": 1e7
+    }
     
     try:
         # Load or create network
@@ -254,6 +257,18 @@ def run_debugging_sequence():
         except Exception as e:
             print(f"  ❌ Test failed: {e}")
     
+    # Step 5: Generate phenomenological trend plots
+    print("\n\n5. PHENOMENOLOGICAL TREND ANALYSIS")
+    print("-" * 40)
+    print("Generating phenomenological trend plots...")
+    
+    try:
+        from kinetic_fitting.tools import _create_phenomenological_plots
+        plot_info = _create_phenomenological_plots(data)
+        print(f"✅ {plot_info}")
+    except Exception as e:
+        print(f"❌ Phenomenological plot generation failed: {e}")
+    
     print("\n\n" + "=" * 60)
     print("DEBUG SESSION COMPLETE")
     print("=" * 60)
@@ -263,6 +278,7 @@ def run_debugging_sequence():
     print("  - reference_fit_{experiment}.json - Detailed fit results")
     print("  - reference_fit_plot_{experiment}.png - Reference fit plots")
     print("  - fit_params_{timestamp}.json - Parameter logging")
+    print("  - phenomenological_trends.png - Concentration/irradiance trend plots")
     
 
 if __name__ == "__main__":

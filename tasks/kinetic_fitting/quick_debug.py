@@ -42,9 +42,12 @@ def quick_debug_test(exp_name=None, custom_params=None):
             print(f"Error loading data: {e}")
             return
     
-    # Default reference parameters (optimized for this experimental system)
+    # Default reference parameters for Akhtar network (moderate starting values to avoid overflow)
     if custom_params is None:
-        ref_params = {"qy_0": 0.994, "k_1": 56.3, "k_2": 0.773, "k_3": 0.077, "k_4": 0.348, "k_5": 0.010}
+        ref_params = {
+            "qy_0": 0.5, "k_1": 1e6, "k_2": 1e7, "k_3": 1e2, "k_4": 1e7, 
+            "k_5": 1e2, "qy_6": 0.5, "k_7": 1e6, "k_8": 1e4, "k_9": 1e5, "k_10": 1e7
+        }
     else:
         try:
             ref_params = json.loads(custom_params) if isinstance(custom_params, str) else custom_params

@@ -677,6 +677,41 @@ def _score_irradiance_trend(rates_vs_irradiance: dict) -> float:
     return max(0, r_value ** 2)
 
 
+def _score_ph_trend(rates_vs_ph: dict) -> float:
+    """Score pH trend (should have optimal range around pH 8-10 for Ru-based photocatalysis)."""
+    if len(rates_vs_ph) < 2:
+        return 0.5
+    
+    ph_values = np.array(sorted(rates_vs_ph.keys()))
+    rates = np.array([np.mean(rates_vs_ph[ph]) for ph in ph_values])
+    
+    if len(ph_values) < 3:
+        # For limited data, score based on whether higher pH gives higher rate
+        if ph_values[-1] > ph_values[0]:
+            return 0.8 if rates[-1] > rates[0] else 0.3
+        return 0.5
+    
+    # Look for optimal pH in the alkaline range (8-10)
+    max_rate_idx = np.argmax(rates)
+    max_rate_ph = ph_values[max_rate_idx]
+    
+    # Score based on whether maximum is in optimal range
+    if 8 <= max_rate_ph <= 10:
+        optimal_score = 1.0
+    elif 7 <= max_rate_ph <= 11:
+        optimal_score = 0.7
+    else:
+        optimal_score = 0.3
+        
+    # Score based on general alkaline preference (higher pH > acidic pH)
+    if len(ph_values[ph_values >= 7]) > 0 and len(ph_values[ph_values < 7]) > 0:
+        alkaline_preference = 1.0 if np.mean(rates[ph_values >= 7]) > np.mean(rates[ph_values < 7]) else 0.5
+    else:
+        alkaline_preference = 0.5
+        
+    return (optimal_score + alkaline_preference) / 2
+
+
 def _create_fit_plot(
     time: np.ndarray,
     y_exp: np.ndarray,
@@ -760,7 +795,7 @@ def _create_phenomenological_plots(
         plt.ioff()
         
         # Collect trend data
-        trends = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}}
+        trends = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}, "pH": {}}
         
         for exp_name, exp_data in data.items():
             meta = exp_data["metadata"]
@@ -771,7 +806,7 @@ def _create_phenomenological_plots(
             rates = np.gradient(oxygen, time)
             max_rate = np.max(rates)
             
-            for param in ["c_Ru", "c_S2O8", "irradiance"]:
+            for param in ["c_Ru", "c_S2O8", "irradiance", "pH"]:
                 param_val = meta.get(param)
                 if param_val is not None:
                     if param_val not in trends[param]:
@@ -779,7 +814,7 @@ def _create_phenomenological_plots(
                     trends[param][param_val].append(max_rate)
         
         # Create plots
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
         
         # [Ru] trend plot
         if trends["c_Ru"]:
@@ -788,12 +823,12 @@ def _create_phenomenological_plots(
             rates_std = [np.std(trends["c_Ru"][c]) if len(trends["c_Ru"][c]) > 1 else 0 
                         for c in concentrations]
             
-            axes[0].errorbar(concentrations, rates, yerr=rates_std, 
+            axes[0,0].errorbar(concentrations, rates, yerr=rates_std, 
                            marker='o', capsize=5, markersize=8, linewidth=2)
-            axes[0].set_xlabel('[Ru(bpy)₃²⁺] (µM)', fontweight='bold')
-            axes[0].set_ylabel('Max O₂ Rate (µM/s)', fontweight='bold')
-            axes[0].set_title('Ru Concentration Dependence', fontweight='bold')
-            axes[0].grid(True, alpha=0.3)
+            axes[0,0].set_xlabel('[Ru(bpy)₃²⁺] (µM)', fontweight='bold')
+            axes[0,0].set_ylabel('Max O₂ Rate (µM/s)', fontweight='bold')
+            axes[0,0].set_title('Ru Concentration Dependence', fontweight='bold')
+            axes[0,0].grid(True, alpha=0.3)
         
         # [S2O8] trend plot  
         if trends["c_S2O8"]:
@@ -802,12 +837,12 @@ def _create_phenomenological_plots(
             rates_std = [np.std(trends["c_S2O8"][c]) if len(trends["c_S2O8"][c]) > 1 else 0 
                         for c in concentrations]
             
-            axes[1].errorbar(concentrations, rates, yerr=rates_std,
+            axes[0,1].errorbar(concentrations, rates, yerr=rates_std,
                            marker='s', capsize=5, markersize=8, linewidth=2, color='orange')
-            axes[1].set_xlabel('[S₂O₈²⁻] (µM)', fontweight='bold') 
-            axes[1].set_ylabel('Max O₂ Rate (µM/s)', fontweight='bold')
-            axes[1].set_title('Persulfate Concentration Dependence', fontweight='bold')
-            axes[1].grid(True, alpha=0.3)
+            axes[0,1].set_xlabel('[S₂O₈²⁻] (µM)', fontweight='bold') 
+            axes[0,1].set_ylabel('Max O₂ Rate (µM/s)', fontweight='bold')
+            axes[0,1].set_title('Persulfate Concentration Dependence', fontweight='bold')
+            axes[0,1].grid(True, alpha=0.3)
         
         # Irradiance trend plot
         if trends["irradiance"]:
@@ -816,12 +851,26 @@ def _create_phenomenological_plots(
             rates_std = [np.std(trends["irradiance"][c]) if len(trends["irradiance"][c]) > 1 else 0 
                         for c in irradiances]
             
-            axes[2].errorbar(irradiances, rates, yerr=rates_std,
+            axes[1,0].errorbar(irradiances, rates, yerr=rates_std,
                            marker='^', capsize=5, markersize=8, linewidth=2, color='green')
-            axes[2].set_xlabel('Irradiance (W/m²)', fontweight='bold')
-            axes[2].set_ylabel('Max O₂ Rate (µM/s)', fontweight='bold') 
-            axes[2].set_title('Irradiance Dependence', fontweight='bold')
-            axes[2].grid(True, alpha=0.3)
+            axes[1,0].set_xlabel('Irradiance (W/m²)', fontweight='bold')
+            axes[1,0].set_ylabel('Max O₂ Rate (µM/s)', fontweight='bold') 
+            axes[1,0].set_title('Irradiance Dependence', fontweight='bold')
+            axes[1,0].grid(True, alpha=0.3)
+            
+        # pH trend plot
+        if trends["pH"]:
+            ph_values = np.array(sorted(trends["pH"].keys()))
+            rates = [np.mean(trends["pH"][ph]) for ph in ph_values]
+            rates_std = [np.std(trends["pH"][ph]) if len(trends["pH"][ph]) > 1 else 0 
+                        for ph in ph_values]
+            
+            axes[1,1].errorbar(ph_values, rates, yerr=rates_std,
+                           marker='D', capsize=5, markersize=8, linewidth=2, color='purple')
+            axes[1,1].set_xlabel('pH', fontweight='bold')
+            axes[1,1].set_ylabel('Max O₂ Rate (µM/s)', fontweight='bold') 
+            axes[1,1].set_title('pH Dependence', fontweight='bold')
+            axes[1,1].grid(True, alpha=0.3)
         
         plt.tight_layout()
         
@@ -1201,7 +1250,7 @@ def evaluate_phenomenological_trends(
     """
     try:
         data = load_experimental_data(data_path)
-        trends = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}}
+        trends = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}, "pH": {}}
         
         for exp_name, exp_data in data.items():
             meta = exp_data["metadata"]
@@ -1212,7 +1261,7 @@ def evaluate_phenomenological_trends(
             rates = np.gradient(oxygen, time)
             max_rate = np.max(rates)
             
-            for param in ["c_Ru", "c_S2O8", "irradiance"]:
+            for param in ["c_Ru", "c_S2O8", "irradiance", "pH"]:
                 param_val = meta.get(param)
                 if param_val is not None:
                     if param_val not in trends[param]:
@@ -1222,8 +1271,9 @@ def evaluate_phenomenological_trends(
         ru_score = _score_ru_trend(trends["c_Ru"])
         s2o8_score = _score_s2o8_trend(trends["c_S2O8"])
         irr_score = _score_irradiance_trend(trends["irradiance"])
+        ph_score = _score_ph_trend(trends["pH"])
         
-        overall_score = 0.4 * ru_score + 0.3 * s2o8_score + 0.3 * irr_score
+        overall_score = 0.3 * ru_score + 0.25 * s2o8_score + 0.25 * irr_score + 0.2 * ph_score
         
         # Load existing results and update with trend scores
         try:
@@ -1236,6 +1286,7 @@ def evaluate_phenomenological_trends(
             "ru_score": ru_score,
             "s2o8_score": s2o8_score, 
             "irradiance_score": irr_score,
+            "pH_score": ph_score,
             "overall_score": overall_score,
         }
         
@@ -1258,6 +1309,7 @@ def evaluate_phenomenological_trends(
             f"  Ru concentration trend: {ru_score:.3f}\n"
             f"  S2O8 concentration trend: {s2o8_score:.3f}\n"
             f"  Irradiance trend: {irr_score:.3f}\n"
+            f"  pH trend: {ph_score:.3f}\n"
             f"  Overall score: {overall_score:.3f}\n"
             f"  Best score so far: {all_results['best_phenomenological_score']:.3f}\n\n"
             f"{plot_info}"
@@ -1749,50 +1801,80 @@ def fit_with_reference_start(
 
 
 def initialize_default_network() -> Dict[str, Any]:
-    """Initialize with reference-based reaction network matching the literature."""
+    """Initialize with Akhtar network structure for agent discovery."""
     return {
         "reactions": [
             {
-                "equation": "RuII + hv -> RuII_ex",
+                "equation": "RuII + hv -> RuII*",
                 "type": "light",
-                "quantum_yield": [0.5, 1.0],  # Φ₁ ≈ 1 from reference
-                "description": "Photoexcitation of Ru catalyst (Φ₁)"
+                "quantum_yield": [0.8, 1.0],
+                "description": "Photoexcitation of Ru(II) catalyst"
             },
             {
-                "equation": "RuII_ex -> RuII",  
+                "equation": "RuII* + S2O8 -> RuIII + SO4_rad + SO4",
                 "type": "dark",
-                "k_range": [10, 200],  # k₁ = 59 s⁻¹ from reference
-                "description": "Excited state decay (k₁ = 59 s⁻¹)"
+                "k_range": [1e7, 1e9],
+                "description": "Excited Ru oxidation by persulfate"
             },
             {
-                "equation": "RuII_ex + S2O8 -> RuIII + SO4",
+                "equation": "RuII + SO4_rad -> RuIII + SO4",
                 "type": "dark", 
-                "k_range": [0.01, 1.0],  # k₂ = 0.03 s⁻¹ from reference
-                "description": "Oxidative quenching (k₂ = 0.03 s⁻¹)"
+                "k_range": [1e8, 1e10],
+                "description": "Ru oxidation by sulfate radical"
             },
             {
-                "equation": "RuIII + H2O -> H2O2 + RuII + H+",
+                "equation": "RuIII + OH -> RuII + OH_rad",
                 "type": "dark",
-                "k_range": [0.001, 0.1],  # k₅ = 0.005 s⁻¹ from reference 
-                "description": "Unimolecular decomposition (k₅ = 0.005 s⁻¹)"
+                "k_range": [1e3, 1e5],
+                "description": "Ru(III) reduction by hydroxide"
             },
             {
-                "equation": "H2O2 -> O2 + H2O",
+                "equation": "2 OH_rad -> H2O2",
                 "type": "dark",
-                "k_range": [0.1, 100],  # Fast conversion
-                "description": "H2O2 to O2 conversion"
+                "k_range": [1e9, 1e10],
+                "description": "OH radical dimerization"
             },
             {
-                "equation": "RuIII -> Inactive",
+                "equation": "2 RuIII + H2O2 -> 2 RuII + O2 + 2 H",
                 "type": "dark",
-                "k_range": [0.001, 0.01],  # k₄ = 0.003 s⁻¹ from reference
-                "description": "Inactive formation (k₄ = 0.003 s⁻¹)"
+                "k_range": [1e3, 1e5],
+                "description": "O2 evolution from H2O2"
+            },
+            {
+                "equation": "RuIII + hv -> RuIII*",
+                "type": "light",
+                "quantum_yield": [0.8, 1.0],
+                "description": "Photoexcitation of Ru(III)"
+            },
+            {
+                "equation": "RuIII* + S2O8 -> RuIV_intermediate",
+                "type": "dark",
+                "k_range": [1e7, 1e9],
+                "description": "Formation of Ru(IV) intermediate"
+            },
+            {
+                "equation": "2 RuIV_intermediate -> Ru_Dimer_active",
+                "type": "dark",
+                "k_range": [1e5, 1e7],
+                "description": "Active dimer formation"
+            },
+            {
+                "equation": "RuIV_intermediate + RuIV_intermediate -> Ru_oligomer_inactive",
+                "type": "dark",
+                "k_range": [1e6, 1e8],
+                "description": "Inactive oligomer formation"
+            },
+            {
+                "equation": "OH_rad + RuII -> decomposed_Ru",
+                "type": "dark",
+                "k_range": [1e8, 1e10],
+                "description": "Catalyst decomposition"
             }
         ],
         "metadata": {
             "created_by": "initialize_default_network",
-            "description": "Reference-based network matching literature kinetic model (without dimerization)",
-            "version": "3.0"
+            "description": "Akhtar network structure for agent to discover improved kinetic pathways",
+            "version": "4.0"
         }
     }
 
