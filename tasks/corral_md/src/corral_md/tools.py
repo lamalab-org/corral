@@ -15,6 +15,226 @@ from corral.backend.tool import tool
 
 
 @tool
+def execute_python_script(
+    script_path: str,
+    args: list | None = None,
+    timeout: int = 600,
+    working_dir: str | None = None,
+) -> str:
+    """[BRIEF] Execute a Python script file with arguments in a controlled environment. [/BRIEF]
+
+    [DETAILED] This tool executes existing Python script files with command-line arguments, providing a controlled environment for running complex analysis workflows, data processing pipelines, or computational simulations.
+    It captures all output streams and provides comprehensive execution monitoring with timeout protection.
+    This is essential for integrating existing Python scripts into automated workflows and materials analysis pipelines. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to execute existing Python scripts with specific arguments. You can also use io tool to write a script and then execute it.
+    - Best suited for running complex analysis workflows or simulations
+    - Essential for integrating external Python tools into automated pipelines
+    - Recommended for batch processing and computational workflows
+    - Avoid for simple code execution
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Validates script file existence and accessibility
+    - Constructs command with script path and provided arguments
+    - Executes script in subprocess with timeout protection
+    - Captures standard output, error streams, and return codes
+    - Provides comprehensive execution monitoring and error reporting
+    - Supports custom working directory for script execution
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Ensure script file exists and is executable with proper dependencies [/PREREQUISITE]
+    2. [CURRENT] Execute script with appropriate arguments and timeout [/CURRENT]
+    3. [FOLLOW_UP] Process script output and results for further analysis. Can be used to process json script as required [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    `execute_python_script("analysis.py", ["--input", "data.json", "--output", "results.json"], 300)`,
+    `execute_python_script("simulation.py", ["--steps", "1000", "--temp", "300"], 1800, "/path/to/workdir")`,
+    `execute_python_script("processing.py", None, 600, None)`,
+    [/SYNTACTICAL]
+
+    Args:
+        script_path: [BRIEF] Path to the Python script file to execute. [/BRIEF]
+                    [DETAILED] Complete file path to the Python script that should be executed.
+                    The script must exist and be readable.
+                    The path can be relative to the current working directory or absolute.
+                    The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/DETAILED]
+                    [SYNTACTIC] "Valid file path to Python script" [/SYNTACTIC]
+                    [EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/EXAMPLES]
+        args: [BRIEF] Optional list of command-line arguments for the script. [/BRIEF]
+             [DETAILED] A list of strings representing command-line arguments to pass to the script.
+             These arguments will be passed to the script in the order provided.
+             Common arguments include input files, output paths, configuration parameters, and processing options.
+             If None, the script will be executed without arguments. [/DETAILED]
+             [SYNTACTIC] ["arg1", "arg2", "arg3", ...] or None [/SYNTACTIC]
+             [EXAMPLES] ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/EXAMPLES]
+        timeout: [BRIEF] Maximum execution time in seconds. Defaults to 600. [/BRIEF]
+                [DETAILED] The maximum time in seconds the script is allowed to run before being terminated.
+                This prevents runaway processes and ensures resource management.
+                Choose appropriate values based on expected script execution time.
+                For computational simulations, longer timeouts may be necessary. [/DETAILED]
+                [SYNTACTIC] positive integer representing seconds [/SYNTACTIC]
+                [EXAMPLES] 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/EXAMPLES]
+        working_dir: [BRIEF] Optional working directory for script execution. [/BRIEF]
+                    [DETAILED] The directory from which the script should be executed.
+                    This affects relative path resolution and file I/O operations within the script.
+                    If None, the current working directory will be used.
+                    This is useful when scripts expect to run from specific directories or access relative files. [/DETAILED]
+                    [SYNTACTIC] Valid directory path or None [/SYNTACTIC]
+                    [EXAMPLES] "/path/to/project", "data/analysis", None [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] JSON string with comprehensive execution results and monitoring data. [/BRIEF]
+             [DETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.
+             This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/DETAILED]
+             [EXAMPLES] "{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}" [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        FileNotFoundError: [ERROR_WHEN] When the specified script file doesn't exist [/ERROR_WHEN]
+                          [ERROR_DETAILS] Script path is invalid or file is not accessible [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Verify script path exists and is readable [/ERROR_RECOVERY]
+        TimeoutExpired: [ERROR_WHEN] When script execution exceeds the specified timeout [/ERROR_WHEN]
+                       [ERROR_DETAILS] Script terminated due to timeout limit [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Increase timeout value or optimize script performance [/ERROR_RECOVERY]
+        PermissionError: [ERROR_WHEN] When script file lacks execute permissions [/ERROR_WHEN]
+                        [ERROR_DETAILS] Insufficient permissions to execute the script [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Check file permissions and ensure script is executable [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Cannot modify script execution environment beyond working directory
+    - Limited to Python scripts and available system Python installation
+    - No real-time output streaming during execution
+    - Cannot interact with scripts requiring user input
+    [/LIMITATIONS]
+    """
+    try:
+        execute_code_script = modal.Function.lookup("simagent", "execute_python_script")
+        return execute_code_script.remote(
+            script_path=script_path, args=args, timeout=timeout, working_dir=working_dir
+        )
+    except Exception as e:
+        # Handle unexpected errors
+        raise Exception(
+            f"An unexpected error occurred while executing the code: {e!s}"
+        ) from e
+
+
+@tool
+def execute_python_code(
+    python_code: str,
+    input_data: str | None = None,
+    save_output_to: str | None = None,
+    timeout: int = 300,
+) -> str:
+    """[BRIEF] Execute Python code in a secure environment with data input/output capabilities. [/BRIEF]
+
+    [DETAILED] This tool provides a secure execution environment for custom Python code, essential for data analysis, custom calculations, and algorithm development in materials science workflows.
+    It supports data injection, output capture, and file saving capabilities while maintaining security through process isolation and timeout controls.
+    This enables flexible custom analysis. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to execute custom Python analysis or calculations
+    - Best suited for data processing and custom algorithm development
+    - Essential for implementing custom filtering, analysis, or transformation logic
+    - Recommended for prototyping and testing analysis workflows
+    - Avoid for simple operations that can be done with existing tools
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Creates isolated subprocess environment for secure code execution
+    - Injects input data as JSON-parsed variable if provided
+    - Captures standard output, error streams, and execution results
+    - Implements timeout protection to prevent infinite loops
+    - Extracts variables from executed code for result capture
+    - Saves results to file if requested for persistence
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Prepare input data and ensure code is syntactically correct [/PREREQUISITE]
+    2. [CURRENT] Execute custom Python code with data processing or analysis [/CURRENT]
+    3. [FOLLOW_UP] Use captured results for further analysis or save to files [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    `execute_python_code("result = sum([1, 2, 3, 4, 5])", None, None, 30)`,
+    `execute_python_code("filtered_data = [x for x in input_data if x > 0.5]", json_data, "output.json")`,
+    `execute_python_code("import numpy as np; result = np.mean(input_data)", array_data, None, 60)`,
+    [/SYNTACTICAL]
+
+    Args:
+        python_code: [BRIEF] Python code string to be executed. [/BRIEF]
+                    [DETAILED] A string containing valid Python code to be executed in this environment.
+                    For best results, assign your main output to a variable named 'result' or 'output'.
+                    The code can import standard libraries and perform complex calculations.
+                    The tool will attempt to capture user-defined variables as execution results. [/DETAILED]
+                    [SYNTACTIC] Valid Python code string [/SYNTACTIC]
+                    [EXAMPLES] "result = 2 + 2", "import json; result = json.loads(data)", "filtered = [x for x in data if x > threshold]" [/EXAMPLES]
+        input_data: [BRIEF] Optional JSON string to inject as input_data variable. [/BRIEF]
+                   [DETAILED] An optional JSON string that will be loaded into a Python variable named 'input_data' within the executed script.
+                   This allows the script to process external data.
+                   The JSON will be parsed and made available as a Python object (dict, list, etc.) depending on the JSON structure. [/DETAILED]
+                   [SYNTACTIC] Valid JSON string or None [/SYNTACTIC]
+                   [EXAMPLES] "{"data": [1, 2, 3]}", '[1, 2, 3, 4, 5]', "{"threshold": 0.5, "values": [...]}" [/EXAMPLES]
+        save_output_to: [BRIEF] Optional file path to save execution results. [/BRIEF]
+                       [DETAILED] An optional file path where the captured execution results will be saved as a JSON file.
+                       If provided and execution is successful, the results will be written to this file for persistence and later use.
+                       The directory will be created if it doesn't exist. [/DETAILED]
+                       [SYNTACTIC] "Valid file path or None" [/SYNTACTIC]
+                       [EXAMPLES] "results.json", "output/analysis_results.json", "data/processed_output.json" [/EXAMPLES]
+        timeout: [BRIEF] Maximum execution time in seconds. Defaults to 300. [/BRIEF]
+                [DETAILED] The maximum time in seconds the subprocess is allowed to run before being terminated.
+                This prevents infinite loops and runaway processes from consuming system resources.
+                If the execution exceeds this limit, a timeout error will be returned.
+                Choose appropriate values based on expected computation time. [/DETAILED]
+                [SYNTACTIC] positive integer representing seconds [/SYNTACTIC]
+                [EXAMPLES] 30 (quick calculations), 300 (standard), 1800 (long processing) [/EXAMPLES]
+
+    Returns:
+        str: [BRIEF] JSON string with detailed execution results and captured output. [/BRIEF]
+             [DETAILED] A comprehensive JSON string containing execution status, standard output, error messages, return code, captured execution results, and file save status.
+             The execution_result field contains variables captured from the executed code.
+             This enables full visibility into the execution process and results. [/DETAILED]
+             [EXAMPLES] "{"success": true, "execution_result": {"result": 10}, "stdout": "...", "stderr": "", "return_code": 0}" [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        TimeoutExpired: [ERROR_WHEN] When code execution exceeds the specified timeout [/ERROR_WHEN]
+                       [ERROR_DETAILS] Process terminated due to timeout limit [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Increase timeout value or optimize code for faster execution [/ERROR_RECOVERY]
+        SyntaxError: [ERROR_WHEN] When the Python code contains syntax errors [/ERROR_WHEN]
+                    [ERROR_DETAILS] Invalid Python syntax in the code string [/ERROR_DETAILS]
+                    [ERROR_RECOVERY] Check code syntax and fix any errors [/ERROR_RECOVERY]
+        RuntimeError: [ERROR_WHEN] When code execution fails due to runtime errors [/ERROR_WHEN]
+                     [ERROR_DETAILS] Errors during code execution such as undefined variables [/ERROR_DETAILS]
+                     [ERROR_RECOVERY] Debug code logic and ensure all required variables are defined [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Limited to Python standard library and commonly available packages
+    - Cannot access external network resources or file system outside working directory
+    - Cannot install new packages during execution
+    - Does not persist state between executions
+    [/LIMITATIONS]
+    """
+    try:
+        execute_code = modal.Function.lookup("simagent", "execute_python_code")
+        return execute_code.remote(
+            python_code=python_code,
+            input_data=input_data,
+            save_output_to=save_output_to,
+            timeout=timeout,
+        )
+    except Exception as e:
+        # Handle unexpected errors
+        raise Exception(
+            f"An unexpected error occurred while executing the code: {e!s}"
+        ) from e
+
+
+@tool
 def get_potential_metadata(file_path: str) -> str:
     """
     [BRIEF] Returns metadata from a known LAMMPS potential file given the file path. The metadata includes potential type, elements supported, and the LAMMPS compatible pair style keyword. [/BRIEF]
