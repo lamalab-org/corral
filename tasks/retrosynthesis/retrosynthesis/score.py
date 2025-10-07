@@ -8,6 +8,31 @@ from retrosynthesis.utils import (
 )
 
 
+def collect_leaf_molecules(node):
+    """
+    Recursively collect all leaf molecules (molecules without children).
+    These are the starting materials that need to be buyable.
+    """
+    if node["type"] == "mol":
+        if "children" not in node or not node["children"]:
+            # This is a leaf molecule (starting material)
+            return [node["smiles"]]
+        else:
+            # This molecule has children, so collect from children
+            leaf_molecules = []
+            for child in node["children"]:
+                leaf_molecules.extend(collect_leaf_molecules(child))
+            return leaf_molecules
+    elif node["type"] == "reaction":
+        # For reaction nodes, collect from all children
+        leaf_molecules = []
+        for child in node["children"]:
+            leaf_molecules.extend(collect_leaf_molecules(child))
+        return leaf_molecules
+    else:
+        return []
+
+
 def score_final(prediction: dict, max_price: float) -> float:
     """
     Function to score the retrosynthesis route based on the provided conditions.
@@ -20,30 +45,6 @@ def score_final(prediction: dict, max_price: float) -> float:
     Returns:
         float: 1.0 if all conditions are met, 0.0 if any condition is violated.
     """
-
-    def collect_leaf_molecules(node):
-        """
-        Recursively collect all leaf molecules (molecules without children).
-        These are the starting materials that need to be buyable.
-        """
-        if node["type"] == "mol":
-            if "children" not in node or not node["children"]:
-                # This is a leaf molecule (starting material)
-                return [node["smiles"]]
-            else:
-                # This molecule has children, so collect from children
-                leaf_molecules = []
-                for child in node["children"]:
-                    leaf_molecules.extend(collect_leaf_molecules(child))
-                return leaf_molecules
-        elif node["type"] == "reaction":
-            # For reaction nodes, collect from all children
-            leaf_molecules = []
-            for child in node["children"]:
-                leaf_molecules.extend(collect_leaf_molecules(child))
-            return leaf_molecules
-        else:
-            return []
 
     def validate_reactions_with_products(node, expected_product=None):
         """
@@ -132,3 +133,23 @@ def score_final(prediction: dict, max_price: float) -> float:
         # Any exception during validation means failure
         logger.warning(f"Exception during scoring: {e}")
         return 0.0
+
+
+def check_reactants(prediction: dict, target: list) -> float:
+    """
+    Scoring function to check if the retrosynthesis route is valid and meets the criteria.
+
+    Args:
+        prediction (dict): The retrosynthesis route in JSON format.
+        target (list): A list containing the target molecule SMILES and the maximum allowed price.
+
+    Returns:
+        float: 1.0 if all conditions are met, 0.0 if any condition is violated.
+    """
+    target_molecule = target[0]
+
+    leaf_molecules = collect_leaf_molecules(prediction)
+    if not leaf_molecules:
+        return 0.0
+
+    return 1.0 if target_molecule in leaf_molecules else 0.0
