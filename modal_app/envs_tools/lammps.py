@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from modal import Image
 
 _lammps_image = (
@@ -44,7 +46,7 @@ def _install_lammps():
 
         logger.debug("Running CMAKE for MANY BODY PACKAGE")
         subprocess.check_call(
-            "cmake ../cmake -D PKG_MANYBODY=on -D PKG_ATC=yes", shell=True
+            "cmake ../cmake -D BUILD_MPI=ON PKG_MANYBODY=on -D PKG_ATC=yes", shell=True
         )
         logger.debug("Running CMake with presets and GPU support...")
         subprocess.check_call(
@@ -90,7 +92,6 @@ def _run_lammps(
 
     import os
     import subprocess
-    from pathlib import Path
 
     lmp_command = "/root/lammps/build/lmp"
     original_cwd = Path.cwd()

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import fsspec
 import modal
 from envs_tools.lammps import _run_lammps, lammps_image
+from loguru import logger
 from modal import App
 
 simagent_name = os.getenv("SIMAGENT_NAME", "")
@@ -18,22 +20,388 @@ app = App(f"simagent{simagent_name}")
 volume_potential = modal.Volume.from_name("potentials", create_if_missing=True)
 volume_sim = modal.Volume.from_name("simulations", create_if_missing=True)
 volume_struct = modal.Volume.from_name("structures", create_if_missing=True)
+volume_test_files = modal.Volume.from_name("test_files", create_if_missing=True)
 
-with volume_potential.batch_upload() as batch:
-    batch.put_directory("./potentials/", "/")
+CPUS = 1
 
-with volume_struct.batch_upload() as batch:
-    batch.put_directory("./structures/", "/")
+# with volume_potential.batch_upload() as batch:
+#     batch.put_directory("./potentials/", "/")
+
+# with volume_struct.batch_upload() as batch:
+#     batch.put_directory("./structures/", "/")
+
+# with volume_test_files.batch_upload() as batch:
+#     batch.put_directory("./test_files/", "/")
+
+
+def ensure_directory_exists(file_path: str) -> None:
+    """
+    Ensure the parent directory of a file path exists.
+
+    Args:
+        file_path: Path to a file
+    """
+    from pathlib import Path
+
+    if file_path:
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+
+
+def generate_output_capture_code() -> str:
+    """
+    Generate the Python code string for capturing execution results.
+
+    This utility function creates the code that gets appended to user code
+    to capture variables and prepare them for JSON serialization.
+
+    Returns:
+        str: Python code string for variable capture
+    """
+    return """
+
+import json
+import types
+import sys
+from collections.abc import Iterable
+
+result_ = {}
+
+def is_json_serializable(obj, max_depth=10, current_depth=0):
+    '''Check if object is JSON serializable with depth limit'''
+    if current_depth > max_depth:
+        return False
+
+    try:
+        # Handle basic types
+        if obj is None or isinstance(obj, (bool, int, float, str)):
+            return True
+
+        # Handle sequences (but not strings)
+        if isinstance(obj, (list, tuple)):
+            return all(is_json_serializable(item, max_depth, current_depth + 1) for item in obj)
+
+        # Handle dictionaries
+        if isinstance(obj, dict):
+            return all(
+                isinstance(k, str) and is_json_serializable(v, max_depth, current_depth + 1)
+                for k, v in obj.items()
+            )
+
+        # Quick test with actual JSON serialization for edge cases
+        json.dumps(obj)
+        return True
+    except (TypeError, ValueError, RecursionError, OverflowError):
+        return False
+
+def safe_convert_to_serializable(obj):
+    '''Convert common non-serializable types to serializable ones'''
+    try:
+        import numpy as np
+        # Handle numpy arrays
+        if hasattr(obj, '__module__') and obj.__module__ == 'numpy':
+            if hasattr(obj, 'tolist'):
+                return obj.tolist()
+            elif hasattr(obj, 'item'):
+                return obj.item()
+    except ImportError:
+        pass
+
+    # Handle sets
+    if isinstance(obj, set):
+        return list(obj)
+
+    # Handle other iterables (but not strings/bytes)
+    if hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, dict)):
+        try:
+            return list(obj)
+        except:
+            pass
+
+    return obj
+
+# Try to capture from preferred variable names first
+preferred_vars = ['output', 'result', 'filtered_data', 'processed_data', 'dataset']
+captured = False
+
+for var_name in preferred_vars:
+    if var_name in locals():
+        var_value = locals()[var_name]
+        converted_value = safe_convert_to_serializable(var_value)
+        if is_json_serializable(converted_value):
+            result_[var_name] = converted_value
+            captured = True
+            break
+
+# Fallback: capture any user-defined variables
+if not captured:
+    excluded = {
+        '__builtins__', '__name__', '__doc__', '__package__', '__loader__',
+        '__spec__', '__annotations__', '__cached__', '__file__',
+        'json', 'types', 'sys', 'Iterable', 'result_', 'preferred_vars',
+        'captured', 'excluded', 'local_vars', 'is_json_serializable',
+        'safe_convert_to_serializable', 'var_name', 'var_value', 'converted_value'
+    }
+
+    local_vars = dict(locals())  # Create snapshot
+
+    # Collect all suitable variables
+    suitable_vars = {}
+    for var_name, var_value in local_vars.items():
+        if (not var_name.startswith('_') and
+            var_name not in excluded and
+            not isinstance(var_value, types.ModuleType) and
+            not callable(var_value)):
+
+            converted_value = safe_convert_to_serializable(var_value)
+            if is_json_serializable(converted_value):
+                suitable_vars[var_name] = converted_value
+
+    # If we have suitable variables, include them all
+    if suitable_vars:
+        result_.update(suitable_vars)
+
+print('EXECUTION_RESULT:', json.dumps(result_))
+"""
+
+
+def safe_convert_timeout(timeout) -> int:
+    """
+    Safely convert timeout parameter to integer.
+
+    Args:
+        timeout: Timeout value (could be string, int, float, or None)
+
+    Returns:
+        int: Valid timeout value
+    """
+    if timeout is None:
+        return 300
+
+    try:
+        return int(float(timeout))  # Handle both "60" and "60.5"
+    except (ValueError, TypeError):
+        return 300  # Default fallback
+
+
+def parse_execution_output(stdout: str) -> tuple[dict, list[str]]:
+    """
+    Parse subprocess output to extract execution results and regular output.
+
+    Args:
+        stdout: Raw stdout from subprocess
+
+    Returns:
+        tuple: (execution_result dict, output_lines list)
+    """
+    import json
+    from contextlib import suppress
+
+    stdout_lines = stdout.strip().split("\n") if stdout.strip() else []
+    execution_result = {}
+    output_lines = []
+
+    for line in stdout_lines:
+        if line.startswith("EXECUTION_RESULT:"):
+            with suppress(json.JSONDecodeError):
+                execution_result = json.loads(line[17:])
+        else:
+            output_lines.append(line)
+
+    return execution_result, output_lines
 
 
 @app.function(
     image=lammps_image,
-    cpu=1.0,
+    cpu=CPUS,
     memory=5120,
     volumes={
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
+    },
+)
+def execute_python_script(
+    script_path: str,
+    args: list | None = None,
+    timeout: int = 600,
+    working_dir: str | None = None,
+) -> str:
+    import json
+    import sys
+
+    try:
+        if not Path(script_path).exists():
+            return json.dumps(
+                {"success": False, "error": f"Script file not found: {script_path}"}
+            )
+
+        # Prepare command
+        cmd = [sys.executable, script_path]
+        if args:
+            cmd.extend(str(arg) for arg in args)
+
+        # Execute
+        process = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=working_dir or Path.cwd(),
+            check=False,
+        )
+
+        result = {
+            "success": process.returncode == 0,
+            "stdout": process.stdout,
+            "stderr": process.stderr,
+            "return_code": process.returncode,
+            "command": " ".join(cmd),
+        }
+
+        return json.dumps(result, indent=2)
+
+    except subprocess.TimeoutExpired:
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Script execution timed out after {timeout} seconds",
+            }
+        )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@app.function(
+    image=lammps_image,
+    cpu=CPUS,
+    memory=5120,
+    volumes={
+        "/potentials": volume_potential,
+        "/results": volume_sim,
+        "/structures": volume_struct,
+        "/test_files": volume_test_files,
+    },
+)
+def execute_python_code(
+    python_code: str,
+    input_data: str | None = None,
+    save_output_to: str | None = None,
+    timeout: int = 300,
+) -> str:
+    volume_sim.reload()
+    import json
+    import subprocess
+    import sys
+    import traceback
+    from pathlib import Path
+
+    try:
+        # Ensure timeout is valid
+        timeout = safe_convert_timeout(timeout)
+
+        # Create directory if needed
+        if save_output_to:
+            ensure_directory_exists(save_output_to)
+
+        # Create temporary file for the code
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+            # Prepare the code with input data if provided
+            full_code = ""
+            if input_data:
+                full_code += "import json\n"
+                full_code += f"input_data = json.loads({input_data!r})\n"
+
+            full_code += python_code
+            full_code += generate_output_capture_code()
+
+            f.write(full_code)
+            temp_file = f.name
+
+        # Execute the code
+        process = subprocess.run(
+            [sys.executable, temp_file],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=Path.cwd(),
+            check=False,
+        )
+
+        # Clean up
+        Path(temp_file).unlink()
+
+        # Parse output
+        execution_result, output_lines = parse_execution_output(process.stdout)
+
+        # Save output if requested
+        saved_path = None
+        if save_output_to and execution_result:
+            try:
+                with Path(save_output_to).open("w") as f:
+                    json.dump(execution_result, f, indent=2)
+                saved_path = save_output_to
+            except Exception as e:
+                logger.warning(
+                    f"Warning: Failed to save output to {save_output_to}: {e}"
+                )
+
+        result = {
+            "success": process.returncode == 0,
+            "stdout": "\n".join(output_lines),
+            "stderr": process.stderr,
+            "return_code": process.returncode,
+            "execution_result": execution_result,
+            "saved_to": saved_path,
+        }
+        if process.returncode != 0:
+            result["error"] = process.stderr or "Script execution failed"
+
+        return json.dumps(result, indent=2)
+
+    except subprocess.TimeoutExpired:
+        from pathlib import Path
+
+        if "temp_file" in locals() and Path(temp_file).exists():
+            Path(temp_file).unlink()
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Code execution timed out after {timeout} seconds",
+                "stdout": "",
+                "stderr": "",
+                "return_code": -1,
+                "execution_result": {},
+            }
+        )
+    except Exception as e:
+        if "temp_file" in locals() and Path(temp_file).exists():
+            Path(temp_file).unlink()
+        return json.dumps(
+            {
+                "success": False,
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "stdout": "",
+                "stderr": "",
+                "return_code": -1,
+                "execution_result": {},
+            }
+        )
+    finally:
+        volume_sim.commit()
+
+
+@app.function(
+    image=lammps_image,
+    cpu=CPUS,
+    timeout=3600,
+    memory=5120,
+    volumes={
+        "/potentials": volume_potential,
+        "/results": volume_sim,
+        "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def run_lammps(input_file: str, log_file: str) -> None:
@@ -53,7 +421,7 @@ def run_lammps(input_file: str, log_file: str) -> None:
     directory_path = input_path.parent
     input_file_ = input_path.name
     try:
-        _run_lammps(input_file_, log_file, str(directory_path))
+        _run_lammps(input_file_, log_file, str(directory_path), CPUS)
         volume_sim.commit()
 
     except Exception as e:
@@ -68,6 +436,7 @@ def run_lammps(input_file: str, log_file: str) -> None:
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def convert_structure_to_lammps_data(
@@ -136,6 +505,7 @@ def convert_structure_to_lammps_data(
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def run_bash_command(
@@ -181,6 +551,7 @@ def run_bash_command(
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def list_files(path: str, recursive: bool = False) -> list[str]:
@@ -201,6 +572,7 @@ def list_files(path: str, recursive: bool = False) -> list[str]:
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def read_file(path: str) -> str:
@@ -222,6 +594,7 @@ def read_file(path: str) -> str:
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def read_large_file(path: str, start: int, length: int, encoding: str) -> str:
@@ -245,6 +618,7 @@ def read_large_file(path: str, start: int, length: int, encoding: str) -> str:
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def write_file(path: str, content: str) -> None:
@@ -266,6 +640,7 @@ def write_file(path: str, content: str) -> None:
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def file_info(path: str) -> dict:
@@ -286,6 +661,7 @@ def file_info(path: str) -> dict:
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def copy_file(source: str, destination: str) -> None:
@@ -306,6 +682,7 @@ def copy_file(source: str, destination: str) -> None:
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def move_file(source: str, destination: str) -> None:
@@ -328,6 +705,7 @@ def move_file(source: str, destination: str) -> None:
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def mkdir(path: str, create_parents: bool = False) -> None:
@@ -353,6 +731,7 @@ def mkdir(path: str, create_parents: bool = False) -> None:
         "/potentials": volume_potential,
         "/results": volume_sim,
         "/structures": volume_struct,
+        "/test_files": volume_test_files,
     },
 )
 def cat_files(paths: list[str], separator: str = "\n") -> str:
