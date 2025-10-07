@@ -16,13 +16,13 @@ BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
 
 def check_resistor_topology(
     expected_topology: dict[str, Any],
+    use_functional_scoring: bool,
+    topology_weight: float,
+    functional_weight: float,
+    exact_values_weight: float,
     tolerance: float = 0.1,
     require_both: bool = True,
     expected_measurements: list[dict[str, Any]] | None = None,
-    use_functional_scoring: bool = False,
-    topology_weight: float = 0.5,
-    functional_weight: float = 0.0,
-    exact_values_weight: float = 0.5,
 ) -> Callable[[str], float]:
     """
     Enhanced scoring function that checks:
@@ -31,17 +31,48 @@ def check_resistor_topology(
     3. Optionally: exact resistor values
 
     Args:
-        expected_topology: Expected circuit topology
-        tolerance: Tolerance for measurements and resistor values
-        require_both: Legacy parameter - ignored when use_functional_scoring=True
-        expected_measurements: List of expected resistance measurements
-        use_functional_scoring: Whether to use functional validation instead of exact values
-        topology_weight: Weight for topology structure score
-        functional_weight: Weight for functional behavior score
-        exact_values_weight: Weight for exact resistor values score
+        expected_topology: Expected circuit topology (required)
+        use_functional_scoring: Whether to use functional validation (required)
+        topology_weight: Weight for topology structure score (required, set 0.0 to disable)
+        functional_weight: Weight for functional behavior score (required, set 0.0 to disable)
+        exact_values_weight: Weight for exact resistor values score (required, set 0.0 to disable)
+        tolerance: Tolerance for measurements and resistor values (default: 0.1)
+        require_both: Legacy parameter - ignored when use_functional_scoring=True (default: True)
+        expected_measurements: List of expected resistance measurements (required if functional_weight > 0)
+
+    Notes:
+        - At least one weight must be > 0
+        - If functional_weight > 0, expected_measurements must be provided
+        - Weights are normalized automatically in weighted scoring mode
+
+    Example configurations:
+        # Pure functional scoring (for subtasks with arbitrary resistor names):
+        use_functional_scoring=True, topology_weight=0.0, functional_weight=1.0, exact_values_weight=0.0
+
+        # Functional + topology (for main tasks):
+        use_functional_scoring=True, topology_weight=0.5, functional_weight=0.5, exact_values_weight=0.0
+
+        # Original strict mode (backward compatible):
+        use_functional_scoring=False, topology_weight=0.5, functional_weight=0.0, exact_values_weight=0.5
     """
+    # Validate configuration
+    if topology_weight < 0 or functional_weight < 0 or exact_values_weight < 0:
+        raise ValueError("All weights must be non-negative")
+
+    if topology_weight == 0 and functional_weight == 0 and exact_values_weight == 0:
+        raise ValueError(
+            "At least one weight must be > 0. "
+            "Set topology_weight, functional_weight, or exact_values_weight to enable scoring."
+        )
+
+    if functional_weight > 0 and not expected_measurements:
+        raise ValueError(
+            "expected_measurements must be provided when functional_weight > 0"
+        )
+
     logger.info(
-        f"Creating enhanced topology checker - functional: {use_functional_scoring}"
+        f"Creating enhanced topology checker - functional: {use_functional_scoring}, "
+        f"weights(topology={topology_weight}, functional={functional_weight}, exact_values={exact_values_weight})"
     )
 
     def score_fn(topology_input: str) -> float:
