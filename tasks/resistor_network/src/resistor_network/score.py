@@ -218,7 +218,11 @@ def _score_functional_behavior(
 ) -> float:
     """
     Score how well the topology functionally matches expected resistance measurements.
-    Uses the existing _simulate_resistance function.
+
+    Binary version:
+    - If predicted resistance is within tolerance of expected value → 1
+    - Otherwise → 0
+    The final score is the mean of all binary results.
     """
     if not expected_measurements:
         logger.warning("No expected measurements provided for functional scoring")
@@ -232,7 +236,6 @@ def _score_functional_behavior(
             node_b = measurement["node_b"]
             expected_resistance = measurement["resistance"]
 
-            # Simulate the resistance using existing function
             predicted_resistance = _simulate_resistance(topology_data, node_a, node_b)
 
             if expected_resistance == 0:
@@ -242,13 +245,12 @@ def _score_functional_behavior(
                     abs(predicted_resistance - expected_resistance)
                     / expected_resistance
                 )
-                # Give partial credit based on how close it is
-                score = max(0.0, 1.0 - relative_error / tolerance)
+                score = 1.0 if relative_error <= tolerance else 0.0
 
             scores.append(score)
             logger.info(
                 f"Functional test {node_a}-{node_b}: expected={expected_resistance}, "
-                f"predicted={predicted_resistance}, score={score}"
+                f"predicted={predicted_resistance}, relative_error={relative_error:.4f}, score={score}"
             )
 
         except Exception as e:
