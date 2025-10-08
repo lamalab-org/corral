@@ -211,7 +211,7 @@ def delta_to_wye_transform(ra: float, rb: float, rc: float) -> str:
     Returns:
         str: [BRIEF] JSON string with keys 'r1', 'r2', 'r3' for wye resistor values. [/BRIEF]
              [DETAILED] A JSON string containing a dictionary with three keys: 'r1', 'r2', and 'r3', whose values are the calculated equivalent resistances for the wye network, each being a floating-point number. R1 is connected to original node A, R2 to B, and R3 to C. [/DETAILED]
-             [EXAMPLES] `{"r1": 10.0, "r2": 10.0, "r3": 10.0}` (for `delta_to_wye_transform(30, 30, 30)`) [/EXAMPLES]
+             [EXAMPLES] "{\\\"r1\\\": 10.0, \\\"r2\\\": 10.0, \\\"r3\\\": 10.0}" (for `delta_to_wye_transform(30, 30, 30)`) [/EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError: [ERRORS]
@@ -295,7 +295,7 @@ def wye_to_delta_transform(r1: float, r2: float, r3: float) -> str:
     Returns:
         str: [BRIEF] JSON string with keys 'ra', 'rb', 'rc' for delta resistor values. [/BRIEF]
              [DETAILED] A JSON string containing a dictionary with three keys: 'ra', 'rb', and 'rc', whose values are the calculated equivalent resistances for the delta network, each being a floating-point number. Ra is between original nodes A and B, Rb between B and C, and Rc between C and A. [/DETAILED]
-             [EXAMPLES] `{"ra": 30.0, "rb": 30.0, "rc": 30.0}` (for `wye_to_delta_transform(10, 10, 10)`) [/EXAMPLES]
+             [EXAMPLES] "{\\\"ra\\\": 30.0, \\\"rb\\\": 30.0, \\\"rc\\\": 30.0}" (for `wye_to_delta_transform(10, 10, 10)`) [/EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError: [ERRORS]
@@ -353,15 +353,15 @@ def simulate_circuit_resistance(topology: str, terminal_nodes: list[str]) -> flo
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - `simulate_circuit_resistance("{\"resistors\": {\"R1\": 7.778, \"R2\": 11.111, \"R3\": 10.0}, \"connections\": [[\"A\", \"N1\", \"R1\"], [\"A\", \"X1\", \"R2\"], [\"N1\", \"X1\", \"R3\"]]}", ["A", "X1"])`
-    - `simulate_circuit_resistance("{\"resistors\": {\"R1\": 50.0, \"R2\": 25.0}, \"connections\": [[\"N1\", \"N2\", \"R1\"], [\"N2\", \"N3\", \"R2\"]]}", ["N1", "N3"])`
+    - `simulate_circuit_resistance("{\\"resistors\\": {\\"R1\\": 7.778, \\"R2\\": 11.111, \\"R3\\": 10.0}, \\"connections\\": [[\\"A\\", \\"N1\\", \\"R1\\"], [\\"A\\", \\"X1\\", \\"R2\\"], [\\"N1\\", \\"X1\\", \\"R3\\\"]]}", ["A", "X1"])`
+    - `simulate_circuit_resistance("{\\"resistors\\": {\\"R1\\": 50.0, \\"R2\\": 25.0}, \\"connections\\": [[\\"N1\\", \\"N2\\", \\"R1\\"], [\\"N2\\", \\"N3\\", \\"R2\\\"]]}", ["N1", "N3"])`
     [/SYNTACTICAL]
 
     Args:
         topology : [BRIEF] JSON string describing circuit. [/BRIEF]
                    [DETAILED] A JSON string that defines the circuit's components and their interconnections. It must contain a "resistors" dictionary (mapping resistor IDs to their resistance values) and a "connections" list (each entry being a list `[node1, node2, resistor_id]`). [/DETAILED]
-                   [SYNTACTIC] Format: JSON string (with escaped quotes) - `"{\"resistors\": {\"R1\": 10, \"R2\": 20}, \"connections\": [[\"node1\", \"node2\", \"R1\"]]}"` [/SYNTACTIC]
-                   [EXAMPLES] `"{\"resistors\": {\"R1\": 7.778, \"R2\": 11.111, \"R3\": 10.0}, \"connections\": [[\"A\", \"N1\", \"R1\"], [\"A\", \"X1\", \"R2\"], [\"N1\", \"X1\", \"R3\"]]}"`, `"{\"resistors\": {\"R1\": 50.0, \"R2\": 25.0}, \"connections\": [[\"N1\", \"N2\", \"R1\"], [\"N2\", \"N3\", \"R2\"]]}"` [/EXAMPLES]
+                   [SYNTACTIC] Format: JSON string (with escaped quotes) - `"{\\"resistors\\": {\\"R1\\": 10, \\"R2\\": 20}, \\"connections\\": [[\\"node1\\", \\"node2\\", \\"R1\\\"]]}"` [/SYNTACTIC]
+                   [EXAMPLES] `"{\\"resistors\\": {\\"R1\\": 7.778, \\"R2\\": 11.111, \\"R3\\": 10.0}, \\"connections\\": [[\\"A\\", \\"N1\\", \\"R1\\"], [\\"A\\", \\"X1\\", \\"R2\\"], [\\"N1\\", \\"X1\\", \\"R3\\\"]]}"`, `"{\\"resistors\\": {\\"R1\\": 50.0, \\"R2\\": 25.0}, \\"connections\\": [[\\"N1\\", \\"N2\\", \\"R1\\"], [\\"N2\\", \\"N3\\", \\"R2\\\"]]}", ["N1", "N3"]` [/EXAMPLES]
         terminal_nodes : [BRIEF] List of two node names to measure resistance between. [/BRIEF]
                          [DETAILED] A list containing exactly two strings, where each string is the name of a node in the circuit. The tool will calculate the equivalent resistance between these two specified nodes. [/DETAILED]
                          [SYNTACTIC] Format: `["node_start", "node_end"]` [/SYNTACTIC]
@@ -525,19 +525,24 @@ def validate_measurements(topology: str, measurements: str) -> str:
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - `validate_measurements("{\"resistors\": {\"R1\": 7.778, \"R2\": 11.111, \"R3\": 10.0}, \"connections\": [[\"A\", \"N1\", \"R1\"], [\"A\", \"X1\", \"R2\"], [\"N1\", \"X1\", \"R3\"]]}", "[{\"node_a\": \"A\", \"node_b\": \"N1\", \"resistance\": 7.778}, {\"node_a\": \"A\", \"node_b\": \"X1\", \"resistance\": 11.111}]")`
+    - `validate_measurements(
+    "{\\\"resistors\\\": {\\\"R1\\\": 5.0, \\\"R2\\\": 10.0}, "
+    "\\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R2\\\"]]}",
+    "[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, "
+    "{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, "
+    "{\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]")`
     - `validate_measurements(proposed_circuit_topology, experimental_data)`
     [/SYNTACTICAL]
 
     Args:
         topology : [BRIEF] JSON string describing proposed circuit topology. [/BRIEF]
                    [DETAILED] A JSON string conforming to the `CircuitTopology` structure, including resistor IDs, their estimated values, and the connections between nodes. This represents your hypothesis about the circuit's structure. [/DETAILED]
-                   [SYNTACTIC] Format: JSON string (with escaped quotes) - `"{\"resistors\": {\"R1\": 10, \"R2\": 20}, \"connections\": [[\"node1\", \"node2\", \"R1\"]]}"` [/SYNTACTIC]
-                [EXAMPLES] `"{\"resistors\": {\"R1\": 7.778, \"R2\": 11.111, \"R3\": 10.0}, \"connections\": [[\"A\", \"N1\", \"R1\"], [\"A\", \"X1\", \"R2\"], [\"N1\", \"X1\", \"R3\"]]}"` [/EXAMPLES]
+                   [SYNTACTIC] Format: JSON string (with escaped quotes) - `"{\\\"resistors\\\": {\\\"R1\\\": 5.0, \\\"R2\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R2\\\"]]}"` [/SYNTACTIC]
+                [EXAMPLES] `"{\\\"resistors\\\": {\\\"R1\\\": 5.0, \\\"R2\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R2\\\"]]}"`[/EXAMPLES]
         measurements : [BRIEF] JSON string with actual measurements. [/BRIEF]
                 [DETAILED] A JSON string representing a list of CircuitMeasurement objects. Each object should contain node_a, node_b, and at least resistance (though voltage and current are also possible if the tool were to be extended for them). These are the real-world observations. [/DETAILED]
-                [SYNTACTIC] Format: JSON string (with escaped quotes) - `"[{\"node_a\": \"A\", \"node_b\": \"B\", \"resistance\": 10.0}, ...]"` [/SYNTACTIC]
-                [EXAMPLES] `"[{\"node_a\": \"A\", \"node_b\": \"N1\", \"resistance\": 7.778}, {\"node_a\": \"A\", \"node_b\": \"X1\", \"resistance\": 11.111}, {\"node_a\": \"N1\", \"node_b\": \"X1\", \"resistance\": 10.0}]"` [/EXAMPLES]
+                [SYNTACTIC] Format: JSON string (with escaped quotes) - `"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]"` [/SYNTACTIC]
+                [EXAMPLES] `"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]"` [/EXAMPLES]
 
     Returns:
     str: [BRIEF] JSON string with validation results including error metrics. [/BRIEF]
@@ -671,7 +676,7 @@ def propose_simple_topology(num_resistors: int, topology_type: str) -> str:
     Returns:
         str: [BRIEF] JSON string with proposed topology structure. [/BRIEF]
              [DETAILED] A JSON string representing a `CircuitTopology` object. It includes a "resistors" dictionary (with `R1`, `R2`, etc., initially set to 10.0 ohms) and a "connections" list defining how these resistors are wired based on the `topology_type`. [/DETAILED]
-             [EXAMPLES] `'{"resistors": {"R1": 10, "R2": 10, "R3": 10}, "connections": [["A", "B", "R1"], ["B", "C", "R2"], ["C", "D", "R3"]]}'` (for `propose_simple_topology(3, "series")`) [/EXAMPLES]
+             [EXAMPLES] ` "{\\\"resistors\\\": {\\\"R1\\\": 10.0, \\\"R2\\\": 10.0, \\\"R3\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}"` (for `propose_simple_topology(3, "series")`) [/EXAMPLES]
 
     [RAISES] Exceptions:
         None explicitly raised by the tool itself, but downstream tools using this output might raise errors if the generated topology is invalid for their operations.
@@ -768,7 +773,12 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
     [/WORKFLOW_INTEGRATION]
 
     [SYNTACTICAL] Usage examples:
-    - `estimate_resistor_values("{\"resistors\": {\"R1\": 10.0, \"R2\": 10.0, \"R3\": 10.0}, \"connections\": [[\"A\", \"N1\", \"R1\"], [\"A\", \"X1\", \"R2\"], [\"N1\", \"X1\", \"R3\"]]}", "[{\"node_a\": \"A\", \"node_b\": \"N1\", \"resistance\": 7.778}, {\"node_a\": \"A\", \"node_b\": \"X1\", \"resistance\": 11.111}, {\"node_a\": \"N1\", \"node_b\": \"X1\", \"resistance\": 10.0}]")`
+    - `estimate_resistor_values(
+    "{\\\"resistors\\\": {\\\"R1\\\": 10.0, \\\"R2\\\": 10.0, \\\"R3\\\": 10.0}, "
+    "\\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}",
+    "[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 7.778}, "
+    "{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 11.111}, "
+    "{\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]")`
     - `estimate_resistor_values(initial_topology_json, experimental_measurements_json)`
     [/SYNTACTICAL]
 
@@ -776,11 +786,11 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
         topology : [BRIEF] JSON string describing circuit topology with initial resistor value guesses. [/BRIEF]
                    [DETAILED] A JSON string conforming to the `CircuitTopology` structure. It must include a "resistors" dictionary with resistor IDs and their *initial estimated* resistance values, and a "connections" list defining the circuit structure. These initial values are the starting point for optimization. [/DETAILED]
                    [SYNTACTIC] Format: JSON string (with escaped quotes) - `"{\"resistors\": {\"R1\": 10, \"R2\": 20}, \"connections\": [[\"node1\", \"node2\", \"R1\"]]}"` [/SYNTACTIC]
-                   [EXAMPLES] `"{\"resistors\": {\"R1\": 10.0, \"R2\": 10.0, \"R3\": 10.0}, \"connections\": [[\"A\", \"N1\", \"R1\"], [\"A\", \"X1\", \"R2\"], [\"N1\", \"X1\", \"R3\"]]}"` [/EXAMPLES]
+                   [EXAMPLES] `"{\\\"resistors\\\": {\\\"R1\\\": 10.0, \\\"R2\\\": 10.0, \\\"R3\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}"` [/EXAMPLES]
         measurements : [BRIEF] JSON string with actual measurements. [/BRIEF]
                        [DETAILED] A JSON string representing a list of `CircuitMeasurement` objects, each containing `node_a`, `node_b`, and `resistance`. These are the actual observed resistance values against which the model will be optimized. [/DETAILED]
-                       [SYNTACTIC] Format: JSON string (with escaped quotes) - `"[{\"node_a\": \"A\", \"node_b\": \"B\", \"resistance\": 10.0}, ...]"` [/SYNTACTIC]
-                       [EXAMPLES] `"[{\"node_a\": \"A\", \"node_b\": \"N1\", \"resistance\": 7.778}, {\"node_a\": \"A\", \"node_b\": \"X1\", \"resistance\": 11.111}, {\"node_a\": \"N1\", \"node_b\": \"X1\", \"resistance\": 10.0}]"` [/EXAMPLES]
+                       [SYNTACTIC] Format: JSON string (with escaped quotes) - `"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"B\\\", \\\"resistance\\\": 10.0}, ...]"` [/SYNTACTIC]
+                       [EXAMPLES] `"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 7.778}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 11.111}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]"` [/EXAMPLES]
 
     Returns:
         str: [BRIEF] JSON string with optimized resistor values and optimization info. [/BRIEF]
@@ -897,73 +907,77 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
 def generate_test_measurements(topology: str, terminal_pairs: list[list[str]]) -> str:
     """[BRIEF] Generate theoretical measurements for a given circuit topology. [/BRIEF]
 
-        [DETAILED] Calculates what the resistance measurements would be between specified terminal pairs for a given circuit topology.
-        This tool is useful for testing your circuit analysis tools, understanding the behavior of different topologies.
-        It provides a ground truth for a given circuit design. [/DETAILED]
+            [DETAILED] Calculates what the resistance measurements would be between specified terminal pairs for a given circuit topology.
+            This tool is useful for testing your circuit analysis tools, understanding the behavior of different topologies.
+            It provides a ground truth for a given circuit design. [/DETAILED]
 
-    [PROCEDURAL] When to use this tool:
-    - Use to understand what resistance measurements a proposed or known topology would produce.
-    - Best suited for testing and debugging your circuit analysis approach or custom tools.
-    - Recommended to generate additional synthetic measurements for validation of `estimate_resistor_values` or `validate_measurements`.
-    - Use when exploring how changes in topology or resistor values affect the overall circuit measurements.
-    [/PROCEDURAL]
+        [PROCEDURAL] When to use this tool:
+        - Use to understand what resistance measurements a proposed or known topology would produce.
+        - Best suited for testing and debugging your circuit analysis approach or custom tools.
+        - Recommended to generate additional synthetic measurements for validation of `estimate_resistor_values` or `validate_measurements`.
+        - Use when exploring how changes in topology or resistor values affect the overall circuit measurements.
+        [/PROCEDURAL]
 
-    [CONTEXTUAL] How this tool works:
-    - Parses the input `topology` JSON string.
-    - Iterates through each `terminal_pair` provided in the list.
-    - For each pair, it calls the `get_resistance_between_nodes` tool to calculate the equivalent resistance between those two nodes.
-    - Stores the calculated resistance along with the `node_a` and `node_b` in a list of measurement dictionaries.
-    - If a simulation fails for a specific `terminal_pair`, it records an error message for that measurement.
-    - Returns a JSON string containing the list of theoretical measurements.
-    [/CONTEXTUAL]
+        [CONTEXTUAL] How this tool works:
+        - Parses the input `topology` JSON string.
+        - Iterates through each `terminal_pair` provided in the list.
+        - For each pair, it calls the `get_resistance_between_nodes` tool to calculate the equivalent resistance between those two nodes.
+        - Stores the calculated resistance along with the `node_a` and `node_b` in a list of measurement dictionaries.
+        - If a simulation fails for a specific `terminal_pair`, it records an error message for that measurement.
+        - Returns a JSON string containing the list of theoretical measurements.
+        [/CONTEXTUAL]
 
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. [PREREQUISITE] Have a fully defined circuit `topology` (including resistor values) and a list of `terminal_pairs` where measurements are desired. [/PREREQUISITE]
-        2. [CURRENT] Apply this tool with the `topology` and `terminal_pairs` to obtain a set of theoretical resistance measurements. [/CURRENT]
-        3. [FOLLOW_UP] Use these generated measurements to test the `estimate_resistor_values` tool (by trying to recover the original resistor values), or to test the `validate_measurements` tool (by comparing against the same topology). [/FOLLOW_UP]
-    [/WORKFLOW_INTEGRATION]
+        [WORKFLOW_INTEGRATION] Typical workflow integration:
+            1. [PREREQUISITE] Have a fully defined circuit `topology` (including resistor values) and a list of `terminal_pairs` where measurements are desired. [/PREREQUISITE]
+            2. [CURRENT] Apply this tool with the `topology` and `terminal_pairs` to obtain a set of theoretical resistance measurements. [/CURRENT]
+            3. [FOLLOW_UP] Use these generated measurements to test the `estimate_resistor_values` tool (by trying to recover the original resistor values), or to test the `validate_measurements` tool (by comparing against the same topology). [/FOLLOW_UP]
+        [/WORKFLOW_INTEGRATION]
 
-    [SYNTACTICAL] Usage examples:
-    - `generate_test_measurements("{\"resistors\": {\"R1\": 7.778, \"R2\": 11.111, \"R3\": 10.0}, \"connections\": [[\"A\", \"N1\", \"R1\"], [\"A\", \"X1\", \"R2\"], [\"N1\", \"X1\", \"R3\"]]}", [["A", "N1"], ["A", "X1"], ["N1", "X1"]])`
-    - `generate_test_measurements(my_topology_json, [["A", "B"], ["A", "C"]])`
-    [/SYNTACTICAL]
+        [SYNTACTICAL] Usage examples:
+        - `generate_test_measurements(
+        "{\\\"resistors\\\": {\\\"R1\\\": 7.778, \\\"R2\\\": 11.111, \\\"R3\\\": 10.0}, "
+        "\\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}",
+        [["A", "N1"], ["A", "X1"], ["N1", "X1"]]
+    )`
+        - `generate_test_measurements(my_topology_json, [["A", "B"], ["A", "C"]])`
+        [/SYNTACTICAL]
 
-    Args:
-        topology : [BRIEF] JSON string describing the circuit. [/BRIEF]
-                   [DETAILED] A JSON string conforming to the `CircuitTopology` structure, containing both the resistor IDs with their precise resistance values and the connections between nodes. This is the circuit for which theoretical measurements are to be generated. [/DETAILED]
-                   [SYNTACTIC] Format: JSON string (with escaped quotes) - `"{\"resistors\": {\"R1\": 10, \"R2\": 20}, \"connections\": [[\"node1\", \"node2\", \"R1\"]]}"` [/SYNTACTIC]
-                   [EXAMPLES] `"{\"resistors\": {\"R1\": 7.778, \"R2\": 11.111, \"R3\": 10.0}, \"connections\": [[\"A\", \"N1\", \"R1\"], [\"A\", \"X1\", \"R2\"], [\"N1\", \"X1\", \"R3\"]]}"` [/EXAMPLES]
-        terminal_pairs : [BRIEF] List of node pairs to measure between. [/BRIEF]
-                         [DETAILED] A list of lists, where each inner list contains two strings representing the names of the nodes between which the equivalent resistance should be calculated. Each pair signifies one theoretical measurement point. [/DETAILED]
-                         [SYNTACTIC] Format: `[["node_a", "node_b"], ["node_x", "node_y"], ...]` [/SYNTACTIC]
-                         [EXAMPLES] `[["A", "B"], ["A", "C"], ["B", "C"]]`, `[["input", "output"]]` [/EXAMPLES]
+        Args:
+            topology : [BRIEF] JSON string describing the circuit. [/BRIEF]
+                       [DETAILED] A JSON string conforming to the `CircuitTopology` structure, containing both the resistor IDs with their precise resistance values and the connections between nodes. This is the circuit for which theoretical measurements are to be generated. [/DETAILED]
+                       [SYNTACTIC] Format: JSON string (with escaped quotes) - `"{\"resistors\": {\"R1\": 10, \"R2\": 20}, \"connections\": [[\"node1\", \"node2\", \"R1\"]]}"` [/SYNTACTIC]
+                       [EXAMPLES] `"{\"resistors\": {\"R1\": 7.778, \"R2\": 11.111, \"R3\": 10.0}, \"connections\": [[\"A\", \"N1\", \"R1\"], [\"A\", \"X1\", \"R2\"], [\"N1\", \"X1\", \"R3\"]]}"` [/EXAMPLES]
+            terminal_pairs : [BRIEF] List of node pairs to measure between. [/BRIEF]
+                             [DETAILED] A list of lists, where each inner list contains two strings representing the names of the nodes between which the equivalent resistance should be calculated. Each pair signifies one theoretical measurement point. [/DETAILED]
+                             [SYNTACTIC] Format: `[["node_a", "node_b"], ["node_x", "node_y"], ...]` [/SYNTACTIC]
+                             [EXAMPLES] `[["A", "B"], ["A", "C"], ["B", "C"]]`, `[["input", "output"]]` [/EXAMPLES]
 
-    Returns:
-        str: [BRIEF] JSON string with theoretical measurements. [/BRIEF]
-             [DETAILED] A JSON string representing a list of measurement dictionaries. Each dictionary will include `node_a`, `node_b`, and the `resistance` (rounded to 3 decimal places) between those nodes, as calculated by the `simulate_circuit_resistance` tool. If a simulation fails for a pair, an "error" key will be present instead of "resistance". [/DETAILED]
-             [EXAMPLES] `'[{"node_a": "A", "node_b": "B", "resistance": 15.0}, {"node_a": "A", "node_b": "C", "resistance": 45.0}]'` [/EXAMPLES]
+        Returns:
+            str: [BRIEF] JSON string with theoretical measurements. [/BRIEF]
+                 [DETAILED] A JSON string representing a list of measurement dictionaries. Each dictionary will include `node_a`, `node_b`, and the `resistance` (rounded to 3 decimal places) between those nodes, as calculated by the `simulate_circuit_resistance` tool. If a simulation fails for a pair, an "error" key will be present instead of "resistance". [/DETAILED]
+                 [EXAMPLES] `'[{"node_a": "A", "node_b": "B", "resistance": 15.0}, {"node_a": "A", "node_b": "C", "resistance": 45.0}]'` [/EXAMPLES]
 
-    [RAISES] Exceptions:
-        json.JSONDecodeError: [BRIEF] If `topology` is not a valid JSON string.
-                              [DETAILED] This occurs if the input `topology` string cannot be parsed into a valid JSON object, which is required for circuit definition.
-        Exception: [BRIEF] General error during measurement generation.
-                   [DETAILED] Catches any other unforeseen errors that might occur during the iteration through terminal pairs or calls to `get_resistance_between_nodes`, returning an error message for the overall process. Specific measurement errors are handled per-pair.
+        [RAISES] Exceptions:
+            json.JSONDecodeError: [BRIEF] If `topology` is not a valid JSON string.
+                                  [DETAILED] This occurs if the input `topology` string cannot be parsed into a valid JSON object, which is required for circuit definition.
+            Exception: [BRIEF] General error during measurement generation.
+                       [DETAILED] Catches any other unforeseen errors that might occur during the iteration through terminal pairs or calls to `get_resistance_between_nodes`, returning an error message for the overall process. Specific measurement errors are handled per-pair.
 
-    [PERFORMANCE] Performance notes:
-    - Time complexity: O(M * S), where M is the number of `terminal_pairs` and S is the time complexity of `get_resistance_between_nodes`.
-    - Memory usage: Proportional to the size of the `topology` and the number of `terminal_pairs`.
-    - Network calls: None (assuming `get_resistance_between_nodes` is an internal function or tool).
-    - File I/O: None.
+        [PERFORMANCE] Performance notes:
+        - Time complexity: O(M * S), where M is the number of `terminal_pairs` and S is the time complexity of `get_resistance_between_nodes`.
+        - Memory usage: Proportional to the size of the `topology` and the number of `terminal_pairs`.
+        - Network calls: None (assuming `get_resistance_between_nodes` is an internal function or tool).
+        - File I/O: None.
 
-    [LIMITATIONS] Known limitations:
-    - Relies entirely on the accuracy and robustness of the `get_resistance_between_nodes` tool.
-    - Does not validate the `topology` for circuit correctness (e.g., disconnected components, short circuits) beyond what `get_resistance_between_nodes` handles.
-    - Handles only resistance measurements; cannot generate other types of circuit measurements (e.g., voltage, current).
+        [LIMITATIONS] Known limitations:
+        - Relies entirely on the accuracy and robustness of the `get_resistance_between_nodes` tool.
+        - Does not validate the `topology` for circuit correctness (e.g., disconnected components, short circuits) beyond what `get_resistance_between_nodes` handles.
+        - Handles only resistance measurements; cannot generate other types of circuit measurements (e.g., voltage, current).
 
-    [RELATED] Related tools:
-    - `get_resistance_between_nodes()`: Directly called by this tool to perform individual resistance calculations.
-    - `estimate_resistor_values()`: Can use the output of this tool as input for validation.
-    - `validate_measurements()`: Can use the output of this tool to compare against actual measurements or another theoretical set.
+        [RELATED] Related tools:
+        - `get_resistance_between_nodes()`: Directly called by this tool to perform individual resistance calculations.
+        - `estimate_resistor_values()`: Can use the output of this tool as input for validation.
+        - `validate_measurements()`: Can use the output of this tool to compare against actual measurements or another theoretical set.
     """
     try:
         measurements = []
