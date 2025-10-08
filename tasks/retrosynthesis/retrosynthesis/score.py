@@ -146,10 +146,9 @@ def check_reactants(prediction: dict, target: list) -> float:
     Returns:
         float: 1.0 if all conditions are met, 0.0 if any condition is violated.
     """
-    target_molecule = target[0]
 
     leaf_molecules = collect_leaf_molecules(prediction)
     if not leaf_molecules:
         return 0.0
 
-    return 1.0 if target_molecule in leaf_molecules else 0.0
+    return 1.0 if all(smiles in leaf_molecules for smiles in target) else 0.0

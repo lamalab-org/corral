@@ -13,13 +13,17 @@ from rdkit import Chem
 from rxnutils.chem.reaction import ChemicalReaction
 
 
-def _mol_info_from_smiles_list(smiles_list):
+def _mol_info_from_smiles_list(smiles_list: list[str]) -> tuple[dict, dict]:
     """
     Extract bond and atom map information from list of SMILES.
 
+    Args:
+        smiles_list (list[str]): List of SMILES strings.
+
     Returns:
-        bonds: dict of {(map1, map2): {'order': ..., 'aromatic': bool}}
-        amapZ: dict of {mapNum: atomic_number}
+        tuple (dict, dict):
+            bonds: dict of {(map1, map2): {'order': ..., 'aromatic': bool}}
+            amapZ: dict of {mapNum: atomic_number}
     """
     bonds = {}
     amapZ = {}
@@ -87,10 +91,10 @@ def obtain_bonds(mapped_rxn: str) -> dict[str, list[str]]:
     where at least one atom persists in products).
 
     Args:
-        mapped_rxn: Atom-mapped reaction SMILES (reactants>>products)
+        mapped_rxn (str): Atom-mapped reaction SMILES (reactants>>products)
 
     Returns:
-        Dict with keys:
+        dict[str, list[str]]: Dict with keys:
         - 'formed': List of formed bonds (e.g., ['6-7', '6-8'])
         - 'broken': List of broken bonds
         - 'order_changed': List of bonds with order changes (e.g., ['6-6 (1.0->2.0)'])
@@ -156,10 +160,6 @@ def obtain_bonds(mapped_rxn: str) -> dict[str, list[str]]:
         logger.warning(f"Bond detection failed for {mapped_rxn[:50]}...: {e}")
         return {"formed": [], "broken": [], "order_changed": []}
 
-
-# =============================================================================
-# FUNCTIONAL GROUP DETECTION
-# =============================================================================
 
 # SMARTS patterns for functional groups
 FG_SMARTS = {
@@ -252,10 +252,10 @@ def detect_functional_groups_in_molecule(smiles: str) -> list[str]:
     Detect functional groups in a single molecule.
 
     Args:
-        smiles: SMILES string
+        smiles (str): SMILES string
 
     Returns:
-        List of functional group names detected
+        list[str]: List of functional group names detected
     """
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -274,10 +274,10 @@ def get_functional_groups(mapped_rxn: str) -> dict[str, list[str]]:
     Detect functional groups formed and broken in reaction.
 
     Args:
-        mapped_rxn: Atom-mapped reaction SMILES
+        mapped_rxn (str): Atom-mapped reaction SMILES
 
     Returns:
-        Dict with keys:
+        dict[str, list[str]]: Dict with keys:
         - 'formed': List of FG names formed in products
         - 'broken': List of FG names broken from reactants
     """

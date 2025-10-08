@@ -17,16 +17,16 @@ MOLECULES = [
     "O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O",
 ]
 PRIZES = [
-    ["01a"],
-    ["02a"],
-    ["03a"],
-    ["04a"],
-    ["05a1", "05a2", "05a3"],
-    ["06a1", "06a2", "06a3", "06a4"],
-    ["07a1", "07a2"],
-    ["08a1", "08a2", "08a3"],
-    ["09a1", "09a2", "09a3"],
-    ["10a1", "10a2", "10a3", "10a4, 10a5, 10a6"],
+    ["1914396"],
+    ["1914397"],
+    ["1914398"],
+    ["1679759"],
+    ["36006", "1914399", "1914400"],
+    ["29648", "1914401", "1914402", "1914403"],
+    ["1914404", "337284"],
+    ["1914405", "1914406", "1914407"],
+    ["324328", "1914408", "733"],
+    ["20810", "2895", "1914409", "1914410", "1914411", "74060"],
 ]
 
 TARGETS = [
@@ -89,7 +89,7 @@ def main():
                     "threshold": None,
                 }
             ],
-            "scoring_fn": "check_reactants",
+            "scoring_fn": "score_final",
             "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
         }
         task_file = tasks_path / f"make_{i+1}.json"

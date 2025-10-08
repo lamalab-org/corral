@@ -53,23 +53,21 @@ NUM_WORKERS = None  # Number of parallel workers for chemistry processing (None 
 # RDKit function names (adjust if your cartridge version differs)
 # To verify: run \df *qmol* and \df *fp* in psql
 RDKIT_QMOL_FUNC = "qmol_from_smarts"  # Creates query molecule from SMARTS
-RDKIT_FP_FUNC = "rdkit_fp"  # RDKit fingerprint for molecules (alternatives: morganbv_fp, layered_fp, maccs_fp)
+RDKIT_FP_FUNC = "rdkit_fp"  # RDKit fingerprint for molecules
 RDKIT_SUBSET_OP = "%<="  # Substructure match operator
 
 
 class ErrorStage(Enum):
     """Enumeration of all possible ETL error stages for precise tracking"""
 
-    TEMPLATE_GENERATION = (
-        "template_generation"  # ChemicalReaction.generate_reaction_template() failed
-    )
-    QMOL_PRODUCT = "qmol_product"  # qmol_from_smarts() failed for product
-    QMOL_REACTANT = "qmol_reactant"  # qmol_from_smarts() failed for reactant
-    PATTERN_FP_PRODUCT = "pattern_fp_product"  # pattern_fp() failed for product
-    PATTERN_FP_REACTANT = "pattern_fp_reactant"  # pattern_fp() failed for reactant
-    BONDS = "bonds"  # obtain_bonds() failed
-    FGS = "fgs"  # get_functional_groups() failed
-    PREPARATION = "preparation"  # General preparation error
+    TEMPLATE_GENERATION = "template_generation"
+    QMOL_PRODUCT = "qmol_product"
+    QMOL_REACTANT = "qmol_reactant"
+    PATTERN_FP_PRODUCT = "pattern_fp_product"
+    PATTERN_FP_REACTANT = "pattern_fp_reactant"
+    BONDS = "bonds"
+    FGS = "fgs"
+    PREPARATION = "preparation"
 
     def __str__(self):
         return self.value
@@ -234,6 +232,7 @@ def create_production_schema():
 
         logger.info("Creating production schema...")
 
+        # REACTIONS TABLE (unique templates with one representative example each)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS reactions (
                 reaction_id                 SERIAL PRIMARY KEY,
@@ -265,6 +264,7 @@ def create_production_schema():
             );
         """)
 
+        # BONDS TABLE (normalized bond types)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS bonds (
                 bond_id         SERIAL PRIMARY KEY,
@@ -272,6 +272,7 @@ def create_production_schema():
             );
         """)
 
+        # BONDS JUNCTION TABLES
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS reaction_bonds_formed (
                 reaction_id     INTEGER NOT NULL REFERENCES reactions(reaction_id) ON DELETE CASCADE,
@@ -296,6 +297,7 @@ def create_production_schema():
             );
         """)
 
+        # FUNCTIONAL GROUPS TABLES
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS functional_groups (
                 functional_group_id     SERIAL PRIMARY KEY,
@@ -319,6 +321,7 @@ def create_production_schema():
             );
         """)
 
+        # MOLECULES TABLE (for caching target molecules)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS molecules (
                 molecule_id     SERIAL PRIMARY KEY,
@@ -458,10 +461,10 @@ def generate_templates(mapped_rxn: str) -> dict[str, str] | None:
     - Multi-product reactions are handled via SMARTS concatenation
 
     Args:
-        mapped_rxn (str): Mapped reaction SMILES.
+        mapped_rxn (str): The mapped reaction string.
 
     Returns:
-        dict[str, str] | None: Dict with keys:
+        dict[str, str]: Dict with keys:
         - 'retro_smarts': Product-side SMARTS (for retro applicability)
         - 'canonical_smarts': Canonical template
         - 'template_hash': Hash computed from rxn.retro_template.hash_from_bits()
@@ -580,7 +583,7 @@ def process_single_reaction_chemistry(row_data: dict[str, Any]) -> dict[str, Any
         return result
 
 
-def upsert_bond(cursor, bond_label: str) -> int:
+def upsert_bond(cursor: psycopg2.extensions.cursor, bond_label: str) -> int:
     """Insert or get bond ID"""
     cursor.execute(
         """
@@ -594,7 +597,7 @@ def upsert_bond(cursor, bond_label: str) -> int:
     return cursor.fetchone()[0]
 
 
-def upsert_functional_group(cursor, fg_key: str) -> int:
+def upsert_functional_group(cursor: psycopg2.extensions.cursor, fg_key: str) -> int:
     """Insert or get functional group ID"""
     cursor.execute(
         """
@@ -609,7 +612,7 @@ def upsert_functional_group(cursor, fg_key: str) -> int:
 
 
 def process_batch(
-    production_conn: Any,
+    production_conn: psycopg2.extensions.connection,
     batch: list[dict[str, Any]],
     error_tracker: ErrorTracker,
     num_workers: int | None = None,
@@ -617,10 +620,10 @@ def process_batch(
     """Process a batch of staging reactions using bulk insert with execute_values
 
     Args:
-        production_conn (Any): Connection to production database
+        production_conn (psycopg2.extensions.connection): Connection to production database
         batch (list[dict[str, Any]]): List of reaction data dictionaries
         error_tracker (ErrorTracker): ErrorTracker instance for logging errors
-        num_workers (int | None): Number of parallel workers (None = use all CPUs)
+        num_workers (int): Number of parallel workers (None = use all CPUs)
 
     Returns:
         dict[str, int]: Statistics about processing (processed, inserted, skipped_duplicate, skipped_error)
@@ -629,14 +632,14 @@ def process_batch(
 
     prod_cursor = production_conn.cursor()
 
-    # Phase 1: Process chemistry in parallel
-    # Determine number of workers
     if num_workers is None:
         num_workers = cpu_count()
 
     logger.info(
         f"Processing batch of {len(batch)} reactions using {num_workers} parallel workers..."
     )
+
+    # Phase 1: Process chemistry in parallel
 
     # Process all reactions in parallel
     chemistry_results = []
@@ -715,7 +718,9 @@ def process_batch(
 
     # Phase 3: Bulk insert unique templates into reactions table
     # Note: RDKit errors (qmol_from_smarts, pattern_fp) are caught by PostgreSQL
-    # and will cause the entire batch to fail.
+    # and will cause the entire batch to fail. We could implement row-by-row
+    # fallback here if needed, but typically these errors are rare after
+    # template validation.
     if reactions_to_insert:
         try:
             insert_sql = """
@@ -778,6 +783,7 @@ def process_batch(
             raise
 
     # Phase 4: Insert bonds and functional groups for successfully inserted templates
+    # We need to query for reaction_ids since they may have been inserted in a previous batch
     template_hashes = [m["template_hash"] for m in reaction_metadata]
     if template_hashes:
         # Fetch reaction_ids for all template_hashes in this batch

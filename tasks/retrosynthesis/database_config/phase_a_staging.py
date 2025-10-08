@@ -87,12 +87,10 @@ def compute_raw_hash(mapped_rxn: str) -> str:
     Uses Python's built-in hashlib to generate a SHA256 hash of the mapped reaction SMILES.
 
     Args:
-        mapped_rxn: Mapped reaction SMILES
-        dataset: Dataset identifier (not used, kept for API compatibility)
-        id_val: ID from CSV (not used, kept for API compatibility)
+        mapped_rxn (str): Mapped reaction SMILES
 
     Returns:
-        Hash string (SHA256 hexdigest)
+        str: Hash string (SHA256 hexdigest)
 
     Raises:
         Exception: If reaction SMILES is empty
@@ -112,12 +110,12 @@ def normalize_row_data(
     Normalize and prepare a CSV row for insertion.
 
     Args:
-        row: Dictionary from CSV DictReader
-        source_file: Name of source CSV file
-        line_no: Line number in CSV (1-indexed, excluding header)
+        row (dict[str, Any]): Dictionary from CSV DictReader
+        source_file (str): Name of source CSV file
+        line_no (int): Line number in CSV (1-indexed, excluding header)
 
     Returns:
-        Normalized dictionary ready for DB insertion, or None if critical data missing
+        dict[str, Any] | None: Normalized dictionary ready for DB insertion, or None if critical data missing
     """
     # Extract mapped_rxn (required)
     mapped_rxn = row.get("mapped_rxn", "").strip()
@@ -178,7 +176,7 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
-def create_tables(conn):
+def create_tables(conn: psycopg2.extensions.connection):
     """Create staging table if it doesn't exist."""
     with conn.cursor() as cur:
         logger.info("Creating staging_reactions table...")
@@ -189,7 +187,7 @@ def create_tables(conn):
 
 
 def load_csv_to_staging(
-    conn,
+    conn: psycopg2.extensions.connection,
     csv_path: str,
     source_file: str,
 ) -> dict[str, int]:
@@ -197,12 +195,12 @@ def load_csv_to_staging(
     Load a CSV file into the staging table with deduplication and validation.
 
     Args:
-        conn: Database connection
-        csv_path: Path to CSV file
-        source_file: Identifier for the source file
+        conn (psycopg2.extensions.connection): Database connection
+        csv_path (str): Path to CSV file
+        source_file (str): Identifier for the source file
 
     Returns:
-        Dictionary with statistics (inserted, skipped, errors)
+        dict[str, int]: Dictionary with statistics (inserted, skipped, errors)
     """
     stats = {
         "total_rows": 0,
@@ -253,12 +251,12 @@ def load_csv_to_staging(
             if normalized["raw_hash"] in existing_hashes:
                 stats["duplicate_hash"] += 1
                 # existing = existing_hashes[normalized['raw_hash']]
-                # print(f"\n⚠️  DUPLICATE FOUND (hash: {normalized['raw_hash'][:16]}...)")
-                # print(f"   NEW: {source_file}:{line_no} (ID: {normalized.get('id_in_csv', 'N/A')})")
-                # print(f"        mapped_rxn: {normalized['mapped_rxn']}")
-                # print(f"   EXISTING: {existing['source_file']}:{existing['line_no']} (ID: {existing.get('id_in_csv', 'N/A')})")
-                # print(f"        mapped_rxn: {existing['mapped_rxn']}")
-                # print()
+                # logger.warning(f"\n⚠️  DUPLICATE FOUND (hash: {normalized['raw_hash'][:16]}...)")
+                # logger.warning(f"   NEW: {source_file}:{line_no} (ID: {normalized.get('id_in_csv', 'N/A')})")
+                # logger.warning(f"     mapped_rxn: {normalized['mapped_rxn']}")
+                # logger.warning(f"   EXISTING: {existing['source_file']}:{existing['line_no']} (ID: {existing.get('id_in_csv', 'N/A')})")
+                # logger.warning(f"        mapped_rxn: {existing['mapped_rxn']}")
+                # logger.warning()
                 continue
 
             # Add to batch
@@ -445,7 +443,7 @@ def _insert_batch(conn, batch: list[dict[str, Any]]) -> int:
         return actual_inserted
 
 
-def print_statistics(conn):
+def print_statistics(conn: psycopg2.extensions.connection):
     """Print summary statistics from the staging table."""
     with conn.cursor() as cur:
         # Total rows
