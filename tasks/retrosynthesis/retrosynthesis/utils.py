@@ -2,10 +2,13 @@ import re
 from time import sleep
 from typing import Any
 
+import psycopg2
 from bs4 import BeautifulSoup
 from bs4.element import Tag
+from loguru import logger
+from psycopg2.extras import RealDictCursor
 from rdkit import Chem
-from retrosynthesis.constants import FG_PATTERNS, SUPPRESS_RULES
+from retrosynthesis.constants import FG_PATTERNS
 from rxnutils.chem.reaction import ChemicalReaction
 
 from corral.utils.modal import remote_call
@@ -18,9 +21,366 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 }
 
+PRODUCTION_DB_CONFIG = {
+    "host": "localhost",
+    "port": 5432,
+    "database": "reactions_production_db",
+    "user": "postgres",
+    "password": "postgres",
+}
 
-def search_by_template(template_id: str) -> list[dict[str, Any]] | str:
-    return search_catalog(template_id)
+
+def get_production_connection():
+    """Connect to Phase B production database"""
+    conn = psycopg2.connect(**PRODUCTION_DB_CONFIG)
+    conn.set_client_encoding("UTF8")
+    return conn
+
+
+def search_by_template(template_id: str) -> dict[str, Any] | None:
+    """
+    Retrieve complete reaction information by reaction ID.
+
+    Args:
+        reaction_id (str): The unique reaction identifier (primary key)
+
+    Returns:
+        dict[str, Any]: dict containing all reaction table fields, or None if not found
+
+    Example:
+        >>> reaction = search_by_template(42)
+        >>> if reaction:
+        ...     print(reaction['retro_smarts_template'])
+        ...     print(reaction['product_smiles'])
+    """
+    conn = get_production_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                reaction_id,
+                template_hash,
+                retro_smarts_template,
+                canonical_smarts_template,
+                mapped_rxn,
+            FROM reactions
+            WHERE reaction_id = %s
+        """,
+            (template_id,),
+        )
+
+        result = cursor.fetchone()
+
+        if result:
+            logger.info(f"Found reaction with reaction_id: {template_id}")
+            return dict(result)
+        else:
+            logger.warning(f"No reaction found with reaction_id: {template_id}")
+            return None
+
+    except Exception as e:
+        logger.error(f"Error retrieving reaction by reaction_id '{template_id}': {e}")
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def search_reactions_by_criteria(
+    functional_groups_formed: list[str] | None = None,
+    functional_groups_broken: list[str] | None = None,
+    bonds_formed: list[str] | None = None,
+    bonds_broken: list[str] | None = None,
+    bonds_order_changed: list[str] | None = None,
+    reference_smiles: str | None = None,
+    use_product_fingerprint: bool = True,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """
+    Query reactions database by functional groups and bonds (broken/formed/order_changed),
+    with optional exact substructure matching and similarity-based ranking.
+
+    This function performs a multi-stage query:
+    1. Filters reactions by functional groups (formed/broken) via junction tables
+    2. Filters reactions by bonds (formed/broken/order_changed) via junction tables
+    3. If reference_smiles provided:
+       - Exact substructure match using RDKit's @> operator (correctness filter)
+       - Similarity computed for ranking only (does not filter results)
+    4. Returns comprehensive reaction information
+
+    Args:
+        functional_groups_formed: List of functional group keys that must be formed
+            Example: ['carbonyl', 'ester']
+        functional_groups_broken: List of functional group keys that must be broken
+            Example: ['alcohol', 'amine']
+        bonds_formed: List of bond labels that must be formed
+            Example: ['6-7', '8-9']
+        bonds_broken: List of bond labels that must be broken
+            Example: ['5-6', '7-8']
+        bonds_order_changed: List of bond labels with order changes
+            Example: ['6-6 (1.0->2.0)']
+        reference_smiles: SMILES string for chemical filtering
+            If provided, results will be filtered by exact substructure match:
+            reference molecule must contain the template pattern (qmol).
+            Similarity is computed only for ranking, not filtering.
+        use_product_fingerprint: If True, compare against product fingerprints/patterns,
+            otherwise compare against reactant fingerprints/patterns (default True)
+        limit: Maximum number of results to return (default 100)
+
+    Returns:
+        List of dictionaries, each containing:
+            - reaction_id: Unique reaction identifier
+            - template_hash: Unique template hash
+            - retro_smarts_template: Retrosynthetic SMARTS pattern
+            - canonical_smarts_template: Forward SMARTS pattern
+            - mapped_rxn: Example mapped reaction SMILES
+            - product_smiles: Product SMILES
+            - reactant_smiles: Reactant SMILES
+            - dataset: Source dataset name
+            - similarity: Tanimoto similarity score (if reference_smiles provided)
+
+    Raises:
+        ValueError: If reference_smiles is invalid
+        psycopg2.Error: If database query fails
+
+    Examples:
+        # Search for reactions that form esters and break alcohols
+        >>> results = search_reactions_by_criteria(
+        ...     functional_groups_formed=['ester'],
+        ...     functional_groups_broken=['alcohol'],
+        ...     limit=10
+        ... )
+
+        # Search with bond constraints and chemical filtering
+        >>> results = search_reactions_by_criteria(
+        ...     bonds_formed=['6-7'],
+        ...     reference_smiles='CCO',
+        ...     limit=50
+        ... )
+
+        # Complex query with multiple criteria
+        >>> results = search_reactions_by_criteria(
+        ...     functional_groups_formed=['carbonyl', 'ester'],
+        ...     functional_groups_broken=['alcohol'],
+        ...     bonds_formed=['6-7', '6-8'],
+        ...     bonds_broken=['7-8'],
+        ...     reference_smiles='CC(=O)OCC',
+        ...     use_product_fingerprint=True,
+        ...     limit=20
+        ... )
+    """
+    conn = get_production_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        # Build the base query with Common Table Expressions (CTEs) for each filter
+        params = []
+        cte_list = []
+
+        # CTE 0: Compute reference molecule and fingerprint once (if provided)
+        if reference_smiles:
+            try:
+                # Validate SMILES
+                mol = Chem.MolFromSmiles(reference_smiles)
+                if mol is None:
+                    raise ValueError(f"Invalid SMILES string: {reference_smiles}")
+
+                # Compute reference molecule and fingerprint once
+                cte_list.append("""
+                    q AS (
+                        SELECT
+                            mol_from_smiles(%s) AS qmol,
+                            rdkit_fp(mol_from_smiles(%s)) AS qfp
+                    )
+                """)
+                params.extend([reference_smiles, reference_smiles])
+            except Exception as e:
+                logger.error(
+                    f"Error processing reference SMILES '{reference_smiles}': {e}"
+                )
+                raise ValueError(f"Invalid reference SMILES: {e}") from e
+
+        # CTE 1: Filter by functional groups formed
+        if functional_groups_formed:
+            cte_list.append("""
+                fg_formed AS (
+                    SELECT rfgf.reaction_id
+                    FROM reaction_functional_groups_formed rfgf
+                    JOIN functional_groups fg ON rfgf.functional_group_id = fg.functional_group_id
+                    WHERE fg.functional_group_key = ANY(%s)
+                    GROUP BY rfgf.reaction_id
+                    HAVING COUNT(DISTINCT fg.functional_group_key) = %s
+                )
+            """)
+            params.extend([functional_groups_formed, len(functional_groups_formed)])
+
+        # CTE 2: Filter by functional groups broken
+        if functional_groups_broken:
+            cte_list.append("""
+                fg_broken AS (
+                    SELECT rfgb.reaction_id
+                    FROM reaction_functional_groups_broken rfgb
+                    JOIN functional_groups fg ON rfgb.functional_group_id = fg.functional_group_id
+                    WHERE fg.functional_group_key = ANY(%s)
+                    GROUP BY rfgb.reaction_id
+                    HAVING COUNT(DISTINCT fg.functional_group_key) = %s
+                )
+            """)
+            params.extend([functional_groups_broken, len(functional_groups_broken)])
+
+        # CTE 3: Filter by bonds formed
+        if bonds_formed:
+            cte_list.append("""
+                bonds_formed_cte AS (
+                    SELECT rbf.reaction_id
+                    FROM reaction_bonds_formed rbf
+                    JOIN bonds b ON rbf.bond_id = b.bond_id
+                    WHERE b.bond_label = ANY(%s)
+                    GROUP BY rbf.reaction_id
+                    HAVING COUNT(DISTINCT b.bond_label) = %s
+                )
+            """)
+            params.extend([bonds_formed, len(bonds_formed)])
+
+        # CTE 4: Filter by bonds broken
+        if bonds_broken:
+            cte_list.append("""
+                bonds_broken_cte AS (
+                    SELECT rbb.reaction_id
+                    FROM reaction_bonds_broken rbb
+                    JOIN bonds b ON rbb.bond_id = b.bond_id
+                    WHERE b.bond_label = ANY(%s)
+                    GROUP BY rbb.reaction_id
+                    HAVING COUNT(DISTINCT b.bond_label) = %s
+                )
+            """)
+            params.extend([bonds_broken, len(bonds_broken)])
+
+        # CTE 5: Filter by bonds with order changed
+        if bonds_order_changed:
+            cte_list.append("""
+                bonds_order_cte AS (
+                    SELECT rboc.reaction_id
+                    FROM reaction_bonds_order_changed rboc
+                    JOIN bonds b ON rboc.bond_id = b.bond_id
+                    WHERE b.bond_label = ANY(%s)
+                    GROUP BY rboc.reaction_id
+                    HAVING COUNT(DISTINCT b.bond_label) = %s
+                )
+            """)
+            params.extend([bonds_order_changed, len(bonds_order_changed)])
+
+        # Build the main query
+        query = "WITH " + ",".join(cte_list) + "\n" if cte_list else ""
+
+        # Determine which columns to select
+        fp_column = (
+            "product_pattern_fp" if use_product_fingerprint else "reactant_pattern_fp"
+        )
+        qmol_column = "product_qmol" if use_product_fingerprint else "reactant_qmol"
+
+        # Select from reactions table
+        if reference_smiles:
+            # Include similarity for ranking (computed from pre-calculated CTE)
+            query += f"""
+                SELECT DISTINCT
+                    r.reaction_id,
+                    r.template_hash,
+                    r.retro_smarts_template,
+                    r.canonical_smarts_template,
+                    r.mapped_rxn,
+                    r.product_smiles,
+                    r.reactant_smiles,
+                    r.dataset,
+                    r.source_row_id,
+                    r.derive_version,
+                    tanimoto_sml(q.qfp, r.{fp_column}) AS similarity
+                FROM reactions r
+                CROSS JOIN q
+            """
+        else:
+            query += """
+                SELECT DISTINCT
+                    r.reaction_id,
+                    r.template_hash,
+                    r.retro_smarts_template,
+                    r.canonical_smarts_template,
+                    r.mapped_rxn,
+                    r.product_smiles,
+                    r.reactant_smiles,
+                    r.dataset,
+                    r.source_row_id,
+                    r.derive_version
+                FROM reactions r
+            """
+
+        # Add WHERE clause to join all CTEs
+        where_conditions = []
+        if functional_groups_formed:
+            where_conditions.append(
+                "r.reaction_id IN (SELECT reaction_id FROM fg_formed)"
+            )
+        if functional_groups_broken:
+            where_conditions.append(
+                "r.reaction_id IN (SELECT reaction_id FROM fg_broken)"
+            )
+        if bonds_formed:
+            where_conditions.append(
+                "r.reaction_id IN (SELECT reaction_id FROM bonds_formed_cte)"
+            )
+        if bonds_broken:
+            where_conditions.append(
+                "r.reaction_id IN (SELECT reaction_id FROM bonds_broken_cte)"
+            )
+        if bonds_order_changed:
+            where_conditions.append(
+                "r.reaction_id IN (SELECT reaction_id FROM bonds_order_cte)"
+            )
+
+        # Add exact substructure match for reference_smiles (correctness filter)
+        if reference_smiles:
+            where_conditions.append(f"r.{qmol_column} IS NOT NULL")
+            where_conditions.append(f"q.qmol @> r.{qmol_column}")
+
+        if where_conditions:
+            query += "\nWHERE " + " AND ".join(where_conditions)
+
+        # Add ordering and limit
+        if reference_smiles:
+            # Order by similarity (best matches first)
+            query += "\nORDER BY similarity DESC"
+        else:
+            query += "\nORDER BY r.reaction_id"
+
+        query += "\nLIMIT %s"
+        params.append(limit)
+
+        # Execute query
+        logger.info(
+            f"Executing query with filters: "
+            f"fg_formed={functional_groups_formed}, "
+            f"fg_broken={functional_groups_broken}, "
+            f"bonds_formed={bonds_formed}, "
+            f"bonds_broken={bonds_broken}, "
+            f"bonds_order_changed={bonds_order_changed}, "
+            f"reference_smiles={reference_smiles}"
+        )
+
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+
+        logger.info(f"Found {len(results)} matching reactions")
+
+        return [dict(row) for row in results]
+
+    except Exception as e:
+        logger.error(f"Error executing reaction search query: {e}")
+        raise
+    finally:
+        cursor.close()
+        conn.close()
 
 
 def apply_template_retro(product_smiles: str, template_id: str) -> list[str]:
@@ -37,6 +397,8 @@ def apply_template_retro(product_smiles: str, template_id: str) -> list[str]:
         list[str]: A list of SMILES strings representing the predicted reactants.
     """
     reaction_data = search_by_template(template_id)
+    if reaction_data is None:
+        raise ValueError(f"Template ID {template_id} not found in database.")
     try:
         rxn = ChemicalReaction(reaction_data["mapped_rxn"])
         rxn.generate_reaction_template()
@@ -281,58 +643,41 @@ def _get_full_mapped_smiles(
     return Chem.MolToSmiles(mc, isomericSmiles=True, canonical=True)
 
 
-def detect_fgs(smiles: str, collapse: bool = True):
+def detect_functional_groups_in_molecule(smiles: str) -> list[str]:
     """
-    Return a dict with:
-      - 'raw': list of {'group', 'positions', 'mapped_smiles', 'smarts'}
-      - 'collapsed': same structure with generic sub-matches suppressed (if collapse=True)
+    Detect functional groups in a single molecule.
+
+    Args:
+        smiles (str): SMILES string
+
+    Returns:
+        list[str]: List of functional group names detected
     """
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
-        raise ValueError("Invalid SMILES")
+        raise ValueError(f"Invalid SMILES string: {smiles}")
 
-    raw = []
-    # Collect matches similar to your deprotection loop: uniquify across each pattern
-    for name, patt in FG_PATTERNS:
-        group_matches = set()
-        for match in mol.GetSubstructMatches(patt, uniquify=True):
-            group_matches.add(tuple(match))
+    detected = set()
+    for name, patt in FG_PATTERNS.items():
+        if mol.HasSubstructMatch(patt):
+            detected.add(name)
 
-        raw.extend(
-            {
-                "group": name,
-                "positions": tup,  # atom indices in 'mol'
-                "mapped_smiles": _fragment_mapped_smiles(mol, tup),
-                "smarts": Chem.MolToSmarts(patt),
-            }
-            for tup in sorted(group_matches)
-        )
+    return sorted(detected)
 
-    if not collapse:
-        return {"raw": raw, "collapsed": raw}
 
-    # Build quick lookup of hits per group
-    present = {}
-    for i, hit in enumerate(raw):
-        present.setdefault(hit["group"], []).append((i, set(hit["positions"])))
+def get_functional_groups(product: str) -> list[str]:
+    """
+    Detect functional groups formed and broken in reaction.
 
-    suppressed_idxs = set()
-    # Iterate in library order: earlier (more specific) groups suppress later generic ones
-    for parent, _ in FG_PATTERNS:
-        if parent not in present:
-            continue
-        children = SUPPRESS_RULES.get(parent, set())
-        par_hits = [atoms for _, atoms in present[parent]]
-        for child in children:
-            if child not in present:
-                continue
-            for ch_idx, ch_atoms in present[child]:
-                # suppress child if fully contained in any parent hit
-                if any(ch_atoms.issubset(pa) for pa in par_hits):
-                    suppressed_idxs.add(ch_idx)
+    Args:
+        mapped_rxn (str): Atom-mapped reaction SMILES
 
-    collapsed = [hit for i, hit in enumerate(raw) if i not in suppressed_idxs]
-    return {"raw": raw, "collapsed": collapsed}
+    Returns:
+        dict[str, list[str]]: Dict with keys:
+        - 'formed': List of FG names formed in products
+        - 'broken': List of FG names broken from reactants
+    """
+    return detect_functional_groups_in_molecule(product)
 
 
 def summarize_groups_with_full_mapping(smiles: str, result_dict, use_collapsed=True):

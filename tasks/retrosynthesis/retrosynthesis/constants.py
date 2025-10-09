@@ -706,96 +706,81 @@ PG = {
 }
 
 SMARTS = {
-    ("nitro groups", "[#6][NX3+](=O)[O-]"),
-    ("sulfonic acids", "[#6][$([SX4](=O)(=O)),$([S+2X4]([O-])([O-]))][OX2;H,-]"),
-    ("primary amines", "[#6;!$(C=[O,S,N])][NX3H2]"),
-    ("carbamate groups", "[#6;!$(C=[O,S,N])][OX2H0][CX3](=O)[NX3]"),
-    ("diazo groups", "[#6,#1][CX3]([#6,#1])=[$([NX2+]=[NX1-]),$([NX2-]#[NX1+])]"),
-    ("methoxy", "[#6;!$(C=[O,S,N])][OX2H0][CH3]"),
-    ("aziridines", "N1CC1"),
-    ("furan rings", "[oR1]1[cR1][cR1][cR1][cR1]1"),
-    ("ethoxy", "[#6;!$(C=[O,S,N])][OX2H0][CH2][CH3]"),
-    ("isopropoxy", "[#6;!$(C=[O,S,N])][OX2H0][CH]([CH3])[CH3]"),
-    ("azide groups", "[#6][$([NX2]=[NX2+]=[NX1-]),$([NX2-]-[NX2+]#[NX1])]"),
-    ("benzene rings", "[cR1]1[cR1][cR1][cR1][cR1][cR1]1"),
-    ("para di-substituted benzene", "[cH0]1[cH1][cH][cH0][cH][cH]1"),
-    ("ketones", "[#6][CX3](=O)[#6]"),
-    ("trifluoromethyl groups", "[CX4H0](F)(F)F"),
-    ("t-butyl groups", "[CX4H0]([CH3])([CH3])[CH3]"),
-    ("thiophene rings", "[sR1]1[cR1][cR1][cR1][cR1]1"),
-    ("aromatic carboxylic acid", "[c][CX3](=O)[O;H1,-]"),
-    ("pyrrole rings", "[nR1]1[cR1][cR1][cR1][cR1]1"),
-    ("thiazole rings", "[cR1]1[sR1][cR1][nR1][cR1]1"),
-    ("carbonate groups", "[#6;!$(C=[O,S,N])][OX2H0][CX3](=O)[OX2H0][#6;!$(C=[O,S,N])]"),
-    ("four-membered rings", "[*]1[*][*][*]1"),
-    ("nitrile groups", "[CX2]#[NX1]"),
-    ("pyrimdine rings", "[nR1]1[cR1][nR1][cR1][cR1][cR1]1"),
-    ("five-membered rings", "[*]1[*][*][*][*]1"),
-    ("thioethers", "[#6][SX2H0][#6]"),
-    ("phenoxy", "[#6;!$(C=[O,S,N])][OX2H0]c1[cH1][cH1][cH1][cH1][cH1]1"),
-    ("aryl halide", "[c][F,Cl,Br,I]"),
-    ("alkyl halide", "[CX4][F,Cl,Br,I]"),
-    ("six-membered aromatic rings", "[n,c]1[n,c][n,c][n,c][n,c][n,c]1"),
-    ("phenyl group", "[cH0]1[cH][cH][cH][cH][cH]1"),
-    ("imine group", "[#6,#1][CX3]([#6,#1])=[NX2][#6,#1]"),
-    ("meta di-substituted benzene", "[cH0]1[cH1][cH0][cH][cH][cH]1"),
-    ("urea groups", "[NX3][CX3](=O)[NX3]"),
-    ("thioketones", "[#6][CX3](=S)[#6]"),
-    (
-        "amidine groups",
-        "[#6,#1][CX3](=[NX2])[NX3]([#1,#6;!$(C=[O,S,N])])[#1,#6;!$(C=[O,S,N])]",
-    ),
-    ("cyclopropane rings", "C1CC1"),
-    ("trimethylsilyl group", "[Si]([CH3])([CH3])[CH3]"),
-    ("aromatic hydroxyls", "[c][OX2H1]"),
-    (
-        "anhydride",
-        "[#6,#1;!$(C=[O,S,N])][CX3](=O)[OX2H0][CX3](=O)[#6,#1;!$(C=[O,S,N])]",
-    ),
-    ("ether oxygens", "[#6;!$(C=[O,S,N])][OX2H0;!$([O;r3])][#6;!$(C=[O,S,N])]"),
-    ("isocyanate groups", "[#6]N=C=O"),
-    ("sulfonamides", "[#6][$([SX4](=O)(=O)),$([S+2X4]([O-])([O-]))]N"),
-    ("oxazole rings", "[cR1]1[oR1][cR1][nR1][cR1]1"),
-    ("azo groups", "[#6]-N=N-[#6]"),
-    ("aliphatic hydroxyls", "[C;!$(C=[O,S,N])][OX2H1]"),
-    ("epoxides", "O1CC1"),
-    ("thiourea groups", "[NX3][CX3](=S)[NX3]"),
-    (
-        "thioamide groups",
-        "[#6,#1][CX3](=S)[NX3]([#1,#6;!$(C=[O,S,N])])[#1,#6;!$(C=[O,S,N])]",
-    ),
-    ("sulfones", "[#6][$([SX4](=O)(=O)),$([S+2X4]([O-])([O-]))][#6]"),
-    ("t-butyldimethylsilyl group", "[Si]([CH3])([CH3])C([CH3])([CH3])[CH3]"),
-    ("acyl chloride", "[#6][CX3](=O)Cl"),
-    ("pyrridine rings", "[nR1]1[cR1][cR1][cR1][cR1][cR1]1"),
-    ("carboxylic esters", "[#6,#1][CX3](=O)[OX2H0][#6;!$(C=[O,S,N])]"),
-    ("tertiary amines", "[NX3;!$(NC=[O,S,N]);!$([N;r3])]([#6])([#6])[#6]"),
-    ("cyanate groups", "[#6]OC#N"),
-    ("isonitrile groups", "[NX2+]#[CX1-]"),
-    ("isothiocyanate groups", "[#6]N=C=S"),
-    ("C-C double bonds", "[C]=[C]"),
-    ("C-C triple bonds", "[C]#[C]"),
-    ("pyrazine rings", "[nR1]1[cR1][cR1][nR1][cR1][cR1]1"),
-    ("sulfoxides", "[#6][$([SX3](=O)),$([SX3+]([O-]))][#6]"),
-    ("aldehydes", "[#6,#1][CX3](=O)[H]"),
-    ("secondary amines", "[NX3H1;!$(NC=[O,S,N]);!$([N;r3])]([#6])[#6]"),
-    ("aliphatic carboxylic acid", "[C][CX3](=O)[O;H1,-]"),
-    ("imide groups", "[#6,#1][CX3](=O)[NX3]([CX3](=O)[#6,#1])[#1,#6;!$(C=[O,S,N])]"),
-    ("ortho di-substituted benzene", "[cH0]1[cH0]([!$([c,n,s,o])])[cH][cH][cH][cH]1"),
-    ("pyridazine rings", "[nR1]1[nR1][cR1][cR1][cR1][cR1]1"),
-    (
-        "amide groups",
-        "[#6,#1][CX3](=O)[NX3]([#1,#6;!$(C=[O,S,N])])[#1,#6;!$(C=[O,S,N])]",
-    ),
-    ("thiol groups", "[#6][SX2H1][H]"),
-    ("imidazole rings", "[nR1]1[cR1][nR1][cR1][cR1]1"),
-    (
-        "guanidine groups",
-        "[#1,#6;!$(C=[O,S,N])][NX3]([#1,#6;!$(C=[O,S,N])])[CX3](=[NX2])[NX3]([#1,#6;!$(C=[O,S,N])])[#1,#6;!$(C=[O,S,N])]",
-    ),
-    ("aryl diazonium", "[c]-[NX2+]#[NX1]"),
+    "azo": "[#6]-N=N-[#6]",
+    "diazo": "[#6,#1][CX3]([#6,#1])=[$([NX2+]=[NX1-]),$([NX2-]#[NX1+])]",
+    "aryl diazonium": "[c]-[NX2+]#[NX1]",
+    "azide": "[#6][$([NX2]=[NX2+]=[NX1-]),$([NX2-]-[NX2+]#[NX1])]",
+    "nitrile": "[CX2]#[NX1]",
+    "isonitrile": "[NX2+]#[CX1-]",
+    "nitro": "[#6][NX3+](=O)[O-]",
+    "aldehydes": "[#6,#1][CX3](=O)[H]",
+    "aliphatic hydroxyls": "[C;!$(C=[O,S,N])][OX2H1]",
+    "aromatic hydroxyls": "[c][OX2H1]",
+    "aliphatic carboxylic acid": "[C][CX3](=O)[O;H1,-]",
+    "aromatic carboxylic acid": "[c][CX3](=O)[O;H1,-]",
+    "acyl chloride": "[#6][CX3](=O)Cl",
+    "six-membered aromatic rings": "[n,c]1[n,c][n,c][n,c][n,c][n,c]1",  # includes fused systems, e.g. naphthalene, quinoline
+    "benzene rings": "[cR1]1[cR1][cR1][cR1][cR1][cR1]1",  # single benzene ring; excludes fused systems
+    "phenyl group": "[cH0]1[cH][cH][cH][cH][cH]1",  # a.k.a mono-substituted benzene
+    "ortho di-substituted benzene": "[cH0]1[cH0]([!$([c,n,s,o])])[cH][cH][cH][cH]1",  # excludes fused systems
+    "meta di-substituted benzene": "[cH0]1[cH1][cH0][cH][cH][cH]1",
+    "para di-substituted benzene": "[cH0]1[cH1][cH][cH0][cH][cH]1",
+    "pyrridine": "[nR1]1[cR1][cR1][cR1][cR1][cR1]1",  # single pyrridine ring; excludes fused systems
+    "pyridazine": "[nR1]1[nR1][cR1][cR1][cR1][cR1]1",  # single pyrridine ring; excludes fused systems
+    "pyrimidine": "[nR1]1[cR1][nR1][cR1][cR1][cR1]1",  # single pyrridine ring; excludes fused systems
+    "pyrazine": "[nR1]1[cR1][cR1][nR1][cR1][cR1]1",  # single pyrridine ring; excludes fused systems
+    "amide": "[#6,#1][CX3](=O)[NX3]([#1,#6;!$(C=[O,S,N])])[#1,#6;!$(C=[O,S,N])]",
+    "imide": "[#6,#1][CX3](=O)[NX3]([CX3](=O)[#6,#1])[#1,#6;!$(C=[O,S,N])]",
+    "thioamide": "[#6,#1][CX3](=S)[NX3]([#1,#6;!$(C=[O,S,N])])[#1,#6;!$(C=[O,S,N])]",
+    "amidine": "[#6,#1][CX3](=[NX2])[NX3]([#1,#6;!$(C=[O,S,N])])[#1,#6;!$(C=[O,S,N])]",
+    "guanidine": "[#1,#6;!$(C=[O,S,N])][NX3]([#1,#6;!$(C=[O,S,N])])[CX3](=[NX2])[NX3]([#1,#6;!$(C=[O,S,N])])[#1,#6;!$(C=[O,S,N])]",
+    "C-C double bonds": "[C]=[C]",
+    "C-C triple bonds": "[C]#[C]",
+    "imine": "[#6,#1][CX3]([#6,#1])=[NX2][#6,#1]",
+    "cyclopropane": "C1CC1",
+    "ketones": "[#6][CX3](=O)[#6]",
+    "carboxylic esters": "[#6,#1][CX3](=O)[OX2H0][#6;!$(C=[O,S,N])]",  # excludes carbonats, carbamates, and anhydrides
+    "carbonate": "[#6;!$(C=[O,S,N])][OX2H0][CX3](=O)[OX2H0][#6;!$(C=[O,S,N])]",
+    "carbamate": "[#6;!$(C=[O,S,N])][OX2H0][CX3](=O)[NX3]",
+    "anhydride": "[#6,#1;!$(C=[O,S,N])][CX3](=O)[OX2H0][CX3](=O)[#6,#1;!$(C=[O,S,N])]",
+    "urea": "[NX3][CX3](=O)[NX3]",
+    "thiourea": "[NX3][CX3](=S)[NX3]",
+    "ether oxygens": "[#6;!$(C=[O,S,N])][OX2H0;!$([O;r3])][#6;!$(C=[O,S,N])]",  # excludes epoxides
+    "epoxides": "O1CC1",
+    "aziridines": "N1CC1",
+    "four-membered rings": "[*]1[*][*][*]1",
+    "five-membered rings": "[*]1[*][*][*][*]1",
+    "trifluoromethyl": "[CX4H0](F)(F)F",
+    "primary amines": "[#6;!$(C=[O,S,N])][NX3H2]",  # excludes amides
+    "secondary amines": "[NX3H1;!$(NC=[O,S,N]);!$([N;r3])]([#6])[#6]",  # excludes amides and aziridines
+    "tertiary amines": "[NX3;!$(NC=[O,S,N]);!$([N;r3])]([#6])([#6])[#6]",  # excludes amides and aziridines
+    "t-butyl": "[CX4H0]([CH3])([CH3])[CH3]",
+    "thiol": "[#6][SX2H1][H]",
+    "thioethers": "[#6][SX2H0][#6]",  # excludes sulfoxides and sulfones
+    "thioketones": "[#6][CX3](=S)[#6]",
+    "sulfoxides": "[#6][$([SX3](=O)),$([SX3+]([O-]))][#6]",
+    "sulfones": "[#6][$([SX4](=O)(=O)),$([S+2X4]([O-])([O-]))][#6]",
+    "sulfonic": "[#6][$([SX4](=O)(=O)),$([S+2X4]([O-])([O-]))][OX2;H,-]",
+    "sulfonamides": "[#6][$([SX4](=O)(=O)),$([S+2X4]([O-])([O-]))]N",
+    "methoxy": "[#6;!$(C=[O,S,N])][OX2H0][CH3]",
+    "ethoxy": "[#6;!$(C=[O,S,N])][OX2H0][CH2][CH3]",
+    "isopropoxy": "[#6;!$(C=[O,S,N])][OX2H0][CH]([CH3])[CH3]",
+    "phenoxy": "[#6;!$(C=[O,S,N])][OX2H0]c1[cH1][cH1][cH1][cH1][cH1]1",
+    "alkyl halide": "[CX4][F,Cl,Br,I]",
+    "aryl halide": "[c][F,Cl,Br,I]",
+    "halide": "[#6][F,Cl,Br,I]",  # any carbon bonded to halogen (F, Cl, Br, or I)
+    "furan": "[oR1]1[cR1][cR1][cR1][cR1]1",  # single ring; excludes fused systems
+    "thiophene": "[sR1]1[cR1][cR1][cR1][cR1]1",  # single ring; excludes fused systems
+    "pyrrole": "[nR1]1[cR1][cR1][cR1][cR1]1",  # single ring; excludes fused systems
+    "imidazole": "[nR1]1[cR1][nR1][cR1][cR1]1",  # single ring; excludes fused systems
+    "oxazole": "[cR1]1[oR1][cR1][nR1][cR1]1",  # single ring; excludes fused systems
+    "thiazole": "[cR1]1[sR1][cR1][nR1][cR1]1",  # single ring; excludes fused systems
+    "cyanate": "[#6]OC#N",
+    "isocyanate": "[#6]N=C=O",
+    "isothiocyanate": "[#6]N=C=S",
+    "trimethylsilyl": "[Si]([CH3])([CH3])[CH3]",
+    "t-butyldimethylsilyl": "[Si]([CH3])([CH3])C([CH3])([CH3])[CH3]",
 }
-
 
 SMARTS_OLD = {
     (
@@ -1993,11 +1978,12 @@ SUPPRESS_RULES = {
 }
 
 # Precompile SMARTS
-FG_PATTERNS = [
-    (name, Chem.MolFromSmarts(smarts))
-    for name, smarts in SMARTS
-    if Chem.MolFromSmarts(smarts) is not None
-]
+FG_PATTERNS = {}
+for name, smarts in SMARTS.items():
+    patt = Chem.MolFromSmarts(smarts)
+    if patt is not None:
+        FG_PATTERNS[name] = patt
+
 
 CUSTOM_TEMPLATES = {
     "01a": "[CH3:1]/[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)=[CH:9]/[CH2:10][CH2:11][CH2:12][C:13](=[O:14])[C:15]([F:16])([F:17])[F:18]>>[CH2:1]=[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)[C@@H:9]1[CH2:10][CH2:11][CH2:12][C@@:13]1([OH:14])[C:15]([F:16])([F:17])[F:18]",
@@ -2026,3 +2012,5 @@ CUSTOM_TEMPLATES = {
     "10a5": "O=[C:10]1[c:8]2[c:7]([cH:6][cH:5][c:4]([N+:2](=[O:1])[O-:3])[cH:9]2)[O:16][C:12]2([CH2:11]1)[CH2:13][CH2:14][CH2:15]2>>[O:1]=[N+:2]([O-:3])[c:4]1[cH:5][cH:6][c:7]2[c:8]([cH:9]1)[CH2:10][CH2:11][C:12]1([CH2:13][CH2:14][CH2:15]1)[O:16]2",
     "10a6": "[O:1]=[C:2]([CH3:3])[c:17]1[c:9]([OH:8])[cH:10][cH:11][c:12]([N+:13](=[O:14])[O-:15])[cH:16]1.O=[C:4]1[CH2:5][CH2:6][CH2:7]1>>[O:1]=[C:2]1[CH2:3][C:4]2([CH2:5][CH2:6][CH2:7]2)[O:8][c:9]2[cH:10][cH:11][c:12]([N+:13](=[O:14])[O-:15])[cH:16][c:17]21",
 }
+
+FUNCTIONAL_GROUPS = list(SMARTS.keys())

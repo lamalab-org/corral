@@ -178,6 +178,173 @@ tracking all original reactions that produced that template.
 
 ---
 
+## Fingerprint Design & Limitations
+
+### Current Implementation
+
+The database stores **molecular fingerprints** (`rdkit_fp`) in the `product_pattern_fp` and `reactant_pattern_fp` columns, not true pattern fingerprints. This is due to limitations in the available RDKit cartridge functions.
+
+#### What's Stored:
+
+```sql
+-- In phase_b_production.py:
+product_pattern_fp = rdkit_fp(mol_from_smiles(product_smiles))
+reactant_pattern_fp = rdkit_fp(mol_from_smiles(reactant_smiles))
+```
+
+These are **molecular fingerprints** computed from example product/reactant SMILES, designed for:
+- ✅ **Similarity comparisons** between whole molecules
+- ❌ **NOT for substructure subset screening**
+
+#### Missing Functions:
+
+The following functions would be ideal but **do not exist** in this RDKit build:
+
+1. **`pattern_fp(qmol)`** — Generate pattern fingerprints from SMARTS patterns
+2. **`bfp_sub(fp1, fp2)`** — Check if fp1 bits are a superset of fp2 bits (subset screening)
+
+You can verify with:
+```bash
+psql -h localhost -U martino -d reactions_production_db -c "\df pattern_fp"
+psql -h localhost -U martino -d reactions_production_db -c "\df *bfp*sub*"
+```
+
+### Why Molecular Fingerprints Don't Work for Substructure Screening
+
+**The Problem:**
+
+When matching templates to target molecules, we need to know: *"Does this large target molecule contain this small reaction pattern?"*
+
+Molecular fingerprint similarity (`tanimoto_sml`) compares **whole molecule structures**, which fails for this use case:
+
+**Example:**
+```
+Target:    CC(=O)OCC(C)C(=O)OC1CCCCC1C(=O)NC2CCCCC2...  (large drug, 50+ atoms)
+Template:  CC(=O)O[*]  (ester pattern, 3 heavy atoms)
+
+Molecular FP Tanimoto: ~0.1-0.3  ❌ (LOW - molecules are "different")
+Substructure match:    TRUE       ✅ (target CONTAINS the pattern)
+```
+
+**Why this happens:**
+- Molecular fingerprints encode the **entire structure**
+- A large molecule has many bits set for features the small pattern lacks
+- A small pattern has few bits set
+- Tanimoto similarity measures **overall structural similarity**, not containment
+
+### Current Query Strategy (Optimal Given Constraints)
+
+Since pattern fingerprints and subset operators are unavailable, the query strategy relies on:
+
+#### 1. **Semantic Filters (Primary Pruning)**
+
+Functional group and bond filters dramatically reduce candidates:
+
+```python
+# search_reactions_by_criteria() in utils.py
+"""
+WHERE:
+  - reaction_id IN (SELECT reaction_id FROM fg_formed WHERE fg = 'ester')
+  - reaction_id IN (SELECT reaction_id FROM fg_broken WHERE fg = 'alcohol')
+  - reaction_id IN (SELECT reaction_id FROM bonds_formed WHERE bond = '6-8')
+"""
+```
+
+**Effectiveness:**
+- 427k templates → ~500-5k candidates (depending on filter specificity)
+- Very fast (indexed junction table lookups)
+- Semantically meaningful (chemist-friendly filters)
+
+#### 2. **Exact Substructure Match (Correctness)**
+
+```sql
+WHERE target_mol @> template_qmol
+```
+
+This guarantees correctness:
+- ✅ Returns only templates whose patterns are **contained** in the target
+- ✅ RDKit's `@>` operator is exact (no false positives)
+- ⚠️ Can be expensive on large candidate sets (but FG/bond filters minimize this)
+
+#### 3. **Similarity Ranking (Ordering Only)**
+
+```sql
+ORDER BY tanimoto_sml(rdkit_fp(target), product_pattern_fp) DESC
+```
+
+This ranks results by **whole molecule similarity** between the target and template's example product:
+- ✅ Useful heuristic: templates with similar example products may be more relevant
+- ✅ Fast to compute (pre-calculated fingerprints)
+- ⚠️ Not used for filtering (would incorrectly exclude valid templates)
+
+### Why This Design Is Correct
+
+The current implementation is **not a workaround—it's the optimal design** given available RDKit functions:
+
+| Approach | Speed | Correctness | Available? |
+|----------|-------|-------------|------------|
+| Pattern FP + `bfp_sub()` prefilter | ⚡⚡⚡ Best | ✅ | ❌ Not in this RDKit build |
+| Molecular FP for filtering | ⚡⚡ Fast | ❌ **Incorrect** (false negatives) | ✅ |
+| FG/bond filters + exact `@>` | ⚡⚡ Fast | ✅ **Correct** | ✅ **Current** |
+| Exact `@>` only (no filters) | 🐌 Slow | ✅ | ✅ |
+
+**Key Insight:**
+- Molecular fingerprints are great for "find similar molecules"
+- But **useless** for "does target contain template pattern"
+- FG/bond filters provide semantic filtering that's often **better** than generic fingerprint screening
+
+### Performance Characteristics
+
+For a typical query with functional group/bond constraints:
+
+```python
+results = search_reactions_by_criteria(
+    functional_groups_formed=["ester"],
+    functional_groups_broken=["alcohol"],
+    bonds_formed=["6-8"],
+    reference_smiles="CC(=O)OCC...",
+    limit=100,
+)
+```
+
+**Query plan:**
+1. FG filter: 427k → ~2k candidates (0.5% of templates) — **~10ms**
+2. Bond filter: 2k → ~500 candidates — **~5ms**
+3. Exact `@>` check: 500 templates — **~50-200ms**
+4. Similarity ranking: Pre-computed FPs — **~10ms**
+
+**Total: ~100-250ms** for a well-constrained query ✅
+
+### If You Need Better Performance
+
+If your queries are slow (e.g., weak FG/bond filters → many candidates), consider:
+
+#### Option 1: Upgrade RDKit Cartridge
+Install a version with `pattern_fp()` and implement:
+```sql
+WHERE bfp_sub(target_pattern_fp, template_pattern_fp)  -- Fast prefilter
+  AND target_mol @> template_qmol                      -- Exact check
+```
+
+#### Option 2: Add More Semantic Filters
+Extend the schema with additional metadata:
+- Ring count changes
+- Charge changes
+- Stereochemistry changes
+- Reaction classes/types
+
+#### Option 3: Pre-filter in Python
+For very large candidate sets, compute fingerprints in Python and filter before DB query.
+
+### References
+
+For more on RDKit fingerprints and substructure searching:
+- [RDKit Cartridge Documentation](https://www.rdkit.org/docs/Cartridge.html)
+- [Substructure Searching with Fingerprints](https://www.rdkit.org/docs/GettingStartedInPython.html#substructure-searching)
+- Discussion: Why molecular FP Tanimoto ≠ pattern containment
+
+---
+
 ## Chemistry Utilities
 
 The bond and FG detection logic is in `phase_b_chemistry_utils.py`:

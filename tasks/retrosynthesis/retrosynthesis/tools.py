@@ -5,7 +5,7 @@ from typing import Any
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDeprotect
 from rdkit.Chem.rdDeprotect import Deprotect
-from retrosynthesis.constants import PG
+from retrosynthesis.constants import FUNCTIONAL_GROUPS, PG
 from retrosynthesis.types import FunctionalGroup
 from retrosynthesis.utils import (
     _is_buyable,
@@ -13,19 +13,125 @@ from retrosynthesis.utils import (
     apply_template_retro,
     detect_fgs,
     get_molecule_summary,
+    search_by_template,
     search_catalog,
     species_match,
 )
+from retrosynthesis.utils import (
+    search_reactions_by_criteria as search_reactions_by_molecule,
+)
 
-from corral.backend.tool import Tool
+from corral.backend.tool import Tool, tool
 from corral.utils.modal import remote_call
 
-# @tool
-# def search_template_catalog(
-#     resulting_group: str | None, reaction_type: str | None
-# ) -> dict[str, Any]:
-#     """Returns a template catalog."""
-#     return resulting_group, reaction_type
+
+# TODO: Include reaction type in the search_template_catalog tool
+@tool
+def search_template_catalog_by_criteria(
+    molecule_smiles: str,
+    functional_groups_broken: FUNCTIONAL_GROUPS | None = None,
+    functional_groups_formed: FUNCTIONAL_GROUPS | None = None,
+    bonds_formed: list[str] | None = None,
+    bonds_broken: list[str] | None = None,
+    bonds_order_changed: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Returns a template catalog."""
+    return search_reactions_by_molecule(
+        functional_groups_broken=functional_groups_broken,
+        functional_groups_formed=functional_groups_formed,
+        bonds_formed=bonds_formed,
+        bonds_broken=bonds_broken,
+        bonds_order_changed=bonds_order_changed,
+        reference_smiles=molecule_smiles,
+        limit=10,
+    )
+
+
+@tool
+def get_template(template_id: str) -> str:
+    """[BRIEF] Retrieves a retrosynthetic template and other information by its ID. [/BRIEF]
+
+    [DETAILED] This function takes a template ID as input and returns the corresponding retrosynthetic
+    template in SMARTS format. If the template ID is not found, it raises a ValueError. It also retrieves
+    the canonical SMARTS template (template for the forward reaction), and an example reaction for that example reaction.
+
+    [PROCEDURAL] When to use this tool:
+    - When you need to retrieve a specific retrosynthetic template for analysis or application.
+    - When you want to explore the details of a known retrosynthetic transformation. [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Identify the template ID you want to retrieve, you can search the template catalog with `search_template_catalog`. [/PREREQUISITE]
+    2. [CURRENT] Use `get_template` to obtain the SMARTS representation of the template. [/CURRENT]
+    3. [FOLLOW_UP] Use the retrieved template with `apply_template` to explore possible precursors for target molecules or validate retrosynthetic steps with `verify_step`. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+    - The function takes a string representing the template ID as input.
+    - It looks up the template ID in a predefined database or dictionary of retrosynthetic templates.
+    - If the template ID exists, it retrieves and returns the corresponding SMARTS string.
+    - If the template ID does not exist, it raises a ValueError indicating that the template was not found. [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `get_template("123")`,
+        `get_template("45")`,
+        `get_template("7892")`,
+        `get_template("001999")`,
+        `get_template("9999999")`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        template_id (str):
+            [BRIEF] Identifier of the retrosynthetic template to retrieve. [/BRIEF]
+            [DETAILED] The template ID corresponds to a specific retrosynthetic transformation that can be applied to molecules. The templates ids can be found in the template catalog. [/DETAILED]
+            [SYNTACTICAL] Valid template ID string [/SYNTACTICAL]
+            [EXAMPLES] "template_123", "template_456", "template_789" [/EXAMPLES]
+    Returns:
+        str: The SMARTS representation of the requested retrosynthetic template.
+            [BRIEF] SMARTS string of the retrosynthetic template. [/BRIEF]
+            [DETAILED] The SMARTS string defines the chemical transformation represented by the retrosynthetic template. It can be used in various cheminformatics applications to apply the transformation to target molecules. [/DETAILED]
+            [SYNTACTICAL] Valid SMARTS string [/SYNTACTICAL]
+            [EXAMPLES] "[C:1][O:2]>>[C:1][C:2]", "[C:1][C:2]>>[C:1][O:2]" [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError:
+            [ERROR_WHEN] Raised when the template ID is not found. [/ERROR_WHEN]
+            [ERROR_DETAILS] This occurs if the provided template ID does not correspond to any known retrosynthetic template in the database. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Ensure the template ID is correct and exists in the template catalog. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+        - The function relies on the availability of the specified template in the template catalog.
+        - The SMARTS string must be valid and represent a real chemical transformation.
+        - The function may not account for all possible molecular variations and edge cases.
+    [/LIMITATIONS]
+    """
+    return search_by_template(template_id)
+
+
+@tool
+def get_available_functional_groups() -> list[str]:
+    """
+    [BRIEF] Returns a list of available functional groups for querying the database. [/BRIEF]
+
+    [DETAILED] This function provides a list of predefined functional groups that can be used to filter
+    molecules in the database. These functional groups are based on common chemical motifs and can aid in
+    the identification and selection of relevant compounds for synthesis or analysis. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - When you need to identify specific functional groups in a set of molecules.
+    - When you want to filter molecules based on their functional group content.
+    - When you are interested in exploring the chemical space around certain functional motifs. [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Understand the functional groups relevant to your chemical analysis or synthesis planning. [/PREREQUISITE]
+    2. [CURRENT] Use `get_available_functional_groups` to retrieve the list of functional groups. [/CURRENT]
+    3. [FOLLOW_UP] Use the retrieved functional groups to filter or search for molecules in the database using other tools or functions. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+    """
+
+    return str(FUNCTIONAL_GROUPS)
 
 
 # @tool
@@ -107,7 +213,7 @@ def apply_template(molecule_smiles: str, template_id: str) -> list[str]:
 
 
 # @tool
-def verify_step(molecule_smiles: str, template: str, precursors: list[str]) -> bool:
+def verify_step(molecule_smiles: str, template_id: str, precursors: list[str]) -> bool:
     """
     [BRIEF] Verifies if a retrosynthetic step is valid. [/BRIEF]
 
@@ -147,7 +253,7 @@ def verify_step(molecule_smiles: str, template: str, precursors: list[str]) -> b
             [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
             [EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/EXAMPLES]
 
-        template (str):
+        template_id (str):
             [BRIEF] Retrosynthetic template in SMARTS format. [/BRIEF]
             [DETAILED] The retrosynthetic template is a SMARTS string that defines the transformation to be applied to the precursors. It should be one of the templates from the dataset. [/DETAILED]
             [SYNTACTICAL] Valid SMARTS string [/SYNTACTICAL]
@@ -173,7 +279,7 @@ def verify_step(molecule_smiles: str, template: str, precursors: list[str]) -> b
             [ERROR_RECOVERY] Ensure the template is correct and compatible with the precursors. [/ERROR_RECOVERY]
     """
     reactants = ".".join(precursors)
-    real_products = apply_template_forward(reactants, template)
+    real_products = apply_template_forward(reactants, template_id)
     return species_match([molecule_smiles], real_products) if real_products else False
 
 
