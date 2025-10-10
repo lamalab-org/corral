@@ -3,7 +3,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
-from score import check_numerical, check_potential_file, check_structure
+from score import check_numerical, check_potential_file
 from tools import (
     convert_structure_to_lammps_data,
     execute_python_code,
@@ -30,7 +30,6 @@ from corral.utils.io_tools import (
 
 SCORING_FUNCTIONS = {
     "check_numerical": check_numerical,
-    "check_structure": check_structure,
     "check_potential_file": check_potential_file,
 }
 

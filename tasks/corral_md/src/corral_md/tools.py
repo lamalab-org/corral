@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 import modal
+from loguru import logger
 
 from corral.backend.tool import tool
 
@@ -112,6 +113,7 @@ def execute_python_script(
     [/LIMITATIONS]
     """
     try:
+        logger.info(f"script path {script_path}")
         execute_code_script = modal.Function.lookup("simagent", "execute_python_script")
         return execute_code_script.remote(
             script_path=script_path, args=args, timeout=timeout, working_dir=working_dir
