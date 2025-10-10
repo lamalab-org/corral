@@ -597,26 +597,125 @@
         }
 
         function visualizeReActAgent(messages, nodes, links, nodeId, lastNodeId) {
-            // TODO: Implement ReActAgent visualization logic
-            // This will be implemented based on your next messages
-            // For now, fallback to showing all messages sequentially
+            // Process ReAct agent messages
+            // In ReAct, tool results appear in messages with role='user' starting with 'Observation:'
             messages.forEach((msg, idx) => {
-                nodes.push({
-                    id: nodeId,
-                    type: msg.role || 'unknown',
-                    content: msg.content || '',
-                    timestamp: msg.timestamp || '',
-                    index: idx
-                });
+                const role = msg.role;
+                const content = msg.content || '';
 
-                if (nodeId > 0) {
-                    links.push({
-                        source: nodeId - 1,
-                        target: nodeId
-                    });
+                // Check if this is a tool observation message
+                const isToolObservation = role === 'user' && content.startsWith('Observation:');
+
+                if (currentFilter === 'all') {
+                    // ALL MODE: Show all messages
+                    if (isToolObservation) {
+                        // Extract tool content from observation
+                        const toolContent = extractToolContent(content);
+
+                        nodes.push({
+                            id: nodeId,
+                            type: 'tool',
+                            content: toolContent.result,
+                            timestamp: msg.timestamp || '',
+                            index: idx,
+                            toolName: toolContent.tool_name || msg.name || 'tool',
+                            arguments: toolContent.arguments,
+                            status: toolContent.status,
+                            duration: toolContent.duration,
+                            error_message: toolContent.error_message
+                        });
+                    } else {
+                        nodes.push({
+                            id: nodeId,
+                            type: role,
+                            content: content,
+                            timestamp: msg.timestamp || '',
+                            index: idx
+                        });
+                    }
+
+                    if (nodeId > 0) {
+                        links.push({
+                            source: nodeId - 1,
+                            target: nodeId
+                        });
+                    }
+                    nodeId++;
+                } else if (currentFilter === 'tools') {
+                    // TOOLS ONLY MODE: Show only tool observations
+                    if (isToolObservation) {
+                        const toolContent = extractToolContent(content);
+
+                        nodes.push({
+                            id: nodeId,
+                            type: 'tool',
+                            content: toolContent.result,
+                            timestamp: msg.timestamp || '',
+                            index: idx,
+                            toolName: toolContent.tool_name || msg.name || 'tool',
+                            arguments: toolContent.arguments,
+                            status: toolContent.status,
+                            duration: toolContent.duration,
+                            error_message: toolContent.error_message
+                        });
+
+                        // Connect to previous tool node
+                        if (lastNodeId >= 0) {
+                            links.push({
+                                source: lastNodeId,
+                                target: nodeId
+                            });
+                        }
+                        lastNodeId = nodeId;
+                        nodeId++;
+                    }
                 }
-                nodeId++;
             });
+        }
+
+        function extractToolContent(observationText) {
+            // Extract tool content from "Observation: {tool_content}" format
+            try {
+                // Remove "Observation: " prefix
+                let contentStr = observationText.replace(/^Observation:\s*/, '');
+
+                // Try to parse as JSON
+                let toolData = null;
+                try {
+                    // Try direct JSON parse first
+                    toolData = JSON.parse(contentStr);
+                } catch (e1) {
+                    // If that fails, it might be a Python dict string representation
+                    // Convert Python dict syntax to JSON:
+                    // 1. Replace Python None with null
+                    // 2. Replace Python True/False with true/false
+                    // 3. Replace single quotes with double quotes
+                    let jsonStr = contentStr
+                        .replace(/None/g, 'null')
+                        .replace(/True/g, 'true')
+                        .replace(/False/g, 'false')
+                        // Replace single quotes with double quotes
+                        // This is a simple approach that works for most cases
+                        .replace(/'/g, '"');
+
+                    toolData = JSON.parse(jsonStr);
+                }
+
+                return {
+                    tool_name: toolData.tool_name,
+                    arguments: toolData.arguments,
+                    result: toolData.result,
+                    status: toolData.status,
+                    error_message: toolData.error_message,
+                    duration: toolData.duration
+                };
+            } catch (e) {
+                // If parsing fails, return the raw content
+                console.log('Failed to parse observation:', e);
+                return {
+                    result: observationText
+                };
+            }
         }
 
         function drawGraph(nodes, links) {
@@ -787,10 +886,40 @@
                 </div>`;
             }
 
+            if (d.status) {
+                html += `<div class="detail-item">
+                    <div class="detail-label">Status</div>
+                    <div class="detail-value">${d.status}</div>
+                </div>`;
+            }
+
+            if (d.duration !== undefined) {
+                html += `<div class="detail-item">
+                    <div class="detail-label">Duration</div>
+                    <div class="detail-value">${d.duration.toFixed(4)} seconds</div>
+                </div>`;
+            }
+
+            if (d.error_message) {
+                html += `<div class="detail-item">
+                    <div class="detail-label">Error Message</div>
+                    <div class="detail-value"><pre>${d.error_message}</pre></div>
+                </div>`;
+            }
+
             if (d.arguments) {
+                // Try to parse if it's a string, otherwise use as-is
+                let argsToDisplay = d.arguments;
+                if (typeof d.arguments === 'string') {
+                    try {
+                        argsToDisplay = JSON.parse(d.arguments);
+                    } catch (e) {
+                        argsToDisplay = d.arguments;
+                    }
+                }
                 html += `<div class="detail-item">
                     <div class="detail-label">Arguments</div>
-                    <div class="detail-value"><pre>${JSON.stringify(JSON.parse(d.arguments), null, 2)}</pre></div>
+                    <div class="detail-value"><pre>${typeof argsToDisplay === 'object' ? JSON.stringify(argsToDisplay, null, 2) : argsToDisplay}</pre></div>
                 </div>`;
             }
 
