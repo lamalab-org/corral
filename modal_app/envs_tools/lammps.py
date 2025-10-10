@@ -17,7 +17,7 @@ _lammps_image = (
         "libopenmpi-dev",
         "openmpi-bin",
     )
-    .pip_install("loguru", "fsspec", "numpy", "matplotlib", "pymatgen")
+    .pip_install("loguru", "fsspec", "numpy", "matplotlib", "pymatgen", "MDAnalysis")
     .run_commands(
         "echo 'export LAMMPS_POTENTIALS=\"/potentials/EAM:/potentials/EAM_FS:/potentials/TERSOFF\"' >> /root/.bashrc"
     )

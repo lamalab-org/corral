@@ -230,6 +230,7 @@ def execute_python_script(
     import json
     import sys
 
+    volume_sim.reload()
     try:
         if not Path(script_path).exists():
             return json.dumps(
@@ -258,7 +259,7 @@ def execute_python_script(
             "return_code": process.returncode,
             "command": " ".join(cmd),
         }
-
+        volume_sim.commit()
         return json.dumps(result, indent=2)
 
     except subprocess.TimeoutExpired:
@@ -421,7 +422,7 @@ def run_lammps(input_file: str, log_file: str) -> None:
     directory_path = input_path.parent
     input_file_ = input_path.name
     try:
-        _run_lammps(input_file_, log_file, str(directory_path), CPUS)
+        _run_lammps(input_file_, log_file, str(directory_path))
         volume_sim.commit()
 
     except Exception as e:
