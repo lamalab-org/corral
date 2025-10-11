@@ -371,9 +371,29 @@ def search_reactions_by_criteria(
         cursor.execute(query, params)
         results = cursor.fetchall()
 
-        logger.info(f"Found {len(results)} matching reactions")
+        logger.info(
+            f"Found {len(results)} matching reactions before applicability check"
+        )
 
-        return [dict(row) for row in results]
+        # Convert to list of dicts
+        result_dicts = [dict(row) for row in results]
+
+        # Filter templates by applicability if reference_smiles is provided
+        if reference_smiles:
+            logger.info("Checking template applicability for reference molecule...")
+            filtered_results = [
+                reaction_data
+                for reaction_data in result_dicts
+                if _check_template_applicable(reference_smiles, reaction_data)
+            ]
+
+            logger.info(
+                f"Filtered to {len(filtered_results)} applicable templates "
+                f"(removed {len(result_dicts) - len(filtered_results)} non-applicable)"
+            )
+            return filtered_results
+
+        return result_dicts
 
     except Exception as e:
         logger.error(f"Error executing reaction search query: {e}")
@@ -383,30 +403,71 @@ def search_reactions_by_criteria(
         conn.close()
 
 
-def apply_template_retro(product_smiles: str, template_id: str) -> list[str]:
+def apply_template_retro(
+    product_smiles: str,
+    template_id: str | None = None,
+    reaction_data: dict[str, Any] | None = None,
+) -> list[str]:
     """
     Verify a retrosynthesis step by checking if the given reaction template can produce the expected product.
     This function should be replaced with a call to a retrosynthesis prediction model or API.
 
     product_smiles: str
         The SMILES of the expected product molecule.
-    template_id: str
-        The identifier of the reaction template to use.
+    template_id: str | None
+        The identifier of the reaction template to use. Required if reaction_data is not provided.
+    reaction_data: dict[str, Any] | None
+        Optional dictionary containing reaction information. If provided, it will be used directly
+        instead of querying the database. This avoids redundant database queries.
+        Expected keys: 'mapped_rxn', 'retro_smarts_template', etc.
 
     Returns:
         list[str]: A list of SMILES strings representing the predicted reactants.
     """
-    reaction_data = search_by_template(template_id)
+    # Use provided reaction_data or fetch from database
     if reaction_data is None:
-        raise ValueError(f"Template ID {template_id} not found in database.")
+        if template_id is None:
+            raise ValueError("Either template_id or reaction_data must be provided.")
+        reaction_data = search_by_template(template_id)
+        if reaction_data is None:
+            raise ValueError(f"Template ID {template_id} not found in database.")
+
     try:
         rxn = ChemicalReaction(reaction_data["mapped_rxn"])
         rxn.generate_reaction_template()
         return rxn.retro_template.apply(product_smiles)
     except Exception as e:
+        template_identifier = (
+            template_id if template_id else reaction_data.get("reaction_id", "unknown")
+        )
         raise Exception(
-            f"Error applying template {template_id} to {product_smiles}: {e}"
+            f"Error applying template {template_identifier} to {product_smiles}: {e}"
         ) from e
+
+
+def _check_template_applicable(
+    product_smiles: str, reaction_data: dict[str, Any]
+) -> bool:
+    """
+    Check if a retro template can be applied to a given product SMILES.
+    This is used internally to filter templates in search_reactions_by_criteria.
+
+    Args:
+        product_smiles: The SMILES of the product molecule
+        reaction_data: Dictionary containing reaction information with 'mapped_rxn' key
+
+    Returns:
+        bool: True if the template can be applied, False otherwise
+    """
+    try:
+        rxn = ChemicalReaction(reaction_data["mapped_rxn"])
+        rxn.generate_reaction_template()
+        result = rxn.retro_template.apply(product_smiles)
+        # Check if the template produces any valid reactants
+        return len(result) > 0
+    except Exception:
+        # If any error occurs (e.g., template doesn't match), return False
+        return False
 
 
 def extract_chemical_info(element: Tag) -> dict[str, Any]:

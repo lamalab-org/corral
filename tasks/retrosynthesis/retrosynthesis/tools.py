@@ -11,14 +11,12 @@ from retrosynthesis.utils import (
     _is_buyable,
     apply_template_forward,
     apply_template_retro,
-    detect_fgs,
+    detect_functional_groups_in_molecule,
     get_molecule_summary,
     search_by_template,
     search_catalog,
+    search_reactions_by_criteria,
     species_match,
-)
-from retrosynthesis.utils import (
-    search_reactions_by_criteria as search_reactions_by_molecule,
 )
 
 from corral.backend.tool import Tool, tool
@@ -29,14 +27,99 @@ from corral.utils.modal import remote_call
 @tool
 def search_template_catalog_by_criteria(
     molecule_smiles: str,
-    functional_groups_broken: FUNCTIONAL_GROUPS | None = None,
-    functional_groups_formed: FUNCTIONAL_GROUPS | None = None,
+    functional_groups_broken: list[str] | None = None,
+    functional_groups_formed: list[str] | None = None,
     bonds_formed: list[str] | None = None,
     bonds_broken: list[str] | None = None,
     bonds_order_changed: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Returns a template catalog."""
-    return search_reactions_by_molecule(
+    """[BRIEF] Searches the retrosynthetic template database based on specified criteria. [/BRIEF]
+
+    [DETAILED] This function allows users to search a retrosynthetic template database using various chemical criteria, including functional groups that are broken or formed, as well as specific bonds that are formed, broken, or have their order changed.
+    This changes refer to the forward reaction, meaning that if you are looking for a retrosynthetic template that breaks the alcohol in the current molecule to form an alkene, you should specify "alcohol" in `functional_groups_formed` and "alkene" in `functional_groups_broken`.
+    It returns a list of templates that match the given criteria, each represented as a dictionary containing relevant information, and ranked by Tanimoto similarity with respect the reference molecule. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - When you need to find retrosynthetic templates that involve specific functional group transformations.
+    - When you want to explore templates based on bond changes in a target molecule.
+    - When planning retrosynthetic routes and looking for applicable templates based on chemical features. [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Identify the chemical features (functional groups, bonds) relevant to your retrosynthetic analysis. You can use the tool `get_available_functional_groups` to see the list of functional groups that can be used for searching. [/PREREQUISITE]
+    2. [CURRENT] Use `search_template_catalog_by_criteria` to find templates that match your specified criteria. [/CURRENT]
+    3. [FOLLOW_UP] Review the returned templates and select those that are most relevant to your synthesis planning. You can then apply these templates using the `apply_template` tool or validate retrosynthetic steps with `verify_step`. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+    - The function takes a SMILES string representing the target molecule and optional criteria for functional groups and bonds.
+    - It analyzes the molecule to identify its functional groups and bond structure.
+    - It searches the retrosynthetic template database for templates that match the specified criteria.
+    - It ranks the matching templates based on their Tanimoto similarity to the reference molecule.
+    - It checks that all returned templates can be applied to the target molecule.
+    - The search results are returned as a list of dictionaries, each containing details about a matching template. [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `search_template_catalog_by_criteria("CCO", functional_groups_broken=["alcohol"], functional_groups_formed=["alkene"])`,
+        `search_template_catalog_by_criteria("c1ccccc1O", bonds_broken=["C-O"], bonds_formed=["C-C"])`,
+        `search_template_catalog_by_criteria("C1=CC=CC=C1", functional_groups_formed=["carboxylic_acid"])`,
+        `search_template_catalog_by_criteria("C1=CC=CC=C1", bonds_order_changed=["C=C"])`,
+        `search_template_catalog_by_criteria("C1=CC=CC=C1C(=O)O", functional_groups_broken=["carboxylic_acid"], bonds_broken=["C=O"])`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        molecule_smiles (str):
+            [BRIEF] SMILES string of the target molecule. [/BRIEF]
+            [DETAILED] SMILES string of the molecule to be analyzed for retrosynthetic template matching. The SMILES string must be valid and represent a real chemical structure. [/DETAILED]
+            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
+            [EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/EXAMPLES]
+
+        functional_groups_broken (list[str] | None):
+            [BRIEF] List of functional groups that are broken in the forward reaction. None will result in not filtering with this criterion. [/BRIEF]
+            [DETAILED] A list of functional groups (from a predefined set) that are expected to be broken during the forward reaction. This helps to filter templates that involve the cleavage of these groups. [/DETAILED]
+            [SYNTACTICAL] List of valid functional group strings or None [/SYNTACTICAL]
+            [EXAMPLES] ["alcohol", "amine"], None [/EXAMPLES]
+
+        functional_groups_formed (list[str] | None):
+            [BRIEF] List of functional groups that are formed in the forward reaction. None will result in not filtering with this criterion. [/BRIEF]
+            [DETAILED] A list of functional groups (from a predefined set) that are expected to be formed during the forward reaction. This helps to filter templates that involve the creation of these groups. [/DETAILED]
+            [SYNTACTICAL] List of valid functional group strings or None [/SYNTACTICAL]
+            [EXAMPLES] ["alkene", "carboxylic_acid"], None [/EXAMPLES]
+
+        bonds_formed (list[str] | None):
+            [BRIEF] List of bonds that are formed in the forward reaction. None will result in not filtering with this criterion. [/BRIEF]
+            [DETAILED] A list of bond types (e.g., "6-6", "6-8") that are expected to be formed during the forward reaction. This helps to filter templates that involve the formation of these bonds. [/DETAILED]
+            [SYNTACTICAL] List of valid bond type strings or None [/SYNTACTICAL]
+            [EXAMPLES] ["6-6", "6-8"], None [/EXAMPLES]
+
+        bonds_broken (list[str] | None):
+            [BRIEF] List of bonds that are broken in the forward reaction. None will result in not filtering with this criterion. [/BRIEF]
+            [DETAILED] A list of bond types (e.g., "6-6", "6-8") that are expected to be broken during the forward reaction. This helps to filter templates that involve the cleavage of these bonds. [/DETAILED]
+            [SYNTACTICAL] List of valid bond type strings or None [/SYNTACTICAL]
+            [EXAMPLES] ["6-6", "6-8"], None [/EXAMPLES]
+
+        bonds_order_changed (list[str] | None):
+            [BRIEF] List of bonds whose order is changed in the forward reaction. None will result in not filtering with this criterion. [/BRIEF]
+            [DETAILED] A list of bond types (e.g., "6-6", "6-8") whose order is expected to change during the forward reaction. This helps to filter templates that involve changes in bond order. [/DETAILED]
+            [SYNTACTICAL] List of valid bond type strings or None [/SYNTACTICAL]
+            [EXAMPLES] ['6-6 (1.0->2.0)'], None [/EXAMPLES]
+
+    Returns:
+        list[dict[str, Any]]:
+            [BRIEF] List of dictionaries representing matching retrosynthetic templates. [/BRIEF]
+            [DETAILED] Each dictionary in the returned list contains details about a retrosynthetic template that matches the specified criteria, including its SMARTS representation and other relevant information. If no templates match the criteria, an empty list is returned. [/DETAILED]
+            [SYNTACTICAL] List of dictionaries or an empty list [/SYNTACTICAL]
+            [EXAMPLES] [{"template_id": "123", "smarts": "..."}], [] [/EXAMPLES]
+
+    [LIMITATIONS] Known limitations:
+        - The function relies on the completeness and accuracy of the retrosynthetic template catalog. If the catalog is incomplete or contains errors, the search results may be affected.
+        - The criteria provided must be specific enough to yield meaningful results; overly broad criteria may return too many templates, while overly narrow criteria may return none.
+        - The function may not handle all edge cases in chemical structures, such as unusual bonding patterns or rare functional groups.
+        - The accuracy of the search results is dependent on the quality of the underlying reaction templates and algorithms used in the retrosynthetic analysis.
+    [/LIMITATIONS]
+    """
+    return search_reactions_by_criteria(
         functional_groups_broken=functional_groups_broken,
         functional_groups_formed=functional_groups_formed,
         bonds_formed=bonds_formed,
@@ -51,9 +134,10 @@ def search_template_catalog_by_criteria(
 def get_template(template_id: str) -> str:
     """[BRIEF] Retrieves a retrosynthetic template and other information by its ID. [/BRIEF]
 
-    [DETAILED] This function takes a template ID as input and returns the corresponding retrosynthetic
-    template in SMARTS format. If the template ID is not found, it raises a ValueError. It also retrieves
-    the canonical SMARTS template (template for the forward reaction), and an example reaction for that example reaction.
+    [DETAILED] This function takes a template ID as input and returns the corresponding retrosynthetic template in SMARTS format.
+    If the template ID is not found, it raises a ValueError.
+    It also retrieves the canonical SMARTS template (template for the forward reaction), and an example reaction for that example reaction.
+    [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you need to retrieve a specific retrosynthetic template for analysis or application.
@@ -107,17 +191,16 @@ def get_template(template_id: str) -> str:
         - The function may not account for all possible molecular variations and edge cases.
     [/LIMITATIONS]
     """
-    return search_by_template(template_id)
+    return str(search_by_template(template_id))
 
 
 @tool
-def get_available_functional_groups() -> list[str]:
+def get_available_functional_groups() -> str:
     """
     [BRIEF] Returns a list of available functional groups for querying the database. [/BRIEF]
 
-    [DETAILED] This function provides a list of predefined functional groups that can be used to filter
-    molecules in the database. These functional groups are based on common chemical motifs and can aid in
-    the identification and selection of relevant compounds for synthesis or analysis. [/DETAILED]
+    [DETAILED] This function provides a list of predefined functional groups that can be used to filter molecules in the database.
+    These functional groups are based on common chemical motifs and can aid in the identification and selection of relevant compounds for synthesis or analysis. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you need to identify specific functional groups in a set of molecules.
@@ -129,19 +212,45 @@ def get_available_functional_groups() -> list[str]:
     2. [CURRENT] Use `get_available_functional_groups` to retrieve the list of functional groups. [/CURRENT]
     3. [FOLLOW_UP] Use the retrieved functional groups to filter or search for molecules in the database using other tools or functions. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+    - The function accesses a predefined list of functional groups stored in the retrosynthesis package.
+    - It returns this list as a simple Python list of strings, each representing a functional group.
+    - The functional groups are standardized and commonly used in cheminformatics for molecular characterization. [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `get_available_functional_groups()`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        None
+
+    Returns:
+        list[str]:
+            [BRIEF] List of available functional groups. [/BRIEF]
+            [DETAILED] A list of strings, each representing a functional group that can be used for querying the database. These functional groups are based on common chemical motifs and are useful for filtering and identifying relevant compounds. [/DETAILED]
+            [SYNTACTICAL] List of valid functional group strings [/SYNTACTICAL]
+            [EXAMPLES] ["alcohol", "amine", "carboxylic_acid"] [/EXAMPLES]
+
+    [LIMITATIONS] Known limitations:
+        - The list of functional groups is predefined and may not cover all possible functional groups found in chemical compounds.
+        - The function does not provide additional information about each functional group, such as its chemical properties or reactivity.
+        - The functional groups are based on common motifs and may not account for all variations or derivatives of these groups.
+    [/LIMITATIONS]
     """
 
     return str(FUNCTIONAL_GROUPS)
 
 
-# @tool
+@tool
 def apply_template(molecule_smiles: str, template_id: str) -> list[str]:
     """[BRIEF] Applies a retrosynthetic template to a molecule. [/BRIEF]
 
-    [DETAILED] Given a molecule in SMILES format and a template ID, this function applies the retrosynthetic
-    template to the molecule and returns a list of precursor SMILES strings. If the template cannot be applied,
-    it returns an empty list. This function is useful for retrosynthetic analysis in computational chemistry and
-    drug discovery. [/DETAILED]
+    [DETAILED] Given a molecule in SMILES format and a template ID, this function applies the retrosynthetic template to the molecule and returns a list of precursor SMILES strings.
+    If the template cannot be applied, it returns an empty list.
+    This function is useful for retrosynthetic analysis in computational chemistry and drug discovery. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you have a target molecule and want to explore possible precursors using a specific retrosynthetic template.
@@ -212,13 +321,13 @@ def apply_template(molecule_smiles: str, template_id: str) -> list[str]:
     return apply_template_retro(molecule_smiles, template_id)
 
 
-# @tool
+@tool
 def verify_step(molecule_smiles: str, template_id: str, precursors: list[str]) -> bool:
     """
     [BRIEF] Verifies if a retrosynthetic step is valid. [/BRIEF]
 
-    [DETAILED] This function checks whether applying a given retrosynthetic template to a set of precursor molecules
-    results in the target molecule. It is used to validate retrosynthetic steps in a synthesis route. [/DETAILED]
+    [DETAILED] This function checks whether applying a given retrosynthetic template to a set of precursor molecules results in the target molecule.
+    It is used to validate retrosynthetic steps in a synthesis route. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you have a proposed retrosynthetic step and want to confirm its validity.
@@ -283,14 +392,13 @@ def verify_step(molecule_smiles: str, template_id: str, precursors: list[str]) -
     return species_match([molecule_smiles], real_products) if real_products else False
 
 
-# @tool
+@tool
 def verify_route(route: str) -> tuple[bool, str]:
     """
     [BRIEF] Verifies if a synthesis route follows the expected schema. [/BRIEF]
 
-    [DETAILED] This function checks whether a given synthesis route, represented as a JSON string,
-    adheres to a predefined hierarchical schema. The schema defines the structure and required fields for
-    molecules and reactions in the route. [/DETAILED]
+    [DETAILED] This function checks whether a given synthesis route, represented as a JSON string, adheres to a predefined hierarchical schema.
+    The schema defines the structure and required fields for molecules and reactions in the route. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you have a synthesis route and want to ensure it is correctly formatted before further processing.
@@ -447,14 +555,13 @@ def verify_route(route: str) -> tuple[bool, str]:
         return False, f"Unexpected error: {e!s}"
 
 
-# @tool
+@tool
 def search_catalog_by_cas(cas: str, limit: int = 10) -> list[dict[str, Any]] | str:
     """
     [BRIEF] Searches a catalog for available precursors. [/BRIEF]
 
     [DETAILED] This function searches a chemical catalog using a CAS number to find available precursor chemicals.
-    It returns a list of chemical information dictionaries if matches are found, or a message indicating no
-    results were found. [/DETAILED]
+    It returns a list of chemical information dictionaries if matches are found, or a message indicating no results were found. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you have a CAS number and want to find corresponding chemicals in the catalog.
@@ -522,12 +629,13 @@ def search_catalog_by_cas(cas: str, limit: int = 10) -> list[dict[str, Any]] | s
     return chemicals if chemicals else "No results found"
 
 
-# @tool
+@tool
 def is_buyable(cas: str) -> bool:
     """
     [BRIEF] Checks if a molecule is commercially available. [/BRIEF]
 
-    [DETAILED] This function determines whether a given molecule, represented by its CAS number, is commercially available for purchase. It returns True if the molecule can be bought, and False otherwise. [/DETAILED]
+    [DETAILED] This function determines whether a given molecule, represented by its CAS number, is commercially available for purchase.
+    It returns True if the molecule can be bought, and False otherwise. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you need to verify the availability of a chemical precursor for synthesis planning.
@@ -585,7 +693,7 @@ def is_buyable(cas: str) -> bool:
     return _is_buyable(cas)
 
 
-# @tool
+@tool
 def suggest_protecting_groups(functional_group: FunctionalGroup) -> list[str]:
     """
     [BRIEF] Suggests protecting groups for a given functional group.[/BRIEF]
@@ -656,7 +764,7 @@ def suggest_protecting_groups(functional_group: FunctionalGroup) -> list[str]:
     ]
 
 
-# @tool
+@tool
 def smiles_to_cas(molecule_smiles: str) -> str:
     """
     [BRIEF] Converts a SMILES string to a CAS number. [/BRIEF]
@@ -729,14 +837,13 @@ def smiles_to_cas(molecule_smiles: str) -> str:
     )
 
 
-# @tool
+@tool
 def cas_to_smiles(cas_number: str) -> str:
     """
     [BRIEF] Converts a CAS number to an isomeric SMILES string. [/BRIEF]
 
-    [DETAILED] This function takes a CAS (Chemical Abstracts Service) number as input and converts it to
-    the corresponding isomeric SMILES (Simplified Molecular Input Line Entry System) string. The isomeric SMILES
-    representation includes stereochemical information, making it more specific than standard SMILES. [/DETAILED]
+    [DETAILED] This function takes a CAS (Chemical Abstracts Service) number as input and converts it to the corresponding isomeric SMILES (Simplified Molecular Input Line Entry System) string.
+    The isomeric SMILES representation includes stereochemical information, making it more specific than standard SMILES. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you have a CAS number and need to find the corresponding isomeric SMILES representation of the molecule. [/PROCEDURAL]
@@ -748,8 +855,7 @@ def cas_to_smiles(cas_number: str) -> str:
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - The function takes a CAS number as input and queries a chemical database or service that maps
-    CAS numbers to isomeric SMILES strings.
+    - The function takes a CAS number as input and queries a chemical database or service that maps CAS numbers to isomeric SMILES strings.
     - It retrieves the isomeric SMILES representation associated with the provided CAS number.
     - If a matching isomeric SMILES string is found, it is returned as a string. If no match is found, an appropriate message or exception may be raised. [/CONTEXTUAL]
 
@@ -789,15 +895,13 @@ def cas_to_smiles(cas_number: str) -> str:
     )
 
 
-# @tool
+@tool
 def deprotect_molecule(molecule_smiles: str) -> str:
     """
     [BRIEF] Removes protecting groups from a molecule represented by a SMILES string. [/BRIEF]
 
-    [DETAILED] This function takes a SMILES (Simplified Molecular Input Line Entry System) string
-    representing a molecule with protecting groups and removes those protecting groups to yield the
-    deprotected molecule. Protecting groups are commonly used in synthetic chemistry to temporarily mask
-    reactive sites on molecules during multi-step synthesis processes. [/DETAILED]
+    [DETAILED] This function takes a SMILES (Simplified Molecular Input Line Entry System) string representing a molecule with protecting groups and removes those protecting groups to yield the deprotected molecule.
+    Protecting groups are commonly used in synthetic chemistry to temporarily mask reactive sites on molecules during multi-step synthesis processes. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you have a molecule with protecting groups and need to obtain the deprotected version of the molecule.
@@ -858,16 +962,15 @@ def deprotect_molecule(molecule_smiles: str) -> str:
     return Deprotect(mol)
 
 
-# @tool
-def detect_pgs_with_positions(
+@tool
+def detect_protection_groups(
     smiles: str,
 ) -> dict[str, Any]:
     """
     [BRIEF] Detects protecting groups in a molecule and their positions. [/BRIEF]
 
-    [DETAILED] This function identifies protecting groups present in a molecule represented by a SMILES (Simplified Molecular Input Line Entry System)
-    string. It returns a list of detected protecting groups along with their abbreviations, full names,
-    classes, and the positions of the atoms involved in each protecting group. [/DETAILED]
+    [DETAILED] This function identifies protecting groups present in a molecule represented by a SMILES (Simplified Molecular Input Line Entry System) string.
+    It returns a list of detected protecting groups along with their abbreviations, full names, classes, and the positions of the atoms involved in each protecting group. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you need to identify protecting groups in a molecule for synthesis planning or analysis.
@@ -1000,14 +1103,14 @@ def detect_pgs_with_positions(
     }
 
 
-# @tool
+@tool
 def detect_functional_groups(smiles: str) -> str:
     """
     [BRIEF] Detects functional groups in a molecule represented by a SMILES string. [/BRIEF]
 
-    [DETAILED] This function identifies functional groups present in a molecule represented by a SMILES (Simplified Molecular Input Line Entry System)
-    string. It returns a summary of the detected functional groups, including their names, and positions of the atoms within the molecule. Functional
-    groups are specific groups of atoms within molecules that have characteristic properties and reactivities. [/DETAILED]
+    [DETAILED] This function identifies functional groups present in a molecule represented by a SMILES (Simplified Molecular Input Line Entry System) string.
+    It returns a summary of the detected functional groups, including their names, and positions of the atoms within the molecule.
+    Functional groups are specific groups of atoms within molecules that have characteristic properties and reactivities. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you need to identify functional groups in a molecule for synthesis planning or analysis.
@@ -1071,22 +1174,24 @@ def detect_functional_groups(smiles: str) -> str:
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         raise ValueError("Invalid SMILES")
-    res = detect_fgs(smiles)
+    res = detect_functional_groups_in_molecule(smiles)
     return get_molecule_summary(smiles, res)
 
 
 def create_tools() -> dict[str, Tool]:
     """Create a dictionary of all available tools for the agent environment"""
     return {
-        # "template_catalog": template_catalog,
+        "search_template_catalog_by_criteria": search_template_catalog_by_criteria,
+        "get_template": get_template,
+        "get_available_functional_groups": get_available_functional_groups,
         "apply_template": apply_template,
         "verify_step": verify_step,
         "verify_route": verify_route,
-        "search_catalog": search_catalog_by_cas,
+        "search_catalog_by_cas": search_catalog_by_cas,
         "is_buyable": is_buyable,
         "suggest_protecting_groups": suggest_protecting_groups,
         "deprotect_molecule": deprotect_molecule,
-        "detect_protection_groups": detect_pgs_with_positions,
+        "detect_protection_groups": detect_protection_groups,
         "detect_functional_groups": detect_functional_groups,
         "smiles_to_cas": smiles_to_cas,
         "cas_to_smiles": cas_to_smiles,
