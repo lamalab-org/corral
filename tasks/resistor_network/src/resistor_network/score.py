@@ -220,9 +220,8 @@ def _score_functional_behavior(
     Score how well the topology functionally matches expected resistance measurements.
 
     Binary version:
-    - If predicted resistance is within tolerance of expected value → 1
-    - Otherwise → 0
-    The final score is the mean of all binary results.
+    - Each measurement: if predicted resistance is within tolerance → 1, else → 0
+    - Final score: 1.0 only if ALL measurements pass, otherwise 0.0
     """
     if not expected_measurements:
         logger.warning("No expected measurements provided for functional scoring")
@@ -257,8 +256,11 @@ def _score_functional_behavior(
             logger.error(f"Failed to test measurement {measurement}: {e}")
             scores.append(0.0)
 
-    final_functional_score = sum(scores) / len(scores) if scores else 0.0
-    logger.info(f"Overall functional score: {final_functional_score}")
+    # All measurements must pass for a score of 1.0
+    final_functional_score = 1.0 if (scores and all(s == 1.0 for s in scores)) else 0.0
+    logger.info(
+        f"Overall functional score: {final_functional_score} (passed {sum(scores)}/{len(scores)} measurements)"
+    )
     return final_functional_score
 
 
