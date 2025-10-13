@@ -70,7 +70,7 @@ TARGETS = [
 
 
 def main():
-    tasks_path = Path(__file__).parent.parent / "environments" / "level_3" / "tasks"
+    tasks_path = Path(__file__).parent / "tasks"
     for i, molecule in enumerate(MOLECULES):
         task = {
             "id": f"make_{i+1}_lvl1",
@@ -78,14 +78,14 @@ def main():
             "keywords": ["chemistry", "synthesis", "retrosynthesis"],
             "metrics": ["binary"],
             "input": {
-                "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The leaves on the retrosynthesis tree should be commercially available chemicals.",
+                "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The route must have at least one reaction.  You should use the template/s {PRIZES[i]} in this order.",
                 "input_from_task": False,
                 "input_for_task": False,
             },
             "output": [
                 {
-                    "type": "integer",
-                    "target": 9999.0,
+                    "type": "list",
+                    "target": [TARGETS[i]],
                     "threshold": None,
                 }
             ],

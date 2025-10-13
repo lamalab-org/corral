@@ -30,6 +30,15 @@ PRODUCTION_DB_CONFIG = {
 }
 
 
+# pc = PriceCollector()
+# pc.setMolportApiKey(os.environ.get("MOLPORT_API_KEY", ""))
+# pc.setChemSpaceApiKey(os.environ.get("CHEMSPACE_API_KEY", ""))
+# pc.setMCuleApiKey(os.environ.get("MCULE_API_KEY", ""))
+
+# if os.environ.get("MOLPORT_API_KEY", "") == ""  or os.environ.get("CHEMSPACE_API_KEY", "") == "" or os.environ.get("MCULE_API_KEY", "") == "":
+#     raise ValueError("Please set MOLPORT_API_KEY, CHEMSPACE_API_KEY and MCULE_API_KEY environment variables.")
+
+
 def get_production_connection():
     """Connect to Phase B production database"""
     conn = psycopg2.connect(**PRODUCTION_DB_CONFIG)
