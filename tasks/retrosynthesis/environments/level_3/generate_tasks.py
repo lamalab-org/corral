@@ -31,10 +31,10 @@ PRIZES = [
 
 
 def main():
-    tasks_path = Path(__file__).parent.parent / "environments" / "level_3" / "tasks"
+    tasks_path = Path(__file__).parent / "tasks"
     for i, molecule in enumerate(MOLECULES):
         task = {
-            "id": f"make_{i+1}_lvl1",
+            "id": f"make_{i+1}_lvl3",
             "name": f"synthesize_{molecule}",
             "keywords": ["chemistry", "synthesis", "retrosynthesis"],
             "metrics": ["binary"],

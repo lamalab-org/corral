@@ -16,17 +16,16 @@ MOLECULES = [
     "Cc1ccc(NS(=O)(=O)c2ccc(/C=C/C(=O)Nc3ccccc3N)cc2)cc1",
     "O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O",
 ]
-PRIZES = [
-    ["1914396"],
-    ["1914397"],
-    ["1914398"],
-    ["1679759"],
-    ["36006", "1914399", "1914400"],
-    ["29648", "1914401", "1914402", "1914403"],
-    ["1914404", "337284"],
-    ["1914405", "1914406", "1914407"],
-    ["324328", "1914408", "733"],
-    ["20810", "2895", "1914409", "1914410", "1914411", "74060"],
+HINTS = [
+    "In a carbonyl-ene reaction, an alkene reacts with an allylic hydrogen and a carbonyl group to form a new carbon-carbon bondm. This reaction can take place between parts of the same molecule. The reaction typically requires a Lewis acid catalyst and proceeds via a concerted mechanism. The stereochemistry of the product is influenced by the geometry of the alkene and the carbonyl group. The result of the reaction is the formation of a new carbon-carbon bond and a new stereocenter at the site of the allylic hydrogen, in which one of the substituents is going to be a hydroxyl group.",
+    "A Dies-Alder reaction is a [4+2] cycloaddition between a conjugated diene and a dienophile, resulting in the formation of a six-membered ring. The reaction is stereospecific, meaning that the stereochemistry of the reactants is preserved in the product. The reaction typically proceeds via a concerted mechanism, where the pi electrons of the diene and dienophile interact to form new sigma bonds. The reaction can be catalyzed by heat or Lewis acids, and the regioselectivity of the product can be influenced by substituents on the diene and dienophile.",
+    "In a cycloaddition reaction, two unsaturated molecules (or parts of the same molecule) combine to form a cyclic product. The reaction typically involves the formation of new sigma bonds between the reacting species, resulting in the creation of a ring structure.",
+    "The Peterson Reaction allows the preparation of alkenes from alpha-silylcarbanions. An intermediate beta-hydroxy silane is formed, following an elimination step to yield the alkene.",
+    "tert-Butyldimethylsilyl (TBS or TBDMS) is a common protecting group for alcohols in organic synthesis. The TBS group is stable under a variety of reaction conditions, including acidic and basic environments, making it useful for multi-step syntheses. It can be removed (deprotected) using fluoride sources such as tetrabutylammonium fluoride (TBAF) or by acidic hydrolysis, regenerating the free alcohol.\n\nThe nozaki-hiyama-kishi reaction is a nickel/chromium-catalyzed coupling reaction between an aldehyde and an allyl, vinyl, or aryl halide to form a new carbon-carbon bond. The reaction typically proceeds via the formation of an organochromium intermediate, which then reacts with the aldehyde to form the desired product. The reaction is stereoselective, meaning that the stereochemistry of the product is influenced by the geometry of the starting materials and the reaction conditions. The resulting product is an alcohol (that can be easily oxidized into a ketone) with a new carbon-carbon bond formed between the aldehyde and the halide.",
+    "tert-Butyldimethylsilyl (TBS or TBDMS) is a common protecting group for alcohols in organic synthesis. It is introduced using reagents such as tert-butyldimethylsilyl chloride (TBDMSCl) or tert-butyldimethylsilyl trifluoromethanesulfonate (TBDMSOTf) in the presence of a base like imidazole or pyridine. The TBS group is stable under a variety of reaction conditions, including acidic and basic environments, making it useful for multi-step syntheses. It can be removed (deprotected) using fluoride sources such as tetrabutylammonium fluoride (TBAF) or by acidic hydrolysis, regenerating the free alcohol.\n\nIn the Horner-Wadsworth-Emmons reaction, the reaction of aldehydes or ketones with stabilized phosphorus ylides (phosphonate carbanions) leads to olefins with excellent E-selectivity.\n\nDIBAL-H is a reducing agent used in organic synthesis, particularly for the selective reduction of esters and nitriles to aldehydes. It is a complex of diisobutylaluminum hydride and is typically used in low temperatures to minimize side reactions.\n\nThe Still-Gennari reaction is a modification of the Horner-Wadsworth-Emmons (HWE) reaction that allows for the selective formation of (Z)-alkenes from aldehydes and phosphonate esters. The reaction typically involves the use of a phosphonate ester with electron-withdrawing groups, such as bis(trifluoroethyl) or bis(2,2,2-trifluoroethyl) groups, which helps to stabilize the carbanion intermediate formed during the reaction.",
+    "The Baylis-Hillman reaction is a carbon-carbon bond-forming reaction between an activated alkene (such as an acrylate or vinyl ketone) and an aldehyde or ketone, catalyzed by a nucleophilic catalyst (often a tertiary amine or phosphine). The reaction proceeds via the formation of a zwitterionic intermediate, which then undergoes nucleophilic attack on the carbonyl compound to form the desired product.\n\nKetones can be reduced to secondary alcohols using various reducing agents. Common reagents for this transformation include sodium borohydride (NaBH4) and lithium aluminum hydride (LiAlH4).",
+    "Friedel-Crafts alkylation is a type of electrophilic aromatic substitution reaction that introduces an alkyl group onto an aromatic ring. The reaction typically involves the use of an alkyl halide and a Lewis acid catalyst, such as aluminum chloride (AlCl3) or ferric chloride (FeCl3). The Lewis acid activates the alkyl halide, generating a carbocation or a related electrophilic species that can then attack the aromatic ring, forming a new carbon-carbon bond.\n\nA substitution reaction can be used to replace a leaving group (such as a hydroxyl group) with an halogens (like chlorine, bromine, or iodine). This can be achieved using reagents such as hydrogen halides (HF), thionyl chloride (SOCl2), phosphorus tribromide (PBr3), or phosphorus triiodide (PI3).",
+    "A carboxylic acid can be converted to an amide by reaction with an amine in the presence of a coupling agent. Common coupling agents include carbodiimides (like DCC or EDC) or uronium salts (like HATU or TBTU). The reaction typically proceeds via the formation of an activated ester intermediate, which then reacts with the amine to form the desired amide bond.\n\nThe Doebner Modification is a reaction in which an aromatic aldehyde reacts with malonic acid (HOOC-CH2-COOH) under base (e.g., piperidine/pyridine or ammonium acetate) to give an alpha,beta-unsaturated carboxylic acid (the new alkene) with decarboxylation.",
 ]
 
 TARGETS = [
@@ -70,22 +69,22 @@ TARGETS = [
 
 
 def main():
-    tasks_path = Path(__file__).parent.parent / "environments" / "level_3" / "tasks"
+    tasks_path = Path(__file__).parent.parent / "environments" / "level_2" / "tasks"
     for i, molecule in enumerate(MOLECULES):
         task = {
-            "id": f"make_{i+1}_lvl1",
+            "id": f"make_{i+1}_lvl2",
             "name": f"synthesize_{molecule}",
             "keywords": ["chemistry", "synthesis", "retrosynthesis"],
             "metrics": ["binary"],
             "input": {
-                "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The leaves on the retrosynthesis tree should be commercially available chemicals.",
+                "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The route must have at least one reaction. The leaves on the retrosynthesis tree should be commercially available chemicals.\n\nHere are some hints to help you (the hints are enumerated in the order that they should be applied): {HINTS[i]}",
                 "input_from_task": False,
                 "input_for_task": False,
             },
             "output": [
                 {
                     "type": "integer",
-                    "target": 9999.0,
+                    "target": TARGETS[i],
                     "threshold": None,
                 }
             ],
