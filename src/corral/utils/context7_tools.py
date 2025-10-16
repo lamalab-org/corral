@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import os
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +84,29 @@ def _save_cache(key: str, payload: dict[str, Any]) -> None:
         logger.warning(f"Failed to save cache for key {key}: {e}")
 
 
+def _parse_text_results(text: str) -> list[dict]:
+    results = []
+    for block in text.split("----------"):
+        lines = block.strip().splitlines()
+        entry = {}
+        for line in lines:
+            if line.startswith("- Title:"):
+                entry["name"] = line.split(":", 1)[1].strip()
+            elif line.startswith("- Context7-compatible library ID:"):
+                entry["libraryId"] = line.split(":", 1)[1].strip()
+            elif line.startswith("- Code Snippets:"):
+                val = line.split(":", 1)[1].strip()
+                if val.isdigit():  # only parse numeric values
+                    entry["codeSnippets"] = int(val)
+            elif line.startswith("- Trust Score:"):
+                val = line.split(":", 1)[1].strip()
+                with suppress(ValueError):
+                    entry["trustScore"] = float(val)
+        if entry:
+            results.append(entry)
+    return results
+
+
 async def _resolve_library_id(session: ClientSession, package_name: str) -> dict:
     """
     Call Context7's resolve-library-id tool and choose the best match.
@@ -112,15 +136,11 @@ async def _resolve_library_id(session: ClientSession, package_name: str) -> dict
 
     if getattr(result, "structuredContent", None):
         data = result.structuredContent
-    else:
-        # Try to parse first text block as JSON
+    elif result.content:
         for block in result.content:
             if isinstance(block, types.TextContent):
-                try:
-                    data = json.loads(block.text)
-                    break
-                except Exception:
-                    pass
+                data = {"results": _parse_text_results(block.text)}
+                break
 
     if not data or not data.get("results"):
         raise RuntimeError(f"No libraries found for '{package_name}'")
@@ -371,7 +391,16 @@ def get_library_documentation(
                 return text, lib_id
 
         # Execute async fetch
-        text, resolved_lib_id = asyncio.run(_fetch())
+        # text, resolved_lib_id = asyncio.run(_fetch())
+        try:
+            text, resolved_lib_id = asyncio.run(_fetch())
+        except ExceptionGroup as eg:
+            for sub in eg.exceptions:
+                logger.exception(f"Sub-exception in TaskGroup: {sub}")
+            raise
+        except Exception as e:
+            logger.exception(f"Regular exception: {e}")
+            raise
 
         # Cache the result
         _save_cache(cache_key, {"text": text, "library_id": resolved_lib_id})
