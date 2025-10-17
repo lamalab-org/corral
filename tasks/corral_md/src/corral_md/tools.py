@@ -16,6 +16,134 @@ from corral.backend.tool import tool
 
 
 @tool
+def run_in_terminal(
+    command: str,
+    timeout: int | None = 300,
+    session_id: str | None = None,
+) -> str:
+    """[BRIEF] Execute shell commands in a persistent terminal session with state preservation. For managing environments and dependencies uv is used. [/BRIEF]
+
+    [DETAILED] This tool executes shell commands in a persistent terminal environment that maintains working directory, environment variables, and command history across multiple invocations.
+    Commands are executed synchronously and block until completion, with comprehensive output capture and timeout protection.
+    This is essential for running system commands, installing dependencies, and executing workflows that require shell access.
+    The persistent session ensures that directory changes, environment modifications, and other session state persist across commands. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to execute shell/terminal commands (bash, zsh, etc.)
+    - Best suited for system operations, and dependency installation
+    - Essential for running command-line tools and utilities
+    - Recommended for git operations, package installations, and system commands
+    - Avoid for Python code execution (use execute_python_code instead)
+    - Avoid for long-running processes that don't need to block (consider implementing background support if needed)
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Maintains persistent terminal session with preserved working directory
+    - Preserves environment variables across command invocations
+    - Executes commands using system shell (bash/zsh/cmd based on OS)
+    - Captures stdout and stderr streams with automatic truncation
+    - Implements timeout protection to prevent hanging processes
+    - Tracks command history and execution results within session
+    - Automatically truncates output if it exceeds 60KB to prevent memory issues
+    - Blocks until command completes or timeout is reached
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Identify a command that needs to be run in the terminal such as installing a package that you want to use [/PREREQUISITE]
+    2. [CURRENT] Execute command with appropriate timeout [/CURRENT]
+    3. [FOLLOW_UP] Process the output or use returned session_id for subsequent commands [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `run_in_terminal("ls -la", 30)`,
+        `run_in_terminal("npm install", 600)`,
+        `run_in_terminal("python -m venv env", 60)`,
+        `run_in_terminal("git status", 10)`,
+        `run_in_terminal("pip install numpy pandas", 300, "existing-session-id")`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        command (str):
+            [BRIEF] The shell command to execute. [/BRIEF]
+            [DETAILED] A valid shell command string that will be executed in the terminal.
+            The command should be compatible with the system's default shell (bash/zsh on Unix, cmd on Windows).
+            Multi-line commands are not supported - use semicolons or && to chain commands.
+            For commands that use pagers (like git log), disable paging with flags (e.g., 'git --no-pager log').
+            Use absolute paths when possible to avoid ambiguity. [/DETAILED]
+            [SYNTACTIC] "valid shell command string" [/SYNTACTIC]
+            [EXAMPLES] "ls -la /home/user", "git clone https://github.com/repo.git", "npm install --save package-name" [/EXAMPLES]
+
+        timeout (int):
+            [BRIEF] Maximum execution time in seconds. Defaults to 300 (5 minutes). [/BRIEF]
+            [DETAILED] The maximum time in seconds the command is allowed to run before being terminated.
+            This prevents hanging processes and ensures resource management.
+            Set to None to disable timeout (use with caution, only for trusted commands).
+            For quick commands, use shorter timeouts (10-60s). For installations or builds, use longer timeouts (300-1800s). [/DETAILED]
+            [SYNTACTIC] positive integer representing seconds, or None [/SYNTACTIC]
+            [EXAMPLES] 30 (quick commands), 300 (default, moderate operations), 600 (builds/installations), None (no limit) [/EXAMPLES]
+
+        session_id (str):
+            [BRIEF] Optional session ID to use an existing terminal session. [/BRIEF]
+            [DETAILED] The unique identifier of a terminal session to execute the command in.
+            If provided, the command runs in the context of that session (preserving directory and environment).
+            If None, a new session is created or the default session is used.
+            This allows maintaining state across multiple command invocations.
+            Useful for workflows that require sequential commands in the same context. [/DETAILED]
+            [SYNTACTIC] UUID string or None [/SYNTACTIC]
+            [EXAMPLES] "123e4567-e89b-12d3-a456-426614174000", None [/EXAMPLES]
+
+    Returns:
+        str:
+            [BRIEF] JSON string with execution results including output, errors, and process information. [/BRIEF]
+            [DETAILED] A JSON-formatted string containing the execution status, stdout, stderr, exit code, working directory, and session ID.
+            The output is automatically truncated if it exceeds 60KB to prevent memory issues.
+            Provides comprehensive information for debugging and workflow integration.
+            The command blocks until completion or timeout. [/DETAILED]
+            [EXAMPLES] '{"success": true, "stdout": "total 48\\ndrwxr-xr-x  12 user  staff  384 Oct 10 10:00 .", "stderr": "", "exit_code": 0, "cwd": "/home/user", "session_id": "abc123"}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        TimeoutExpired:
+            [ERROR_WHEN] When command execution exceeds the specified timeout [/ERROR_WHEN]
+            [ERROR_DETAILS] Command was terminated due to timeout limit [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Increase timeout value or optimize command, or set timeout to None for no limit [/ERROR_RECOVERY]
+
+        OSError:
+            [ERROR_WHEN] When the command cannot be executed due to system errors [/ERROR_WHEN]
+            [ERROR_DETAILS] System-level error preventing command execution [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Check command syntax, system resources, and permissions [/ERROR_RECOVERY]
+
+        ValueError:
+            [ERROR_WHEN] When invalid parameters are provided [/ERROR_WHEN]
+            [ERROR_DETAILS] Command or parameters are malformed [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify command syntax and parameter values [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Does not support multi-line commands (use semicolons or && to chain)
+    - Output is truncated after 60KB to prevent memory overflow
+    - Interactive commands requiring user input may hang
+    - Commands block until completion (no background execution support)
+    - Session state is not persisted across tool restarts
+    - Working directory changes only persist within the same session
+    - Pager commands (like 'less', 'more') should be avoided or disabled
+    [/LIMITATIONS]
+    """
+    try:
+        logger.info(f"Executing terminal command: '{command}' (timeout={timeout})")
+        execute_terminal_command = modal.Function.lookup("simagent", "run_in_terminal")
+        return execute_terminal_command.remote(
+            command=command, timeout=timeout, session_id=session_id
+        )
+    except Exception as e:
+        # Handle unexpected errors
+        raise Exception(
+            f"An unexpected error occurred while executing the terminal command: {e!s}"
+        ) from e
+
+
+@tool
 def execute_python_script(
     script_path: str,
     args: list | None = None,
@@ -122,6 +250,75 @@ def execute_python_script(
         # Handle unexpected errors
         raise Exception(
             f"An unexpected error occurred while executing the code: {e!s}"
+        ) from e
+
+
+@tool
+def list_terminal_sessions() -> str:
+    """[BRIEF] List all active terminal sessions and their information. [/BRIEF]
+
+    [DETAILED] This tool provides an overview of all active terminal sessions, including session IDs, working directories, command history count, and creation times.
+    This is useful for managing multiple terminal contexts and understanding the current state of terminal operations.
+    Each session maintains its own working directory and environment, allowing for isolated command execution contexts. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use to see all available terminal sessions
+    - Best suited for debugging session-related issues
+    - Essential for understanding terminal session state
+    - Recommended when managing multiple parallel workflows
+    [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE]  You used the tool `run_in_terminal`, and you need to run it again within the same terminal such that the context is preserved. [/PREREQUISITE]
+    2. [CURRENT] Retrieve list of active sessions and their status [/CURRENT]
+    3. [FOLLOW_UP] Use session IDs with `run_in_terminal` to execute in specific contexts [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+    - Queries the internal session registry
+    - Collects information about each active session
+    - Returns formatted data including session IDs and metadata
+    - Provides current working directory for each session
+    - Shows command history count to understand session usage
+    [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `list_terminal_sessions()`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        None
+
+    Returns:
+        str:
+            [BRIEF] JSON string with list of all active terminal sessions. [/BRIEF]
+            [DETAILED] A JSON-formatted string containing an array of session objects, each with session ID, current working directory, number of commands executed, and creation timestamp.
+            Provides complete overview of terminal session state for management and debugging. [/DETAILED]
+            [EXAMPLES] '{"sessions": [{"session_id": "abc123", "cwd": "/home/user/project", "command_count": 5, "created_at": 1696956000.0}]}' [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        Exception:
+            [ERROR_WHEN] For any unexpected errors during session listing [/ERROR_WHEN]
+            [ERROR_DETAILS] An unexpected error occurred [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Review error message and stack trace for details [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Sessions are not persisted across tool restarts
+    - Cannot retrieve sessions from other tool instances
+    - Limited to sessions created by this tool
+    [/LIMITATIONS]
+    """
+    logger.info("Listing all terminal sessions")
+    try:
+        list_sessions = modal.Function.lookup("simagent", "list_terminal_sessions")
+        return list_sessions.remote()
+    except Exception as e:
+        # Handle unexpected errors
+        raise Exception(
+            f"An unexpected error occurred while listing sessions: {e!s}"
         ) from e
 
 
