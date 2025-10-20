@@ -52,6 +52,20 @@ def main():
             ],
             "scoring_fn": "score_final",
             "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
+            "tools": [
+                "search_template_catalog_by_criteria",
+                "get_template",
+                "get_available_functional_groups",
+                "apply_template",
+                "verify_step",
+                "verify_route",
+                "search_catalog_by_smiles",
+                "is_buyable",
+                "suggest_protecting_groups",
+                "deprotect_molecule",
+                "detect_functional_groups",
+                "detect_protection_groups",
+            ],
         }
         task_file = tasks_path / f"make_{i+1}.json"
         with task_file.open("w") as f:

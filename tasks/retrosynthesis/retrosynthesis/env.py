@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 
 from loguru import logger
-from retrosynthesis.score import score_final
+from retrosynthesis.score import check_reactants, score_final
 from retrosynthesis.tools import create_tools
 
 from corral.backend.env import Environment
@@ -22,9 +22,7 @@ from corral.backend.task import TaskDefinition, TaskGroup
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "CORRAL_WORK_DIR/rethrosynthesis")
 
-SCORING_FUNCTIONS = {
-    "final_score": score_final,
-}
+SCORING_FUNCTIONS = {"final_score": score_final, "check_reactants": check_reactants}
 
 
 def load_tasks_from_json(

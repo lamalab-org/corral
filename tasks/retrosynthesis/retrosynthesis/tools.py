@@ -6,18 +6,18 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, rdDeprotect
 from rdkit.Chem.rdDeprotect import Deprotect
 from retrosynthesis.constants import FUNCTIONAL_GROUPS, PG
-from retrosynthesis.types import FunctionalGroup
-from retrosynthesis.utils import (
+from retrosynthesis.retrosynthesis_utils import (
     _is_buyable,
     apply_template_forward,
     apply_template_retro,
+    check_price,
     detect_functional_groups_in_molecule,
     get_molecule_summary,
     search_by_template,
-    search_catalog,
     search_reactions_by_criteria,
     species_match,
 )
+from retrosynthesis.types import FunctionalGroup
 
 from corral.backend.tool import Tool, tool
 from corral.utils.modal import remote_call
@@ -556,64 +556,57 @@ def verify_route(route: str) -> tuple[bool, str]:
 
 
 @tool
-def search_catalog_by_cas(cas: str, limit: int = 10) -> list[dict[str, Any]] | str:
+def search_catalog_by_smiles(smiles_list: list[str]) -> list[dict[str, Any]]:
     """
     [BRIEF] Searches a catalog for available precursors. [/BRIEF]
 
-    [DETAILED] This function searches a chemical catalog using a CAS number to find available precursor chemicals.
+    [DETAILED] This function searches a chemical catalog using for a list of SMILES strings to find available precursor chemicals.
     It returns a list of chemical information dictionaries if matches are found, or a message indicating no results were found. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - When you have a CAS number and want to find corresponding chemicals in the catalog.
+    - When you have a list of SMILES strings and want to find corresponding chemicals in the catalog.
     - When validating the availability of a chemical precursor for synthesis planning. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Obtain the CAS number of the chemical you want to search for. You can obtain the CAS number for a chemical by using the tool `smiles_to_cas`. [/PREREQUISITE]
-    2. [CURRENT] Use `search_catalog_by_cas` to look up the CAS number in the catalog. [/CURRENT]
+    1. [PREREQUISITE] Obtain the SMILES strings of the chemicals you want to search for. [/PREREQUISITE]
+    2. [CURRENT] Use `search_catalog_by_smiles` to look up the SMILES strings in the catalog. [/CURRENT]
     3. [FOLLOW_UP] If matches are found, review the chemical information for potential use in synthesis. If no matches are found, consider alternative chemicals or suppliers. You can also check if the molecule is buyable using the tool `is_buyable`. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - The function takes a CAS number as input and queries a chemical catalog for matching entries.
-    - It retrieves a list of chemicals that match the provided CAS number, each represented as a dictionary containing relevant chemical information.
-    - If multiple matches are found, it returns only the first `limit` matches to avoid overwhelming the user.
+    - The function takes a list of SMILES strings as input and queries some chemical catalogs for matching entries using the `chemprice` package.
+    - It retrieves a list of chemicals that match the provided SMILES strings, each represented as a dictionary containing relevant chemical information.
     - If no matches are found, it returns a message indicating that no results were found. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
     [
-        `search_catalog_by_cas("50-00-0")`,
-        `search_catalog_by_cas("64-17-5")`,
-        `search_catalog_by_cas("67-56-1")`,
-        `search_catalog_by_cas("000-00-0")`,
-        `search_catalog_by_cas("999-99-9")`,
+        `search_catalog_by_smiles(["CCO"])`,
+        `search_catalog_by_smiles(["c1ccccc1O"])`,
+        `search_catalog_by_smiles(["C1=CC=CC=C1"])`,
+        `search_catalog_by_smiles(["C1=CC=CC=C1C(=O)O"])`,
+        `search_catalog_by_smiles(["C1=CC=CC=C1C(=O)Cl", "CCO"])`,
     ]
     [/SYNTACTICAL]
 
     Args:
-        cas (str):
-            [BRIEF] CAS number of the chemical to search for. [/BRIEF]
-            [DETAILED] The CAS number is a unique numerical identifier assigned to every chemical substance described in the open scientific literature. It is used to provide a unique, unmistakable identifier for chemical substances. [/DETAILED]
-            [SYNTACTICAL] Valid CAS number string [/SYNTACTICAL]
-            [EXAMPLES] "50-00-0", "64-17-5", "67-56-1" [/EXAMPLES]
-
-        limit (int):
-            [BRIEF] Maximum number of matches to return. Defaults to 10. [/BRIEF]
-            [DETAILED] This parameter sets an upper limit on the number of chemical matches to return from the catalog search. It helps to manage the amount of data returned and ensures that the user is not overwhelmed with too many results. The default value is 10. [/DETAILED]
-            [SYNTACTICAL] Positive integer [/SYNTACTICAL]
-            [EXAMPLES] 5, 10, 20 [/EXAMPLES]
+        smiles_list (list[str]):
+            [BRIEF] List of SMILES strings representing the chemicals to search for. [/BRIEF]
+            [DETAILED] A list of SMILES representations of all the chemicals to be searched in the catalog. [/DETAILED]
+            [SYNTACTICAL] List with valid SMILES strings [/SYNTACTICAL]
+            [EXAMPLES] ["CCO"], ["c1ccccc1O"], ["C1=CC=CC=C1"] [/EXAMPLES]
 
     Returns:
         list[dict[str, Any]] | str:
             [BRIEF] List of chemical info dicts or a not-found message. [/BRIEF]
-            [DETAILED] If matches are found, a list of dictionaries containing chemical information is returned. Each dictionary represents a chemical and includes details such as name, CAS number, and availability. If no matches are found, a message indicating no results were found is returned. [/DETAILED]
+            [DETAILED] If matches are found, a list of dictionaries containing chemical information is returned. Each dictionary represents a chemical and includes details such as SMILES, amount, distributor or price. If no matches are found, a message indicating no results were found is returned. [/DETAILED]
             [SYNTACTICAL] List of dictionaries or a string message [/SYNTACTICAL]
             [EXAMPLES] [{"name": "Formaldehyde", "cas": "50-00-0", ...}], "No results found" [/EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
             [ERROR_WHEN] Raised for any unexpected errors during the catalog search. [/ERROR_WHEN]
-            [ERROR_DETAILS] This could be due to connectivity issues, invalid CAS number format, or server errors in the catalog service. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] Verify the CAS number format if the error has to do with the CAS number. If the error comes from the catalog service, inform the user to try again later. [/ERROR_RECOVERY]
+            [ERROR_DETAILS] This could be due to connectivity issues, invalid SMILES format, or server errors in the catalog service. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the SMILES format if the error has to do with the SMILES representation. If the error comes from the catalog service, inform the user to try again later. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
@@ -623,64 +616,62 @@ def search_catalog_by_cas(cas: str, limit: int = 10) -> list[dict[str, Any]] | s
     - If the catalog service is down or unreachable, the function will not be able to return results.
     [/LIMITATIONS]
     """
-    chemicals = search_catalog(cas)
-    if len(chemicals) > limit:
-        return chemicals[:limit]
+    chemicals = check_price(smiles_list)
     return chemicals if chemicals else "No results found"
 
 
 @tool
-def is_buyable(cas: str) -> bool:
+def is_buyable(smiles_list: list[str]) -> list[bool]:
     """
-    [BRIEF] Checks if a molecule is commercially available. [/BRIEF]
+    [BRIEF] Checks if a list of molecules are commercially available. [/BRIEF]
 
-    [DETAILED] This function determines whether a given molecule, represented by its CAS number, is commercially available for purchase.
-    It returns True if the molecule can be bought, and False otherwise. [/DETAILED]
+    [DETAILED] This function determines whether some given molecules, represented by their SMILES notation, are commercially available for purchase.
+    It returns a list of boolean values indicating the availability of each molecule. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you need to verify the availability of a chemical precursor for synthesis planning.
     - When deciding whether to include a specific molecule in a synthesis route based on its commercial availability. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Obtain the CAS number of the molecule you want to check. You can obtain the CAS number for a chemical by using the tool `smiles_to_cas`. [/PREREQUISITE]
-    2. [CURRENT] Use `is_buyable` to check if the molecule is commercially available. [/CURRENT]
-    3. [FOLLOW_UP] If the molecule is buyable, consider it for inclusion in your synthesis route. If not, look for alternative molecules, precursors or routes. [/FOLLOW_UP]
+    1. [PREREQUISITE] Obtain the SMILES notation of the molecules you want to check. [/PREREQUISITE]
+    2. [CURRENT] Use `is_buyable` to check if the molecules are commercially available. [/CURRENT]
+    3. [FOLLOW_UP] If a molecule is buyable, consider it for inclusion in your synthesis route. If not, look for alternative molecules, precursors or routes. You can use this tool for validation to check that all the reactants are buyable. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - The function takes a CAS number as input and queries a database or service that tracks the commercial availability of chemicals.
-    - It checks if the molecule associated with the provided CAS number is listed as available for purchase.
-    - If the molecule is found to be commercially available, the function returns True. If it is not available, it returns False. [/CONTEXTUAL]
+    - The function takes a list of SMILES as input and queries some chemical database using the `chemprice` package to check the commercial availability of each molecule.
+    - It checks if the molecule associated with the provided SMILES is listed as available for purchase.
+    - If the molecule is found to be commercially available, the function returns True for such molecule. If it is not available, it returns False. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
     [
-        `is_buyable("50-00-0")`,
-        `is_buyable("64-17-5")`,
-        `is_buyable("67-56-1")`,
-        `is_buyable("000-00-0")`,
-        `is_buyable("999-99-9")`,
+        `is_buyable(["CCO", "c1ccccc1O", "C1=CC=CC=C1"])`,
+        `is_buyable(["C1=CC=CC=C1C(=O)O", "C1=CC=CC=C1C(=O)Cl"])`,
+        `is_buyable(["CNC", "CCN", "CCCN"])`,
+        `is_buyable(["CC(=O)O", "C1=CC=CC=C1C(=O)Cl"])`,
+        `is_buyable(["CC(=O)O", "C1=CC=CC=C1"])`,
     ]
     [/SYNTACTICAL]
 
     Args:
-        cas (str):
-            [BRIEF] CAS number of the molecule to check. [/BRIEF]
-            [DETAILED] The CAS number is a unique numerical identifier assigned to every chemical substance described in the open scientific literature. It is used to provide a unique, unmistakable identifier for chemical substances. [/DETAILED]
-            [SYNTACTICAL] Valid CAS number string [/SYNTACTICAL]
-            [EXAMPLES] "50-00-0", "64-17-5", "67-56-1", "000-00-0", "999-99-9" [/EXAMPLES]
+        smiles_list (list[str]):
+            [BRIEF] List of SMILES strings representing the molecules to check. [/BRIEF]
+            [DETAILED] A list of SMILES representations of all the molecules whose commercial availability is to be checked. [/DETAILED]
+            [SYNTACTICAL] Valid SMILES strings [/SYNTACTICAL]
+            [EXAMPLES] ["CCO"], ["c1ccccc1O"], ["C1=CC=CC=C1"] [/EXAMPLES]
 
     Returns:
-        bool:
-            [BRIEF] True if the molecule is commercially available, False otherwise. [/BRIEF]
-            [DETAILED] The function returns True if the molecule associated with the provided CAS number is listed as available for purchase. If the molecule is not available, it returns False. [/DETAILED]
-            [SYNTACTICAL] Boolean value (True or False) [/SYNTACTICAL]
-            [EXAMPLES] True, False [/EXAMPLES]
+        list[bool]:
+            [BRIEF] List of boolean values indicating the availability of each molecule. [/BRIEF]
+            [DETAILED] The function returns a list of boolean values, where each value corresponds to the availability of the molecule represented by the respective SMILES string in the input list. [/DETAILED]
+            [SYNTACTICAL] Boolean value (True or False) for each molecule [/SYNTACTICAL]
+            [EXAMPLES] [True], [False] [/EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
             [ERROR_WHEN] Raised for any unexpected errors during the availability check. [/ERROR_WHEN]
-            [ERROR_DETAILS] This could be due to connectivity issues, invalid CAS number format, or server errors in the availability service. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] Verify the CAS number format if the error has to do with the CAS number. If the error comes from the availability service, inform the user to try again later, and you should workaround by checking alternative routes. [/ERROR_RECOVERY]
+            [ERROR_DETAILS] This could be due to connectivity issues, invalid SMILES format, or server errors in the availability service. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the SMILES format if the error has to do with the SMILES. If the error comes from the availability service, inform the user to try again later, and you should workaround by checking alternative routes. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
@@ -690,7 +681,7 @@ def is_buyable(cas: str) -> bool:
     - If the availability service is down or unreachable, the function will not be able to return results.
     [/LIMITATIONS]
     """
-    return _is_buyable(cas)
+    return _is_buyable(smiles_list)
 
 
 @tool
@@ -1187,7 +1178,7 @@ def create_tools() -> dict[str, Tool]:
         "apply_template": apply_template,
         "verify_step": verify_step,
         "verify_route": verify_route,
-        "search_catalog_by_cas": search_catalog_by_cas,
+        "search_catalog_by_smiles": search_catalog_by_smiles,
         "is_buyable": is_buyable,
         "suggest_protecting_groups": suggest_protecting_groups,
         "deprotect_molecule": deprotect_molecule,

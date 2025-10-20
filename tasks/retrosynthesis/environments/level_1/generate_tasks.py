@@ -16,7 +16,7 @@ MOLECULES = [
     "Cc1ccc(NS(=O)(=O)c2ccc(/C=C/C(=O)Nc3ccccc3N)cc2)cc1",
     "O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O",
 ]
-PRIZES = [
+TEMPLATES = [
     ["1914396"],
     ["1914397"],
     ["1914398"],
@@ -78,7 +78,7 @@ def main():
             "keywords": ["chemistry", "synthesis", "retrosynthesis"],
             "metrics": ["binary"],
             "input": {
-                "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The route must have at least one reaction.  You should use the template/s {PRIZES[i]} in this order.",
+                "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The route must have at least {len(TEMPLATES[i])} reactions.  You should use the template/s {TEMPLATES[i]} in this order.",
                 "input_from_task": False,
                 "input_for_task": False,
             },
@@ -91,6 +91,20 @@ def main():
             ],
             "scoring_fn": "score_final",
             "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
+            "tools": [
+                "search_template_catalog_by_criteria",
+                "get_template",
+                "get_available_functional_groups",
+                "apply_template",
+                "verify_step",
+                "verify_route",
+                "search_catalog_by_smiles",
+                "is_buyable",
+                "suggest_protecting_groups",
+                "deprotect_molecule",
+                "detect_functional_groups",
+                "detect_protection_groups",
+            ],
         }
         task_file = tasks_path / f"make_{i+1}.json"
         with task_file.open("w") as f:

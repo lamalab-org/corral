@@ -1,5 +1,5 @@
 from loguru import logger
-from retrosynthesis.utils import (
+from retrosynthesis.retrosynthesis_utils import (
     _is_buyable,
     apply_template_retro,
     check_price,
