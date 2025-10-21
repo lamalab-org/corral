@@ -18,6 +18,7 @@ from retrosynthesis.retrosynthesis_utils import (
     species_match,
 )
 from retrosynthesis.types import FunctionalGroup
+from rxnmapper import RXNMapper
 
 from corral.backend.tool import Tool, tool
 from corral.utils.modal import remote_call
@@ -1171,6 +1172,71 @@ def detect_functional_groups(smiles: str) -> str:
     return get_molecule_summary(smiles, res)
 
 
+def map_reaction_smiles(reaction_smiles: str) -> str:
+    """
+    [BRIEF] Maps atoms in a reaction SMILES string using attention-guided atom mapping. Sometimes, the mapping may help to get the templates to work. [/BRIEF]
+
+    [DETAILED] This function takes a reaction SMILES string as input and applies attention-guided atom mapping to assign atom map numbers to the atoms involved in the reaction.
+    Atom mapping is useful for tracking the movement of atoms from reactants to products in a chemical reaction and it can help with the retrosynthesis template application. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - When you have a reaction SMILES string and need to assign atom map numbers to the atoms in the reaction.
+    - When preparing reaction data for retrosynthesis analysis or template application. [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Some template is not working when being applied to the molecule at hand. Obtain the reaction SMILES string that you want to map. [/PREREQUISITE]
+    2. [CURRENT] Use `map_reaction_smiles(reaction_smiles)` to get the mapped SMILES string. [/CURRENT]
+    3. [FOLLOW_UP] Use the mapped reaction SMILES for further retrosynthesis analysis or template application. You can also use the tool `apply_template` to apply retrosynthesis templates to molecules. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+    - The function takes a reaction SMILES string as input and utilizes the RXNMapper library to perform attention-guided atom mapping.
+    - The RXNMapper analyzes the reaction and assigns atom map numbers to the atoms in the reactants and products based on learned attention mechanisms.
+    - The resulting mapped reaction SMILES string is returned, which includes the atom map numbers for each atom involved in the reaction. [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `map_reaction_smiles("CCO.CC(=O)O>>CCOC(=O)C")`,
+        `map_reaction_smiles("c1ccccc1.O>>c1ccccc1O")`,
+        `map_reaction_smiles("C1=CC=CC=C1.CC(=O)O>>C1=CC=CC=C1C(=O)O")`,
+        `map_reaction_smiles("C1=CC=CC=C1C(=O)Cl.CC>>C1=CC=CC=C1C(=O)CC")`,
+        `map_reaction_smiles("CCN.C1=CC=CC=C1>>CCNC1=CC=CC=C1")`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        reaction_smiles (str):
+            [BRIEF] Reaction SMILES string to be mapped. [/BRIEF]
+            [DETAILED] A valid reaction SMILES string representing the chemical reaction you want to map. [/DETAILED]
+            [SYNTACTICAL] Valid reaction SMILES string [/SYNTACTICAL]
+            [EXAMPLES] "CCO.CC(=O)O>>CCOC(=O)C", "c1ccccc1.O>>c1cccccc1O" [/EXAMPLES]
+
+    Returns:
+        str:
+            [BRIEF] The mapped reaction SMILES string with atom map numbers. [/BRIEF]
+            [DETAILED] The function returns the reaction SMILES string with atom map numbers assigned to the atoms in the reactants and products. This mapped SMILES string allows for tracking of atoms through the reaction process. [/DETAILED]
+            [SYNTACTICAL] String representing a mapped reaction SMILES [/SYNTACTICAL]
+            [EXAMPLES] "C[C:1][O:2].C[C:3](=[O:4])[O:5]>>C[C:1][O:2][C:3](=[O:4])" [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        Exception:
+            [ERROR_WHEN] Raised for any unexpected errors during the mapping process. [/ERROR_WHEN]
+            [ERROR_DETAILS] This could be due to connectivity issues, invalid reaction SMILES format, or errors in the RXNMapper library. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the reaction SMILES format if the error has to do with the input. If the error comes from the mapping process, inform the user to try again later. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - The function relies on the RXNMapper library, which may not accurately map all types of reactions.
+    - The accuracy of the mapping process depends on the quality of the input reaction SMILES string.
+    - The function may not handle complex reactions with multiple steps or ambiguous atom mappings effectively.
+    - The RXNMapper model may have limitations based on its training data and may not generalize well to all reaction types.
+    [/LIMITATIONS]
+    """
+    rxn_mapper = RXNMapper()
+    results = rxn_mapper.get_attention_guided_atom_maps([reaction_smiles])
+    return results[0]["mapped_rxn"]
+
+
 def create_tools() -> dict[str, Tool]:
     """Create a dictionary of all available tools for the agent environment"""
     return {
@@ -1186,6 +1252,7 @@ def create_tools() -> dict[str, Tool]:
         "deprotect_molecule": deprotect_molecule,
         "detect_protection_groups": detect_protection_groups,
         "detect_functional_groups": detect_functional_groups,
+        "map_reaction_smiles": map_reaction_smiles,
         # "smiles_to_cas": smiles_to_cas,
         # "cas_to_smiles": cas_to_smiles,
     }

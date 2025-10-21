@@ -4,7 +4,7 @@ from pathlib import Path
 from loguru import logger
 
 MOLECULES = [
-    "C=C(c1ccccc1)[C@@H]1CCC[C@@]1(O)C(F)(F)F",  # Carbony-En Reaction
+    "[CH2:1]=[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)[C@@H:9]1[CH2:10][CH2:11][CH2:12][C@@:13]1([OH:14])[C:15]([F:16])([F:17])[F:18]",  # Carbony-En Reaction
     "COC([C@]12CC=CC[C@H]1C(C2)=O)=O",  # Diels-Alder
     "COC(C1(C=C1[Si](C)(C)C)/C=C/C2=CC=CC=C2)=O",  # Cycloaddition
     "C=C(C1=CC=C(OC)C=C1)C2=CC=C(OC)C=C2",  # Peterson olefination
@@ -17,16 +17,16 @@ MOLECULES = [
     "O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O",
 ]
 PRIZES = [
-    ["1914396"],
-    ["1914397"],
-    ["1914398"],
-    ["1679759"],
-    ["36006", "1914399", "1914400"],
-    ["29648", "1914401", "1914402", "1914403"],
-    ["1914404", "337284"],
-    ["1914405", "1914406", "1914407"],
-    ["324328", "1914408", "733"],
-    ["20810", "2895", "1914409", "1914410", "1914411", "74060"],
+    9999.0,
+    9999.0,
+    9999.0,
+    9999.0,
+    9999.0,
+    9999.0,
+    9999.0,
+    9999.0,
+    9999.0,
+    9999.0,
 ]
 
 
