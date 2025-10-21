@@ -1172,6 +1172,7 @@ def detect_functional_groups(smiles: str) -> str:
     return get_molecule_summary(smiles, res)
 
 
+@tool
 def map_reaction_smiles(reaction_smiles: str) -> str:
     """
     [BRIEF] Maps atoms in a reaction SMILES string using attention-guided atom mapping. Sometimes, the mapping may help to get the templates to work. [/BRIEF]
