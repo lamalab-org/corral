@@ -8,7 +8,7 @@ MOLECULES = [
     "COC([C@]12CC=CC[C@H]1C(C2)=O)=O",  # Diels-Alder
     "COC(C1(C=C1[Si](C)(C)C)/C=C/C2=CC=CC=C2)=O",  # Cycloaddition
     "C=C(C1=CC=C(OC)C=C1)C2=CC=C(OC)C=C2",  # Peterson olefination
-    "C=C(C1=CC([C@H]([C@@]1(CC(C(CO[Si](C)(C(C)(C)C)C)=C)=O)[H])C)=O)C",  # Nozaki Hiyama Kishi Reaction + Deprotection of OTBS into OH
+    "C[C@H]1[C@](CC(C(CO)=C)=O)(C(C(C)=C)=CC1=O)[H]",  # Nozaki Hiyama Kishi Reaction + Deprotection of OTBS into OH
     # Difficult ones
     "O[C@H]1C[C@@H](O[C@@H]([C@@H]1C)/C=C(CO)/C)C/C=C/C=C/C(O)=O",  # Still-Gennari + Horner-Wadsworth-Emmons
     "O[C@H]1C2=CC3=CC=CC=C3O[C@H]2CCC1",  # Baylis-Hillman Reaction + cyclic stereocontrol
@@ -86,11 +86,11 @@ def main():
     for i, molecule in enumerate(MOLECULES):
         task = {
             "id": f"make_{i+1}_lvl2",
-            "name": f"synthesize_{molecule}",
+            "name": f"make_{i+1}_lvl2",
             "keywords": ["chemistry", "synthesis", "retrosynthesis"],
             "metrics": ["binary"],
             "input": {
-                "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The route must have at least {len(TEMPLATES[i])} reaction. The leaves on the retrosynthesis tree should be commercially available chemicals.\n\nHere are some hints to help you (the hints are enumerated in the order that they should be applied): {HINTS[i]}",
+                "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The route must have at least {len(TEMPLATES[i])} reactions. The leaves on the retrosynthesis tree should be commercially available chemicals.\n\nHere are some hints to help you (the hints are enumerated in the order that they should be applied): {HINTS[i]}",
                 "input_from_task": False,
                 "input_for_task": False,
             },

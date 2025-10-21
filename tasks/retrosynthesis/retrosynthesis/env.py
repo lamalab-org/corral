@@ -4,6 +4,7 @@ Retrosynthesis Benchmark Server
 Command-line arguments:
     --host: Host address to run the server (default: value of CORRAL_HOST env var or '0.0.0.0').
     --port: Port to run the server (default: value of CORRAL_PORT env var or 8000).
+    --level: Level of the environment (1, 2, or 3) (default: 1).
     --subtask_level: Whether to use subtask-level tasks (default: False).
 """
 
@@ -22,7 +23,7 @@ from corral.backend.task import TaskDefinition, TaskGroup
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "CORRAL_WORK_DIR/rethrosynthesis")
 
-SCORING_FUNCTIONS = {"final_score": score_final, "check_reactants": check_reactants}
+SCORING_FUNCTIONS = {"score_final": score_final, "check_reactants": check_reactants}
 
 
 def load_tasks_from_json(
@@ -36,23 +37,22 @@ def load_tasks_from_json(
 
         with task_file.open() as f:
             task_data = json.load(f)
-        for data in task_data:
-            task_id = data["id"]
-            initial_input = data.get("initial_input", {"work_dir": work_dir})
-            input_from_tasks = data.get("input", {}).get("input_from_task", [])
-            if not isinstance(input_from_tasks, list):
-                input_from_tasks = []
+        task_id = task_data["id"]
+        initial_input = task_data.get("initial_input", {"work_dir": work_dir})
+        input_from_tasks = task_data.get("input", {}).get("input_from_task", [])
+        if not isinstance(input_from_tasks, list):
+            input_from_tasks = []
 
-            tasks[task_id] = TaskDefinition(
-                name=data["name"],
-                description=data["input"]["prompt"],
-                tools=data.get("tools", []),
-                scoring_fn=SCORING_FUNCTIONS[str(data["scoring_fn"])],
-                scoring_inputs=data["output"][0]["target"],
-                submission_format=data.get("submission_format", ""),
-                input_from_tasks=input_from_tasks,
-                initial_input=initial_input,
-            )
+        tasks[task_id] = TaskDefinition(
+            name=task_data["name"],
+            description=task_data["input"]["prompt"],
+            tools=task_data.get("tools", []),
+            scoring_fn=SCORING_FUNCTIONS[str(task_data["scoring_fn"])],
+            scoring_inputs=task_data["output"][0]["target"],
+            submission_format=task_data.get("submission_format", ""),
+            input_from_tasks=input_from_tasks,
+            initial_input=initial_input,
+        )
     return tasks
 
 
@@ -87,8 +87,6 @@ class RetroEnvironment(Environment):
         # Initialize environment
         super().__init__(f"{task_group.group_id}_{task_id}", base_work_dir=work_dir)
 
-        self.hidden_args = {"h_smiles": self.current_task.scoring_inputs}
-
         logger.info(f"Initializing environment for task {self.task_id}")
         logger.info(f"Task name: {self.current_task}")
         self._add_task_tools()
@@ -115,18 +113,19 @@ class RetroEnvironment(Environment):
             f"{self.current_task.submission_format}\n\n"
         )
 
-        prompt += "\nAvailable input data:\n"
+        if self.current_task.input_from_tasks:
+            prompt += "\nAvailable input data:\n"
 
-        # Display input data from dependencies
-        for dep_task_id in self.current_task.input_from_tasks:
-            dep_key = f"{self.task_group.group_id}_{dep_task_id}"
-            if dep_key in self.task_group.results:
-                dep_result = self.task_group.results[dep_key]
-                task_prompt = self.task_group.tasks[dep_task_id].description
-                if isinstance(dep_result, dict) and "answer" in dep_result:
-                    prompt += f"- Input from '{dep_task_id}' with question: '{task_prompt}' and answer: '{dep_result['answer']}'\n"
-                else:
-                    prompt += f"- Input from '{dep_task_id}' with description: '{task_prompt}' and answer: '{dep_result}'\n"
+            # Display input data from dependencies
+            for dep_task_id in self.current_task.input_from_tasks:
+                dep_key = f"{self.task_group.group_id}_{dep_task_id}"
+                if dep_key in self.task_group.results:
+                    dep_result = self.task_group.results[dep_key]
+                    task_prompt = self.task_group.tasks[dep_task_id].description
+                    if isinstance(dep_result, dict) and "answer" in dep_result:
+                        prompt += f"- Input from '{dep_task_id}' with question: '{task_prompt}' and answer: '{dep_result['answer']}'\n"
+                    else:
+                        prompt += f"- Input from '{dep_task_id}' with description: '{task_prompt}' and answer: '{dep_result}'\n"
 
         # Display initial input data
         if self.current_task.initial_input:
@@ -144,11 +143,13 @@ class RetroEnvironment(Environment):
 
         try:
             # Clean the submission
-            submission_json = self.state.submitted_answer.strip()
-            logger.info(f"Raw submission: {submission_json}")
-            score = self.current_task.scoring_fn(prediction=submission_json)
+            submitted_answer = self.state.submitted_answer.strip()
+            logger.info(f"Raw submission: {submitted_answer}")
+            score = self.current_task.scoring_fn(
+                prediction=submitted_answer, target=self.current_task.scoring_inputs
+            )
             self.task_group.store_result(
-                self.task_id, {"answer": submission_json}, score
+                self.task_id, {"answer": submitted_answer}, score
             )
             logger.info(f"Score for task {self.task_id}: {score}")
             return score
@@ -162,13 +163,21 @@ class RetroEnvironment(Environment):
 def create_rethrosynthesis_environments(
     work_dir: str = BASE_WORK_DIR,
     subtask_level: bool = False,
+    level: int = 1,
 ) -> dict[str, Environment]:
     """Create environments for the rethrosynthesis benchmark tasks."""
     logger.info("Creating environments for rethrosynthesis tasks...")
     if subtask_level:
-        json_path = Path(__file__).parent / "subtasks_json"
+        json_path = (
+            Path(__file__).parent.parent
+            / "environments"
+            / f"level_{level}"
+            / "subtasks"
+        )
     else:
-        json_path = Path(__file__).parent / "tasks_json"
+        json_path = (
+            Path(__file__).parent.parent / "environments" / f"level_{level}" / "tasks"
+        )
     if not json_path.exists():
         raise ValueError(f"Task file {json_path} does not exist.")
 
@@ -219,6 +228,14 @@ if __name__ == "__main__":
         default=int(os.environ.get("CORRAL_PORT", "8000")),
         help="Port to run the server on",
     )
+
+    parser.add_argument(
+        "--level",
+        type=int,
+        default=1,
+        help="Level of the environment (1,2, or 3)",
+    )
+
     parser.add_argument(
         "--subtask_level",
         type=bool,

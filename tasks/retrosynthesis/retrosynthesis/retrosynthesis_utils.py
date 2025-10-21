@@ -415,7 +415,7 @@ def apply_template_retro(
     product_smiles: str,
     template_id: str | None = None,
     reaction_data: dict[str, Any] | None = None,
-) -> list[str]:
+) -> tuple[tuple[str, ...], ...]:
     """
     Verify a retrosynthesis step by checking if the given reaction template can produce the expected product.
     This function should be replaced with a call to a retrosynthesis prediction model or API.
@@ -430,7 +430,8 @@ def apply_template_retro(
         Expected keys: 'mapped_rxn', 'retro_smarts_template', etc.
 
     Returns:
-        list[str]: A list of SMILES strings representing the predicted reactants.
+        tuple[tuple[str, ...], ...]: A tuple of tuples, where each inner tuple contains SMILES strings
+        representing one possible set of predicted reactants.
     """
     # Use provided reaction_data or fetch from database
     if reaction_data is None:
@@ -440,14 +441,40 @@ def apply_template_retro(
         if reaction_data is None:
             raise ValueError(f"Template ID {template_id} not found in database.")
 
+    template_identifier = (
+        template_id if template_id else reaction_data.get("reaction_id", "unknown")
+    )
+
     try:
         rxn = ChemicalReaction(reaction_data["mapped_rxn"])
         rxn.generate_reaction_template()
         return rxn.retro_template.apply(product_smiles)
+    except RuntimeError as e:
+        # Handle stereochemistry violation errors by removing E/Z stereochemistry
+        if "Stereo atoms should be specified before specifying CIS/TRANS" in str(e):
+            logger.warning(
+                f"Stereochemistry error for template {template_identifier}. "
+                "Retrying with E/Z stereochemistry removed."
+            )
+            try:
+                # Remove E/Z (cis/trans) stereochemistry markers (/ and \)
+                # while preserving tetrahedral stereochemistry (@ and @@)
+                sanitized_rxn = (
+                    reaction_data["mapped_rxn"].replace("/", "").replace("\\", "")
+                )
+                rxn = ChemicalReaction(sanitized_rxn)
+                rxn.generate_reaction_template()
+                return rxn.retro_template.apply(product_smiles)
+            except Exception as e2:
+                raise Exception(
+                    f"Error applying template {template_identifier} to {product_smiles} "
+                    f"(even after removing E/Z stereochemistry): {e2}"
+                ) from e2
+        else:
+            raise Exception(
+                f"Error applying template {template_identifier} to {product_smiles}: {e}"
+            ) from e
     except Exception as e:
-        template_identifier = (
-            template_id if template_id else reaction_data.get("reaction_id", "unknown")
-        )
         raise Exception(
             f"Error applying template {template_identifier} to {product_smiles}: {e}"
         ) from e
@@ -473,6 +500,23 @@ def _check_template_applicable(
         result = rxn.retro_template.apply(product_smiles)
         # Check if the template produces any valid reactants
         return len(result) > 0
+    except RuntimeError as e:
+        # Handle stereochemistry violation errors by removing E/Z stereochemistry
+        if "Stereo atoms should be specified before specifying CIS/TRANS" in str(e):
+            try:
+                # Remove E/Z (cis/trans) stereochemistry markers (/ and \)
+                # while preserving tetrahedral stereochemistry (@ and @@)
+                sanitized_rxn = (
+                    reaction_data["mapped_rxn"].replace("/", "").replace("\\", "")
+                )
+                rxn = ChemicalReaction(sanitized_rxn)
+                rxn.generate_reaction_template()
+                result = rxn.retro_template.apply(product_smiles)
+                return len(result) > 0
+            except Exception:
+                return False
+        else:
+            return False
     except Exception:
         # If any error occurs (e.g., template doesn't match), return False
         return False
@@ -618,8 +662,34 @@ def valid_smiles(smiles: str) -> bool:
     return Chem.MolFromSmiles(smiles) is not None
 
 
-def species_match(predicted: list[str], ground_truth: list[str]) -> bool:
-    """Check if two lists of species (SMILES) match, ignoring order."""
+def species_match(
+    ground_truth: list[str], predicted: tuple[tuple[str, ...], ...] | list[str]
+) -> bool:
+    """
+    Check if predicted species match ground truth, ignoring order and stereochemistry.
+
+    Args:
+        ground_truth: List of SMILES strings representing the expected molecules
+        predicted: Either a tuple of tuples (multiple possible outcomes, each containing SMILES strings)
+                  or a list of SMILES strings (single outcome)
+
+    Returns:
+        bool: True if any predicted outcome matches the ground truth
+    """
+    # Convert predicted to list of outcomes
+    if isinstance(predicted, tuple):
+        # predicted is tuple of tuples: ((smiles1, smiles2, ...), (alt_smiles1, alt_smiles2, ...), ...)
+        outcomes = [list(outcome) for outcome in predicted]
+    else:
+        # predicted is a list: [smiles1, smiles2, ...]
+        outcomes = [predicted]
+
+    # Try to match against any outcome
+    return any(_species_match_single(ground_truth, outcome) for outcome in outcomes)
+
+
+def _species_match_single(ground_truth: list[str], predicted: list[str]) -> bool:
+    """Check if two lists of species (SMILES) match, ignoring order and stereochemistry."""
     # First check if both lists have the same length
     if len(ground_truth) != len(predicted):
         return False
@@ -635,23 +705,27 @@ def species_match(predicted: list[str], ground_truth: list[str]) -> bool:
 
     for smiles in ground_truth:
         mol = Chem.MolFromSmiles(smiles)
-        Chem.AssignStereochemistry(mol, cleanIt=True, force=True)
         if mol is None:
             return False
+        # Remove stereochemistry for comparison
+        Chem.RemoveStereochemistry(mol)
         actual_canonical.append(Chem.MolToSmiles(mol))
 
     for smiles in predicted:
         mol = Chem.MolFromSmiles(smiles)
-        Chem.AssignStereochemistry(mol, cleanIt=True, force=True)
         if mol is None:
             return False
+        # Remove stereochemistry for comparison
+        Chem.RemoveStereochemistry(mol)
         predicted_canonical.append(Chem.MolToSmiles(mol))
 
     # Check if both lists contain the same canonical SMILES (ignoring order)
     return sorted(actual_canonical) == sorted(predicted_canonical)
 
 
-def apply_template_forward(reactants: str, template_id: str) -> list[str]:
+def apply_template_forward(
+    reactants: str, template_id: str
+) -> tuple[tuple[str, ...], ...]:
     """
     Apply a reaction template in the forward direction to predict products.
 
@@ -661,13 +735,39 @@ def apply_template_forward(reactants: str, template_id: str) -> list[str]:
         The identifier of the reaction template to use.
 
     Returns:
-        list[str]: The predicted product SMILES strings.
+        tuple[tuple[str, ...], ...]: A tuple of tuples, where each inner tuple contains SMILES strings
+        representing one possible set of predicted products.
     """
     reaction_data = search_by_template(template_id)
     try:
         rxn = ChemicalReaction(reaction_data["mapped_rxn"])
         rxn.generate_reaction_template()
         return rxn.canonical_template.apply(reactants)
+    except RuntimeError as e:
+        # Handle stereochemistry violation errors by removing E/Z stereochemistry
+        if "Stereo atoms should be specified before specifying CIS/TRANS" in str(e):
+            logger.warning(
+                f"Stereochemistry error for template {template_id}. "
+                "Retrying with E/Z stereochemistry removed."
+            )
+            try:
+                # Remove E/Z (cis/trans) stereochemistry markers (/ and \)
+                # while preserving tetrahedral stereochemistry (@ and @@)
+                sanitized_rxn = (
+                    reaction_data["mapped_rxn"].replace("/", "").replace("\\", "")
+                )
+                rxn = ChemicalReaction(sanitized_rxn)
+                rxn.generate_reaction_template()
+                return rxn.canonical_template.apply(reactants)
+            except Exception as e2:
+                raise Exception(
+                    f"Error applying template {template_id} to {reactants} "
+                    f"(even after removing E/Z stereochemistry): {e2}"
+                ) from e2
+        else:
+            raise Exception(
+                f"Error applying template {template_id} to {reactants}: {e}"
+            ) from e
     except Exception as e:
         raise Exception(
             f"Error applying template {template_id} to {reactants}: {e}"

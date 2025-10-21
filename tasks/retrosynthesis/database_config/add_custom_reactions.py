@@ -1,42 +1,33 @@
 """
-Phase B — Production Database Builder
+Add Custom Reactions to Production Database
 
-Derives chemistry artifacts from Phase A staging data and populates production schema:
-- Reaction templates with retro/forward SMARTS
-- RDKit query molecules and pattern fingerprints
-- Bonds (formed/broken/order_changed)
+This script allows you to add custom reaction SMILES to the production database.
+It processes each reaction to extract:
+- Reaction templates (retro and forward SMARTS)
+- RDKit query molecules and fingerprints
+- Bond changes (formed/broken/order_changed)
 - Functional groups (formed/broken)
-- Molecules cache for repeated queries
 
-Database: reactions_production_db
-Depends on: Phase A staging database (reactions_raw_db)
+After processing, it prints the reaction_id for each successfully added reaction.
+
+Usage:
+    python add_custom_reactions.py
+
+The script will prompt you to enter reaction SMILES, or you can modify
+the CUSTOM_REACTIONS list in the script directly.
 """
 
-import sys
-from collections import defaultdict
-from enum import Enum
-from multiprocessing import Pool, cpu_count
 from typing import Any
 
 import psycopg2
 from loguru import logger
 from phase_b_chemistry_utils import get_functional_groups, obtain_bonds
-from psycopg2.extras import RealDictCursor, execute_batch, execute_values
+from psycopg2.extras import RealDictCursor
 
-# Import your chemistry tools
+# Import chemistry tools
 from rxnutils.chem.reaction import ChemicalReaction
-from tqdm import tqdm
 
-# Phase A (source) database
-STAGING_DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "reactions_raw_db",
-    "user": "postgres",
-    "password": "postgres",
-}
-
-# Phase B (target) database
+# Production database configuration
 PRODUCTION_DB_CONFIG = {
     "host": "localhost",
     "port": 5432,
@@ -45,430 +36,105 @@ PRODUCTION_DB_CONFIG = {
     "password": "postgres",
 }
 
-# Processing parameters
-BATCH_SIZE = 10000  # Rows per batch
-DERIVE_VERSION = "v1"  # Version tag for this run
-NUM_WORKERS = None  # Number of parallel workers for chemistry processing (None = use all available CPUs)
+# Derive version for these custom additions
+DERIVE_VERSION = "custom_v1"
 
-# RDKit function names (adjust if your cartridge version differs)
-# To verify: run \df *qmol* and \df *fp* in psql
-RDKIT_QMOL_FUNC = "qmol_from_smarts"  # Creates query molecule from SMARTS
-RDKIT_FP_FUNC = "rdkit_fp"  # RDKit fingerprint for molecules
-RDKIT_SUBSET_OP = "%<="  # Substructure match operator
+# RDKit function names
+RDKIT_QMOL_FUNC = "qmol_from_smarts"
+RDKIT_FP_FUNC = "rdkit_fp"
 
-
-class ErrorStage(Enum):
-    """Enumeration of all possible ETL error stages for precise tracking"""
-
-    TEMPLATE_GENERATION = "template_generation"
-    QMOL_PRODUCT = "qmol_product"
-    QMOL_REACTANT = "qmol_reactant"
-    PATTERN_FP_PRODUCT = "pattern_fp_product"
-    PATTERN_FP_REACTANT = "pattern_fp_reactant"
-    BONDS = "bonds"
-    FGS = "fgs"
-    PREPARATION = "preparation"
-
-    def __str__(self):
-        return self.value
-
-
-class ErrorTracker:
-    """Track ETL errors in memory with aggregation capabilities"""
-
-    def __init__(self, derive_version: str):
-        self.derive_version = derive_version
-        # Count by error stage
-        self.error_counts = defaultdict(int)
-        # Store sample errors for debugging (limit to avoid memory issues)
-        self.error_samples = defaultdict(list)
-        self.max_samples_per_stage = 10
-
-    def log_error(
-        self,
-        staging_id: int,
-        raw_hash: str,
-        mapped_rxn: str,
-        stage: ErrorStage,
-        message: str,
-    ):
-        """Log an error to in-memory tracker and file log"""
-        # Increment counter
-        self.error_counts[stage] += 1
-
-        # Store sample if we haven't hit the limit
-        if len(self.error_samples[stage]) < self.max_samples_per_stage:
-            self.error_samples[stage].append(
-                {
-                    "staging_id": staging_id,
-                    "raw_hash": raw_hash,
-                    "mapped_rxn": mapped_rxn[:100] + "..."
-                    if len(mapped_rxn) > 100
-                    else mapped_rxn,
-                    "message": str(message),
-                }
-            )
-
-        # Log to file with full context
-        logger.warning(
-            f"Error [{stage.value}] staging_id={staging_id} hash={raw_hash[:8]}: {message}"
-        )
-
-    def get_summary(self) -> dict[str, int]:
-        """Get summary of errors by stage"""
-        return dict(self.error_counts)
-
-    def get_total_errors(self) -> int:
-        """Get total error count across all stages"""
-        return sum(self.error_counts.values())
-
-    def print_report(self):
-        """Print detailed error report"""
-        logger.info("=" * 80)
-        logger.info("ERROR REPORT")
-        logger.info("=" * 80)
-        logger.info(f"Derive version: {self.derive_version}")
-        logger.info(f"Total errors: {self.get_total_errors()}")
-        logger.info("")
-
-        if self.error_counts:
-            logger.info("Errors by stage:")
-            for stage in ErrorStage:
-                count = self.error_counts.get(stage, 0)
-                if count > 0:
-                    logger.info(f"  {stage.value:25s}: {count:6d}")
-
-            logger.info("")
-            logger.info("Sample errors (first 10 per stage):")
-            for stage, samples in self.error_samples.items():
-                if samples:
-                    logger.info(f"\n  [{stage.value}]")
-                    for i, sample in enumerate(
-                        samples[:5], 1
-                    ):  # Show only first 5 in summary
-                        logger.info(
-                            f"    {i}. staging_id={sample['staging_id']} - {sample['message'][:80]}"
-                        )
-        else:
-            logger.info("No errors encountered! ✓")
-
-        logger.info("=" * 80)
-
-
-def get_staging_connection():
-    """Connect to Phase A staging database"""
-    conn = psycopg2.connect(**STAGING_DB_CONFIG)
-    conn.set_client_encoding("UTF8")
-    return conn
+CUSTOM_REACTIONS = [
+    "[CH3:1]/[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)=[CH:9]/[CH2:10][CH2:11][CH2:12][C:13](=[O:14])[C:15]([F:16])([F:17])[F:18]>>[CH2:1]=[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)[C@@H:9]1[CH2:10][CH2:11][CH2:12][C@@:13]1([OH:14])[C:15]([F:16])([F:17])[F:18]",
+    "[CH2:6]=[CH:7][CH:8]=[CH2:9].[CH3:1][O:2][C:3](=[O:4])[C:5]1=[CH:10][C:11](=[O:12])[CH2:13]1>>[CH3:1][O:2][C:3](=[O:4])[C@:5]12[CH2:6][CH:7]=[CH:8][CH2:9][C@H:10]1[C:11](=[O:12])[CH2:13]2",
+    "[CH:14]#[C:15][Si:16]([CH3:17])([CH3:18])[CH3:19].O=[C:5]([C:3]([O:2][CH3:1])=[O:4])[CH2:6][CH2:7][c:8]1[cH:9][cH:10][cH:11][cH:12][cH:13]1>>[CH3:1][O:2][C:3](=[O:4])[C:5]1(/[CH:6]=[CH:7]/[c:8]2[cH:9][cH:10][cH:11][cH:12][cH:13]2)[CH:14]=[C:15]1[Si:16]([CH3:17])([CH3:18])[CH3:19]",
+    "O=[C:2]([c:3]1[cH:4][cH:5][c:6]([O:7][CH3:8])[cH:9][cH:10]1)[c:11]1[cH:12][cH:13][c:14]([O:15][CH3:16])[cH:17][cH:18]1.[Li][CH2:1][Si](C)(C)C>>[CH2:1]=[C:2]([c:3]1[cH:4][cH:5][c:6]([O:7][CH3:8])[cH:9][cH:10]1)[c:11]1[cH:12][cH:13][c:14]([O:15][CH3:16])[cH:17][cH:18]1",
+    "CC(C)(C)[Si](C)(C)[O:17][CH2:16][C:14]([C:12]([CH2:11][C@@H:10]1[C:4]([C:2](=[CH2:1])[CH3:3])=[CH:5][C:6](=[O:7])[C@H:8]1[CH3:9])=[O:13])=[CH2:15]>>[CH2:1]=[C:2]([CH3:3])[C:4]1=[CH:5][C:6](=[O:7])[C@@H:8]([CH3:9])[C@@H:10]1[CH2:11][C:12](=[O:13])[C:14](=[CH2:15])[CH2:16][OH:17]",
+    "[CH2:1]=[C:2]([CH3:3])[C:4]1=[CH:5][C@H:6]([OH:7])[C@@H:8]([CH3:9])[C@@H:10]1[CH2:11][C@H:12]([OH:13])[C:14](=[CH2:15])[CH2:16][O:17][Si:18]([CH3:19])([CH3:20])[C:21]([CH3:22])([CH3:23])[CH3:24]>>[CH2:1]=[C:2]([CH3:3])[C:4]1=[CH:5][C:6](=[O:7])[C@@H:8]([CH3:9])[C@@H:10]1[CH2:11][C:12](=[O:13])[C:14](=[CH2:15])[CH2:16][O:17][Si:18]([CH3:19])([CH3:20])[C:21]([CH3:22])([CH3:23])[CH3:24]",
+    "[CH2:1]=[C:2]([CH3:3])[C:4]1=[CH:5][C@H:6]([OH:7])[C@@H:8]([CH3:9])[C@@H:10]1[CH2:11][CH:12]=[O:13].I[C:14](=[CH2:15])[CH2:16][O:17][Si:18]([CH3:19])([CH3:20])[C:21]([CH3:22])([CH3:23])[CH3:24]>>[CH2:1]=[C:2]([CH3:3])[C:4]1=[CH:5][C@H:6]([OH:7])[C@@H:8]([CH3:9])[C@@H:10]1[CH2:11][C@H:12]([OH:13])[C:14](=[CH2:15])[CH2:16][O:17][Si:18]([CH3:19])([CH3:20])[C:21]([CH3:22])([CH3:23])[CH3:24]",
+    "CC(C)(C)[Si](C)(C)[O:17][C@H:16]1[CH2:15][C@H:6]([CH2:7]/[CH:8]=[CH:9]/[CH:10]=[CH:11]/[C:12](=[O:13])[OH:14])[O:5][C@H:4](/[CH:3]=[C:2](/[CH3:1])[CH2:20][OH:21])[C@@H:18]1[CH3:19]>>[CH3:1]/[C:2](=[CH:3]/[C@H:4]1[O:5][C@@H:6]([CH2:7]/[CH:8]=[CH:9]/[CH:10]=[CH:11]/[C:12](=[O:13])[OH:14])[CH2:15][C@H:16]([OH:17])[C@H:18]1[CH3:19])[CH2:20][OH:21]",
+    "O=[CH:8][CH2:7][C@@H:6]1[O:5][C@H:4](/[CH:3]=[C:2](/[CH3:1])[CH2:27][OH:28])[C@H:25]([CH3:26])[C@@H:16]([O:17][Si:18]([CH3:19])([CH3:20])[C:21]([CH3:22])([CH3:23])[CH3:24])[CH2:15]1.CCOP(=O)(OCC)[CH2:9]/[CH:10]=[CH:11]/[C:12](=[O:13])[O:14]CC>>[CH3:1]/[C:2](=[CH:3]/[C@H:4]1[O:5][C@@H:6]([CH2:7]/[CH:8]=[CH:9]/[CH:10]=[CH:11]/[C:12](=[O:13])[OH:14])[CH2:15][C@H:16]([O:17][Si:18]([CH3:19])([CH3:20])[C:21]([CH3:22])([CH3:23])[CH3:24])[C@H:25]1[CH3:26])[CH2:27][OH:28]",
+    "O=S(=O)(O[Si:13]([CH3:14])([CH3:15])[C:16]([CH3:17])([CH3:18])[CH3:19])C(F)(F)F.CCO[C:8]([CH2:7][C@@H:6]1[O:5][C@H:4](/[CH:3]=[C:2](/[CH3:1])[C:22](OC)=[O:23])[C@H:20]([CH3:21])[C@@H:11]([OH:12])[CH2:10]1)=[O:9]>>[CH3:1]/[C:2](=[CH:3]/[C@H:4]1[O:5][C@@H:6]([CH2:7][CH:8]=[O:9])[CH2:10][C@H:11]([O:12][Si:13]([CH3:14])([CH3:15])[C:16]([CH3:17])([CH3:18])[CH3:19])[C@H:20]1[CH3:21])[CH2:22][OH:23]",
+    "[CH3:1][CH2:2][O:3][C:4](=[O:5])[CH2:6][C@H:7]1[CH2:8][C@H:9]([OH:10])[C@@H:11]([CH3:12])[C@@H:13]([CH:14]=[O:18])[O:21]1.C[CH:16](P(=O)(OCC(F)(F)F)OCC(F)(F)F)[C:15]#[C:17][O:19][CH3:20]>>[CH3:1][CH2:2][O:3][C:4](=[O:5])[CH2:6][C@H:7]1[CH2:8][C@H:9]([OH:10])[C@@H:11]([CH3:12])[C@@H:13](/[CH:14]=[C:15](/[CH3:16])[C:17](=[O:18])[O:19][CH3:20])[O:21]1",
+    "[O:1]=[C:2]1[CH2:3][CH2:4][CH2:5][CH:6]2[O:7][c:8]3[cH:9][cH:10][cH:11][cH:12][c:13]3[CH:14]=[C:15]12>>[OH:1][C@@H:2]1[CH2:3][CH2:4][CH2:5][C@@H:6]2[O:7][c:8]3[cH:9][cH:10][cH:11][cH:12][c:13]3[CH:14]=[C:15]12",
+    "C1CN2CCN1CC2.[O:1]=[C:2]1[CH2:3][CH2:4][CH2:5][CH:6]=[CH:15]1.O=[CH:14][c:13]1[c:8]([OH:7])[cH:9][cH:10][cH:11][cH:12]1>>[O:1]=[C:2]1[CH2:3][CH2:4][CH2:5][CH:6]2[O:7][c:8]3[cH:9][cH:10][cH:11][cH:12][c:13]3[CH:14]=[C:15]12",
+    "[CH3:1][O:2][c:3]1[cH:4][cH:5][cH:6][c:7]([NH:8][C:9](=[O:10])[c:11]2[n:12][n:13][nH:14][c:28]2[NH2:29])[cH:30]1.Cl[CH2:15][c:16]1[cH:17][cH:18][c:19]([CH2:20][N:21]2[CH2:22][CH:23]([F:24])[CH2:25]2)[cH:26][cH:27]1>>[CH3:1][O:2][c:3]1[cH:4][cH:5][cH:6][c:7]([NH:8][C:9](=[O:10])[c:11]2[n:12][n:13][n:14]([CH2:15][c:16]3[cH:17][cH:18][c:19]([CH2:20][N:21]4[CH2:22][CH:23]([F:24])[CH2:25]4)[cH:26][cH:27]3)[c:28]2[NH2:29])[cH:30]1",
+    "Cl[CH2:10][Cl:11].[F:1][CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][cH:9][cH:12][cH:13]2)[CH2:14]1>>[F:1][CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][c:9]([CH2:10][Cl:11])[cH:12][cH:13]2)[CH2:14]1",
+    "O[CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[CH2:12]1>>[F:1][CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[CH2:12]1",
+    "[CH3:1][c:2]1[cH:7][cH:6][c:5]([NH:8][S:9](=[O:10])([c:12]2[cH:17][cH:16][c:15](/[CH:18]=[CH:19]/[C:20](O)=[O:21])[cH:14][cH:13]2)=[O:11])[cH:4][cH:3]1.[NH2:28][c:26]3[cH:27][cH:22][cH:23][cH:24][c:25]3[NH2:29]>>[CH3:1][c:2]4[cH:7][cH:6][c:5]([NH:8][S:9](=[O:10])([c:12]5[cH:17][cH:16][c:15](/[CH:18]=[CH:19]/[C:20]([NH:28][c:26]6[c:25]([NH2:29])[cH:24][cH:23][cH:22][cH:27]6)=[O:21])[cH:14][cH:13]5)=[O:11])[cH:4][cH:3]4",
+    "O=[CH:1][c:2]1[cH:18][cH:17][c:5]([S:6]([NH:7][c:8]2[cH:14][cH:13][c:11]([CH3:12])[cH:10][cH:9]2)(=[O:15])=[O:16])[cH:4][cH:3]1.O=C([CH2:19][C:20]([OH:22])=[O:21])O>>[CH3:12][c:11]3[cH:13][cH:14][c:8]([NH:7][S:6](=[O:15])([c:5]4[cH:17][cH:18][c:2](/[CH:1]=[CH:19]/[C:20]([OH:22])=[O:21])[cH:3][cH:4]4)=[O:16])[cH:9][cH:10]3",
+    "[CH3:1][c:2]1[cH:8][cH:7][c:5]([NH2:6])[cH:4][cH:3]1.Cl[S:9](=[O:10])([c:12]2[cH:19][cH:18][c:15]([CH:16]=[O:17])[cH:14][cH:13]2)=[O:11]>>[CH3:1][c:2]3[cH:8][cH:7][c:5]([NH:6][S:9](=[O:10])([c:12]4[cH:19][cH:18][c:15]([CH:16]=[O:17])[cH:14][cH:13]4)=[O:11])[cH:4][cH:3]3",
+    "[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][N:11]([c:12]2[cH:13][c:14]([NH2:15])[cH:26][c:27]3[c:28]2[O:29][C:30]2([CH2:31][CH2:32][CH2:33]2)[CH2:34][CH2:35]3)[CH2:36][CH2:37]1.Cl[S:16](=[O:17])(=[O:18])[c:19]1[cH:20][cH:21][cH:22][cH:23][c:24]1[F:25]>>[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][N:11]([c:12]2[cH:13][c:14]([NH:15][S:16](=[O:17])(=[O:18])[c:19]3[cH:20][cH:21][cH:22][cH:23][c:24]3[F:25])[cH:26][c:27]3[c:28]2[O:29][C:30]2([CH2:31][CH2:32][CH2:33]2)[CH2:34][CH2:35]3)[CH2:36][CH2:37]1",
+    "O=[N+:15]([O-])[c:14]1[cH:13][c:12]([N:11]2[CH2:10][CH2:9][N:8]([C:6]([O:5][C:2]([CH3:1])([CH3:3])[CH3:4])=[O:7])[CH2:27][CH2:26]2)[c:18]2[c:17]([cH:16]1)[CH2:25][CH2:24][C:20]1([O:19]2)[CH2:21][CH2:22][CH2:23]1>>[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][N:11]([c:12]2[cH:13][c:14]([NH2:15])[cH:16][c:17]3[c:18]2[O:19][C:20]2([CH2:21][CH2:22][CH2:23]2)[CH2:24][CH2:25]3)[CH2:26][CH2:27]1",
+    "[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][NH:11][CH2:28][CH2:29]1.Br[c:12]1[cH:13][c:14]([N+:15](=[O:16])[O-:17])[cH:18][c:19]2[c:20]1[O:21][C:22]1([CH2:23][CH2:24][CH2:25]1)[CH2:26][CH2:27]2>>[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][N:11]([c:12]2[cH:13][c:14]([N+:15](=[O:16])[O-:17])[cH:18][c:19]3[c:20]2[O:21][C:22]2([CH2:23][CH2:24][CH2:25]2)[CH2:26][CH2:27]3)[CH2:28][CH2:29]1",
+    "Br[Br:7].[O:1]=[N+:2]([O-:3])[c:4]1[cH:5][cH:6][c:8]2[c:9]([cH:10]1)[CH2:11][CH2:12][C:13]1([CH2:14][CH2:15][CH2:16]1)[O:17]2>>[O:1]=[N+:2]([O-:3])[c:4]1[cH:5][c:6]([Br:7])[c:8]2[c:9]([cH:10]1)[CH2:11][CH2:12][C:13]1([CH2:14][CH2:15][CH2:16]1)[O:17]2",
+    "O=[C:10]1[c:8]2[c:7]([cH:6][cH:5][c:4]([N+:2](=[O:1])[O-:3])[cH:9]2)[O:16][C:12]2([CH2:11]1)[CH2:13][CH2:14][CH2:15]2>>[O:1]=[N+:2]([O-:3])[c:4]1[cH:5][cH:6][c:7]2[c:8]([cH:9]1)[CH2:10][CH2:11][C:12]1([CH2:13][CH2:14][CH2:15]1)[O:16]2",
+    "[O:1]=[C:2]([CH3:3])[c:17]1[c:9]([OH:8])[cH:10][cH:11][c:12]([N+:13](=[O:14])[O-:15])[cH:16]1.O=[C:4]1[CH2:5][CH2:6][CH2:7]1>>[O:1]=[C:2]1[CH2:3][C:4]2([CH2:5][CH2:6][CH2:7]2)[O:8][c:9]2[cH:10][cH:11][c:12]([N+:13](=[O:14])[O-:15])[cH:16][c:17]21",
+]
 
 
 def get_production_connection():
-    """Connect to Phase B production database"""
+    """Connect to production database"""
     conn = psycopg2.connect(**PRODUCTION_DB_CONFIG)
     conn.set_client_encoding("UTF8")
     return conn
 
 
-def create_production_database():
-    """Create the production database if it doesn't exist"""
-    # Connect to default postgres database to create new DB
-    conn = psycopg2.connect(
-        host=PRODUCTION_DB_CONFIG["host"],
-        port=PRODUCTION_DB_CONFIG["port"],
-        database="postgres",
-        user=PRODUCTION_DB_CONFIG["user"],
-        password=PRODUCTION_DB_CONFIG["password"],
-    )
-    conn.set_client_encoding("UTF8")
-    conn.autocommit = True
-    cursor = conn.cursor()
-
+def test_database_connection():
+    """Test connection and verify schema exists"""
     try:
-        # Check if database exists
-        cursor.execute(
-            "SELECT 1 FROM pg_database WHERE datname = %s",
-            (PRODUCTION_DB_CONFIG["database"],),
-        )
-        exists = cursor.fetchone()
+        conn = get_production_connection()
+        cursor = conn.cursor()
 
-        if not exists:
-            logger.info(f"Creating database {PRODUCTION_DB_CONFIG['database']}...")
-            cursor.execute(f"CREATE DATABASE {PRODUCTION_DB_CONFIG['database']}")
-            logger.info("Database created successfully")
-        else:
-            logger.info(f"Database {PRODUCTION_DB_CONFIG['database']} already exists")
+        # Check if reactions table exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'reactions'
+            )
+        """)
+        table_exists = cursor.fetchone()[0]
 
-    finally:
+        if not table_exists:
+            logger.error("Error: 'reactions' table does not exist in the database!")
+            logger.error(
+                "Please run the phase_b_production.py script first to create the schema."
+            )
+            cursor.close()
+            conn.close()
+            return False
+
+        # Verify RDKit extension
+        cursor.execute("SELECT COUNT(*) FROM pg_extension WHERE extname = 'rdkit'")
+        rdkit_exists = cursor.fetchone()[0] > 0
+
+        if not rdkit_exists:
+            logger.error("Error: RDKit extension is not installed!")
+            cursor.close()
+            conn.close()
+            return False
+
+        logger.info("✓ Database connection successful")
+        logger.info("✓ Schema verified")
+        logger.info("✓ RDKit extension available")
+
         cursor.close()
         conn.close()
-
-
-def create_production_schema():
-    """Create all production tables and indexes"""
-    conn = get_production_connection()
-    cursor = conn.cursor()
-
-    try:
-        logger.info("Creating RDKit extension...")
-        cursor.execute("CREATE EXTENSION IF NOT EXISTS rdkit;")
-
-        # Validate RDKit functions are available
-        logger.info("Validating RDKit functions...")
-        try:
-            cursor.execute(f"SELECT {RDKIT_QMOL_FUNC}('c1ccccc1');")
-            cursor.execute(f"SELECT {RDKIT_FP_FUNC}(mol_from_smiles('c1ccccc1'));")
-            logger.info(
-                f"✓ RDKit functions validated: {RDKIT_QMOL_FUNC}(), {RDKIT_FP_FUNC}()"
-            )
-        except Exception as e:
-            logger.error(f"✗ RDKit function validation failed: {e}")
-            logger.error(
-                f"  Check that {RDKIT_QMOL_FUNC} and {RDKIT_FP_FUNC} exist in your RDKit cartridge"
-            )
-            logger.error(
-                "  Run: \\df *qmol* and \\df *fp* in psql to see available functions"
-            )
-            raise
-
-        logger.info("Creating production schema...")
-
-        # REACTIONS TABLE (unique templates with one representative example each)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS reactions (
-                reaction_id                 SERIAL PRIMARY KEY,
-                template_hash               TEXT NOT NULL UNIQUE,
-
-                -- Templates (SMARTS)
-                retro_smarts_template       TEXT NOT NULL,
-                canonical_smarts_template   TEXT NOT NULL,
-
-                -- Representative example reaction
-                mapped_rxn                  TEXT NOT NULL,
-                product_smiles              TEXT,
-                reactant_smiles             TEXT,
-
-                -- Provenance (from the representative example)
-                dataset                     TEXT,
-                source_row_id               TEXT,
-                staging_id                  BIGINT,
-
-                -- RDKit chemistry columns
-                product_qmol                qmol,
-                reactant_qmol               qmol,
-                product_pattern_fp          bfp,
-                reactant_pattern_fp         bfp,
-
-                -- Metadata
-                derive_version              TEXT,
-                created_at                  TIMESTAMP NOT NULL DEFAULT NOW()
-            );
-        """)
-
-        # BONDS TABLE (normalized bond types)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS bonds (
-                bond_id         SERIAL PRIMARY KEY,
-                bond_label      TEXT UNIQUE NOT NULL
-            );
-        """)
-
-        # BONDS JUNCTION TABLES
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS reaction_bonds_formed (
-                reaction_id     INTEGER NOT NULL REFERENCES reactions(reaction_id) ON DELETE CASCADE,
-                bond_id         INTEGER NOT NULL REFERENCES bonds(bond_id) ON DELETE CASCADE,
-                PRIMARY KEY (reaction_id, bond_id)
-            );
-        """)
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS reaction_bonds_broken (
-                reaction_id     INTEGER NOT NULL REFERENCES reactions(reaction_id) ON DELETE CASCADE,
-                bond_id         INTEGER NOT NULL REFERENCES bonds(bond_id) ON DELETE CASCADE,
-                PRIMARY KEY (reaction_id, bond_id)
-            );
-        """)
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS reaction_bonds_order_changed (
-                reaction_id     INTEGER NOT NULL REFERENCES reactions(reaction_id) ON DELETE CASCADE,
-                bond_id         INTEGER NOT NULL REFERENCES bonds(bond_id) ON DELETE CASCADE,
-                PRIMARY KEY (reaction_id, bond_id)
-            );
-        """)
-
-        # FUNCTIONAL GROUPS TABLES
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS functional_groups (
-                functional_group_id     SERIAL PRIMARY KEY,
-                functional_group_key    TEXT UNIQUE NOT NULL
-            );
-        """)
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS reaction_functional_groups_formed (
-                reaction_id             INTEGER NOT NULL REFERENCES reactions(reaction_id) ON DELETE CASCADE,
-                functional_group_id     INTEGER NOT NULL REFERENCES functional_groups(functional_group_id) ON DELETE CASCADE,
-                PRIMARY KEY (reaction_id, functional_group_id)
-            );
-        """)
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS reaction_functional_groups_broken (
-                reaction_id             INTEGER NOT NULL REFERENCES reactions(reaction_id) ON DELETE CASCADE,
-                functional_group_id     INTEGER NOT NULL REFERENCES functional_groups(functional_group_id) ON DELETE CASCADE,
-                PRIMARY KEY (reaction_id, functional_group_id)
-            );
-        """)
-
-        # MOLECULES TABLE (for caching target molecules)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS molecules (
-                molecule_id     SERIAL PRIMARY KEY,
-                name            TEXT,
-                smiles          TEXT UNIQUE NOT NULL,
-                mol             mol,
-                pattern_fp      bfp,
-                created_at      TIMESTAMP NOT NULL DEFAULT NOW()
-            );
-        """)
-
-        logger.info("Creating indexes...")
-
-        # Reactions indexes
-        # Note: template_hash is already UNIQUE, so it has an automatic index
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_reactions_product_fp
-            ON reactions USING gist(product_pattern_fp);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_reactions_reactant_fp
-            ON reactions USING gist(reactant_pattern_fp);
-        """)
-
-        # Reactions provenance indexes
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_reactions_dataset
-            ON reactions(dataset);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_reactions_staging_id
-            ON reactions(staging_id);
-        """)
-
-        # Bonds table index
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_bonds_label
-            ON bonds(bond_label);
-        """)
-
-        # Bonds junction tables indexes
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_bonds_formed_reaction
-            ON reaction_bonds_formed(reaction_id);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_bonds_formed_bond
-            ON reaction_bonds_formed(bond_id);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_bonds_broken_reaction
-            ON reaction_bonds_broken(reaction_id);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_bonds_broken_bond
-            ON reaction_bonds_broken(bond_id);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_bonds_order_changed_reaction
-            ON reaction_bonds_order_changed(reaction_id);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_bonds_order_changed_bond
-            ON reaction_bonds_order_changed(bond_id);
-        """)
-
-        # FG indexes
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_fg_key
-            ON functional_groups(functional_group_key);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_rfg_formed_reaction
-            ON reaction_functional_groups_formed(reaction_id);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_rfg_formed_fg
-            ON reaction_functional_groups_formed(functional_group_id);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_rfg_broken_reaction
-            ON reaction_functional_groups_broken(reaction_id);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_rfg_broken_fg
-            ON reaction_functional_groups_broken(functional_group_id);
-        """)
-
-        # Molecules indexes
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_molecules_mol_gist
-            ON molecules USING gist(mol);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_molecules_pattern_fp
-            ON molecules USING gist(pattern_fp);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_molecules_smiles
-            ON molecules(smiles);
-        """)
-
-        conn.commit()
-        logger.info("Schema created successfully")
+        return True
 
     except Exception as e:
-        conn.rollback()
-        logger.error(f"Error creating schema: {e}")
-        raise
-    finally:
-        cursor.close()
-        conn.close()
+        logger.error(f"Database connection failed: {e}")
+        return False
 
 
 def generate_templates(mapped_rxn: str) -> dict[str, str] | None:
     """
     Generate retro and forward SMARTS templates from mapped reaction.
 
-    Notes:
-    - Uses rxnutils.ChemicalReaction which employs rdchiral template extraction
-    - retro_smarts: Product-side SMARTS for retrosynthetic queries
-    - The library validates unmapped product atoms don't exceed limits
-    - Multi-product reactions are handled via SMARTS concatenation
-
-    Args:
-        mapped_rxn (str): The mapped reaction string.
-
     Returns:
-        dict[str, str]: Dict with keys:
+        Dict with keys:
         - 'retro_smarts': Product-side SMARTS (for retro applicability)
         - 'canonical_smarts': Canonical template
         - 'template_hash': Hash computed from rxn.retro_template.hash_from_bits()
-        - 'reactant_smarts': Reactant-side SMARTS (optional)
         - 'product_smiles': Product SMILES (for fingerprint generation)
         - 'reactant_smiles': Reactant SMILES (for fingerprint generation)
     """
@@ -480,7 +146,6 @@ def generate_templates(mapped_rxn: str) -> dict[str, str] | None:
         template_hash = rxn.retro_template.hash_from_bits()
 
         # Extract SMILES for fingerprint generation
-        # Join multiple reactants/products with '.'
         reactants_smiles = ".".join(rxn.reactants_list) if rxn.reactants_list else None
         products_smiles = ".".join(rxn.products_list) if rxn.products_list else None
 
@@ -499,91 +164,75 @@ def generate_templates(mapped_rxn: str) -> dict[str, str] | None:
             )
             return None
 
-        # Check for single quotes in SMARTS (should be handled by parameterization)
-        if "'" in templates["retro_smarts"]:
-            logger.debug(
-                f"SMARTS contains single quotes (OK with params): {templates['retro_smarts'][:50]}..."
-            )
-
         return templates
+
     except Exception as e:
-        # Include reaction SMILES in error log to identify problematic reactions
         rxn_preview = mapped_rxn[:100] + "..." if len(mapped_rxn) > 100 else mapped_rxn
-        logger.warning(f"Template generation failed: {e} | Reaction: {rxn_preview}")
+        logger.error(f"Template generation failed: {e} | Reaction: {rxn_preview}")
         return None
 
 
-def process_single_reaction_chemistry(row_data: dict[str, Any]) -> dict[str, Any]:
+def process_single_reaction(
+    mapped_rxn: str, metadata: dict | None = None
+) -> dict[str, Any]:
     """
-    Process chemistry for a single reaction (parallelizable function).
-
-    This function extracts templates, bonds, and functional groups for one reaction.
-    It's designed to be called in parallel using multiprocessing.
+    Process chemistry for a single custom reaction.
 
     Args:
-        row_data (dict[str, Any]): Dict containing 'staging_id', 'mapped_rxn', 'raw_hash', etc.
+        mapped_rxn: Atom-mapped reaction SMILES
+        metadata: Optional dict with additional metadata (name, source, etc.)
 
     Returns:
-        dict[str, Any]: Dict with results including:
-        - 'success': bool
-        - 'staging_id': int
-        - 'error_stage': ErrorStage (if failed)
-        - 'error_message': str (if failed)
-        - 'templates': dict (if successful)
-        - 'bonds': dict (if successful)
-        - 'fgs': dict (if successful)
+        Dict with processing results including success status, templates, bonds, fgs
     """
-    staging_id = row_data["staging_id"]
-    mapped_rxn = row_data["mapped_rxn"]
-    raw_hash = row_data["raw_hash"]
-
-    result = {
-        "staging_id": staging_id,
-        "raw_hash": raw_hash,
-        "mapped_rxn": mapped_rxn,
-        "dataset": row_data.get("dataset"),
-        "id_in_csv": row_data.get("id_in_csv"),
-        "success": False,
-    }
+    result = {"mapped_rxn": mapped_rxn, "success": False, "metadata": metadata or {}}
 
     try:
         # Step 1: Generate templates
+        logger.info("Generating templates...")
         templates = generate_templates(mapped_rxn)
         if not templates:
-            result["error_stage"] = ErrorStage.TEMPLATE_GENERATION
-            result["error_message"] = "Failed to generate templates"
+            result["error"] = "Failed to generate templates"
             return result
 
         result["templates"] = templates
+        logger.info(
+            f"✓ Templates generated (hash: {templates['template_hash'][:16]}...)"
+        )
 
         # Step 2: Extract bonds
+        logger.info("Extracting bonds...")
         try:
             bonds = obtain_bonds(mapped_rxn)
             result["bonds"] = bonds
+            logger.info(
+                f"✓ Bonds extracted (formed: {len(bonds['formed'])}, broken: {len(bonds['broken'])}, order_changed: {len(bonds['order_changed'])})"
+            )
         except Exception as e:
-            result["error_stage"] = ErrorStage.BONDS
-            result["error_message"] = f"obtain_bonds() failed: {e}"
+            result["error"] = f"obtain_bonds() failed: {e}"
             return result
 
         # Step 3: Extract functional groups
+        logger.info("Extracting functional groups...")
         try:
             fgs = get_functional_groups(mapped_rxn)
             result["fgs"] = fgs
+            logger.info(
+                f"✓ Functional groups extracted (formed: {len(fgs['formed'])}, broken: {len(fgs['broken'])})"
+            )
         except Exception as e:
-            result["error_stage"] = ErrorStage.FGS
-            result["error_message"] = f"get_functional_groups() failed: {e}"
+            result["error"] = f"get_functional_groups() failed: {e}"
             return result
 
         result["success"] = True
         return result
 
     except Exception as e:
-        result["error_stage"] = ErrorStage.PREPARATION
-        result["error_message"] = str(e)
+        result["error"] = str(e)
         return result
 
 
-def upsert_bond(cursor: psycopg2.extensions.cursor, bond_label: str) -> int:
+def upsert_bond(cursor, bond_label: str) -> int:
     """Insert or get bond ID"""
     cursor.execute(
         """
@@ -597,7 +246,7 @@ def upsert_bond(cursor: psycopg2.extensions.cursor, bond_label: str) -> int:
     return cursor.fetchone()[0]
 
 
-def upsert_functional_group(cursor: psycopg2.extensions.cursor, fg_key: str) -> int:
+def upsert_functional_group(cursor, fg_key: str) -> int:
     """Insert or get functional group ID"""
     cursor.execute(
         """
@@ -611,118 +260,134 @@ def upsert_functional_group(cursor: psycopg2.extensions.cursor, fg_key: str) -> 
     return cursor.fetchone()[0]
 
 
-def process_batch(
-    production_conn: psycopg2.extensions.connection,
-    batch: list[dict[str, Any]],
-    error_tracker: ErrorTracker,
-    num_workers: int | None = None,
-) -> dict[str, int]:
-    """Process a batch of staging reactions using bulk insert with execute_values
+def insert_reaction_to_database(conn, result: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Insert or update a processed reaction in the database.
 
     Args:
-        production_conn (psycopg2.extensions.connection): Connection to production database
-        batch (list[dict[str, Any]]): List of reaction data dictionaries
-        error_tracker (ErrorTracker): ErrorTracker instance for logging errors
-        num_workers (int): Number of parallel workers (None = use all CPUs)
+        conn: Database connection
+        result: Result dict from process_single_reaction()
 
     Returns:
-        dict[str, int]: Statistics about processing (processed, inserted, skipped_duplicate, skipped_error)
+        Dict with:
+        - 'reaction_id': The reaction ID (new or existing)
+        - 'is_updated': True if an existing entry was updated, False if newly inserted
+        - 'template_hash': The template hash
+        Returns None if operation fails
     """
-    stats = {"processed": 0, "inserted": 0, "skipped_duplicate": 0, "skipped_error": 0}
+    if not result["success"]:
+        logger.error(f"Cannot insert failed reaction: {result.get('error')}")
+        return None
 
-    prod_cursor = production_conn.cursor()
+    cursor = conn.cursor()
 
-    if num_workers is None:
-        num_workers = cpu_count()
-
-    logger.info(
-        f"Processing batch of {len(batch)} reactions using {num_workers} parallel workers..."
-    )
-
-    # Phase 1: Process chemistry in parallel
-
-    # Process all reactions in parallel
-    chemistry_results = []
-    if num_workers > 1 and len(batch) > 1:
-        # Use multiprocessing for parallel chemistry processing
-        with Pool(processes=num_workers) as pool:
-            chemistry_results = pool.map(process_single_reaction_chemistry, batch)
-    else:
-        # Fallback to sequential processing if only 1 worker or 1 reaction
-        chemistry_results = [process_single_reaction_chemistry(row) for row in batch]
-
-    # Phase 2: Prepare data for bulk insert from successful chemistry results
-    reactions_to_insert = []  # List of tuples for bulk insert
-    reaction_metadata = []  # Metadata for post-insert processing (bonds, FGs)
-
-    for result in chemistry_results:
-        stats["processed"] += 1
-
-        if not result["success"]:
-            # Log error and skip
-            error_tracker.log_error(
-                result["staging_id"],
-                result["raw_hash"],
-                result["mapped_rxn"],
-                result["error_stage"],
-                result["error_message"],
-            )
-            stats["skipped_error"] += 1
-            continue
-
-        # Extract data from successful result
-        staging_id = result["staging_id"]
+    try:
         templates = result["templates"]
-        template_hash = templates["template_hash"]
         bonds = result["bonds"]
         fgs = result["fgs"]
+        metadata = result["metadata"]
 
-        # Prepare values tuple for bulk insert into reactions table
-        # Each template gets ONE representative example (the first one encountered)
-        # IMPORTANT: SMARTS/SMILES are passed as parameters (not f-strings) to prevent SQL injection
-        # Note: Each CASE WHEN needs the value twice (once for NULL check, once for the function call)
-        reaction_values = (
-            template_hash,  # 1. template_hash
-            templates["retro_smarts"],  # 2. retro_smarts_template
-            templates.get("canonical_smarts"),  # 3. canonical_smarts_template
-            result["mapped_rxn"],  # 4. mapped_rxn (representative example)
-            templates.get("product_smiles"),  # 5. product_smiles
-            templates.get("reactant_smiles"),  # 6. reactant_smiles
-            result.get("dataset"),  # 7. dataset
-            result.get("id_in_csv"),  # 8. source_row_id
-            staging_id,  # 9. staging_id
-            templates["retro_smarts"],  # 10. retro_smarts for splitting to product side
-            templates[
-                "retro_smarts"
-            ],  # 11. retro_smarts for splitting to reactant side
-            templates.get(
-                "product_smiles"
-            ),  # 12. CASE WHEN check for product_pattern_fp
-            templates.get("product_smiles"),  # 13. rdkit_fp(mol_from_smiles(product))
-            templates.get(
-                "reactant_smiles"
-            ),  # 14. CASE WHEN check for reactant_pattern_fp
-            templates.get("reactant_smiles"),  # 15. rdkit_fp(mol_from_smiles(reactant))
-            DERIVE_VERSION,  # 16. derive_version
+        # Get metadata fields
+        dataset = metadata.get("dataset", "custom")
+        source_row_id = metadata.get("source_row_id", None)
+
+        # Step 0: Check if template already exists
+        logger.info("Checking if template already exists...")
+        cursor.execute(
+            """
+            SELECT reaction_id FROM reactions WHERE template_hash = %s
+        """,
+            (templates["template_hash"],),
         )
 
-        reactions_to_insert.append(reaction_values)
-        reaction_metadata.append(
-            {
-                "template_hash": template_hash,
-                "staging_id": staging_id,
-                "bonds": bonds,
-                "fgs": fgs,
-            }
-        )
+        existing_row = cursor.fetchone()
+        if existing_row:
+            existing_id = existing_row[0]
+            logger.warning(
+                f"⚠ Template already exists in database with reaction_id: {existing_id}"
+            )
+            logger.warning(f"  Template hash: {templates['template_hash']}")
+            logger.warning("  Updating existing entry with new reaction data...")
 
-    # Phase 3: Bulk insert unique templates into reactions table
-    # Note: RDKit errors (qmol_from_smarts, pattern_fp) are caught by PostgreSQL
-    # and will cause the entire batch to fail. We could implement row-by-row
-    # fallback here if needed, but typically these errors are rare after
-    # template validation.
-    if reactions_to_insert:
-        try:
+            # Update the existing reaction with new data
+            update_sql = """
+                UPDATE reactions SET
+                    retro_smarts_template = %s,
+                    canonical_smarts_template = %s,
+                    mapped_rxn = %s,
+                    product_smiles = %s,
+                    reactant_smiles = %s,
+                    dataset = %s,
+                    source_row_id = %s,
+                    product_qmol = qmol_from_smarts(split_part(%s, '>>', 1)::cstring),
+                    reactant_qmol = qmol_from_smarts(split_part(%s, '>>', 2)::cstring),
+                    product_pattern_fp = CASE WHEN %s IS NOT NULL THEN rdkit_fp(mol_from_smiles(%s)) ELSE NULL END,
+                    reactant_pattern_fp = CASE WHEN %s IS NOT NULL THEN rdkit_fp(mol_from_smiles(%s)) ELSE NULL END,
+                    derive_version = %s
+                WHERE reaction_id = %s
+            """
+
+            cursor.execute(
+                update_sql,
+                (
+                    templates["retro_smarts"],  # 1. retro_smarts_template
+                    templates.get("canonical_smarts"),  # 2. canonical_smarts_template
+                    result["mapped_rxn"],  # 3. mapped_rxn
+                    templates.get("product_smiles"),  # 4. product_smiles
+                    templates.get("reactant_smiles"),  # 5. reactant_smiles
+                    dataset,  # 6. dataset
+                    source_row_id,  # 7. source_row_id
+                    templates["retro_smarts"],  # 8. for product_qmol split
+                    templates["retro_smarts"],  # 9. for reactant_qmol split
+                    templates.get(
+                        "product_smiles"
+                    ),  # 10. CASE WHEN check for product_pattern_fp
+                    templates.get(
+                        "product_smiles"
+                    ),  # 11. rdkit_fp(mol_from_smiles(product))
+                    templates.get(
+                        "reactant_smiles"
+                    ),  # 12. CASE WHEN check for reactant_pattern_fp
+                    templates.get(
+                        "reactant_smiles"
+                    ),  # 13. rdkit_fp(mol_from_smiles(reactant))
+                    DERIVE_VERSION,  # 14. derive_version
+                    existing_id,  # 15. WHERE reaction_id
+                ),
+            )
+
+            logger.info(f"✓ Updated existing reaction with reaction_id: {existing_id}")
+            reaction_id = existing_id
+            is_updated = True
+
+            # Delete existing bonds and functional groups before inserting new ones
+            logger.info("Clearing existing bonds and functional groups...")
+            cursor.execute(
+                "DELETE FROM reaction_bonds_formed WHERE reaction_id = %s",
+                (reaction_id,),
+            )
+            cursor.execute(
+                "DELETE FROM reaction_bonds_broken WHERE reaction_id = %s",
+                (reaction_id,),
+            )
+            cursor.execute(
+                "DELETE FROM reaction_bonds_order_changed WHERE reaction_id = %s",
+                (reaction_id,),
+            )
+            cursor.execute(
+                "DELETE FROM reaction_functional_groups_formed WHERE reaction_id = %s",
+                (reaction_id,),
+            )
+            cursor.execute(
+                "DELETE FROM reaction_functional_groups_broken WHERE reaction_id = %s",
+                (reaction_id,),
+            )
+
+        else:
+            # Template doesn't exist, insert new reaction
+            is_updated = False
+            logger.info("Inserting new reaction into database...")
+
             insert_sql = """
                 INSERT INTO reactions (
                     template_hash,
@@ -739,390 +404,545 @@ def process_batch(
                     product_pattern_fp,
                     reactant_pattern_fp,
                     derive_version
-                ) VALUES %s
-                ON CONFLICT (template_hash) DO NOTHING
-                RETURNING reaction_id, template_hash
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    qmol_from_smarts(split_part(%s, '>>', 1)::cstring),
+                    qmol_from_smarts(split_part(%s, '>>', 2)::cstring),
+                    CASE WHEN %s IS NOT NULL THEN rdkit_fp(mol_from_smiles(%s)) ELSE NULL END,
+                    CASE WHEN %s IS NOT NULL THEN rdkit_fp(mol_from_smiles(%s)) ELSE NULL END,
+                    %s
+                )
+                RETURNING reaction_id
             """
 
-            # Template for execute_values - this defines what goes in each VALUES (...)
-            # execute_values will replace %s in the INSERT with this template repeated for each row
-            values_template = """(
-                %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                qmol_from_smarts(split_part(%s, '>>', 1)::cstring),
-                qmol_from_smarts(split_part(%s, '>>', 2)::cstring),
-                CASE WHEN %s IS NOT NULL THEN rdkit_fp(mol_from_smiles(%s)) ELSE NULL END,
-                CASE WHEN %s IS NOT NULL THEN rdkit_fp(mol_from_smiles(%s)) ELSE NULL END,
-                %s
-            )"""
-
-            # Use page_size equal to batch size to insert all at once
-            inserted_rows = execute_values(
-                prod_cursor,
+            cursor.execute(
                 insert_sql,
-                reactions_to_insert,
-                template=values_template,
-                page_size=len(reactions_to_insert),
-                fetch=True,
+                (
+                    templates["template_hash"],  # 1. template_hash
+                    templates["retro_smarts"],  # 2. retro_smarts_template
+                    templates.get("canonical_smarts"),  # 3. canonical_smarts_template
+                    result["mapped_rxn"],  # 4. mapped_rxn
+                    templates.get("product_smiles"),  # 5. product_smiles
+                    templates.get("reactant_smiles"),  # 6. reactant_smiles
+                    dataset,  # 7. dataset
+                    source_row_id,  # 8. source_row_id
+                    None,  # 9. staging_id (NULL for custom reactions)
+                    templates["retro_smarts"],  # 10. for product_qmol split
+                    templates["retro_smarts"],  # 11. for reactant_qmol split
+                    templates.get(
+                        "product_smiles"
+                    ),  # 12. CASE WHEN check for product_pattern_fp
+                    templates.get(
+                        "product_smiles"
+                    ),  # 13. rdkit_fp(mol_from_smiles(product))
+                    templates.get(
+                        "reactant_smiles"
+                    ),  # 14. CASE WHEN check for reactant_pattern_fp
+                    templates.get(
+                        "reactant_smiles"
+                    ),  # 15. rdkit_fp(mol_from_smiles(reactant))
+                    DERIVE_VERSION,  # 16. derive_version
+                ),
             )
 
-            # Build mapping of template_hash -> reaction_id for inserted reactions
-            reaction_id_map = (
-                {row[1]: row[0] for row in inserted_rows} if inserted_rows else {}
-            )
+            reaction_id = cursor.fetchone()[0]
+            logger.info(f"✓ Reaction inserted with reaction_id: {reaction_id}")
 
-            stats["inserted"] = len(reaction_id_map)
-            stats["skipped_duplicate"] = len(reactions_to_insert) - stats["inserted"]
+        # Step 2: Insert bonds
+        logger.info("Inserting bonds...")
 
-            logger.info(
-                f"Bulk insert (reactions): {stats['inserted']} inserted, {stats['skipped_duplicate']} duplicates"
-            )
-
-        except Exception as e:
-            logger.error(f"Bulk insert (reactions) failed: {e}")
-            production_conn.rollback()
-            raise
-
-    # Phase 4: Insert bonds and functional groups for successfully inserted templates
-    # We need to query for reaction_ids since they may have been inserted in a previous batch
-    template_hashes = [m["template_hash"] for m in reaction_metadata]
-    if template_hashes:
-        # Fetch reaction_ids for all template_hashes in this batch
-        prod_cursor.execute(
-            "SELECT template_hash, reaction_id FROM reactions WHERE template_hash = ANY(%s)",
-            (template_hashes,),
-        )
-        reaction_id_map = {row[0]: row[1] for row in prod_cursor.fetchall()}
-
-    # Track unique templates processed for bonds/FGs (avoid duplicates within batch)
-    processed_templates = set()
-
-    for metadata in reaction_metadata:
-        template_hash = metadata["template_hash"]
-
-        # Skip if we've already processed this template in this batch
-        if template_hash in processed_templates:
-            continue
-
-        # Check if this template exists in the database
-        if template_hash not in reaction_id_map:
-            continue
-
-        processed_templates.add(template_hash)
-        reaction_id = reaction_id_map[template_hash]
-        bonds = metadata["bonds"]
-        fgs = metadata["fgs"]
-
-        try:
-            # Insert bonds formed
-            if bonds["formed"]:
-                # Upsert all bonds first and collect (reaction_id, bond_id) pairs
-                bond_pairs = []
-                for bond in bonds["formed"]:
-                    bond_id = upsert_bond(prod_cursor, bond)
-                    bond_pairs.append((reaction_id, bond_id))
-                # Batch insert all relationships
-                execute_batch(
-                    prod_cursor,
+        # Bonds formed
+        if bonds["formed"]:
+            for bond in bonds["formed"]:
+                bond_id = upsert_bond(cursor, bond)
+                cursor.execute(
                     """
                     INSERT INTO reaction_bonds_formed (reaction_id, bond_id)
                     VALUES (%s, %s)
                     ON CONFLICT (reaction_id, bond_id) DO NOTHING
                 """,
-                    bond_pairs,
+                    (reaction_id, bond_id),
                 )
+            logger.info(f"  ✓ {len(bonds['formed'])} bonds formed")
 
-            # Insert bonds broken
-            if bonds["broken"]:
-                bond_pairs = []
-                for bond in bonds["broken"]:
-                    bond_id = upsert_bond(prod_cursor, bond)
-                    bond_pairs.append((reaction_id, bond_id))
-                execute_batch(
-                    prod_cursor,
+        # Bonds broken
+        if bonds["broken"]:
+            for bond in bonds["broken"]:
+                bond_id = upsert_bond(cursor, bond)
+                cursor.execute(
                     """
                     INSERT INTO reaction_bonds_broken (reaction_id, bond_id)
                     VALUES (%s, %s)
                     ON CONFLICT (reaction_id, bond_id) DO NOTHING
                 """,
-                    bond_pairs,
+                    (reaction_id, bond_id),
                 )
+            logger.info(f"  ✓ {len(bonds['broken'])} bonds broken")
 
-            # Insert bonds with order changes
-            if bonds["order_changed"]:
-                bond_pairs = []
-                for bond in bonds["order_changed"]:
-                    bond_id = upsert_bond(prod_cursor, bond)
-                    bond_pairs.append((reaction_id, bond_id))
-                execute_batch(
-                    prod_cursor,
+        # Bonds order changed
+        if bonds["order_changed"]:
+            for bond in bonds["order_changed"]:
+                bond_id = upsert_bond(cursor, bond)
+                cursor.execute(
                     """
                     INSERT INTO reaction_bonds_order_changed (reaction_id, bond_id)
                     VALUES (%s, %s)
                     ON CONFLICT (reaction_id, bond_id) DO NOTHING
                 """,
-                    bond_pairs,
+                    (reaction_id, bond_id),
                 )
+            logger.info(f"  ✓ {len(bonds['order_changed'])} bonds order changed")
 
-            # Insert functional groups formed
-            if fgs["formed"]:
-                fg_pairs = []
-                for fg_key in fgs["formed"]:
-                    fg_id = upsert_functional_group(prod_cursor, fg_key)
-                    fg_pairs.append((reaction_id, fg_id))
-                execute_batch(
-                    prod_cursor,
+        # Step 3: Insert functional groups
+        logger.info("Inserting functional groups...")
+
+        # Functional groups formed
+        if fgs["formed"]:
+            for fg_key in fgs["formed"]:
+                fg_id = upsert_functional_group(cursor, fg_key)
+                cursor.execute(
                     """
                     INSERT INTO reaction_functional_groups_formed (reaction_id, functional_group_id)
                     VALUES (%s, %s)
                     ON CONFLICT (reaction_id, functional_group_id) DO NOTHING
                 """,
-                    fg_pairs,
+                    (reaction_id, fg_id),
                 )
+            logger.info(f"  ✓ {len(fgs['formed'])} functional groups formed")
 
-            # Insert functional groups broken
-            if fgs["broken"]:
-                fg_pairs = []
-                for fg_key in fgs["broken"]:
-                    fg_id = upsert_functional_group(prod_cursor, fg_key)
-                    fg_pairs.append((reaction_id, fg_id))
-                execute_batch(
-                    prod_cursor,
+        # Functional groups broken
+        if fgs["broken"]:
+            for fg_key in fgs["broken"]:
+                fg_id = upsert_functional_group(cursor, fg_key)
+                cursor.execute(
                     """
                     INSERT INTO reaction_functional_groups_broken (reaction_id, functional_group_id)
                     VALUES (%s, %s)
                     ON CONFLICT (reaction_id, functional_group_id) DO NOTHING
                 """,
-                    fg_pairs,
+                    (reaction_id, fg_id),
                 )
+            logger.info(f"  ✓ {len(fgs['broken'])} functional groups broken")
 
-        except Exception as e:
-            logger.error(
-                f"Error processing bonds/FGs for reaction_id={reaction_id}: {e}"
-            )
-            # Note: reaction was already inserted, so we don't increment skipped_error
-            # The reaction is still counted in stats['inserted']
-            continue
+        conn.commit()
+        cursor.close()
 
-    production_conn.commit()
-    prod_cursor.close()
-
-    return stats
-
-
-def run_etl_pipeline():
-    """Main ETL pipeline - process all staging reactions"""
-    logger.info("=" * 80)
-    logger.info("PHASE B ETL PIPELINE START")
-    logger.info("=" * 80)
-
-    # Determine number of workers
-    num_workers = NUM_WORKERS if NUM_WORKERS is not None else cpu_count()
-    logger.info(f"Using {num_workers} parallel workers for chemistry processing")
-
-    # Initialize error tracker
-    error_tracker = ErrorTracker(DERIVE_VERSION)
-
-    staging_conn = get_staging_connection()
-    production_conn = get_production_connection()
-
-    try:
-        # Get total count
-        staging_cursor = staging_conn.cursor()
-        staging_cursor.execute("SELECT COUNT(*) FROM staging_reactions")
-        total_count = staging_cursor.fetchone()[0]
-        logger.info(f"Total staging reactions to process: {total_count}")
-
-        # Create dict cursor for fetching data
-        staging_cursor = staging_conn.cursor(cursor_factory=RealDictCursor)
-
-        # Process in batches
-        total_stats = {
-            "processed": 0,
-            "inserted": 0,
-            "skipped_duplicate": 0,
-            "skipped_error": 0,
+        return {
+            "reaction_id": reaction_id,
+            "is_updated": is_updated,
+            "template_hash": templates["template_hash"],
         }
 
-        offset = 0
-        with tqdm(total=total_count, desc="Processing reactions") as pbar:
-            while offset < total_count:
-                # Fetch batch from staging
-                staging_cursor.execute(
-                    """
-                    SELECT
-                        staging_id,
-                        raw_hash,
-                        dataset,
-                        id_in_csv,
-                        mapped_rxn
-                    FROM staging_reactions
-                    ORDER BY staging_id
-                    LIMIT %s OFFSET %s
-                """,
-                    (BATCH_SIZE, offset),
-                )
-
-                batch = [dict(row) for row in staging_cursor.fetchall()]
-                if not batch:
-                    break
-
-                # Process batch with parallel chemistry processing
-                batch_stats = process_batch(
-                    production_conn, batch, error_tracker, num_workers
-                )
-
-                # Update totals
-                for key in total_stats:
-                    total_stats[key] += batch_stats[key]
-
-                pbar.update(len(batch))
-                offset += BATCH_SIZE
-
-        # Final stats
-        logger.info("=" * 80)
-        logger.info("PHASE B ETL PIPELINE COMPLETE")
-        logger.info("=" * 80)
-        logger.info(f"Total processed:       {total_stats['processed']}")
-        logger.info(f"Successfully inserted: {total_stats['inserted']}")
-        logger.info(f"Skipped (duplicate):   {total_stats['skipped_duplicate']}")
-        logger.info(f"Skipped (error):       {total_stats['skipped_error']}")
-
-        # Query final counts
-        prod_cursor = production_conn.cursor()
-        prod_cursor.execute("SELECT COUNT(*) FROM reactions")
-        reaction_count = prod_cursor.fetchone()[0]
-
-        prod_cursor.execute("SELECT COUNT(*) FROM functional_groups")
-        fg_count = prod_cursor.fetchone()[0]
-
-        logger.info("=" * 80)
-        logger.info("Production database stats:")
-        logger.info(f"  - Unique templates (with examples): {reaction_count}")
-        logger.info(f"  - Functional groups:                {fg_count}")
-        logger.info("=" * 80)
-
-        # Print error report
-        error_tracker.print_report()
-
     except Exception as e:
-        logger.error(f"ETL pipeline failed: {e}")
-        raise
-    finally:
-        staging_conn.close()
-        production_conn.close()
+        logger.error(f"Error inserting reaction into database: {e}")
+        conn.rollback()
+        cursor.close()
+        return None
 
 
-def validate_setup():
-    """B5: Run sanity checks on the production database"""
-    logger.info("Running validation checks...")
+def get_reaction_info(conn, reaction_id: int) -> dict | None:
+    """
+    Retrieve complete information about a reaction from the database.
 
-    conn = get_production_connection()
+    Args:
+        conn: Database connection
+        reaction_id: ID of the reaction to retrieve
+
+    Returns:
+        Dict with complete reaction information
+    """
     cursor = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
-        # Check 1: Sample reaction exists
-        cursor.execute("SELECT COUNT(*) as count FROM reactions")
-        count = cursor.fetchone()["count"]
-        assert count > 0, "No reactions in production database!"
-        logger.info(f"✓ Found {count} unique templates")
-
-        # Check 2: Chemistry columns populated
-        cursor.execute("""
-            SELECT COUNT(*) as count
-            FROM reactions
-            WHERE product_qmol IS NOT NULL AND product_pattern_fp IS NOT NULL
-        """)
-        chem_count = cursor.fetchone()["count"]
-        logger.info(
-            f"✓ {chem_count}/{count} reactions have chemistry columns populated"
-        )
-
-        # Check 3: Verify mapped_rxn and provenance fields populated
-        cursor.execute("""
-            SELECT COUNT(*) as count
-            FROM reactions
-            WHERE mapped_rxn IS NOT NULL AND dataset IS NOT NULL
-        """)
-        prov_count = cursor.fetchone()["count"]
-        logger.info(
-            f"✓ Provenance: {prov_count}/{count} reactions have example mapped_rxn and dataset"
-        )
-
-        # Check 5: Bonds tables populated
-        cursor.execute("SELECT COUNT(*) as count FROM reaction_bonds_formed")
-        formed_count = cursor.fetchone()["count"]
-        cursor.execute("SELECT COUNT(*) as count FROM reaction_bonds_broken")
-        broken_count = cursor.fetchone()["count"]
-        logger.info(f"✓ Bonds: {formed_count} formed, {broken_count} broken")
-
-        # Check 6: FG tables populated
-        cursor.execute("SELECT COUNT(*) as count FROM functional_groups")
-        fg_count = cursor.fetchone()["count"]
+        # Get basic reaction info
         cursor.execute(
-            "SELECT COUNT(*) as count FROM reaction_functional_groups_formed"
+            """
+            SELECT
+                reaction_id,
+                template_hash,
+                retro_smarts_template,
+                canonical_smarts_template,
+                mapped_rxn,
+                product_smiles,
+                reactant_smiles,
+                dataset,
+                source_row_id,
+                staging_id,
+                derive_version,
+                created_at
+            FROM reactions
+            WHERE reaction_id = %s
+        """,
+            (reaction_id,),
         )
-        rfg_count = cursor.fetchone()["count"]
-        logger.info(
-            f"✓ Functional groups: {fg_count} unique, {rfg_count} reaction-FG associations"
+
+        reaction = cursor.fetchone()
+        if not reaction:
+            return None
+
+        reaction = dict(reaction)
+
+        # Get bonds formed
+        cursor.execute(
+            """
+            SELECT b.bond_label
+            FROM reaction_bonds_formed rbf
+            JOIN bonds b ON rbf.bond_id = b.bond_id
+            WHERE rbf.reaction_id = %s
+        """,
+            (reaction_id,),
         )
+        reaction["bonds_formed"] = [row["bond_label"] for row in cursor.fetchall()]
 
-        # Check 7: Sample substructure query (if reactions exist)
-        if count > 0:
-            cursor.execute("""
-                SELECT reaction_id, retro_smarts_template
-                FROM reactions
-                WHERE product_qmol IS NOT NULL
-                LIMIT 1
-            """)
-            sample = cursor.fetchone()
-            if sample:
-                logger.info(
-                    f"✓ Sample reaction {sample['reaction_id']} has valid query molecule"
-                )
+        # Get bonds broken
+        cursor.execute(
+            """
+            SELECT b.bond_label
+            FROM reaction_bonds_broken rbb
+            JOIN bonds b ON rbb.bond_id = b.bond_id
+            WHERE rbb.reaction_id = %s
+        """,
+            (reaction_id,),
+        )
+        reaction["bonds_broken"] = [row["bond_label"] for row in cursor.fetchall()]
 
-        logger.info("All validation checks passed! ✓")
+        # Get bonds order changed
+        cursor.execute(
+            """
+            SELECT b.bond_label
+            FROM reaction_bonds_order_changed rboc
+            JOIN bonds b ON rboc.bond_id = b.bond_id
+            WHERE rboc.reaction_id = %s
+        """,
+            (reaction_id,),
+        )
+        reaction["bonds_order_changed"] = [
+            row["bond_label"] for row in cursor.fetchall()
+        ]
 
-    except AssertionError as e:
-        logger.error(f"Validation failed: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"Error during validation: {e}")
-        raise
-    finally:
+        # Get functional groups formed
+        cursor.execute(
+            """
+            SELECT fg.functional_group_key
+            FROM reaction_functional_groups_formed rfgf
+            JOIN functional_groups fg ON rfgf.functional_group_id = fg.functional_group_id
+            WHERE rfgf.reaction_id = %s
+        """,
+            (reaction_id,),
+        )
+        reaction["functional_groups_formed"] = [
+            row["functional_group_key"] for row in cursor.fetchall()
+        ]
+
+        # Get functional groups broken
+        cursor.execute(
+            """
+            SELECT fg.functional_group_key
+            FROM reaction_functional_groups_broken rfgb
+            JOIN functional_groups fg ON rfgb.functional_group_id = fg.functional_group_id
+            WHERE rfgb.reaction_id = %s
+        """,
+            (reaction_id,),
+        )
+        reaction["functional_groups_broken"] = [
+            row["functional_group_key"] for row in cursor.fetchall()
+        ]
+
         cursor.close()
-        conn.close()
+        return reaction
+
+    except Exception as e:
+        logger.error(f"Error retrieving reaction info: {e}")
+        cursor.close()
+        return None
+
+
+def print_reaction_summary(reaction_info: dict):
+    """Print a formatted summary of reaction information"""
+    logger.info("\n" + "=" * 80)
+    logger.info("REACTION INFORMATION")
+    logger.info("=" * 80)
+    logger.info(f"Reaction ID:          {reaction_info['reaction_id']}")
+    logger.info(f"Template Hash:        {reaction_info['template_hash']}")
+    logger.info(f"Dataset:              {reaction_info['dataset']}")
+    logger.info(f"Derive Version:       {reaction_info['derive_version']}")
+    logger.info(f"Created At:           {reaction_info['created_at']}")
+    logger.info()
+    logger.info(f"Mapped Reaction:      {reaction_info['mapped_rxn']}")
+    logger.info(f"Product SMILES:       {reaction_info['product_smiles']}")
+    logger.info(f"Reactant SMILES:      {reaction_info['reactant_smiles']}")
+    logger.info()
+    logger.info(f"Retro SMARTS:         {reaction_info['retro_smarts_template']}")
+    logger.info(f"Canonical SMARTS:     {reaction_info['canonical_smarts_template']}")
+    logger.info()
+    logger.info(
+        f"Bonds Formed:         {', '.join(reaction_info['bonds_formed']) if reaction_info['bonds_formed'] else 'None'}"
+    )
+    logger.info(
+        f"Bonds Broken:         {', '.join(reaction_info['bonds_broken']) if reaction_info['bonds_broken'] else 'None'}"
+    )
+    logger.info(
+        f"Bonds Order Changed:  {', '.join(reaction_info['bonds_order_changed']) if reaction_info['bonds_order_changed'] else 'None'}"
+    )
+    logger.info()
+    logger.info(
+        f"FGs Formed:           {', '.join(reaction_info['functional_groups_formed']) if reaction_info['functional_groups_formed'] else 'None'}"
+    )
+    logger.info(
+        f"FGs Broken:           {', '.join(reaction_info['functional_groups_broken']) if reaction_info['functional_groups_broken'] else 'None'}"
+    )
+    logger.info("=" * 80)
+
+
+# =============================================================================
+# MAIN WORKFLOW
+# =============================================================================
+
+
+def add_reactions_from_list(
+    reactions: list[str], interactive: bool = False
+) -> list[dict[str, Any]]:
+    """
+    Add a list of reactions to the database.
+
+    Args:
+        reactions: List of atom-mapped reaction SMILES
+        interactive: If True, prompt for metadata for each reaction
+
+    Returns:
+        List of dicts with results for each reaction
+    """
+    if not reactions:
+        logger.warning("No reactions provided!")
+        return []
+
+    logger.info("=" * 80)
+    logger.info(f"ADDING {len(reactions)} CUSTOM REACTIONS TO DATABASE")
+    logger.info("=" * 80)
+
+    # Test database connection
+    if not test_database_connection():
+        logger.error("Database connection failed. Aborting.")
+        return []
+
+    conn = get_production_connection()
+    results = []
+
+    for idx, mapped_rxn in enumerate(reactions, 1):
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info(f"PROCESSING REACTION {idx}/{len(reactions)}")
+        logger.info("=" * 80)
+        logger.info(f"Reaction SMILES: {mapped_rxn}")
+
+        # Prepare metadata
+        metadata = {}
+        if interactive:
+            name = input(
+                f"Enter name for reaction {idx} (optional, press Enter to skip): "
+            ).strip()
+            if name:
+                metadata["name"] = name
+            source = input(
+                f"Enter source for reaction {idx} (optional, press Enter to skip): "
+            ).strip()
+            if source:
+                metadata["source_row_id"] = source
+
+        # Process chemistry
+        result = process_single_reaction(mapped_rxn, metadata)
+
+        if not result["success"]:
+            logger.error(f"✗ Failed to process reaction {idx}: {result.get('error')}")
+            results.append(
+                {
+                    "index": idx,
+                    "mapped_rxn": mapped_rxn,
+                    "success": False,
+                    "error": result.get("error"),
+                    "reaction_id": None,
+                    "template_hash": None,
+                }
+            )
+            continue
+
+        # Insert or update in database
+        db_result = insert_reaction_to_database(conn, result)
+
+        if db_result:
+            reaction_id = db_result["reaction_id"]
+            is_updated = db_result["is_updated"]
+
+            if is_updated:
+                logger.info(
+                    f"✓ Updated existing reaction with reaction_id: {reaction_id}"
+                )
+                results.append(
+                    {
+                        "index": idx,
+                        "mapped_rxn": mapped_rxn,
+                        "success": True,
+                        "is_updated": True,
+                        "reaction_id": reaction_id,
+                        "template_hash": result["templates"]["template_hash"],
+                        "message": "Existing entry updated with new reaction data",
+                    }
+                )
+            else:
+                logger.info(f"✓ Successfully added reaction {idx}")
+                results.append(
+                    {
+                        "index": idx,
+                        "mapped_rxn": mapped_rxn,
+                        "success": True,
+                        "is_updated": False,
+                        "reaction_id": reaction_id,
+                        "template_hash": result["templates"]["template_hash"],
+                    }
+                )
+        else:
+            logger.error(f"✗ Failed to insert/update reaction {idx} in database")
+            results.append(
+                {
+                    "index": idx,
+                    "mapped_rxn": mapped_rxn,
+                    "success": False,
+                    "is_updated": False,
+                    "error": "Database operation failed",
+                    "reaction_id": None,
+                    "template_hash": result["templates"].get("template_hash"),
+                }
+            )
+
+    conn.close()
+
+    # Print summary
+    logger.info("")
+    logger.info("=" * 80)
+    logger.info("SUMMARY")
+    logger.info("=" * 80)
+
+    new_entries = [
+        r for r in results if r["success"] and not r.get("is_updated", False)
+    ]
+    updated = [r for r in results if r["success"] and r.get("is_updated", False)]
+    failed = [r for r in results if not r["success"]]
+
+    logger.info(f"Total reactions processed: {len(results)}")
+    logger.info(f"New entries added:         {len(new_entries)}")
+    logger.info(f"Existing entries updated:  {len(updated)}")
+    logger.info(f"Failed:                    {len(failed)}")
+
+    if new_entries:
+        logger.info("")
+        logger.info("New reactions added:")
+        for r in new_entries:
+            logger.info(
+                f"  Reaction {r['index']}: reaction_id={r['reaction_id']}, template_hash={r['template_hash'][:16]}..."
+            )
+
+    if updated:
+        logger.info("")
+        logger.info("Existing reactions updated:")
+        for r in updated:
+            logger.info(
+                f"  Reaction {r['index']}: reaction_id={r['reaction_id']}, template_hash={r['template_hash'][:16]}..."
+            )
+
+    if failed:
+        logger.info("")
+        logger.info("Failed reactions:")
+        for r in failed:
+            logger.info(f"  Reaction {r['index']}: {r.get('error', 'Unknown error')}")
+
+    logger.info("=" * 80)
+
+    return results
+
+
+def interactive_mode():
+    """Interactive mode to input reactions one by one"""
+    logger.info("=" * 80)
+    logger.info("INTERACTIVE MODE")
+    logger.info("=" * 80)
+    logger.info("Enter reaction SMILES (atom-mapped) one per line.")
+    logger.info("Press Enter on an empty line when done.")
+    logger.info("")
+
+    reactions = []
+    while True:
+        rxn = input(
+            f"Reaction {len(reactions) + 1} (or press Enter to finish): "
+        ).strip()
+        if not rxn:
+            break
+        reactions.append(rxn)
+
+    if not reactions:
+        logger.info("No reactions entered.")
+        return None
+
+    return add_reactions_from_list(reactions, interactive=True)
 
 
 def main():
-    """Main execution flow"""
-    try:
-        logger.info("Phase B - Production Database Builder")
-        logger.info(f"Derive version: {DERIVE_VERSION}")
-        logger.info(f"Batch size: {BATCH_SIZE}")
+    """Main entry point"""
+    logger.info("\n" + "=" * 80)
+    logger.info("ADD CUSTOM REACTIONS TO PRODUCTION DATABASE")
+    logger.info("=" * 80)
+    logger.info()
 
-        # Step 1: Create database
-        logger.info("\n[1/4] Creating production database...")
-        create_production_database()
+    # Check if we have reactions in CUSTOM_REACTIONS list
+    if CUSTOM_REACTIONS and CUSTOM_REACTIONS[0] != "":
+        logger.info(
+            f"Found {len(CUSTOM_REACTIONS)} reaction(s) in CUSTOM_REACTIONS list."
+        )
+        choice = input("Process these reactions? (y/n): ").strip().lower()
 
-        # Step 2: Create schema
-        logger.info("\n[2/4] Creating production schema...")
-        create_production_schema()
+        if choice == "y":
+            results = add_reactions_from_list(CUSTOM_REACTIONS)
 
-        # Step 3: Run ETL pipeline
-        logger.info("\n[3/4] Running ETL pipeline...")
-        run_etl_pipeline()
+            # Optionally retrieve and print full info for each added reaction
+            if results:
+                view_details = (
+                    input("\nView detailed information for added reactions? (y/n): ")
+                    .strip()
+                    .lower()
+                )
+                if view_details == "y":
+                    conn = get_production_connection()
+                    for r in results:
+                        if r["success"]:
+                            info = get_reaction_info(conn, r["reaction_id"])
+                            if info:
+                                print_reaction_summary(info)
+                    conn.close()
+            return
 
-        # Step 4: Validate
-        logger.info("\n[4/4] Running validation...")
-        validate_setup()
+    # Otherwise, use interactive mode
+    logger.info("No reactions found in CUSTOM_REACTIONS list.")
+    choice = input("Enter reactions interactively? (y/n): ").strip().lower()
 
-        logger.info("\n" + "=" * 80)
-        logger.info("PHASE B COMPLETE - Production database ready!")
-        logger.info("=" * 80)
+    if choice == "y":
+        results = interactive_mode()
 
-    except Exception as e:
-        logger.error(f"Phase B failed: {e}")
-        sys.exit(1)
+        # Optionally retrieve and print full info
+        if results:
+            view_details = (
+                input("\nView detailed information for added reactions? (y/n): ")
+                .strip()
+                .lower()
+            )
+            if view_details == "y":
+                conn = get_production_connection()
+                for r in results:
+                    if r["success"]:
+                        info = get_reaction_info(conn, r["reaction_id"])
+                        if info:
+                            print_reaction_summary(info)
+                conn.close()
+    else:
+        logger.info("Exiting.")
 
 
 if __name__ == "__main__":

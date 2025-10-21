@@ -1,4 +1,7 @@
+import json
+
 from loguru import logger
+from rdkit import Chem
 from retrosynthesis.retrosynthesis_utils import (
     _is_buyable,
     apply_template_retro,
@@ -13,6 +16,7 @@ def collect_leaf_molecules(node):
     Recursively collect all leaf molecules (molecules without children).
     These are the starting materials that need to be buyable.
     """
+    node = json.loads(str(node).replace("'", '"'))
     if node["type"] == "mol":
         if "children" not in node or not node["children"]:
             # This is a leaf molecule (starting material)
@@ -33,14 +37,14 @@ def collect_leaf_molecules(node):
         return []
 
 
-def score_final(prediction: dict, max_price: float) -> float:
+def score_final(prediction: dict, target: float) -> float:
     """
     Function to score the retrosynthesis route based on the provided conditions.
     Returns 1.0 if all conditions are met, else returns 0.0.
 
     Args:
         prediction (dict): The retrosynthesis route in JSON format.
-        max_price (float): Maximum allowed total price for the route.
+        target (float): Target price for the route.
 
     Returns:
         float: 1.0 if all conditions are met, 0.0 if any condition is violated.
@@ -124,7 +128,7 @@ def score_final(prediction: dict, max_price: float) -> float:
                 return 0.0
 
         # Step 5: Check if total price is within budget
-        if total_price <= max_price:
+        if total_price <= target:
             return 1.0
         else:
             return 0.0
@@ -151,4 +155,36 @@ def check_reactants(prediction: dict, target: list) -> float:
     if not leaf_molecules:
         return 0.0
 
-    return 1.0 if all(smiles in leaf_molecules for smiles in target) else 0.0
+    # Convert all molecules to RDKit mol objects (canonical SMILES for comparison)
+    # Use canonical SMILES as the key for comparison
+    leaf_mols = {}
+    for smiles in leaf_molecules:
+        pred_mol = Chem.MolFromSmiles(smiles)
+        if pred_mol is None:
+            return 0.0
+        # Remove atom mapping numbers
+        for atom in pred_mol.GetAtoms():
+            atom.SetAtomMapNum(0)
+        # Remove stereochemistry for comparison
+        Chem.RemoveStereochemistry(pred_mol)
+        canonical_smiles = Chem.MolToSmiles(pred_mol)
+        leaf_mols[canonical_smiles] = pred_mol
+
+    target_mols = {}
+    for target_smiles in target:
+        target_mol = Chem.MolFromSmiles(target_smiles)
+        if target_mol is None:
+            return 0.0
+        # Remove atom mapping numbers
+        for atom in target_mol.GetAtoms():
+            atom.SetAtomMapNum(0)
+        # Remove stereochemistry for comparison
+        Chem.RemoveStereochemistry(target_mol)
+        canonical_smiles = Chem.MolToSmiles(target_mol)
+        target_mols[canonical_smiles] = target_mol
+
+    return (
+        1.0
+        if all(target_canonical in leaf_mols for target_canonical in target_mols)
+        else 0.0
+    )
