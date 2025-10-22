@@ -71,47 +71,47 @@ def search_template_catalog_by_criteria(
 
     Args:
         molecule_smiles (str):
-            [BRIEF] SMILES string of the target molecule. [/BRIEF]
-            [DETAILED] SMILES string of the molecule to be analyzed for retrosynthetic template matching. The SMILES string must be valid and represent a real chemical structure. [/DETAILED]
-            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
-            [EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/EXAMPLES]
+            [ARGS_BRIEF] SMILES string of the target molecule. [/ARGS_BRIEF]
+            [ARGS_DETAILED] SMILES string of the molecule to be analyzed for retrosynthetic template matching. The SMILES string must be valid and represent a real chemical structure. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMILES string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/ARGS_EXAMPLES]
 
         functional_groups_broken (list[str] | None):
-            [BRIEF] List of functional groups that are broken in the forward reaction. None will result in not filtering with this criterion. [/BRIEF]
-            [DETAILED] A list of functional groups (from a predefined set) that are expected to be broken during the forward reaction. This helps to filter templates that involve the cleavage of these groups. [/DETAILED]
-            [SYNTACTICAL] List of valid functional group strings or None [/SYNTACTICAL]
-            [EXAMPLES] ["alcohol", "amine"], None [/EXAMPLES]
+            [ARGS_BRIEF] List of functional groups that are broken in the forward reaction. None will result in not filtering with this criterion. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A list of functional groups (from a predefined set) that are expected to be broken during the forward reaction. This helps to filter templates that involve the cleavage of these groups. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] List of valid functional group strings or None [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] ["alcohol", "amine"], None [/ARGS_EXAMPLES]
 
         functional_groups_formed (list[str] | None):
-            [BRIEF] List of functional groups that are formed in the forward reaction. None will result in not filtering with this criterion. [/BRIEF]
-            [DETAILED] A list of functional groups (from a predefined set) that are expected to be formed during the forward reaction. This helps to filter templates that involve the creation of these groups. [/DETAILED]
-            [SYNTACTICAL] List of valid functional group strings or None [/SYNTACTICAL]
-            [EXAMPLES] ["alkene", "carboxylic_acid"], None [/EXAMPLES]
+            [ARGS_BRIEF] List of functional groups that are formed in the forward reaction. None will result in not filtering with this criterion. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A list of functional groups (from a predefined set) that are expected to be formed during the forward reaction. This helps to filter templates that involve the creation of these groups. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] List of valid functional group strings or None [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] ["alkene", "carboxylic_acid"], None [/ARGS_EXAMPLES]
 
         bonds_formed (list[str] | None):
-            [BRIEF] List of bonds that are formed in the forward reaction. None will result in not filtering with this criterion. [/BRIEF]
-            [DETAILED] A list of bond types (e.g., "6-6", "6-8") that are expected to be formed during the forward reaction. This helps to filter templates that involve the formation of these bonds. [/DETAILED]
-            [SYNTACTICAL] List of valid bond type strings or None [/SYNTACTICAL]
-            [EXAMPLES] ["6-6", "6-8"], None [/EXAMPLES]
+            [ARGS_BRIEF] List of bonds that are formed in the forward reaction (e.g., "6-6", "6-8"). None will result in not filtering with this criterion. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A list of bond types (e.g., "6-6", "6-8") that are expected to be formed during the forward reaction. This helps to filter templates that involve the formation of these bonds. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] List of valid bond type strings or None [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] ["6-6", "6-8"], None [/ARGS_EXAMPLES]
 
         bonds_broken (list[str] | None):
-            [BRIEF] List of bonds that are broken in the forward reaction. None will result in not filtering with this criterion. [/BRIEF]
-            [DETAILED] A list of bond types (e.g., "6-6", "6-8") that are expected to be broken during the forward reaction. This helps to filter templates that involve the cleavage of these bonds. [/DETAILED]
-            [SYNTACTICAL] List of valid bond type strings or None [/SYNTACTICAL]
-            [EXAMPLES] ["6-6", "6-8"], None [/EXAMPLES]
+            [ARGS_BRIEF] List of bonds that are broken in the forward reaction (e.g., "6-6", "6-8"). None will result in not filtering with this criterion. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A list of bond types (e.g., "6-6", "6-8") that are expected to be broken during the forward reaction. This helps to filter templates that involve the cleavage of these bonds. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] List of valid bond type strings or None [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] ["6-6", "6-8"], None [/ARGS_EXAMPLES]
 
         bonds_order_changed (list[str] | None):
-            [BRIEF] List of bonds whose order is changed in the forward reaction. None will result in not filtering with this criterion. [/BRIEF]
-            [DETAILED] A list of bond types (e.g., "6-6", "6-8") whose order is expected to change during the forward reaction. This helps to filter templates that involve changes in bond order. [/DETAILED]
-            [SYNTACTICAL] List of valid bond type strings or None [/SYNTACTICAL]
-            [EXAMPLES] ['6-6 (1.0->2.0)'], None [/EXAMPLES]
+            [ARGS_BRIEF] List of bonds whose order is changed in the forward reaction (e.g., "6-6 (1.0->2.0)"). None will result in not filtering with this criterion. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A list of bond types (e.g., "6-6 (3.0->2.0)", "6-8 (1.0->2.0)") whose order is expected to change during the forward reaction. This helps to filter templates that involve changes in bond order. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] List of valid bond type strings or None [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] ['6-6 (1.0->2.0)'], None [/ARGS_EXAMPLES]
 
     Returns:
         list[dict[str, Any]]:
-            [BRIEF] List of dictionaries representing matching retrosynthetic templates. [/BRIEF]
-            [DETAILED] Each dictionary in the returned list contains details about a retrosynthetic template that matches the specified criteria, including its SMARTS representation and other relevant information. If no templates match the criteria, an empty list is returned. [/DETAILED]
-            [SYNTACTICAL] List of dictionaries or an empty list [/SYNTACTICAL]
-            [EXAMPLES] [{"template_id": "123", "smarts": "..."}], [] [/EXAMPLES]
+            [RETURNS_BRIEF] List of dictionaries representing matching retrosynthetic templates. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Each dictionary in the returned list contains details about a retrosynthetic template that matches the specified criteria, including its SMARTS representation and other relevant information. If no templates match the criteria, an empty list is returned. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] List of dictionaries or an empty list [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] [{"template_id": "123", "smarts": "..."}], [] [/RETURNS_EXAMPLES]
 
     [LIMITATIONS] Known limitations:
         - The function relies on the completeness and accuracy of the retrosynthetic template catalog. If the catalog is incomplete or contains errors, the search results may be affected.
@@ -168,16 +168,16 @@ def get_template(template_id: str) -> str:
 
     Args:
         template_id (str):
-            [BRIEF] Identifier of the retrosynthetic template to retrieve. [/BRIEF]
-            [DETAILED] The template ID corresponds to a specific retrosynthetic transformation that can be applied to molecules. The templates ids can be found in the template catalog. [/DETAILED]
-            [SYNTACTICAL] Valid template ID string [/SYNTACTICAL]
-            [EXAMPLES] "template_123", "template_456", "template_789" [/EXAMPLES]
+            [ARGS_BRIEF] Identifier of the retrosynthetic template to retrieve. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The template ID corresponds to a specific retrosynthetic transformation that can be applied to molecules. The templates ids can be found in the template catalog. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid template ID string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "template_123", "template_456", "template_789" [/ARGS_EXAMPLES]
     Returns:
         str: The SMARTS representation of the requested retrosynthetic template.
-            [BRIEF] SMARTS string of the retrosynthetic template. [/BRIEF]
-            [DETAILED] The SMARTS string defines the chemical transformation represented by the retrosynthetic template. It can be used in various cheminformatics applications to apply the transformation to target molecules. [/DETAILED]
-            [SYNTACTICAL] Valid SMARTS string [/SYNTACTICAL]
-            [EXAMPLES] "[C:1][O:2]>>[C:1][C:2]", "[C:1][C:2]>>[C:1][O:2]" [/EXAMPLES]
+            [RETURNS_BRIEF] SMARTS string of the retrosynthetic template. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The SMARTS string defines the chemical transformation represented by the retrosynthetic template. It can be used in various cheminformatics applications to apply the transformation to target molecules. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] Valid SMARTS string [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] "[C:1][O:2]>>[C:1][C:2]", "[C:1][C:2]>>[C:1][O:2]" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -230,10 +230,10 @@ def get_available_functional_groups() -> str:
 
     Returns:
         list[str]:
-            [BRIEF] List of available functional groups. [/BRIEF]
-            [DETAILED] A list of strings, each representing a functional group that can be used for querying the database. These functional groups are based on common chemical motifs and are useful for filtering and identifying relevant compounds. [/DETAILED]
-            [SYNTACTICAL] List of valid functional group strings [/SYNTACTICAL]
-            [EXAMPLES] ["alcohol", "amine", "carboxylic_acid"] [/EXAMPLES]
+            [RETURNS_BRIEF] List of available functional groups. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] A list of strings, each representing a functional group that can be used for querying the database. These functional groups are based on common chemical motifs and are useful for filtering and identifying relevant compounds. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] List of valid functional group strings [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] ["alcohol", "amine", "carboxylic_acid"] [/RETURNS_EXAMPLES]
 
     [LIMITATIONS] Known limitations:
         - The list of functional groups is predefined and may not cover all possible functional groups found in chemical compounds.
@@ -285,23 +285,23 @@ def apply_template(
 
     Args:
         molecule_smiles (str):
-            [BRIEF] SMILES string of the target molecule. [/BRIEF]
-            [DETAILED] SMILES string of the molecule to which the template will be applied. Note that the SMILES string must be valid and represent a real chemical structure which can be processed by the retrosynthetic route used. [/DETAILED]
-            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
-            [EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/EXAMPLES]
+            [ARGS_BRIEF] SMILES string of the target molecule. [/ARGS_BRIEF]
+            [ARGS_DETAILED] SMILES string of the molecule to which the template will be applied. Note that the SMILES string must be valid and represent a real chemical structure which can be processed by the retrosynthetic route used. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMILES string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/ARGS_EXAMPLES]
 
         template_id (str):
-            [BRIEF] Identifier of the retrosynthetic template to apply. [/BRIEF]
-            [DETAILED] The template ID corresponds to a specific retrosynthetic transformation that can be applied to the target molecule. The templates ids can be found in the template catalog. [/DETAILED]
-            [SYNTACTICAL] Valid template ID string [/SYNTACTICAL]
-            [EXAMPLES] "template_123", "template_456", "template_789" [/EXAMPLES]
+            [ARGS_BRIEF] Identifier of the retrosynthetic template to apply. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The template ID corresponds to a specific retrosynthetic transformation that can be applied to the target molecule. The templates ids can be found in the template catalog. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid template ID string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "template_123", "template_456", "template_789" [/ARGS_EXAMPLES]
 
     Returns:
         tuple[tuple[str, ...], ...]:
-            [BRIEF] Tuple of tuples representing precursor SMILES strings. Each tuple corresponds to one possible outcome. [/BRIEF]
-            [DETAILED] Each inner tuple contains SMILES strings of precursor molecules generated by applying the retrosynthetic template to the target molecule. If the template cannot be applied, an empty tuple is returned. [/DETAILED]
-            [SYNTACTICAL] Tuple of tuples of valid SMILES strings or an empty tuple [/SYNTACTICAL]
-            [EXAMPLES] (("CCBr", "CO"),), () [/EXAMPLES]
+            [RETURNS_BRIEF] Tuple of tuples representing precursor SMILES strings. Each tuple corresponds to one possible outcome. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Each inner tuple contains SMILES strings of precursor molecules generated by applying the retrosynthetic template to the target molecule. If the template cannot be applied, an empty tuple is returned. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] Tuple of tuples of valid SMILES strings or an empty tuple [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] (("CCBr", "CO"),), () [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -360,35 +360,43 @@ def verify_step(molecule_smiles: str, template_id: str, precursors: list[str]) -
 
     Args:
         molecule_smiles (str):
-            [BRIEF] SMILES string of the target molecule. [/BRIEF]
-            [DETAILED] The SMILES string representation of the target molecule. It must be the molecule that one already known in the retrosynthetic context. [/DETAILED]
-            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
-            [EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/EXAMPLES]
+            [ARGS_BRIEF] SMILES string of the target molecule. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The SMILES string representation of the target molecule. It must be the molecule that one already known in the retrosynthetic context. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMILES string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/ARGS_EXAMPLES]
 
         template_id (str):
-            [BRIEF] Retrosynthetic template in SMARTS format. [/BRIEF]
-            [DETAILED] The retrosynthetic template is a SMARTS string that defines the transformation to be applied to the precursors. It should be one of the templates from the dataset. [/DETAILED]
-            [SYNTACTICAL] Valid SMARTS string [/SYNTACTICAL]
-            [EXAMPLES] "[C:1][O:2]>>[C:1][C:2]", "[C:1][C:2]>>[C:1][O:2]" [/EXAMPLES]
+            [ARGS_BRIEF] Retrosynthetic template in SMARTS format. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The retrosynthetic template is a SMARTS string that defines the transformation to be applied to the precursors. It should be one of the templates from the dataset. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMARTS string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "[C:1][O:2]>>[C:1][C:2]", "[C:1][C:2]>>[C:1][O:2]" [/ARGS_EXAMPLES]
 
         precursors (list[str]):
-            [BRIEF] List of SMILES strings representing the precursor molecules. [/BRIEF]
-            [DETAILED] A list of SMILES strings, each representing a precursor molecule that, when combined and transformed by the template, should yield the target molecule. [/DETAILED]
-            [SYNTACTICAL] List of valid SMILES strings [/SYNTACTICAL]
-            [EXAMPLES] ["CCBr", "CO"], ["c1ccccc1Br", "CO"] [/EXAMPLES]
+            [ARGS_BRIEF] List of SMILES strings representing the precursor molecules. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A list of SMILES strings, each representing a precursor molecule that, when combined and transformed by the template, should yield the target molecule. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] List of valid SMILES strings [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] ["CCBr", "CO"], ["c1ccccc1Br", "CO"] [/ARGS_EXAMPLES]
 
     Returns:
         bool:
-            [BRIEF] True if the retrosynthetic step is valid, False otherwise. [/BRIEF]
-            [DETAILED] The function returns True if applying the retrosynthetic template to the provided precursors results in the target molecule. If the generated product does not match the target molecule, it returns False. [/DETAILED]
-            [SYNTACTICAL] Boolean value (True or False) [/SYNTACTICAL]
-            [EXAMPLES] True, False [/EXAMPLES]
+            [RETURNS_BRIEF] True if the retrosynthetic step is valid, False otherwise. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns True if applying the retrosynthetic template to the provided precursors results in the target molecule. If the generated product does not match the target molecule, it returns False. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] Boolean value (True or False) [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] True, False [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
             [ERROR_WHEN] Raised when the template is invalid or cannot be applied. [/ERROR_WHEN]
             [ERROR_DETAILS] This occurs if the provided template is not a valid SMARTS string or if it cannot be applied to the given precursors. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Ensure the template is correct and compatible with the precursors. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - The function assumes that the input SMILES strings and template are valid and correctly formatted.
+    - The accuracy of the verification depends on the correctness of the retrosynthetic template and its applicability to the given precursors.
+    - The function may not handle all edge cases in chemical structures, such as stereochemistry or tautomers.
+    - The function does not account for reaction conditions or other factors that may influence the outcome of a retrosynthetic step.
+    [/LIMITATIONS]
     """
     reactants = ".".join(precursors)
     real_products = apply_template_forward(reactants, template_id)
@@ -435,17 +443,17 @@ def verify_route(route: str) -> tuple[bool, str]:
 
     Args:
         route (str):
-            [BRIEF] JSON string representing the synthesis route. [/BRIEF]
-            [DETAILED] A JSON-formatted string that encodes the hierarchical structure of a synthesis route, including molecules and reactions with their respective fields. [/DETAILED]
-            [SYNTACTICAL] Valid JSON string [/SYNTACTICAL]
-            [EXAMPLES] '{"type": "mol", "smiles": "CCO", "children": [{"type": ...}]}', '{"type": "mol", "smiles": "c1ccccc1O", "children": [{"type": ...}]}' [/EXAMPLES]
+            [ARGS_BRIEF] JSON string representing the synthesis route. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A JSON-formatted string that encodes the hierarchical structure of a synthesis route, including molecules and reactions with their respective fields. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid JSON string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] '{"type": "mol", "smiles": "CCO", "children": [{"type": ...}]}', '{"type": "mol", "smiles": "c1ccccc1O", "children": [{"type": ...}]}' [/ARGS_EXAMPLES]
 
     Returns:
         tuple[bool, str]:
-            [BRIEF] (is_valid, error_message) where is_valid is True if the route is valid, False otherwise. [/BRIEF]
-            [DETAILED] A tuple where the first element is a boolean indicating whether the route is valid, and the second element is a string containing an error message if the route is invalid, or a success message if it is valid. [/DETAILED]
-            [SYNTACTICAL] (Boolean, String) [/SYNTACTICAL]
-            [EXAMPLES] (True, "The route is valid"), (False, "Invalid JSON format: ...") [/EXAMPLES]
+            [RETURNS_BRIEF] (is_valid, error_message) where is_valid is True if the route is valid, False otherwise. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] A tuple where the first element is a boolean indicating whether the route is valid, and the second element is a string containing an error message if the route is invalid, or a success message if it is valid. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] (Boolean, String) [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] (True, "The route is valid"), (False, "Invalid JSON format: ...") [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -593,17 +601,17 @@ def search_catalog_by_smiles(smiles_list: list[str]) -> list[dict[str, Any]]:
 
     Args:
         smiles_list (list[str]):
-            [BRIEF] List of SMILES strings representing the chemicals to search for. [/BRIEF]
-            [DETAILED] A list of SMILES representations of all the chemicals to be searched in the catalog. [/DETAILED]
-            [SYNTACTICAL] List with valid SMILES strings [/SYNTACTICAL]
-            [EXAMPLES] ["CCO"], ["c1ccccc1O"], ["C1=CC=CC=C1"] [/EXAMPLES]
+            [ARGS_BRIEF] List of SMILES strings representing the chemicals to search for. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A list of SMILES representations of all the chemicals to be searched in the catalog. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] List with valid SMILES strings [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] ["CCO"], ["c1ccccc1O"], ["C1=CC=CC=C1"] [/ARGS_EXAMPLES]
 
     Returns:
         list[dict[str, Any]] | str:
-            [BRIEF] List of chemical info dicts or a not-found message. [/BRIEF]
-            [DETAILED] If matches are found, a list of dictionaries containing chemical information is returned. Each dictionary represents a chemical and includes details such as SMILES, amount, distributor or price. If no matches are found, a message indicating no results were found is returned. [/DETAILED]
-            [SYNTACTICAL] List of dictionaries or a string message [/SYNTACTICAL]
-            [EXAMPLES] [{"name": "Formaldehyde", "cas": "50-00-0", ...}], "No results found" [/EXAMPLES]
+            [RETURNS_BRIEF] List of chemical info dicts or a not-found message. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] If matches are found, a list of dictionaries containing chemical information is returned. Each dictionary represents a chemical and includes details such as SMILES, amount, distributor or price. If no matches are found, a message indicating no results were found is returned. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] List of dictionaries or a string message [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] [{"name": "Formaldehyde", "cas": "50-00-0", ...}], "No results found" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -658,17 +666,17 @@ def is_buyable(smiles_list: list[str]) -> list[bool]:
 
     Args:
         smiles_list (list[str]):
-            [BRIEF] List of SMILES strings representing the molecules to check. [/BRIEF]
-            [DETAILED] A list of SMILES representations of all the molecules whose commercial availability is to be checked. [/DETAILED]
-            [SYNTACTICAL] Valid SMILES strings [/SYNTACTICAL]
-            [EXAMPLES] ["CCO"], ["c1ccccc1O"], ["C1=CC=CC=C1"] [/EXAMPLES]
+            [ARGS_BRIEF] List of SMILES strings representing the molecules to check. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A list of SMILES representations of all the molecules whose commercial availability is to be checked. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMILES strings [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] ["CCO"], ["c1ccccc1O"], ["C1=CC=CC=C1"] [/ARGS_EXAMPLES]
 
     Returns:
         list[bool]:
-            [BRIEF] List of boolean values indicating the availability of each molecule. [/BRIEF]
-            [DETAILED] The function returns a list of boolean values, where each value corresponds to the availability of the molecule represented by the respective SMILES string in the input list. [/DETAILED]
-            [SYNTACTICAL] Boolean value (True or False) for each molecule [/SYNTACTICAL]
-            [EXAMPLES] [True], [False] [/EXAMPLES]
+            [RETURNS_BRIEF] List of boolean values indicating the availability of each molecule. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns a list of boolean values, where each value corresponds to the availability of the molecule represented by the respective SMILES string in the input list. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] Boolean value (True or False) for each molecule [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] [True], [False] [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -721,17 +729,17 @@ def suggest_protecting_groups(functional_group: FunctionalGroup) -> list[str]:
 
     Args:
         functional_group (FunctionalGroup):
-            [BRIEF] The functional group for which to suggest protecting groups. It must be one of the following: '1,2-Aminoalcohol', '1,2-Diol', '1,3-Diol', 'Acetylene', 'Alcohol', 'Aldehyde, Ketone', 'Amide, Carbamate', 'Amine', 'Carboxylic acid', 'Indole', 'Phenol', 'Sulfonamide'. [/BRIEF]
-            [DETAILED] An enumeration value representing a common functional group in organic chemistry. The functional group should be selected from the predefined list to ensure accurate suggestions. [/DETAILED]
-            [SYNTACTICAL] One of the predefined FunctionalGroup enum values. [/SYNTACTICAL]
-            [EXAMPLES] "Sulfonamide", "Amine", "Alcohol" [/EXAMPLES]
+            [ARGS_BRIEF] The functional group for which to suggest protecting groups. It must be one of the following: '1,2-Aminoalcohol', '1,2-Diol', '1,3-Diol', 'Acetylene', 'Alcohol', 'Aldehyde, Ketone', 'Amide, Carbamate', 'Amine', 'Carboxylic acid', 'Indole', 'Phenol', 'Sulfonamide'. [/ARGS_BRIEF]
+            [ARGS_DETAILED] An enumeration value representing a common functional group in organic chemistry. The functional group should be selected from the predefined list to ensure accurate suggestions. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] One of the predefined FunctionalGroup enum values. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "Sulfonamide", "Amine", "Alcohol" [/ARGS_EXAMPLES]
 
     Returns:
         list[str]:
-            [BRIEF] List of protecting groups suitable for the given functional group and the reactions and conditions to protect and deprotect with them. [/BRIEF]
-            [DETAILED] A list of strings, each representing a protecting group that can be used to protect the specified functional group during synthesis. The list may include common protecting groups as well as their abbreviations. [/DETAILED]
-            [SYNTACTICAL] List of strings [/SYNTACTICAL]
-            [EXAMPLES] '[{"reagents": "CuSO₄", "solvents": "Acetone", "temperature": "RT", "time": "36 h", "yield": "83%"},...,]', '[][/EXAMPLES]
+            [RETURNS_BRIEF] List of protecting groups suitable for the given functional group and the reactions and conditions to protect and deprotect with them. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] A list of strings, each representing a protecting group that can be used to protect the specified functional group during synthesis. The list may include common protecting groups as well as their abbreviations. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] List of strings [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] '[{"reagents": "CuSO₄", "solvents": "Acetone", "temperature": "RT", "time": "36 h", "yield": "83%"},...,]', '[] [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -792,17 +800,17 @@ def smiles_to_cas(molecule_smiles: str) -> str:
 
     Args:
         molecule_smiles (str):
-            [BRIEF] SMILES string of the molecule to convert. [/BRIEF]
-            [DETAILED] A valid SMILES string of the molecule that you need the CAS number for. [/DETAILED]
-            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
-            [EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/EXAMPLES]
+            [ARGS_BRIEF] SMILES string of the molecule to convert. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A valid SMILES string of the molecule that you need the CAS number for. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMILES string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] The corresponding CAS number as a string. [/BRIEF]
-            [DETAILED] The function returns the CAS number associated with the provided SMILES string. The CAS number is a unique identifier for chemical substances and is widely used in chemical databases and literature. [/DETAILED]
-            [SYNTACTICAL] String representing a CAS number [/SYNTACTICAL]
-            [EXAMPLES] "50-00-0", "64-17-5", "67-56-1" [/EXAMPLES]
+            [RETURNS_BRIEF] The corresponding CAS number as a string. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns the CAS number associated with the provided SMILES string. The CAS number is a unique identifier for chemical substances and is widely used in chemical databases and literature. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] String representing a CAS number [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] "50-00-0", "64-17-5", "67-56-1" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -865,17 +873,17 @@ def cas_to_smiles(cas_number: str) -> str:
 
     Args:
         cas_number (str):
-            [BRIEF] CAS number of the molecule to convert. [/BRIEF]
-            [DETAILED] Valid CAS number string that corresponds to a specific chemical substance that you want to convert to SMILES. [/DETAILED]
-            [SYNTACTICAL] Valid CAS number string [/SYNTACTICAL]
-            [EXAMPLES] "50-00-0", "64-17-5", "67-56-1" [/EXAMPLES]
+            [ARGS_BRIEF] CAS number of the molecule to convert. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Valid CAS number string that corresponds to a specific chemical substance that you want to convert to SMILES. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid CAS number string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "50-00-0", "64-17-5", "67-56-1" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] The corresponding isomeric SMILES string. [/BRIEF]
-            [DETAILED] The function returns the isomeric SMILES representation associated with the provided CAS number. The isomeric SMILES includes stereochemical information, making it more specific than standard SMILES. [/DETAILED]
-            [SYNTACTICAL] String representing an isomeric SMILES [/SYNTACTICAL]
-            [EXAMPLES] "C(CO)O", "CCO", "C1=CC=CC=C1" [/EXAMPLES]
+            [RETURNS_BRIEF] The corresponding isomeric SMILES string. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns the isomeric SMILES representation associated with the provided CAS number. The isomeric SMILES includes stereochemical information, making it more specific than standard SMILES. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] String representing an isomeric SMILES [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] "C(CO)O", "CCO", "C1=CC=CC=C1" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -924,17 +932,17 @@ def deprotect_molecule(molecule_smiles: str) -> str:
 
     Args:
         molecule_smiles (str):
-            [BRIEF] SMILES string of the molecule with protecting groups. [/BRIEF]
-            [DETAILED] Valid SMILES string of the molecule that contains the protective groups that you want to detect and remove. Ensure that is a valid SMILES, otherwise an exception will be raised. [/DETAILED]
-            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
-            [EXAMPLES] "CC(C)(OC(NCCOc1ccccc1)=O)C", "CC(C)(OC(NCCOc1ccccc1)=O)C" [/EXAMPLES]
+            [ARGS_BRIEF] SMILES string of the molecule with protecting groups. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Valid SMILES string of the molecule that contains the protective groups that you want to detect and remove. Ensure that is a valid SMILES, otherwise an exception will be raised. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMILES string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CC(C)(OC(NCCOc1ccccc1)=O)C", "CC(C)(OC(NCCOc1ccccc1)=O)C" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] The SMILES string of the deprotected molecule. [/BRIEF]
-            [DETAILED] The function returns the SMILES representation of the molecule after removing the protecting groups. This deprotected SMILES string represents the core structure of the molecule without any temporary modifications. [/DETAILED]
-            [SYNTACTICAL] String representing a SMILES [/SYNTACTICAL]
-            [EXAMPLES] "CCO", "CCO" [/EXAMPLES]
+            [RETURNS_BRIEF] The SMILES string of the deprotected molecule. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns the SMILES representation of the molecule after removing the protecting groups. This deprotected SMILES string represents the core structure of the molecule without any temporary modifications. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] String representing a SMILES [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] "CCO", "CCO" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -995,27 +1003,27 @@ def detect_protection_groups(
 
     Args:
         smiles (str):
-            [BRIEF] SMILES string of the molecule to analyze. [/BRIEF]
-            [DETAILED] Valid SMILES string of the molecule that contains the protective groups that you want to detect. [/DETAILED]
-            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
-            [EXAMPLES] "CC(C)(OC(NCCOc1ccccc1)=O)C", "CCO", "c1ccccc1O" [/EXAMPLES]
+            [ARGS_BRIEF] SMILES string of the molecule to analyze. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Valid SMILES string of the molecule that contains the protective groups that you want to detect. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMILES string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CC(C)(OC(NCCOc1ccccc1)=O)C", "CCO", "c1ccccc1O" [/ARGS_EXAMPLES]
 
     Returns:
         dict[str, Any]:
-            [BRIEF] Dictionary containing input SMILES, mapped SMILES, and detected protecting groups. [/BRIEF]
-            [DETAILED] The function returns a dictionary with the following keys:
+            [RETURNS_BRIEF] Dictionary containing input SMILES, mapped SMILES, and detected protecting groups. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns a dictionary with the following keys:
                 - "input_smiles": The original SMILES string provided as input.
                 - "mapped_smiles": A version of the SMILES string with atom-map numbers for reference.
                 - "protecting_groups": A list of dictionaries, each representing a detected protecting group with details such as abbreviation, full name, class, and atom positions.
-            This structured output provides comprehensive information about the protecting groups present in the molecule. [/DETAILED]
-            [SYNTACTICAL] Dictionary with specific keys and values [/SYNTACTICAL]
-            [EXAMPLES] {
+            This structured output provides comprehensive information about the protecting groups present in the molecule. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] Dictionary with specific keys and values [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] {
                 "input_smiles": "CC(C)(OC(NCCOc1ccccc1)=O)C",
                 "mapped_smiles": "CC(C)(OC(NCCOc1ccccc1)=O)C",
                 "protecting_groups": [
                     {"abbrev": "Boc", "name": "tert-Butyloxycarbonyl", "class": "amine", "positions": [(0, 1, 2)]},...
                 ]
-            } [/EXAMPLES]
+            } [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -1134,22 +1142,22 @@ def detect_functional_groups(smiles: str) -> str:
 
     Args:
         smiles (str):
-            [BRIEF] SMILES string of the molecule to analyze. [/BRIEF]
-            [DETAILED] The SMILES string of the molecule that you want to detect the functional groups from. [/DETAILED]
-            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
-            [EXAMPLES] "CC(C)(OC(NCCOc1ccccc1)=O)C", "CCO", "c1ccccc1O" [/EXAMPLES]
+            [ARGS_BRIEF] SMILES string of the molecule to analyze. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The SMILES string of the molecule that you want to detect the functional groups from. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMILES string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CC(C)(OC(NCCOc1ccccc1)=O)C", "CCO", "c1ccccc1O" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] Summary of detected functional groups in the molecule. [/BRIEF]
-            [DETAILED] The function returns a string summarizing the functional groups detected in the molecule. The summary includes the names of the functional groups and the positions of the atoms in the original molecule, providing insight into the reactive sites and properties of the molecule. [/DETAILED]
-            [SYNTACTICAL] String summarizing functional groups [/SYNTACTICAL]
-            [EXAMPLES] "Full mapped SMILES: C([NH:6][C:5]([O:4][C:2]([CH3:1])([CH3:3])[CH3:17])=[O:16])[CH2:8][O:9][c:10]1[cH:11][cH:12][cH:13][cH:14][cH:15]1
+            [RETURNS_BRIEF] Summary of detected functional groups in the molecule. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns a string summarizing the functional groups detected in the molecule. The summary includes the names of the functional groups and the positions of the atoms in the original molecule, providing insight into the reactive sites and properties of the molecule. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] String summarizing functional groups [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] "Full mapped SMILES: C([NH:6][C:5]([O:4][C:2]([CH3:1])([CH3:3])[CH3:17])=[O:16])[CH2:8][O:9][c:10]1[cH:11][cH:12][cH:13][cH:14][cH:15]1
 
                         Groups found:
                             - phenyl group     pos=(10, 11, 12, 13, 14, 15)  frag=[c:10]1[cH:11][cH:12][cH:13][cH:14][cH:15]1
                             - carbamate groups pos=(2, 4, 5, 16, 6)  frag=[C:2][O:4][C:5]([NH:6])=[O:16]
-                            ..." [/EXAMPLES]
+                            ..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -1207,17 +1215,17 @@ def map_reaction_smiles(reaction_smiles: str) -> str:
 
     Args:
         reaction_smiles (str):
-            [BRIEF] Reaction SMILES string to be mapped. [/BRIEF]
-            [DETAILED] A valid reaction SMILES string representing the chemical reaction you want to map. [/DETAILED]
-            [SYNTACTICAL] Valid reaction SMILES string [/SYNTACTICAL]
-            [EXAMPLES] "CCO.CC(=O)O>>CCOC(=O)C", "c1ccccc1.O>>c1cccccc1O" [/EXAMPLES]
+            [ARGS_BRIEF] Reaction SMILES string to be mapped. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A valid reaction SMILES string representing the chemical reaction you want to map. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid reaction SMILES string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CCO.CC(=O)O>>CCOC(=O)C", "c1ccccc1.O>>c1cccccc1O" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] The mapped reaction SMILES string with atom map numbers. [/BRIEF]
-            [DETAILED] The function returns the reaction SMILES string with atom map numbers assigned to the atoms in the reactants and products. This mapped SMILES string allows for tracking of atoms through the reaction process. [/DETAILED]
-            [SYNTACTICAL] String representing a mapped reaction SMILES [/SYNTACTICAL]
-            [EXAMPLES] "C[C:1][O:2].C[C:3](=[O:4])[O:5]>>C[C:1][O:2][C:3](=[O:4])" [/EXAMPLES]
+            [RETURNS_BRIEF] The mapped reaction SMILES string with atom map numbers. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns the reaction SMILES string with atom map numbers assigned to the atoms in the reactants and products. This mapped SMILES string allows for tracking of atoms through the reaction process. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] String representing a mapped reaction SMILES [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] "C[C:1][O:2].C[C:3](=[O:4])[O:5]>>C[C:1][O:2][C:3](=[O:4])" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
