@@ -93,6 +93,13 @@ class VerbosityConfig:
         "RAISES",
         "LIMITATIONS",
         "EXAMPLES",
+        "ARGS_BRIEF",
+        "ARGS_DETAILED",
+        "ARGS_SYNTACTICAL",
+        "ARGS_EXAMPLES",
+        "RETURNS_BRIEF",
+        "RETURNS_DETAILED",
+        "RETURNS_EXAMPLES",
     ]
 
     # Pre-compile regex patterns for performance
@@ -123,8 +130,6 @@ class VerbosityConfig:
     @classmethod
     def _clean_nested_tags(cls, content: str) -> str:
         """Remove any nested [TAG]...[/TAG] patterns and keep just the content"""
-        import re
-
         nested_tag_pattern = r"\[([A-Z_]+)\](.*?)\[/\1\]"
 
         # Keep replacing until no more nested tags found
@@ -327,20 +332,13 @@ class VerbosityConfig:
                 # Just the basic part before any tags or extra info
                 return arg_desc.split("[")[0].split("(choices:")[0].strip()
 
-            elif verbosity == ToolVerbosity.BRIEF:
-                # Basic description + choices, but no detailed explanations
-                basic = arg_desc.split("[")[0].strip()
-                if "(choices:" in arg_desc:
-                    choices_start = arg_desc.find("(choices:")
-                    choices_end = arg_desc.find(")", choices_start)
-                    if choices_end != -1:
-                        choices_part = arg_desc[choices_start : choices_end + 1]
-                        return f"{basic} {choices_part}"
-                return basic
-
             else:
                 # For DETAILED and above, include tagged sections based on verbosity
                 sections = cls.extract_all_sections(arg_desc)
+                sections = {
+                    k.replace("ARGS_", "") if k.startswith("ARGS_") else k: v
+                    for k, v in sections.items()
+                }
                 included_sections = VerbosityConfig.get_sections_for_verbosity(
                     verbosity
                 )
@@ -374,7 +372,7 @@ class VerbosityConfig:
                         choices_part = arg_desc[choices_start : choices_end + 1]
                         parts.append(choices_part)
 
-                return " ".join(parts) if parts else arg_desc
+                return "\n".join(parts) if parts else arg_desc
 
         except Exception as e:
             logger.error(f"Error filtering argument description: {e}")
