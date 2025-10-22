@@ -57,7 +57,7 @@ CUSTOM_REACTIONS = [
     "O=S(=O)(O[Si:11]([CH3:12])([CH3:13])[C:14]([CH3:15])([CH3:16])[CH3:17])C(F)(F)F.[CH3:1][CH2:2][O:3][C:4](=[O:5])[CH2:6][C@H:7]1[CH2:8][C@H:9]([OH:10])[C@@H:18]([CH3:19])[C@@H:20](/[CH:21]=[C:22](/[CH3:23])[C:24](=[O:25])[O:26][CH3:27])[O:28]1>>[CH3:1][CH2:2][O:3][C:4](=[O:5])[CH2:6][C@H:7]1[CH2:8][C@H:9]([O:10][Si:11]([CH3:12])([CH3:13])[C:14]([CH3:15])([CH3:16])[CH3:17])[C@@H:18]([CH3:19])[C@@H:20](/[CH:21]=[C:22](/[CH3:23])[C:24](=[O:25])[O:26][CH3:27])[O:28]1",
     "[CH3:1][CH2:2][O:3][C:4](=[O:5])[CH2:6][C@H:7]1[CH2:8][C@H:9]([OH:10])[C@@H:11]([CH3:12])[C@@H:13]([CH:14]=[O:18])[O:21]1.C[CH:16](P(=O)(OCC(F)(F)F)OCC(F)(F)F)[C:15]#[C:17][O:19][CH3:20]>>[CH3:1][CH2:2][O:3][C:4](=[O:5])[CH2:6][C@H:7]1[CH2:8][C@H:9]([OH:10])[C@@H:11]([CH3:12])[C@@H:13](/[CH:14]=[C:15](/[CH3:16])[C:17](=[O:18])[O:19][CH3:20])[O:21]1",
     "[O:1]=[C:2]1[CH2:3][CH2:4][CH2:5][CH:6]2[O:7][c:8]3[cH:9][cH:10][cH:11][cH:12][c:13]3[CH:14]=[C:15]12>>[OH:1][C@@H:2]1[CH2:3][CH2:4][CH2:5][C@@H:6]2[O:7][c:8]3[cH:9][cH:10][cH:11][cH:12][c:13]3[CH:14]=[C:15]12",
-    "C1CN2CCN1CC2.[O:1]=[C:2]1[CH2:3][CH2:4][CH2:5][CH:6]=[CH:15]1.O=[CH:14][c:13]1[c:8]([OH:7])[cH:9][cH:10][cH:11][cH:12]1>>[O:1]=[C:2]1[CH2:3][CH2:4][CH2:5][CH:6]2[O:7][c:8]3[cH:9][cH:10][cH:11][cH:12][c:13]3[CH:14]=[C:15]12",
+    "C1CN2CCN1CC2.[O:1]=[C:2]1[CH2:3][CH2:4][CH2:5][CH:6]=[CH:15]1.O=[CH:14][c:13]1[c:8]([OH:7])[cH:9][cH:10][cH:11][cH:12]1>>([O:1]=[C:2]1[CH2:3][CH2:4][CH2:5][CH:6]2[O:7][c:8]3[cH:9][cH:10][cH:11][cH:12][c:13]3[CH:14]=[C:15]12)",
     "[CH3:1][O:2][c:3]1[cH:4][cH:5][cH:6][c:7]([NH:8][C:9](=[O:10])[c:11]2[n:12][n:13][nH:14][c:28]2[NH2:29])[cH:30]1.Cl[CH2:15][c:16]1[cH:17][cH:18][c:19]([CH2:20][N:21]2[CH2:22][CH:23]([F:24])[CH2:25]2)[cH:26][cH:27]1>>[CH3:1][O:2][c:3]1[cH:4][cH:5][cH:6][c:7]([NH:8][C:9](=[O:10])[c:11]2[n:12][n:13][n:14]([CH2:15][c:16]3[cH:17][cH:18][c:19]([CH2:20][N:21]4[CH2:22][CH:23]([F:24])[CH2:25]4)[cH:26][cH:27]3)[c:28]2[NH2:29])[cH:30]1",
     "Cl[CH2:10][Cl:11].[F:1][CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][cH:9][cH:12][cH:13]2)[CH2:14]1>>[F:1][CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][c:9]([CH2:10][Cl:11])[cH:12][cH:13]2)[CH2:14]1",
     "O[CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[CH2:12]1>>[F:1][CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[CH2:12]1",
@@ -668,14 +668,14 @@ def print_reaction_summary(reaction_info: dict):
     logger.info(f"Dataset:              {reaction_info['dataset']}")
     logger.info(f"Derive Version:       {reaction_info['derive_version']}")
     logger.info(f"Created At:           {reaction_info['created_at']}")
-    logger.info()
+    logger.info(" ")
     logger.info(f"Mapped Reaction:      {reaction_info['mapped_rxn']}")
     logger.info(f"Product SMILES:       {reaction_info['product_smiles']}")
     logger.info(f"Reactant SMILES:      {reaction_info['reactant_smiles']}")
-    logger.info()
+    logger.info(" ")
     logger.info(f"Retro SMARTS:         {reaction_info['retro_smarts_template']}")
     logger.info(f"Canonical SMARTS:     {reaction_info['canonical_smarts_template']}")
-    logger.info()
+    logger.info(" ")
     logger.info(
         f"Bonds Formed:         {', '.join(reaction_info['bonds_formed']) if reaction_info['bonds_formed'] else 'None'}"
     )
@@ -685,7 +685,7 @@ def print_reaction_summary(reaction_info: dict):
     logger.info(
         f"Bonds Order Changed:  {', '.join(reaction_info['bonds_order_changed']) if reaction_info['bonds_order_changed'] else 'None'}"
     )
-    logger.info()
+    logger.info(" ")
     logger.info(
         f"FGs Formed:           {', '.join(reaction_info['functional_groups_formed']) if reaction_info['functional_groups_formed'] else 'None'}"
     )

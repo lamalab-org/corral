@@ -1254,6 +1254,6 @@ def create_tools() -> dict[str, Tool]:
         "detect_protection_groups": detect_protection_groups,
         "detect_functional_groups": detect_functional_groups,
         "map_reaction_smiles": map_reaction_smiles,
-        # "smiles_to_cas": smiles_to_cas,
-        # "cas_to_smiles": cas_to_smiles,
+        "smiles_to_cas": smiles_to_cas,
+        "cas_to_smiles": cas_to_smiles,
     }

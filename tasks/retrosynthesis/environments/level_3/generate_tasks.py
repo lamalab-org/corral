@@ -8,17 +8,13 @@ MOLECULES = [
     "COC([C@]12CC=CC[C@H]1C(C2)=O)=O",  # Diels-Alder
     "COC(C1(C=C1[Si](C)(C)C)/C=C/C2=CC=CC=C2)=O",  # Cycloaddition
     "C=C(C1=CC=C(OC)C=C1)C2=CC=C(OC)C=C2",  # Peterson olefination
-    "C[C@H]1[C@](CC(C(CO)=C)=O)(C(C(C)=C)=CC1=O)[H]",  # Nozaki Hiyama Kishi Reaction + Deprotection of OTBS into OH
     # Difficult ones
     "O[C@H]1C[C@@H](O[C@@H]([C@@H]1C)/C=C(CO)/C)C/C=C/C=C/C(O)=O",  # Still-Gennari + Horner-Wadsworth-Emmons
-    "O[C@H]1C2=CC3=CC=CC=C3O[C@H]2CCC1",  # Baylis-Hillman Reaction + cyclic stereocontrol
     "COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1",
     "Cc1ccc(NS(=O)(=O)c2ccc(/C=C/C(=O)Nc3ccccc3N)cc2)cc1",
     "O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O",
 ]
 PRIZES = [
-    9999.0,
-    9999.0,
     9999.0,
     9999.0,
     9999.0,
