@@ -248,7 +248,7 @@ if __name__ == "__main__":
 
     # Create all environments with file system tools
     environments = create_rethrosynthesis_environments(
-        work_dir=BASE_WORK_DIR, subtask_level=args.subtask_level
+        work_dir=BASE_WORK_DIR, subtask_level=args.subtask_level, level=args.level
     )
 
     logger.info("\nCreated Environments:")

@@ -3,9 +3,8 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from corral import CorralRouter, CorralRunner
-from corral.agents import ToolCallingAgent
-
-# from corral.report import CorralWandbLogger
+from corral.agents import ReActAgent
+from corral.report import CorralWandbLogger
 
 
 def setup_litellm():
@@ -23,21 +22,20 @@ def run_benchmark(
     """Run the benchmark with specified model and tasks"""
 
     interface = CorralRouter()
-    # wandblogger = CorralWandbLogger(
-    #     project="corral",
-    #     group="tool_description_ablation",
-    #     name=run_name,
-    # )
-    agent = ToolCallingAgent(model=model, max_iterations=20, temperature=temperature)
-    # runner = CorralRunner(interface, agent, logger=wandblogger)
-    runner = CorralRunner(interface, agent)
+    wandblogger = CorralWandbLogger(
+        project="corral",
+        group="tool_description_ablation",
+        name=run_name,
+    )
+    agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
+    runner = CorralRunner(interface, agent, logger=wandblogger)
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
     result = runner.bench(
         task_ids,
-        trials_per_task=1,
-        k_values=[1],
+        trials_per_task=3,
+        k_values=[1, 2, 3],
         verbose=True,
         tool_verbosity=verbose,
     )
@@ -51,14 +49,14 @@ if __name__ == "__main__":
 
     verboses = [
         "brief",
-        # "workflow",
-        # "comprehensive",
+        "workflow",
+        "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
             model = "claude-3-5-sonnet-20241022"
-            run_name = f"claude_35_sonnet-tool_calling-retro_env-{verbose}_verbosity"
+            run_name = f"claude_35_sonnet-react-retro_env_lvl1-{verbose}_verbosity"
             run_benchmark(model=model, run_name=run_name, verbose=verbose)
 
         except Exception as e:
