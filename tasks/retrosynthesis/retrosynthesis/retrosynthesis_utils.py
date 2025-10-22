@@ -928,3 +928,23 @@ def get_molecule_summary(smiles: str, result_dict, use_collapsed=True) -> str:
         lines.append("  - No functional groups detected")
 
     return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    smiles = (
+        "O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O"
+    )
+    res = [
+        "aryl halide",
+        "benzene rings",
+        "carbamate",
+        "ether oxygens",
+        "four-membered rings",
+        "halide",
+        "ortho di-substituted benzene",
+        "six-membered aromatic rings",
+        "sulfonamides",
+        "t-butyl",
+        "tertiary amines",
+    ]
+    # print(get_molecule_summary(smiles, res))

@@ -4,7 +4,6 @@ from loguru import logger
 
 from corral import CorralRouter, CorralRunner
 from corral.agents import ReActAgent
-from corral.report import CorralWandbLogger
 
 
 def setup_litellm():
@@ -22,20 +21,15 @@ def run_benchmark(
     """Run the benchmark with specified model and tasks"""
 
     interface = CorralRouter()
-    wandblogger = CorralWandbLogger(
-        project="corral",
-        group="tool_description_ablation",
-        name=run_name,
-    )
     agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
-    runner = CorralRunner(interface, agent, logger=wandblogger)
+    runner = CorralRunner(interface, agent)
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
     result = runner.bench(
         task_ids,
-        trials_per_task=3,
-        k_values=[1, 2, 3],
+        trials_per_task=1,
+        k_values=[1],
         verbose=True,
         tool_verbosity=verbose,
     )
@@ -49,8 +43,8 @@ if __name__ == "__main__":
 
     verboses = [
         "brief",
-        "workflow",
-        "comprehensive",
+        # "workflow",
+        # "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")
