@@ -8,7 +8,11 @@ using realistic tool docstrings from the tasks.
 
 import pytest
 
-from corral.router.verbosity import ToolVerbosity, VerbosityConfig
+from corral.router.verbosity import (
+    MalformedDocstringError,
+    ToolVerbosity,
+    VerbosityConfig,
+)
 
 # Complete tool docstring from corral_md/tools.py (execute_python_script)
 FULL_DOCSTRING_EXECUTE_PYTHON_SCRIPT = """[BRIEF] Execute a Python script file with arguments in a controlled environment. [/BRIEF]
@@ -45,6 +49,48 @@ This is essential for integrating existing Python scripts into automated workflo
 `execute_python_script("simulation.py", ["--steps", "1000", "--temp", "300"], 1800, "/path/to/workdir")`,
 `execute_python_script("processing.py", None, 600, None)`,
 [/SYNTACTICAL]
+
+Args:
+    script_path: [ARGS_BRIEF] Path to the Python script file to execute. [/ARGS_BRIEF]
+                [ARGS_DETAILED] Complete file path to the Python script that should be executed.
+                The script must exist and be readable.
+                The path can be relative to the current working directory or absolute.
+                The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/ARGS_DETAILED]
+                [ARGS_SYNTACTIC] "Valid file path to Python script" [/ARGS_SYNTACTIC]
+                [ARGS_EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/ARGS_EXAMPLES]
+    args: [ARGS_BRIEF] Optional list of command-line arguments for the script. [/ARGS_BRIEF]
+         [ARGS_DETAILED] A list of strings representing command-line arguments to pass to the script.
+         These arguments will be passed to the script in the order provided.
+         Common arguments include input files, output paths, configuration parameters, and processing options.
+         If None, the script will be executed without arguments. [/ARGS_DETAILED]
+         [ARGS_SYNTACTIC] ["arg1", "arg2", "arg3", ...] or None [/ARGS_SYNTACTIC]
+         [ARGS_EXAMPLES] ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/ARGS_EXAMPLES]
+    timeout: [ARGS_BRIEF] Maximum execution time in seconds. Defaults to 600. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The maximum time in seconds the script is allowed to run before being terminated.
+            This prevents runaway processes and ensures resource management.
+            Choose appropriate values based on expected script execution time.
+            For computational simulations, longer timeouts may be necessary. [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] positive integer representing seconds [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/ARGS_EXAMPLES]
+    working_dir: [ARGS_BRIEF] Optional working directory for script execution. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The directory from which the script should be executed.
+                This affects relative path resolution and file I/O operations within the script.
+                If None, the current working directory will be used.
+                This is useful when scripts expect to run from specific directories or access relative files. [/ARGS_DETAILED]
+                [ARGS_SYNTACTIC] Valid directory path or None [/ARGS_SYNTACTIC]
+                [ARGS_EXAMPLES] "/path/to/project", "data/analysis", None [/ARGS_EXAMPLES]
+
+Returns:
+    str: [RETURNS_BRIEF] JSON string with comprehensive execution results and monitoring data. [/RETURNS_BRIEF]
+         [RETURNS_DETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.
+         This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/RETURNS_DETAILED]
+         [RETURNS_EXAMPLES] "{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}" [/RETURNS_EXAMPLES]
+
+Returns:
+    str: [RETURNS_BRIEF] JSON string with comprehensive execution results and monitoring data. [/RETURNS_BRIEF]
+         [RETURNS_DETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.
+         This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/RETURNS_DETAILED]
+         [RETURNS_EXAMPLES] "{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}" [/RETURNS_EXAMPLES]
 
 [RAISES] Exceptions:
     FileNotFoundError: [ERROR_WHEN] When the specified script file doesn't exist [/ERROR_WHEN]
@@ -99,6 +145,21 @@ CIF is then returned as string [/DETAILED]
     `get_structure_from_mp_text("mp-67890")` # Another example with a different MP ID
 ]
 [/SYNTACTICAL]
+
+Args:
+    mp_id: [ARGS_BRIEF] Materials Project identifier string. [/ARGS_BRIEF]
+           [ARGS_DETAILED] The unique identifier used by Materials Project to catalog materials.
+           Should be in the format "mp-XXXXX" where XXXXX is a numerical ID.
+           This ID corresponds to a specific material entry in the Materials Project database. [/ARGS_DETAILED]
+           [ARGS_SYNTACTIC] "mp-" followed by digits (e.g., "mp-149", "mp-20066") [/ARGS_SYNTACTIC]
+           [ARGS_EXAMPLES] "mp-149" (Silicon), "mp-20066" (CO2), "mp-2" (Li) [/ARGS_EXAMPLES]
+
+Returns:
+    str: [RETURNS_BRIEF] CIF content string containing the crystal structure data. [/RETURNS_BRIEF]
+         [RETURNS_DETAILED] A properly formatted CIF (Crystallographic Information File) string containing all necessary information about the crystal structure including lattice parameters, atomic positions, space group, and symmetry operations.
+         This format is widely compatible with crystallographic software and other structure analysis tools. [/RETURNS_DETAILED]
+         [RETURNS_EXAMPLES] "\n_chemical_formula_structural Si\n_cell_length_a 5.468..." [/RETURNS_EXAMPLES]
+
 [RAISES] Exceptions:
     ConnectionError: [ERROR_WHEN] When unable to connect to Materials Project API [/ERROR_WHEN]
                     [ERROR_DETAILS] Network connectivity issues or API server downtime [/ERROR_DETAILS]
@@ -118,13 +179,13 @@ CIF is then returned as string [/DETAILED]
 """
 
 # Complete argument docstring from corral_md/tools.py (script_path argument)
-FULL_ARG_SCRIPT_PATH = """[BRIEF] Path to the Python script file to execute. [/BRIEF]
-[DETAILED] Complete file path to the Python script that should be executed.
+FULL_ARG_SCRIPT_PATH = """[ARGS_BRIEF] Path to the Python script file to execute. [/ARGS_BRIEF]
+[ARGS_DETAILED] Complete file path to the Python script that should be executed.
 The script must exist and be readable.
 The path can be relative to the current working directory or absolute.
-The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/DETAILED]
-[SYNTACTIC] "Valid file path to Python script" [/SYNTACTIC]
-[EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/EXAMPLES]
+The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/ARGS_DETAILED]
+[ARGS_SYNTACTIC] "Valid file path to Python script" [/ARGS_SYNTACTIC]
+[ARGS_EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/ARGS_EXAMPLES]
 """
 
 # Complete argument docstring from catalyst/tools.py (mp_id argument)
@@ -279,10 +340,20 @@ class TestFilterToolDescription:
         result = VerbosityConfig.filter_tool_description(
             simple_docstring, ToolVerbosity.BRIEF
         )
+        workflow_result = VerbosityConfig.filter_tool_description(
+            simple_docstring, ToolVerbosity.WORKFLOW
+        )
+        comprehensive_result = VerbosityConfig.filter_tool_description(
+            simple_docstring, ToolVerbosity.COMPREHENSIVE
+        )
+        full_result = VerbosityConfig.filter_tool_description(
+            simple_docstring, ToolVerbosity.FULL
+        )
 
         # Should return the basic content
         assert "simple tool" in result
         assert "does something useful" in result
+        assert result == workflow_result == comprehensive_result == full_result
 
 
 class TestFilterArgumentDescription:
@@ -441,10 +512,39 @@ class TestEdgeCases:
         """Test handling of malformed tags"""
         malformed = "[BRIEF] Some text [DETAILED] Missing close tag"
 
-        # Should handle gracefully
-        result = VerbosityConfig.filter_tool_description(malformed, ToolVerbosity.BRIEF)
-        assert isinstance(result, str)
-        assert len(result) > 0
+        # Should raise MalformedDocstringError for unclosed tags
+        with pytest.raises(MalformedDocstringError) as exc_info:
+            VerbosityConfig.filter_tool_description(malformed, ToolVerbosity.BRIEF)
+
+        # Verify the error message contains information about the unclosed tag
+        assert "unclosed tags" in str(exc_info.value).lower()
+        assert "DETAILED" in str(exc_info.value)
+
+    def test_multiple_unclosed_tags(self):
+        """Test handling of multiple unclosed tags"""
+        malformed = (
+            "[BRIEF] Some text [DETAILED] Missing close [PROCEDURAL] Also missing"
+        )
+
+        # Should raise MalformedDocstringError listing all unclosed tags
+        with pytest.raises(MalformedDocstringError) as exc_info:
+            VerbosityConfig.filter_tool_description(malformed, ToolVerbosity.BRIEF)
+
+        error_msg = str(exc_info.value)
+        assert "unclosed tags" in error_msg.lower()
+        # Should mention all unclosed tags
+        assert "DETAILED" in error_msg or "PROCEDURAL" in error_msg
+
+    def test_properly_closed_tags_work(self):
+        """Test that properly closed tags work correctly"""
+        proper = "[BRIEF] Brief text [/BRIEF] [DETAILED] Detailed text [/DETAILED]"
+
+        # Should not raise an exception
+        result = VerbosityConfig.filter_tool_description(proper, ToolVerbosity.DETAILED)
+
+        # Should contain content from both sections
+        assert "Brief text" in result
+        assert "Detailed text" in result
 
     def test_nested_tags(self):
         """Test handling of nested tags"""
@@ -471,6 +571,35 @@ class TestEdgeCases:
         # Should include all content
         assert "Brief description" in result
         assert "Line 99" in result
+
+    def test_args_returns_without_tags(self):
+        """Test parsing docstring with Args and Returns sections without custom tags"""
+        # Create a docstring with standard Args and Returns sections (no custom tags)
+        docstring_with_args_returns = """This is a basic function description.
+
+Args:
+    param1: First parameter description
+    param2: Second parameter description with more details
+
+Returns:
+    str: The return value description
+"""
+
+        # Use extract_all_sections to parse the docstring
+        sections = VerbosityConfig.extract_all_sections(docstring_with_args_returns)
+
+        # Assert that ARGS and RETURNS are in the sections dict
+        assert "ARGS" in sections, "ARGS section should be extracted"
+        assert "RETURNS" in sections, "RETURNS section should be extracted"
+
+        # Verify the content is correctly extracted
+        assert "param1: First parameter description" in sections["ARGS"]
+        assert "param2: Second parameter description" in sections["ARGS"]
+        assert "str: The return value description" in sections["RETURNS"]
+
+        # Also check that BASIC section is present (text before Args/Returns)
+        assert "BASIC" in sections
+        assert "basic function description" in sections["BASIC"]
 
 
 if __name__ == "__main__":
