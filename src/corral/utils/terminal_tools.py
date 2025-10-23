@@ -18,6 +18,9 @@ _session_lock = threading.Lock()
 # Maximum output size to prevent memory issues (60KB as mentioned in reference)
 MAX_OUTPUT_SIZE = 60 * 1024
 
+# Maximum session history length to prevent excessive memory usage
+MAX_HISTORY_LENGTH = 100  # Adjust as needed
+
 
 def truncate_output(output: str, max_size: int = MAX_OUTPUT_SIZE) -> str:
     """
@@ -219,7 +222,7 @@ def run_in_terminal(
                 new_dir = parts[1].strip()
                 # Resolve relative to current cwd
                 target_path = Path(cwd) / new_dir
-                if target_path.exists() and target_path.is_dir():
+                if target_path.is_dir():
                     session["cwd"] = str(target_path.resolve())
                     logger.info(
                         f"Updated session working directory to: {session['cwd']}"
@@ -233,6 +236,9 @@ def run_in_terminal(
                 "timestamp": time.time(),
             }
         )
+        # Enforce maximum history length
+        if len(session["history"]) > MAX_HISTORY_LENGTH:
+            session["history"] = session["history"][-MAX_HISTORY_LENGTH:]
 
         result = {
             "success": process.returncode == 0,
@@ -336,16 +342,15 @@ def list_terminal_sessions() -> str:
 
     try:
         with _session_lock:
-            sessions_info = []
-            for sess_id, session in _terminal_sessions.items():
-                sessions_info.append(
-                    {
-                        "session_id": sess_id,
-                        "cwd": session["cwd"],
-                        "command_count": len(session["history"]),
-                        "created_at": session["created_at"],
-                    }
-                )
+            sessions_info = [
+                {
+                    "session_id": sess_id,
+                    "cwd": session["cwd"],
+                    "command_count": len(session["history"]),
+                    "created_at": session["created_at"],
+                }
+                for sess_id, session in _terminal_sessions.items()
+            ]
 
         result = {
             "success": True,
