@@ -7,8 +7,8 @@ from env import AfmEnvironment
 from corral.server import run_server
 
 task_type = "task_5"
-# model = "gpt-4o"
-model = "claude_37"
+model = "gpt-4o"
+# model = "claude_37"
 agent = "tool_calling"
 path = "./afm_working_directory"
 # path = "./test"
