@@ -16,6 +16,8 @@ from tenacity import (
     wait_fixed,
 )
 
+from corral.agents.token_counts import count_tokens_and_add
+
 RETRY_EXCEPTIONS = (
     openai.APITimeoutError,
     openai.APIConnectionError,
@@ -70,9 +72,9 @@ def llm_call(
 
     Args:
         model (str): The model to use.
-        messages (List[LiteLLMMessage]): The messages to send to the model.
+        messages (list[LiteLLMMessage]): The messages to send to the model.
         temperature (float): The temperature to use.
-        tools (Dict[str, Any], optional): The tools to use. If provided, will use tool calling.
+        tools (dict[str, Any], optional): The tools to use. If provided, will use tool calling.
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
         return_usage (bool, optional): If True, returns tuple of (message, usage_info). Defaults to False.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
@@ -80,6 +82,10 @@ def llm_call(
     Returns:
         Message | tuple[Message, dict]: The response from the LiteLLM API, optionally with usage info.
     """
+    messages[0]["content"] = count_tokens_and_add(
+        model=model, messages=messages, tools=tools
+    )
+
     try:
         params = {
             "model": model,
