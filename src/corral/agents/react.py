@@ -138,7 +138,6 @@ class ReActAgent(BaseAgent):
                 actions.append(Action(tool_name=tool_name, arguments=arguments))
             except json.JSONDecodeError as e:
                 logger.error(f"JSON parsing error: {e}")
-                logger.error(f"Failed to parse: {action_input[:200]}...")
 
         return thought, actions if actions else None
 
