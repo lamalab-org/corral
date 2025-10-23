@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
 from promptstore import PromptStore
 
 from corral.agents.base_agent import BaseAgent
@@ -119,13 +120,25 @@ class ReActAgent(BaseAgent):
             tool_name = action_match.group(1).strip()
             try:
                 action_input = action_match.group(2).strip()
+
+                # Convert Python triple-quoted strings to JSON-escaped strings
+                action_input = re.sub(
+                    r'"""(.*?)"""',
+                    lambda m: json.dumps(m.group(1)),
+                    action_input,
+                    flags=re.DOTALL,
+                )
+
+                # Handle Python boolean values
                 action_input = action_input.replace("True", "true").replace(
                     "False", "false"
                 )
+
                 arguments = json.loads(action_input)
                 actions.append(Action(tool_name=tool_name, arguments=arguments))
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON parsing error: {e}")
+                logger.error(f"Failed to parse: {action_input[:200]}...")
 
         return thought, actions if actions else None
 

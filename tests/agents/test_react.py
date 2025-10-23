@@ -309,6 +309,100 @@ Final Answer: <final_answer>Based on my analysis, the answer is 42.</final_answe
         assert actions[0].tool_name == "search"
         assert actions[1].tool_name == "analyze"
 
+    def test_parse_llm_response_unescaped_triple_quotes_simple(self, react_agent):
+        """Test parsing response with simple unescaped triple-quoted string."""
+        response = """<thought>Testing simple case</thought>
+<action>write_file</action>
+<action_input>{"path": "test.py", "content": \"\"\"print('hello')\"\"\"}</action_input>"""
+
+        thought, actions = react_agent.parse_llm_response(response)
+
+        assert thought is not None
+        assert actions is not None
+        assert len(actions) == 1
+        assert actions[0].tool_name == "write_file"
+        assert actions[0].arguments["path"] == "test.py"
+        assert actions[0].arguments["content"] == "print('hello')"
+
+    def test_parse_llm_response_escaped_triple_quotes(self, react_agent):
+        """Test parsing response with properly escaped triple quotes in JSON."""
+        response = """<thought>Testing escaped case</thought>
+<action>write_file</action>
+<action_input>{"path": "test.py", "content": "x = \\"\\"\\"\\nMultiline\\nString\\n\\"\\"\\""}</action_input>"""
+
+        thought, actions = react_agent.parse_llm_response(response)
+
+        assert thought is not None
+        assert actions is not None
+        assert len(actions) == 1
+        assert actions[0].tool_name == "write_file"
+        assert actions[0].arguments["path"] == "test.py"
+        # Should preserve the triple quotes as actual string content
+        assert '"""' in actions[0].arguments["content"]
+        assert "Multiline" in actions[0].arguments["content"]
+
+    def test_parse_llm_response_unescaped_multiline_code(self, react_agent):
+        """Test parsing response with multi-line unescaped triple-quoted code."""
+        response = """<thought>Need to write complex script</thought>
+<action>write_file</action>
+<action_input>{
+  "path": "script.py",
+  "content": \"\"\"import numpy as np
+import pandas as pd
+
+def analyze_data():
+    data = pd.DataFrame({'x': [1, 2, 3]})
+    print(f"Results: {data.mean()}")
+
+analyze_data()\"\"\"
+}</action_input>"""
+
+        thought, actions = react_agent.parse_llm_response(response)
+
+        assert thought is not None
+        assert actions is not None
+        assert len(actions) == 1
+        assert actions[0].tool_name == "write_file"
+        assert actions[0].arguments["path"] == "script.py"
+        content = actions[0].arguments["content"]
+        # Verify multi-line content is preserved
+        assert "import numpy" in content
+        assert "import pandas" in content
+        assert "def analyze_data" in content
+        assert content.count("\n") >= 7  # Multiple lines
+
+    def test_parse_llm_response_standard_json_with_newlines(self, react_agent):
+        """Test parsing response with standard JSON using escaped newlines."""
+        response = """<thought>Standard JSON format</thought>
+<action>write_file</action>
+<action_input>{"path": "test.py", "content": "line1\\nline2\\nline3"}</action_input>"""
+
+        thought, actions = react_agent.parse_llm_response(response)
+
+        assert thought is not None
+        assert actions is not None
+        assert len(actions) == 1
+        assert actions[0].tool_name == "write_file"
+        content = actions[0].arguments["content"]
+        assert content == "line1\nline2\nline3"
+        assert content.count("\n") == 2
+
+    def test_parse_llm_response_boolean_conversion(self, react_agent):
+        """Test parsing response with Python boolean values."""
+        response = """<thought>Testing boolean conversion</thought>
+<action>configure</action>
+<action_input>{"enabled": True, "debug": False, "count": 42}</action_input>"""
+
+        thought, actions = react_agent.parse_llm_response(response)
+
+        assert thought is not None
+        assert actions is not None
+        assert len(actions) == 1
+        assert actions[0].tool_name == "configure"
+        assert actions[0].arguments["enabled"] is True
+        assert actions[0].arguments["debug"] is False
+        assert actions[0].arguments["count"] == 42
+
 
 class TestReActAgentRun:
     """Test cases for ReActAgent.run method."""
