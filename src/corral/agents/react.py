@@ -186,12 +186,11 @@ class ReActAgent(BaseAgent):
             # Check for final answer (XML format)
 
             final_answer_match = re.search(
-                r"<final_answer>(.*?)</final_answer>", llm_response, re.DOTALL
-            )
-            if not final_answer_match:
-                final_answer_match = re.search(
-                    r"Final Answer: (.*)", llm_response, re.DOTALL
-                )
+                            r"<final_answer>(.*?)</final_answer>", llm_response, re.DOTALL
+                        ) or re.search(
+                                r"Final Answer: (.*)", llm_response, re.DOTALL
+                            )
+
 
             if final_answer_match:
                 return final_answer_match.group(1).strip()
