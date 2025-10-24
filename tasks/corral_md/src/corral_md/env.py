@@ -3,10 +3,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
-from score import check_numerical, check_potential_file
+from score import check_numerical, check_potential_file, check_structure
 from tools import (
     convert_structure_to_lammps_data,
-    execute_python_code,
     execute_python_script,
     get_potential_metadata,
     get_structure_from_mp_text,
@@ -17,6 +16,7 @@ from corral.backend.env import Environment
 from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
 from corral.backend.tool import Tool
+from corral.utils.context7_tools import get_library_documentation
 from corral.utils.io_tools import (
     CatFilesTool,
     CopyFileTool,
@@ -31,6 +31,7 @@ from corral.utils.io_tools import (
 SCORING_FUNCTIONS = {
     "check_numerical": check_numerical,
     "check_potential_file": check_potential_file,
+    "check_structure": check_structure,
 }
 
 
@@ -167,6 +168,8 @@ class TaskGroupEnvironment(Environment):
                     "cat_files": CatFilesTool(fs_manager),
                     "copy_file": CopyFileTool(fs_manager),
                     "grep": GrepTool(fs_manager),
+                    "library_docs": get_library_documentation,
+                    "execute_python_script": execute_python_script,
                 }
             )
             logger.info(
@@ -314,8 +317,6 @@ def create_environments(
         "get_potential_metadata": get_potential_metadata,
         "get_structure_from_mp_text": get_structure_from_mp_text,
         "run_lammps": run_lammps,
-        "execute_python_code": execute_python_code,
-        "execute_python_script": execute_python_script,
     }
 
     environments = {}
