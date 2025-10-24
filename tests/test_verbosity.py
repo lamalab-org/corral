@@ -56,28 +56,28 @@ Args:
                 The script must exist and be readable.
                 The path can be relative to the current working directory or absolute.
                 The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/ARGS_DETAILED]
-                [ARGS_SYNTACTIC] "Valid file path to Python script" [/ARGS_SYNTACTIC]
+                [ARGS_SYNTACTICAL] "Valid file path to Python script" [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/ARGS_EXAMPLES]
     args: [ARGS_BRIEF] Optional list of command-line arguments for the script. [/ARGS_BRIEF]
          [ARGS_DETAILED] A list of strings representing command-line arguments to pass to the script.
          These arguments will be passed to the script in the order provided.
          Common arguments include input files, output paths, configuration parameters, and processing options.
          If None, the script will be executed without arguments. [/ARGS_DETAILED]
-         [ARGS_SYNTACTIC] ["arg1", "arg2", "arg3", ...] or None [/ARGS_SYNTACTIC]
+         [ARGS_SYNTACTICAL] ["arg1", "arg2", "arg3", ...] or None [/ARGS_SYNTACTICAL]
          [ARGS_EXAMPLES] ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/ARGS_EXAMPLES]
     timeout: [ARGS_BRIEF] Maximum execution time in seconds. Defaults to 600. [/ARGS_BRIEF]
             [ARGS_DETAILED] The maximum time in seconds the script is allowed to run before being terminated.
             This prevents runaway processes and ensures resource management.
             Choose appropriate values based on expected script execution time.
             For computational simulations, longer timeouts may be necessary. [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] positive integer representing seconds [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] positive integer representing seconds [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/ARGS_EXAMPLES]
     working_dir: [ARGS_BRIEF] Optional working directory for script execution. [/ARGS_BRIEF]
                 [ARGS_DETAILED] The directory from which the script should be executed.
                 This affects relative path resolution and file I/O operations within the script.
                 If None, the current working directory will be used.
                 This is useful when scripts expect to run from specific directories or access relative files. [/ARGS_DETAILED]
-                [ARGS_SYNTACTIC] Valid directory path or None [/ARGS_SYNTACTIC]
+                [ARGS_SYNTACTICAL] Valid directory path or None [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] "/path/to/project", "data/analysis", None [/ARGS_EXAMPLES]
 
 Returns:
@@ -151,7 +151,7 @@ Args:
            [ARGS_DETAILED] The unique identifier used by Materials Project to catalog materials.
            Should be in the format "mp-XXXXX" where XXXXX is a numerical ID.
            This ID corresponds to a specific material entry in the Materials Project database. [/ARGS_DETAILED]
-           [ARGS_SYNTACTIC] "mp-" followed by digits (e.g., "mp-149", "mp-20066") [/ARGS_SYNTACTIC]
+           [ARGS_SYNTACTICAL] "mp-" followed by digits (e.g., "mp-149", "mp-20066") [/ARGS_SYNTACTICAL]
            [ARGS_EXAMPLES] "mp-149" (Silicon), "mp-20066" (CO2), "mp-2" (Li) [/ARGS_EXAMPLES]
 
 Returns:
@@ -184,7 +184,7 @@ FULL_ARG_SCRIPT_PATH = """[ARGS_BRIEF] Path to the Python script file to execute
 The script must exist and be readable.
 The path can be relative to the current working directory or absolute.
 The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/ARGS_DETAILED]
-[ARGS_SYNTACTIC] "Valid file path to Python script" [/ARGS_SYNTACTIC]
+[ARGS_SYNTACTICAL] "Valid file path to Python script" [/ARGS_SYNTACTICAL]
 [ARGS_EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/ARGS_EXAMPLES]
 """
 
@@ -193,7 +193,7 @@ FULL_ARG_MP_ID = """[ARGS_BRIEF] Materials Project identifier string. [/ARGS_BRI
 [ARGS_DETAILED] The unique identifier used by Materials Project to catalog materials.
 Should be in the format "mp-XXXXX" where XXXXX is a numerical ID.
 This ID corresponds to a specific material entry in the Materials Project database. [/ARGS_DETAILED]
-[ARGS_SYNTACTIC] "mp-" followed by digits (e.g., "mp-149", "mp-20066") [/ARGS_SYNTACTIC]
+[ARGS_SYNTACTICAL] "mp-" followed by digits (e.g., "mp-149", "mp-20066") [/ARGS_SYNTACTICAL]
 [ARGS_EXAMPLES] "mp-149" (Silicon), "mp-20066" (CO2), "mp-2" (Li) [/ARGS_EXAMPLES]
 """
 
