@@ -540,7 +540,7 @@ def validate_measurements(topology: str, measurements: str) -> str:
                    [SYNTACTIC] Format: JSON string (with escaped quotes) - `"{\\\"resistors\\\": {\\\"R1\\\": 5.0, \\\"R2\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R2\\\"]]}"` [/SYNTACTIC]
                 [EXAMPLES] `"{\\\"resistors\\\": {\\\"R1\\\": 5.0, \\\"R2\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R2\\\"]]}"`[/EXAMPLES]
         measurements : [BRIEF] JSON string with actual measurements. [/BRIEF]
-                [DETAILED] A JSON string representing a list of CircuitMeasurement objects. Each object should contain node_a, node_b, and at least resistance (though voltage and current are also possible if the tool were to be extended for them). These are the real-world observations. [/DETAILED]
+                [DETAILED] A JSON string representing a list of CircuitMeasurement objects. Each object should contain node_a, node_b, and at least resistance. These are the real-world observations. [/DETAILED]
                 [SYNTACTIC] Format: JSON string (with escaped quotes) - `"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]"` [/SYNTACTIC]
                 [EXAMPLES] `"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]"` [/EXAMPLES]
 
