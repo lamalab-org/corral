@@ -25,6 +25,7 @@ _lammps_image = (
         "pymatgen",
         "MDAnalysis",
         "tidynamics",
+        "ase",
     )
     .run_commands(
         "echo 'export LAMMPS_POTENTIALS=\"/potentials/EAM:/potentials/EAM_FS:/potentials/TERSOFF\"' >> /root/.bashrc"

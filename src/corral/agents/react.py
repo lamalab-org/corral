@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
 from promptstore import PromptStore
 
 from corral.agents.base_agent import BaseAgent
@@ -101,199 +102,44 @@ class ReActAgent(BaseAgent):
             **kwargs,
         )
 
-    def _finish_pending_action(
-        self,
-        actions: list[Action],
-        current_action_name: str | None,
-        current_action_input_lines: list[str],
-        parsing_error: str | None,
-        in_action_input: bool,
-    ) -> str | None:
-        """
-        Helper function to finish a pending action by parsing its input and adding to actions list.
-        Only processes if we're in action input mode and have an action name.
-        If no input lines are provided, defaults to empty arguments {}.
-
-        Returns:
-            str | None: Updated parsing error if JSON parsing fails, otherwise the original parsing_error
-        """
-        if in_action_input and current_action_name:
-            try:
-                if current_action_input_lines:
-                    action_input_str = "\n".join(current_action_input_lines)
-                    arguments = json.loads(action_input_str)
-                else:
-                    # Default to empty arguments if no action input is provided
-                    arguments = {}
-
-                actions.append(
-                    Action(tool_name=current_action_name, arguments=arguments)
-                )
-            except json.JSONDecodeError as e:
-                if parsing_error is None:  # Only capture first parsing error
-                    parsing_error = f"Invalid JSON in Action Input for '{current_action_name}': {e!s}"
-        return parsing_error
-
-    def _finish_previous_thought(
-        self, thought_lines: list[str], in_thought: bool
-    ) -> Thought | None:
-        """
-        Helper function to finish previous thought by joining lines and creating Thought object.
-        Only processes if in_thought is True and thought_lines exist
-
-        Returns:
-            Thought | None: Thought object if meaningful content exists, otherwise None
-        """
-        if in_thought and thought_lines:
-            content = "\n".join(thought_lines).strip()
-            if content:
-                return Thought(content=content)
-        return None
-
-    def extract_final_answer(self, response: str) -> tuple[bool, str | None]:
-        """
-        Extract final answer from response in a case-insensitive way.
-
-        Args:
-            response (str): The response text to search for final answer
-
-        Returns:
-            tuple: (is_final, final_answer)
-            - is_final: True if "Final Answer:" is found (case-insensitive), False otherwise
-            - final_answer: The extracted answer text or None if not found
-        """
-        # Use case-insensitive regex to find "Final Answer:" pattern
-        pattern = r"final\s+answer:\s*(.*)"
-        match = re.search(pattern, response, re.IGNORECASE | re.DOTALL)
-
-        if match:
-            # Extract the answer text and strip whitespace
-            answer = match.group(1).strip()
-            return True, answer
-
-        return False, None
-
     def parse_llm_response(
         self, response: str
-    ) -> tuple[Thought | None, list[Action] | None, bool, str | None]:
-        """
-        Parse LLM response into Thought, Actions, final flag, and parsing error.
+    ) -> tuple[Thought | None, list[Action] | None]:
+        """Parse LLM response into Thought and Actions"""
+        thought_match = re.search(r"<thought>(.*?)</thought>", response, re.DOTALL)
+        action_matches = re.finditer(
+            r"<action>(.*?)</action>.*?<action_input>(.*?)</action_input>",
+            response,
+            re.DOTALL,
+        )
 
-        This parser:
-        1. Returns a boolean flag for final answer detection (eliminates duplicate parsing)
-        2. Handles empty/whitespace-only thoughts consistently (returns None)
-        3. Uses robust line-by-line parsing for better accuracy
-        4. Properly handles multiline thoughts and multiple actions
-        5. Captures JSON parsing errors for better error feedback
+        thought = Thought(thought_match.group(1).strip()) if thought_match else None
 
-        Returns:
-            tuple: (thought, actions, is_final, parsing_error)
-            - thought: Thought object or None if no meaningful thought found
-            - actions: List of Action objects or None if no actions found
-            - is_final: True if response contains "Final Answer:", False otherwise
-            - parsing_error: String describing parsing error or None if no error
-        """
-        lines = response.split("\n")
-
-        # Check for final answer using the new extract_final_answer function
-        is_final, _ = self.extract_final_answer(response)
-
-        # Parse thought
-        thought = None
-        thought_lines = []
-        in_thought = False
-
-        # Parse actions
         actions = []
-        current_action_name = None
-        current_action_input_lines = []
-        in_action_input = False
-        parsing_error = None
+        for action_match in action_matches:
+            tool_name = action_match.group(1).strip()
+            try:
+                action_input = action_match.group(2).strip()
 
-        for line in lines:
-            if line.startswith("Thought:"):
-                # Finish any pending action first
-                parsing_error = self._finish_pending_action(
-                    actions,
-                    current_action_name,
-                    current_action_input_lines,
-                    parsing_error,
-                    in_action_input,
-                )
-                current_action_name = None
-                current_action_input_lines = []
-
-                # Start thought parsing
-                thought_content = line[8:].strip()  # Remove "Thought:" prefix
-                thought_lines = [thought_content] if thought_content else []
-                in_thought = True
-                in_action_input = False
-
-            elif line.startswith("Action:"):
-                # Finish previous thought if any (only if not already processed)
-                if thought is None:
-                    thought = self._finish_previous_thought(thought_lines, in_thought)
-                in_thought = False
-
-                # Finish any pending action first
-                parsing_error = self._finish_pending_action(
-                    actions,
-                    current_action_name,
-                    current_action_input_lines,
-                    parsing_error,
-                    in_action_input,
+                # Convert Python triple-quoted strings to JSON-escaped strings
+                action_input = re.sub(
+                    r'"""(.*?)"""',
+                    lambda m: json.dumps(m.group(1)),
+                    action_input,
+                    flags=re.DOTALL,
                 )
 
-                # Start new action parsing
-                current_action_name = line[7:].strip()  # Remove "Action:" prefix
-                current_action_input_lines = []
-                in_action_input = False
-
-            elif line.startswith("Action Input:"):
-                # Start action input parsing
-                action_input_content = line[
-                    13:
-                ].strip()  # Remove "Action Input:" prefix
-                current_action_input_lines = (
-                    [action_input_content] if action_input_content else []
+                # Handle Python boolean values
+                action_input = action_input.replace("True", "true").replace(
+                    "False", "false"
                 )
-                in_action_input = True
-                in_thought = False
 
-            elif line.lower().startswith("final answer:"):
-                # Finish any pending parsing (only if not already processed)
-                if thought is None:
-                    thought = self._finish_previous_thought(thought_lines, in_thought)
-                parsing_error = self._finish_pending_action(
-                    actions,
-                    current_action_name,
-                    current_action_input_lines,
-                    parsing_error,
-                    in_action_input,
-                )
-                break
+                arguments = json.loads(action_input)
+                actions.append(Action(tool_name=tool_name, arguments=arguments))
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON parsing error: {e}")
 
-            else:
-                # Continue current context
-                if in_thought:
-                    thought_lines.append(line)
-                elif in_action_input:
-                    current_action_input_lines.append(line)
-
-        # Handle end of response (no Final Answer found)
-        if not is_final:
-            # Only finish thought if we haven't already processed it
-            if thought is None:
-                thought = self._finish_previous_thought(thought_lines, in_thought)
-            parsing_error = self._finish_pending_action(
-                actions,
-                current_action_name,
-                current_action_input_lines,
-                parsing_error,
-                in_action_input,
-            )
-
-        return thought, actions if actions else None, is_final, parsing_error
+        return thought, actions if actions else None
 
     def run(
         self,
@@ -332,48 +178,24 @@ class ReActAgent(BaseAgent):
             # Create prompt and get LLM response
             llm_response = self.get_llm_response().content
 
-            # Parse response using improved parser
-            thought, actions, is_final, parsing_error = self.parse_llm_response(
-                llm_response
-            )
-            thought_prefix = f"Thought: {thought.content}\n" if thought else ""
+            self.messages.append(LiteLLMMessage(role="assistant", content=llm_response))
 
-            # Check for final answer using the new extract_final_answer function
-            if is_final:
-                is_final_check, final_answer = self.extract_final_answer(llm_response)
-                if is_final_check and final_answer:
-                    self.messages.append(
-                        LiteLLMMessage(
-                            role="assistant",
-                            content=f"{thought_prefix}Final Answer: {final_answer}",
-                        )
-                    )
-                    return final_answer
+            # Parse response
+            thought, actions = self.parse_llm_response(llm_response)
 
-            # Provide feedback for parsing errors
-            if parsing_error:
-                self.messages.append(
-                    LiteLLMMessage(
-                        role="assistant", content=f"{thought_prefix}Action: (attempted)"
-                    )
-                )
-                self.messages.append(
-                    LiteLLMMessage(
-                        role="user",
-                        content=f"Error: {parsing_error}. Please ensure your Action Input is valid JSON format.",
-                        name="parsing-error",
-                    )
-                )
-                continue  # Skip to next iteration to let agent try again
+            # Check for final answer (XML format)
+
+            final_answer_match = re.search(
+                r"<final_answer>(.*?)</final_answer>", llm_response, re.DOTALL
+            ) or re.search(r"Final Answer: (.*)", llm_response, re.DOTALL)
+
+            if final_answer_match:
+                return final_answer_match.group(1).strip()
 
             # Execute tools if actions exist
             if actions:
+                # Check for final answer
                 for action in actions:
-                    action_content = f"{thought_prefix}Action: {action.tool_name}\nAction Input: {json.dumps(action.arguments)}"
-                    self.messages.append(
-                        LiteLLMMessage(role="assistant", content=action_content)
-                    )
-
                     # Execute tool and get response
                     tool_response = interface.execute_tool(
                         task_id, action.tool_name, action.arguments
@@ -396,7 +218,7 @@ class ReActAgent(BaseAgent):
                 self.messages.append(
                     LiteLLMMessage(
                         role="user",
-                        content=str(llm_response),
+                        content="No actions to execute. This is due to parsing error or missing action in the response. Please use the tags <action> and <action_input> to specify your action, or <final_answer> to provide your final answer.",
                     )
                 )
 
