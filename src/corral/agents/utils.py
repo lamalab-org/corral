@@ -16,8 +16,6 @@ from tenacity import (
     wait_fixed,
 )
 
-from corral.agents.token_counts import count_tokens_and_add
-
 RETRY_EXCEPTIONS = (
     openai.APITimeoutError,
     openai.APIConnectionError,
@@ -82,10 +80,6 @@ def llm_call(
     Returns:
         Message | tuple[Message, dict]: The response from the LiteLLM API, optionally with usage info.
     """
-    messages[0]["content"] = count_tokens_and_add(
-        model=model, messages=messages, tools=tools
-    )
-
     try:
         params = {
             "model": model,
@@ -421,3 +415,84 @@ def save_agent_messages(
         )
 
     return file_path
+
+
+def get_context_window(model: str) -> int:
+    """
+    Return the total context window (max tokens) for a given LiteLLM model name.
+
+    Tries litellm.get_max_tokens(model) first, then falls back to the
+    model cost/context map. Returns None if the model isn't known.
+
+    Args:
+        model (str): The model name, e.g., "gpt-4o", "claude-haiku-4-5".
+
+    Returns:
+        int: The max input tokens for the model, or None if unknown.
+    """
+    return litellm.model_cost.get(model, {}).get("max_input_tokens", None)
+
+
+def remove_old_budget_message(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Remove any existing CONTEXT_BUDGET messages from the first message in the list.
+
+    Args:
+        messages (List[dict[str, Any]]): The messages to filter.
+
+    Returns:
+        List[dict[str, Any]]: The filtered messages.
+    """
+    if messages and "[CONTEXT_BUDGET]" in str(messages[0].get("content", "")):
+        # Replace content between CONTEXT_BUDGET tokens with nothing in first message
+        content = str(messages[0]["content"])
+        start_tag = "[CONTEXT_BUDGET]"
+        end_tag = "[/CONTEXT_BUDGET]"
+
+        start_idx = content.find(start_tag)
+        end_idx = content.find(end_tag)
+
+        if start_idx != -1 and end_idx != -1:
+            # Keep everything after end_tag (remove budget from beginning)
+            messages[0]["content"] = content[end_idx + len(end_tag) :].lstrip()
+    return messages
+
+
+def count_tokens_and_add(
+    messages: list[dict[str, Any]], model: str, count: int
+) -> list[dict[str, Any]]:
+    """
+    Count tokens in messages and add token count as metadata if supported.
+
+    Args:
+        messages (list[dict[str, Any]]): The messages to count tokens for.
+        model (str): The model to use for token counting.
+        count (int): The token count to add as metadata.
+
+    Returns:
+        list[dict[str, Any]]: The messages with token count metadata added.
+    """
+    window = get_context_window(model=model)
+    if window is None:
+        window = get_context_window(model=model.split("/")[-1])
+
+    if window is None:
+        window = 8192  # Default to 8k if unknown
+
+    messages = remove_old_budget_message(messages)
+    budget_message = f"""[CONTEXT_BUDGET]
+Note that the context budget is not exact since it is based on previous iterations.
+model: {model}
+max_context_tokens: {window}
+prompt_tokens_now: {count}
+reserve_for_output: 100
+remaining_budget: {window - count - 100}
+actions_if_low_budget:
+  - avoid reading entire files
+  - prefer short answers (<= 150 tokens)
+  - summarize or drop thoughts if needed
+[/CONTEXT_BUDGET]
+"""
+    # Ensure content is a string before concatenation
+    messages[0]["content"] = budget_message + str(messages[0]["content"])
+    return messages
