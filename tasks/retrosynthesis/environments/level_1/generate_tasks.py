@@ -58,40 +58,42 @@ TARGETS = [
 def main():
     tasks_path = Path(__file__).parent / "tasks"
     for i, molecule in enumerate(MOLECULES):
-        task = {
-            "id": f"make_{i+1}_lvl1",
-            "name": f"make_{i+1}_lvl1",
-            "keywords": ["chemistry", "synthesis", "retrosynthesis"],
-            "metrics": ["binary"],
-            "input": {
-                "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The route must have at least {len(TEMPLATES[i])} reactions.  You should use the template/s {TEMPLATES[i]} in this order.",
-                "input_from_task": False,
-                "input_for_task": False,
-            },
-            "output": [
-                {
-                    "type": "list",
-                    "target": [TARGETS[i]],
-                    "threshold": None,
-                }
-            ],
-            "scoring_fn": "check_reactants",
-            "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
-            "tools": [
-                "search_template_catalog_by_criteria",
-                "get_template",
-                "get_available_functional_groups",
-                "apply_template",
-                "verify_step",
-                "verify_route",
-                "search_catalog_by_smiles",
-                "is_buyable",
-                "suggest_protecting_groups",
-                "deprotect_molecule",
-                "detect_functional_groups",
-                "detect_protection_groups",
-            ],
-        }
+        task = [
+            {
+                "id": f"make_{i+1}_lvl1",
+                "name": f"make_{i+1}_lvl1",
+                "keywords": ["chemistry", "synthesis", "retrosynthesis"],
+                "metrics": ["binary"],
+                "input": {
+                    "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The route must have at least {len(TEMPLATES[i])} reactions.  You should use the template/s {TEMPLATES[i]} in this order.",
+                    "input_from_task": False,
+                    "input_for_task": False,
+                },
+                "output": [
+                    {
+                        "type": "list",
+                        "target": [TARGETS[i]],
+                        "threshold": None,
+                    }
+                ],
+                "scoring_fn": "check_reactants",
+                "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
+                "tools": [
+                    "search_template_catalog_by_criteria",
+                    "get_template",
+                    "get_available_functional_groups",
+                    "apply_template",
+                    "verify_step",
+                    "verify_route",
+                    "search_catalog_by_smiles",
+                    "is_buyable",
+                    "suggest_protecting_groups",
+                    "deprotect_molecule",
+                    "detect_functional_groups",
+                    "detect_protection_groups",
+                ],
+            }
+        ]
         task_file = tasks_path / f"make_{i+1}.json"
         with task_file.open("w") as f:
             json.dump(task, f, indent=4)

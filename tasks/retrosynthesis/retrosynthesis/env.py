@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 
 from loguru import logger
-from retrosynthesis.score import check_reactants, score_final
+from retrosynthesis.score import check_reactants, check_template, score_final
 from retrosynthesis.tools import create_tools
 
 from corral.backend.env import Environment
@@ -23,7 +23,11 @@ from corral.backend.task import TaskDefinition, TaskGroup
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "CORRAL_WORK_DIR/rethrosynthesis")
 
-SCORING_FUNCTIONS = {"score_final": score_final, "check_reactants": check_reactants}
+SCORING_FUNCTIONS = {
+    "score_final": score_final,
+    "check_reactants": check_reactants,
+    "check_template": check_template,
+}
 
 
 def load_tasks_from_json(
@@ -37,22 +41,23 @@ def load_tasks_from_json(
 
         with task_file.open() as f:
             task_data = json.load(f)
-        task_id = task_data["id"]
-        initial_input = task_data.get("initial_input", {"work_dir": work_dir})
-        input_from_tasks = task_data.get("input", {}).get("input_from_task", [])
-        if not isinstance(input_from_tasks, list):
-            input_from_tasks = []
+        for task in task_data:
+            task_id = task["id"]
+            initial_input = task.get("initial_input", {"work_dir": work_dir})
+            input_from_tasks = task.get("input", {}).get("input_from_task", [])
+            if not isinstance(input_from_tasks, list):
+                input_from_tasks = []
 
-        tasks[task_id] = TaskDefinition(
-            name=task_data["name"],
-            description=task_data["input"]["prompt"],
-            tools=task_data.get("tools", []),
-            scoring_fn=SCORING_FUNCTIONS[str(task_data["scoring_fn"])],
-            scoring_inputs=task_data["output"][0]["target"],
-            submission_format=task_data.get("submission_format", ""),
-            input_from_tasks=input_from_tasks,
-            initial_input=initial_input,
-        )
+            tasks[task_id] = TaskDefinition(
+                name=task["name"],
+                description=task["input"]["prompt"],
+                tools=task.get("tools", []),
+                scoring_fn=SCORING_FUNCTIONS[str(task["scoring_fn"])],
+                scoring_inputs=task["output"][0]["target"],
+                submission_format=task.get("submission_format", ""),
+                input_from_tasks=input_from_tasks,
+                initial_input=initial_input,
+            )
     return tasks
 
 

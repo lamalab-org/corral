@@ -29,40 +29,42 @@ PRIZES = [
 def main():
     tasks_path = Path(__file__).parent / "tasks"
     for i, molecule in enumerate(MOLECULES):
-        task = {
-            "id": f"make_{i+1}_lvl3",
-            "name": f"make_{i+1}_lvl3",
-            "keywords": ["chemistry", "synthesis", "retrosynthesis"],
-            "metrics": ["binary"],
-            "input": {
-                "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The leaves on the retrosynthesis tree should be commercially available chemicals.",
-                "input_from_task": False,
-                "input_for_task": False,
-            },
-            "output": [
-                {
-                    "type": "integer",
-                    "target": 9999.0,
-                    "threshold": None,
-                }
-            ],
-            "scoring_fn": "score_final",
-            "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
-            "tools": [
-                "search_template_catalog_by_criteria",
-                "get_template",
-                "get_available_functional_groups",
-                "apply_template",
-                "verify_step",
-                "verify_route",
-                "search_catalog_by_smiles",
-                "is_buyable",
-                "suggest_protecting_groups",
-                "deprotect_molecule",
-                "detect_functional_groups",
-                "detect_protection_groups",
-            ],
-        }
+        task = [
+            {
+                "id": f"make_{i+1}_lvl3",
+                "name": f"make_{i+1}_lvl3",
+                "keywords": ["chemistry", "synthesis", "retrosynthesis"],
+                "metrics": ["binary"],
+                "input": {
+                    "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The leaves on the retrosynthesis tree should be commercially available chemicals.",
+                    "input_from_task": False,
+                    "input_for_task": False,
+                },
+                "output": [
+                    {
+                        "type": "integer",
+                        "target": 9999.0,
+                        "threshold": None,
+                    }
+                ],
+                "scoring_fn": "score_final",
+                "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
+                "tools": [
+                    "search_template_catalog_by_criteria",
+                    "get_template",
+                    "get_available_functional_groups",
+                    "apply_template",
+                    "verify_step",
+                    "verify_route",
+                    "search_catalog_by_smiles",
+                    "is_buyable",
+                    "suggest_protecting_groups",
+                    "deprotect_molecule",
+                    "detect_functional_groups",
+                    "detect_protection_groups",
+                ],
+            }
+        ]
         task_file = tasks_path / f"make_{i+1}.json"
         with task_file.open("w") as f:
             json.dump(task, f, indent=4)

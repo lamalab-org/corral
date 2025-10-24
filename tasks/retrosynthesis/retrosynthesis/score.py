@@ -6,6 +6,7 @@ from retrosynthesis.retrosynthesis_utils import (
     _is_buyable,
     apply_template_retro,
     check_price,
+    search_by_template,
     species_match,
     valid_smiles,
 )
@@ -192,3 +193,17 @@ def check_reactants(prediction: dict, target: list) -> float:
         if all(target_canonical in leaf_mols for target_canonical in target_mols)
         else 0.0
     )
+
+
+def check_template(prediction: dict, target: str) -> float:
+    pred_template = prediction.get("template_id")
+    if pred_template is None or pred_template != target:
+        return 0.0
+
+    ground_rxn = search_by_template(target)
+    ground_rxn_mapped = ground_rxn["mapped_rxn"]
+    pred_rxn = prediction.get("mapped_rxn")
+    if pred_rxn is None or pred_rxn != ground_rxn_mapped:
+        return 0.0
+
+    return 1.0

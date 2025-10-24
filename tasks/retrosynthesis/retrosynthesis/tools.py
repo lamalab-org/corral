@@ -113,6 +113,17 @@ def search_template_catalog_by_criteria(
             [RETURNS_SYNTACTICAL] List of dictionaries or an empty list [/RETURNS_SYNTACTICAL]
             [RETURNS_EXAMPLES] [{"template_id": "123", "smarts": "..."}], [] [/RETURNS_EXAMPLES]
 
+    [RAISES] Exceptions:
+        TypeError:
+            [ERROR_WHEN] Raised when any of the list parameters is not a list. [/ERROR_WHEN]
+            [ERROR_DETAILS] This occurs if the user provides a string or other non-list type for any of the parameters that expect a list of strings. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Ensure that all parameters expecting lists are provided with list types, even if they contain only a single string. [/ERROR_RECOVERY]
+
+        Exception:
+            [ERROR_WHEN] Raised for any unexpected errors during the search process. [/ERROR_WHEN]
+            [ERROR_DETAILS] This can occur due to various reasons, such as issues with the retrosynthetic template database or internal processing errors. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Check the input parameters and try again. If the issue persists, let the user know and try another way of solving the task. [/ERROR_RECOVERY]
+
     [LIMITATIONS] Known limitations:
         - The function relies on the completeness and accuracy of the retrosynthetic template catalog. If the catalog is incomplete or contains errors, the search results may be affected.
         - The criteria provided must be specific enough to yield meaningful results; overly broad criteria may return too many templates, while overly narrow criteria may return none.
@@ -120,6 +131,23 @@ def search_template_catalog_by_criteria(
         - The accuracy of the search results is dependent on the quality of the underlying reaction templates and algorithms used in the retrosynthetic analysis.
     [/LIMITATIONS]
     """
+    # Validate that list parameters are actually lists, not strings
+    list_params = {
+        "functional_groups_broken": functional_groups_broken,
+        "functional_groups_formed": functional_groups_formed,
+        "bonds_formed": bonds_formed,
+        "bonds_broken": bonds_broken,
+        "bonds_order_changed": bonds_order_changed,
+    }
+
+    for param_name, param_value in list_params.items():
+        if param_value is not None and not isinstance(param_value, list):
+            raise TypeError(
+                f"Parameter '{param_name}' must be a list of strings, not a {type(param_value).__name__}. "
+                f"Received: {param_value!r}. "
+                f"Example: If you want to search for 'alcohol', use [{param_value!r}] instead of {param_value!r}"
+            )
+
     return search_reactions_by_criteria(
         functional_groups_broken=functional_groups_broken,
         functional_groups_formed=functional_groups_formed,
@@ -235,13 +263,19 @@ def get_available_functional_groups() -> str:
             [RETURNS_SYNTACTICAL] List of valid functional group strings [/RETURNS_SYNTACTICAL]
             [RETURNS_EXAMPLES] ["alcohol", "amine", "carboxylic_acid"] [/RETURNS_EXAMPLES]
 
+    [RAISES] Exceptions:
+        Exception:
+            [ERROR_WHEN] Raised for any unexpected errors during the retrieval process. [/ERROR_WHEN]
+            [ERROR_DETAILS] This can occur due to various reasons, such as issues with the internal data structure or access permissions. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] If the issue persists, let the user know and try another way of solving the task. [/ERROR_RECOVERY]
+    [/RAISES]
+
     [LIMITATIONS] Known limitations:
         - The list of functional groups is predefined and may not cover all possible functional groups found in chemical compounds.
         - The function does not provide additional information about each functional group, such as its chemical properties or reactivity.
         - The functional groups are based on common motifs and may not account for all variations or derivatives of these groups.
     [/LIMITATIONS]
     """
-
     return str(FUNCTIONAL_GROUPS)
 
 
@@ -891,6 +925,13 @@ def cas_to_smiles(cas_number: str) -> str:
             [ERROR_DETAILS] This could be due to connectivity issues, invalid CAS number format, or server errors in the conversion service. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Verify the CAS number format if the error has to do with the CAS number. If the error comes from the conversion service, inform the user to try again later. [/ERROR_RECOVERY]
     [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - The function relies on the accuracy and completeness of the underlying database or service used for the conversion.
+    - Not all CAS numbers may have a corresponding isomeric SMILES representation, especially for novel or less common compounds.
+    - The function does not handle cases where multiple isomeric SMILES strings may correspond to the same CAS number.
+    - If the conversion service is down or unreachable, the function will not be able to return results.
+    [/LIMITATIONS]
     """
     return remote_call(function_name="get_isomeric_smiles_pubchem", env_name="chemenv")(
         compound=cas_number
