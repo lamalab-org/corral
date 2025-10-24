@@ -56,7 +56,7 @@ class FSManager:
         try:
             resolved_path = self._resolve_path(path)
             if self.app:
-                list_files_ = modal.Function.lookup(self.app, "list_files")
+                list_files_ = modal.Function.from_name(self.app, "list_files")
                 return list_files_.remote(resolved_path, recursive)
             return self.fs.ls(resolved_path, detail=False, recursive=recursive)
         except Exception as e:
@@ -67,7 +67,7 @@ class FSManager:
         try:
             resolved_path = self._resolve_path(path)
             if self.app:
-                read_file_ = modal.Function.lookup(self.app, "read_file")
+                read_file_ = modal.Function.from_name(self.app, "read_file")
                 return read_file_.remote(resolved_path)
             with self.fs.open(resolved_path, "r") as f:
                 return f.read()
@@ -79,7 +79,7 @@ class FSManager:
         try:
             resolved_path = self._resolve_path(path)
             if self.app:
-                write_file_ = modal.Function.lookup(self.app, "write_file")
+                write_file_ = modal.Function.from_name(self.app, "write_file")
                 write_file_.remote(resolved_path, content)
             else:
                 # Ensure directory exists
@@ -96,7 +96,7 @@ class FSManager:
         try:
             resolved_path = self._resolve_path(path)
             if self.app:
-                file_info_ = modal.Function.lookup(self.app, "file_info")
+                file_info_ = modal.Function.from_name(self.app, "file_info")
                 return file_info_.remote(resolved_path)
             return self.fs.info(resolved_path)
         except Exception as e:
@@ -107,7 +107,7 @@ class FSManager:
             resolved_source = self._resolve_path(source)
             resolved_dest = self._resolve_path(destination)
             if self.app:
-                copy_file_ = modal.Function.lookup(self.app, "copy_file")
+                copy_file_ = modal.Function.from_name(self.app, "copy_file")
                 copy_file_.remote(resolved_source, resolved_dest)
             else:
                 self.fs.copy(resolved_source, resolved_dest)
@@ -121,7 +121,7 @@ class FSManager:
             resolved_source = self._resolve_path(source)
             resolved_dest = self._resolve_path(destination)
             if self.app:
-                move_file_ = modal.Function.lookup(self.app, "move_file")
+                move_file_ = modal.Function.from_name(self.app, "move_file")
                 move_file_.remote(resolved_source, resolved_dest)
             else:
                 # fsspec does not always provide a move method; if not, copy then remove.
@@ -140,7 +140,7 @@ class FSManager:
         try:
             resolved_path = self._resolve_path(path)
             if self.app:
-                mkdir_ = modal.Function.lookup(self.app, "mkdir")
+                mkdir_ = modal.Function.from_name(self.app, "mkdir")
                 mkdir_.remote(resolved_path, create_parents)
             else:
                 if create_parents and hasattr(self.fs, "mkdirs"):
@@ -154,7 +154,7 @@ class FSManager:
         """Concatenate the contents of multiple files with the given separator."""
         resolved_paths = [self._resolve_path(path) for path in paths]
         if self.app:
-            cat_files_ = modal.Function.lookup(self.app, "cat_files")
+            cat_files_ = modal.Function.from_name(self.app, "cat_files")
             return cat_files_.remote(resolved_paths, separator)
 
         contents = []
