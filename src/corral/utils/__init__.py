@@ -8,4 +8,5 @@ __all__ = [
     "search_tools",
     "task_group",
     "tool_helpers",
+    "context7_tools",
 ]
