@@ -492,10 +492,9 @@ def Code_Executor(code: str) -> int:
         para = get_params()
         output = f"Code executed successfully with current AFM parameters: {para}"
         logger.info(f"Code_Executor: {output}")
+        return output
     except Exception as e:
-        logger.error(f"Code_Executor: Error occurred - {e}")
-        output = e
-    return output
+        raise Exception(f"An error occurred during code execution: {e}") from e
 
 
 @tool
@@ -667,9 +666,9 @@ def Image_Analyzer(
         if calculate_rms_roughness:
             result["rms_roughness"] = rms_roughness
 
+        return result
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
-        return {"status": "Error", "message": f"An error occurred: {e!s}"}
+        raise Exception(f"An error occurred during image processing: {e}") from e
 
 
 def get_params():
