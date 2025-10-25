@@ -260,7 +260,7 @@ def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:
         mp_id (str):
             [ARGS_BRIEF] Materials Project ID of the material. [/ARGS_BRIEF]
             [ARGS_DETAILED] A unique identifier used by the Materials Project database to reference a material. The ID typically starts with "mp-" followed by digits. It must correspond to an existing entry. [/ARGS_DETAILED]
-            [ARGS_SYNTACTICAL] Format: '"mp-XXXX" where X is a digit'. [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] Format: '"mp-XXXX" where X is a digit'. [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] Examples: "mp-149", "mp-13", "mp-1234567" [/ARGS_EXAMPLES]
         file_path (str):
             [ARGS_BRIEF] Destination path for saving the CIF file. [/ARGS_BRIEF]
