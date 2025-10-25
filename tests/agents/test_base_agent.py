@@ -56,7 +56,7 @@ def test_base_agent_default_initialization():
     assert agent.api_endpoint is None
     assert agent.temperature == 0.7
     assert agent.messages == []
-    assert agent.token_usage == []
+    assert agent.token_usage == {}
 
 
 def test_base_agent_custom_initialization(mock_prompt_store):
@@ -171,8 +171,9 @@ def test_base_agent_get_llm_response_success(monkeypatch, concrete_agent):
     response = concrete_agent.get_llm_response()
 
     assert response == mock_response
-    assert len(concrete_agent.token_usage) == 1
-    assert concrete_agent.token_usage[0] == mock_usage
+    # token_usage is now a dict with the three token counts
+    assert len(concrete_agent.token_usage) == 3
+    assert concrete_agent.token_usage == mock_usage
 
 
 def test_get_llm_response_with_tools(monkeypatch, concrete_agent):
@@ -226,6 +227,9 @@ def test_get_llm_response_generic_error(monkeypatch, concrete_agent):
         raise Exception("Generic error")
 
     monkeypatch.setattr("corral.agents.base_agent.llm_call", mock_llm_call_with_error)
+
+    # Need to provide messages so count_tokens_and_add doesn't fail
+    concrete_agent.messages = [{"role": "user", "content": "Test message"}]
 
     with pytest.raises(Exception, match="Generic error"):
         concrete_agent.get_llm_response()
@@ -412,43 +416,44 @@ def test_get_total_token_usage_empty(concrete_agent):
 
 def test_get_total_token_usage_with_data(concrete_agent):
     """Test token usage calculation with usage data."""
-    concrete_agent.token_usage = [
-        {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
-        {"prompt_tokens": 200, "completion_tokens": 75, "total_tokens": 275},
-        {"prompt_tokens": 50, "completion_tokens": 25, "total_tokens": 75},
-    ]
+    concrete_agent.token_usage = {
+        "prompt_tokens": 50,
+        "completion_tokens": 25,
+        "total_tokens": 75,
+    }
 
     usage = concrete_agent.get_total_token_usage()
 
     assert usage == {
-        "prompt_tokens": 350,
-        "completion_tokens": 150,
-        "total_tokens": 500,
+        "prompt_tokens": 50,
+        "completion_tokens": 25,
+        "total_tokens": 75,
     }
 
 
 def test_get_total_token_usage_with_missing_keys(concrete_agent):
     """Test token usage calculation with missing keys."""
-    concrete_agent.token_usage = [
-        {"prompt_tokens": 100, "total_tokens": 150},  # Missing completion_tokens
-        {"completion_tokens": 75, "total_tokens": 275},  # Missing prompt_tokens
-        {},  # Missing all keys
-    ]
+    concrete_agent.token_usage = {
+        "completion_tokens": 75,
+        "total_tokens": 275,
+    }  # Missing prompt_tokens
 
     usage = concrete_agent.get_total_token_usage()
 
     assert usage == {
-        "prompt_tokens": 100,
+        "prompt_tokens": 0,
         "completion_tokens": 75,
-        "total_tokens": 425,
+        "total_tokens": 275,
     }
 
 
 def test_reset_token_usage(concrete_agent):
     """Test resetting token usage."""
-    concrete_agent.token_usage = [
-        {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
-    ]
+    concrete_agent.token_usage = {
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "total_tokens": 150,
+    }
 
     concrete_agent.reset_token_usage()
 
