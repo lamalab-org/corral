@@ -19,6 +19,6 @@ k, b = params
 print(f"Rq = {k} * A**{b}")
 
 # Save the results
-with open('C:/Users/Admin/Desktop/corral/mat-agent-bench/tasks/afm/src/afm/enviroment/tasks_3/power_law_results.txt', 'w') as f:
+with open("C:/Users/Admin/Desktop/corral/mat-agent-bench/tasks/afm/src/afm/enviroment/tasks_3/power_law_results.txt", "w") as f:
     f.write(f"Rq = {k} * A**{b}\n")
     f.write(f"k: {k}, b: {b}\n")
