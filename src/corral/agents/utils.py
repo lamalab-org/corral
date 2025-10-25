@@ -496,3 +496,45 @@ actions_if_low_budget:
     # Ensure content is a string before concatenation
     messages[0]["content"] = budget_message + str(messages[0]["content"])
     return messages
+
+
+def convert_outermost_triple_quotes(text: str) -> str:
+    """Convert only the outermost triple-quoted strings to JSON format."""
+    result = []
+    i = 0
+
+    while i < len(text):
+        if text[i : i + 3] == '"""':
+            # Found opening triple quote - find its closing match
+            # Look backwards to see if this is a JSON value start
+            preceding = text[:i].rstrip()
+            if preceding and (preceding[-1] in ":," or preceding.endswith("{")):
+                # This is a JSON value, find the matching closing quote
+                start = i + 3
+                j = start
+
+                # Scan for the closing triple quote
+                # Skip to end or find """ followed by JSON delimiter
+                while j <= len(text) - 3:
+                    if text[j : j + 3] == '"""':
+                        # Check what comes after
+                        after = text[j + 3 :].lstrip()
+                        if not after or after[0] in ",}":
+                            # This is the closing quote
+                            content = text[start:j]
+                            result.append(json.dumps(content))
+                            i = j + 3
+                            break
+                    j += 1
+                else:
+                    # Didn't find closing, keep original
+                    result.append(text[i])
+                    i += 1
+            else:
+                result.append(text[i])
+                i += 1
+        else:
+            result.append(text[i])
+            i += 1
+
+    return "".join(result)
