@@ -8,7 +8,7 @@ from promptstore import PromptStore
 
 from corral.agents.base_agent import BaseAgent
 from corral.agents.prompt_utils import create_prompt
-from corral.agents.utils import LiteLLMMessage
+from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
 from corral.router.routes import CorralRouter
 
 
@@ -121,23 +121,18 @@ class ReActAgent(BaseAgent):
             try:
                 action_input = action_match.group(2).strip()
 
-                # Convert Python triple-quoted strings to JSON-escaped strings
-                action_input = re.sub(
-                    r'"""(.*?)"""',
-                    lambda m: json.dumps(m.group(1)),
-                    action_input,
-                    flags=re.DOTALL,
-                )
+                converted_input = convert_outermost_triple_quotes(action_input)
 
                 # Handle Python boolean values
-                action_input = action_input.replace("True", "true").replace(
+                converted_input = converted_input.replace("True", "true").replace(
                     "False", "false"
                 )
 
-                arguments = json.loads(action_input)
+                # Parse as JSON
+                arguments = json.loads(converted_input)
                 actions.append(Action(tool_name=tool_name, arguments=arguments))
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON parsing error: {e}")
+            except (json.JSONDecodeError, ValueError, SyntaxError) as e:
+                logger.error(f"Parsing error: {e}")
 
         return thoughts if thoughts else None, actions if actions else None
 

@@ -1155,3 +1155,183 @@ Final Answer: <final_answer>Successfully recovered and found the answer.</final_
             for msg in agent.messages
         )
         assert error_message_found
+
+    def test_actions_before_final_answer(self, mock_interface, monkeypatch):
+        """Test that actions are executed before final answer is returned in same message."""
+        agent = ReActAgent(model="test-model", max_iterations=5)
+
+        # Single response containing multiple thoughts, actions with code, and final answer
+        # Note: LLMs typically output triple quotes directly without escaping, including nested docstrings
+        # Using triple single quotes for the outer string so we can have unescaped triple double quotes inside
+        response = MockLLMResponse(
+            content='''Thought: <thought>I need to search for data and then analyze it before providing the answer.</thought>
+Action: <action>write_script</action>
+Action Input: <action_input>{
+  "filename": "search.py",
+  "content": """import pandas as pd
+import numpy as np
+
+def search_data(query):
+    """Search for data based on query.
+
+    Args:
+        query: Search query string
+
+    Returns:
+        DataFrame with search results
+    """
+    results = pd.DataFrame({'id': [1, 2, 3], 'value': [10, 20, 30]})
+    filtered = results.query(query)
+    return filtered
+
+if __name__ == '__main__':
+    data = search_data('id > 1')
+    print(data)
+    print(f'Found {len(data)} results')"""
+}</action_input>
+Thought: <thought>Now I'll create an analysis script to process the search results.</thought>
+Action: <action>write_script</action>
+Action Input: <action_input>{
+  "filename": "analyze.py",
+  "content": """import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+
+def analyze_results(data):
+    """Analyze the search results.
+
+    Args:
+        data: Input DataFrame
+
+    Returns:
+        Analysis summary dictionary
+    """
+    summary = {
+        'mean': data['value'].mean(),
+        'std': data['value'].std(),
+        'count': len(data),
+        'max': data['value'].max(),
+        'min': data['value'].min()
+    }
+
+    # Create visualization
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x='id', y='value', data=data)
+    plt.title('Search Results Analysis')
+    plt.xlabel('ID')
+    plt.ylabel('Value')
+    plt.savefig('results.png')
+    plt.close()
+
+    return summary
+
+if __name__ == '__main__':
+    # Example usage
+    test_data = pd.DataFrame({'id': [1, 2], 'value': [20, 30]})
+    result = analyze_results(test_data)
+    print(result)"""
+}</action_input>
+Final Answer: <final_answer>Based on the search and analysis, the answer is 42.</final_answer>'''
+        )
+
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return response
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            return []
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
+
+        # Set up tool responses for both actions
+        mock_interface.tool_responses = [
+            ToolResponse(
+                success=True, result="Script created successfully", error=None
+            ),
+            ToolResponse(success=True, result="Analysis script created", error=None),
+        ]
+
+        result = agent.run(mock_interface, "test_task")
+
+        # Verify final answer is returned
+        assert result == "Based on the search and analysis, the answer is 42."
+
+        # Verify that both thoughts were captured in the parsing
+        thoughts, actions = agent.parse_llm_response(response.content)
+        assert thoughts is not None
+        assert len(thoughts) == 2
+        assert (
+            thoughts[0].content
+            == "I need to search for data and then analyze it before providing the answer."
+        )
+        assert (
+            thoughts[1].content
+            == "Now I'll create an analysis script to process the search results."
+        )
+
+        # Verify that both actions were executed before returning
+        assert len(mock_interface.tool_calls) == 2
+        assert mock_interface.tool_calls[0]["tool_name"] == "write_script"
+        assert mock_interface.tool_calls[0]["arguments"]["filename"] == "search.py"
+        # Verify the content contains multi-line code with docstrings (triple quotes)
+        search_content = mock_interface.tool_calls[0]["arguments"]["content"]
+        assert "import pandas as pd" in search_content
+        assert "import numpy as np" in search_content
+        assert "Search for data based on query" in search_content
+        assert "def search_data(query):" in search_content
+        assert "if __name__ == '__main__':" in search_content
+        assert "print(f'Found {len(data)} results')" in search_content
+        # Verify it's multi-line
+        assert search_content.count("\n") >= 10
+
+        assert mock_interface.tool_calls[1]["tool_name"] == "write_script"
+        assert mock_interface.tool_calls[1]["arguments"]["filename"] == "analyze.py"
+        # Verify the content contains multi-line code with docstrings (triple quotes)
+        analyze_content = mock_interface.tool_calls[1]["arguments"]["content"]
+        assert "import matplotlib.pyplot as plt" in analyze_content
+        assert "import seaborn as sns" in analyze_content
+        assert "Analyze the search results" in analyze_content
+        assert "def analyze_results(data):" in analyze_content
+        assert "plt.savefig('results.png')" in analyze_content
+        assert "'max': data['value'].max()" in analyze_content
+        # Verify it's multi-line
+        assert analyze_content.count("\n") >= 25
+
+        # Verify only one LLM call was made (single iteration)
+        assert call_tracker["get_llm_response"] == 1
+
+        # Verify message history contains the action executions and observations
+        messages = agent.messages
+
+        # Should contain the assistant's response with actions and final answer
+        assert any(
+            msg.get("role") == "assistant"
+            and "<action>write_script</action>" in msg.get("content", "")
+            and "<final_answer>" in msg.get("content", "")
+            for msg in messages
+        )
+
+        # Should contain observations from both tool executions
+        first_observation_found = any(
+            msg.get("role") == "user"
+            and "Observation: Script created successfully" in msg.get("content", "")
+            for msg in messages
+        )
+        assert (
+            first_observation_found
+        ), "First script creation observation should be in message history"
+
+        second_observation_found = any(
+            msg.get("role") == "user"
+            and "Observation: Analysis script created" in msg.get("content", "")
+            for msg in messages
+        )
+        assert (
+            second_observation_found
+        ), "Second script creation observation should be in message history"
