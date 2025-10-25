@@ -154,10 +154,11 @@ class TestReActAgentParsing:
             "Thought: <thought>I need to analyze this problem carefully.</thought>"
         )
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thoughts, actions = react_agent.parse_llm_response(response)
 
-        assert thought is not None
-        assert thought.content == "I need to analyze this problem carefully."
+        assert thoughts is not None
+        assert len(thoughts) == 1
+        assert thoughts[0].content == "I need to analyze this problem carefully."
         assert actions is None
 
     def test_parse_llm_response_thought_and_action(self, react_agent):
@@ -166,10 +167,11 @@ class TestReActAgentParsing:
 Action: <action>search</action>
 Action Input: <action_input>{"query": "test query", "limit": 10}</action_input>"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thoughts, actions = react_agent.parse_llm_response(response)
 
-        assert thought is not None
-        assert thought.content == "I need to search for information."
+        assert thoughts is not None
+        assert len(thoughts) == 1
+        assert thoughts[0].content == "I need to search for information."
         assert actions is not None
         assert len(actions) == 1
         assert actions[0].tool_name == "search"
@@ -198,10 +200,11 @@ Action Input: <action_input>{"expression": "2+2"}</action_input>"""
         response = """Thought: <thought>I have found the answer.</thought>
 Final Answer: <final_answer>42.</final_answer>"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thoughts, actions = react_agent.parse_llm_response(response)
 
-        assert thought is not None
-        assert thought.content == "I have found the answer."
+        assert thoughts is not None
+        assert len(thoughts) == 1
+        assert thoughts[0].content == "I have found the answer."
         assert actions is None
 
     def test_parse_llm_response_invalid_json(self, react_agent):
@@ -245,12 +248,13 @@ Let me break it down step by step.</thought>
 Action: <action>search</action>
 Action Input: <action_input>{"query": "complex problem"}</action_input>"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thoughts, actions = react_agent.parse_llm_response(response)
 
-        assert thought is not None
+        assert thoughts is not None
+        assert len(thoughts) == 1
         assert (
             "This is a complex problem that requires\nmultiple lines of reasoning"
-            in thought.content
+            in thoughts[0].content
         )
         assert actions is not None
         assert len(actions) == 1
@@ -300,10 +304,11 @@ Action: <action>analyze</action>
 Action Input: <action_input>{"data": "results"}</action_input>
 Final Answer: <final_answer>Based on my analysis, the answer is 42.</final_answer>"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thoughts, actions = react_agent.parse_llm_response(response)
 
-        assert thought is not None
-        assert thought.content == "I need to search and then provide an answer."
+        assert thoughts is not None
+        assert len(thoughts) == 1
+        assert thoughts[0].content == "I need to search and then provide an answer."
         assert actions is not None
         assert len(actions) == 2
         assert actions[0].tool_name == "search"
@@ -810,10 +815,11 @@ Action Input: <action_input>not valid json at all</action_input>"""
 Action: <action>test_tool</action>
 Action Input: <action_input>{malformed: "json", missing_quotes: value}</action_input>"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thoughts, actions = react_agent.parse_llm_response(response)
 
-        assert thought is not None
-        assert thought.content == "I'll try using a tool with malformed JSON."
+        assert thoughts is not None
+        assert len(thoughts) == 1
+        assert thoughts[0].content == "I'll try using a tool with malformed JSON."
         assert actions is None  # Should be None due to JSON parsing error
 
     def test_parse_llm_response_multiple_parsing_errors(self, react_agent):
@@ -860,10 +866,11 @@ Action Input: <action_input>{"query": "test with \\"quotes\\" and \\n newlines",
 Action: <action>batch_retrieve_polymorphs</action>
 Action Input: <action_input>{"compositions": ["AlN", "GaN", "InN", "TiN", "ZrN", "HfN", "VN", "NbN", "TaN", "CrN", "MoN", "WN", "ScN", "YN", "LaN", "Si3N4", "Ge3N4", "Sn3N4", "Li3N", "Na3N", "K3N", "Be3N2", "Mg3N2", "Ca3N2", "Sr3N2", "Ba3N2", "BN", "GaN", "InN", "TlN", "PN", "AsN", "SbN", "BiN", "ZnN", "CdN", "HgN", "MnN", "FeN", "CoN"], "max_energy_above_hull": 0.3, "max_per_composition": 3, "save_directory": "polymorph_data"}</action_input>"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thoughts, actions = react_agent.parse_llm_response(response)
 
-        assert thought is not None
-        assert "nitride compositions" in thought.content
+        assert thoughts is not None
+        assert len(thoughts) == 1
+        assert "nitride compositions" in thoughts[0].content
         assert actions is not None
         assert len(actions) == 1
         assert actions[0].tool_name == "batch_retrieve_polymorphs"
@@ -886,11 +893,12 @@ Let's start by evaluating the model performance on the test set.
 Action: <action>evaluate_xgboost_model</action>
 Action Input: <action_input>{"model_path": "/Users/n0w0f/nitride_ml_claude_react/train_xgboost_formation_energy_model_trial_1/trained_xgboost_model.pkl", "test_data_path": "/Users/n0w0f/nitride_ml_claude_react/prepare_ml_ready_dataset_trial_1/nitride_ml_dataset/metadata.json", "target_column": "formation_energy_per_atom", "detailed_analysis": true}</action_input>"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thoughts, actions = react_agent.parse_llm_response(response)
 
-        assert thought is not None
-        assert "break this down into steps" in thought.content
-        assert "XGBoost model" in thought.content
+        assert thoughts is not None
+        assert len(thoughts) == 1
+        assert "break this down into steps" in thoughts[0].content
+        assert "XGBoost model" in thoughts[0].content
         assert actions is not None
         assert len(actions) == 1
         assert actions[0].tool_name == "evaluate_xgboost_model"
@@ -915,11 +923,12 @@ Let's start by preparing the dataset using the prepare_tabular_dataset tool with
 Action: <action>prepare_tabular_dataset</action>
 Action Input: <action_input>{"polymorphs_json_path": "/Users/n0w0f/nitride_ml_claude_react/batch_retrieve_nitride_polymorphs_trial_8/nitride_polymorphs_dataset.json", "output_path": "nitride_ml_dataset", "target_property": "formation_energy_per_atom", "feature_engineering": "advanced", "test_split": 0.2, "normalize": true}</action_input>"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thoughts, actions = react_agent.parse_llm_response(response)
 
-        assert thought is not None
-        assert "break down the task" in thought.content
-        assert "ML-ready dataset" in thought.content
+        assert thoughts is not None
+        assert len(thoughts) == 1
+        assert "break down the task" in thoughts[0].content
+        assert "ML-ready dataset" in thoughts[0].content
         assert actions is not None
         assert len(actions) == 1
         assert actions[0].tool_name == "prepare_tabular_dataset"
@@ -941,11 +950,12 @@ Action Input: <action_input>{"polymorphs_json_path": "/Users/n0w0f/nitride_ml_cl
 3. Saved the enumerated slabs to slabs.json</thought>
 Final Answer: <final_answer>slabs.json</final_answer>"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thoughts, actions = react_agent.parse_llm_response(response)
 
-        assert thought is not None
-        assert "task has been completed successfully" in thought.content
-        assert "slabs.json" in thought.content
+        assert thoughts is not None
+        assert len(thoughts) == 1
+        assert "task has been completed successfully" in thoughts[0].content
+        assert "slabs.json" in thoughts[0].content
         assert actions is None
 
     def test_parse_response_write_file_with_large_content(self, react_agent):
@@ -954,11 +964,12 @@ Final Answer: <final_answer>slabs.json</final_answer>"""
 Action: <action>write_file</action>
 Action Input: <action_input>{"path": "slab_with_co2.cif", "content": "# generated using pymatgen\\ndata_Cu10CO7\\n_symmetry_space_group_name_H-M   'P 1'\\n_cell_length_a   6.00573977\\n_cell_length_b   6.00573977\\n_cell_length_c   33.97359456\\n_cell_angle_alpha   90.00000000\\n_cell_angle_beta   45.00000000\\n_cell_angle_gamma   60.00000000\\n_symmetry_Int_Tables_number   1\\n_chemical_formula_structural   Cu10CO7\\n_chemical_formula_sum   'Cu20 C2 O14'\\n_cell_volume   612.69526542\\n_cell_formula_units_Z   2\\nloop_\\n _symmetry_equiv_pos_site_id\\n _symmetry_equiv_pos_as_xyz\\n  1  'x, y, z'\\nloop_\\n _atom_site_type_symbol\\n _atom_site_label\\n _atom_site_symmetry_multiplicity\\n _atom_site_fract_x\\n _atom_site_fract_y\\n _atom_site_fract_z\\n _atom_site_occupancy\\n  Cu  Cu0  1  0.50000000  0.00000000  0.10937500  1.0\\n  Cu  Cu1  1  0.50000000  0.50000000  0.10937500  1.0\\n  Cu  Cu2  1  0.00000000  0.50000000  0.10937500  1.0\\n  Cu  Cu3  1  0.00000000  0.00000000  0.10937500  1.0\\n  Cu  Cu4  1  0.50000000  0.00000000  0.23437500  1.0\\n  Cu  Cu5  1  0.50000000  0.50000000  0.23437500  1.0\\n  Cu  Cu6  1  0.00000000  0.50000000  0.23437500  1.0\\n  Cu  Cu7  1  0.00000000  0.00000000  0.23437500  1.0\\n  Cu  Cu8  1  0.50000000  0.00000000  0.35937500  1.0\\n  Cu  Cu9  1  0.50000000  0.50000000  0.35937500  1.0\\n  Cu  Cu10  1  0.00000000  0.50000000  0.35937500  1.0\\n  Cu  Cu11  1  0.00000000  0.00000000  0.35937500  1.0\\n  Cu  Cu12  1  0.50000000  0.00000000  0.48437500  1.0\\n  Cu  Cu13  1  0.50000000  0.50000000  0.48437500  1.0\\n  Cu  Cu14  1  0.00000000  0.50000000  0.48437500  1.0\\n  Cu  Cu15  1  0.00000000  0.00000000  0.48437500  1.0\\n  Cu  Cu16  1  0.50000000  0.00000000  0.60937500  1.0\\n  Cu  Cu17  1  0.50000000  0.50000000  0.60937500  1.0\\n  Cu  Cu18  1  0.00000000  0.50000000  0.60937500  1.0\\n  Cu  Cu19  1  0.00000000  0.00000000  0.60937500  1.0\\n  O  O20  1  0.50000000  0.75000000  0.01562500  1.0\\n  O  O21  1  0.50000000  0.25000000  0.07812500  1.0\\n  O  O22  1  0.50000000  0.75000000  0.14062500  1.0\\n  O  O23  1  0.50000000  0.25000000  0.20312500  1.0\\n  O  O24  1  0.50000000  0.75000000  0.26562500  1.0\\n  O  O25  1  0.50000000  0.25000000  0.32812500  1.0\\n  O  O26  1  0.50000000  0.75000000  0.39062500  1.0\\n  O  O27  1  0.50000000  0.25000000  0.45312500  1.0\\n  O  O28  1  0.50000000  0.75000000  0.51562500  1.0\\n  O  O29  1  0.50000000  0.25000000  0.57812500  1.0\\n  C  C30  1  0.48007745  1.87973315  24.15907524  1\\n  C  C31  1  0.96864912  1.15470054  24.03957863  1\\n  O  O32  1  0.26338899  2.03836011  24.15907524  1\\n  O  O33  1  0.69676592  1.72110618  24.15907524  1\\n  O  O34  1  1.02671062  1.31332750  24.03957863  1\\n  O  O35  1  1.20807476  1.80882355  24.03957863  1\\n"}</action_input>"""
 
-        thought, actions = react_agent.parse_llm_response(response)
+        thoughts, actions = react_agent.parse_llm_response(response)
 
-        assert thought is not None
-        assert "combined structure" in thought.content
-        assert "slab_with_co2.cif" in thought.content
+        assert thoughts is not None
+        assert len(thoughts) == 1
+        assert "combined structure" in thoughts[0].content
+        assert "slab_with_co2.cif" in thoughts[0].content
         assert actions is not None
         assert len(actions) == 1
         assert actions[0].tool_name == "write_file"
@@ -1144,3 +1155,183 @@ Final Answer: <final_answer>Successfully recovered and found the answer.</final_
             for msg in agent.messages
         )
         assert error_message_found
+
+    def test_actions_before_final_answer(self, mock_interface, monkeypatch):
+        """Test that actions are executed before final answer is returned in same message."""
+        agent = ReActAgent(model="test-model", max_iterations=5)
+
+        # Single response containing multiple thoughts, actions with code, and final answer
+        # Note: LLMs typically output triple quotes directly without escaping, including nested docstrings
+        # Using triple single quotes for the outer string so we can have unescaped triple double quotes inside
+        response = MockLLMResponse(
+            content='''Thought: <thought>I need to search for data and then analyze it before providing the answer.</thought>
+Action: <action>write_script</action>
+Action Input: <action_input>{
+  "filename": "search.py",
+  "content": """import pandas as pd
+import numpy as np
+
+def search_data(query):
+    """Search for data based on query.
+
+    Args:
+        query: Search query string
+
+    Returns:
+        DataFrame with search results
+    """
+    results = pd.DataFrame({'id': [1, 2, 3], 'value': [10, 20, 30]})
+    filtered = results.query(query)
+    return filtered
+
+if __name__ == '__main__':
+    data = search_data('id > 1')
+    print(data)
+    print(f'Found {len(data)} results')"""
+}</action_input>
+Thought: <thought>Now I'll create an analysis script to process the search results.</thought>
+Action: <action>write_script</action>
+Action Input: <action_input>{
+  "filename": "analyze.py",
+  "content": """import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+
+def analyze_results(data):
+    """Analyze the search results.
+
+    Args:
+        data: Input DataFrame
+
+    Returns:
+        Analysis summary dictionary
+    """
+    summary = {
+        'mean': data['value'].mean(),
+        'std': data['value'].std(),
+        'count': len(data),
+        'max': data['value'].max(),
+        'min': data['value'].min()
+    }
+
+    # Create visualization
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x='id', y='value', data=data)
+    plt.title('Search Results Analysis')
+    plt.xlabel('ID')
+    plt.ylabel('Value')
+    plt.savefig('results.png')
+    plt.close()
+
+    return summary
+
+if __name__ == '__main__':
+    # Example usage
+    test_data = pd.DataFrame({'id': [1, 2], 'value': [20, 30]})
+    result = analyze_results(test_data)
+    print(result)"""
+}</action_input>
+Final Answer: <final_answer>Based on the search and analysis, the answer is 42.</final_answer>'''
+        )
+
+        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
+
+        def mock_get_llm_response(*args, **kwargs):
+            call_tracker["get_llm_response"] += 1
+            return response
+
+        def mock_create_prompt(*args, **kwargs):
+            call_tracker["create_prompt"] += 1
+            return []
+
+        monkeypatch.setattr(
+            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
+        )
+        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
+
+        # Set up tool responses for both actions
+        mock_interface.tool_responses = [
+            ToolResponse(
+                success=True, result="Script created successfully", error=None
+            ),
+            ToolResponse(success=True, result="Analysis script created", error=None),
+        ]
+
+        result = agent.run(mock_interface, "test_task")
+
+        # Verify final answer is returned
+        assert result == "Based on the search and analysis, the answer is 42."
+
+        # Verify that both thoughts were captured in the parsing
+        thoughts, actions = agent.parse_llm_response(response.content)
+        assert thoughts is not None
+        assert len(thoughts) == 2
+        assert (
+            thoughts[0].content
+            == "I need to search for data and then analyze it before providing the answer."
+        )
+        assert (
+            thoughts[1].content
+            == "Now I'll create an analysis script to process the search results."
+        )
+
+        # Verify that both actions were executed before returning
+        assert len(mock_interface.tool_calls) == 2
+        assert mock_interface.tool_calls[0]["tool_name"] == "write_script"
+        assert mock_interface.tool_calls[0]["arguments"]["filename"] == "search.py"
+        # Verify the content contains multi-line code with docstrings (triple quotes)
+        search_content = mock_interface.tool_calls[0]["arguments"]["content"]
+        assert "import pandas as pd" in search_content
+        assert "import numpy as np" in search_content
+        assert "Search for data based on query" in search_content
+        assert "def search_data(query):" in search_content
+        assert "if __name__ == '__main__':" in search_content
+        assert "print(f'Found {len(data)} results')" in search_content
+        # Verify it's multi-line
+        assert search_content.count("\n") >= 10
+
+        assert mock_interface.tool_calls[1]["tool_name"] == "write_script"
+        assert mock_interface.tool_calls[1]["arguments"]["filename"] == "analyze.py"
+        # Verify the content contains multi-line code with docstrings (triple quotes)
+        analyze_content = mock_interface.tool_calls[1]["arguments"]["content"]
+        assert "import matplotlib.pyplot as plt" in analyze_content
+        assert "import seaborn as sns" in analyze_content
+        assert "Analyze the search results" in analyze_content
+        assert "def analyze_results(data):" in analyze_content
+        assert "plt.savefig('results.png')" in analyze_content
+        assert "'max': data['value'].max()" in analyze_content
+        # Verify it's multi-line
+        assert analyze_content.count("\n") >= 25
+
+        # Verify only one LLM call was made (single iteration)
+        assert call_tracker["get_llm_response"] == 1
+
+        # Verify message history contains the action executions and observations
+        messages = agent.messages
+
+        # Should contain the assistant's response with actions and final answer
+        assert any(
+            msg.get("role") == "assistant"
+            and "<action>write_script</action>" in msg.get("content", "")
+            and "<final_answer>" in msg.get("content", "")
+            for msg in messages
+        )
+
+        # Should contain observations from both tool executions
+        first_observation_found = any(
+            msg.get("role") == "user"
+            and "Observation: Script created successfully" in msg.get("content", "")
+            for msg in messages
+        )
+        assert (
+            first_observation_found
+        ), "First script creation observation should be in message history"
+
+        second_observation_found = any(
+            msg.get("role") == "user"
+            and "Observation: Analysis script created" in msg.get("content", "")
+            for msg in messages
+        )
+        assert (
+            second_observation_found
+        ), "Second script creation observation should be in message history"

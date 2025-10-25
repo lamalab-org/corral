@@ -8,7 +8,7 @@ from promptstore import PromptStore
 
 from corral.agents.base_agent import BaseAgent
 from corral.agents.prompt_utils import create_prompt
-from corral.agents.utils import LiteLLMMessage
+from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
 from corral.router.routes import CorralRouter
 
 
@@ -104,42 +104,40 @@ class ReActAgent(BaseAgent):
 
     def parse_llm_response(
         self, response: str
-    ) -> tuple[Thought | None, list[Action] | None]:
-        """Parse LLM response into Thought and Actions"""
-        thought_match = re.search(r"<thought>(.*?)</thought>", response, re.DOTALL)
+    ) -> tuple[list[Thought] | None, list[Action] | None]:
+        """Parse LLM response into Thoughts and Actions"""
+        thought_matches = re.finditer(r"<thought>(.*?)</thought>", response, re.DOTALL)
         action_matches = re.finditer(
-            r"<action>(.*?)</action>.*?<action_input>(.*?)</action_input>",
+            r"<action>(.*?)</action>(?:.*?<action_input>(.*?)</action_input>)?",
             response,
             re.DOTALL,
         )
 
-        thought = Thought(thought_match.group(1).strip()) if thought_match else None
+        thoughts = [Thought(match.group(1).strip()) for match in thought_matches]
 
         actions = []
         for action_match in action_matches:
             tool_name = action_match.group(1).strip()
             try:
-                action_input = action_match.group(2).strip()
+                if action_match.group(2) is None:
+                    action_input = "{}"
+                else:
+                    action_input = action_match.group(2).strip()
 
-                # Convert Python triple-quoted strings to JSON-escaped strings
-                action_input = re.sub(
-                    r'"""(.*?)"""',
-                    lambda m: json.dumps(m.group(1)),
-                    action_input,
-                    flags=re.DOTALL,
-                )
+                converted_input = convert_outermost_triple_quotes(action_input)
 
                 # Handle Python boolean values
-                action_input = action_input.replace("True", "true").replace(
+                converted_input = converted_input.replace("True", "true").replace(
                     "False", "false"
                 )
 
-                arguments = json.loads(action_input)
+                # Parse as JSON
+                arguments = json.loads(converted_input)
                 actions.append(Action(tool_name=tool_name, arguments=arguments))
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON parsing error: {e}")
+            except (json.JSONDecodeError, ValueError, SyntaxError) as e:
+                logger.error(f"Parsing error: {e}")
 
-        return thought, actions if actions else None
+        return thoughts if thoughts else None, actions if actions else None
 
     def run(
         self,
@@ -181,16 +179,12 @@ class ReActAgent(BaseAgent):
             self.messages.append(LiteLLMMessage(role="assistant", content=llm_response))
 
             # Parse response
-            thought, actions = self.parse_llm_response(llm_response)
+            thoughts, actions = self.parse_llm_response(llm_response)
 
             # Check for final answer (XML format)
-
             final_answer_match = re.search(
                 r"<final_answer>(.*?)</final_answer>", llm_response, re.DOTALL
             ) or re.search(r"Final Answer: (.*)", llm_response, re.DOTALL)
-
-            if final_answer_match:
-                return final_answer_match.group(1).strip()
 
             # Execute tools if actions exist
             if actions:
@@ -214,11 +208,14 @@ class ReActAgent(BaseAgent):
                             name=action.tool_name,
                         )
                     )
-            else:
+            if final_answer_match:
+                return final_answer_match.group(1).strip()
+
+            if not actions and final_answer_match is None:
                 self.messages.append(
                     LiteLLMMessage(
                         role="user",
-                        content="No actions to execute. This is due to parsing error or missing action in the response. Please use the tags <action> and <action_input> to specify your action, or <final_answer> to provide your final answer.",
+                        content="No actions to execute. This is due to parsing error or missing action in the response. Please use the tags <thought>, <action> and <action_input> to specify your action, or <final_answer> to provide your final answer.",
                     )
                 )
 
