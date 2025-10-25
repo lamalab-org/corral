@@ -215,7 +215,7 @@ class ReActAgent(BaseAgent):
                 self.messages.append(
                     LiteLLMMessage(
                         role="user",
-                        content="No actions to execute. This is due to parsing error or missing action in the response. Please use the tags <action> and <action_input> to specify your action, or <final_answer> to provide your final answer.",
+                        content="No actions to execute. This is due to parsing error or missing action in the response. Please use the tags <thought>, <action> and <action_input> to specify your action, or <final_answer> to provide your final answer.",
                     )
                 )
 
