@@ -8,8 +8,10 @@ analysis of simulation parameters.
 """
 
 # import modal
+import contextlib
 import json
 import re
+import tempfile
 from pathlib import Path
 
 import modal
@@ -32,7 +34,7 @@ def check_potential_file(target: str):
 
             # Check file existence using Modal
             try:
-                info = modal.Function.lookup("simagent", "file_info").remote(
+                info = modal.Function.from_name("simagent", "file_info").remote(
                     str(result_path)
                 )
                 logger.info(f"File info: {info}")
@@ -107,7 +109,9 @@ def check_numerical(target: float, tolerance: float):
                         answer = float(parsed_result["density"])
                     except (ValueError, TypeError):
                         return 0.0
-                    file_path = parsed_result.get("trajectory_file")
+                    file_path = parsed_result.get(
+                        "trajectory_file"
+                    ) or parsed_result.get("log_file")
                 # BULK ENERGY -> path to relaxed structure (or fallback)
                 elif "BULK ENERGY" in parsed_result:
                     try:
@@ -143,7 +147,7 @@ def check_numerical(target: float, tolerance: float):
 
                 # call the platform file existence checker (keeps original behavior)
                 try:
-                    info = modal.Function.lookup("simagent", "file_info").remote(
+                    info = modal.Function.from_name("simagent", "file_info").remote(
                         file_path
                     )
                     logger.info(f"File info: {info}")
@@ -165,5 +169,53 @@ def check_numerical(target: float, tolerance: float):
                 f"Unexpected error in check_numerical: {exc}, result was: {result}"
             )
             return 0.0
+
+    return score_fn
+
+
+def check_structure(target, atom_style):
+    def score_fn(result: str) -> float:
+        from pymatgen.analysis.structure_matcher import StructureMatcher
+        from pymatgen.io.lammps.data import LammpsData
+
+        if result is None:
+            logger.warning("Received None as result in check_structure")
+            return 0.0
+
+        tmp_path = None  # Predefine in case of early exception
+
+        try:
+            # Load target structure
+            ld1 = LammpsData.from_file(target, atom_style=atom_style)
+
+            # Read remote result file content
+            read_file = modal.Function.from_name("simagent", "read_file")
+            content = read_file.remote(result)
+
+            # Write content to a unique temp file
+            with tempfile.NamedTemporaryFile(
+                mode="w+", suffix=".data", delete=False
+            ) as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+
+            # Load predicted structure
+            ld2 = LammpsData.from_file(tmp_path, atom_style=atom_style)
+
+            # Compare structures
+            matcher = StructureMatcher()
+            are_equal = matcher.fit(ld1.structure, ld2.structure)
+
+            return 1.0 if are_equal else 0.0
+
+        except Exception as e:
+            logger.warning(f"Error in check_structure: {e}")
+            return 0.0
+
+        finally:
+            # Clean up temp file
+            if tmp_path:
+                with contextlib.suppress(Exception):
+                    Path(tmp_path).unlink()
 
     return score_fn

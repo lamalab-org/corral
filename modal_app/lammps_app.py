@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
@@ -193,7 +194,6 @@ def parse_execution_output(stdout: str) -> tuple[dict, list[str]]:
     Returns:
         tuple: (execution_result dict, output_lines list)
     """
-    import json
     from contextlib import suppress
 
     stdout_lines = stdout.strip().split("\n") if stdout.strip() else []
@@ -227,9 +227,9 @@ def execute_python_script(
     timeout: int = 600,
     working_dir: str | None = None,
 ) -> str:
-    import json
     import sys
 
+    volume_sim.reload()
     try:
         if not Path(script_path).exists():
             return json.dumps(
@@ -258,7 +258,7 @@ def execute_python_script(
             "return_code": process.returncode,
             "command": " ".join(cmd),
         }
-
+        volume_sim.commit()
         return json.dumps(result, indent=2)
 
     except subprocess.TimeoutExpired:
@@ -270,6 +270,8 @@ def execute_python_script(
         )
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
+    finally:
+        volume_sim.commit()
 
 
 @app.function(
@@ -290,7 +292,6 @@ def execute_python_code(
     timeout: int = 300,
 ) -> str:
     volume_sim.reload()
-    import json
     import subprocess
     import sys
     import traceback
