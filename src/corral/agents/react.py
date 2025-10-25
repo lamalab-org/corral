@@ -178,6 +178,11 @@ class ReActAgent(BaseAgent):
             # Parse response
             thoughts, actions = self.parse_llm_response(llm_response)
 
+            # Check for final answer (XML format)
+            final_answer_match = re.search(
+                r"<final_answer>(.*?)</final_answer>", llm_response, re.DOTALL
+            ) or re.search(r"Final Answer: (.*)", llm_response, re.DOTALL)
+
             # Execute tools if actions exist
             if actions:
                 # Check for final answer
@@ -200,21 +205,16 @@ class ReActAgent(BaseAgent):
                             name=action.tool_name,
                         )
                     )
-            else:
+            if final_answer_match:
+                return final_answer_match.group(1).strip()
+
+            if not actions and final_answer_match is None:
                 self.messages.append(
                     LiteLLMMessage(
                         role="user",
                         content="No actions to execute. This is due to parsing error or missing action in the response. Please use the tags <action> and <action_input> to specify your action, or <final_answer> to provide your final answer.",
                     )
                 )
-
-            # Check for final answer (XML format)
-            final_answer_match = re.search(
-                r"<final_answer>(.*?)</final_answer>", llm_response, re.DOTALL
-            ) or re.search(r"Final Answer: (.*)", llm_response, re.DOTALL)
-
-            if final_answer_match:
-                return final_answer_match.group(1).strip()
 
         self.messages.append(
             LiteLLMMessage(
