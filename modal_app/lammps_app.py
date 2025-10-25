@@ -4,11 +4,7 @@ import json
 import os
 import subprocess
 import tempfile
-import threading
-import time
-import uuid
 from pathlib import Path
-from typing import Any
 
 import fsspec
 import modal
@@ -37,62 +33,6 @@ CPUS = 1
 
 # with volume_test_files.batch_upload() as batch:
 #     batch.put_directory("./test_files/", "/")
-
-# Global registry for terminal sessions
-_terminal_sessions: dict[str, dict[str, Any]] = {}
-_session_lock = threading.Lock()
-MAX_OUTPUT_SIZE = 60 * 1024
-
-
-def truncate_output(output: str, max_size: int = MAX_OUTPUT_SIZE) -> str:
-    """
-    Truncate output if it exceeds maximum size.
-
-    Args:
-        output (str): The output string to truncate
-        max_size (int): Maximum size in bytes. Defaults to 60KB.
-
-    Returns:
-        str: Truncated output with informational message if needed
-    """
-    if len(output) > max_size:
-        # Keep 80% from the beginning and 20% from the end
-        truncation_msg = f"\n\n... [Output truncated: {len(output) - max_size} bytes omitted] ...\n\n"
-        msg_size = len(truncation_msg)
-        available_size = max_size - msg_size
-
-        beginning_size = int(available_size * 0.8)
-        end_size = available_size - beginning_size
-
-        return output[:beginning_size] + truncation_msg + output[-end_size:]
-    return output
-
-
-def get_or_create_session(session_id: str | None = None) -> tuple[str, dict[str, Any]]:
-    """
-    Get an existing terminal session or create a new one.
-
-    Args:
-        session_id (str | None): Optional session ID to retrieve
-
-    Returns:
-        tuple[str, dict[str, Any]]: Tuple of (session_id, session_dict)
-    """
-    with _session_lock:
-        if session_id and session_id in _terminal_sessions:
-            return session_id, _terminal_sessions[session_id]
-
-        # Create new session
-        new_session_id = str(uuid.uuid4())
-        _terminal_sessions[new_session_id] = {
-            "id": new_session_id,
-            "cwd": str(Path.cwd()),
-            "env": os.environ.copy(),
-            "history": [],
-            "created_at": time.time(),
-        }
-        logger.info(f"Created new terminal session: {new_session_id}")
-        return new_session_id, _terminal_sessions[new_session_id]
 
 
 def ensure_directory_exists(file_path: str) -> None:
@@ -254,7 +194,6 @@ def parse_execution_output(stdout: str) -> tuple[dict, list[str]]:
     Returns:
         tuple: (execution_result dict, output_lines list)
     """
-    import json
     from contextlib import suppress
 
     stdout_lines = stdout.strip().split("\n") if stdout.strip() else []
@@ -282,120 +221,12 @@ def parse_execution_output(stdout: str) -> tuple[dict, list[str]]:
         "/test_files": volume_test_files,
     },
 )
-def run_in_terminal(
-    command: str,
-    timeout: int | None = 300,
-    session_id: str | None = None,
-) -> str:
-    logger.info(f"Executing terminal command: '{command}' (timeout={timeout})")
-    volume_sim.reload()
-    try:
-        # Get or create session
-        sess_id, session = get_or_create_session(session_id)
-        cwd = session["cwd"]
-        env = session["env"]
-
-        # Execute command and wait for completion
-        logger.info(f"Executing command in directory: {cwd}")
-
-        process = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            cwd=cwd,
-            env=env,
-            timeout=timeout,
-            text=True,
-            check=False,
-        )
-
-        # Truncate output if needed
-        stdout = truncate_output(process.stdout)
-        stderr = truncate_output(process.stderr)
-
-        # Check for directory changes (extract from commands like 'cd')
-        if command.strip().startswith("cd "):
-            # Simple cd parsing - in reality, this is complex
-            parts = command.strip().split(maxsplit=1)
-            if len(parts) > 1:
-                new_dir = parts[1].strip()
-                # Resolve relative to current cwd
-                target_path = Path(cwd) / new_dir
-                if target_path.exists() and target_path.is_dir():
-                    session["cwd"] = str(target_path.resolve())
-                    logger.info(
-                        f"Updated session working directory to: {session['cwd']}"
-                    )
-
-        # Record in session history
-        session["history"].append(
-            {
-                "command": command,
-                "exit_code": process.returncode,
-                "timestamp": time.time(),
-            }
-        )
-
-        result = {
-            "success": process.returncode == 0,
-            "stdout": stdout,
-            "stderr": stderr,
-            "exit_code": process.returncode,
-            "command": command,
-            "cwd": cwd,
-            "session_id": sess_id,
-        }
-
-        logger.info(f"Command completed with exit code: {process.returncode}")
-
-        return json.dumps(result, indent=2)
-
-    except subprocess.TimeoutExpired:
-        logger.error(f"Command timed out after {timeout} seconds: {command}")
-        return json.dumps(
-            {
-                "success": False,
-                "error": "TimeoutExpired",
-                "message": f"Command execution exceeded timeout of {timeout} seconds",
-                "command": command,
-                "timeout": timeout,
-            },
-            indent=2,
-        )
-
-    except Exception as e:
-        logger.error(f"Error executing command: {e}")
-        return json.dumps(
-            {
-                "success": False,
-                "error": type(e).__name__,
-                "message": str(e),
-                "command": command,
-            },
-            indent=2,
-        )
-    finally:
-        volume_sim.commit()
-
-
-@app.function(
-    image=lammps_image,
-    cpu=CPUS,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-        "/test_files": volume_test_files,
-    },
-)
 def execute_python_script(
     script_path: str,
     args: list | None = None,
     timeout: int = 600,
     working_dir: str | None = None,
 ) -> str:
-    import json
     import sys
 
     volume_sim.reload()
@@ -454,54 +285,6 @@ def execute_python_script(
         "/test_files": volume_test_files,
     },
 )
-def list_terminal_sessions() -> str:
-    volume_sim.reload()
-    try:
-        with _session_lock:
-            sessions_info = []
-            for sess_id, session in _terminal_sessions.items():
-                sessions_info.append(
-                    {
-                        "session_id": sess_id,
-                        "cwd": session["cwd"],
-                        "command_count": len(session["history"]),
-                        "created_at": session["created_at"],
-                    }
-                )
-
-        result = {
-            "success": True,
-            "session_count": len(sessions_info),
-            "sessions": sessions_info,
-        }
-
-        return json.dumps(result, indent=2)
-
-    except Exception as e:
-        logger.error(f"Error listing sessions: {e}")
-        return json.dumps(
-            {
-                "success": False,
-                "error": type(e).__name__,
-                "message": str(e),
-            },
-            indent=2,
-        )
-    finally:
-        volume_sim.commit()
-
-
-@app.function(
-    image=lammps_image,
-    cpu=CPUS,
-    memory=5120,
-    volumes={
-        "/potentials": volume_potential,
-        "/results": volume_sim,
-        "/structures": volume_struct,
-        "/test_files": volume_test_files,
-    },
-)
 def execute_python_code(
     python_code: str,
     input_data: str | None = None,
@@ -509,7 +292,6 @@ def execute_python_code(
     timeout: int = 300,
 ) -> str:
     volume_sim.reload()
-    import json
     import subprocess
     import sys
     import traceback
@@ -640,7 +422,7 @@ def run_lammps(input_file: str, log_file: str) -> None:
     directory_path = input_path.parent
     input_file_ = input_path.name
     try:
-        _run_lammps(input_file_, log_file, str(directory_path))
+        _run_lammps(input_file_, log_file, str(directory_path), CPUS)
         volume_sim.commit()
 
     except Exception as e:
