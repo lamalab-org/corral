@@ -108,7 +108,7 @@ class ReActAgent(BaseAgent):
         """Parse LLM response into Thoughts and Actions"""
         thought_matches = re.finditer(r"<thought>(.*?)</thought>", response, re.DOTALL)
         action_matches = re.finditer(
-            r"<action>(.*?)</action>(?:.*?<action_input>(.*?)</action_input>)?",
+            r"<action>(.*?)</action>.*?<action_input>(.*?)</action_input>",
             response,
             re.DOTALL,
         )
@@ -119,10 +119,7 @@ class ReActAgent(BaseAgent):
         for action_match in action_matches:
             tool_name = action_match.group(1).strip()
             try:
-                if action_match.group(2) is None:
-                    action_input = "{}"
-                else:
-                    action_input = action_match.group(2).strip()
+                action_input = action_match.group(2).strip()
 
                 converted_input = convert_outermost_triple_quotes(action_input)
 
@@ -215,7 +212,7 @@ class ReActAgent(BaseAgent):
                 self.messages.append(
                     LiteLLMMessage(
                         role="user",
-                        content="No actions to execute. This is due to parsing error or missing action in the response. Please use the tags <action> and <action_input> to specify your action, or <final_answer> to provide your final answer.",
+                        content="No actions to execute. This is due to parsing error or missing action in the response. Please use the tags <thought>, <action> and <action_input> to specify your action, or <final_answer> to provide your final answer.",
                     )
                 )
 
