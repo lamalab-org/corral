@@ -1,24 +1,34 @@
-from loguru import logger
-'''
+#!/usr/bin/env python
+"""
 AFM Tools Module
 This module provides tools for operating an Atomic Force Microscope (AFM) using the Nanosurf API.
-It includes functionalities for grain detection, scanning, document retrieval, image optimization, 
-and code execution for AFM operations.   
-'''
+It includes functionalities for grain detection, scanning, document retrieval, image optimization,
+and code execution for AFM operations.
+"""
 
-# import modal
-# from modal import Image
-from typing import Dict, Any
-from corral.backend.tool import Tool, ToolArgument
-# from corral.utils import MODAL_TOOL_REGISTRY, modal_tool, tool
-from corral.backend.tool import tool
-from tool_utils import Document_Retriever
-from aila_image_process import *
-import matplotlib.pyplot as plt
-import numpy as np
-import os
-import glob
 import gc
+import os
+import time
+from pathlib import Path
+from typing import Any
+
+import matplotlib.pyplot as plt
+import nanosurf
+import numpy as np
+import pythoncom
+from loguru import logger
+from NSFopen.read import read
+from pymoo.algorithms.soo.nonconvex.ga import GA
+from pymoo.optimize import minimize
+from pymoo.termination import get_termination
+
+from aila_image_process import (
+    get_subscan_parameters,
+    image_process,
+    patches,
+)
+from corral.backend.tool import tool
+from tool_utils import Document_Retriever, MyProblem
 
 
 @tool
@@ -31,7 +41,7 @@ def visualize_grain_boxes(image_path: str) -> list:
     [PROCEDURAL] When to use this tool:
         - When identifying and isolating grains within a microscopy image for further processing.
         - When preparing for grain-wise scanning or measurement tasks.
-        - When you need visual confirmation of grain detection and layout. 
+        - When you need visual confirmation of grain detection and layout.
     [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
@@ -80,21 +90,20 @@ def visualize_grain_boxes(image_path: str) -> list:
     [/LIMITATIONS]
     """
 
-    import matplotlib
-    matplotlib.use('Agg')  # Use non-GUI backend for saving
-    
+    plt.use("Agg")  # Use non-GUI backend for saving
+
     indexed_boxes, extents, Z_flat2, labeled = image_process(image_path)
-    
+
     fig, ax = plt.subplots()
-    clip = [np.percentile(Z_flat2, percent) for percent in [3, 91]]
-    ax.imshow(Z_flat2, cmap='afmhot', origin='lower', extent=extents)
+    ax.imshow(Z_flat2, cmap="afmhot", origin="lower", extent=extents)
 
     # List to store (index, x1, y1, x2, y2)
     box_coords = []
 
     for index, x, y, w, h in indexed_boxes:
-        
-        rect = patches.Rectangle((x, y), w, h, linewidth=1, edgecolor='cyan', facecolor='none')
+        rect = patches.Rectangle(
+            (x, y), w, h, linewidth=1, edgecolor="cyan", facecolor="none"
+        )
         ax.add_patch(rect)
 
         # Label box center
@@ -105,34 +114,39 @@ def visualize_grain_boxes(image_path: str) -> list:
         scale_factor = 0.3
         font_size = base_fontsize + scale_factor * min(w, h)
 
-        ax.text(center_x, center_y, str(index),
-                color='cyan', fontsize=font_size, ha='center', va='center')
+        ax.text(
+            center_x,
+            center_y,
+            str(index),
+            color="cyan",
+            fontsize=font_size,
+            ha="center",
+            va="center",
+        )
 
         # Store (index, bottom-left, top-right)
         x1, y1 = x, y
         x2, y2 = x + w, y + h
         box_coords.append((index, x1, y1, x2, y2))
 
-    ax.set_xlabel(r'X [$\mu$m]')
-    ax.set_ylabel(r'Y [$\mu$m]')
+    ax.set_xlabel(r"X [$\mu$m]")
+    ax.set_ylabel(r"Y [$\mu$m]")
     ax.set_title("Grains with Bounding Boxes")
 
     # Save to file
-    import pythoncom
     pythoncom.CoInitialize()
-    import nanosurf
     spm = nanosurf.SPM()
     application = spm.application
     current_path = application.GetGalleryHistoryDirectoryPath
-    output_path = os.path.join(current_path, "annotated.png")
-    fig.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"image annotated with bounding boxes saved at {current_path}.")
+    output_path = Path(current_path) / "annotated.png"
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    logger.info(f"Image annotated with bounding boxes saved at {current_path}.")
     plt.close(fig)
     del application
     del spm
     gc.collect()
     pythoncom.CoUninitialize()
-    
+
     return box_coords
 
 
@@ -146,7 +160,7 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
     [PROCEDURAL] When to use this tool:
         - After detecting grains using `visualize_grain_boxes`.
         - When you want to perform a high-resolution scan of a specific grain region.
-        - When preparing to analyze or manipulate a particular grain feature in isolation. 
+        - When preparing to analyze or manipulate a particular grain feature in isolation.
     [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
@@ -200,15 +214,10 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
     [/LIMITATIONS]
     """
 
-    import pythoncom
     pythoncom.CoInitialize()
-    import nanosurf
-    import time
-    import os
 
     # Use absolute path as key for consistency
-    abs_image_path = os.path.abspath(image_path)
-        
+
     # Query current scan parameters from the SPM
     spm = nanosurf.SPM()
     application = spm.application
@@ -218,14 +227,14 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
     current_center = (scan.CenterPosX * 1e9, scan.CenterPosY * 1e9)
 
     # Process the image and compute subscan parameters
-    boxes, extents, Z_flat2, labeled = image_process(image_path)
+    _boxes, extents, _Z_flat2, labeled = image_process(image_path)
 
     params = get_subscan_parameters(
         grain_id=grain_id,
         labeled_mask=labeled,
         extents=extents,
         current_center=current_center,
-        current_size=current_size
+        current_size=current_size,
     )
 
     # Update scan settings
@@ -235,18 +244,17 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
     scan.CenterPosY = params["center_y"] * 1e-9
     scan.StartFrameUp()
 
-
     # Wait while scanning is in progress
     while scan.IsScanning:
-        print("Scanning in progress...")
+        logger.info("Scanning in progress...")
         time.sleep(5)
-        
-    nid_files = glob.glob(os.path.join(current_working_directory, "*.nid"))
+
+    nid_files = list(Path(current_working_directory).glob("*.nid"))
     if not nid_files:
         raise FileNotFoundError("No .nid files found after scan.")
     latest_nid = max(nid_files, key=os.path.getmtime)
-    
-    print(f"Scan complete. Latest saved .nid file: {latest_nid}")
+
+    logger.info(f"Scan complete. Latest saved .nid file: {latest_nid}")
     return latest_nid
 
 
@@ -260,7 +268,7 @@ def Document_Retrieval(query: str) -> str:
     [PROCEDURAL] When to use this tool:
         - When looking for specific Python code to control an AFM (e.g., start a scan, set PID gains, configure scan modes).
         - When building a larger AFM automation script and need reference routines.
-        - When troubleshooting or experimenting with control procedures and need examples. 
+        - When troubleshooting or experimenting with control procedures and need examples.
     [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
@@ -294,10 +302,10 @@ def Document_Retrieval(query: str) -> str:
     Returns:
         str:
             [BRIEF] The AFM control code snippet matching the query. [/BRIEF]
-            [DETAILED] Returns a formatted string of Python code that matches the request. This code is typically suitable for direct use with the `Code_Executor` tool and interacts with the AFM system using nanosurf’s Python API. [/DETAILED]
-            [EXAMPLES] 
+            [DETAILED] Returns a formatted string of Python code that matches the request. This code is typically suitable for direct use with the `Code_Executor` tool and interacts with the AFM system using nanosurf's Python API. [/DETAILED]
+            [EXAMPLES]
                 `"spm = nanosurf.SPM()\nscan = spm.application.Scan\nscan.StartFrameUp()"`,
-                `"zcontrol.PGain = 120\nzcontrol.IGain = 7000\nzcontrol.DGain = 8"` 
+                `"zcontrol.PGain = 120\nzcontrol.IGain = 7000\nzcontrol.DGain = 8"`
             [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -312,15 +320,15 @@ def Document_Retrieval(query: str) -> str:
     [/LIMITATIONS]
     """
 
-    result = Document_Retriever.invoke(query)
-    return result
+    return Document_Retriever.invoke(query)
+
 
 @tool
 def Image_optimizer(baseline: bool = False) -> str:
     """
     [BRIEF] Optimizes AFM image sharpness using a genetic algorithm by tuning PID control parameters. The image file corresponding to the optimal P,I,D parameters is the latest .nid file in the current working directory.[/BRIEF]
 
-    [DETAILED] This tool automatically tunes the Proportional, Integral, and Derivative (PID) gains of the Z-controller to enhance Atomic Force Microscopy (AFM) image clarity. It uses a genetic algorithm to evaluate image sharpness and iteratively sample PID combinations. During each iteration (generation × population), a new image is acquired and saved. The image corresponding to the optimal PID parameters is the latest .nid file in the current working directory at the end of the run. The optional `baseline` argument enables baseline correction, which can improve results on samples with tilt or drift. [/DETAILED]
+    [DETAILED] This tool automatically tunes the Proportional, Integral, and Derivative (PID) gains of the Z-controller to enhance Atomic Force Microscopy (AFM) image clarity. It uses a genetic algorithm to evaluate image sharpness and iteratively sample PID combinations. During each iteration (generation x population), a new image is acquired and saved. The image corresponding to the optimal PID parameters is the latest .nid file in the current working directory at the end of the run. The optional `baseline` argument enables baseline correction, which can improve results on samples with tilt or drift. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
         - When AFM images appear blurred, distorted, or exhibit tracking instability.
@@ -374,48 +382,38 @@ def Image_optimizer(baseline: bool = False) -> str:
     [/LIMITATIONS]
     """
 
-    import os
-    import glob
-    from pymoo.termination import get_termination
-    from tool_utils import MyProblem
-    from pymoo.optimize import minimize
-    from pymoo.algorithms.soo.nonconvex.ga import GA
-
     if not isinstance(baseline, bool):
-        raise ValueError(f"Invalid type for 'baseline': {type(baseline).__name__}. Expected a boolean.")
+        raise ValueError(
+            f"Invalid type for 'baseline': {type(baseline).__name__}. Expected a boolean."
+        )
 
     try:
-
-        import pythoncom
         pythoncom.CoInitialize()
 
         problem = MyProblem(baseline=baseline)
-    
+
         termination = get_termination("n_gen", 1)
         algorithm = GA(pop_size=1, eliminate_duplicates=True)
-    
-        res = minimize(problem,
-                       algorithm,
-                       termination,
-                       seed=1,
-                       verbose=True)
+
+        res = minimize(problem, algorithm, termination, seed=1, verbose=True)
 
     finally:
         pass
 
-    return "Best solution found: \n[Pgain Igain Dgain] = %s\n[Error] = %s" % (res.X, res.F)
+    return f"Best solution found: \n[Pgain Igain Dgain] = {res.X}\n[Error] = {res.F}"
+
 
 @tool
 def Code_Executor(code: str) -> int:
     """
     [BRIEF] Executes Python code for controlling Atomic Force Microscopes (AFM). [/BRIEF]
-    
+
     [DETAILED] This tool executes raw Python code intended for operating an Atomic Force Microscope (AFM). It is primarily used to run or test code snippets retrieved using the `Document_Retriever` tool, typically for automation, configuration, or interaction with AFM hardware through an API. Because the execution directly controls AFM operations, the input code must be validated and handled cautiously. This tool ensures COM initialization for compatibility with AFM control libraries. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
         - When you need to execute control commands or configuration routines on an AFM.
         - When you retrieve a code snippet from a lab protocol or document and need to test or apply it.
-        - When automating AFM workflows through scripting. 
+        - When automating AFM workflows through scripting.
     [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
@@ -470,8 +468,8 @@ def Code_Executor(code: str) -> int:
         int:
             [BRIEF] Current AFM parameters status or error information from code execution. [/BRIEF]
             [DETAILED] Returns a success message with current AFM parameters or the captured exception details if execution fails. The result may be logged or used to troubleshoot control scripts. [/DETAILED]
-            [EXAMPLES] 
-                `"Code executed successfully with current AFM parameters: {'Pgain': 100, 'Igain': 6000, 'Dgain': 10, 'ScanMode': 'Contact', 'ImageWidth': 5e-06, 'ImageHeight': 5e-06}"`,  
+            [EXAMPLES]
+                `"Code executed successfully with current AFM parameters: {'Pgain': 100, 'Igain': 6000, 'Dgain': 10, 'ScanMode': 'Contact', 'ImageWidth': 5e-06, 'ImageHeight': 5e-06}"`,
                 `"Error: NameError: name 'afm' is not defined"` [/EXAMPLES]
 
     [RAISES] Exceptions:
@@ -489,7 +487,6 @@ def Code_Executor(code: str) -> int:
     """
     try:
         # Execute the code
-        import pythoncom
         pythoncom.CoInitialize()
         exec(code)
         para = get_params()
@@ -501,17 +498,22 @@ def Code_Executor(code: str) -> int:
     return output
 
 
-
 @tool
-def Image_Analyzer(path: str = None, dynamic_code: str = None, calculate_friction: bool = False, calculate_mean_roughness: bool = False, calculate_rms_roughness: bool = False) -> Dict[str, Any]:
+def Image_Analyzer(
+    path: str | None = None,
+    dynamic_code: str | None = None,
+    calculate_friction: bool = False,
+    calculate_mean_roughness: bool = False,
+    calculate_rms_roughness: bool = False,
+) -> dict[str, Any]:
     """
     [BRIEF] Analyzes AFM `.nid` image files from Nanosurf instruments and optionally computes surface metrics such as average friction, mean roughness, and RMS roughness. [/BRIEF]
-    
+
     [DETAILED] This tool processes Atomic Force Microscopy (AFM) image files in `.nid` format captured using Nanosurf devices. It leverages the Nanosurf API to read high-resolution topographical and force-channel data. In addition to extracting image data, the tool can optionally compute key surface metrics:
     - Average friction (via forward/backward scan differences),
     - Mean roughness (Ra),
     - Root-mean-square roughness (Rq).
-    It supports custom logic through the `dynamic_code` parameter, allowing flexible access to alternate scan channels or directions such as 'Deflection', 'Friction Force', or 'Backward' images. The tool is well-suited for automated AFM workflows in surface characterization and materials research. 
+    It supports custom logic through the `dynamic_code` parameter, allowing flexible access to alternate scan channels or directions such as 'Deflection', 'Friction Force', or 'Backward' images. The tool is well-suited for automated AFM workflows in surface characterization and materials research.
     [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -528,7 +530,7 @@ def Image_Analyzer(path: str = None, dynamic_code: str = None, calculate_frictio
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-        - Reads `.nid` file using Nanosurf’s `NSFopen.read`.
+        - Reads `.nid` file using Nanosurf's `NSFopen.read`.
         - Extracts `Z-Axis` image data by default from the `Forward` scan.
         - Optionally executes user-defined code via the `dynamic_code` argument to switch channels or apply processing.
         - Computes requested surface metrics (friction, Ra, Rq) using standard definitions.
@@ -580,7 +582,7 @@ def Image_Analyzer(path: str = None, dynamic_code: str = None, calculate_frictio
         Dict[str, Any]:
             [BRIEF] Dictionary with image data, computation results, and status messages. [/BRIEF]
             [DETAILED] Contains raw image data extracted from the file, and optionally, values for average friction, mean roughness, and RMS roughness if requested. In case of error, includes a detailed message. [/DETAILED]
-            [EXAMPLES] Example outputs: 
+            [EXAMPLES] Example outputs:
                 - "{"status": "Success", "image_data": [...], "mean_roughness": 2.4e-9}"
                 - "{"status": "Error", "message": "An error occurred: File not found"}" [/EXAMPLES]
 
@@ -596,62 +598,67 @@ def Image_Analyzer(path: str = None, dynamic_code: str = None, calculate_frictio
         - Relies on user-provided `dynamic_code` being safe and correctly scoped.
     [/LIMITATIONS]
     """
-    import os
-    import glob
-    from NSFopen.read import read
-    import numpy as np
 
     try:
         # Read the file
         afm = read(path)
-        
+
         # Extract data and parameters
         data = afm.data  # Raw data
-        param = afm.param  # Parameters
-        
+
         # Assuming 'Image', 'Forward', and 'Z-Axis' are keys in the data structure
-        image_data = data['Image']['Forward']['Z-Axis']
-        
-        # If dynamic code is provided, execute it. image_data = data['Image']['Forward']['Z-Axis'] cange Forward to Backward if asked. Z-Axis to Deflection or Friction force if asked. 
+        image_data = data["Image"]["Forward"]["Z-Axis"]
+
+        # If dynamic code is provided, execute it. image_data = data['Image']['Forward']['Z-Axis'] cange Forward to Backward if asked. Z-Axis to Deflection or Friction force if asked.
         if dynamic_code:
             # Safely execute the dynamic code
             try:
                 exec(dynamic_code)
                 # After executing the dynamic code, `image_data` should be processed accordingly
-                print("Dynamic code executed successfully.")
+                logger.info("Dynamic code executed successfully.")
             except Exception as e:
-                print(f"Error executing dynamic code: {e}")
-                return {"status": "Error", "message": f"Error executing dynamic code: {str(e)}"}
-        
+                logger.error(f"Error executing dynamic code: {e}")
+                return {
+                    "status": "Error",
+                    "message": f"Error executing dynamic code: {e!s}",
+                }
+
         # Calculate Average Friction if requested
         if calculate_friction:
-            friction = 0.5 * (data['Image']['Forward']['Friction force'] - data['Image']['Backward']['Friction force'])
+            friction = 0.5 * (
+                data["Image"]["Forward"]["Friction force"]
+                - data["Image"]["Backward"]["Friction force"]
+            )
             average_friction = np.mean(friction)
-            print(f"Average Friction: {average_friction}")
-        
+            logger.info(f"Average Friction: {average_friction}")
+
         # Calculate Mean Roughness if requested
         if calculate_mean_roughness:
-            z = data['Image']['Forward']['Z-Axis']
+            z = data["Image"]["Forward"]["Z-Axis"]
             z_mean = np.mean(z)
             absolute_differences = np.abs(z - z_mean)
             total_sum = np.sum(absolute_differences)
             M, N = z.shape
             mean_roughness = total_sum / (M * N)
-            print(f"Mean Roughness: {mean_roughness}")
-        
+            logger.info(f"Mean Roughness: {mean_roughness}")
+
         # Calculate RMS Roughness if requested
         if calculate_rms_roughness:
-            z = data['Image']['Forward']['Z-Axis']
+            z = data["Image"]["Forward"]["Z-Axis"]
             z_mean = np.mean(z)
             squared_differences = (z - z_mean) ** 2
             total_sum = np.sum(squared_differences)
             M, N = z.shape
             rms_roughness = np.sqrt(total_sum / (M * N))
-            print(f"RMS Roughness: {rms_roughness}")
-        
+            logger.info(f"RMS Roughness: {rms_roughness}")
+
         # Return the image data along with status
-        result = {"status": "Success", "message": f"Raw Image {path} processed successfully.", "image_data": image_data}
-        
+        result = {
+            "status": "Success",
+            "message": f"Raw Image {path} processed successfully.",
+            "image_data": image_data,
+        }
+
         # Include calculated metrics in the result if they were calculated
         if calculate_friction:
             result["average_friction"] = average_friction
@@ -659,50 +666,14 @@ def Image_Analyzer(path: str = None, dynamic_code: str = None, calculate_frictio
             result["mean_roughness"] = mean_roughness
         if calculate_rms_roughness:
             result["rms_roughness"] = rms_roughness
-        
-        return result
-    
+
     except Exception as e:
-        print(f"An error occurred: {e}")
-        return {"status": "Error", "message": f"An error occurred: {str(e)}"}
-    
-import nanosurf
-import os
+        logger.error(f"An error occurred: {e}")
+        return {"status": "Error", "message": f"An error occurred: {e!s}"}
+
+
 def get_params():
-    import pythoncom
     pythoncom.CoInitialize()
-    tip_guid_map = {
-        "AN2_200": "{BD61D124-8350-4464-BFE4-1D8A156E4913}",
-        "GLA_1": "{9E2BA28D-D843-41bf-8F62-05502B3EDB18}",
-        "ACL_A": "{ABB75273-9543-431a-B681-C79B533DD9E6}",
-        "ANSCM": "{40AEA787-942C-4d48-A389-DA81571F009C}",
-        "SICON_A": "{F7A339A7-E29F-42a9-B7AA-D69C54363B76}",
-        "XYNCHR": "{DD3DFE39-455E-40a1-801E-5D5B14CE4080}",
-        "XYCONTR": "{12ADC816-C7B1-48f8-8B9E-5E579151CF50}",
-        "ContAl_G": "{ED5A15E6-D3B0-4e64-8C50-809335D3E143}",
-        "Multi75E_G": "{9593403B-A476-49a9-AA1F-9C3AEDAC0178}",
-        "Multi75M_G": "{03D0715C-A520-4976-A5E2-4FC3078E3821}",
-        "Multi75Al_G": "{443A2EDC-5C9C-4d60-843F-C6688BEA1DEA}",
-        "Tap190Al_G": "{041FB80E-A179-4170-B5A4-A4EA1CC0A965}",
-        "Tap150Al_G": "{E0F31C86-6BB8-496b-AC7E-F55C62EAB635}",
-        "USC_F1_2_k7_3": "{19AEEE43-478F-4D16-BDB7-2EE256EAF4A4}",
-        "USC_F0_3_k0_3": "{16FAEEB6-A887-46F6-A418-81A9EBBCB6C3}",
-        "Dyn190Al": "{E9CE0D2D-F59E-4B44-A74F-B78C11575E9F}",
-        "Stat0_2LAuD": "{A4A16538-CCD1-4BB1-B048-7B4F0F1B31BD}",
-        "CONTR": "{89E92173-96FB-4ff9-94D8-42296D00D980}",
-        "CONTSCR": "{5A687B3E-A75A-4b22-BD70-40ABB931F00E}",
-        "CONTSCPt": "{1E95D12B-1DDB-4ace-B3AF-BE9C0D52D4FC}",
-        "EFMR": "{986305AC-64B5-462e-B37E-6BD5AE447BE3}",
-        "LFMR": "{C61FCA2C-6D5D-4105-9FDE-640D263E229F}",
-        "MFMR": "{9499F49F-920F-47ec-80B6-883F683FF056}",
-        "NCLR": "{62633FD4-0555-4cee-A8B4-B82F4CEFBB48}",
-        "PPP_FMR": "{EBA2B75C-AA94-4451-AD36-1388CDABF5E8}",
-        "pq_SCONT": "{8D28AE10-E1DD-49E0-8CC6-ABD7CEDF57B0}",
-        "qp_CONT": "{0996E3AC-ABF6-4A22-B320-4BF749288156}",
-        "qp_fast_CB1": "{3F3DD96B-F838-45B6-AA8C-B54F66ED9571}",
-        "qp_fast_CB2": "{964280C3-70F7-4E22-AA60-734E672D7A02}",
-        "qp_fast_CB3": "{CCF4B65D-F3D8-4A40-9108-53468ECBA1B4}"
-    }
     spm = nanosurf.SPM()
     application = spm.application
     scan = application.Scan
@@ -710,39 +681,36 @@ def get_params():
     zcontrol = application.ZController
     head = application.ScanHead
     tip = head.CantileverByGUID
-    # tip = None
-    # # Reverse lookup: find key (tip name) for current GUID
-    # for tip_name, guid in tip_guid_map.items():
-    #     if guid.lower() == current_guid.lower():  # Case-insensitive match
-    #         tip = tip_name
-
-    #"mode": mode_mapping.get(opmode.OperatingMode, f"Unknown({opmode.OperatingMode})"),
 
     mode_mapping = {
-    4: "Tapping/Phase Contrast",
-    9: "Lateral Force",
-    3: "Dynamic Force",
-    2: "Static Force",
-    # Add more modes if needed
-}
+        4: "Tapping/Phase Contrast",
+        9: "Lateral Force",
+        3: "Dynamic Force",
+        2: "Static Force",
+        # Add more modes if needed
+    }
 
     params = {
-        "pgain" : zcontrol.PGain,
-        "igain" : zcontrol.IGain,
-        "dgain" : zcontrol.DGain,
-        "image_height" : scan.ImageHeight*1e9,
-        "image_width" : scan.ImageWidth*1e9,
-        "times_per_line" : scan.Scantime,
-        "points_per_line" : scan.Points,
-        "lines_per_frame" : scan.Lines,
-        "rotation" : scan.rotation,
-        "centre_x" : scan.CenterPosX,
-        "centre_y" : scan.CenterPosY,
-        "setpoint" : zcontrol.SetPoint,
-        "tip" :  tip,
-        "mode": mode_mapping.get(opmode.OperatingMode, f"Unknown({opmode.OperatingMode})"),
+        "pgain": zcontrol.PGain,
+        "igain": zcontrol.IGain,
+        "dgain": zcontrol.DGain,
+        "image_height": scan.ImageHeight * 1e9,
+        "image_width": scan.ImageWidth * 1e9,
+        "times_per_line": scan.Scantime,
+        "points_per_line": scan.Points,
+        "lines_per_frame": scan.Lines,
+        "rotation": scan.rotation,
+        "centre_x": scan.CenterPosX,
+        "centre_y": scan.CenterPosY,
+        "setpoint": zcontrol.SetPoint,
+        "tip": tip,
+        "mode": mode_mapping.get(
+            opmode.OperatingMode, f"Unknown({opmode.OperatingMode})"
+        ),
         "Current Working directory": application.GetGalleryHistoryDirectoryPath,
-        "AFM image files in directory": os.listdir(application.GetGalleryHistoryDirectoryPath)
+        "AFM image files in directory": [
+            p.name for p in Path(application.GetGalleryHistoryDirectoryPath).iterdir()
+        ],
     }
     del zcontrol
     del scan
