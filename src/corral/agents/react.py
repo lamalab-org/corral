@@ -119,7 +119,18 @@ class ReActAgent(BaseAgent):
         for action_match in action_matches:
             tool_name = action_match.group(1).strip()
             try:
-                action_input = action_match.group(2).strip()
+                action_input = action_match.group(2)
+                if action_input is None and (
+                    "</action_input>" not in response
+                    or "<action_input>" not in response
+                ):
+                    action_input = "{}"  # Default to empty JSON object if no tags found for action_input
+                elif action_input is None and (
+                    "</action_input>" in response and "<action_input>" in response
+                ):
+                    return thoughts, None
+                else:
+                    action_input = action_match.group(2).strip()
 
                 converted_input = convert_outermost_triple_quotes(action_input)
 
@@ -212,7 +223,7 @@ class ReActAgent(BaseAgent):
                 self.messages.append(
                     LiteLLMMessage(
                         role="user",
-                        content="No actions to execute. This is due to parsing error or missing action in the response. Please follow the format <thought>[your reasoning]</thought>\n<action>[tool name]</action>\n<action_input>[tool arguments as JSON]</action_input>.\n\nIf you have the final answer, respond with:\n<thought>[your reasoning]</thought>\n<final_answer>[answer]</final_answer>. Remember the closing tags. For empty action input, use empty JSON `{}`. Try again.",
+                        content="No actions to execute. This is due to parsing error or missing action in the response. Please follow the format <thought>[your reasoning]</thought>\n<action>[tool name]</action>\n<action_input>[tool arguments as JSON]</action_input>.\n\nIf you have the final answer, respond with:\n<thought>[your reasoning]</thought>\n<final_answer>[answer]</final_answer>. Remember the closing tags. Try again.",
                     )
                 )
 
