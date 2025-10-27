@@ -290,8 +290,6 @@ def parse_string_argument(arg_string: str) -> dict | None:
     Parse a string argument format like "path (str, required): Path to the directory"
     This is a fallback for malformed API responses.
     """
-    import re
-
     # Pattern to match "name (type, required/optional): description"
     pattern = r"^(\w+)\s*\(([^,]+)(?:,\s*(required|optional))?\):\s*(.+)$"
     match = re.match(pattern, arg_string.strip())
