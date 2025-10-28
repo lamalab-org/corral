@@ -10,7 +10,6 @@ import modal
 import requests
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
-from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 
 from corral.backend.tool import Tool, tool
 from corral.utils.modal import remote_call
@@ -1337,8 +1336,6 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
     if mol is None:
         raise ValueError("Invalid SMILES string provided.")
 
-    parent_formula = CalcMolFormula(mol)
-
     fragments = enumerate_fragments_from_smiles(h_smiles)
 
     final_fragments = []
@@ -1349,15 +1346,82 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
             continue
         if fragment_mol is None:
             continue
-        fragment_formula = CalcMolFormula(fragment_mol)
-        if not differs_by_one_atom(
-            parse_molecular_formula(parent_formula),
-            parse_molecular_formula(fragment_formula),
-        ):
-            final_fragments.append(fragment)
+        final_fragments.append(fragment)
 
     random.shuffle(final_fragments)
     return final_fragments
+
+
+@tool
+def simulate_spectra(smiles: str) -> dict[str, str]:
+    """[BRIEF] Simulate 1H NMR, 13C NMR, and IR spectra for a given molecule using its SMILES string, that allows validation of a proposed candidate. [/BRIEF]
+
+    [DETAILED] This function simulates the 1H NMR, 13C NMR, and IR spectra for a molecule represented by its SMILES string.
+    It uses a remote function to perform the simulation, which involves structure analysis, neural network prediction of chemical shifts, prediction of J-coupling constants, and quantum-mechanical simulation to generate realistic multiplet patterns and effects. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use it to validate the chemical structure of a proposed molecule by simulating its spectra.
+    - When you want to validate some hypothetical molecule against the experimental data in the task description.
+    [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Run the spectra tools, and analyze the results thoroughly. Generate different candidate molecules and reason which ones could fit the spectra, until you have a good guess for the molecule in the sample at hand. [/PREREQUISITE]
+    2. [CURRENT] Apply this tool with the SMILES string of the proposed molecule to simulate its spectra and validate if can be the solution to the task. [/CURRENT]
+    3. [FOLLOW_UP] Submit the answer if the simulated spectra is similar to the experimental, or go back to step 1 and propose new candidate molecules. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+    - It uses a remote function `simulate_spectra` to perform the simulation.
+    - The simulation process involves:
+        1. Structure analysis using HOSE code descriptors to identify the chemical environment of atoms in the molecule.
+        2. Neural network prediction of chemical shifts based on experimental data.
+        3. Prediction of J-coupling constants for proton-proton interactions to simulate the splitting patterns in NMR spectra.
+        4. Quantum-mechanical simulation to generate realistic multiplet patterns and effects in the spectra.
+    - The function returns a dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.
+    If some of the spectra are not available, it will return None for those spectra.
+    [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `simulate_spectra("CCO")`,
+        `simulate_spectra("C1=CC=CC=C1")`,
+        `simulate_spectra("C(C(=O)O)N")`,
+        `simulate_spectra("C1=CC=C(C=C1)C(=O)O")`,
+        `simulate_spectra("C1=CC=C")`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        smiles (str):
+            [BRIEF] The SMILES representation of the compound to simulate spectra for [/BRIEF]
+            [DETAILED] The SMILES string representing the chemical structure of the molecule for which the spectra will be simulated.
+            It should be a valid SMILES notation that can be processed by the remote function. [/DETAILED]
+            [SYNTACTICAL] Format: "valid SMILES string" [/SYNTACTICAL]
+            [EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O"[/EXAMPLES]
+
+    Returns:
+        dict[str, str]:
+            [BRIEF] The simulated spectra of the compound [/BRIEF]
+            [DETAILED] A dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.
+            Each key corresponds to a type of spectrum, and the value is a string representation of the simulated spectrum.
+            If some spectra are not available, the value will be None for those keys. [/DETAILED]
+            [EXAMPLES] Examples: {"1H NMR": "simulated_1H_NMR_spectrum", "13C NMR": "simulated_13C_NMR_spectrum", "IR": "simulated_IR_spectrum"} [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        Exception:
+            [ERROR_WHEN] If a network error occurs during the remote function call. [/ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an error in calling the remote function `simulate_spectra`, such as network issues. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] This tool is unavailable if the remote function cannot be called. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known Limitations:
+        - The SMILES string must be valid and represent a chemical structure that can be interpreted by the remote function.
+        - The remote function may not be able to simulate spectra for all compounds, especially if they are complex or not well-defined.
+        - The function relies on the availability of the remote service and its simulation capabilities, which may change over time.
+    [/LIMITATIONS]
+    """
+    return remote_call(function_name="simulate_spectra", env_name="chemenv")(
+        smiles=smiles
+    )
 
 
 def create_tools() -> dict[str, Tool]:
@@ -1378,4 +1442,5 @@ def create_tools() -> dict[str, Tool]:
         "obtain_isomers_from_molecular_formula": obtain_isomers_from_molecular_formula,
         "validate_smiles": validate_smiles,
         "return_possible_fragments": return_possible_fragments,
+        "simulate_spectra": simulate_spectra,
     }
