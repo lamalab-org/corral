@@ -120,14 +120,8 @@ class ReActAgent(BaseAgent):
             tool_name = action_match.group(1).strip()
             try:
                 action_input = action_match.group(2)
-                if action_input is None and (
-                    "</action_input>" not in response
-                    or "<action_input>" not in response
-                ):
-                    action_input = "{}"  # Default to empty JSON object if no tags found for action_input
-                elif action_input is None and (
-                    "</action_input>" in response and "<action_input>" in response
-                ):
+                # Check if action_input tags are malformed (opening tag present but closing tag missing)
+                if action_input is None:
                     return thoughts, None
                 else:
                     action_input = action_match.group(2).strip()
@@ -223,7 +217,7 @@ class ReActAgent(BaseAgent):
                 self.messages.append(
                     LiteLLMMessage(
                         role="user",
-                        content="No actions to execute. This is due to parsing error or missing action in the response. Please follow the format <thought>[your reasoning]</thought>\n<action>[tool name]</action>\n<action_input>[tool arguments as JSON]</action_input>.\n\nIf you have the final answer, respond with:\n<thought>[your reasoning]</thought>\n<final_answer>[answer]</final_answer>. Remember the closing tags. Try again.",
+                        content="No actions to execute. This is due to parsing error or missing action in the response. Please follow the format <thought>[your reasoning]</thought>\n<action>[tool name]</action>\n<action_input>[tool arguments as JSON]</action_input>.\n\nIf you have the final answer, respond with:\n<thought>[your reasoning]</thought>\n<final_answer>[answer]</final_answer>. For tool calls without arguments, use `<action_input>{}</action_input>`. Remember the closing tags. Try again.",
                     )
                 )
 
