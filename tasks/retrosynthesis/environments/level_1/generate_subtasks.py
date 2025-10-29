@@ -107,7 +107,7 @@ def main():
         final_inputs = []
         for j, template in enumerate(TEMPLATES[i]):
             if j == 0:
-                input_from_task = [f"make_{i+1}_lvl1-apply_template-{j}"]
+                input_from_task = [f"make_{i+1}_lvl1-apply_template-{j+1}"]
                 initial_inputs = {"initial_molecule": molecule}
             else:
                 input_from_task = [
@@ -141,16 +141,11 @@ def main():
                     }
                 ],
                 "scoring_fn": "check_template",
-                "submission_format": "Return a dict with the `mapped_rxn` as a string and the `template_id` as an integer, e.g., {'mapped_rxn': 'Cc1ccccc1.Br>>Cc1ccccc1Br', 'template_id': 12345}.",
+                "submission_format": "Return a dict with the `mapped_rxn` as a string and the `template_id` as an integer in JSON format, e.g., {'mapped_rxn': 'Cc1ccccc1.Br>>Cc1ccccc1Br', 'template_id': 12345}.",
                 "tools": [
                     "search_template_catalog_by_criteria",
                     "get_template",
                     "get_available_functional_groups",
-                    "apply_template",
-                    "verify_step",
-                    "verify_route",
-                    "search_catalog_by_smiles",
-                    "is_buyable",
                     "suggest_protecting_groups",
                     "deprotect_molecule",
                     "detect_functional_groups",
@@ -194,18 +189,9 @@ def main():
                 "scoring_fn": "check_reactants",
                 "submission_format": "Return the SMILES of the molecule as a simple string.",
                 "tools": [
-                    "search_template_catalog_by_criteria",
                     "get_template",
-                    "get_available_functional_groups",
                     "apply_template",
                     "verify_step",
-                    "verify_route",
-                    "search_catalog_by_smiles",
-                    "is_buyable",
-                    "suggest_protecting_groups",
-                    "deprotect_molecule",
-                    "detect_functional_groups",
-                    "detect_protection_groups",
                 ],
             }
             final_inputs.append(f"make_{i+1}_lvl1-apply_template-{j+1}")
@@ -235,18 +221,10 @@ def main():
             "scoring_fn": "check_reactants",
             "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  \"type\": \"mol\",\n  \"smiles\": \"CO\",\n  \"children\": [\n    {\n      \"type\": \"reaction\",\n      \"template_id\": \"template_x\",\n      \"children\": [\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"BrC\"\n        },\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"[OH-]\"\n        }\n      ]\n    }\n  ]\n}`.""",
             "tools": [
-                "search_template_catalog_by_criteria",
-                "get_template",
-                "get_available_functional_groups",
-                "apply_template",
                 "verify_step",
                 "verify_route",
                 "search_catalog_by_smiles",
                 "is_buyable",
-                "suggest_protecting_groups",
-                "deprotect_molecule",
-                "detect_functional_groups",
-                "detect_protection_groups",
             ],
         }
         tasks.append(task)

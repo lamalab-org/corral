@@ -178,9 +178,9 @@ def main():
     for i, molecule in enumerate(MOLECULES):
         tasks = []
         final_inputs = []
-        for j, template in enumerate(TEMPLATES[i]):
+        for j, _template in enumerate(TEMPLATES[i]):
             if j == 0:
-                input_from_task = [f"make_{i+1}_lvl1-apply_template-{j+1}"]
+                input_from_task = [f"make_{i+1}_lvl1-apply_template-{j}"]
                 initial_inputs = {"initial_molecule": molecule}
             else:
                 input_from_task = [
@@ -199,7 +199,7 @@ def main():
                 ],
                 "metrics": ["binary"],
                 "input": {
-                    "prompt": f"Can you return the `mapped_rxn` associated with the template that produces the reaction: {HINTS[i][j]}? It has to be applicable to the molecule with SMILES {ALL_MOLECULES[i][j]}.",
+                    "prompt": f"Can you return the `mapped_rxn` associated with one template that can be applied to the molecule {ALL_MOLECULES[i][j]}? The application of the template in such molecule should be guided towards an optimal retrosynthetic route.",
                     "input_from_task": False,
                     "input_for_task": [
                         f"make_{i+1}_lvl1-apply_template-{j+1}",
@@ -209,10 +209,11 @@ def main():
                 "output": [
                     {
                         "type": "string",
-                        "target": template,
+                        "target": MOLECULES,
                         "threshold": None,
                     }
                 ],
+                "initial_inputs": initial_inputs,
                 "scoring_fn": "check_template",
                 "submission_format": "Return a dict with the `mapped_rxn` as a string and the `template_id` as an integer in JSON format, e.g., {'mapped_rxn': 'Cc1ccccc1.Br>>Cc1ccccc1Br', 'template_id': 12345}.",
                 "tools": [
