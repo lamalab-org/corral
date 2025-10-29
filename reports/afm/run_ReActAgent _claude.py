@@ -1,8 +1,9 @@
+#!/usr/bin/env python
 import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
-from corral import CorralRunner, CorralRouter
+from corral import CorralRouter, CorralRunner
 from corral.agents import ReActAgent
 from corral.report import CorralWandbLogger
 
@@ -27,7 +28,7 @@ def run_benchmark(
         group="tool_description_ablation",
         name=run_name,
     )
-    agent = ReActAgent(model="claude-3-5-sonnet-20241022", max_iterations=10, temperature=0.1)
+    agent = ReActAgent(model="claude-3-5-sonnet-20241022", max_iterations=10, temperature=temperature)
     runner = CorralRunner(interface, agent, logger=wandblogger)
     #claude-3-5-sonnet-20241022
     # Run benchmark

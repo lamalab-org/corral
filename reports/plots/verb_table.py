@@ -31,7 +31,7 @@ columns = [
 ]
 
 # Group entries by (model, agent_type, verbosity_level)
-results = defaultdict(lambda: {col: None for col in columns[2:]})
+results = defaultdict(lambda: dict.fromkeys(columns[2:]))
 
 
 def normalize_model(model):
@@ -209,8 +209,7 @@ def create_latex_table_with_multirow(df, columns, best_scores):
             if (
                 str(next_row[0]).startswith("===")
                 or str(next_row[0]) == ""
-                or j > i
-                and str(next_row[0]) != current_agent
+                or (j > i and str(next_row[0]) != current_agent)
             ):
                 break
             if str(next_row[0]) == current_agent:

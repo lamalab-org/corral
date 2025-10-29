@@ -1,41 +1,58 @@
+#!/usr/bin/env python
+import gc
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
+
+import nanosurf
+import pythoncom
 from loguru import logger
-from tools import visualize_grain_boxes, scan_grain_area, Document_Retrieval, Image_optimizer, Code_Executor, Image_Analyzer
-from corral.utils.code_tools import execute_python_code
+
 from corral.backend.env import Environment
 from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
 from corral.backend.tool import Tool
+from corral.utils.code_tools import execute_python_code
 from corral.utils.io_tools import (
     CatFilesTool,
     CopyFileTool,
     FileInfoTool,
     FSManager,
-    GrepTool,
     ListFilesTool,
     ReadFileTool,
     WriteFileTool,
 )
-from collections.abc import Callable
-
-import os 
-from corral.backend.server import run_server
-from score import check_numerical, check_image_quality, check_params_function, check_file_exists, check_roughness_function, check_equation
+from score import (
+    check_equation,
+    check_file_exists,
+    check_image_quality,
+    check_numerical,
+    check_params_function,
+    check_roughness_function,
+)
+from tools import (
+    Code_Executor,
+    Document_Retrieval,
+    Image_Analyzer,
+    Image_optimizer,
+    scan_grain_area,
+    visualize_grain_boxes,
+)
 
 ENVIRONMENT = "enviroment"
-TASK_TYPE="tasks_4"  # "single_task" or "subtasks"
+TASK_TYPE = "tasks_4"  # "single_task" or "subtasks"
 BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\mat-agent-bench\tasks\afm\src\afm\{ENVIRONMENT}\{TASK_TYPE}"
 
 SCORING_FUNCTIONS = {
-    "check_numerical" : check_numerical,
-    "check_image_quality" : check_image_quality,
-    "check_params_function" : check_params_function,
-    "check_file_exists" : check_file_exists,
-    "check_roughness_function" : check_roughness_function,
-    "check_mathematical_eq" : check_equation,
+    "check_numerical": check_numerical,
+    "check_image_quality": check_image_quality,
+    "check_params_function": check_params_function,
+    "check_file_exists": check_file_exists,
+    "check_roughness_function": check_roughness_function,
+    "check_mathematical_eq": check_equation,
 }
+
 
 def get_scoring_function(name: str, params: dict | None = None) -> Callable:
     """Get a scoring function by name from the registry, with optional parameters"""
@@ -53,7 +70,8 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
             ) from e
     else:
         return fn
-    
+
+
 def load_tasks_from_json(
     json_path: str | Path, work_dir: str
 ) -> dict[str, TaskDefinition]:
@@ -75,11 +93,15 @@ def load_tasks_from_json(
 
     tasks = {}
     for task_id, task_info in task_data.items():
-        scoring_fn_name = task_info.get("scoring_function", "default")  # Get the scoring function by name from the registry
+        scoring_fn_name = task_info.get(
+            "scoring_function", "default"
+        )  # Get the scoring function by name from the registry
         scoring_params = task_info.get("scoring_params", {})
 
         scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
-        initial_input = task_info.get("initial_input", {}).copy()    # Add work_dir to initial input if not already present
+        initial_input = task_info.get(
+            "initial_input", {}
+        ).copy()  # Add work_dir to initial input if not already present
         if "work_dir" not in initial_input:
             initial_input["work_dir"] = work_dir
         tasks[task_id] = TaskDefinition(
@@ -96,7 +118,6 @@ def load_tasks_from_json(
 
 
 class AFMEnvironment(Environment):
-
     def __init__(
         self,
         task_id: str,
@@ -110,13 +131,12 @@ class AFMEnvironment(Environment):
         self.taskgroup_common_tools = taskgroup_common_tools or {}
         self.base_work_dir = base_work_dir
 
-
         if task_id not in task_group.tasks:
             raise ValueError(f"Task {task_id} not found in task group")
 
         self.current_task = task_group.tasks[task_id]
 
-        self.initial_params = self.current_task.initial_input['params']
+        self.initial_params = self.current_task.initial_input["params"]
 
         self.afm_dir = self.base_work_dir
 
@@ -125,8 +145,6 @@ class AFMEnvironment(Environment):
         # Add tools
         self._add_task_tools()
         self._setup_file_tools()
-
-
 
     def _add_task_tools(self):
         """Add required tools for the task"""
@@ -168,56 +186,9 @@ class AFMEnvironment(Environment):
         else:
             logger.warning("DEBUG: No current_work_dir set, skipping file tools setup")
 
-
-
-    # def reset_params(self) -> None:
-    #     import gc
-    #     import pythoncom
-    #     pythoncom.CoInitialize()
-        
-    #     import nanosurf
-    #     spm = nanosurf.SPM()
-    #     application = spm.application
-    #     application.SetGalleryHistoryDirectoryPath(self.current_work_dir)
-    #     scan = application.Scan
-    #     zcontrol = application.ZController
-    #     head = application.ScanHead
-    #     opmode = application.OperatingMode
-
-    #     # Access initial parameters
-    #     params = self.initial_params
-
-    #     # Apply scan parameters (converted to meters and seconds)
-    #     scan.ImageHeight = params["image_height"] * 1e-9  # nm to m  100e-9 [m] for 100 nm
-    #     scan.ImageWidth = params["image_width"] * 1e-9    # nm to m
-    #     scan.Scantime = params["times_per_line"]          # [s]
-    #     scan.Points = params["points_per_line"]
-    #     scan.Rotation = params["rotation"]                # [deg]
-    #     scan.Lines = params["lines_per_frame"]
-    #     scan.CenterPosX = params["centre_x"] * 1e-9
-    #     scan.CenterPosY = params["centre_y"] * 1e-9
-    #     zcontrol.PGain = params["pgain"]
-    #     zcontrol.IGain = params["igain"]
-    #     zcontrol.DGain = params["dgain"]
-    #     # zcontrol.SetPoint = params["setpoint"]
-    #     head.CantileverByGUID = params["tip"]
-    #     opmode.OperatingMode = getattr(spm.OperatingMode, params["mode"])
-    
-    #     logger.info(f"AFM parameters have been reset to initial values. AFM images will be saved at {application.GetGalleryHistoryDirectoryPath}. Corral's current working directory is {self.afm_dir}.")
-
-    #     del zcontrol
-    #     del scan
-    #     del application
-    #     del spm
-    #     gc.collect()
-    #     pythoncom.CoUninitialize()
-
     def reset_params(self) -> None:
-        import gc
-        import pythoncom
         pythoncom.CoInitialize()
-        
-        import nanosurf
+
         spm = nanosurf.SPM()
         application = spm.application
         application.SetGalleryHistoryDirectoryPath(self.current_work_dir)
@@ -276,13 +247,12 @@ class AFMEnvironment(Environment):
         # Recreate file tools for new workspace
         # os.path.join(self.base_work_dir, trial_id)
         self._setup_file_tools()
-        #self.reset_params()
+        # self.reset_params()
         return trial_id
 
     def get_task_prompt(self) -> str:
-
         _combined_input = self.task_group.get_task_input(self.task_id)
-        prompt = f"You are an advanced AI-AFM system with access to the Nanosurf AFM software through its Python API." 
+        prompt = "You are an advanced AI-AFM system with access to the Nanosurf AFM software through its Python API."
         prompt += f"""\nTask: {self.current_task.name}
         Description: {self.current_task.description}
         Required submission format:
@@ -326,12 +296,12 @@ class AFMEnvironment(Environment):
 
         # logger.info(f"PROMPT : {prompt}")
         return prompt
-    
+
     def configure_additional_apps(self):
         logger.info("configuration taking place!!!!!!!")
         self.reset_params()
         return "No external object configuration needed for this trial."
-    
+
     def score(self) -> float:
         """Score the submitted answer"""
         if not self.state.submitted_answer:
@@ -383,7 +353,9 @@ def create_environments(
     tasks = load_tasks_from_json(task_json_path, work_dir)
 
     # Create task group
-    group_id = Path(task_json_path).parent  # Use filename (without extension) as group ID
+    group_id = Path(
+        task_json_path
+    ).parent  # Use filename (without extension) as group ID
     logger.info(f"Creating task group with ID: {ENVIRONMENT}")
     task_group = TaskGroup(group_id=group_id, tasks=tasks)
 
@@ -399,13 +371,13 @@ def create_environments(
         logger.info(f"{i+1}. {task_id}")
 
     subtask_specific_tools = {
-        "visualize_grain_boxes" : visualize_grain_boxes,
-        "scan_grain_area" : scan_grain_area,
-        "Document_Retrieval" : Document_Retrieval,
-        "Image_optimizer" : Image_optimizer,
-        "Code_Executor" : Code_Executor,
-        "Image_Analyzer" : Image_Analyzer,
-        "execute_python_code" : execute_python_code
+        "visualize_grain_boxes": visualize_grain_boxes,
+        "scan_grain_area": scan_grain_area,
+        "Document_Retrieval": Document_Retrieval,
+        "Image_optimizer": Image_optimizer,
+        "Code_Executor": Code_Executor,
+        "Image_Analyzer": Image_Analyzer,
+        "execute_python_code": execute_python_code,
     }
 
     environments = {}
@@ -420,8 +392,15 @@ def create_environments(
 
     return environments
 
+
 if __name__ == "__main__":
-    tasks_json_path = Path(__file__).parent.parent.parent / "afm" / "src" / ENVIRONMENT / f"{TASK_TYPE}.json"
+    tasks_json_path = (
+        Path(__file__).parent.parent.parent
+        / "afm"
+        / "src"
+        / ENVIRONMENT
+        / f"{TASK_TYPE}.json"
+    )
     logger.info(f"task directory {tasks_json_path}")
     work_dir = BASE_WORK_DIR
     host = os.environ.get("CORRAL_HOST", "0.0.0.0")
