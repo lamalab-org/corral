@@ -7,6 +7,10 @@ from loguru import logger
 from corral.backend.env import Environment
 
 
+class MalformedDocstringError(ValueError):
+    """Raised when a docstring has unclosed tags"""
+
+
 class ToolVerbosity(Enum):
     """Defines different levels of tool description verbosity for ablation studies"""
 
@@ -93,6 +97,13 @@ class VerbosityConfig:
         "RAISES",
         "LIMITATIONS",
         "EXAMPLES",
+        "ARGS_BRIEF",
+        "ARGS_DETAILED",
+        "ARGS_SYNTACTICAL",
+        "ARGS_EXAMPLES",
+        "RETURNS_BRIEF",
+        "RETURNS_DETAILED",
+        "RETURNS_EXAMPLES",
     ]
 
     # Pre-compile regex patterns for performance
@@ -121,10 +132,50 @@ class VerbosityConfig:
         return str(hash(docstring))
 
     @classmethod
+    def _validate_tag_closure(cls, docstring: str) -> None:
+        """
+        Validate that all opening tags have corresponding closing tags.
+
+        Args:
+            docstring: The docstring to validate
+
+        Raises:
+            MalformedDocstringError: If unclosed tags are found
+        """
+        # Find all opening tags
+        opening_pattern = rf"\[({cls._keyword_pattern})\]"
+        opening_tags = re.findall(opening_pattern, docstring, re.IGNORECASE)
+
+        # For each unique tag, count openings and closings
+        unclosed = []
+        checked_tags = set()
+
+        for tag in opening_tags:
+            tag_upper = tag.upper()
+            if tag_upper in checked_tags:
+                continue
+            checked_tags.add(tag_upper)
+
+            # Count openings and closings for this specific tag (case-insensitive)
+            opening_count = len(
+                re.findall(rf"\[{re.escape(tag)}\]", docstring, re.IGNORECASE)
+            )
+            closing_count = len(
+                re.findall(rf"\[/{re.escape(tag)}\]", docstring, re.IGNORECASE)
+            )
+
+            if opening_count > closing_count:
+                unclosed.append(
+                    f"{tag_upper} (opened {opening_count} times, closed {closing_count} times)"
+                )
+
+        if unclosed:
+            message = f"Docstring has unclosed tags: {', '.join(unclosed)}"
+            raise MalformedDocstringError(message)
+
+    @classmethod
     def _clean_nested_tags(cls, content: str) -> str:
         """Remove any nested [TAG]...[/TAG] patterns and keep just the content"""
-        import re
-
         nested_tag_pattern = r"\[([A-Z_]+)\](.*?)\[/\1\]"
 
         # Keep replacing until no more nested tags found
@@ -147,6 +198,9 @@ class VerbosityConfig:
         sections = {}
 
         try:
+            # Validate tag closure before processing
+            cls._validate_tag_closure(docstring)
+
             # Find all tagged sections using pre-compiled regex
             matches = cls._keyword_regex.findall(docstring)
             for section_name, content in matches:
@@ -179,6 +233,9 @@ class VerbosityConfig:
             # Cache the result
             cls._parsed_cache[doc_hash] = sections.copy()
 
+        except MalformedDocstringError:
+            # Re-raise malformed docstring errors without catching them
+            raise
         except Exception as e:
             logger.error(f"Error parsing docstring: {e}")
             # Fallback to basic parsing
@@ -327,20 +384,13 @@ class VerbosityConfig:
                 # Just the basic part before any tags or extra info
                 return arg_desc.split("[")[0].split("(choices:")[0].strip()
 
-            elif verbosity == ToolVerbosity.BRIEF:
-                # Basic description + choices, but no detailed explanations
-                basic = arg_desc.split("[")[0].strip()
-                if "(choices:" in arg_desc:
-                    choices_start = arg_desc.find("(choices:")
-                    choices_end = arg_desc.find(")", choices_start)
-                    if choices_end != -1:
-                        choices_part = arg_desc[choices_start : choices_end + 1]
-                        return f"{basic} {choices_part}"
-                return basic
-
             else:
                 # For DETAILED and above, include tagged sections based on verbosity
                 sections = cls.extract_all_sections(arg_desc)
+                sections = {
+                    k.replace("ARGS_", "") if k.startswith("ARGS_") else k: v
+                    for k, v in sections.items()
+                }
                 included_sections = VerbosityConfig.get_sections_for_verbosity(
                     verbosity
                 )
@@ -374,7 +424,7 @@ class VerbosityConfig:
                         choices_part = arg_desc[choices_start : choices_end + 1]
                         parts.append(choices_part)
 
-                return " ".join(parts) if parts else arg_desc
+                return "\n".join(parts) if parts else arg_desc
 
         except Exception as e:
             logger.error(f"Error filtering argument description: {e}")

@@ -3,11 +3,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
 from promptstore import PromptStore
 
 from corral.agents.base_agent import BaseAgent
 from corral.agents.prompt_utils import create_prompt
-from corral.agents.utils import LiteLLMMessage
+from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
 from corral.router.routes import CorralRouter
 
 
@@ -103,33 +104,42 @@ class ReActAgent(BaseAgent):
 
     def parse_llm_response(
         self, response: str
-    ) -> tuple[Thought | None, list[Action] | None]:
-        """Parse LLM response into Thought and Actions"""
-        thought_match = re.search(
-            r"Thought: (.*?)(?=\nAction:|Final Answer:|$)", response, re.DOTALL
-        )
+    ) -> tuple[list[Thought] | None, list[Action] | None]:
+        """Parse LLM response into Thoughts and Actions"""
+        thought_matches = re.finditer(r"<thought>(.*?)</thought>", response, re.DOTALL)
         action_matches = re.finditer(
-            r"Action: (\w+)\nAction Input: ({.*?}(?=\nAction:|\nThought:|\nFinal Answer:|$))",
+            r"<action>(.*?)</action>(?:.*?<action_input>(.*?)</action_input>)?",
             response,
             re.DOTALL,
         )
 
-        thought = Thought(thought_match.group(1).strip()) if thought_match else None
+        thoughts = [Thought(match.group(1).strip()) for match in thought_matches]
 
         actions = []
         for action_match in action_matches:
             tool_name = action_match.group(1).strip()
             try:
-                action_input = action_match.group(2).strip()
-                action_input = action_input.replace("True", "true").replace(
+                action_input = action_match.group(2)
+                # Check if action_input tags are malformed (opening tag present but closing tag missing)
+                if action_input is None:
+                    return thoughts, None
+                else:
+                    action_input = action_match.group(2).strip()
+
+                converted_input = convert_outermost_triple_quotes(action_input)
+
+                # Handle Python boolean values
+                converted_input = converted_input.replace("True", "true").replace(
                     "False", "false"
                 )
-                arguments = json.loads(action_input)
-                actions.append(Action(tool_name=tool_name, arguments=arguments))
-            except json.JSONDecodeError:
-                pass
 
-        return thought, actions if actions else None
+                # Parse as JSON
+                arguments = json.loads(converted_input)
+                actions.append(Action(tool_name=tool_name, arguments=arguments))
+            except (json.JSONDecodeError, ValueError, SyntaxError) as e:
+                logger.error(f"Parsing error: {e}")
+
+        return thoughts if thoughts else None, actions if actions else None
 
     def run(
         self,
@@ -168,33 +178,20 @@ class ReActAgent(BaseAgent):
             # Create prompt and get LLM response
             llm_response = self.get_llm_response().content
 
+            self.messages.append(LiteLLMMessage(role="assistant", content=llm_response))
+
             # Parse response
-            thought, actions = self.parse_llm_response(llm_response)
-            thought_prefix = f"Thought: {thought.content}\n" if thought else ""
+            thoughts, actions = self.parse_llm_response(llm_response)
 
-            # Check for final answer
-            final_answer_match = re.search(r"Final Answer: (.*)", llm_response)
-
-            if final_answer_match:
-                self.messages.append(
-                    LiteLLMMessage(
-                        role="assistant",
-                        content=f"{thought_prefix}Final Answer: {final_answer_match.group(1)}",
-                    )
-                )
-                return final_answer_match.group(1).strip()
+            # Check for final answer (XML format)
+            final_answer_match = re.search(
+                r"<final_answer>(.*?)</final_answer>", llm_response, re.DOTALL
+            ) or re.search(r"Final Answer: (.*)", llm_response, re.DOTALL)
 
             # Execute tools if actions exist
             if actions:
+                # Check for final answer
                 for action in actions:
-                    action_content = f"{thought_prefix}Action: {
-                        action.tool_name}\nAction Input: {
-                        json.dumps(
-                            action.arguments)}"
-                    self.messages.append(
-                        LiteLLMMessage(role="assistant", content=action_content)
-                    )
-
                     # Execute tool and get response
                     tool_response = interface.execute_tool(
                         task_id, action.tool_name, action.arguments
@@ -213,11 +210,14 @@ class ReActAgent(BaseAgent):
                             name=action.tool_name,
                         )
                     )
-            else:
+            if final_answer_match:
+                return final_answer_match.group(1).strip()
+
+            if not actions and final_answer_match is None:
                 self.messages.append(
                     LiteLLMMessage(
                         role="user",
-                        content=str(llm_response),
+                        content="No actions to execute. This is due to parsing error or missing action in the response. Please follow the format <thought>[your reasoning]</thought>\n<action>[tool name]</action>\n<action_input>[tool arguments as JSON]</action_input>.\n\nIf you have the final answer, respond with:\n<thought>[your reasoning]</thought>\n<final_answer>[answer]</final_answer>. For tool calls without arguments, use `<action_input>{}</action_input>`. Remember the closing tags. Try again.",
                     )
                 )
 

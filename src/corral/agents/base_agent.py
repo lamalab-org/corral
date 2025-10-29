@@ -10,6 +10,7 @@ from promptstore import PromptStore
 from corral.agents.prompt_utils import get_prompt
 from corral.agents.utils import (
     LiteLLMMessage,
+    count_tokens_and_add,
     llm_call,
     save_agent_messages,
 )
@@ -129,7 +130,7 @@ class BaseAgent(ABC):
         self.api_endpoint = api_endpoint
         self.temperature = temperature
         self.messages: list = []
-        self.token_usage: list = []  # Track token usage per LLM call
+        self.token_usage: list = {}  # Track token usage per LLM call
 
         if prompt_store:
             self.store = prompt_store
@@ -166,6 +167,9 @@ class BaseAgent(ABC):
         Returns:
             Any: The response from the LLM
         """
+        self.messages = count_tokens_and_add(
+            self.messages, self.model, self.token_usage.get("total_tokens", 0)
+        )
         try:
             response, usage_info = llm_call(
                 model=self.model,
@@ -178,7 +182,7 @@ class BaseAgent(ABC):
             )
 
             # Track token usage
-            self.token_usage.append(usage_info)
+            self.token_usage = usage_info
 
             return response
 
@@ -315,13 +319,9 @@ class BaseAgent(ABC):
         Returns:
             dict[str, int]: Dictionary with prompt_tokens, completion_tokens, and total_tokens
         """
-        total_prompt_tokens = sum(
-            usage.get("prompt_tokens", 0) for usage in self.token_usage
-        )
-        total_completion_tokens = sum(
-            usage.get("completion_tokens", 0) for usage in self.token_usage
-        )
-        total_tokens = sum(usage.get("total_tokens", 0) for usage in self.token_usage)
+        total_prompt_tokens = self.token_usage.get("prompt_tokens", 0)
+        total_completion_tokens = self.token_usage.get("completion_tokens", 0)
+        total_tokens = self.token_usage.get("total_tokens", 0)
 
         return {
             "prompt_tokens": total_prompt_tokens,
@@ -331,4 +331,4 @@ class BaseAgent(ABC):
 
     def reset_token_usage(self) -> None:
         """Reset token usage tracking"""
-        self.token_usage = []
+        self.token_usage = {}

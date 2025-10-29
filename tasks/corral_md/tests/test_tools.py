@@ -17,8 +17,12 @@ from pymatgen.core import Structure
     ("file_path", "expected_metadata"),
     [
         (
-            "path/to/ffield.reax",
-            "{potential type : reax, elements supported : Carbon (C), Hydrogen (H), Oxygen (O), Calcium (Ca), Silicon (Si), pair_style : reaxff}",
+            "path/to/Si.sw",
+            "{potential type : Stillinger Weber (SW), elements supported : Si (Silicon), pair_style : sw}",
+        ),
+        (
+            "/potentials/TERSOFF/2007_SiO.tersoff",
+            "{potential type : tersoff, elements supported : Si (Silicon), Oxygen (O), pair_style : tersoff}",
         ),
         (
             "./potentials/Al99.eam.alloy",
@@ -110,7 +114,7 @@ def test_run_lammps_unexpected_exception():
 
 def test_run_lammps_with_real_file():
     # Replace this with the actual existing file path on your system
-    actual_input_file = "/results/3_June_2025/tool_calling/claude_37/energy_minimisation/task_1/task_1_0_06030804/in.minimize"
+    actual_input_file = "/test_files/test_minimise/input.in"
 
     # Run the function without mocking - this will execute the real modal call
     result = run_lammps.execute(input_file=actual_input_file)
@@ -212,3 +216,7 @@ def test_convert_structure_to_lammps_data_invalid_input():
     msg = str(exc_info.value).lower()
     assert "unexpected error" in msg
     assert "no such file" in msg or "not found" in msg or "failed" in msg
+
+
+if __name__ == "__main__":
+    pytest.main()

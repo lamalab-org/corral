@@ -70,9 +70,9 @@ def llm_call(
 
     Args:
         model (str): The model to use.
-        messages (List[LiteLLMMessage]): The messages to send to the model.
+        messages (list[LiteLLMMessage]): The messages to send to the model.
         temperature (float): The temperature to use.
-        tools (Dict[str, Any], optional): The tools to use. If provided, will use tool calling.
+        tools (dict[str, Any], optional): The tools to use. If provided, will use tool calling.
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
         return_usage (bool, optional): If True, returns tuple of (message, usage_info). Defaults to False.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
@@ -290,8 +290,6 @@ def parse_string_argument(arg_string: str) -> dict | None:
     Parse a string argument format like "path (str, required): Path to the directory"
     This is a fallback for malformed API responses.
     """
-    import re
-
     # Pattern to match "name (type, required/optional): description"
     pattern = r"^(\w+)\s*\(([^,]+)(?:,\s*(required|optional))?\):\s*(.+)$"
     match = re.match(pattern, arg_string.strip())
@@ -415,3 +413,126 @@ def save_agent_messages(
         )
 
     return file_path
+
+
+def get_context_window(model: str) -> int:
+    """
+    Return the total context window (max tokens) for a given LiteLLM model name.
+
+    Tries litellm.get_max_tokens(model) first, then falls back to the
+    model cost/context map. Returns None if the model isn't known.
+
+    Args:
+        model (str): The model name, e.g., "gpt-4o", "claude-haiku-4-5".
+
+    Returns:
+        int: The max input tokens for the model, or None if unknown.
+    """
+    return litellm.model_cost.get(model, {}).get("max_input_tokens", None)
+
+
+def remove_old_budget_message(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Remove any existing CONTEXT_BUDGET messages from the first message in the list.
+
+    Args:
+        messages (List[dict[str, Any]]): The messages to filter.
+
+    Returns:
+        List[dict[str, Any]]: The filtered messages.
+    """
+    if messages and "[CONTEXT_BUDGET]" in str(messages[0].get("content", "")):
+        # Replace content between CONTEXT_BUDGET tokens with nothing in first message
+        content = str(messages[0]["content"])
+        start_tag = "[CONTEXT_BUDGET]"
+        end_tag = "[/CONTEXT_BUDGET]"
+
+        start_idx = content.find(start_tag)
+        end_idx = content.find(end_tag)
+
+        if start_idx != -1 and end_idx != -1:
+            # Keep everything after end_tag (remove budget from beginning)
+            messages[0]["content"] = content[end_idx + len(end_tag) :].lstrip()
+    return messages
+
+
+def count_tokens_and_add(
+    messages: list[dict[str, Any]], model: str, count: int
+) -> list[dict[str, Any]]:
+    """
+    Count tokens in messages and add token count as metadata if supported.
+
+    Args:
+        messages (list[dict[str, Any]]): The messages to count tokens for.
+        model (str): The model to use for token counting.
+        count (int): The token count to add as metadata.
+
+    Returns:
+        list[dict[str, Any]]: The messages with token count metadata added.
+    """
+    window = get_context_window(model=model)
+    if window is None:
+        window = get_context_window(model=model.split("/")[-1])
+
+    if window is None:
+        window = 8192  # Default to 8k if unknown
+
+    messages = remove_old_budget_message(messages)
+    budget_message = f"""[CONTEXT_BUDGET]
+Note that the context budget is not exact since it is based on previous iterations.
+model: {model}
+max_context_tokens: {window}
+prompt_tokens_now: {count}
+reserve_for_output: 100
+remaining_budget: {window - count - 100}
+actions_if_low_budget:
+  - avoid reading entire files
+  - prefer short answers (<= 150 tokens)
+  - summarize or drop thoughts if needed
+[/CONTEXT_BUDGET]
+"""
+    # Ensure content is a string before concatenation
+    messages[0]["content"] = budget_message + str(messages[0]["content"])
+    return messages
+
+
+def convert_outermost_triple_quotes(text: str) -> str:
+    """Convert only the outermost triple-quoted strings to JSON format."""
+    result = []
+    i = 0
+
+    while i < len(text):
+        if text[i : i + 3] == '"""':
+            # Found opening triple quote - find its closing match
+            # Look backwards to see if this is a JSON value start
+            preceding = text[:i].rstrip()
+            if preceding and (preceding[-1] in ":," or preceding.endswith("{")):
+                # This is a JSON value, find the matching closing quote
+                start = i + 3
+                j = start
+
+                # Scan for the closing triple quote
+                # Skip to end or find """ followed by JSON delimiter
+                while j <= len(text) - 3:
+                    if text[j : j + 3] == '"""':
+                        # Check what comes after
+                        after = text[j + 3 :].lstrip()
+                        if not after or after[0] in ",}":
+                            # This is the closing quote
+                            content = text[start:j]
+                            result.append(json.dumps(content))
+                            i = j + 3
+                            break
+                    j += 1
+                else:
+                    # Didn't find closing, keep original
+                    result.append(text[i])
+                    i += 1
+            else:
+                result.append(text[i])
+                i += 1
+        else:
+            result.append(text[i])
+            i += 1
+
+    return "".join(result)

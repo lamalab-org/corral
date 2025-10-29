@@ -12,6 +12,7 @@ The embeddings are saved as numpy files following the next path:
 """
 
 import ast
+import re
 from pathlib import Path
 
 import numpy as np
@@ -49,10 +50,8 @@ def extract_tool_functions(file_path: str) -> dict[str, str]:
 
                 for decorator in node.decorator_list:
                     # Handle simple decorator like @tool
-                    if (
-                        isinstance(decorator, ast.Name)
-                        and decorator.id == "tool"
-                        or isinstance(decorator, ast.Attribute)
+                    if (isinstance(decorator, ast.Name) and decorator.id == "tool") or (
+                        isinstance(decorator, ast.Attribute)
                         and decorator.attr == "tool"
                     ):
                         has_tool_decorator = True
@@ -62,7 +61,8 @@ def extract_tool_functions(file_path: str) -> dict[str, str]:
                     if (
                         isinstance(decorator.func, ast.Name)
                         and decorator.func.id == "tool"
-                        or isinstance(decorator.func, ast.Attribute)
+                    ) or (
+                        isinstance(decorator.func, ast.Attribute)
                         and decorator.func.attr == "tool"
                     ):
                         has_tool_decorator = True
@@ -201,13 +201,9 @@ def format_tool_for_embedding(docstring: str, mode: str = "full") -> str:
     #   'workflow': extract text between [BRIEF] and [/WORKFLOW_INTEGRATION]
     #   'full': use entire docstring
     if mode == "brief":
-        import re
-
         match = re.search(r"\[BRIEF\](.*?)\[/BRIEF\]", docstring, re.DOTALL)
         return match.group(1).strip() if match else ""
     elif mode == "workflow":
-        import re
-
         match = re.search(
             r"\[BRIEF\](.*?)\[/WORKFLOW_INTEGRATION\]", docstring, re.DOTALL
         )
