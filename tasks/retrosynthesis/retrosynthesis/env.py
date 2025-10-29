@@ -23,6 +23,7 @@ from retrosynthesis.score import (
 from retrosynthesis.tools import create_tools
 
 from corral.backend.env import Environment
+from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "CORRAL_WORK_DIR/rethrosynthesis")
@@ -124,11 +125,6 @@ class RetroEnvironment(Environment):
             f"{self.current_task.submission_format}\n\n"
         )
 
-        # print()
-        # print()
-        # print(self.current_task.input_from_tasks)
-        # print()
-        # print()
         if self.current_task.input_from_tasks:
             prompt += "\nAvailable input data:\n"
 
@@ -281,8 +277,8 @@ if __name__ == "__main__":
         if env.current_task.input_from_tasks:
             logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
 
-    # run_server(
-    #     environments=environments,
-    #     host=args.host,
-    #     port=args.port,
-    # )
+    run_server(
+        environments=environments,
+        host=args.host,
+        port=args.port,
+    )
