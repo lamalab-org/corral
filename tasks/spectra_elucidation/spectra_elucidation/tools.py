@@ -1002,7 +1002,9 @@ Example Calculations:
 
 
 @tool
-def obtain_isomers_from_molecular_formula(molecular_formula: str) -> list[str]:
+def obtain_isomers_from_molecular_formula(
+    molecular_formula: str, limit: int
+) -> list[str]:
     """[BRIEF] Obtain isomers for a given molecular formula. [/BRIEF]
 
     [DETAILED] This function retrieves isomers for a given molecular formula using the `get_isomers_from_molecular_formula` remote function. It returns a list of isomer SMILES strings. The list of isomers might not be accurate since it is based on the PubChem database. [/DETAILED]
@@ -1041,6 +1043,12 @@ def obtain_isomers_from_molecular_formula(molecular_formula: str) -> list[str]:
             [ARGS_SYNTACTICAL] Valid molecular formula string [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "C2H6O", "C6H6", "C6H12", "C6H10O", "C6H10Cl2" [/ARGS_EXAMPLES]
 
+        limit (int):
+            [ARGS_BRIEF] The maximum number of isomers to retrieve. 0 means no limit. [/ARGS_BRIEF]
+            [ARGS_DETAILED] An integer specifying the maximum number of isomers to retrieve for the given molecular formula. This parameter helps to limit the number of results returned by the function. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Positive integer [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] 5, 10, 20 [/ARGS_EXAMPLES]
+
     Returns:
         list[str]:
             [RETURNS_BRIEF] A list of SMILES strings representing the isomers of the input compound. [/RETURNS_BRIEF]
@@ -1052,13 +1060,14 @@ def obtain_isomers_from_molecular_formula(molecular_formula: str) -> list[str]:
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
+        - This tool can be really slow for molecular formulas with many isomers, if the limit is set too high.
         - The list of isomers may not be exhaustive or accurate, as it is based on the PubChem database.
         - The function may not find all possible isomers, especially for complex or unusual structures.
     [/LIMITATIONS]
     """
     return remote_call(
         function_name="get_compound_isomers_pubchem_by_formula", env_name="chemenv"
-    )(formula=molecular_formula)
+    )(formula=molecular_formula, limit=limit)
 
 
 @tool
