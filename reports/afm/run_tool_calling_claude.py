@@ -1,9 +1,10 @@
+#!/usr/bin/env python
 import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
+from corral import CorralRouter, CorralRunner
 from corral.agents import ToolCallingAgent
-from corral import CorralRunner, CorralRouter
 from corral.report import CorralWandbLogger
 
 
