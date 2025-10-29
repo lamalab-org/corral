@@ -180,12 +180,16 @@ def main():
         final_inputs = []
         for j, _template in enumerate(TEMPLATES[i]):
             if j == 0:
-                input_from_task = [f"make_{i+1}_lvl1-apply_template-{j}"]
+                input_from_task = [f"make_{i+1}_lvl1-template_search-{j+1}"]
                 initial_inputs = {"initial_molecule": molecule}
+                input_from_task_search = False
             else:
                 input_from_task = [
                     f"make_{i+1}_lvl1-apply_template-{j}",
                     f"make_{i+1}_lvl1-template_search-{j+1}",
+                ]
+                input_from_task_search = [
+                    f"make_{i+1}_lvl1-apply_template-{j}",
                 ]
                 initial_inputs = {}
             task = {
@@ -199,8 +203,8 @@ def main():
                 ],
                 "metrics": ["binary"],
                 "input": {
-                    "prompt": f"Can you return the `mapped_rxn` associated with one template that can be applied to the molecule {ALL_MOLECULES[i][j]}? The application of the template in such molecule should be guided towards an optimal retrosynthetic route.",
-                    "input_from_task": False,
+                    "prompt": "Return the atom-mapped reaction SMILES (`mapped_rxn`) for one template that is applicable to the molecule below. Among all applicable templates, choose the one that you think it maximizes the possibility of reaching buyable reactants, in this or subsequent steps.",
+                    "input_from_task": input_from_task_search,
                     "input_for_task": [
                         f"make_{i+1}_lvl1-apply_template-{j+1}",
                         f"make_{i+1}_lvl1-build_complete_route",
@@ -209,14 +213,15 @@ def main():
                 "output": [
                     {
                         "type": "string",
-                        "target": MOLECULES,
+                        "target": ALL_MOLECULES[i][j],
                         "threshold": None,
                     }
                 ],
                 "initial_inputs": initial_inputs,
-                "scoring_fn": "check_template",
+                "scoring_fn": "check_apply_template",
                 "submission_format": "Return a dict with the `mapped_rxn` as a string and the `template_id` as an integer in JSON format, e.g., {'mapped_rxn': 'Cc1ccccc1.Br>>Cc1ccccc1Br', 'template_id': 12345}.",
                 "tools": [
+                    "check_smiles_reaction_template_matching",
                     "search_template_catalog_by_criteria",
                     "get_template",
                     "get_available_functional_groups",
@@ -233,6 +238,7 @@ def main():
                 ]
             else:
                 input_for_task = [
+                    f"make_{i+1}_lvl1-search_template-{j+2}",
                     f"make_{i+1}_lvl1-apply_template-{j+2}",
                     f"make_{i+1}_lvl1-build_complete_route",
                 ]
@@ -255,7 +261,7 @@ def main():
                 "output": [
                     {
                         "type": "list",
-                        "target": [TARGETS[i][j]],
+                        "target": "input_from_task",
                         "threshold": None,
                     }
                 ],
@@ -287,12 +293,12 @@ def main():
             "output": [
                 {
                     "type": "list",
-                    "target": final_targets,
+                    "target": 9999.0,
                     "threshold": None,
                 }
             ],
             "initial_inputs": {},
-            "scoring_fn": "check_reactants",
+            "scoring_fn": "score_final",
             "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  \"type\": \"mol\",\n  \"smiles\": \"CO\",\n  \"children\": [\n    {\n      \"type\": \"reaction\",\n      \"template_id\": \"template_x\",\n      \"children\": [\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"BrC\"\n        },\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"[OH-]\"\n        }\n      ]\n    }\n  ]\n}`.""",
             "tools": [
                 "verify_step",

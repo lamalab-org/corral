@@ -13,6 +13,7 @@ from retrosynthesis.retrosynthesis_utils import (
     check_price,
     detect_functional_groups_in_molecule,
     get_molecule_summary,
+    return_matching,
     search_by_template,
     search_reactions_by_criteria,
     species_match,
@@ -1287,6 +1288,87 @@ def map_reaction_smiles(reaction_smiles: str) -> str:
     return results[0]["mapped_rxn"]
 
 
+@tool
+def check_smiles_reaction_template_matching(smiles: str, template_id: str) -> bool:
+    """[BRIEF] Checks if the SMARTS of a reaction template matches any substructure in the given SMILES. [/BRIEF]
+
+    [DETAILED] This function takes a SMILES string and a reaction template in SMARTS format as input.
+    It checks whether the reaction template SMARTS can be applied to the molecule represented by the SMILES string. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - When you need to verify if a specific reaction template is applicable to a molecule. [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Obtain the SMILES string of a molecule and the reaction template. You can use the `search_template_catalog_by_criteria` tool to find the appropriate template. [/PREREQUISITE]
+    2. [CURRENT] Use `check_smiles_reaction_template_matching` to check if the template matches the molecule. [/CURRENT]
+    3. [FOLLOW_UP] Use the result to decide whether to apply the template using the `apply_template` tool or to search for alternative templates. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+    - The function converts the SMILES string into a molecular structure using RDKit to check if the SMILES is valid.
+    - It retrieves the information relative to the reaction template using the provided template ID.
+    - It checks if the reaction template SMARTS matches any substructure in the molecule.
+    - The function returns True if a match is found, otherwise it returns False. [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `check_smiles_reaction_template_matching("CCO", "123")`,
+        `check_smiles_reaction_template_matching("c1ccccc1O", "456")`,
+        `check_smiles_reaction_template_matching("C1=CC=CC=C1", "789")`,
+        `check_smiles_reaction_template_matching("C1=CC=CC=C1C(=O)O", "101")`,
+        `check_smiles_reaction_template_matching("C1=CC=CC=C1C(=O)Cl", "112")`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        smiles (str):
+            [ARGS_BRIEF] SMILES string of the molecule to check. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A valid SMILES string of the molecule that you want to check against the reaction template. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMILES string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/ARGS_EXAMPLES]
+
+        template_id (str):
+            [ARGS_BRIEF] ID of the reaction template to check. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The unique identifier of the reaction template you want to check against the molecule. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] String representing a template ID [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "123", "456", "789" [/ARGS_EXAMPLES]
+
+    Returns:
+        bool:
+            [RETURNS_BRIEF] True if the template matches the molecule, False otherwise. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns a boolean value indicating whether the reaction template matches any substructure in the molecule represented by the SMILES string. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] Boolean value [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] True, False [/RETURNS_EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError:
+            [ERROR_WHEN] Raised when the provided SMILES string is invalid. [/ERROR_WHEN]
+            [ERROR_DETAILS] This occurs if the SMILES string cannot be parsed into a valid molecular structure. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Ensure the SMILES string is correctly formatted. [/ERROR_RECOVERY]
+
+        ValueError:
+            [ERROR_WHEN] Raised when the provided template ID is invalid or not found. [//ERROR_WHEN]
+            [ERROR_DETAILS] This occurs if the template ID does not correspond to any known reaction template. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify that the template ID is correct and exists in the template catalog. [/ERROR_RECOVERY]
+
+        Exception:
+            [ERROR_WHEN] Raised for any unexpected errors during the matching process. [/ERROR_WHEN]
+            [ERROR_DETAILS] This could be due to connectivity issues, or server errors in the template retrieval service. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] If the error comes from the template retrieval service, being a server error or similar, inform the user. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - The function relies on the accuracy and completeness of the underlying template catalog or service used for template retrieval.
+    - The matching process may not account for all stereochemical or conformational variations of the molecule.
+    - If the template retrieval service is down or unreachable, the function will not be able to return results.
+    [/LIMITATIONS]
+    """
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError("Invalid SMILES string provided.")
+    return return_matching(smiles, template_id)
+
+
 def create_tools() -> dict[str, Tool]:
     """Create a dictionary of all available tools for the agent environment"""
     return {
@@ -1305,4 +1387,5 @@ def create_tools() -> dict[str, Tool]:
         "map_reaction_smiles": map_reaction_smiles,
         "smiles_to_cas": smiles_to_cas,
         "cas_to_smiles": cas_to_smiles,
+        "check_smiles_reaction_template_matching": check_smiles_reaction_template_matching,
     }

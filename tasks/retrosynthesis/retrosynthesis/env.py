@@ -14,11 +14,15 @@ import os
 from pathlib import Path
 
 from loguru import logger
-from retrosynthesis.score import check_reactants, check_template, score_final
+from retrosynthesis.score import (
+    check_apply_template,
+    check_reactants,
+    check_template,
+    score_final,
+)
 from retrosynthesis.tools import create_tools
 
 from corral.backend.env import Environment
-from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "CORRAL_WORK_DIR/rethrosynthesis")
@@ -27,6 +31,7 @@ SCORING_FUNCTIONS = {
     "score_final": score_final,
     "check_reactants": check_reactants,
     "check_template": check_template,
+    "check_apply_template": check_apply_template,
 }
 
 
@@ -43,7 +48,8 @@ def load_tasks_from_json(
             task_data = json.load(f)
         for task in task_data:
             task_id = task["id"]
-            initial_input = task.get("initial_input", {"work_dir": work_dir})
+            initial_input = task.get("initial_input", {})
+            initial_input["work_dir"] = work_dir
             input_from_tasks = task.get("input", {}).get("input_from_task", [])
             if not isinstance(input_from_tasks, list):
                 input_from_tasks = []
@@ -118,6 +124,11 @@ class RetroEnvironment(Environment):
             f"{self.current_task.submission_format}\n\n"
         )
 
+        # print()
+        # print()
+        # print(self.current_task.input_from_tasks)
+        # print()
+        # print()
         if self.current_task.input_from_tasks:
             prompt += "\nAvailable input data:\n"
 
@@ -134,6 +145,7 @@ class RetroEnvironment(Environment):
 
         # Display initial input data
         if self.current_task.initial_input:
+            prompt += "\nAvailable initial input data:\n"
             for key, value in self.current_task.initial_input.items():
                 if key != "work_dir":
                     prompt += f"- {key}: {value}\n"
@@ -150,9 +162,15 @@ class RetroEnvironment(Environment):
             # Clean the submission
             submitted_answer = self.state.submitted_answer.strip()
             logger.info(f"Raw submission: {submitted_answer}")
-            score = self.current_task.scoring_fn(
-                prediction=submitted_answer, target=self.current_task.scoring_inputs
-            )
+            if self.current_task.scoring_inputs == "input_from_task":
+                score = self.current_task.scoring_fn(
+                    prediction=submitted_answer,
+                    target=self.current_task.input_from_tasks,
+                )
+            else:
+                score = self.current_task.scoring_fn(
+                    prediction=submitted_answer, target=self.current_task.scoring_inputs
+                )
             self.task_group.store_result(
                 self.task_id, {"answer": submitted_answer}, score
             )
@@ -263,8 +281,8 @@ if __name__ == "__main__":
         if env.current_task.input_from_tasks:
             logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
 
-    run_server(
-        environments=environments,
-        host=args.host,
-        port=args.port,
-    )
+    # run_server(
+    #     environments=environments,
+    #     host=args.host,
+    #     port=args.port,
+    # )

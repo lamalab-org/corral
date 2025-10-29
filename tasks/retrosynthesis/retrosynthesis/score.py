@@ -207,3 +207,29 @@ def check_template(prediction: dict, target: str) -> float:
         return 0.0
 
     return 1.0
+
+
+def check_apply_template(prediction: dict, target: str) -> float:
+    """
+    Scoring function to check if applying the given template to the input molecule
+    produces the expected output molecule.
+
+    Args:
+        prediction (dict): A dictionary containing 'input_molecule' and 'template_id'.
+        target (str): The initial molecule of the retrosynthesis.
+
+    Returns:
+        float: 1.0 if the application is correct, 0.0 otherwise.
+    """
+    prediction_rxn = prediction.get("mapped_rxn")
+    real_rxn = search_by_template(prediction.get("template_id")).get("mapped_rxn")
+    if prediction_rxn != real_rxn:
+        return 0.0
+
+    try:
+        precursors = apply_template_retro(target, prediction.get("template_id"))
+        if precursors:
+            return 1.0
+    except Exception:
+        return 0.0
+    return 0.0

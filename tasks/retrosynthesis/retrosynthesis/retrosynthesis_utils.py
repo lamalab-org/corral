@@ -930,21 +930,16 @@ def get_molecule_summary(smiles: str, result_dict, use_collapsed=True) -> str:
     return "\n".join(lines)
 
 
-if __name__ == "__main__":
-    smiles = (
-        "O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O"
-    )
-    res = [
-        "aryl halide",
-        "benzene rings",
-        "carbamate",
-        "ether oxygens",
-        "four-membered rings",
-        "halide",
-        "ortho di-substituted benzene",
-        "six-membered aromatic rings",
-        "sulfonamides",
-        "t-butyl",
-        "tertiary amines",
-    ]
-    # print(get_molecule_summary(smiles, res))
+def return_matching(smiles, template_id):
+    """
+    Check if a given reaction template matches the provided SMILES.
+
+    Args:
+        smiles: The SMILES string to check.
+        template_id: The identifier of the reaction template.
+
+    Returns:
+        bool: True if the SMILES matches the template, False otherwise.
+    """
+    matches = apply_template_retro(smiles, template_id)
+    return len(matches) > 0

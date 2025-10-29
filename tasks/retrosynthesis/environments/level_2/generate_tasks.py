@@ -89,6 +89,7 @@ def main():
                 "scoring_fn": "check_reactants",
                 "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
                 "tools": [
+                    "check_smiles_reaction_template_matching",
                     "search_template_catalog_by_criteria",
                     "get_template",
                     "get_available_functional_groups",
