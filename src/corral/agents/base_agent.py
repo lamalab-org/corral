@@ -214,6 +214,7 @@ class BaseAgent(ABC):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
+        enable_retire: bool = False,
     ) -> str:
         """
         Run the agent to solve a task
@@ -226,6 +227,7 @@ class BaseAgent(ABC):
             history (list[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
+            enable_retire (bool, optional): Whether to enable the retire option. Defaults to False.
 
         Returns:
             str: The final answer from the agent
@@ -241,6 +243,7 @@ class BaseAgent(ABC):
         examples: list[str] | None = None,
         verbose: bool = False,
         tool_verbosity: str = "brief",
+        enable_retire: bool = False,
     ) -> tuple[str, dict[str, int]]:
         """Run the agent to solve a task
 
@@ -254,6 +257,7 @@ class BaseAgent(ABC):
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             verbose (bool, optional): Whether to save agent messages. Defaults to False.
             tool_verbosity (str, optional): The verbosity level for tool information. Defaults to "brief".
+            enable_retire (bool, optional): Whether to enable the retire option. Defaults to False.
 
         Returns:
             str: The final answer from the agent
@@ -264,7 +268,14 @@ class BaseAgent(ABC):
             history = []
 
         try:
-            final_answer = self.run(interface, task_id, history, task_prompt, examples)
+            final_answer = self.run(
+                interface, task_id, history, task_prompt, examples, enable_retire
+            )
+
+            # Check if agent decided to retire
+            if final_answer == "RETIRE":
+                logger.info(f"Agent retired from task {task_id}")
+                return "RETIRE", self.get_total_token_usage()
 
             if verbose:
                 # Check if agent has stored tools information

@@ -107,6 +107,7 @@ class ToolCallingAgent(BaseAgent):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
+        enable_retire: bool = False,
     ) -> str:
         """Run the agent to solve the task
 
@@ -116,6 +117,7 @@ class ToolCallingAgent(BaseAgent):
             history (list[LiteLLMMessage]], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
+            enable_retire (bool, optional): Whether to enable the retire option. Defaults to False.
 
         Returns:
             str: The final answer to the task
@@ -145,6 +147,18 @@ class ToolCallingAgent(BaseAgent):
 
                 content = llm_response.content
                 if content:
+                    # Check for retirement if enabled
+                    if enable_retire:
+                        retire_match = re.search(
+                            r"(?:Final Answer:\s*)?RETIRE", content, re.IGNORECASE
+                        )
+                        if retire_match:
+                            logger.info(f"Agent retiring from task {task_id}")
+                            self.messages.append(
+                                LiteLLMMessage(role="assistant", content=content)
+                            )
+                            return "RETIRE"
+
                     final_answer_match = re.search(
                         r"Final Answer:\s*(.*)", content, re.IGNORECASE
                     )

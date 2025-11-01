@@ -148,6 +148,7 @@ class ReActAgent(BaseAgent):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
+        enable_retire: bool = False,
     ) -> str:
         """Main ReAct loop implementation
 
@@ -157,6 +158,7 @@ class ReActAgent(BaseAgent):
             history (List[Dict[str, Any]], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. `task_prompt` is intended to be a plan or description about the task, that should always be provided when this agent is called as a subagent of a main orchestrator. Defaults to None.
             examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
+            enable_retire (bool, optional): Whether to enable the retire option. Defaults to False.
 
         Returns:
             str: The final answer to the task
@@ -182,6 +184,17 @@ class ReActAgent(BaseAgent):
 
             # Parse response
             thoughts, actions = self.parse_llm_response(llm_response)
+
+            # Check for retirement (XML format) if enabled
+            if enable_retire:
+                retire_match = re.search(
+                    r"<retire>(.*?)</retire>", llm_response, re.DOTALL | re.IGNORECASE
+                )
+                if retire_match:
+                    logger.info(
+                        f"Agent retiring from task {task_id}. Reason: {retire_match.group(1).strip()}"
+                    )
+                    return "RETIRE"
 
             # Check for final answer (XML format)
             final_answer_match = re.search(
