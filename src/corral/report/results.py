@@ -26,11 +26,12 @@ class TaskTrialResult:
     duration: float | None = None
     token_usage: dict[str, int] | None = None
     error_message: str | None = None
+    retired: bool = False
 
     @property
     def success(self) -> bool:
         """Whether the trial was successful"""
-        return self.score > 0 and self.error_message is None
+        return self.score > 0 and self.error_message is None and not self.retired
 
 
 @dataclass
@@ -176,6 +177,10 @@ class BenchmarkResult:
             "failed": failed_calls,
             "total": successful_calls + failed_calls,
         }
+
+    def total_retired_trials(self) -> int:
+        """Calculate total number of retired trials across all tasks"""
+        return sum(1 for trial in self.all_results if trial.retired)
 
     def average_score(self) -> float:
         """Calculate average score across all results"""
@@ -338,6 +343,10 @@ class BenchmarkResult:
         )
         summary_table.add_row("Failed Tool Calls", str(tool_call_stats["failed"]))
 
+        # Add retirement statistics
+        retired_count = self.total_retired_trials()
+        summary_table.add_row("Retired Trials", str(retired_count))
+
         # Add token usage statistics
         total_tokens = self.total_token_usage()
         if total_tokens:
@@ -388,9 +397,10 @@ class BenchmarkResult:
         task_table.add_column("Trial ID", style="yellow")
         task_table.add_column("Score", style="cyan")
         task_table.add_column("Success", style="white")
+        task_table.add_column("Retired", style="red")
         task_table.add_column("Duration (s)", style="green")
         task_table.add_column("Tokens", style="green")
-        task_table.add_column("Tool Duration (s)", style="blue")  # New column
+        task_table.add_column("Tool Duration (s)", style="blue")
 
         # Add columns for each k value
         for k_val in self.k:
@@ -412,6 +422,7 @@ class BenchmarkResult:
             "Overall",
             f"{self._calculate_task_average_score(task_id):.3f}",
             f"{task_success_rate:.3f}",
+            "-",  # No overall retirement status
             duration_str,
             token_str,
             "-",  # No overall tool duration for task level
@@ -436,6 +447,7 @@ class BenchmarkResult:
                 trial.trial_id,
                 f"{trial.score:.3f}",
                 "✓" if trial.success else "✗",
+                "✓" if trial.retired else "✗",
                 duration_str,
                 token_str,
                 f"{trial_tool_duration:.3f}",  # Tool duration for this trial
@@ -558,6 +570,7 @@ class BenchmarkResult:
                         "total_tool_calls": tool_call_stats["total"],
                         "successful_tool_calls": tool_call_stats["successful"],
                         "failed_tool_calls": tool_call_stats["failed"],
+                        "retired_trials": self.total_retired_trials(),
                         "total_token_usage": total_tokens,
                         # Add duration metric
                         "total_tool_execution_duration": self.total_tool_execution_duration(),
@@ -610,9 +623,10 @@ class BenchmarkResult:
                             if trial.state and isinstance(trial.state, dict)
                             else None,
                             "success": trial.success,
+                            "retired": trial.retired,
                             "tool_execution_duration": self.get_trial_tool_execution_duration(
                                 trial
-                            ),  # Add this
+                            ),
                         }
 
                         # Add duration if available
