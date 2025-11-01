@@ -19,6 +19,7 @@ from retrosynthesis.score import (
     check_reactants,
     check_template,
     score_final,
+    score_final_without_price,
 )
 from retrosynthesis.tools import create_tools
 
@@ -33,6 +34,7 @@ SCORING_FUNCTIONS = {
     "check_reactants": check_reactants,
     "check_template": check_template,
     "check_apply_template": check_apply_template,
+    "score_final_without_price": score_final_without_price,
 }
 
 

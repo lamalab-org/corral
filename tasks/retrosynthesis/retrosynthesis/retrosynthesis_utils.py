@@ -1,6 +1,7 @@
 import os
 from typing import Any
 
+import pandas as pd
 import psycopg2
 from chemprice import PriceCollector
 from loguru import logger
@@ -586,8 +587,8 @@ def filter_price_data(df, smiles_list, limit=10):
     return result
 
 
-def check_chemicals_price(smiles_list: list[str]) -> list[dict[str, Any]]:
-    """Extract chemical information dictionaries from text using BeautifulSoup."""
+def check_chemicals_price(smiles_list: list[str]) -> pd.DataFrame:
+    """Check the price of chemicals given a list of SMILES strings."""
     pc.check()
     pc.status()
     return pc.collect(smiles_list)
@@ -644,17 +645,20 @@ def _is_buyable(smiles: list[str]) -> list[bool]:
     return check_smiles_presence(chemicals, smiles)
 
 
-def check_price(smiles_list: list[str]) -> list[dict[str, Any]]:
+def check_price(smiles_list: list[str], limit: int) -> list[dict[str, Any]]:
     """
     Check the price of chemicals given a list of SMILES strings.
 
     Args:
         smiles_list (list[str]): List of SMILES strings to check prices for.
+        limit (int): Maximum number of entries to return per SMILES.
 
     Returns:
         list of dict: List of dictionaries containing price information for each SMILES.
     """
-    return filter_price_data(check_chemicals_price(smiles_list))
+    return filter_price_data(
+        check_chemicals_price(smiles_list), smiles_list, limit=limit
+    )
 
 
 def valid_smiles(smiles: str) -> bool:
@@ -836,7 +840,7 @@ def detect_functional_groups_in_molecule(smiles: str) -> list[str]:
     """
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
-        raise ValueError(f"Invalid SMILES string: {smiles}")
+        return []
 
     detected = set()
     for name, patt in FG_PATTERNS.items():
@@ -846,7 +850,7 @@ def detect_functional_groups_in_molecule(smiles: str) -> list[str]:
     return sorted(detected)
 
 
-def get_functional_groups(product: str) -> list[str]:
+def get_functional_groups(smiles: str) -> list[str]:
     """
     Detect functional groups formed and broken in reaction.
 
@@ -854,11 +858,23 @@ def get_functional_groups(product: str) -> list[str]:
         mapped_rxn (str): Atom-mapped reaction SMILES
 
     Returns:
-        dict[str, list[str]]: Dict with keys:
-        - 'formed': List of FG names formed in products
-        - 'broken': List of FG names broken from reactants
+       list[str]: List of functional groups detected
     """
-    return detect_functional_groups_in_molecule(product)
+    try:
+        products_str = smiles
+
+        # Detect FGs in all products
+        product_fgs = set()
+        for p_smiles in products_str.split("."):
+            product_fgs.update(detect_functional_groups_in_molecule(p_smiles))
+
+        return sorted(product_fgs)
+
+    except Exception as e:
+        logger.error(f"Error detecting functional groups in SMILES '{smiles}': {e}")
+        raise Exception(
+            f"Error detecting functional groups in SMILES '{smiles}': {e}"
+        ) from e
 
 
 def summarize_groups_with_full_mapping(smiles: str, result_dict, use_collapsed=True):

@@ -267,7 +267,7 @@ def main():
                 ],
                 "initial_inputs": initial_inputs,
                 "scoring_fn": "check_reactants",
-                "submission_format": "Return the SMILES of the molecule as a simple string.",
+                "submission_format": "Return a list in which each item corresponds to the SMILES of each of the precursors as a string.",
                 "tools": [
                     "get_template",
                     "apply_template",
@@ -298,8 +298,8 @@ def main():
                 }
             ],
             "initial_inputs": {},
-            "scoring_fn": "check_reactants",
-            "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  \"type\": \"mol\",\n  \"smiles\": \"CO\",\n  \"children\": [\n    {\n      \"type\": \"reaction\",\n      \"template_id\": \"template_x\",\n      \"children\": [\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"BrC\"\n        },\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"[OH-]\"\n        }\n      ]\n    }\n  ]\n}`.""",
+            "scoring_fn": "score_final_without_price",
+            "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  \"type\": \"mol\",\n  \"smiles\": \"CO\",\n  \"children\": [\n    {\n      \"type\": \"reaction\",\n      \"template_id\": 1234,\n      \"children\": [\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"BrC\"\n        },\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"[OH-]\"\n        }\n      ]\n    }\n  ]\n}`.""",
             "tools": [
                 "verify_step",
                 "verify_route",

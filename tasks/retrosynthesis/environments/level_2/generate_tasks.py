@@ -75,7 +75,7 @@ def main():
                 "keywords": ["chemistry", "synthesis", "retrosynthesis"],
                 "metrics": ["binary"],
                 "input": {
-                    "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The route must have at least {len(TEMPLATES[i])} reactions. The leaves on the retrosynthesis tree should be commercially available chemicals.\n\nHere are some hints to help you (the hints are enumerated in the order that they should be applied): {HINTS[i]}",
+                    "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The route must have at least {len(TEMPLATES[i])} reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they should be applied): {HINTS[i]}",
                     "input_from_task": False,
                     "input_for_task": False,
                 },
@@ -87,7 +87,7 @@ def main():
                     }
                 ],
                 "scoring_fn": "check_reactants",
-                "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
+                "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": 1234,\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
                 "tools": [
                     "check_smiles_reaction_template_matching",
                     "search_template_catalog_by_criteria",

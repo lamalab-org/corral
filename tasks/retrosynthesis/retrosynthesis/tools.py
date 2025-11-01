@@ -11,8 +11,7 @@ from retrosynthesis.retrosynthesis_utils import (
     apply_template_forward,
     apply_template_retro,
     check_price,
-    detect_functional_groups_in_molecule,
-    get_molecule_summary,
+    get_functional_groups,
     return_matching,
     search_by_template,
     search_reactions_by_criteria,
@@ -124,6 +123,7 @@ def search_template_catalog_by_criteria(
             [ERROR_WHEN] Raised for any unexpected errors during the search process. [/ERROR_WHEN]
             [ERROR_DETAILS] This can occur due to various reasons, such as issues with the retrosynthetic template database or internal processing errors. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Check the input parameters and try again. If the issue persists, let the user know and try another way of solving the task. [/ERROR_RECOVERY]
+    [/RAISES]
 
     [LIMITATIONS] Known limitations:
         - The function relies on the completeness and accuracy of the retrosynthetic template catalog. If the catalog is incomplete or contains errors, the search results may be affected.
@@ -362,7 +362,7 @@ def apply_template(
 @tool
 def verify_step(molecule_smiles: str, template_id: str, precursors: list[str]) -> bool:
     """
-    [BRIEF] Verifies if a retrosynthetic step is valid. [/BRIEF]
+    [BRIEF] Verifies if a retrosynthetic step is valid. This tool might fail for intramolecular reactions. [/BRIEF]
 
     [DETAILED] This function checks whether applying a given retrosynthetic template to a set of precursor molecules results in the target molecule.
     It is used to validate retrosynthetic steps in a synthesis route. [/DETAILED]
@@ -560,21 +560,14 @@ def verify_route(route: str) -> tuple[bool, str]:
         if "template_id" not in reaction:
             return False, f"Reaction at {path} is missing required 'template_id' field"
 
-        if not isinstance(reaction["template_id"], str):
-            return False, f"Reaction at {path} has non-string 'template_id' field"
+        if not isinstance(reaction["template_id"], int):
+            return False, f"Reaction at {path} has non-integer 'template_id' field"
 
         if "children" not in reaction:
             return False, f"Reaction at {path} is missing required 'children' field"
 
         if not isinstance(reaction["children"], list):
             return False, f"Reaction at {path} has non-list 'children' field"
-
-        # Reaction must have at least 2 children (reactants)
-        if len(reaction["children"]) < 2:
-            return (
-                False,
-                f"Reaction at {path} has {len(reaction['children'])} children, expected at least 2 reactants",
-            )
 
         # All children must be valid molecules
         for i, child in enumerate(reaction["children"]):
@@ -602,7 +595,9 @@ def verify_route(route: str) -> tuple[bool, str]:
 
 
 @tool
-def search_catalog_by_smiles(smiles_list: list[str]) -> list[dict[str, Any]]:
+def search_catalog_by_smiles(
+    smiles_list: list[str], limit: int = 5
+) -> list[dict[str, Any]]:
     """
     [BRIEF] Searches a catalog for available precursors. [/BRIEF]
 
@@ -626,11 +621,11 @@ def search_catalog_by_smiles(smiles_list: list[str]) -> list[dict[str, Any]]:
 
     [SYNTACTICAL] Usage examples:
     [
-        `search_catalog_by_smiles(["CCO"])`,
+        `search_catalog_by_smiles(["CCO"], limit=10)`,
         `search_catalog_by_smiles(["c1ccccc1O"])`,
-        `search_catalog_by_smiles(["C1=CC=CC=C1"])`,
+        `search_catalog_by_smiles(["C1=CC=CC=C1"], liimit=3)`,
         `search_catalog_by_smiles(["C1=CC=CC=C1C(=O)O"])`,
-        `search_catalog_by_smiles(["C1=CC=CC=C1C(=O)Cl", "CCO"])`,
+        `search_catalog_by_smiles(["C1=CC=CC=C1C(=O)Cl", "CCO"], limit=7)`,
     ]
     [/SYNTACTICAL]
 
@@ -640,6 +635,12 @@ def search_catalog_by_smiles(smiles_list: list[str]) -> list[dict[str, Any]]:
             [ARGS_DETAILED] A list of SMILES representations of all the chemicals to be searched in the catalog. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] List with valid SMILES strings [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] ["CCO"], ["c1ccccc1O"], ["C1=CC=CC=C1"] [/ARGS_EXAMPLES]
+
+        limit (int):
+            [ARGS_BRIEF] Maximum number of results to return. Default is 5. [/ARGS_BRIEF]
+            [ARGS_DETAILED] An integer specifying the maximum number of matching chemicals to return from the catalog search. This helps to limit the output size. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Positive integer [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] 5, 10, 3 [/ARGS_EXAMPLES]
 
     Returns:
         list[dict[str, Any]] | str:
@@ -662,7 +663,7 @@ def search_catalog_by_smiles(smiles_list: list[str]) -> list[dict[str, Any]]:
     - If the catalog service is down or unreachable, the function will not be able to return results.
     [/LIMITATIONS]
     """
-    chemicals = check_price(smiles_list)
+    chemicals = check_price(smiles_list, limit)
     return chemicals if chemicals else "No results found"
 
 
@@ -1148,7 +1149,7 @@ def detect_protection_groups(
 
 
 @tool
-def detect_functional_groups(smiles: str) -> str:
+def detect_functional_groups(smiles: str) -> list[str]:
     """
     [BRIEF] Detects functional groups in a molecule represented by a SMILES string. [/BRIEF]
 
@@ -1206,6 +1207,11 @@ def detect_functional_groups(smiles: str) -> str:
             [ERROR_WHEN] Raised when the provided SMILES string is invalid. [/ERROR_WHEN]
             [ERROR_DETAILS] This occurs if the SMILES string cannot be parsed into a valid molecular structure. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Ensure the SMILES string is correctly formatted. [/ERROR_RECOVERY]
+
+        Exception:
+            [ERROR_WHEN] Raised for any unexpected errors during the detection process. [/ERROR_WHEN]
+            [ERROR_DETAILS] This could be due to issues with the SMARTS patterns or internal processing errors. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] If the error is due to internal processing, inform the user to try again later. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
@@ -1218,8 +1224,7 @@ def detect_functional_groups(smiles: str) -> str:
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         raise ValueError("Invalid SMILES")
-    res = detect_functional_groups_in_molecule(smiles)
-    return get_molecule_summary(smiles, res)
+    return get_functional_groups(smiles)
 
 
 @tool

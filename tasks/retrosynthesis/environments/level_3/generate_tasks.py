@@ -14,11 +14,21 @@ MOLECULES = [
     "Cc1ccc(NS(=O)(=O)c2ccc(/C=C/C(=O)Nc3ccccc3N)cc2)cc1",
     "O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O",
 ]
+TEMPLATES = [
+    ["1914396"],
+    ["1914397"],
+    ["1914398"],
+    ["1679759"],
+    ["29648", "1914401", "1914414", "149046", "1914403"],
+    ["1914405", "1914406", "1914407"],
+    ["324328", "1914408", "733"],
+    ["20810", "2895", "1914409", "1914410", "1914411", "74060"],
+]
 PRIZES = [
-    9999.0,
-    9999.0,
-    9999.0,
-    9999.0,
+    1030.0,
+    405.0,
+    125.0,
+    150.0,
     9999.0,
     9999.0,
     9999.0,
@@ -36,19 +46,19 @@ def main():
                 "keywords": ["chemistry", "synthesis", "retrosynthesis"],
                 "metrics": ["binary"],
                 "input": {
-                    "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The leaves on the retrosynthesis tree should be commercially available chemicals.",
+                    "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed ${PRIZES[i]}. The final route should not surpass {len(TEMPLATES[i])} steps.",
                     "input_from_task": False,
                     "input_for_task": False,
                 },
                 "output": [
                     {
                         "type": "integer",
-                        "target": 9999.0,
+                        "target": PRIZES[i],
                         "threshold": None,
                     }
                 ],
                 "scoring_fn": "score_final",
-                "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": "template_x",\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
+                "submission_format": """Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  "type": "mol",\n  "smiles": "CO",\n  "children": [\n    {\n      "type": "reaction",\n      "template_id": 1234,\n      "children": [\n        {\n          "type": "mol",\n          "smiles": "BrC"\n        },\n        {\n          "type": "mol",\n          "smiles": "[OH-]"\n        }\n      ]\n    }\n  ]\n}`.""",
                 "tools": [
                     "check_smiles_reaction_template_matching",
                     "search_template_catalog_by_criteria",
