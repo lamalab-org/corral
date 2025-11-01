@@ -108,6 +108,21 @@ class CorralRouter:
             tool_statistics=data["state"]["tool_statistics"],
         )
 
+    def retire_task(self, task_id: str) -> TaskTrialResult:
+        """Retire from a task without submitting an answer"""
+        logger.info(f"Agent retiring from task {task_id}")
+        response = requests.post(f"{self.base_url}/tasks/{task_id}/retire")
+        response.raise_for_status()
+        data = response.json()
+        return TaskTrialResult(
+            task_id=task_id,
+            trial_id=data["trial_id"],
+            score=data["score"],
+            state=data["state"],
+            tool_statistics=data["state"]["tool_statistics"],
+            retired=data.get("retired", False),
+        )
+
     def get_task_status(self, task_id: str) -> dict[str, Any]:
         """Get current status of a task"""
         response = requests.get(f"{self.base_url}/tasks/{task_id}/status")
