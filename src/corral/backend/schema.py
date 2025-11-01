@@ -41,3 +41,9 @@ class ToolCall:
 class ToolRequest(BaseModel):
     tool_name: str
     arguments: dict[str, Any]
+
+
+class RetireRequest(BaseModel):
+    """Request to retire from a task without submitting an answer"""
+
+    # No parameters needed for retirement
