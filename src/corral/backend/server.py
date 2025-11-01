@@ -191,7 +191,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
 
         env = environments[task_id]
 
-        # 1. Retire and get score (0)
+        # 1. Retire and get score (0 for now, can be decided to be something else later)
         score = env.retire()
 
         # 2. Get completed trial data (before any reset)
