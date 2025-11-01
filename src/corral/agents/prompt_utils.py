@@ -127,6 +127,10 @@ def build_user_content(
 
     fill_kwargs["task_guide"] = task_guide
 
+    # Provide default empty string for retire_instructions if not specified
+    if "retire_instructions" not in fill_kwargs:
+        fill_kwargs["retire_instructions"] = ""
+
     if isinstance(task_guide, list):
         LIST_PROMPT = "The task is to correctly answer the question with an image specified below."
         fill_kwargs["task_guide"] = LIST_PROMPT

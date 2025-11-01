@@ -133,12 +133,21 @@ class ToolCallingAgent(BaseAgent):
         else:
             task_guide = task_prompt
 
+        # Prepare retirement instructions if enabled
+        retire_instructions = ""
+        if enable_retire:
+            retire_instructions = (
+                "If you cannot solve the task or determine it is unsolvable, you can retire from it.\n"
+                "To retire, respond with: \"Final Answer: RETIRE\""
+            )
+
         self.messages = create_prompt(
             system_prompt=self.system_prompt,
             user_prompt=self.user_prompt,
             task_guide=task_guide,
             history=history,
             examples=examples,
+            retire_instructions=retire_instructions,
         )
 
         for _i in range(self.max_iterations):
