@@ -138,7 +138,7 @@ class ToolCallingAgent(BaseAgent):
         if enable_retire:
             retire_instructions = (
                 "If you cannot solve the task or determine it is unsolvable, you can retire from it.\n"
-                "To retire, respond with: \"Final Answer: RETIRE\""
+                'To retire, respond with: "Final Answer: RETIRE"'
             )
 
         self.messages = create_prompt(
