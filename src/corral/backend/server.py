@@ -197,6 +197,31 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             "tool_statistics": env.state.get_tool_statistics(),
         }
 
+    @app.get("/tasks/{task_id}/last_score")
+    def get_last_score(task_id: str):
+        """Get the score from the most recent trial submission"""
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        env = environments[task_id]
+        # Get the most recent completed trial
+        if not env.trial_states:
+            raise HTTPException(status_code=404, detail="No trials completed yet")
+
+        # Get the most recent trial_id
+        trial_ids = sorted(env.trial_states.keys(), key=lambda x: int(x))
+        if not trial_ids:
+            raise HTTPException(status_code=404, detail="No trials completed yet")
+
+        latest_trial_id = trial_ids[-1]
+        latest_trial = env.trial_states[latest_trial_id]
+
+        return {
+            "task_id": task_id,
+            "trial_id": latest_trial_id,
+            "score": latest_trial.score,
+        }
+
     @app.get("/tasks/{task_id}/trials")
     def get_all_trials(task_id: str):
         if task_id not in environments:

@@ -130,7 +130,7 @@ class BaseAgent(ABC):
         self.api_endpoint = api_endpoint
         self.temperature = temperature
         self.messages: list = []
-        self.token_usage: list = {}  # Track token usage per LLM call
+        self.token_usage: dict = {}  # Track token usage per LLM call
 
         if prompt_store:
             self.store = prompt_store
