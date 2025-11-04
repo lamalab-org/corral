@@ -175,6 +175,16 @@ function loadFileByIndex(index) {
     reader.readAsText(file);
 }
 
+function clearDetailsPanel() {
+    const content = document.getElementById('detailsContent');
+    content.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">Select a node to view details</p>';
+
+    // Clear visual selection
+    d3.selectAll('.node circle')
+        .attr('stroke-width', 1)
+        .attr('stroke', '#333');
+}
+
 function visualizeTrace(data) {
     const agentType = data.agent || 'ToolCallingAgent'; // Default to ToolCallingAgent
     const messages = data.messages;
@@ -185,6 +195,9 @@ function visualizeTrace(data) {
 
     // Reset node selection when loading new trace
     selectedNodeIndex = -1;
+
+    // Clear the details panel
+    clearDetailsPanel();
 
     // Update agent type display
     document.getElementById('agentType').textContent = agentType;
