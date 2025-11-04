@@ -1,7 +1,9 @@
 let allFiles = [];
 let currentFileIndex = 0;
 let currentFilter = 'all';
-let svg, g, simulation;
+let svg, g, simulation, zoomBehavior;
+let currentNodes = []; // Store current graph nodes
+let selectedNodeIndex = -1; // Track selected node index (-1 means none selected)
 
 // Color scheme
 const colors = {
@@ -85,6 +87,70 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
+// Node navigation button handlers
+document.getElementById('prevNodeBtn').addEventListener('click', function() {
+    if (selectedNodeIndex > 0) {
+        navigateToNode(selectedNodeIndex - 1);
+    }
+});
+
+document.getElementById('nextNodeBtn').addEventListener('click', function() {
+    if (selectedNodeIndex < currentNodes.length - 1) {
+        if (selectedNodeIndex === -1) {
+            // First click - go to first node
+            navigateToNode(0);
+        } else {
+            navigateToNode(selectedNodeIndex + 1);
+        }
+    }
+});
+
+function navigateToNode(index) {
+    if (index < 0 || index >= currentNodes.length) return;
+
+    selectedNodeIndex = index;
+    const node = currentNodes[index];
+
+    // Highlight the selected node and show its details
+    showDetails(null, node);
+
+    // Update the visual selection in the graph
+    d3.selectAll('.node circle')
+        .attr('stroke-width', d => d.id === node.id ? 4 : 1)
+        .attr('stroke', d => d.id === node.id ? '#ff6b6b' : '#333');
+
+    // Center the node in the viewport with smooth animation
+    if (svg && zoomBehavior) {
+        const container = document.getElementById('graph-container');
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+
+        // Calculate the transform needed to center the node
+        const scale = 1.5; // Zoom level for focused view
+        const x = width / 2 - node.x * scale;
+        const y = height / 2 - node.y * scale;
+
+        // Animate the zoom/pan to center the node
+        svg.transition()
+            .duration(750)
+            .call(
+                zoomBehavior.transform,
+                d3.zoomIdentity.translate(x, y).scale(scale)
+            );
+    }
+
+    // Update button states
+    updateNodeNavButtons();
+}
+
+function updateNodeNavButtons() {
+    const prevBtn = document.getElementById('prevNodeBtn');
+    const nextBtn = document.getElementById('nextNodeBtn');
+
+    prevBtn.disabled = selectedNodeIndex <= 0;
+    nextBtn.disabled = selectedNodeIndex >= currentNodes.length - 1;
+}
+
 function loadFileByIndex(index) {
     if (index < 0 || index >= allFiles.length) return;
 
@@ -117,6 +183,9 @@ function visualizeTrace(data) {
     let nodeId = 0;
     let lastNodeId = -1;
 
+    // Reset node selection when loading new trace
+    selectedNodeIndex = -1;
+
     // Update agent type display
     document.getElementById('agentType').textContent = agentType;
 
@@ -135,7 +204,13 @@ function visualizeTrace(data) {
     document.getElementById('toolCalls').textContent =
         nodes.filter(n => n.type === 'tool').length;
 
+    // Store current nodes for navigation
+    currentNodes = nodes;
+
     drawGraph(nodes, links);
+
+    // Update node navigation buttons
+    updateNodeNavButtons();
 }
 
 function visualizeToolCallingAgent(messages, nodes, links, nodeId, lastNodeId) {
@@ -390,12 +465,12 @@ function drawGraph(nodes, links) {
     g = svg.append('g');
 
     // Add zoom behavior
-    const zoom = d3.zoom()
+    zoomBehavior = d3.zoom()
         .scaleExtent([0.1, 4])
         .on('zoom', (event) => {
             g.attr('transform', event.transform);
         });
-    svg.call(zoom);
+    svg.call(zoomBehavior);
 
     // Group nodes by tool name for parallel positioning
     const toolGroups = new Map();
@@ -484,6 +559,17 @@ function getNodeLabel(node) {
 function showDetails(event, d) {
     const panel = document.getElementById('detailsPanel');
     const content = document.getElementById('detailsContent');
+
+    // Update selected node index
+    selectedNodeIndex = currentNodes.findIndex(node => node.id === d.id);
+
+    // Update visual selection
+    d3.selectAll('.node circle')
+        .attr('stroke-width', node => node.id === d.id ? 4 : 1)
+        .attr('stroke', node => node.id === d.id ? '#ff6b6b' : '#333');
+
+    // Update button states
+    updateNodeNavButtons();
 
     let html = '';
 
