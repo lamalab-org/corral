@@ -1,3 +1,13 @@
+"""
+Module containing constants for the retrosynthesis task.
+
+The `PG` set contains pairs of protecting group names and their corresponding SMILES representations.
+The `SMARTS` and `SMARTS_OLD` set contains SMILES patterns for various common functional groups and molecular substructures.
+The `CUSTOM_TEMPLATES` list contains custom reaction templates used in retrosynthesis.
+
+The `PG`, `SMARTS` and `SMARTS_OLD` are taken from the package `ChemCaption` (https://github.com/lamalab-org/chem-caption).
+"""
+
 from rdkit import Chem
 
 PG = {
@@ -1961,20 +1971,6 @@ SMARTS_OLD = {
         "z-small",
         "[#8]=[#6](/[#7]=[#6](/[#7]-[#6](-[#8]-[#6]-[#6]1:[#6]:[#6]:[#6]:[#6]:[#6]:1)=[#8])-[#7])-[#8]-[#6]-[#6]1:[#6]:[#6]:[#6]:[#6]:[#6]:1",
     ),
-}
-
-SUPPRESS_RULES = {
-    "acyl_halide": {"ketone"},
-    "anhydride": {"carboxyl", "ester", "ketone"},
-    "carboxyl": {"ketone"},
-    "ester": {"ketone"},
-    "amide": {"ketone"},
-    "imide": {"amide", "ketone"},
-    "urea": {"amide", "ketone"},
-    "carbamate": {"ester", "amide", "ketone"},
-    "lactam": {"amide", "ketone"},
-    "lactone": {"ester", "ketone"},
-    "sulfonamide": {"amide"},
 }
 
 # Precompile SMARTS
