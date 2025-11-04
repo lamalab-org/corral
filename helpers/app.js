@@ -5,8 +5,10 @@ let svg, g, simulation, zoomBehavior;
 let currentNodes = []; // Store current graph nodes
 let selectedNodeIndex = -1; // Track selected node index (-1 means none selected)
 
-// Storage for behavioral markers and notes per node
-let nodeAnnotations = {}; // Format: { nodeId: { markers: [], notes: '' } }
+// Storage for behavioral markers and notes per node, per file
+let allFileAnnotations = {}; // Format: { fileName: { nodeId: { markers: [], notes: '' } } }
+let allFileNodes = {}; // Format: { fileName: [nodes array] } - to store which nodes are annotatable
+let nodeAnnotations = {}; // Current file's annotations
 
 // Color scheme
 const colors = {
@@ -281,6 +283,12 @@ function updateNodeNavButtons() {
 function loadFileByIndex(index) {
     if (index < 0 || index >= allFiles.length) return;
 
+    // Save current file's annotations before switching
+    if (allFiles.length > 0 && allFiles[currentFileIndex]) {
+        const currentFileName = allFiles[currentFileIndex].name;
+        allFileAnnotations[currentFileName] = JSON.parse(JSON.stringify(nodeAnnotations));
+    }
+
     currentFileIndex = index;
     const file = allFiles[index];
 
@@ -337,8 +345,19 @@ function visualizeTrace(data) {
     // Reset node selection when loading new trace
     selectedNodeIndex = -1;
 
-    // Reset annotations for new trace
-    nodeAnnotations = {};
+    // Save current file's annotations before switching
+    if (allFiles.length > 0 && allFiles[currentFileIndex]) {
+        const currentFileName = allFiles[currentFileIndex].name;
+        allFileAnnotations[currentFileName] = JSON.parse(JSON.stringify(nodeAnnotations));
+    }
+
+    // Load annotations for the new file
+    const newFileName = allFiles[currentFileIndex]?.name;
+    if (newFileName && allFileAnnotations[newFileName]) {
+        nodeAnnotations = JSON.parse(JSON.stringify(allFileAnnotations[newFileName]));
+    } else {
+        nodeAnnotations = {};
+    }
 
     // Clear the details panel
     clearDetailsPanel();
@@ -363,6 +382,16 @@ function visualizeTrace(data) {
 
     // Store current nodes for navigation
     currentNodes = nodes;
+
+    // Store nodes for this file for validation purposes
+    const currentFileName = allFiles[currentFileIndex]?.name;
+    if (currentFileName) {
+        allFileNodes[currentFileName] = nodes.map(node => ({
+            id: node.id,
+            type: node.type,
+            annotatable: isNodeAnnotatable(node)
+        }));
+    }
 
     drawGraph(nodes, links);
 
@@ -940,3 +969,130 @@ function dragended(event, d, toolGroups) {
     d.fx = null;
     d.fy = null;
 }
+
+// Submit button handler
+document.getElementById('submitBtn').addEventListener('click', function() {
+    // Save current file's annotations
+    if (allFiles.length > 0 && allFiles[currentFileIndex]) {
+        const currentFileName = allFiles[currentFileIndex].name;
+        allFileAnnotations[currentFileName] = JSON.parse(JSON.stringify(nodeAnnotations));
+    }
+
+    // Validate annotator name
+    const annotatorName = document.getElementById('annotatorName').value.trim();
+    if (!annotatorName) {
+        alert('❌ Validation Error: Annotator Name is required.');
+        document.getElementById('annotatorName').focus();
+        return;
+    }
+
+    // Validate MongoDB key
+    const mongodbKey = document.getElementById('mongodbKey').value.trim();
+    if (!mongodbKey) {
+        alert('❌ Validation Error: MongoDB Key is required.');
+        document.getElementById('mongodbKey').focus();
+        return;
+    }
+
+    // Check all files for missing annotations
+    const missingAnnotations = [];
+
+    allFiles.forEach((file, fileIndex) => {
+        const fileName = file.name;
+        const fileAnnotations = allFileAnnotations[fileName] || {};
+        const fileNodes = allFileNodes[fileName] || [];
+
+        // Check if file has been loaded (has node data)
+        if (fileNodes.length === 0) {
+            missingAnnotations.push({
+                fileName: fileName,
+                fileIndex: fileIndex + 1,
+                reason: 'File has not been loaded yet'
+            });
+            return;
+        }
+
+        // Check all annotatable nodes in this file
+        const unannotatedInFile = [];
+        fileNodes.forEach((nodeInfo, nodeIndex) => {
+            if (nodeInfo.annotatable) {
+                const annotation = fileAnnotations[nodeInfo.id];
+                if (!annotation || annotation.markers.length === 0) {
+                    unannotatedInFile.push({
+                        nodeId: nodeInfo.id,
+                        nodeIndex: nodeIndex,
+                        nodeType: nodeInfo.type
+                    });
+                }
+            }
+        });
+
+        if (unannotatedInFile.length > 0) {
+            missingAnnotations.push({
+                fileName: fileName,
+                fileIndex: fileIndex + 1,
+                unannotatedNodes: unannotatedInFile
+            });
+        }
+    });
+
+    // If there are missing annotations, show detailed error
+    if (missingAnnotations.length > 0) {
+        let message = '❌ Validation Error: Not all annotatable nodes have been marked.\n\n';
+
+        missingAnnotations.forEach(item => {
+            message += `📄 File ${item.fileIndex}: ${item.fileName}\n`;
+
+            if (item.reason) {
+                message += `   ${item.reason}\n`;
+            } else if (item.unannotatedNodes) {
+                message += `   Missing markers on ${item.unannotatedNodes.length} node(s):\n`;
+                item.unannotatedNodes.slice(0, 5).forEach(node => {
+                    message += `   • Node ${node.nodeIndex} (${node.nodeType})\n`;
+                });
+                if (item.unannotatedNodes.length > 5) {
+                    message += `   ... and ${item.unannotatedNodes.length - 5} more\n`;
+                }
+            }
+            message += '\n';
+        });
+
+        message += 'Please review all files and ensure all annotatable nodes have markers assigned.';
+        alert(message);
+        return;
+    }
+
+    // If validation passes, show success message
+    const totalFiles = allFiles.length;
+
+    let successMessage = '✅ Validation Successful!\n\n';
+    successMessage += `Annotator: ${annotatorName}\n`;
+    successMessage += `MongoDB Key: ${mongodbKey}\n`;
+    successMessage += `Files Processed: ${totalFiles}/${totalFiles}\n\n`;
+    successMessage += 'All required annotations are present.';
+
+    // Calculate total annotations
+    let totalMarkers = 0;
+    let totalNotes = 0;
+    Object.values(allFileAnnotations).forEach(fileAnnotations => {
+        Object.values(fileAnnotations).forEach(annotation => {
+            totalMarkers += annotation.markers.length;
+            if (annotation.notes && annotation.notes.trim()) {
+                totalNotes++;
+            }
+        });
+    });
+
+    successMessage += `\n\nTotal Markers: ${totalMarkers}`;
+    successMessage += `\nNodes with Notes: ${totalNotes}`;
+
+    alert(successMessage);
+
+    // Here you would typically send the data to a server
+    console.log('Submission Data:', {
+        annotator: annotatorName,
+        mongodbKey: mongodbKey,
+        annotations: allFileAnnotations,
+        fileNodes: allFileNodes
+    });
+});
