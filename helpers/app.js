@@ -5,6 +5,9 @@ let svg, g, simulation, zoomBehavior;
 let currentNodes = []; // Store current graph nodes
 let selectedNodeIndex = -1; // Track selected node index (-1 means none selected)
 
+// Storage for behavioral markers and notes per node
+let nodeAnnotations = {}; // Format: { nodeId: { markers: [], notes: '' } }
+
 // Color scheme
 const colors = {
     system: '#6c757d',
@@ -86,6 +89,132 @@ document.addEventListener('keydown', function(e) {
         loadFileByIndex(currentFileIndex + 1);
     }
 });
+
+// Help toggle button handler
+document.getElementById('helpToggleBtn').addEventListener('click', function() {
+    const helpDescriptions = document.getElementById('helpDescriptions');
+    const isVisible = helpDescriptions.style.display !== 'none';
+
+    if (isVisible) {
+        helpDescriptions.style.display = 'none';
+        this.textContent = 'ℹ️ Show Descriptions';
+    } else {
+        helpDescriptions.style.display = 'block';
+        this.textContent = 'ℹ️ Hide Descriptions';
+    }
+});
+
+// Marker selector handler
+document.getElementById('markerSelect').addEventListener('change', function() {
+    if (selectedNodeIndex === -1 || !this.value) return;
+
+    const nodeId = currentNodes[selectedNodeIndex].id;
+    const marker = this.value;
+
+    // Initialize annotations for this node if not exists
+    if (!nodeAnnotations[nodeId]) {
+        nodeAnnotations[nodeId] = { markers: [], notes: '' };
+    }
+
+    // Add marker if not already present
+    if (!nodeAnnotations[nodeId].markers.includes(marker)) {
+        nodeAnnotations[nodeId].markers.push(marker);
+        updateMarkersDisplay(nodeId);
+    }
+
+    // Reset selector
+    this.value = '';
+});
+
+// Notes textarea handler
+document.getElementById('notesTextarea').addEventListener('input', function() {
+    if (selectedNodeIndex === -1) return;
+
+    const nodeId = currentNodes[selectedNodeIndex].id;
+
+    // Initialize annotations for this node if not exists
+    if (!nodeAnnotations[nodeId]) {
+        nodeAnnotations[nodeId] = { markers: [], notes: '' };
+    }
+
+    // Save notes
+    nodeAnnotations[nodeId].notes = this.value;
+});
+
+function updateMarkersDisplay(nodeId) {
+    const container = document.getElementById('selectedMarkers');
+    const annotations = nodeAnnotations[nodeId];
+
+    if (!annotations || annotations.markers.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+    annotations.markers.forEach(marker => {
+        html += `
+            <div class="marker-tag">
+                <span>${marker}</span>
+                <span class="marker-tag-remove" data-marker="${marker}" data-node="${nodeId}">×</span>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+
+    // Add remove handlers
+    container.querySelectorAll('.marker-tag-remove').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const marker = this.dataset.marker;
+            const nodeId = parseInt(this.dataset.node);
+            removeMarker(nodeId, marker);
+        });
+    });
+}
+
+function removeMarker(nodeId, marker) {
+    if (!nodeAnnotations[nodeId]) return;
+
+    const index = nodeAnnotations[nodeId].markers.indexOf(marker);
+    if (index > -1) {
+        nodeAnnotations[nodeId].markers.splice(index, 1);
+        updateMarkersDisplay(nodeId);
+    }
+}
+
+function loadNodeAnnotations(nodeId) {
+    const annotations = nodeAnnotations[nodeId];
+
+    // Update markers display
+    updateMarkersDisplay(nodeId);
+
+    // Update notes textarea
+    const notesTextarea = document.getElementById('notesTextarea');
+    notesTextarea.value = annotations ? annotations.notes : '';
+}
+
+function isNodeAnnotatable(node) {
+    // Don't allow annotations for system nodes
+    if (node.type === 'system') {
+        return false;
+    }
+
+    // Don't allow annotations for tool nodes
+    if (node.type === 'tool') {
+        return false;
+    }
+
+    // Don't allow annotations for the first user node
+    if (node.type === 'user') {
+        // Check if this is the first user node in currentNodes
+        const firstUserNode = currentNodes.find(n => n.type === 'user');
+        if (firstUserNode && firstUserNode.id === node.id) {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 // Node navigation button handlers
 document.getElementById('prevNodeBtn').addEventListener('click', function() {
@@ -179,6 +308,20 @@ function clearDetailsPanel() {
     const content = document.getElementById('detailsContent');
     content.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">Select a node to view details</p>';
 
+    // Clear annotations display
+    document.getElementById('selectedMarkers').innerHTML = '';
+    document.getElementById('notesTextarea').value = '';
+
+    // Disable inputs when no node is selected
+    document.getElementById('markerSelect').disabled = true;
+    document.getElementById('notesTextarea').disabled = true;
+
+    // Hide disabled message
+    const disabledMsg = document.getElementById('annotationDisabledMsg');
+    if (disabledMsg) {
+        disabledMsg.style.display = 'none';
+    }
+
     // Clear visual selection
     d3.selectAll('.node circle')
         .attr('stroke-width', 1)
@@ -195,6 +338,9 @@ function visualizeTrace(data) {
 
     // Reset node selection when loading new trace
     selectedNodeIndex = -1;
+
+    // Reset annotations for new trace
+    nodeAnnotations = {};
 
     // Clear the details panel
     clearDetailsPanel();
@@ -583,6 +729,28 @@ function showDetails(event, d) {
 
     // Update button states
     updateNodeNavButtons();
+
+    // Check if this node is annotatable
+    const annotatable = isNodeAnnotatable(d);
+
+    // Enable/disable inputs based on whether the node is annotatable
+    document.getElementById('markerSelect').disabled = !annotatable;
+    document.getElementById('notesTextarea').disabled = !annotatable;
+
+    // Show/hide disabled message
+    const disabledMsg = document.getElementById('annotationDisabledMsg');
+    if (disabledMsg) {
+        disabledMsg.style.display = annotatable ? 'none' : 'block';
+    }
+
+    // Load annotations for this node (or clear if not annotatable)
+    if (annotatable) {
+        loadNodeAnnotations(d.id);
+    } else {
+        // Clear annotations display for non-annotatable nodes
+        document.getElementById('selectedMarkers').innerHTML = '';
+        document.getElementById('notesTextarea').value = '';
+    }
 
     let html = '';
 
