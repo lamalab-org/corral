@@ -408,19 +408,19 @@ function drawGraph(nodes, links) {
         }
     });
 
-    // Set initial positions based on execution order (top to bottom)
-    const verticalSpacing = Math.max(100, (height - 100) / Math.max(1, nodes.length - 1));
+    // Set initial positions based on execution order (left to right)
+    const horizontalSpacing = Math.max(100, (width - 100) / Math.max(1, nodes.length - 1));
     nodes.forEach((node, i) => {
-        node.x = width / 2;
-        node.y = 50 + i * verticalSpacing;
+        node.x = 50 + i * horizontalSpacing;
+        node.y = height / 2;
     });
 
     // Create force simulation
     simulation = d3.forceSimulation(nodes)
         .force('link', d3.forceLink(links).id(d => d.id).distance(100))
         .force('charge', d3.forceManyBody().strength(-400))
-        .force('x', d3.forceX(width / 2).strength(0.05)) // Weak x force to center horizontally
-        .force('y', d3.forceY(d => 50 + d.id * verticalSpacing).strength(0.3)) // Strong y force to maintain top-to-bottom order
+        .force('x', d3.forceX(d => 50 + d.id * horizontalSpacing).strength(0.3)) // Strong x force to maintain left-to-right order
+        .force('y', d3.forceY(height / 2).strength(0.05)) // Weak y force to center vertically
         .force('collision', d3.forceCollide().radius(50))
 
     // Draw links
@@ -437,16 +437,6 @@ function drawGraph(nodes, links) {
         .data(nodes)
         .join('g')
         .attr('class', 'node')
-        .call(d3.drag()
-            .on('start', function(event, d) {
-                dragstarted(event, d, toolGroups);
-            })
-            .on('drag', function(event, d) {
-                dragged(event, d, toolGroups);
-            })
-            .on('end', function(event, d) {
-                dragended(event, d, toolGroups);
-            }))
         .on('click', showDetails);
 
     node.append('circle')
@@ -459,9 +449,6 @@ function drawGraph(nodes, links) {
         .attr('text-anchor', 'middle')
         .text(d => getNodeLabel(d))
         .style('fill', '#333');
-
-    // Add legend
-    addLegend();
 
     // Update positions on simulation tick
     simulation.on('tick', () => {
