@@ -185,6 +185,28 @@ function visualizeToolCallingAgent(messages, nodes, links, nodeId, lastNodeId) {
                 lastNodeId = nodeId;
                 nodeId++;
             }
+        } else if (currentFilter === 'no-tools') {
+            // NO TOOLS MODE: Show all messages except tool results
+            if (role !== 'tool') {
+                nodes.push({
+                    id: nodeId,
+                    type: role,
+                    content: msg.content || '',
+                    timestamp: msg.timestamp || '',
+                    index: idx,
+                    toolCallId: msg.tool_call_id,
+                    toolName: msg.name
+                });
+
+                if (lastNodeId >= 0) {
+                    links.push({
+                        source: lastNodeId,
+                        target: nodeId
+                    });
+                }
+                lastNodeId = nodeId;
+                nodeId++;
+            }
         }
     });
 }
@@ -253,6 +275,27 @@ function visualizeReActAgent(messages, nodes, links, nodeId, lastNodeId) {
                 });
 
                 // Connect to previous tool node
+                if (lastNodeId >= 0) {
+                    links.push({
+                        source: lastNodeId,
+                        target: nodeId
+                    });
+                }
+                lastNodeId = nodeId;
+                nodeId++;
+            }
+        } else if (currentFilter === 'no-tools') {
+            // NO TOOLS MODE: Show all messages except tool observations
+            if (!isToolObservation) {
+                nodes.push({
+                    id: nodeId,
+                    type: role,
+                    content: content,
+                    timestamp: msg.timestamp || '',
+                    index: idx
+                });
+
+                // Connect to previous non-tool node
                 if (lastNodeId >= 0) {
                     links.push({
                         source: lastNodeId,
