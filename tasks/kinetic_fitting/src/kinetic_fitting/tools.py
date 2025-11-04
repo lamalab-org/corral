@@ -1,40 +1,40 @@
 """Tools for kinetic model fitting and analysis."""
 
-import os
+import base64
+import io
 import json
+import os
+import threading
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import h5py
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from litellm import completion
+from scipy.integrate import odeint
+from scipy.optimize import differential_evolution
+from scipy.stats import linregress
+
+from corral.backend.tool import Tool, tool
 
 # Set matplotlib backend environment variables before any matplotlib imports
 os.environ["MPLBACKEND"] = "Agg"
 os.environ["DISPLAY"] = ""  # Disable display
 
-import matplotlib
-
 matplotlib.use("Agg")  # Use non-GUI backend to prevent threading issues
-import matplotlib.pyplot as plt
 
 # Additional safety: explicitly configure pyplot for non-interactive use
 plt.ioff()  # Turn off interactive mode
 
 # Import threading to help with matplotlib threading issues
-import threading
 
 # Create a lock for matplotlib operations
 _matplotlib_lock = threading.Lock()
-
-import numpy as np
-import io
-import base64
-import h5py
-from scipy.integrate import odeint
-from scipy.optimize import differential_evolution
-from scipy.stats import linregress
-
-from corral.backend.tool import tool, Tool
-from litellm import completion
 
 
 def _get_persistent_output_dir() -> Path:
@@ -104,9 +104,6 @@ class Reaction:
 
 def load_experimental_data(data_path: str) -> Dict[str, Any]:
     """Load experimental data from HDF5 file."""
-    import pandas as pd
-    from dataclasses import dataclass, field
-    from typing import Dict
 
     @dataclass
     class ExperimentMetadata:
@@ -554,6 +551,7 @@ def fit_reaction_network(
             seed=42,
             workers=1,
             updating="deferred",
+            disp=True,
             atol=1e-6,
             tol=0.01,  # Tightened tolerances
             init=init_population if reference_params is not None else "latinhypercube",
@@ -871,154 +869,83 @@ def _create_fit_plot(
 
 
 def _create_phenomenological_plots(
-    data: dict,
-    save_dir: str = None,
-) -> str:
-    """Create phenomenological trend plots for [Ru], [S2O8], and irradiance."""
-    with _matplotlib_lock:
-        import matplotlib
+    trends,
+    trends_original,
+    output_path="persistent_outputs/phenomenological_trends.png",
+):
+    """
+    Creates and saves plots comparing model-predicted trends with original experimental trends.
 
-        matplotlib.use("Agg", force=True)
-        import matplotlib.pyplot as plt
+    Args:
+        trends (dict): Dictionary of trends calculated from model predictions.
+        trends_original (dict): Dictionary of trends calculated from original data.
+        output_path (str): Path to save the output plot image.
 
-        plt.ioff()
+    Returns:
+        str: A message indicating that the plot has been saved.
+    """
+    # Create a figure with 2x2 subplots
+    fig, axes = plt.subplots(2, 2, figsize=(14, 11))
+    fig.suptitle(
+        "Comparison of Phenomenological Trends: Model vs. Experimental Data",
+        fontsize=16,
+    )
+    axes = axes.flatten()
 
-        # Collect trend data
-        trends = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}, "pH": {}}
+    param_map = {
+        "c_Ru": "Ru concentration (M)",
+        "c_S2O8": "S2O8 concentration (M)",
+        "irradiance": "Irradiance (W/m^2)",
+        "pH": "pH",
+    }
 
-        for exp_name, exp_data in data.items():
-            meta = exp_data["metadata"]
-            oxygen = np.array(exp_data["oxygen"])
-            time = np.array(exp_data["time"])
+    # Iterate over the parameters and plot the data
+    for i, param in enumerate(["c_Ru", "c_S2O8", "irradiance", "pH"]):
+        ax = axes[i]
 
-            # Calculate maximum rate
-            rates = np.gradient(oxygen, time)
-            max_rate = np.max(rates)
-
-            for param in ["c_Ru", "c_S2O8", "irradiance", "pH"]:
-                param_val = meta.get(param)
-                if param_val is not None:
-                    if param_val not in trends[param]:
-                        trends[param][param_val] = []
-                    trends[param][param_val].append(max_rate)
-
-        # Create plots
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-
-        # [Ru] trend plot
-        if trends["c_Ru"]:
-            concentrations = np.array(sorted(trends["c_Ru"].keys()))
-            rates = [np.mean(trends["c_Ru"][c]) for c in concentrations]
-            rates_std = [
-                np.std(trends["c_Ru"][c]) if len(trends["c_Ru"][c]) > 1 else 0
-                for c in concentrations
-            ]
-
-            axes[0, 0].errorbar(
-                concentrations,
-                rates,
-                yerr=rates_std,
-                marker="o",
-                capsize=5,
+        # --- Process and plot original experimental data ---
+        original_trend = trends_original.get(param, {})
+        if original_trend:
+            # Sort by the parameter value (concentration, pH, etc.)
+            sorted_original_items = sorted(original_trend.items())
+            x_original = [item[0] for item in sorted_original_items]
+            # Calculate mean of rates for each parameter value
+            y_original = [np.mean(item[1]) for item in sorted_original_items]
+            ax.plot(
+                x_original,
+                y_original,
+                "o-",
+                label="Experimental Data",
+                color="blue",
                 markersize=8,
-                linewidth=2,
             )
-            axes[0, 0].set_xlabel("[Ru(bpy)₃²⁺] (µM)", fontweight="bold")
-            axes[0, 0].set_ylabel("Max O₂ Rate (µM/s)", fontweight="bold")
-            axes[0, 0].set_title("Ru Concentration Dependence", fontweight="bold")
-            axes[0, 0].grid(True, alpha=0.3)
 
-        # [S2O8] trend plot
-        if trends["c_S2O8"]:
-            concentrations = np.array(sorted(trends["c_S2O8"].keys()))
-            rates = [np.mean(trends["c_S2O8"][c]) for c in concentrations]
-            rates_std = [
-                np.std(trends["c_S2O8"][c]) if len(trends["c_S2O8"][c]) > 1 else 0
-                for c in concentrations
-            ]
-
-            axes[0, 1].errorbar(
-                concentrations,
-                rates,
-                yerr=rates_std,
-                marker="s",
-                capsize=5,
-                markersize=8,
-                linewidth=2,
-                color="orange",
+        # --- Process and plot model predicted data ---
+        predicted_trend = trends.get(param, {})
+        if predicted_trend:
+            sorted_predicted_items = sorted(predicted_trend.items())
+            x_predicted = [item[0] for item in sorted_predicted_items]
+            y_predicted = [np.mean(item[1]) for item in sorted_predicted_items]
+            ax.plot(
+                x_predicted,
+                y_predicted,
+                "s--",
+                label="Model Prediction",
+                color="red",
+                markersize=6,
             )
-            axes[0, 1].set_xlabel("[S₂O₈²⁻] (µM)", fontweight="bold")
-            axes[0, 1].set_ylabel("Max O₂ Rate (µM/s)", fontweight="bold")
-            axes[0, 1].set_title(
-                "Persulfate Concentration Dependence", fontweight="bold"
-            )
-            axes[0, 1].grid(True, alpha=0.3)
 
-        # Irradiance trend plot
-        if trends["irradiance"]:
-            irradiances = np.array(sorted(trends["irradiance"].keys()))
-            rates = [np.mean(trends["irradiance"][c]) for c in irradiances]
-            rates_std = [
-                np.std(trends["irradiance"][c])
-                if len(trends["irradiance"][c]) > 1
-                else 0
-                for c in irradiances
-            ]
+        ax.set_xlabel(param_map.get(param, param), fontsize=12)
+        ax.set_ylabel("Maximum O₂ Evolution Rate", fontsize=12)
+        ax.set_title(f"Trend for {param_map.get(param, param)}", fontsize=14)
+        ax.legend()
+        ax.grid(True, which="both", linestyle="--", linewidth=0.5)
 
-            axes[1, 0].errorbar(
-                irradiances,
-                rates,
-                yerr=rates_std,
-                marker="^",
-                capsize=5,
-                markersize=8,
-                linewidth=2,
-                color="green",
-            )
-            axes[1, 0].set_xlabel("Irradiance (W/m²)", fontweight="bold")
-            axes[1, 0].set_ylabel("Max O₂ Rate (µM/s)", fontweight="bold")
-            axes[1, 0].set_title("Irradiance Dependence", fontweight="bold")
-            axes[1, 0].grid(True, alpha=0.3)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.savefig(output_path)
+    plt.close()  # Close the figure to free up memory
 
-        # pH trend plot
-        if trends["pH"]:
-            ph_values = np.array(sorted(trends["pH"].keys()))
-            rates = [np.mean(trends["pH"][ph]) for ph in ph_values]
-            rates_std = [
-                np.std(trends["pH"][ph]) if len(trends["pH"][ph]) > 1 else 0
-                for ph in ph_values
-            ]
-
-            axes[1, 1].errorbar(
-                ph_values,
-                rates,
-                yerr=rates_std,
-                marker="D",
-                capsize=5,
-                markersize=8,
-                linewidth=2,
-                color="purple",
-            )
-            axes[1, 1].set_xlabel("pH", fontweight="bold")
-            axes[1, 1].set_ylabel("Max O₂ Rate (µM/s)", fontweight="bold")
-            axes[1, 1].set_title("pH Dependence", fontweight="bold")
-            axes[1, 1].grid(True, alpha=0.3)
-
-        plt.tight_layout()
-
-        # Save plot
-        if save_dir:
-            plot_path = Path(save_dir) / "phenomenological_trends.png"
-            plt.savefig(plot_path, dpi=150, bbox_inches="tight")
-
-        # Also save to persistent directory
-        persistent_dir = _get_persistent_output_dir()
-        persistent_path = persistent_dir / "phenomenological_trends.png"
-        plt.savefig(persistent_path, dpi=150, bbox_inches="tight")
-
-        plt.close()
-
-        return f"Phenomenological trend plots saved to {persistent_path}"
+    return f"\nPhenomenological trend plots saved to '{output_path}'"
 
 
 def _diagnose_network_issues(network: dict, sample_conditions: dict) -> str:
@@ -1387,31 +1314,31 @@ def evaluate_phenomenological_trends(
         network_path: Path to reaction network JSON file
         results_path: Path to results JSON file (updated with trend scores)
     """
+    import random
+
     try:
         data = load_experimental_data(data_path)
+
+        # If there are more than 5 experiments, randomly sample 5 of them
+        all_exp_names = list(data.keys())
+        if len(all_exp_names) > 5:
+            sampled_exp_names = random.sample(all_exp_names, 20)
+            data = {name: data[name] for name in sampled_exp_names}
+
         trends = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}, "pH": {}}
         trends_original = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}, "pH": {}}
 
         reaction_network = load_reaction_network(network_path)
-
-        predictions_for_plotting = {}
 
         for exp_name, exp_data in list(data.items()):
             meta = exp_data["metadata"]
             oxygen = np.array(exp_data["oxygen"])
             time = np.array(exp_data["time"])
             predictions = fit_reaction_network(
-                time, oxygen, reaction_network, meta, maxiter=200
+                time, oxygen, reaction_network, meta, maxiter=30
             )
 
             y_pred = predictions["y_pred"]
-
-            # Store the predictions in a format similar to the original data for plotting
-            predictions_for_plotting[exp_name] = {
-                "metadata": meta,
-                "time": time,
-                "oxygen": y_pred,
-            }
 
             # Calculate maximum rate from predictions
             rates = np.gradient(y_pred, time)
@@ -1474,8 +1401,10 @@ def evaluate_phenomenological_trends(
         with open(results_path, "w") as f:
             json.dump(all_results, f, indent=2)
 
-        # Create phenomenological trend plots using the predicted data
-        plot_info = _create_phenomenological_plots(predictions_for_plotting)
+        # --- Start of modification ---
+        # Create phenomenological trend plots using the calculated trends
+        plot_info = _create_phenomenological_plots(trends, trends_original)
+        # --- End of modification ---
 
         return (
             f"Phenomenological trend scores:\n"

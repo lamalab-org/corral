@@ -21,73 +21,71 @@ from corral.report import CorralWandbLogger
 def main():
     """Run the kinetic fitting benchmark"""
     load_dotenv()
-    
+
     # Configuration
-    model = "claude-3-5-sonnet-20241022"
+    model = "gpt-4o"
     max_iterations = 25
     temperature = 0.0
-    trials_per_task = 1
+    trials_per_task = 5
     port = 8004
-    
+
     # Setup
     litellm.set_verbose = True
-    
+
     # Setup work directory
     work_dir = Path(__file__).parent / "benchmark_workspace"
     work_dir.mkdir(exist_ok=True)
     os.environ["CORRAL_WORK_DIR"] = str(work_dir)
-    
+
     logger.info(f"🧪 Running kinetic fitting benchmark")
     logger.info(f"Model: {model}")
     logger.info(f"Max iterations: {max_iterations}, Temperature: {temperature}")
     logger.info("=" * 60)
-    
+
     try:
         # Connect to server
         logger.info(f"Connecting to corral server on port {port}...")
         interface = CorralRouter(base_url=f"http://localhost:{port}")
-        
+
         # Verify connection
         tasks = interface.get_available_tasks()
         logger.info(f"Connected! Available tasks: {tasks}")
-        
+
         if "kinetic_fitting" not in tasks:
             logger.error(f"Task 'kinetic_fitting' not found. Available: {tasks}")
             return False
-            
+
     except Exception as e:
         logger.error(f"Failed to connect to server: {e}")
         logger.info("Make sure the server is running:")
         logger.info("  python start_server.py")
         return False
-    
+
     # Create agent
     agent = ReActAgent(
-        model=model,
-        max_iterations=max_iterations,
-        temperature=temperature
+        model=model, max_iterations=max_iterations, temperature=temperature
     )
     logger.info(f"Created ReActAgent with {model}")
-    
+
     # Setup W&B logging (optional)
     wandb_logger = None
     try:
         wandb_logger = CorralWandbLogger(
             project="kinetic_fitting_benchmark",
-            name=f"kinetic_fitting_{model.replace('-', '_')}"
+            name=f"kinetic_fitting_{model.replace('-', '_')}",
         )
         logger.info("W&B logging enabled")
     except Exception as e:
         logger.warning(f"W&B logging disabled: {e}")
-    
+
     # Create benchmark runner
     runner = CorralRunner(
         interface=interface,
         agent=agent,
         checkpoint_dir=str(work_dir / "checkpoints"),
-        logger=wandb_logger
+        logger=wandb_logger,
     )
-    
+
     # Run benchmark
     logger.info("Starting benchmark...")
     try:
@@ -95,16 +93,17 @@ def main():
             task_ids=["kinetic_fitting"],
             trials_per_task=trials_per_task,
             verbose=True,
-            tool_verbosity="comprehensive"
+            tool_verbosity="comprehensive",
         )
-        
+
         logger.info("🎉 Benchmark completed successfully!")
         logger.info(f"Results: {result}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Benchmark failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
