@@ -116,11 +116,9 @@ document.getElementById('markerSelect').addEventListener('change', function() {
         nodeAnnotations[nodeId] = { markers: [], notes: '' };
     }
 
-    // Add marker if not already present
-    if (!nodeAnnotations[nodeId].markers.includes(marker)) {
-        nodeAnnotations[nodeId].markers.push(marker);
-        updateMarkersDisplay(nodeId);
-    }
+    // Replace existing marker with the new one (only one marker per node)
+    nodeAnnotations[nodeId].markers = [marker];
+    updateMarkersDisplay(nodeId);
 
     // Reset selector
     this.value = '';
