@@ -16,6 +16,7 @@ from pathlib import Path
 from loguru import logger
 from retrosynthesis.score import (
     check_apply_template,
+    check_list_molecules,
     check_reactants,
     check_template,
     score_final,
@@ -35,6 +36,7 @@ SCORING_FUNCTIONS = {
     "check_template": check_template,
     "check_apply_template": check_apply_template,
     "score_final_without_price": score_final_without_price,
+    "check_list_molecules": check_list_molecules,
 }
 
 
@@ -51,7 +53,7 @@ def load_tasks_from_json(
             task_data = json.load(f)
         for task in task_data:
             task_id = task["id"]
-            initial_input = task.get("initial_input", {})
+            initial_input = task.get("initial_inputs", {})
             initial_input["work_dir"] = work_dir
             input_from_tasks = task.get("input", {}).get("input_from_task", [])
             if not isinstance(input_from_tasks, list):
@@ -128,11 +130,15 @@ class RetroEnvironment(Environment):
         )
 
         if self.current_task.input_from_tasks:
+            logger.info(f"Available input tasks for {self.task_id}:")
+            logger.info(self.current_task.input_from_tasks)
+            logger.info(self.task_group.results)
             prompt += "\nAvailable input data:\n"
 
             # Display input data from dependencies
             for dep_task_id in self.current_task.input_from_tasks:
                 dep_key = f"{self.task_group.group_id}_{dep_task_id}"
+                logger.info(f"Checking dependency: {dep_key}")
                 if dep_key in self.task_group.results:
                     dep_result = self.task_group.results[dep_key]
                     task_prompt = self.task_group.tasks[dep_task_id].description
@@ -143,7 +149,6 @@ class RetroEnvironment(Environment):
 
         # Display initial input data
         if self.current_task.initial_input:
-            prompt += "\nAvailable initial input data:\n"
             for key, value in self.current_task.initial_input.items():
                 if key != "work_dir":
                     prompt += f"- {key}: {value}\n"

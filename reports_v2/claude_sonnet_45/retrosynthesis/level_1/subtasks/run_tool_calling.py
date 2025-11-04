@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     verboses = [
         "brief",
-        # "workflow",
+        "workflow",
         # "comprehensive",
     ]
     for verbose in verboses:

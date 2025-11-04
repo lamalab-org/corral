@@ -1,3 +1,4 @@
+import ast
 import json
 
 from loguru import logger
@@ -97,6 +98,7 @@ def score_final(prediction: dict, target: float) -> float:
     Returns:
         float: 1.0 if all conditions are met, 0.0 if any condition is violated.
     """
+    prediction = prediction.replace("```json", "").replace("```", "").strip()
     try:
         # Step 1: Validate all reactions in the pathway
         if not validate_reactions_with_products(prediction):
@@ -136,18 +138,20 @@ def score_final(prediction: dict, target: float) -> float:
         return 0.0
 
 
-def score_final_without_price(prediction: dict, _target: float) -> float:
+def score_final_without_price(prediction: dict, target: list) -> float:  # noqa: ARG001
     """
     Function to score the retrosynthesis route based on the provided conditions.
     Returns 1.0 if all conditions are met, else returns 0.0.
 
     Args:
         prediction (dict): The retrosynthesis route in JSON format.
-        target (float): Target price for the route.
+        target (list): Target molecules for the route.
 
     Returns:
         float: 1.0 if all conditions are met, 0.0 if any condition is violated.
     """
+    prediction = prediction.replace("```json", "").replace("```", "").strip()
+    prediction = json.loads(prediction)
     try:
         # Step 1: Validate all reactions in the pathway
         if not validate_reactions_with_products(prediction):
@@ -232,18 +236,29 @@ def check_reactants(prediction: dict, target: list) -> float:
         return 0.0
 
 
-def check_template(prediction: dict, target: str) -> float:
-    pred_template = prediction.get("template_id")
-    if pred_template is None or pred_template != target:
+def check_template(prediction: str, target: str) -> float:
+    try:
+        prediction = json.loads(prediction)
+    except Exception as e:
+        logger.warning(f"Exception during JSON loading: {e}")
         return 0.0
+    try:
+        target = int(target)
+        pred_template = prediction.get("template_id")
+        if pred_template is None or pred_template != target:
+            return 0.0
 
-    ground_rxn = search_by_template(target)
-    ground_rxn_mapped = ground_rxn["mapped_rxn"]
-    pred_rxn = prediction.get("mapped_rxn")
-    if pred_rxn is None or pred_rxn != ground_rxn_mapped:
+        ground_rxn = search_by_template(target)
+        ground_rxn_mapped = ground_rxn["mapped_rxn"]
+        pred_rxn = prediction.get("mapped_rxn")
+        if pred_rxn is None or pred_rxn != ground_rxn_mapped:
+            return 0.0
+
+        return 1.0
+
+    except Exception as e:
+        logger.warning(f"Exception during template checking: {e}")
         return 0.0
-
-    return 1.0
 
 
 def check_apply_template(prediction: dict, target: str) -> float:
@@ -270,3 +285,70 @@ def check_apply_template(prediction: dict, target: str) -> float:
     except Exception:
         return 0.0
     return 0.0
+
+
+def check_list_molecules(prediction: list, target: list) -> float:
+    """
+    Scoring function to check if the predicted molecules match the target molecules.
+
+    Args:
+        prediction (list): A list containing the predicted molecules.
+        target (list): A list of target molecule SMILES strings.
+
+    Returns:
+        float: 1.0 if all predicted molecules match the target molecules, 0.0 otherwise.
+    """
+    target = target[0]
+    try:
+        # Convert prediction to list if it's a string representation
+        if isinstance(prediction, str):
+            try:
+                # Try ast.literal_eval first (safest for Python literals)
+                prediction = ast.literal_eval(prediction)
+            except (ValueError, SyntaxError):
+                # If that fails, try json.loads (works for JSON-formatted strings)
+                try:
+                    prediction = json.loads(prediction)
+                except json.JSONDecodeError:
+                    # If both fail, return 0.0
+                    logger.warning(
+                        f"Could not convert prediction string to list: {prediction}"
+                    )
+                    return 0.0
+
+        # Convert all molecules to RDKit mol objects (canonical SMILES for comparison)
+        # Use canonical SMILES as the key for comparison
+        for poss in prediction:
+            leaf_mols = {}
+            for smiles in poss:
+                pred_mol = Chem.MolFromSmiles(smiles)
+                if pred_mol is None:
+                    return 0.0
+                # Remove atom mapping numbers
+                for atom in pred_mol.GetAtoms():
+                    atom.SetAtomMapNum(0)
+                # Remove stereochemistry for comparison
+                Chem.RemoveStereochemistry(pred_mol)
+                canonical_smiles = Chem.MolToSmiles(pred_mol)
+                leaf_mols[canonical_smiles] = pred_mol
+
+            target_mols = {}
+            for target_smiles in target:
+                target_mol = Chem.MolFromSmiles(target_smiles)
+                if target_mol is None:
+                    return 0.0
+                # Remove atom mapping numbers
+                for atom in target_mol.GetAtoms():
+                    atom.SetAtomMapNum(0)
+                # Remove stereochemistry for comparison
+                Chem.RemoveStereochemistry(target_mol)
+                canonical_smiles = Chem.MolToSmiles(target_mol)
+                target_mols[canonical_smiles] = target_mol
+
+            if all(target_canonical in leaf_mols for target_canonical in target_mols):
+                return 1.0
+
+        return 0.0
+    except Exception as e:
+        logger.warning(f"Exception during molecule checking: {e}")
+        return 0.0

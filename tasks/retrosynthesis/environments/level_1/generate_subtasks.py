@@ -42,7 +42,7 @@ TARGETS = [
     [
         [
             "O=[C:2]([c:3]1[cH:4][cH:5][c:6]([O:7][CH3:8])[cH:9][cH:10]1)[c:11]1[cH:12][cH:13][c:14]([O:15][CH3:16])[cH:17][cH:18]1",
-            "[Li].[CH2:1][Si](C)(C)C",
+            "[Li][CH2:1][Si](C)(C)C",
         ]
     ],
     [
@@ -107,7 +107,7 @@ def main():
         final_inputs = []
         for j, template in enumerate(TEMPLATES[i]):
             if j == 0:
-                input_from_task = [f"make_{i+1}_lvl1-apply_template-{j+1}"]
+                input_from_task = [f"make_{i+1}_lvl1-template_search-{j+1}"]
                 initial_inputs = {"initial_molecule": molecule}
             else:
                 input_from_task = [
@@ -129,7 +129,7 @@ def main():
                     "prompt": f"Can you return the `mapped_rxn` associated with the template {template}?",
                     "input_from_task": False,
                     "input_for_task": [
-                        f"make_{i+1}_lvl1-apply_template-{j+1}"
+                        f"make_{i+1}_lvl1-apply_template-{j+1}",
                         f"make_{i+1}_lvl1-build_complete_route",
                     ],
                 },
@@ -141,7 +141,7 @@ def main():
                     }
                 ],
                 "scoring_fn": "check_template",
-                "submission_format": "Return a dict with the `mapped_rxn` as a string and the `template_id` as an integer in JSON format, e.g., {'mapped_rxn': 'Cc1ccccc1.Br>>Cc1ccccc1Br', 'template_id': 12345}.",
+                "submission_format": "Return a dict with the `mapped_rxn` as a string and the `template_id` (the one used to search the database not the hash) as an integer in JSON format, e.g., {'mapped_rxn': 'Cc1ccccc1.Br>>Cc1ccccc1Br', 'template_id': 12345}.",
                 "tools": [
                     "check_smiles_reaction_template_matching",
                     "search_template_catalog_by_criteria",
@@ -164,6 +164,7 @@ def main():
                     f"make_{i+1}_lvl1-build_complete_route",
                 ]
             tasks.append(task)
+            previous_task = f"make_{i+1}_lvl1-template_search-{j+1}"
             task = {
                 "id": f"make_{i+1}_lvl1-apply_template-{j+1}",
                 "name": f"make_{i+1}_lvl1-apply_template-{j+1}",
@@ -175,7 +176,7 @@ def main():
                 ],
                 "metrics": ["binary"],
                 "input": {
-                    "prompt": "Can you return the precursors of applying the template to the molecule below?",
+                    "prompt": f"Can you return all possible precursors of applying the template as the result of the task {previous_task} to the molecule below?",
                     "input_from_task": input_from_task,
                     "input_for_task": [input_for_task],
                 },
@@ -187,8 +188,8 @@ def main():
                     }
                 ],
                 "initial_inputs": initial_inputs,
-                "scoring_fn": "check_reactants",
-                "submission_format": "Return a list in which each item corresponds to the SMILES of each of the precursors as a string.",
+                "scoring_fn": "check_list_molecules",
+                "submission_format": "Return a list of lists where each inner list contain each possible combination in which each item of the inner list corresponds to the SMILES of each of the precursors as a string. For example, `[['CCO', 'O'], ['CC=O', 'CCO']]`.",
                 "tools": [
                     "get_template",
                     "apply_template",
