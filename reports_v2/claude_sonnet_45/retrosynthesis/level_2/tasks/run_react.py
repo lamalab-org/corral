@@ -27,7 +27,7 @@ def run_benchmark(
         group="tool_description_ablation",
         name=run_name,
     )
-    agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
+    agent = ReActAgent(model=model, max_iterations=30, temperature=temperature)
     runner = CorralRunner(interface, agent, logger=wandblogger)
 
     # Run benchmark
@@ -49,8 +49,8 @@ if __name__ == "__main__":
 
     verboses = [
         "brief",
-        # "workflow",
-        # "comprehensive",
+        "workflow",
+        "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")

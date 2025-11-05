@@ -33,6 +33,7 @@ def search_template_catalog_by_criteria(
     bonds_formed: list[str] | None = None,
     bonds_broken: list[str] | None = None,
     bonds_order_changed: list[str] | None = None,
+    limit: int = 10,
 ) -> list[dict[str, Any]]:
     """[BRIEF] Searches the retrosynthetic template database based on specified criteria. [/BRIEF]
 
@@ -106,6 +107,12 @@ def search_template_catalog_by_criteria(
             [ARGS_SYNTACTICAL] List of valid bond type strings or None [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] ['6-6 (1.0->2.0)'], None [/ARGS_EXAMPLES]
 
+        limit (int):
+            [ARGS_BRIEF] Maximum number of templates to return. Default is 10. [/ARGS_BRIEF]
+            [ARGS_DETAILED] An integer specifying the maximum number of retrosynthetic templates to return from the search results. This helps to limit the output to a manageable number of templates for review. If more templates are needed, one can call the tool with higher limit. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Positive integer [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] 5, 10, 20 [/ARGS_EXAMPLES]
+
     Returns:
         list[dict[str, Any]]:
             [RETURNS_BRIEF] List of dictionaries representing matching retrosynthetic templates. [/RETURNS_BRIEF]
@@ -156,7 +163,7 @@ def search_template_catalog_by_criteria(
         bonds_broken=bonds_broken,
         bonds_order_changed=bonds_order_changed,
         reference_smiles=molecule_smiles,
-        limit=10,
+        limit=limit,
     )
 
 
