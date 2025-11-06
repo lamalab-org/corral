@@ -222,7 +222,6 @@ def check_reactants(prediction: dict, target: list) -> float:
     Returns:
         float: 1.0 if all conditions are met, 0.0 if any condition is violated.
     """
-    target = target[0]
     prediction = prediction.replace("```json", "").replace("```", "").strip()
     try:
         leaf_molecules = collect_leaf_molecules(prediction)
