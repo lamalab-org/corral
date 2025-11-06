@@ -27,7 +27,7 @@ def run_benchmark(
         group="tool_description_ablation",
         name=run_name,
     )
-    agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
+    agent = ReActAgent(model=model, max_iterations=40, temperature=temperature)
     runner = CorralRunner(interface, agent, logger=wandblogger)
 
     # Run benchmark

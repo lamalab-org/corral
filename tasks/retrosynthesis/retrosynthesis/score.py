@@ -13,6 +13,30 @@ from retrosynthesis.retrosynthesis_utils import (
 )
 
 
+def count_reactions(node):
+    """
+    Recursively count the total number of reactions in the tree.
+    Each reaction node counts as 1, and we recursively check all children.
+    """
+    node = json.loads(str(node).replace("'", '"'))
+    count = 0
+
+    if node["type"] == "reaction":
+        # Count this reaction
+        count = 1
+        # Recursively count reactions in all children
+        if "children" in node:
+            for child in node["children"]:
+                count += count_reactions(child)
+    elif node["type"] == "mol":
+        # For molecule nodes, recursively check all children
+        if node.get("children"):
+            for child in node["children"]:
+                count += count_reactions(child)
+
+    return count
+
+
 def collect_leaf_molecules(node):
     """
     Recursively collect all leaf molecules (molecules without children).
@@ -86,20 +110,31 @@ def validate_reactions_with_products(node, expected_product=None):
         return False
 
 
-def score_final(prediction: dict, target: float) -> float:
+def score_final(prediction: dict, target: dict) -> float:
     """
     Function to score the retrosynthesis route based on the provided conditions.
     Returns 1.0 if all conditions are met, else returns 0.0.
 
     Args:
         prediction (dict): The retrosynthesis route in JSON format.
-        target (float): Target price for the route.
+        target (dict): Target specifications for the route, including price and max steps.
 
     Returns:
         float: 1.0 if all conditions are met, 0.0 if any condition is violated.
     """
+    max_steps = target.get("max_steps")
+    if max_steps is None:
+        raise NotImplementedError(
+            "Step count validation is not implemented in this scoring function."
+        )
+    target = target.get("prize")
     prediction = prediction.replace("```json", "").replace("```", "").strip()
     try:
+        # Step 0: Check if the number of reactions exceeds max_steps
+        num_reactions = count_reactions(prediction)
+        if num_reactions > max_steps:
+            return 0.0
+
         # Step 1: Validate all reactions in the pathway
         if not validate_reactions_with_products(prediction):
             return 0.0

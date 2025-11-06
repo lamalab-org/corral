@@ -53,7 +53,7 @@ def main():
                 "output": [
                     {
                         "type": "integer",
-                        "target": PRIZES[i],
+                        "target": {"prize": PRIZES[i], "max_steps": len(TEMPLATES[i])},
                         "threshold": None,
                     }
                 ],
