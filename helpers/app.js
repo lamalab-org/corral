@@ -5,6 +5,9 @@ let svg, g, simulation, zoomBehavior;
 let currentNodes = []; // Store current graph nodes
 let selectedNodeIndex = -1; // Track selected node index (-1 means none selected)
 
+// API endpoint configuration
+const API_ENDPOINT = 'https://lamalab-org--llm-annotation-endpoint-fastapi-app.modal.run/ingest';
+
 // Storage for behavioral markers and notes per node, per file
 let allFileAnnotations = {}; // Format: { fileName: { nodeId: { markers: [], notes: '' } } }
 let allFileNodes = {}; // Format: { fileName: [nodes array] } - to store which nodes are annotatable
@@ -1027,7 +1030,7 @@ function dragended(event, d, toolGroups) {
 }
 
 // Submit button handler
-document.getElementById('submitBtn').addEventListener('click', function() {
+document.getElementById('submitBtn').addEventListener('click', async function() {
     // Save current file's annotations and trace comments
     if (allFiles.length > 0 && allFiles[currentFileIndex]) {
         const currentFileName = allFiles[currentFileIndex].name;
@@ -1044,10 +1047,10 @@ document.getElementById('submitBtn').addEventListener('click', function() {
         return;
     }
 
-    // Validate MongoDB key
+    // Validate Personal Identifier
     const mongodbKey = document.getElementById('mongodbKey').value.trim();
     if (!mongodbKey) {
-        alert('❌ Validation Error: MongoDB Key is required.');
+        alert('❌ Validation Error: Personal Identifier is required.');
         document.getElementById('mongodbKey').focus();
         return;
     }
@@ -1120,15 +1123,6 @@ document.getElementById('submitBtn').addEventListener('click', function() {
         return;
     }
 
-    // If validation passes, show success message
-    const totalFiles = allFiles.length;
-
-    let successMessage = '✅ Validation Successful!\n\n';
-    successMessage += `Annotator: ${annotatorName}\n`;
-    successMessage += `MongoDB Key: ${mongodbKey}\n`;
-    successMessage += `Files Processed: ${totalFiles}/${totalFiles}\n\n`;
-    successMessage += 'All required annotations are present.';
-
     // Calculate total annotations
     let totalMarkers = 0;
     let totalNotes = 0;
@@ -1141,17 +1135,70 @@ document.getElementById('submitBtn').addEventListener('click', function() {
         });
     });
 
-    successMessage += `\n\nTotal Markers: ${totalMarkers}`;
-    successMessage += `\nNodes with Notes: ${totalNotes}`;
-
-    alert(successMessage);
-
-    // Here you would typically send the data to a server
-    console.log('Submission Data:', {
+    // Prepare the payload for the API
+    const payload = {
         annotator: annotatorName,
         mongodbKey: mongodbKey,
         annotations: allFileAnnotations,
         traceComments: allFileTraceComments,
         fileNodes: allFileNodes
-    });
+    };
+
+    // Show submitting message
+    const submitBtn = document.getElementById('submitBtn');
+    const originalBtnText = submitBtn.textContent;
+    submitBtn.textContent = '⏳ Submitting...';
+    submitBtn.disabled = true;
+
+    try {
+        // Send data to the API endpoint
+        const response = await fetch(API_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            // Success
+            const totalFiles = allFiles.length;
+            let successMessage = '✅ Submission Successful!\n\n';
+            successMessage += `Annotator: ${annotatorName}\n`;
+            successMessage += `Personal Identifier: ${mongodbKey}\n`;
+            successMessage += `Files Processed: ${totalFiles}/${totalFiles}\n`;
+            successMessage += `Total Markers: ${totalMarkers}\n`;
+            successMessage += `Nodes with Notes: ${totalNotes}\n\n`;
+            successMessage += `Matched: ${result.matched}\n`;
+            successMessage += `Upserted: ${result.upserted}\n`;
+            successMessage += `Modified: ${result.modified}`;
+
+            alert(successMessage);
+
+            // Log successful submission
+            console.log('Submission successful:', result);
+        } else {
+            // API returned an error
+            let errorMessage = '❌ Submission Failed\n\n';
+            errorMessage += `Status: ${response.status}\n`;
+            errorMessage += `Error: ${result.detail || JSON.stringify(result)}`;
+            alert(errorMessage);
+            console.error('Submission error:', result);
+        }
+    } catch (error) {
+        // Network or other error
+        let errorMessage = '❌ Submission Failed\n\n';
+        errorMessage += `Error: ${error.message}\n\n`;
+        errorMessage += 'Please check:\n';
+        errorMessage += '• Network connection\n';
+        errorMessage += '• API endpoint availability';
+        alert(errorMessage);
+        console.error('Submission exception:', error);
+    } finally {
+        // Restore button state
+        submitBtn.textContent = originalBtnText;
+        submitBtn.disabled = false;
+    }
 });
