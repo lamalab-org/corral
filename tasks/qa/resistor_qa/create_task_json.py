@@ -1,36 +1,32 @@
 import json
 import uuid
 from pathlib import Path
-
 from loguru import logger
 
 
 def convert_mcq_to_task_format(questions):
     """Convert MCQ questions to task format and save each as separate file."""
-    for i, raw_question in enumerate(questions):
-        # Start with the raw item and normalize into question_data
-        question_data = raw_question
-
+    for i, question_data in enumerate(questions):
         # Ensure question_data is a dictionary
-        if isinstance(raw_question, list):
+        if isinstance(question_data, list):
             # Assuming a list format like [question_text, options_dict]
             if (
-                len(raw_question) == 2
-                and isinstance(raw_question[0], str)
-                and isinstance(raw_question[1], dict)
+                len(question_data) == 2
+                and isinstance(question_data[0], str)
+                and isinstance(question_data[1], dict)
             ):
                 question_data = {
-                    "question": raw_question[0],
-                    "options": raw_question[1],
+                    "question": question_data[0],
+                    "options": question_data[1],
                 }
             else:
-                logger.info(
-                    f"Warning: Skipping malformed question data (list format) at index {i}: {raw_question}"
+                print(
+                    f"Warning: Skipping malformed question data (list format) at index {i}: {question_data}"
                 )
                 continue
-        elif not isinstance(raw_question, dict):
-            logger.info(
-                f"Warning: Skipping malformed question data (not dict or list) at index {i}: {raw_question}"
+        elif not isinstance(question_data, dict):
+            print(
+                f"Warning: Skipping malformed question data (not dict or list) at index {i}: {question_data}"
             )
             continue
 
@@ -83,7 +79,7 @@ def convert_mcq_to_task_format(questions):
 def main():
     # Read the MCQ JSON file
     try:
-        with Path("questions.json").open() as f:
+        with Path("questions_resistor.json").open() as f:
             mcq_data = json.load(f)
     except FileNotFoundError:
         return
