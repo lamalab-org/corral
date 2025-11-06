@@ -870,19 +870,35 @@ function showDetails(event, d) {
                     contentObj = JSON.parse(d.content);
                 } catch (e1) {
                     // If that fails, it might be a Python dict string representation
-                    // Convert Python dict syntax to JSON:
-                    // 1. Replace single quotes with double quotes (but not inside strings)
-                    // 2. Replace Python None with null
-                    // 3. Replace Python True/False with true/false
-                    let jsonStr = d.content
-                        .replace(/None/g, 'null')
-                        .replace(/True/g, 'true')
-                        .replace(/False/g, 'false')
-                        // Replace single quotes with double quotes
-                        // This is a simple approach that works for most cases
-                        .replace(/'/g, '"');
+                    // Use a more robust approach to convert Python dict to JSON
+                    try {
+                        // Replace Python literals with JSON equivalents
+                        let jsonStr = d.content
+                            .replace(/\bNone\b/g, 'null')
+                            .replace(/\bTrue\b/g, 'true')
+                            .replace(/\bFalse\b/g, 'false');
 
-                    contentObj = JSON.parse(jsonStr);
+                        // Replace single quotes with double quotes, being careful about escaped quotes
+                        // This regex handles most cases including strings with escaped single quotes
+                        jsonStr = jsonStr.replace(/(\w+):\s*'([^']*)'/g, '"$1": "$2"')  // key: 'value'
+                                       .replace(/{\s*'([^']+)':/g, '{"$1":')           // {'key':
+                                       .replace(/,\s*'([^']+)':/g, ', "$1":')          // , 'key':
+                                       .replace(/:\s*'([^']*)'/g, ': "$1"');           // : 'value'
+
+                        contentObj = JSON.parse(jsonStr);
+                    } catch (e2) {
+                        // Try using eval as last resort (with Function constructor for safety)
+                        try {
+                            // Create a safe evaluation context
+                            const evalFunc = new Function('return ' + d.content.replace(/\bNone\b/g, 'null')
+                                                                               .replace(/\bTrue\b/g, 'true')
+                                                                               .replace(/\bFalse\b/g, 'false'));
+                            contentObj = evalFunc();
+                        } catch (e3) {
+                            console.log('All parsing attempts failed:', e3);
+                            contentObj = null;
+                        }
+                    }
                 }
             } else {
                 contentObj = d.content;
@@ -894,38 +910,105 @@ function showDetails(event, d) {
         }
 
         if (contentObj && typeof contentObj === 'object') {
-            // Display each key from the content dict
-            if (contentObj.arguments !== undefined) {
+            // For tool role nodes, use the same boxed formatting as tool_calls
+            if (d.type === 'tool') {
                 html += `<div class="detail-item">
-                    <div class="detail-label">Arguments</div>
-                    <div class="detail-value"><pre>${JSON.stringify(contentObj.arguments, null, 2)}</pre></div>
-                </div>`;
-            }
+                    <div class="detail-label">Tool Response</div>
+                    <div class="detail-value">
+                        <div class="tool-call-box" style="background-color: #f8f9fa; border-left: 4px solid #17a2b8; padding: 12px; border-radius: 4px;">`;
 
-            if (contentObj.result !== undefined) {
-                html += `<div class="detail-item">
-                    <div class="detail-label">Result</div>
-                    <div class="detail-value"><pre>${JSON.stringify(contentObj.result, null, 2)}</pre></div>
-                </div>`;
-            }
+                // Display tool_name if present
+                if (contentObj.tool_name !== undefined) {
+                    html += `<div style="margin-bottom: 6px;"><strong>Tool Name:</strong> <span style="color: #fd7e14; font-weight: 500;">${contentObj.tool_name}</span></div>`;
+                }
 
-            if (contentObj.status !== undefined) {
-                html += `<div class="detail-item">
-                    <div class="detail-label">Status</div>
-                    <div class="detail-value">${contentObj.status}</div>
-                </div>`;
-            }
+                // Display status if present
+                if (contentObj.status !== undefined) {
+                    const statusColor = contentObj.status === 'success' ? '#28a745' : '#dc3545';
+                    html += `<div style="margin-bottom: 6px;"><strong>Status:</strong> <span style="color: ${statusColor}; font-weight: 500;">${contentObj.status}</span></div>`;
+                }
 
-            // Display any other keys that might exist
-            Object.keys(contentObj).forEach(key => {
-                if (key !== 'arguments' && key !== 'result' && key !== 'status') {
-                    const value = contentObj[key];
+                // Display duration if present
+                if (contentObj.duration !== undefined) {
+                    const durationValue = typeof contentObj.duration === 'number'
+                        ? contentObj.duration.toFixed(4)
+                        : contentObj.duration;
+                    html += `<div style="margin-bottom: 6px;"><strong>Duration:</strong> <span style="color: #495057;">${durationValue} seconds</span></div>`;
+                }
+
+                // Display timestamp if present
+                if (contentObj.timestamp !== undefined) {
+                    html += `<div style="margin-bottom: 6px;"><strong>Timestamp:</strong> <span style="color: #6c757d; font-size: 0.9em;">${contentObj.timestamp}</span></div>`;
+                }
+
+                // Display arguments if present
+                if (contentObj.arguments !== undefined) {
+                    const argsValue = typeof contentObj.arguments === 'object'
+                        ? JSON.stringify(contentObj.arguments, null, 2)
+                        : contentObj.arguments;
+                    html += `<div style="margin-bottom: 6px;"><strong>Arguments:</strong><pre style="background-color: #ffffff; padding: 8px; border-radius: 3px; margin-top: 4px; font-size: 0.85em; max-height: 300px; overflow-y: auto;">${argsValue}</pre></div>`;
+                }
+
+                // Display result if present
+                if (contentObj.result !== undefined) {
+                    const resultValue = typeof contentObj.result === 'object'
+                        ? JSON.stringify(contentObj.result, null, 2)
+                        : contentObj.result;
+                    html += `<div style="margin-bottom: 6px;"><strong>Result:</strong><pre style="background-color: #ffffff; padding: 8px; border-radius: 3px; margin-top: 4px; font-size: 0.85em; max-height: 300px; overflow-y: auto;">${resultValue}</pre></div>`;
+                }
+
+                // Display error_message if present
+                if (contentObj.error_message !== undefined && contentObj.error_message !== null) {
+                    html += `<div style="margin-bottom: 6px;"><strong>Error Message:</strong><pre style="background-color: #fff3cd; padding: 8px; border-radius: 3px; margin-top: 4px; font-size: 0.85em; max-height: 300px; overflow-y: auto; color: #856404;">${contentObj.error_message}</pre></div>`;
+                }
+
+                // Display any other keys that might exist (excluding the ones we've already shown)
+                const displayedKeys = ['tool_name', 'status', 'duration', 'timestamp', 'arguments', 'result', 'error_message'];
+                Object.keys(contentObj).forEach(key => {
+                    if (!displayedKeys.includes(key)) {
+                        const value = contentObj[key];
+                        const displayValue = typeof value === 'object'
+                            ? `<pre style="background-color: #ffffff; padding: 8px; border-radius: 3px; margin-top: 4px; font-size: 0.85em; max-height: 300px; overflow-y: auto;">${JSON.stringify(value, null, 2)}</pre>`
+                            : `<span style="color: #495057;">${value}</span>`;
+                        html += `<div style="margin-bottom: 6px;"><strong>${key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ')}:</strong> ${displayValue}</div>`;
+                    }
+                });
+
+                html += `</div></div></div>`;
+            } else {
+                // For non-tool roles, use the original formatting
+                if (contentObj.arguments !== undefined) {
                     html += `<div class="detail-item">
-                        <div class="detail-label">${key.charAt(0).toUpperCase() + key.slice(1)}</div>
-                        <div class="detail-value">${typeof value === 'object' ? `<pre>${JSON.stringify(value, null, 2)}</pre>` : value}</div>
+                        <div class="detail-label">Arguments</div>
+                        <div class="detail-value"><pre>${JSON.stringify(contentObj.arguments, null, 2)}</pre></div>
                     </div>`;
                 }
-            });
+
+                if (contentObj.result !== undefined) {
+                    html += `<div class="detail-item">
+                        <div class="detail-label">Result</div>
+                        <div class="detail-value"><pre>${JSON.stringify(contentObj.result, null, 2)}</pre></div>
+                    </div>`;
+                }
+
+                if (contentObj.status !== undefined) {
+                    html += `<div class="detail-item">
+                        <div class="detail-label">Status</div>
+                        <div class="detail-value">${contentObj.status}</div>
+                    </div>`;
+                }
+
+                // Display any other keys that might exist
+                Object.keys(contentObj).forEach(key => {
+                    if (key !== 'arguments' && key !== 'result' && key !== 'status') {
+                        const value = contentObj[key];
+                        html += `<div class="detail-item">
+                            <div class="detail-label">${key.charAt(0).toUpperCase() + key.slice(1)}</div>
+                            <div class="detail-value">${typeof value === 'object' ? `<pre>${JSON.stringify(value, null, 2)}</pre>` : value}</div>
+                        </div>`;
+                    }
+                });
+            }
         } else {
             // If content is not JSON or parsing failed, display as plain text in a scrollable container
             html += `<div class="detail-item">
