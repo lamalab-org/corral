@@ -126,6 +126,11 @@ def search_template_catalog_by_criteria(
             [ERROR_DETAILS] This occurs if the user provides a string or other non-list type for any of the parameters that expect a list of strings. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Ensure that all parameters expecting lists are provided with list types, even if they contain only a single string. [/ERROR_RECOVERY]
 
+        ValueError:
+            [ERROR_WHEN] Raised when the provided SMILES string is invalid. [/ERROR_WHEN]
+            [ERROR_DETAILS] This occurs if the SMILES string cannot be parsed into a valid molecular structure. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Check the SMILES string for correctness and try again. [/ERROR_RECOVERY]
+
         Exception:
             [ERROR_WHEN] Raised for any unexpected errors during the search process. [/ERROR_WHEN]
             [ERROR_DETAILS] This can occur due to various reasons, such as issues with the retrosynthetic template database or internal processing errors. [/ERROR_DETAILS]
@@ -156,6 +161,9 @@ def search_template_catalog_by_criteria(
                 f"Example: If you want to search for 'alcohol', use [{param_value!r}] instead of {param_value!r}"
             )
 
+    mol = Chem.MolFromSmiles(molecule_smiles)
+    if mol is None:
+        raise ValueError(f"Invalid SMILES string: {molecule_smiles}")
     return search_reactions_by_criteria(
         functional_groups_broken=functional_groups_broken,
         functional_groups_formed=functional_groups_formed,

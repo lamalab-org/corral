@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 from loguru import logger
+from retrosynthesis.checks import check_database
 from retrosynthesis.score import (
     check_apply_template,
     check_list_molecules,
@@ -269,6 +270,20 @@ if __name__ == "__main__":
         help="Whether to use subtask level",
     )
     args = parser.parse_args()
+
+    # Check database availability and schema before starting the environment
+    logger.info("Performing database checks before starting the environment...")
+    try:
+        check_database()
+    except (ConnectionError, ValueError) as e:
+        logger.error(f"Database check failed: {e}")
+        logger.error(
+            "Please ensure the database is properly set up before starting the environment."
+        )
+        logger.error(
+            "You may need to run: python tasks/retrosynthesis/database_config/phase_b_production.py"
+        )
+        raise SystemExit(1) from e
 
     Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
 
