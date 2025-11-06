@@ -9,13 +9,24 @@ def convert_mcq_to_task_format(questions):
         # Ensure question_data is a dictionary
         if isinstance(question_data, list):
             # Assuming a list format like [question_text, options_dict]
-            if len(question_data) == 2 and isinstance(question_data[0], str) and isinstance(question_data[1], dict):
-                question_data = {"question": question_data[0], "options": question_data[1]}
+            if (
+                len(question_data) == 2
+                and isinstance(question_data[0], str)
+                and isinstance(question_data[1], dict)
+            ):
+                question_data = {
+                    "question": question_data[0],
+                    "options": question_data[1],
+                }
             else:
-                print(f"Warning: Skipping malformed question data (list format) at index {i}: {question_data}")
+                print(
+                    f"Warning: Skipping malformed question data (list format) at index {i}: {question_data}"
+                )
                 continue
         elif not isinstance(question_data, dict):
-            print(f"Warning: Skipping malformed question data (not dict or list) at index {i}: {question_data}")
+            print(
+                f"Warning: Skipping malformed question data (not dict or list) at index {i}: {question_data}"
+            )
             continue
 
         question_text = question_data["question"]
