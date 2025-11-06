@@ -242,7 +242,14 @@ def test_run_agent_success(monkeypatch, concrete_agent, mock_benchmark_interface
     """Test successful run_agent execution."""
 
     # Mock the run method
-    def mock_run(interface, task_id, history=None, task_prompt=None, examples=None, enable_retire=False):
+    def mock_run(
+        interface,
+        task_id,
+        history=None,
+        task_prompt=None,
+        examples=None,
+        enable_retire=False,
+    ):
         return "test_answer"
 
     monkeypatch.setattr(concrete_agent, "run", mock_run)
@@ -303,7 +310,14 @@ def test_run_agent_with_error_in_answer(
 ):
     """Test run_agent when answer contains error."""
 
-    def mock_run(interface, task_id, history=None, task_prompt=None, examples=None, enable_retire=False):
+    def mock_run(
+        interface,
+        task_id,
+        history=None,
+        task_prompt=None,
+        examples=None,
+        enable_retire=False,
+    ):
         return "Error: Something went wrong"
 
     monkeypatch.setattr(concrete_agent, "run", mock_run)
@@ -322,7 +336,12 @@ def test_run_agent_with_exception(
     """Test run_agent when run method raises exception."""
 
     def mock_run_with_error(
-        interface, task_id, history=None, task_prompt=None, examples=None, enable_retire=False
+        interface,
+        task_id,
+        history=None,
+        task_prompt=None,
+        examples=None,
+        enable_retire=False,
     ):
         raise Exception("Run failed")
 
@@ -380,7 +399,14 @@ def test_run_agent_extractor_error(
     """Test run_agent when extractor fails."""
 
     # Mock the run method
-    def mock_run(interface, task_id, history=None, task_prompt=None, examples=None, enable_retire=False):
+    def mock_run(
+        interface,
+        task_id,
+        history=None,
+        task_prompt=None,
+        examples=None,
+        enable_retire=False,
+    ):
         return "test_answer"
 
     monkeypatch.setattr(concrete_agent, "run", mock_run)
@@ -496,7 +522,14 @@ def test_extractor_prompt_filling(
     )
 
     # Mock the run method
-    def mock_run(interface, task_id, history=None, task_prompt=None, examples=None, enable_retire=False):
+    def mock_run(
+        interface,
+        task_id,
+        history=None,
+        task_prompt=None,
+        examples=None,
+        enable_retire=False,
+    ):
         return "test_answer"
 
     monkeypatch.setattr(concrete_agent, "run", mock_run)
