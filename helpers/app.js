@@ -10,6 +10,9 @@ let allFileAnnotations = {}; // Format: { fileName: { nodeId: { markers: [], not
 let allFileNodes = {}; // Format: { fileName: [nodes array] } - to store which nodes are annotatable
 let nodeAnnotations = {}; // Current file's annotations
 
+// Storage for trace-level comments per file
+let allFileTraceComments = {}; // Format: { fileName: 'trace comment text' }
+
 // Color scheme
 const colors = {
     system: '#6c757d',
@@ -124,6 +127,15 @@ document.getElementById('markerSelect').addEventListener('change', function() {
 
     // Reset selector
     this.value = '';
+});
+
+// Trace comments textarea handler
+document.getElementById('traceCommentsTextarea').addEventListener('input', function() {
+    // Save trace comments for current file
+    if (allFiles.length > 0 && allFiles[currentFileIndex]) {
+        const currentFileName = allFiles[currentFileIndex].name;
+        allFileTraceComments[currentFileName] = this.value;
+    }
 });
 
 // Notes textarea handler
@@ -283,10 +295,13 @@ function updateNodeNavButtons() {
 function loadFileByIndex(index) {
     if (index < 0 || index >= allFiles.length) return;
 
-    // Save current file's annotations before switching
+    // Save current file's annotations and trace comments before switching
     if (allFiles.length > 0 && allFiles[currentFileIndex]) {
         const currentFileName = allFiles[currentFileIndex].name;
         allFileAnnotations[currentFileName] = JSON.parse(JSON.stringify(nodeAnnotations));
+        // Save trace comments for current file
+        const traceCommentsTextarea = document.getElementById('traceCommentsTextarea');
+        allFileTraceComments[currentFileName] = traceCommentsTextarea.value;
     }
 
     currentFileIndex = index;
@@ -345,18 +360,20 @@ function visualizeTrace(data) {
     // Reset node selection when loading new trace
     selectedNodeIndex = -1;
 
-    // Save current file's annotations before switching
-    if (allFiles.length > 0 && allFiles[currentFileIndex]) {
-        const currentFileName = allFiles[currentFileIndex].name;
-        allFileAnnotations[currentFileName] = JSON.parse(JSON.stringify(nodeAnnotations));
-    }
-
     // Load annotations for the new file
     const newFileName = allFiles[currentFileIndex]?.name;
     if (newFileName && allFileAnnotations[newFileName]) {
         nodeAnnotations = JSON.parse(JSON.stringify(allFileAnnotations[newFileName]));
     } else {
         nodeAnnotations = {};
+    }
+
+    // Load trace comments for the new file
+    const traceCommentsTextarea = document.getElementById('traceCommentsTextarea');
+    if (newFileName && allFileTraceComments[newFileName]) {
+        traceCommentsTextarea.value = allFileTraceComments[newFileName];
+    } else {
+        traceCommentsTextarea.value = '';
     }
 
     // Clear the details panel
@@ -1011,10 +1028,12 @@ function dragended(event, d, toolGroups) {
 
 // Submit button handler
 document.getElementById('submitBtn').addEventListener('click', function() {
-    // Save current file's annotations
+    // Save current file's annotations and trace comments
     if (allFiles.length > 0 && allFiles[currentFileIndex]) {
         const currentFileName = allFiles[currentFileIndex].name;
         allFileAnnotations[currentFileName] = JSON.parse(JSON.stringify(nodeAnnotations));
+        const traceCommentsTextarea = document.getElementById('traceCommentsTextarea');
+        allFileTraceComments[currentFileName] = traceCommentsTextarea.value;
     }
 
     // Validate annotator name
@@ -1132,6 +1151,7 @@ document.getElementById('submitBtn').addEventListener('click', function() {
         annotator: annotatorName,
         mongodbKey: mongodbKey,
         annotations: allFileAnnotations,
+        traceComments: allFileTraceComments,
         fileNodes: allFileNodes
     });
 });
