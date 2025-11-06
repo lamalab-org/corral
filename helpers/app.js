@@ -413,7 +413,8 @@ function visualizeToolCallingAgent(messages, nodes, links, nodeId, lastNodeId) {
                 timestamp: msg.timestamp || '',
                 index: idx,
                 toolCallId: msg.tool_call_id,
-                toolName: msg.name
+                toolName: msg.name,
+                toolCalls: msg.tool_calls || null  // Add tool_calls to node
             });
 
             if (nodeId > 0) {
@@ -433,7 +434,8 @@ function visualizeToolCallingAgent(messages, nodes, links, nodeId, lastNodeId) {
                     timestamp: msg.timestamp || '',
                     index: idx,
                     toolCallId: msg.tool_call_id,
-                    toolName: msg.name
+                    toolName: msg.name,
+                    toolCalls: msg.tool_calls || null
                 });
 
                 // Connect to previous tool node
@@ -456,7 +458,8 @@ function visualizeToolCallingAgent(messages, nodes, links, nodeId, lastNodeId) {
                     timestamp: msg.timestamp || '',
                     index: idx,
                     toolCallId: msg.tool_call_id,
-                    toolName: msg.name
+                    toolName: msg.name,
+                    toolCalls: msg.tool_calls || null
                 });
 
                 if (lastNodeId >= 0) {
@@ -910,6 +913,42 @@ function showDetails(event, d) {
                 <div class="detail-value"><pre>${d.content}</pre></div>
             </div>`;
         }
+    }
+
+    // Display tool_calls if present (after content)
+    if (d.toolCalls && Array.isArray(d.toolCalls) && d.toolCalls.length > 0) {
+        html += `<div class="detail-item">
+            <div class="detail-label">Tool Calls</div>
+            <div class="detail-value">`;
+
+        d.toolCalls.forEach((toolCall, idx) => {
+            html += `<div class="tool-call-box" style="background-color: #f8f9fa; border-left: 4px solid #667eea; padding: 12px; margin-bottom: 8px; border-radius: 4px;">`;
+            html += `<div style="font-weight: 600; color: #667eea; margin-bottom: 8px;">Tool Call ${idx + 1}</div>`;
+
+            if (toolCall.id) {
+                html += `<div style="margin-bottom: 6px;"><strong>ID:</strong> <code style="background-color: #e9ecef; padding: 2px 6px; border-radius: 3px; font-size: 0.9em;">${toolCall.id}</code></div>`;
+            }
+
+            if (toolCall.function && toolCall.function.name) {
+                html += `<div style="margin-bottom: 6px;"><strong>Function:</strong> <span style="color: #fd7e14; font-weight: 500;">${toolCall.function.name}</span></div>`;
+            }
+
+            if (toolCall.function && toolCall.function.arguments) {
+                let argsToDisplay = toolCall.function.arguments;
+                try {
+                    if (typeof argsToDisplay === 'string') {
+                        argsToDisplay = JSON.parse(argsToDisplay);
+                    }
+                    html += `<div style="margin-bottom: 6px;"><strong>Arguments:</strong><pre style="background-color: #ffffff; padding: 8px; border-radius: 3px; margin-top: 4px; font-size: 0.85em; max-height: 300px; overflow-y: auto;">${JSON.stringify(argsToDisplay, null, 2)}</pre></div>`;
+                } catch (e) {
+                    html += `<div style="margin-bottom: 6px;"><strong>Arguments:</strong><pre style="background-color: #ffffff; padding: 8px; border-radius: 3px; margin-top: 4px; font-size: 0.85em; max-height: 300px; overflow-y: auto;">${argsToDisplay}</pre></div>`;
+                }
+            }
+
+            html += `</div>`;
+        });
+
+        html += `</div></div>`;
     }
 
     if (d.toolCallId) {
