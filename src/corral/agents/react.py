@@ -197,15 +197,15 @@ class ReActAgent(BaseAgent):
             thoughts, actions = self.parse_llm_response(llm_response)
 
             # Check for retirement (XML format) if enabled
-            if enable_retire:
-                retire_match = re.search(
+            if enable_retire and (
+                retire_match := re.search(
                     r"<retire>(.*?)</retire>", llm_response, re.DOTALL | re.IGNORECASE
                 )
-                if retire_match:
-                    logger.info(
-                        f"Agent retiring from task {task_id}. Reason: {retire_match.group(1).strip()}"
-                    )
-                    return "RETIRE"
+            ):
+                logger.info(
+                    f"Agent retiring from task {task_id}. Reason: {retire_match[1].strip()}"
+                )
+                return "RETIRE"
 
             # Check for final answer (XML format)
             final_answer_match = re.search(
