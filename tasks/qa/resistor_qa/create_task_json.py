@@ -1,6 +1,7 @@
 import json
 import uuid
 from pathlib import Path
+from loguru import logger
 
 
 def convert_mcq_to_task_format(questions):
@@ -19,12 +20,12 @@ def convert_mcq_to_task_format(questions):
                     "options": question_data[1],
                 }
             else:
-                print(
+                logger.info(
                     f"Warning: Skipping malformed question data (list format) at index {i}: {question_data}"
                 )
                 continue
         elif not isinstance(question_data, dict):
-            print(
+            logger.info(
                 f"Warning: Skipping malformed question data (not dict or list) at index {i}: {question_data}"
             )
             continue
