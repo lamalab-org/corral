@@ -208,6 +208,7 @@ class TestCreatePrompt:
         expected_call_args = {
             "task_guide": "test task guide",
             "extra_param": "test value",
+            "retire_instructions": "",
         }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
@@ -248,6 +249,7 @@ class TestBuildUserContent:
             "task_guide": "test task guide",
             "param1": "value1",
             "param2": "value2",
+            "retire_instructions": "",
         }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
@@ -271,6 +273,7 @@ class TestBuildUserContent:
         expected_call_args = {
             "task_guide": "The task is to correctly answer the question with an image specified below.",
             "param1": "value1",
+            "retire_instructions": "",
         }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
@@ -307,7 +310,7 @@ class TestBuildUserContent:
         result = build_user_content(mock_user_prompt, "test task guide")
 
         assert result == "filled content"
-        expected_call_args = {"task_guide": "test task guide"}
+        expected_call_args = {"task_guide": "test task guide", "retire_instructions": ""}
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
     def test_build_user_content_empty_list_task_guide(self, mock_user_prompt):
