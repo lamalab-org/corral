@@ -180,7 +180,7 @@ class BenchmarkResult:
 
     def total_retired_trials(self) -> int:
         """Calculate total number of retired trials across all tasks"""
-        return sum(1 for trial in self.all_results if trial.retired)
+        return sum(bool(trial.retired)
 
     def average_score(self) -> float:
         """Calculate average score across all results"""
