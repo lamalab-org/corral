@@ -1,32 +1,36 @@
 import json
 import uuid
 from pathlib import Path
+
 from loguru import logger
 
 
 def convert_mcq_to_task_format(questions):
     """Convert MCQ questions to task format and save each as separate file."""
-    for i, question_data in enumerate(questions):
+    for i, raw_question in enumerate(questions):
+        # Start with the raw item and normalize into question_data
+        question_data = raw_question
+
         # Ensure question_data is a dictionary
-        if isinstance(question_data, list):
+        if isinstance(raw_question, list):
             # Assuming a list format like [question_text, options_dict]
             if (
-                len(question_data) == 2
-                and isinstance(question_data[0], str)
-                and isinstance(question_data[1], dict)
+                len(raw_question) == 2
+                and isinstance(raw_question[0], str)
+                and isinstance(raw_question[1], dict)
             ):
                 question_data = {
-                    "question": question_data[0],
-                    "options": question_data[1],
+                    "question": raw_question[0],
+                    "options": raw_question[1],
                 }
             else:
                 logger.info(
-                    f"Warning: Skipping malformed question data (list format) at index {i}: {question_data}"
+                    f"Warning: Skipping malformed question data (list format) at index {i}: {raw_question}"
                 )
                 continue
-        elif not isinstance(question_data, dict):
+        elif not isinstance(raw_question, dict):
             logger.info(
-                f"Warning: Skipping malformed question data (not dict or list) at index {i}: {question_data}"
+                f"Warning: Skipping malformed question data (not dict or list) at index {i}: {raw_question}"
             )
             continue
 
