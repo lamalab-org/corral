@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
@@ -144,8 +146,6 @@ def test_generate_report_json_output(tmp_path):
     assert report_file.exists()
 
     # Load and verify JSON structure
-    import json
-
     with open(report_file) as f:
         report_data = json.load(f)
 
@@ -213,8 +213,14 @@ def test_prepare_report_data_structure():
     task_results = create_dummy_results()
     benchmark = BenchmarkResult(task_results=task_results, k=[1, 2])
 
-    pass_at_k_results = {1: benchmark.overall_pass_at_k(1), 2: benchmark.overall_pass_at_k(2)}
-    pass_hat_k_results = {1: benchmark.overall_pass_hat_k(1), 2: benchmark.overall_pass_hat_k(2)}
+    pass_at_k_results = {
+        1: benchmark.overall_pass_at_k(1),
+        2: benchmark.overall_pass_at_k(2),
+    }
+    pass_hat_k_results = {
+        1: benchmark.overall_pass_hat_k(1),
+        2: benchmark.overall_pass_hat_k(2),
+    }
 
     report_data = benchmark._prepare_report_data(pass_at_k_results, pass_hat_k_results)
 

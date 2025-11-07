@@ -5,6 +5,8 @@ from statistics import mean
 from typing import Any
 
 from loguru import logger
+from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from corral.types import (
@@ -532,7 +534,9 @@ class BenchmarkResult:
         """
         # Create pass@k and pass^k dictionaries for the report
         pass_at_k_dict = {f"pass@{k}": value for k, value in pass_at_k_results.items()}
-        pass_hat_k_dict = {f"pass^{k}": value for k, value in pass_hat_k_results.items()}
+        pass_hat_k_dict = {
+            f"pass^{k}": value for k, value in pass_hat_k_results.items()
+        }
 
         # Get tool call statistics
         tool_call_stats = self.total_tool_calls()
@@ -666,9 +670,6 @@ class BenchmarkResult:
             pass_at_k_results: Dictionary of pass@k values for each k
             pass_hat_k_results: Dictionary of pass^k values for each k
         """
-        from rich.console import Console
-        from rich.panel import Panel
-
         console = Console()
 
         # Print header panel
