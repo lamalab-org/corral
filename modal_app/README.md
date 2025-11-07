@@ -192,8 +192,8 @@ Once deployed, you can call your Modal functions from anywhere:
 ```python
 import modal
 
-# Look up the deployed function
-calculate_lattice_energy = modal.Function.lookup("simagent", "calculate_lattice_energy")
+# Look up the deployed function by app name and function name
+calculate_lattice_energy = modal.Function.from_name("simagent", "calculate_lattice_energy")
 
 # Call the function remotely
 structure_file = "path/to/your/structure.cif"

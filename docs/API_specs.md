@@ -179,7 +179,8 @@ modal deploy my_app.py
 # Use from client code
 import modal
 
-my_func = modal.Function.lookup("my-materials-app", "expensive_calculation")
+# Look up the deployed function by app name and function name
+my_func = modal.Function.from_name("my-materials-app", "expensive_calculation")
 result = my_func.remote([1.0, 2.0, 3.0, 4.0, 5.0])
 ```
 
