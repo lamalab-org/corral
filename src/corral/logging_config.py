@@ -72,9 +72,11 @@ def setup_logging(
 
     Custom format:
         >>> setup_logging(
-        ...     format_string="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-        ...                  "<level>{level: <8}</level> | "
-        ...                  "<level>{message}</level>"
+        ...     format_string=(
+        ...         "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        ...         "<level>{level: <8}</level> | "
+        ...         "<level>{message}</level>"
+        ...     )
         ... )
     """
     # Remove default handler
@@ -134,12 +136,12 @@ def add_file_handler(
     format_string : str or None, default=None
         Custom format string. If None, uses a default format.
     rotation : str or None, default=None
-        When to rotate the log file (e.g., "100 MB", "1 day"). 
+        When to rotate the log file (e.g., "100 MB", "1 day").
         Default is None (no rotation).
     retention : str or None, default=None
         How long to keep rotated files. Default is None (keep forever).
     compression : str or None, default=None
-        Compression format for rotated logs (e.g., "zip", "gz"). 
+        Compression format for rotated logs (e.g., "zip", "gz").
         Default is None (no compression).
     filter_func : callable or None, default=None
         Optional filter function to determine which records to log
