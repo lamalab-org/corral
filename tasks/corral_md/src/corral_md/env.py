@@ -147,25 +147,35 @@ class MDTaskGroupEnvironment(TaskGroupEnvironment):
 
     def get_task_prompt(self) -> str:
         """Generate the task prompt with MD-specific additions"""
-        prompt = super().get_task_prompt()
+        # Get the base prompt from parent class
+        base_prompt = super().get_task_prompt()
         
-        # Add MD-specific prompt additions
-        if "Available input data:" in prompt:
-            # Insert potentials info after "Available input data:"
-            parts = prompt.split("Available input data:\n", 1)
+        # Build MD-specific additions
+        md_additions = []
+        
+        # Add potentials location info
+        md_additions.append("All the potentials, can be found at /potentials/.")
+        
+        # Add workspace path instruction if workspace exists
+        if self.current_work_dir:
+            md_additions.append(
+                f"Save all the files in {self.current_work_dir} when using tools use this path."
+            )
+        
+        # Insert MD additions after "Available input data:" section
+        if md_additions and "Available input data:\n" in base_prompt:
+            parts = base_prompt.split("Available input data:\n", 1)
             if len(parts) == 2:
                 prompt = (
                     parts[0] + "Available input data:\n"
-                    "All the potentials, can be found at /potentials/.\n\n"
+                    + "\n".join(md_additions) + "\n\n"
                     + parts[1]
                 )
-        
-        # Update workspace info with MD-specific path instruction
-        if self.current_work_dir and "IMPORTANT: You have access to filesystem tools" in prompt:
-            prompt = prompt.replace(
-                "IMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n",
-                f"IMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir} when using tools use this path.\n"
-            )
+            else:
+                prompt = base_prompt
+        else:
+            # If we can't insert in the expected location, append at the end
+            prompt = base_prompt + "\n\n" + "\n".join(md_additions)
         
         logger.info(f"PROMPT : {prompt}")
         return prompt
