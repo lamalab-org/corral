@@ -35,7 +35,7 @@ def run_benchmark(
     result = runner.bench(
         task_ids,
         trials_per_task=5,
-        k_values=[1,2,3,4,5],
+        k_values=[1, 2, 3, 4, 5],
         verbose=True,
         tool_verbosity=verbose,
     )
