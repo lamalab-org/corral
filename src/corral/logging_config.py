@@ -145,8 +145,8 @@ def setup_logging(
         for subsystem, filename in subsystem_files.items():
             file_path = log_path / filename
 
-            # Create a filter function for this subsystem
-            def make_filter(subsystem_name: str):
+            # Create a filter function for this subsystem with proper closure
+            def make_filter(subsystem_name: str = subsystem):
                 def filter_func(record):
                     # Check if the logger name starts with the subsystem module path
                     return record["name"].startswith(f"corral.{subsystem_name}")
@@ -157,7 +157,7 @@ def setup_logging(
                 str(file_path),
                 format=format_string,
                 level=level,
-                filter=make_filter(subsystem),
+                filter=make_filter(),
                 rotation=rotation,
                 retention=retention,
                 compression=compression,
@@ -279,10 +279,16 @@ def remove_handler(handler_id: int) -> None:
 
 def set_level(level: str) -> None:
     """
-    Change the logging level for all handlers.
+    Change the logging level by resetting to a simple console handler.
 
-    Note: This removes all existing handlers and re-adds a console handler
-    with the new level. For more control, use setup_logging() or add custom handlers.
+    **Warning**: This function removes all existing handlers (including any
+    custom file handlers or subsystem-specific handlers) and replaces them
+    with a single console handler at the specified level. This is a
+    destructive operation.
+
+    For more fine-grained control, use `setup_logging()` with your desired
+    configuration, or manually manage handlers with `add_file_handler()`
+    and `remove_handler()`.
 
     Parameters
     ----------
@@ -292,6 +298,12 @@ def set_level(level: str) -> None:
     Examples
     --------
     >>> set_level("DEBUG")
+
+    Notes
+    -----
+    This is a convenience function for simple use cases. If you need to
+    preserve existing handler configurations while changing the level,
+    consider using `setup_logging()` again with your desired parameters.
     """
     logger.remove()
     logger.add(
