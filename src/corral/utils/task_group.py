@@ -144,7 +144,9 @@ Required submission format:
         1. Single parameter: scoring_fn(answer) - for scoring functions that don't need ground truth
         2. Dual parameters: scoring_fn(prediction, ground_truth) - for scoring functions that compare against ground truth
         
-        The detection is based on checking if the scoring function accepts 'ground_truth' or 'target' parameters.
+        The detection tries multiple strategies:
+        - First checks for common dual-parameter names: 'ground_truth', 'target', 'expected', 'reference'
+        - Falls back to parameter count: 2 or more parameters means dual-parameter mode
         """
         if not self.state.submitted_answer:
             logger.warning(f"No submission found for task {self.task_id}")
@@ -161,17 +163,29 @@ Required submission format:
             # Check the scoring function signature to determine how to call it
             sig = inspect.signature(self.current_task.scoring_fn)
             params = sig.parameters
+            param_names = list(params.keys())
             
-            # Check if the function expects ground_truth or target parameter
-            # These are the standard parameter names for dual-parameter scoring functions
-            if 'ground_truth' in params or 'target' in params:
+            # Detect dual-parameter scoring functions by checking:
+            # 1. Common ground truth parameter names
+            # 2. Parameter count (2 or more indicates dual-parameter)
+            common_ground_truth_params = {'ground_truth', 'target', 'expected', 'reference'}
+            has_ground_truth_param = bool(common_ground_truth_params & set(param_names))
+            has_multiple_params = len(param_names) >= 2
+            
+            if has_ground_truth_param or has_multiple_params:
                 # Scoring function expects both prediction and ground_truth
+                logger.debug(
+                    f"Using dual-parameter scoring (params: {param_names})"
+                )
                 score = self.current_task.scoring_fn(
                     prediction=resolved_answer, 
                     ground_truth=self.current_task.scoring_inputs
                 )
             else:
                 # Scoring function expects only the answer (single parameter)
+                logger.debug(
+                    f"Using single-parameter scoring (params: {param_names})"
+                )
                 score = self.current_task.scoring_fn(resolved_answer)
 
             # Store result in task group
