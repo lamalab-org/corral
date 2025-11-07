@@ -385,9 +385,10 @@ from modal import Image
 def complex_calculation(data: str) -> str:
     """Run computationally intensive task in the cloud."""
     # This runs in Modal's cloud environment
-    import rdkit
-    # Your computation here
-    return result
+    from rdkit import Chem
+    # Your computation here - example: count atoms
+    mol = Chem.MolFromSmiles(data)
+    return f"Molecule has {mol.GetNumAtoms()} atoms"
 
 
 # Access the tool

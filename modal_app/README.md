@@ -43,7 +43,7 @@ export MODAL_TOKEN_ID="your-token-id"
 export MODAL_TOKEN_SECRET="your-token-secret"
 ```
 
-You can find your tokens in the Modal dashboard under Settings > Tokens.
+You can find your tokens in the Modal dashboard's token management section (typically under Settings or API tokens).
 
 ### 3. Configure App Name (Optional)
 
