@@ -366,6 +366,16 @@ def calculate_molecular_weight(formula: str) -> float:
 
 #### [Modal](https://modal.com) Tools (Cloud Execution)
 
+Modal allows you to run computationally intensive tasks in the cloud with minimal setup.
+
+**Quick Setup:**
+
+1. Create a Modal account at [modal.com](https://modal.com)
+2. Authenticate: `modal setup`
+3. Deploy your functions: `modal deploy app.py`
+
+**Basic Example:**
+
 ```python
 from corral.utils.modal import modal_tool, MODAL_TOOL_REGISTRY
 from modal import Image
@@ -375,12 +385,22 @@ from modal import Image
 def complex_calculation(data: str) -> str:
     """Run computationally intensive task in the cloud."""
     # This runs in Modal's cloud environment
-    pass
+    import rdkit
+    # Your computation here
+    return result
 
 
 # Access the tool
 tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]
 ```
+
+**📖 For detailed setup instructions, including:**
+- Authentication and configuration
+- Using the `@app.function` decorator
+- Managing cloud resources and volumes
+- Deployment best practices
+
+See the [Modal App Documentation](modal_app/README.md).
 
 ### Environment Configuration
 
