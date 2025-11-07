@@ -1,19 +1,19 @@
 # Corral: Scientific Agent Benchmark
 
 <p align="center">
-    <a href="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yaml">
-        <img alt="Tests" src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yaml/badge.svg" />
+    <a href="https://github.com/lamalab-org/corral/actions/workflows/tests.yaml">
+        <img alt="Tests" src="https://github.com/lamalab-org/corral/actions/workflows/tests.yaml/badge.svg" />
     </a>
     <a href="https://pypi.org/project/corral">
         <img alt="PyPI" src="https://img.shields.io/pypi/v/corral" />
     </a>
-    <a href="https://github.com/lamalab-org/mat-agent-bench/blob/main/LICENSE.md">
+    <a href="https://github.com/lamalab-org/corral/blob/main/LICENSE.md">
         <img alt="PyPI - License" src="https://img.shields.io/pypi/l/corral" />
     </a>
-    <a href='https://lamalab-org.github.io/mat-agent-bench/'>
-        <img src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/docs.yaml/badge.svg" alt='Documentation Status' />
+    <a href='https://lamalab-org.github.io/corral/'>
+        <img src="https://github.com/lamalab-org/corral/actions/workflows/docs.yaml/badge.svg" alt='Documentation Status' />
     </a>
-    <a href="https://github.com/lamalab-org/mat-agent-bench/blob/main/CODE_OF_CONDUCT.md">
+    <a href="https://github.com/lamalab-org/corral/blob/main/CODE_OF_CONDUCT.md">
         <img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Contributor Covenant"/>
     </a>
 </p>
@@ -39,8 +39,8 @@ A comprehensive benchmarking framework for evaluating AI agents on science tasks
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/lamalab-org/mat-agent-bench.git
-   cd mat-agent-bench
+   git clone https://github.com/lamalab-org/corral.git
+   cd corral
    ```
 
 2. **Install the framework**
@@ -411,8 +411,8 @@ for task_id, task_result in result.task_results.items():
 
 ## 🤝 Community
 
-- **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/lamalab-org/mat-agent-bench/issues)
-- **Discussions**: Join conversations on [GitHub Discussions](https://github.com/lamalab-org/mat-agent-bench/discussions)
+- **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/lamalab-org/corral/issues)
+- **Discussions**: Join conversations on [GitHub Discussions](https://github.com/lamalab-org/corral/discussions)
 - **Contributing**: See our [Contributing Guide](CONTRIBUTING.md)
 
 ## 📄 License
