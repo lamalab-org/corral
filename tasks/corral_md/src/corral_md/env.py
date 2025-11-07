@@ -12,7 +12,6 @@ from tools import (
     run_lammps,
 )
 
-from corral.backend.env import Environment
 from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
 from corral.backend.tool import Tool
@@ -27,6 +26,7 @@ from corral.utils.io_tools import (
     ReadFileTool,
     WriteFileTool,
 )
+from corral.utils.task_group import TaskGroupEnvironment
 
 SCORING_FUNCTIONS = {
     "check_numerical": check_numerical,
@@ -104,8 +104,8 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
     return tasks
 
 
-class TaskGroupEnvironment(Environment):
-    """Environment that works with a task group - simple composition approach"""
+class MDTaskGroupEnvironment(TaskGroupEnvironment):
+    """MD-specific environment that extends TaskGroupEnvironment with custom file tools"""
 
     def __init__(
         self,
@@ -115,154 +115,60 @@ class TaskGroupEnvironment(Environment):
         base_work_dir: str,
         taskgroup_common_tools: dict[str, Tool] | None = None,
     ):
-        self.task_group = task_group
-        self.subtask_specific_tools = subtask_specific_tools
-        self.taskgroup_common_tools = taskgroup_common_tools or {}
-
-        if task_id not in task_group.tasks:
-            raise ValueError(f"Task {task_id} not found in task group")
-
-        self.current_task = task_group.tasks[task_id]
-
         super().__init__(
-            f"{task_id}",
+            task_id=task_id,
+            task_group=task_group,
+            subtask_specific_tools=subtask_specific_tools,
             base_work_dir=base_work_dir,
-            fs_manager=FSManager("file", base_path=base_work_dir, app="simagent"),
+            taskgroup_common_tools=taskgroup_common_tools,
         )
 
-        # Add tools
-        self._add_task_tools()
-        self._setup_file_tools()
-
-    def _add_task_tools(self):
-        """Add required tools for the task"""
-        for tool_name in self.current_task.tools:
-            if tool_name in self.subtask_specific_tools:
-                self.add_tool(self.subtask_specific_tools[tool_name])
-            else:
-                logger.warning(
-                    f"Tool {tool_name} required for task {self.task_id} not found"
-                )
-
-        for tool in self.taskgroup_common_tools.values():
-            self.add_tool(tool)
-
     def _setup_file_tools(self):
-        """Setup file tools for current workspace"""
+        """Setup file tools for current workspace with MD-specific additions"""
+        super()._setup_file_tools()
+        
         if self.current_work_dir:
-            logger.info(
-                f"DEBUG: Setting up FSManager with base_path: {self.current_work_dir}"
-            )
-            # Create new FSManager for current workspace
+            # Create FSManager for current workspace
             fs_manager = FSManager(
                 "file", base_path=self.current_work_dir, app="simagent"
             )
-
-            # Add/update file tools
+            
+            # Add MD-specific tools
             self.tools.update(
                 {
-                    "list_files": ListFilesTool(fs_manager),
-                    "read_file": ReadFileTool(fs_manager),
-                    "write_file": WriteFileTool(fs_manager),
-                    "file_info": FileInfoTool(fs_manager),
-                    "cat_files": CatFilesTool(fs_manager),
-                    "copy_file": CopyFileTool(fs_manager),
                     "grep": GrepTool(fs_manager),
                     "library_docs": get_library_documentation,
                     "execute_python_script": execute_python_script,
                 }
             )
             logger.info(
-                f"DEBUG: File tools setup complete for workspace: {self.current_work_dir}"
+                f"Added MD-specific file tools for workspace: {self.current_work_dir}"
             )
-        else:
-            logger.warning("DEBUG: No current_work_dir set, skipping file tools setup")
-
-    def reset_state(self) -> str:
-        """Reset state and update file tools for new workspace"""
-        trial_id = super().reset_state()
-        # Recreate file tools for new workspace
-        self._setup_file_tools()
-        return trial_id
 
     def get_task_prompt(self) -> str:
-        """Generate the task prompt for the current task"""
-
-        prompt = f"""\nTask: {self.current_task.name}
-Description: {self.current_task.description}
-
-Required submission format:
-{self.current_task.submission_format}
-
-"""
-
-        prompt += "\nAvailable input data:\n"
-
-        prompt += "All the potentials, can be found at /potentials/.\n\n"
-
-        # Display input data from dependencies
-        for dep_task_id in self.current_task.input_from_tasks:
-            if dep_task_id in self.task_group.results:
-                dep_result = self.task_group.results[dep_task_id]
-                if isinstance(dep_result, dict) and "answer" in dep_result:
-                    prompt += f"- Input from {dep_task_id}: {dep_result['answer']}\n"
-                else:
-                    prompt += f"- Input from {dep_task_id}: {dep_result}\n"
-
-        # Display initial input data
-        if self.current_task.initial_input:
-            for key, value in self.current_task.initial_input.items():
-                if key != "work_dir":
-                    prompt += f"- {key}: {value}\n"
-
-        # Add workspace info
-        if self.current_work_dir:
-            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir} when using tools use this path.\n"
-
-        # Add note about dependencies
-        if self.current_task.input_from_tasks:
-            status = []
-            for dep_id in self.current_task.input_from_tasks:
-                status_text = (
-                    "available"
-                    if dep_id in self.task_group.results
-                    else "not yet available"
+        """Generate the task prompt with MD-specific additions"""
+        prompt = super().get_task_prompt()
+        
+        # Add MD-specific prompt additions
+        if "Available input data:" in prompt:
+            # Insert potentials info after "Available input data:"
+            parts = prompt.split("Available input data:\n", 1)
+            if len(parts) == 2:
+                prompt = (
+                    parts[0] + "Available input data:\n"
+                    "All the potentials, can be found at /potentials/.\n\n"
+                    + parts[1]
                 )
-                status.append(f"{dep_id} ({status_text})")
-
-            prompt += f"\n\nThis task uses output from tasks: {', '.join(status)}"
-
-        logger.info(f"PROMPT : {prompt}")
-
-        return prompt
-
-    def score(self) -> float:
-        """Score the submitted answer"""
-        if not self.state.submitted_answer:
-            logger.warning(f"No submission found for task {self.task_id}")
-            return 0.0
-
-        try:
-            # Get and log the raw submission
-            answer_value = self.state.submitted_answer.strip()
-            logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
-
-            # Call the scoring function with the raw answer
-            score = self.current_task.scoring_fn(answer_value)
-
-            # Store result in task group
-            self.task_group.store_result(self.task_id, {"answer": answer_value}, score)
-            logger.info(f"Task {self.task_id} scored: {score}")
-
-            return score
-
-        except Exception as e:
-            logger.error(
-                f"Error scoring submission for task {self.task_id}: {e!s}",
-                exc_info=True,
+        
+        # Update workspace info with MD-specific path instruction
+        if self.current_work_dir and "IMPORTANT: You have access to filesystem tools" in prompt:
+            prompt = prompt.replace(
+                "IMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n",
+                f"IMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir} when using tools use this path.\n"
             )
-            logger.error(f"Submission was: {self.state.submitted_answer!r}")
-            return 0.0
+        
+        logger.info(f"PROMPT : {prompt}")
+        return prompt
 
 
 def create_environments(
@@ -271,7 +177,7 @@ def create_environments(
     environment: str,
     level: str,
     taskgroup_common_tools: dict[str, Tool] | None = None,
-) -> dict[str, TaskGroupEnvironment]:
+) -> dict[str, MDTaskGroupEnvironment]:
     logger.info("Creating environments for MD")
 
     if subtask_level:
@@ -321,7 +227,7 @@ def create_environments(
 
     environments = {}
     for task_id in task_group.tasks:
-        environments[task_id] = TaskGroupEnvironment(
+        environments[task_id] = MDTaskGroupEnvironment(
             task_id=task_id,
             task_group=task_group,
             subtask_specific_tools=subtask_specific_tools,

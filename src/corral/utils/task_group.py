@@ -147,8 +147,22 @@ Required submission format:
             logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
             resolved_answer = smart_resolve_path(answer_value)
             logger.info(f"Resolved answer for {self.task_id}: {resolved_answer!r}")
-            # Call the scoring function with the raw answer
-            score = self.current_task.scoring_fn(resolved_answer)
+            
+            # Call the scoring function - support both single and dual parameter signatures
+            # Check if the scoring function accepts 'ground_truth' parameter
+            import inspect
+            sig = inspect.signature(self.current_task.scoring_fn)
+            params = sig.parameters
+            
+            if 'ground_truth' in params or 'target' in params:
+                # Scoring function expects both prediction and ground_truth
+                score = self.current_task.scoring_fn(
+                    prediction=resolved_answer, 
+                    ground_truth=self.current_task.scoring_inputs
+                )
+            else:
+                # Scoring function expects only the answer
+                score = self.current_task.scoring_fn(resolved_answer)
 
             # Store result in task group
             self.task_group.store_result(

@@ -29,9 +29,9 @@ from spectra_elucidation.tools import (
     create_tools,
 )
 
-from corral.backend.env import Environment
 from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
+from corral.utils.task_group import TaskGroupEnvironment
 
 BASE_WORK_DIR = os.environ.get(
     "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/spectra_elucidation"
@@ -83,115 +83,10 @@ def load_tasks_from_json(
     return tasks
 
 
-class TaskEnvironment(Environment):
-    """Environment that works with a task group
-
-    Args:
-        task_id (str): ID of the task to work on
-        task_group (TaskGroup): Task group containing all the subtasks
-        available_tools (dict[str, Tool]): All tools available in the environment (including file system tools)
-
-    Raises:
-        ValueError: If task ID is not found in the task group
-    """
-
-    def __init__(
-        self,
-        task_id: str,
-        task_group: TaskGroup,
-        work_dir: str,
-    ):
-        self.task_id = task_id
-        self.task_group = task_group
-        self.available_tools = create_tools()
-        self.work_dir = work_dir
-
-        if task_id not in task_group.tasks:
-            raise ValueError(f"Task {task_id} not found in task group")
-
-        self.current_task = task_group.tasks[task_id]
-
-        # Initialize environment
-        super().__init__(f"{task_group.group_id}_{task_id}", base_work_dir=work_dir)
-
-        self.hidden_args = {"h_smiles": self.current_task.scoring_inputs}
-
-        logger.info(f"Initializing environment for task {self.task_id}")
-        logger.info(f"Task name: {self.current_task}")
-        self._add_task_tools()
-
-    def _add_task_tools(self):
-        """Add tools required for the current task to the environment"""
-        for tool_name in self.current_task.tools:
-            if tool_name in self.available_tools:
-                self.add_tool(self.available_tools[tool_name])
-            else:
-                logger.warning(
-                    f"Tool {tool_name} not found in available tools for task {self.task_id}"
-                )
-        if "subtask" not in self.current_task.name:
-            # Add file system tools if not already included
-            for tool in self.available_tools.values():
-                self.add_tool(self.available_tools[tool.name])
-
-    def get_task_prompt(self) -> str:
-        prompt = (
-            f"Task {self.current_task.name}:\n"
-            f"{self.current_task.description}\n\n"
-            "Required submission format:\n"
-            f"{self.current_task.submission_format}\n\n"
-        )
-
-        prompt += "\nAvailable input data:\n"
-
-        # Display input data from dependencies
-        for dep_task_id in self.current_task.input_from_tasks:
-            dep_key = f"{self.task_group.group_id}_{dep_task_id}"
-            if dep_key in self.task_group.results:
-                dep_result = self.task_group.results[dep_key]
-                task_prompt = self.task_group.tasks[dep_task_id].description
-                if isinstance(dep_result, dict) and "answer" in dep_result:
-                    prompt += f"- Input from '{dep_task_id}' with question: '{task_prompt}' and answer: '{dep_result['answer']}'\n"
-                else:
-                    prompt += f"- Input from '{dep_task_id}' with description: '{task_prompt}' and answer: '{dep_result}'\n"
-
-        # Display initial input data
-        if self.current_task.initial_input:
-            for key, value in self.current_task.initial_input.items():
-                if key != "work_dir":
-                    prompt += f"- {key}: {value}\n"
-
-        logger.info(f"Task prompt for {self.task_id}:\n{prompt}")
-        return prompt
-
-    def score(self) -> float:
-        """Score the submitted answer"""
-        if not self.state.submitted_answer:
-            return 0.0
-
-        try:
-            # Clean the submission
-            submission_str = self.state.submitted_answer.strip()
-            logger.info(f"Raw submission: {submission_str}")
-            score = self.current_task.scoring_fn(
-                prediction=submission_str, ground_truth=self.current_task.scoring_inputs
-            )
-            self.task_group.store_result(
-                self.task_id, {"answer": submission_str}, score
-            )
-            logger.info(f"Score for task {self.task_id}: {score}")
-            return score
-
-        except Exception as e:
-            logger.error(f"Error scoring submission for task {self.task_id}: {e!s}")
-            logger.error(f"Submission was: {self.state.submitted_answer}")
-            return 0.0
-
-
 def create_spectra_elu_environments(
     work_dir: str = BASE_WORK_DIR,
     subtask_level: bool = False,
-) -> dict[str, Environment]:
+) -> dict[str, TaskGroupEnvironment]:
     """Create environments for the spectra elucidation benchmark tasks."""
     logger.info("Creating environments for spectra elucidation tasks...")
     if subtask_level:
@@ -223,12 +118,16 @@ def create_spectra_elu_environments(
     for i, task_id in enumerate(ordered_tasks):
         logger.info(f"{i+1}. {task_id}")
 
+    # Create all available tools
+    subtask_specific_tools = create_tools()
+
     environments = {}
     for task_id in task_group.tasks:
-        environments[task_id] = TaskEnvironment(
+        environments[task_id] = TaskGroupEnvironment(
             task_id=task_id,
             task_group=task_group,
-            work_dir=work_dir,
+            subtask_specific_tools=subtask_specific_tools,
+            base_work_dir=work_dir,
         )
 
     return environments
