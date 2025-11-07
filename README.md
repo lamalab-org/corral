@@ -378,8 +378,10 @@ Modal allows you to run computationally intensive tasks in the cloud with minima
 
 ```python
 from corral.utils.modal import modal_tool, MODAL_TOOL_REGISTRY
-from modal import Image
+from modal import App, Image
 
+# Create a Modal app
+app = App("my-corral-tools")
 
 @modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
 def complex_calculation(data: str) -> str:

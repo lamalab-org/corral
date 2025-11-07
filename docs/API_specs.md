@@ -98,9 +98,6 @@ def percentage_calculator(value: float, percentage: float = 100.0) -> float:
         float: The calculated result
     """
     return (value * percentage) / 100.0
-
-
-
 ```
 
 
