@@ -193,6 +193,7 @@ Once deployed, you can call your Modal functions from anywhere:
 import modal
 
 # Look up the deployed function by app name and function name
+# Note: You can also use modal.Function.lookup() which is equivalent to from_name()
 calculate_lattice_energy = modal.Function.from_name("simagent", "calculate_lattice_energy")
 
 # Call the function remotely
@@ -201,6 +202,8 @@ energy = calculate_lattice_energy.remote(structure_file)
 
 print(f"Calculated energy: {energy} eV")
 ```
+
+**Note:** Both `modal.Function.from_name(app_name, function_name)` and `modal.Function.lookup(app_name, function_name)` can be used interchangeably. The codebase primarily uses `from_name`.
 
 ### Method 2: Using the modal_tool Decorator in Corral
 
@@ -217,18 +220,19 @@ app = App("my-tools")
     image=Image.debian_slim().pip_install("rdkit"),
     memory=1024
 )
-def complex_calculation(formula: str) -> float:
+def complex_calculation(smiles: str) -> float:
     """Calculate molecular properties in the cloud.
     
     Args:
-        formula: Chemical formula (e.g., 'H2O')
+        smiles: SMILES representation of molecule (e.g., 'CCO' for ethanol)
         
     Returns:
-        Calculated molecular weight
+        Calculated molecular weight in g/mol
     """
     from rdkit import Chem
-    mol = Chem.MolFromSmiles(formula)
-    return Chem.Descriptors.MolWt(mol)
+    from rdkit.Chem import Descriptors
+    mol = Chem.MolFromSmiles(smiles)
+    return Descriptors.MolWt(mol)
 
 # Access the tool from the registry
 tool = MODAL_TOOL_REGISTRY["complex_calculation"]
