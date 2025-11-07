@@ -139,11 +139,11 @@ Required submission format:
 
     def score(self) -> float:
         """Score the submitted answer
-        
+
         This method supports scoring functions with two different signatures:
         1. Single parameter: scoring_fn(answer) - for scoring functions that don't need ground truth
         2. Dual parameters: scoring_fn(prediction, ground_truth) - for scoring functions that compare against ground truth
-        
+
         The detection tries multiple strategies:
         - First checks for common dual-parameter names: 'ground_truth', 'target', 'expected', 'reference'
         - Falls back to parameter count: 2 or more parameters means dual-parameter mode
@@ -158,26 +158,26 @@ Required submission format:
             logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
             resolved_answer = smart_resolve_path(answer_value)
             logger.info(f"Resolved answer for {self.task_id}: {resolved_answer!r}")
-            
+
             # Call the scoring function - support both single and dual parameter signatures
             # Check the scoring function signature to determine how to call it
             sig = inspect.signature(self.current_task.scoring_fn)
             params = sig.parameters
             param_names = list(params.keys())
-            
+
             # Detect dual-parameter scoring functions by checking:
             # 1. Common ground truth parameter names
             # 2. Parameter count (2 or more required parameters indicates dual-parameter)
-            common_ground_truth_params = {'ground_truth', 'target', 'expected', 'reference'}
+            common_ground_truth_params = {"ground_truth", "target", "expected", "reference"}
             has_ground_truth_param = bool(common_ground_truth_params & set(param_names))
-            
+
             # Only count required parameters (exclude those with defaults)
             required_params = [
                 name for name, param in params.items()
                 if param.default == inspect.Parameter.empty
             ]
             has_multiple_required_params = len(required_params) >= 2
-            
+
             if has_ground_truth_param or has_multiple_required_params:
                 # Scoring function expects both prediction and ground_truth
                 # Use keyword arguments if the function has standard parameter names,
@@ -188,7 +188,7 @@ Required submission format:
                 if has_ground_truth_param:
                     # Use keyword arguments for clarity when standard names are present
                     score = self.current_task.scoring_fn(
-                        prediction=resolved_answer, 
+                        prediction=resolved_answer,
                         ground_truth=self.current_task.scoring_inputs
                     )
                 else:

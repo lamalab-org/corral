@@ -17,14 +17,8 @@ from corral.backend.task import TaskDefinition, TaskGroup
 from corral.backend.tool import Tool
 from corral.utils.context7_tools import get_library_documentation
 from corral.utils.io_tools import (
-    CatFilesTool,
-    CopyFileTool,
-    FileInfoTool,
     FSManager,
     GrepTool,
-    ListFilesTool,
-    ReadFileTool,
-    WriteFileTool,
 )
 from corral.utils.task_group import TaskGroupEnvironment
 
@@ -126,13 +120,13 @@ class MDTaskGroupEnvironment(TaskGroupEnvironment):
     def _setup_file_tools(self):
         """Setup file tools for current workspace with MD-specific additions"""
         super()._setup_file_tools()
-        
+
         if self.current_work_dir:
             # Create FSManager for current workspace
             fs_manager = FSManager(
                 "file", base_path=self.current_work_dir, app="simagent"
             )
-            
+
             # Add MD-specific tools
             self.tools.update(
                 {
@@ -149,19 +143,19 @@ class MDTaskGroupEnvironment(TaskGroupEnvironment):
         """Generate the task prompt with MD-specific additions"""
         # Get the base prompt from parent class
         base_prompt = super().get_task_prompt()
-        
+
         # Build MD-specific additions
         md_additions = []
-        
+
         # Add potentials location info
         md_additions.append("All the potentials, can be found at /potentials/.")
-        
+
         # Add workspace path instruction if workspace exists
         if self.current_work_dir:
             md_additions.append(
                 f"Save all the files in {self.current_work_dir} when using tools use this path."
             )
-        
+
         # Insert MD additions after "Available input data:" section
         if md_additions and "Available input data:\n" in base_prompt:
             parts = base_prompt.split("Available input data:\n", 1)
@@ -176,7 +170,7 @@ class MDTaskGroupEnvironment(TaskGroupEnvironment):
         else:
             # If we can't insert in the expected location, append at the end
             prompt = base_prompt + "\n\n" + "\n".join(md_additions)
-        
+
         logger.info(f"PROMPT : {prompt}")
         return prompt
 
