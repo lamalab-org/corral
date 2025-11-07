@@ -124,8 +124,10 @@ document.getElementById('markerSelect').addEventListener('change', function() {
         nodeAnnotations[nodeId] = { markers: [], notes: '' };
     }
 
-    // Replace existing marker with the new one (only one marker per node)
-    nodeAnnotations[nodeId].markers = [marker];
+    // Add marker to the array if it's not already present (allow multiple markers per node)
+    if (!nodeAnnotations[nodeId].markers.includes(marker)) {
+        nodeAnnotations[nodeId].markers.push(marker);
+    }
     updateMarkersDisplay(nodeId);
 
     // Reset selector
