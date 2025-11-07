@@ -144,8 +144,6 @@ The framework includes several pre-built environments:
 | `catalyst` | Catalysis research and material design tasks |
 | `afm` | Atomic force microscopy image analysis |
 | `ml` | Machine learning model training and evaluation |
-| `catalyst_qa` | Question answering tasks for catalyst domain |
-| `ml_qa` | Question answering tasks for ML domain |
 
 ## 🤖 Available Agents
 
