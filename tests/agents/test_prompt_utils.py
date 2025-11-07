@@ -208,7 +208,7 @@ class TestCreatePrompt:
         expected_call_args = {
             "task_guide": "test task guide",
             "extra_param": "test value",
-            "retire_instructions": "",
+            "forfeit_instructions": "",
         }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
@@ -249,7 +249,7 @@ class TestBuildUserContent:
             "task_guide": "test task guide",
             "param1": "value1",
             "param2": "value2",
-            "retire_instructions": "",
+            "forfeit_instructions": "",
         }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
@@ -273,7 +273,7 @@ class TestBuildUserContent:
         expected_call_args = {
             "task_guide": "The task is to correctly answer the question with an image specified below.",
             "param1": "value1",
-            "retire_instructions": "",
+            "forfeit_instructions": "",
         }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
@@ -312,7 +312,7 @@ class TestBuildUserContent:
         assert result == "filled content"
         expected_call_args = {
             "task_guide": "test task guide",
-            "retire_instructions": "",
+            "forfeit_instructions": "",
         }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
