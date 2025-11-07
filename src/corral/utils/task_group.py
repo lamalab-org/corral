@@ -167,20 +167,36 @@ Required submission format:
             
             # Detect dual-parameter scoring functions by checking:
             # 1. Common ground truth parameter names
-            # 2. Parameter count (2 or more indicates dual-parameter)
+            # 2. Parameter count (2 or more required parameters indicates dual-parameter)
             common_ground_truth_params = {'ground_truth', 'target', 'expected', 'reference'}
             has_ground_truth_param = bool(common_ground_truth_params & set(param_names))
-            has_multiple_params = len(param_names) >= 2
             
-            if has_ground_truth_param or has_multiple_params:
+            # Only count required parameters (exclude those with defaults)
+            required_params = [
+                name for name, param in params.items()
+                if param.default == inspect.Parameter.empty
+            ]
+            has_multiple_required_params = len(required_params) >= 2
+            
+            if has_ground_truth_param or has_multiple_required_params:
                 # Scoring function expects both prediction and ground_truth
+                # Use keyword arguments if the function has standard parameter names,
+                # otherwise use positional arguments for flexibility
                 logger.debug(
                     f"Using dual-parameter scoring (params: {param_names})"
                 )
-                score = self.current_task.scoring_fn(
-                    prediction=resolved_answer, 
-                    ground_truth=self.current_task.scoring_inputs
-                )
+                if has_ground_truth_param:
+                    # Use keyword arguments for clarity when standard names are present
+                    score = self.current_task.scoring_fn(
+                        prediction=resolved_answer, 
+                        ground_truth=self.current_task.scoring_inputs
+                    )
+                else:
+                    # Use positional arguments for non-standard parameter names
+                    score = self.current_task.scoring_fn(
+                        resolved_answer,
+                        self.current_task.scoring_inputs
+                    )
             else:
                 # Scoring function expects only the answer (single parameter)
                 logger.debug(
