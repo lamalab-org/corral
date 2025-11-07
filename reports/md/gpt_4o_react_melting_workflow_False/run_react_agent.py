@@ -5,6 +5,7 @@ from loguru import logger
 from corral.agents.react import ReActAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 from corral.report import CorralWandbLogger
+from corral import setup_logging
 
 load_dotenv("../../.env", override=True)
 
@@ -50,6 +51,7 @@ def run_benchmark(
 
 
 if __name__ == "__main__":
+    setup_logging()
     load_dotenv()
     setup_litellm()
     import argparse

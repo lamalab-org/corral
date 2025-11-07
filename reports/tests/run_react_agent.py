@@ -4,6 +4,7 @@ from loguru import logger
 
 from corral import CorralRouter, CorralRunner
 from corral.agents import ReActAgent
+from corral import setup_logging
 
 
 def setup_litellm():
@@ -38,6 +39,7 @@ def run_benchmark(
 
 
 if __name__ == "__main__":
+    setup_logging()
     load_dotenv()
     setup_litellm()
 

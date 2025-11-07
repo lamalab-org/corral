@@ -5,6 +5,7 @@ from loguru import logger
 from corral.agents import ToolCallingAgent
 from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
 from corral.report import CorralWandbLogger
+from corral import setup_logging
 
 
 def setup_litellm():
@@ -44,6 +45,7 @@ def run_benchmark(
 
 
 if __name__ == "__main__":
+    setup_logging()
     load_dotenv()
     setup_litellm()
 
