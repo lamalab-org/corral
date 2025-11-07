@@ -232,11 +232,14 @@ setup_logging(
 
 ### Production Setup Example
 
+**Note**: For benchmark logs, do NOT use rotation or retention. Benchmark data should be preserved permanently.
+
 ```python
 from corral import CorralRunner, CorralRouter, setup_logging
 from corral.agents import ReActAgent
 
 # Setup logging before running benchmarks
+# NOTE: No rotation/retention for benchmark logs
 setup_logging(
     level="INFO",
     log_dir="./benchmark_logs",

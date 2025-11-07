@@ -215,11 +215,14 @@ backend_logger.info("Server starting")
 
 ### In Your Benchmark Code
 
+**Important**: Do not use rotation or retention for benchmark logs. Benchmark data should be preserved.
+
 ```python
 from corral import CorralRunner, CorralRouter, setup_logging
 from corral.agents import ReActAgent
 
 # Setup logging before running benchmarks
+# NOTE: No rotation/retention - benchmark logs should be kept permanently
 setup_logging(
     level="INFO",
     log_dir="./benchmark_logs",
@@ -267,9 +270,33 @@ Retention options:
 
 ## Common Patterns
 
-### Production Setup
+### Benchmark Setup
 
-For production deployments with detailed logging:
+**Important**: For benchmark logs, do NOT use rotation or retention. Benchmark results 
+are valuable data that should be preserved permanently, not rotated away.
+
+```python
+from corral import setup_logging
+
+# Benchmark logging - NO rotation/retention
+setup_logging(
+    level="INFO",
+    console=True,
+    log_dir="./benchmark_logs",
+    subsystem_files={
+        "agents": "agents.log",
+        "backend": "backend.log",
+        "router": "router.log",
+        "utils": "utils.log",
+        "report": "report.log",
+    }
+    # NOTE: No rotation, retention, or compression for benchmark logs
+)
+```
+
+### Production Server Setup
+
+For production server/service deployments with detailed logging (non-benchmark):
 
 ```python
 from corral import setup_logging
