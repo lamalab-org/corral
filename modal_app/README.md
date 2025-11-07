@@ -266,14 +266,27 @@ volume = Volume.from_name("my-data", create_if_missing=True)
 
 # Use the volume in a function
 @app.function(volumes={"/data": volume})
-def process_data(filename: str):
+def process_data(filename: str) -> str:
+    """Process data from a file stored in a Modal volume.
+    
+    Args:
+        filename: Name of the file to process from the volume
+        
+    Returns:
+        Path to the output file
+    """
     # Read from volume
     with open(f"/data/{filename}", "r") as f:
         data = f.read()
     
+    # Process the data
+    processed_data = data.upper()  # Example: convert to uppercase
+    
     # Write to volume
     with open(f"/data/output.txt", "w") as f:
         f.write(processed_data)
+    
+    return "/data/output.txt"
 ```
 
 You can upload files to a volume:
