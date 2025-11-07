@@ -1,11 +1,3 @@
-# server.py
-# modal serve # Create a Modal Secret (e.g., "mongodb-secret") with keys like:
-# MONGODB_URI="mongodb+srv://..."
-# MONGODB_DB="annotations"
-# MONGODB_COLLECTION="traces"
-# ALLOW_ORIGINS="https://your-ui.example"
-# ALLOWED_MONGODB_KEYS="MRG,TEAMX"
-# secrets = modal.Secret.from_name("mongodb-secret") # dev
 # modal deploy server.py  # prod
 
 import os
@@ -17,21 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 from pymongo import MongoClient, UpdateOne
 
-# ---------- Modal setup ----------
 image = modal.Image.debian_slim().pip_install(
     "fastapi[standard]", "pydantic", "pymongo>=4.7"
 )
 
 app = modal.App("llm-annotation-endpoint", image=image)
 
-# Create a Modal Secret (e.g., "mongodb-secret") with keys like:
-# MONGODB_URI="mongodb+srv://..."
-# MONGODB_DB="annotations"
-# MONGODB_COLLECTION="traces"
-# ALLOW_ORIGINS="https://lamalab-org.github.io/mat-agent-bench/trace-visualizer/"
-# ALLOWED_MONGODB_KEYS="MRG,TEAMX"
-# [OPTIONAL] ALLOWED_KEY_MAP_JSON='{"MRG":["annotator1@org","annotator2@org"]}'
-secrets = modal.Secret.from_name("mongodb-secret")
+secrets = modal.Secret.from_name("mongodb-secret-corral")
 
 
 class NodeAnnotation(BaseModel):
@@ -97,8 +81,8 @@ def _build_fastapi_app() -> FastAPI:
         return mongo_client
 
     def _get_collection():
-        db_name = os.environ.get("MONGODB_DB", "annotations")
-        coll_name = os.environ.get("MONGODB_COLLECTION", "traces")
+        db_name = os.environ.get("MONGODB_DB", "Corral")
+        coll_name = os.environ.get("MONGODB_COLLECTION", "First-traces")
         return _get_client()[db_name][coll_name]
 
     @web.post("/ingest")
