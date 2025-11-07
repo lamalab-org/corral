@@ -193,6 +193,68 @@ The framework automatically saves checkpoints during benchmark runs.
 
 Checkpoints are automatically searched and loaded when resuming interrupted runs.
 
+## 📝 Logging Framework
+
+Corral uses [loguru](https://github.com/Delgan/loguru) for flexible and powerful logging. The logging framework allows you to configure different handlers for different subsystems.
+
+### Basic Usage
+
+```python
+from corral import setup_logging
+
+# Initialize logging with default settings
+setup_logging()
+```
+
+### Advanced Configuration
+
+Configure subsystem-specific log files for better organization:
+
+```python
+from corral import setup_logging
+
+setup_logging(
+    level="INFO",
+    console=True,
+    log_dir="./logs",
+    subsystem_files={
+        "agents": "agents.log",      # Agent execution logs
+        "backend": "backend.log",    # Task environment logs
+        "router": "router.log",      # API routing logs
+        "utils": "utils.log",        # Utility function logs
+        "report": "report.log",      # Reporting logs
+    },
+    rotation="10 MB",       # Rotate when file reaches 10 MB
+    retention="1 week",     # Keep logs for 1 week
+    compression="zip"       # Compress rotated logs
+)
+```
+
+### Production Setup Example
+
+```python
+from corral import CorralRunner, CorralRouter, setup_logging
+from corral.agents import ReActAgent
+
+# Setup logging before running benchmarks
+setup_logging(
+    level="INFO",
+    log_dir="./benchmark_logs",
+    subsystem_files={
+        "agents": "agents.log",
+        "router": "router.log",
+    }
+)
+
+# Run your benchmark
+interface = CorralRouter("http://localhost:8000")
+agent = ReActAgent(model="gpt-4o", max_iterations=10)
+runner = CorralRunner(interface, agent)
+result = runner.bench()
+```
+
+For more details, see the [Logging Documentation](docs/logging.md).
+
 ## 🔧 Contributing
 
 ### Adding a New Environment
