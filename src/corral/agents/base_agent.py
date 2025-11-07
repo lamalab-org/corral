@@ -36,6 +36,8 @@ class BaseAgent(ABC):
     - **extractor_prompt**: Used to extract and clean final answers from agent responses.
       This prompt takes the raw agent output and extracts just the answer portion, removing
       explanatory text, formatting artifacts, or multiple choice options.
+    - **forfeit_prompt**: Instructions for how the agent can forfeit from unsolvable tasks.
+      This prompt is only included when enable_forfeit=True in the run() method.
 
     ### How to Provide Custom Prompts:
 
@@ -97,6 +99,7 @@ class BaseAgent(ABC):
         user_prompt (str | Any, optional): The user prompt to use. Can be a string or prompt object
             that implements .fill() method. Different templates are used for each agent type. Must support Jinja templating.
         extractor_prompt (str | Any, optional): The extractor prompt for cleaning final answers. Can be a string or prompt object that implements .fill() method. Must support Jinja templating.
+        forfeit_prompt (str | Any, optional): The forfeit prompt with instructions for forfeiting. Can be a string or prompt object that implements .fill() method. Must support Jinja templating.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use for managing templated prompts.
             If None, uses default store from package resources.
@@ -106,6 +109,8 @@ class BaseAgent(ABC):
             Defaults to None (each agent type has its own default).
         extractor_prompt_id (str, optional): The ID of the extractor prompt to use from the prompt store.
             Defaults to "9d37e4a0-26c5-438a-ba1b-a273388fcded".
+        forfeit_prompt_id (str, optional): The ID of the forfeit prompt to use from the prompt store.
+            Defaults to None (each agent type has its own default).
         **kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
@@ -117,11 +122,13 @@ class BaseAgent(ABC):
         system_prompt: str | Any | None = None,
         user_prompt: str | Any | None = None,
         extractor_prompt: str | Any | None = None,
+        forfeit_prompt: str | Any | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
         system_prompt_id: str = "400fcecf-f5f2-464b-aff5-8a4377c9685c",
         user_prompt_id: str | None = None,
         extractor_prompt_id: str | None = "9d37e4a0-26c5-438a-ba1b-a273388fcded",
+        forfeit_prompt_id: str | None = None,
         **kwargs,
     ):
         """Initialize the base agent with common parameters"""
@@ -157,6 +164,13 @@ class BaseAgent(ABC):
             )
         else:
             self.extractor_prompt = extractor_prompt
+
+        if forfeit_prompt_id and forfeit_prompt is None:
+            self.forfeit_prompt = get_prompt(
+                self.store, forfeit_prompt, forfeit_prompt_id
+            )
+        else:
+            self.forfeit_prompt = forfeit_prompt
 
     def get_llm_response(self, tools: list[dict[str, Any]] | None = None) -> Any:
         """Get response from the LLM using LiteLLM

@@ -63,11 +63,14 @@ class ReActAgent(BaseAgent):
             Defaults to ReAct-formatted prompt with Thought-Action-Observation structure.
         extractor_prompt (str | Any, optional): The prompt to use for extracting final answers. Can be a string,
             PromptStore ID, or prompt object that implements .fill() method. Defaults to None.
+        forfeit_prompt (str | Any, optional): The prompt to use for forfeit instructions. Can be a string,
+            PromptStore ID, or prompt object that implements .fill() method. Defaults to None.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         system_prompt_id (str, optional): The ID of the system prompt to use. Defaults to "400fcecf-f5f2-464b-aff5-8a4377c9685c".
         user_prompt_id (str, optional): The ID of the user prompt to use. Defaults to "d880c4d3-fe60-4cf4-813b-2008076cd595".
         extractor_prompt_id (str, optional): The ID of the extractor prompt to use. Defaults to "9d37e4a0-26c5-438a-ba1b-a273388fcded".
+        forfeit_prompt_id (str, optional): The ID of the forfeit prompt to use. Defaults to "1d9059d5-763e-4efd-93b6-308977635ef3".
         **kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
@@ -79,11 +82,13 @@ class ReActAgent(BaseAgent):
         system_prompt: str | Any | None = None,
         user_prompt: str | Any | None = None,
         extractor_prompt: str | Any | None = None,
+        forfeit_prompt: str | Any | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
         system_prompt_id: str = "400fcecf-f5f2-464b-aff5-8a4377c9685c",
         user_prompt_id: str | None = "d880c4d3-fe60-4cf4-813b-2008076cd595",
         extractor_prompt_id: str | None = "9d37e4a0-26c5-438a-ba1b-a273388fcded",
+        forfeit_prompt_id: str | None = "1d9059d5-763e-4efd-93b6-308977635ef3",
         **kwargs,
     ):
         """Initialize the agent"""
@@ -94,11 +99,13 @@ class ReActAgent(BaseAgent):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             extractor_prompt=extractor_prompt,
+            forfeit_prompt=forfeit_prompt,
             temperature=temperature,
             prompt_store=prompt_store,
             system_prompt_id=system_prompt_id,
             user_prompt_id=user_prompt_id,
             extractor_prompt_id=extractor_prompt_id,
+            forfeit_prompt_id=forfeit_prompt_id,
             **kwargs,
         )
 
@@ -168,23 +175,14 @@ class ReActAgent(BaseAgent):
         else:
             task_guide = task_prompt
 
-        # Prepare forfeit instructions if enabled
-        forfeit_instructions = ""
-        if enable_forfeit:
-            forfeit_instructions = (
-                "If you cannot solve the task or determine it is unsolvable, you can forfeit from it.\n"
-                "To forfeit, respond with:\n"
-                "<thought>[your reasoning why the task cannot be solved]</thought>\n"
-                "<forfeit>[brief explanation]</forfeit>"
-            )
-
         self.messages = create_prompt(
             system_prompt=self.system_prompt,
             user_prompt=self.user_prompt,
             task_guide=task_guide,
             history=history,
             examples=examples,
-            forfeit_instructions=forfeit_instructions,
+            forfeit_prompt=self.forfeit_prompt,
+            enable_forfeit=enable_forfeit,
         )
 
         for _iteration in range(self.max_iterations):

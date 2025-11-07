@@ -69,6 +69,8 @@ def create_prompt(
     user_prompt: Any,
     task_guide: str | list,
     history: list[LiteLLMMessage] | None = None,
+    forfeit_prompt: Any | None = None,
+    enable_forfeit: bool = False,
     **kwargs,
 ) -> list[LiteLLMMessage]:
     """Create prompt for LLM including context and history
@@ -78,6 +80,8 @@ def create_prompt(
         user_prompt: The user prompt object
         task_guide (Union[str, list]): The task guide or prompt to use
         history (list[LiteLLMMessage], optional): Message history to include. Defaults to None.
+        forfeit_prompt: The forfeit prompt object. Defaults to None.
+        enable_forfeit (bool, optional): Whether to include forfeit instructions. Defaults to False.
         **kwargs: Additional keyword arguments for building user content
 
     Returns:
@@ -93,6 +97,11 @@ def create_prompt(
 
     if system_prompt:
         messages.append(LiteLLMMessage(role="system", content=system_prompt))
+
+    # Add forfeit instructions if enabled
+    if enable_forfeit and forfeit_prompt:
+        forfeit_instructions = forfeit_prompt.fill({})
+        kwargs["forfeit_instructions"] = forfeit_instructions
 
     user_content = build_user_content(user_prompt, task_guide=task_guide, **kwargs)
 
