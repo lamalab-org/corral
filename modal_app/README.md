@@ -53,15 +53,15 @@ app = App("my-tools")
     image=Image.debian_slim().pip_install("rdkit"),
     memory=1024
 )
-def molecular_analysis(smiles: str) -> float:
-    """Analyze molecular structure in the cloud."""
+def calculate_mol_weight(smiles: str) -> float:
+    """Calculate molecular weight in the cloud."""
     from rdkit import Chem
     from rdkit.Chem import Descriptors
     mol = Chem.MolFromSmiles(smiles)
     return Descriptors.MolWt(mol)
 
 # Tool is automatically registered
-tool = MODAL_TOOL_REGISTRY["molecular_analysis"]
+tool = MODAL_TOOL_REGISTRY["calculate_mol_weight"]
 ```
 
 See Modal's [function configuration docs](https://modal.com/docs/guide/function-config) for all available parameters (image, memory, cpu, gpu, timeout, secrets, volumes, etc.).
