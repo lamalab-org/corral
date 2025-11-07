@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from modal import Image
 
 _lammps_image = (
@@ -26,6 +24,8 @@ _lammps_image = (
         "MDAnalysis",
         "tidynamics",
         "ase",
+        "log-lammps-reader",
+        "polars",
     )
     .run_commands(
         "echo 'export LAMMPS_POTENTIALS=\"/potentials/EAM:/potentials/EAM_FS:/potentials/TERSOFF\"' >> /root/.bashrc"
@@ -82,36 +82,41 @@ def _install_lammps():
 lammps_image = _lammps_image.run_function(_install_lammps)
 
 
-def _run_lammps(
-    input_file: str, log_file: str, directory_path: str | None = None
-) -> None:
-    """
-    Runs a LAMMPS simulation using a specified input file and writes the log output to a given log file.
+# def _run_lammps(
+#     input_file: str, log_file: str, directory_path: str | None = None, CPUS: int = 1
+# ) -> None:
+#     """
+#     Runs a LAMMPS simulation using a specified input file and writes the log output to a given log file.
 
-    Args:
-        input_file (str): Path to the LAMMPS input script file.
-        log_file (str): Path where the log file output will be stored.
+#     Args:
+#         input_file (str): Path to the LAMMPS input script file.
+#         log_file (str): Path where the log file output will be stored.
 
-    Returns:
-        dict: A dictionary containing the log file content and input file content.
+#     Returns:
+#         dict: A dictionary containing the log file content and input file content.
 
-    Raises:
-        ValueError: If the LAMMPS simulation fails.
-    """
+#     Raises:
+#         ValueError: If the LAMMPS simulation fails.
+#     """
 
-    import os
-    import subprocess
+#     import os
+#     import subprocess
 
-    lmp_command = "/root/lammps/build/lmp"
-    original_cwd = Path.cwd()
-    if directory_path:
-        os.chdir(directory_path)
-    try:
-        command = [lmp_command, "-in", input_file, "-log", log_file]
-        subprocess.run(command, shell=False, check=True, capture_output=True, text=True)
+#     lmp_command = "/root/lammps/build/lmp"
+#     original_cwd = Path.cwd()
+#     if directory_path:
+#         os.chdir(directory_path)
+#     try:
+#         # command = [lmp_command, "-in", input_file, "-log", log_file]
+#         command = ["mpirun", "--allow-run-as-root", "-np", str(CPUS), lmp_command, "-in", input_file, "-log", log_file]
+#         subprocess.run(command, shell=False, check=True, capture_output=True, text=True)
+#         with open(log_file, "r") as log_f:
+#             log_content = log_f.read()
+#         text = log_content.decode("utf-8", errors="ignore")
+#         with open(log_file, "w", encoding="utf-8") as dst:
+#             dst.write(text)
+#     except subprocess.CalledProcessError as e:
+#         raise ValueError(f"LAMMPS simulation failed: {e.stderr or e}") from e
 
-    except subprocess.CalledProcessError as e:
-        raise ValueError(f"LAMMPS simulation failed: {e.stderr or e}") from e
-
-    finally:
-        os.chdir(original_cwd)  # Restore original directory
+#     finally:
+#         os.chdir(original_cwd)  # Restore original directory
