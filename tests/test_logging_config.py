@@ -4,7 +4,8 @@
 import pytest
 from loguru import logger
 
-from corral import add_file_handler, get_logger, remove_handler, setup_logging
+from corral import add_file_handler, setup_logging
+from corral.logging_config import remove_handler
 
 
 @pytest.fixture(autouse=True)
@@ -42,38 +43,15 @@ def test_setup_logging_with_file(tmp_path):
     assert "Debug message" in content
 
 
-def test_setup_logging_with_subsystems(tmp_path):
-    """Test subsystem-specific logging."""
-    setup_logging(
-        level="INFO",
-        console=False,
-        log_dir=str(tmp_path),
-        subsystem_files={
-            "agents": "agents.log",
-            "backend": "backend.log",
-        },
-    )
+def test_setup_logging_no_rotation_by_default(tmp_path):
+    """Test that logs are not rotated by default."""
+    log_file = tmp_path / "test.log"
 
-    # Log from different "subsystems" - we simulate this by logging
-    logger.info("General message")
+    # Default behavior should be no rotation
+    setup_logging(level="INFO", console=False, log_file=str(log_file))
 
-    # Verify log directory was created
-    assert tmp_path.exists()
-    assert (tmp_path / "agents.log").exists()
-    assert (tmp_path / "backend.log").exists()
-
-
-def test_get_logger():
-    """Test getting a logger instance."""
-    setup_logging(level="INFO")
-
-    # Get default logger
-    default_logger = get_logger()
-    assert default_logger is not None
-
-    # Get subsystem logger
-    agents_logger = get_logger("agents")
-    assert agents_logger is not None
+    logger.info("Test message")
+    assert log_file.exists()
 
 
 def test_add_and_remove_file_handler(tmp_path):
@@ -97,9 +75,6 @@ def test_add_and_remove_file_handler(tmp_path):
     # Remove the handler
     remove_handler(handler_id)
 
-    # Note: After removing, new messages won't be written to the file
-    # but we can't easily test this without breaking the file handler
-
 
 def test_custom_format(tmp_path):
     """Test custom log format."""
@@ -122,10 +97,10 @@ def test_custom_format(tmp_path):
 
 
 def test_log_rotation_params(tmp_path):
-    """Test that rotation parameters are accepted."""
+    """Test that rotation parameters are accepted when explicitly provided."""
     log_file = tmp_path / "rotating.log"
 
-    # Should not raise any errors
+    # Should not raise any errors when rotation is explicitly set
     setup_logging(
         level="INFO",
         console=False,

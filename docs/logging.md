@@ -1,6 +1,6 @@
 # Logging Framework
 
-Corral uses [loguru](https://github.com/Delgan/loguru) as its logging framework, providing a flexible and powerful logging system that can be easily configured for different use cases.
+Corral uses [loguru](https://github.com/Delgan/loguru) as its logging framework, providing a simple and powerful logging system.
 
 ## Quick Start
 
@@ -44,54 +44,34 @@ setup_logging(console=False, level="INFO")
 
 ### File Logging
 
-Log to a single file:
+**Important**: By default, logs are NOT rotated or deleted to preserve benchmark data.
+
+Log to a file without rotation (recommended for benchmarks):
 
 ```python
 from corral import setup_logging
 
+# Benchmark logging - no rotation (default)
 setup_logging(
     level="INFO",
-    log_file="corral.log",
-    rotation="10 MB",      # Rotate when file reaches 10 MB
-    retention="1 week",    # Keep rotated logs for 1 week
-    compression="zip"      # Compress rotated logs
+    log_file="benchmark.log"
 )
 ```
 
-### Subsystem-Specific Logging
-
-Corral has several subsystems that can log to separate files for better organization:
-
-- `agents`: Agent execution and decision-making
-- `backend`: Task environment and server operations
-- `router`: API routing and interface management
-- `utils`: Utility functions and tools
-- `report`: Reporting and result logging
-
-Configure subsystem-specific log files:
+Log to a file with rotation (for server logs only):
 
 ```python
 from corral import setup_logging
 
+# Server logs with rotation
 setup_logging(
     level="INFO",
-    console=True,
-    log_dir="./logs",
-    subsystem_files={
-        "agents": "agents.log",
-        "backend": "backend.log",
-        "router": "router.log",
-        "utils": "utils.log",
-        "report": "report.log",
-    }
+    log_file="server.log",
+    rotation="100 MB",      # Rotate when file reaches 100 MB
+    retention="30 days",    # Keep rotated logs for 30 days
+    compression="gz"        # Compress rotated logs
 )
 ```
-
-This configuration will:
-1. Output all logs to console
-2. Filter and save agent-related logs to `./logs/agents.log`
-3. Filter and save backend-related logs to `./logs/backend.log`
-4. And so on for other subsystems
 
 ### Custom Format
 
@@ -104,118 +84,16 @@ setup_logging(
     format_string=(
         "{time:YYYY-MM-DD HH:mm:ss} | "
         "{level: <8} | "
-        "{name}:{function}:{line} | "
         "{message}"
     )
 )
-```
-
-### Combined Configuration
-
-A complete example with all options:
-
-```python
-from corral import setup_logging
-
-setup_logging(
-    level="DEBUG",
-    console=True,
-    log_file="corral_full.log",
-    log_dir="./logs",
-    subsystem_files={
-        "agents": "agents.log",
-        "backend": "backend.log",
-        "router": "router.log",
-        "utils": "utils.log",
-        "report": "report.log",
-    },
-    format_string=(
-        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-        "<level>{level: <8}</level> | "
-        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-        "<level>{message}</level>"
-    ),
-    rotation="50 MB",
-    retention="2 weeks",
-    compression="gz"
-)
-```
-
-## Advanced Usage
-
-### Dynamic Handler Addition
-
-Add handlers on-the-fly:
-
-```python
-from corral import add_file_handler, remove_handler
-
-# Add a debug handler for temporary detailed logging
-handler_id = add_file_handler(
-    "debug.log",
-    level="DEBUG",
-    rotation="1 MB"
-)
-
-# ... do some work ...
-
-# Remove the handler when done
-remove_handler(handler_id)
-```
-
-### Custom Filters
-
-Create handlers with custom filters:
-
-```python
-from corral import add_file_handler
-
-def error_only_filter(record):
-    """Only log ERROR and CRITICAL messages"""
-    return record["level"].name in ["ERROR", "CRITICAL"]
-
-handler_id = add_file_handler(
-    "errors_only.log",
-    level="DEBUG",  # Set low level, filter handles the rest
-    filter_func=error_only_filter
-)
-```
-
-### Changing Log Level at Runtime
-
-```python
-from corral import set_level
-
-# Start with INFO level
-setup_logging(level="INFO")
-
-# ... later in your code ...
-
-# Switch to DEBUG for detailed output
-set_level("DEBUG")
-```
-
-### Using Subsystem-Specific Loggers
-
-Get a logger bound to a specific subsystem context:
-
-```python
-from corral import get_logger
-
-# Get a logger for the agents subsystem
-agents_logger = get_logger("agents")
-agents_logger.info("Agent initialized")
-
-# Get a logger for the backend subsystem
-backend_logger = get_logger("backend")
-backend_logger.info("Server starting")
 ```
 
 ## Integration with Corral
 
 ### In Your Benchmark Code
 
-**Important**: Do not use rotation or retention for benchmark logs. Benchmark data should be preserved.
+**Important**: Do not use rotation or retention for benchmark logs.
 
 ```python
 from corral import CorralRunner, CorralRouter, setup_logging
@@ -225,11 +103,7 @@ from corral.agents import ReActAgent
 # NOTE: No rotation/retention - benchmark logs should be kept permanently
 setup_logging(
     level="INFO",
-    log_dir="./benchmark_logs",
-    subsystem_files={
-        "agents": "agents.log",
-        "router": "router.log",
-    }
+    log_file="benchmark.log"
 )
 
 # Run your benchmark
@@ -254,26 +128,51 @@ class MyCustomAgent(BaseAgent):
         logger.info("Agent completed successfully")
 ```
 
-## Log Rotation and Management
+## Advanced Usage
 
-Loguru supports several rotation options:
+### Dynamic Handler Addition
 
-- **Size-based**: `"10 MB"`, `"1 GB"`
-- **Time-based**: `"12:00"` (daily at noon), `"1 week"`, `"1 day"`
-- **Function-based**: Pass a custom function
+Add handlers on-the-fly:
 
-Retention options:
+```python
+from corral import add_file_handler
 
-- **Time-based**: `"1 week"`, `"30 days"`
-- **Count-based**: `3` (keep 3 rotated files)
-- **Function-based**: Pass a custom function
+# Add a debug handler
+handler_id = add_file_handler(
+    "debug.log",
+    level="DEBUG"
+)
+
+# ... do some work ...
+
+# Remove the handler when done
+from corral.logging_config import remove_handler
+remove_handler(handler_id)
+```
+
+### Custom Filters
+
+Create handlers with custom filters:
+
+```python
+from corral import add_file_handler
+
+def error_only_filter(record):
+    """Only log ERROR and CRITICAL messages"""
+    return record["level"].name in ["ERROR", "CRITICAL"]
+
+handler_id = add_file_handler(
+    "errors_only.log",
+    level="DEBUG",  # Set low level, filter handles the rest
+    filter_func=error_only_filter
+)
+```
 
 ## Common Patterns
 
 ### Benchmark Setup
 
-**Important**: For benchmark logs, do NOT use rotation or retention. Benchmark results 
-are valuable data that should be preserved permanently, not rotated away.
+For benchmark logs, do NOT use rotation or retention:
 
 ```python
 from corral import setup_logging
@@ -282,40 +181,8 @@ from corral import setup_logging
 setup_logging(
     level="INFO",
     console=True,
-    log_dir="./benchmark_logs",
-    subsystem_files={
-        "agents": "agents.log",
-        "backend": "backend.log",
-        "router": "router.log",
-        "utils": "utils.log",
-        "report": "report.log",
-    }
-    # NOTE: No rotation, retention, or compression for benchmark logs
-)
-```
-
-### Production Server Setup
-
-For production server/service deployments with detailed logging (non-benchmark):
-
-```python
-from corral import setup_logging
-
-setup_logging(
-    level="INFO",
-    console=True,
-    log_file="corral_production.log",
-    log_dir="./logs",
-    subsystem_files={
-        "agents": "agents.log",
-        "backend": "backend.log",
-        "router": "router.log",
-        "utils": "utils.log",
-        "report": "report.log",
-    },
-    rotation="100 MB",
-    retention="30 days",
-    compression="gz"
+    log_file="benchmark.log"
+    # NOTE: No rotation, retention, or compression
 )
 ```
 
@@ -329,47 +196,26 @@ from corral import setup_logging
 setup_logging(
     level="DEBUG",
     console=True,
-    log_file="corral_dev.log",
-    rotation="10 MB",
-    retention="3 days"
+    log_file="dev.log"
 )
 ```
 
-### Testing Setup
+### Server Setup (Non-Benchmark)
 
-For testing with minimal output:
+For production server/service logs (NOT benchmarks), you can use rotation:
 
 ```python
 from corral import setup_logging
 
 setup_logging(
-    level="WARNING",
-    console=True
+    level="INFO",
+    console=True,
+    log_file="server.log",
+    rotation="100 MB",
+    retention="30 days",
+    compression="gz"
 )
 ```
-
-## Troubleshooting
-
-### No Logs Appearing
-
-If you're not seeing logs, ensure:
-1. You've called `setup_logging()` before using the logger
-2. The log level is appropriate for the messages you're logging
-3. Console output is enabled if you expect to see logs in terminal
-
-### Too Much Output
-
-If you're getting too many logs:
-1. Increase the log level: `setup_logging(level="WARNING")`
-2. Disable console output: `setup_logging(console=False)`
-3. Use subsystem-specific files to separate concerns
-
-### Log Files Not Created
-
-If log files aren't being created:
-1. Check that the directory exists or can be created
-2. Verify you have write permissions
-3. Check the file paths in your configuration
 
 ## API Reference
 
@@ -378,25 +224,13 @@ If log files aren't being created:
 Main function to configure the logging system.
 
 **Parameters:**
-- `level` (str): Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-- `console` (bool): Enable console output
-- `log_file` (str | None): Path to general log file
-- `log_dir` (str | None): Directory for subsystem log files
-- `subsystem_files` (dict[str, str] | None): Mapping of subsystem names to log files
-- `format_string` (str | None): Custom log format
-- `rotation` (str): When to rotate log files
-- `retention` (str): How long to keep rotated logs
-- `compression` (str): Compression format for rotated logs
-
-### `get_logger(subsystem)`
-
-Get a logger instance, optionally bound to a subsystem.
-
-**Parameters:**
-- `subsystem` (str | None): Name of the subsystem
-
-**Returns:**
-- Logger instance
+- `level` (str): Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Default: "INFO"
+- `console` (bool): Enable console output. Default: True
+- `log_file` (str | None): Path to log file. Default: None
+- `format_string` (str | None): Custom log format. Default: None
+- `rotation` (str | None): When to rotate log files. Default: None (no rotation)
+- `retention` (str | None): How long to keep rotated logs. Default: None (keep forever)
+- `compression` (str | None): Compression format for rotated logs. Default: None
 
 ### `add_file_handler()`
 
@@ -404,29 +238,42 @@ Add a custom file handler to the logger.
 
 **Parameters:**
 - `filepath` (str): Path to log file
-- `level` (str): Logging level
-- `format_string` (str | None): Custom format
-- `rotation` (str): Rotation policy
-- `retention` (str): Retention policy
-- `compression` (str): Compression format
-- `filter_func` (callable | None): Optional filter function
+- `level` (str): Logging level. Default: "INFO"
+- `format_string` (str | None): Custom format. Default: None
+- `rotation` (str | None): Rotation policy. Default: None
+- `retention` (str | None): Retention policy. Default: None
+- `compression` (str | None): Compression format. Default: None
+- `filter_func` (callable | None): Optional filter function. Default: None
 
 **Returns:**
 - Handler ID (int)
 
-### `remove_handler(handler_id)`
+## Best Practices
 
-Remove a handler by its ID.
+### For Benchmarks
+- ✅ **DO** use simple file logging without rotation
+- ✅ **DO** keep logs permanently to preserve benchmark data
+- ❌ **DON'T** use rotation, retention, or compression
 
-**Parameters:**
-- `handler_id` (int): Handler ID from add_file_handler()
+### For Server Logs
+- ✅ **DO** use rotation to manage disk space
+- ✅ **DO** set appropriate retention policies
+- ✅ **DO** compress old logs to save space
 
-### `set_level(level)`
+## Troubleshooting
 
-Change the logging level for all handlers.
+### No Logs Appearing
 
-**Parameters:**
-- `level` (str): New logging level
+If you're not seeing logs:
+1. Ensure you've called `setup_logging()` before using the logger
+2. Check the log level is appropriate for the messages you're logging
+3. Verify console output is enabled if you expect to see logs in terminal
+
+### Too Much Output
+
+If you're getting too many logs:
+1. Increase the log level: `setup_logging(level="WARNING")`
+2. Disable console output: `setup_logging(console=False)`
 
 ## Additional Resources
 

@@ -1,57 +1,38 @@
 """
 Centralized logging configuration for Corral framework.
 
-This module provides a flexible logging setup using loguru that allows different
-handlers to be configured for different subsystems (agents, backend, router, utils, report).
+This module provides a simple logging setup using loguru for console and file logging.
 
 Example usage:
-    >>> from corral.logging_config import setup_logging, get_logger
+    >>> from corral.logging_config import setup_logging
     >>>
     >>> # Basic setup with console output
     >>> setup_logging()
     >>>
-    >>> # Advanced setup with separate log files for subsystems
-    >>> setup_logging(
-    ...     level="INFO",
-    ...     log_dir="./logs",
-    ...     subsystem_files={
-    ...         "agents": "agents.log",
-    ...         "backend": "backend.log",
-    ...         "router": "router.log",
-    ...     }
-    ... )
-    >>>
-    >>> # Get a logger for a specific subsystem
-    >>> logger = get_logger("agents")
-    >>> logger.info("Agent started")
+    >>> # Setup with file logging
+    >>> setup_logging(level="INFO", log_file="benchmark.log")
 """
 
 import sys
-from pathlib import Path
-from typing import Any
 
 from loguru import logger
-
-# Store original logger for module-level loggers
-_module_loggers: dict[str, Any] = {}
 
 
 def setup_logging(
     level: str = "INFO",
     console: bool = True,
     log_file: str | None = None,
-    log_dir: str | None = None,
-    subsystem_files: dict[str, str] | None = None,
     format_string: str | None = None,
-    rotation: str = "10 MB",
-    retention: str = "1 week",
-    compression: str = "zip",
+    rotation: str | None = None,
+    retention: str | None = None,
+    compression: str | None = None,
 ) -> None:
     """
     Configure logging for the Corral framework.
 
-    This function sets up loguru with optional handlers for console output,
-    general log files, and subsystem-specific log files.
+    This function sets up loguru with optional handlers for console output
+    and file logging. By default, logs are not rotated or deleted to preserve
+    important benchmark data.
 
     Parameters
     ----------
@@ -60,48 +41,39 @@ def setup_logging(
     console : bool, default=True
         Whether to output logs to console (stderr)
     log_file : str or None, default=None
-        Path to a general log file. If None, no general file logging.
-    log_dir : str or None, default=None
-        Directory for log files. Used with subsystem_files.
-    subsystem_files : dict[str, str] or None, default=None
-        Dictionary mapping subsystem names to log file names.
-        Example: {"agents": "agents.log", "backend": "backend.log"}
-        Logs will be filtered to only include messages from that subsystem.
+        Path to a log file. If None, no file logging.
     format_string : str or None, default=None
         Custom format string for log messages. If None, uses default format.
-    rotation : str, default="10 MB"
-        When to rotate log files (e.g., "500 MB", "1 day", "1 week")
-    retention : str, default="1 week"
-        How long to keep rotated log files
-    compression : str, default="zip"
-        Compression format for rotated logs (e.g., "zip", "gz", "bz2")
+    rotation : str or None, default=None
+        When to rotate log files (e.g., "500 MB", "1 day", "1 week").
+        Default is None (no rotation) to preserve benchmark data.
+    retention : str or None, default=None
+        How long to keep rotated log files. Default is None (keep forever).
+    compression : str or None, default=None
+        Compression format for rotated logs (e.g., "zip", "gz", "bz2").
+        Default is None (no compression).
 
     Examples
     --------
     Basic console logging:
         >>> setup_logging()
 
-    Console + file logging:
-        >>> setup_logging(level="DEBUG", log_file="corral.log")
+    Console + file logging (no rotation - preserves benchmark data):
+        >>> setup_logging(level="INFO", log_file="benchmark.log")
 
-    Subsystem-specific logging:
+    With rotation (for non-benchmark logs):
         >>> setup_logging(
-        ...     level="INFO",
-        ...     log_dir="./logs",
-        ...     subsystem_files={
-        ...         "agents": "agents.log",
-        ...         "backend": "backend.log",
-        ...         "router": "router.log",
-        ...         "utils": "utils.log",
-        ...         "report": "report.log",
-        ...     }
+        ...     level="DEBUG",
+        ...     log_file="server.log",
+        ...     rotation="100 MB",
+        ...     retention="30 days",
+        ...     compression="gz"
         ... )
 
     Custom format:
         >>> setup_logging(
         ...     format_string="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
         ...                  "<level>{level: <8}</level> | "
-        ...                  "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
         ...                  "<level>{message}</level>"
         ... )
     """
@@ -126,7 +98,7 @@ def setup_logging(
             colorize=True,
         )
 
-    # Add general log file handler if requested
+    # Add log file handler if requested
     if log_file:
         logger.add(
             log_file,
@@ -137,81 +109,21 @@ def setup_logging(
             compression=compression,
         )
 
-    # Add subsystem-specific handlers
-    if subsystem_files and log_dir:
-        log_path = Path(log_dir)
-        log_path.mkdir(parents=True, exist_ok=True)
-
-        for subsystem, filename in subsystem_files.items():
-            file_path = log_path / filename
-
-            # Create a filter function for this subsystem with proper closure
-            def make_filter(subsystem_name: str = subsystem):
-                def filter_func(record):
-                    # Check if the logger name starts with the subsystem module path
-                    return record["name"].startswith(f"corral.{subsystem_name}")
-
-                return filter_func
-
-            logger.add(
-                str(file_path),
-                format=format_string,
-                level=level,
-                filter=make_filter(),
-                rotation=rotation,
-                retention=retention,
-                compression=compression,
-            )
-
-
-def get_logger(subsystem: str | None = None):
-    """
-    Get a logger instance, optionally bound to a specific subsystem.
-
-    This function returns the global loguru logger. If a subsystem is specified,
-    the logger's context will be bound to include the subsystem name in the logs.
-
-    Parameters
-    ----------
-    subsystem : str or None, default=None
-        Name of the subsystem (e.g., "agents", "backend", "router", "utils", "report")
-
-    Returns
-    -------
-    logger
-        A loguru logger instance
-
-    Examples
-    --------
-    >>> from corral.logging_config import get_logger
-    >>> logger = get_logger("agents")
-    >>> logger.info("Starting agent execution")
-
-    Notes
-    -----
-    The subsystem parameter is used to help filter logs when subsystem-specific
-    log files are configured via setup_logging().
-    """
-    if subsystem:
-        # Return a logger bound with the subsystem context
-        # The binding doesn't change the logger itself, but adds context
-        return logger.bind(subsystem=subsystem)
-    return logger
-
 
 def add_file_handler(
     filepath: str,
     level: str = "INFO",
     format_string: str | None = None,
-    rotation: str = "10 MB",
-    retention: str = "1 week",
-    compression: str = "zip",
+    rotation: str | None = None,
+    retention: str | None = None,
+    compression: str | None = None,
     filter_func=None,
 ) -> int:
     """
     Add a custom file handler to the logger.
 
     This allows you to add additional log handlers after initial setup.
+    By default, logs are not rotated to preserve important data.
 
     Parameters
     ----------
@@ -221,12 +133,14 @@ def add_file_handler(
         Logging level for this handler
     format_string : str or None, default=None
         Custom format string. If None, uses a default format.
-    rotation : str, default="10 MB"
-        When to rotate the log file
-    retention : str, default="1 week"
-        How long to keep rotated files
-    compression : str, default="zip"
-        Compression format for rotated logs
+    rotation : str or None, default=None
+        When to rotate the log file (e.g., "100 MB", "1 day"). 
+        Default is None (no rotation).
+    retention : str or None, default=None
+        How long to keep rotated files. Default is None (keep forever).
+    compression : str or None, default=None
+        Compression format for rotated logs (e.g., "zip", "gz"). 
+        Default is None (no compression).
     filter_func : callable or None, default=None
         Optional filter function to determine which records to log
 

@@ -195,7 +195,7 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
 
 ## 📝 Logging Framework
 
-Corral uses [loguru](https://github.com/Delgan/loguru) for flexible and powerful logging. The logging framework allows you to configure different handlers for different subsystems.
+Corral uses [loguru](https://github.com/Delgan/loguru) for simple and powerful logging.
 
 ### Basic Usage
 
@@ -206,47 +206,19 @@ from corral import setup_logging
 setup_logging()
 ```
 
-### Advanced Configuration
+### Benchmark Logging
 
-Configure subsystem-specific log files for better organization:
-
-```python
-from corral import setup_logging
-
-setup_logging(
-    level="INFO",
-    console=True,
-    log_dir="./logs",
-    subsystem_files={
-        "agents": "agents.log",      # Agent execution logs
-        "backend": "backend.log",    # Task environment logs
-        "router": "router.log",      # API routing logs
-        "utils": "utils.log",        # Utility function logs
-        "report": "report.log",      # Reporting logs
-    },
-    rotation="10 MB",       # Rotate when file reaches 10 MB
-    retention="1 week",     # Keep logs for 1 week
-    compression="zip"       # Compress rotated logs
-)
-```
-
-### Production Setup Example
-
-**Note**: For benchmark logs, do NOT use rotation or retention. Benchmark data should be preserved permanently.
+**Important**: Benchmark logs are NOT rotated by default to preserve data.
 
 ```python
 from corral import CorralRunner, CorralRouter, setup_logging
 from corral.agents import ReActAgent
 
 # Setup logging before running benchmarks
-# NOTE: No rotation/retention for benchmark logs
+# No rotation/retention - benchmark logs are preserved permanently
 setup_logging(
     level="INFO",
-    log_dir="./benchmark_logs",
-    subsystem_files={
-        "agents": "agents.log",
-        "router": "router.log",
-    }
+    log_file="benchmark.log"
 )
 
 # Run your benchmark
