@@ -1,8 +1,5 @@
 """Tests for the logging configuration module."""
 
-import sys
-import tempfile
-from pathlib import Path
 
 import pytest
 from loguru import logger

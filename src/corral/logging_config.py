@@ -6,10 +6,10 @@ handlers to be configured for different subsystems (agents, backend, router, uti
 
 Example usage:
     >>> from corral.logging_config import setup_logging, get_logger
-    >>> 
+    >>>
     >>> # Basic setup with console output
     >>> setup_logging()
-    >>> 
+    >>>
     >>> # Advanced setup with separate log files for subsystems
     >>> setup_logging(
     ...     level="INFO",
@@ -20,7 +20,7 @@ Example usage:
     ...         "router": "router.log",
     ...     }
     ... )
-    >>> 
+    >>>
     >>> # Get a logger for a specific subsystem
     >>> logger = get_logger("agents")
     >>> logger.info("Agent started")
@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-
 
 # Store original logger for module-level loggers
 _module_loggers: dict[str, Any] = {}
@@ -250,7 +249,7 @@ def add_file_handler(
             "<level>{message}</level>"
         )
 
-    handler_id = logger.add(
+    return logger.add(
         filepath,
         format=format_string,
         level=level,
@@ -259,7 +258,6 @@ def add_file_handler(
         compression=compression,
         filter=filter_func,
     )
-    return handler_id
 
 
 def remove_handler(handler_id: int) -> None:
