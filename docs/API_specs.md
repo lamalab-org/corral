@@ -103,38 +103,9 @@ def percentage_calculator(value: float, percentage: float = 100.0) -> float:
 
 ## Modal Tools API
 
-Modal tools allow you to run computationally intensive tasks in the cloud. See the [Modal App Documentation](../modal_app/README.md) for detailed setup instructions.
+For running computationally intensive tasks in the cloud, use Modal. See [Modal docs](https://modal.com/docs) and the [Modal App Documentation](../modal_app/README.md).
 
-### Using @app.function Decorator
-
-```python
-from modal import App, Image
-
-# Create a Modal app
-app = App("my-materials-app")
-
-# Define a cloud function
-@app.function(
-    image=Image.debian_slim().pip_install("numpy", "scipy"),
-    memory=2048,  # 2GB
-    cpu=2.0,
-    timeout=600   # 10 minutes
-)
-def expensive_calculation(data: list[float]) -> float:
-    """Run computationally intensive calculation in the cloud.
-    
-    Args:
-        data: Input data for calculation
-        
-    Returns:
-        Computed result
-    """
-    import numpy as np
-    # Your expensive computation here
-    return np.mean(data)
-```
-
-### Using modal_tool Decorator
+### Using modal_tool Decorator in Corral
 
 ```python
 from corral.utils.modal import modal_tool, MODAL_TOOL_REGISTRY
@@ -145,21 +116,12 @@ app = App("my-tools")
 @modal_tool(
     app=app,
     image=Image.debian_slim().pip_install("rdkit"),
-    memory=1024,
-    timeout=300
+    memory=1024
 )
 def molecular_analysis(smiles: str) -> dict:
-    """Analyze molecular structure in the cloud.
-    
-    Args:
-        smiles: SMILES representation of the molecule
-        
-    Returns:
-        Dictionary containing molecular properties
-    """
+    """Analyze molecular structure in the cloud."""
     from rdkit import Chem
     from rdkit.Chem import Descriptors
-    
     mol = Chem.MolFromSmiles(smiles)
     return {
         "molecular_weight": Descriptors.MolWt(mol),
@@ -168,32 +130,6 @@ def molecular_analysis(smiles: str) -> dict:
 
 # Tool is automatically registered
 tool = MODAL_TOOL_REGISTRY["molecular_analysis"]
-```
-
-### Deployment and Usage
-
-```bash
-# Deploy the Modal app
-modal deploy my_app.py
-
-# Use from client code
-import modal
-
-# Look up the deployed function by app name and function name
-my_func = modal.Function.from_name("my-materials-app", "expensive_calculation")
-result = my_func.remote([1.0, 2.0, 3.0, 4.0, 5.0])
-```
-
-For more details on:
-- Authentication setup
-- Configuring images with dependencies  
-- Using volumes for persistent storage
-- Managing GPU resources
-- Troubleshooting
-
-See the complete [Modal App Documentation](../modal_app/README.md).
-
-
 ```
 
 
