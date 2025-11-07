@@ -107,7 +107,7 @@ class ToolCallingAgent(BaseAgent):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
-        enable_retire: bool = False,
+        enable_forfeit: bool = False,
     ) -> str:
         """Run the agent to solve the task
 
@@ -117,7 +117,7 @@ class ToolCallingAgent(BaseAgent):
             history (list[LiteLLMMessage]], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
-            enable_retire (bool, optional): Whether to enable the retire option. Defaults to False.
+            enable_forfeit (bool, optional): Whether to enable the forfeition. Defaults to False.
 
         Returns:
             str: The final answer to the task
@@ -133,12 +133,12 @@ class ToolCallingAgent(BaseAgent):
         else:
             task_guide = task_prompt
 
-        # Prepare retirement instructions if enabled
-        retire_instructions = ""
-        if enable_retire:
-            retire_instructions = (
-                "If you cannot solve the task or determine it is unsolvable, you can retire from it.\n"
-                'To retire, respond with: "Final Answer: RETIRE"'
+        # Prepare forfeit instructions if enabled
+        forfeit_instructions = ""
+        if enable_forfeit:
+            forfeit_instructions = (
+                "If you cannot solve the task or determine it is unsolvable, you can forfeit from it.\n"
+                'To forfeit, respond with: "Final Answer: FORFEIT"'
             )
 
         self.messages = create_prompt(
@@ -147,7 +147,7 @@ class ToolCallingAgent(BaseAgent):
             task_guide=task_guide,
             history=history,
             examples=examples,
-            retire_instructions=retire_instructions,
+            forfeit_instructions=forfeit_instructions,
         )
 
         for _i in range(self.max_iterations):
@@ -156,17 +156,17 @@ class ToolCallingAgent(BaseAgent):
 
                 content = llm_response.content
                 if content:
-                    # Check for retirement if enabled
-                    if enable_retire:
-                        retire_match = re.search(
-                            r"(?:Final Answer:\s*)?RETIRE", content, re.IGNORECASE
+                    # Check for FORFEIT if enabled
+                    if enable_forfeit:
+                        forfeit_match = re.search(
+                            r"(?:Final Answer:\s*)?FORFEIT", content, re.IGNORECASE
                         )
-                        if retire_match:
+                        if forfeit_match:
                             logger.info(f"Agent retiring from task {task_id}")
                             self.messages.append(
                                 LiteLLMMessage(role="assistant", content=content)
                             )
-                            return "RETIRE"
+                            return "GIVE UP"
 
                     final_answer_match = re.search(
                         r"Final Answer:\s*(.*)", content, re.IGNORECASE

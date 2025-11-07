@@ -43,7 +43,7 @@ class ToolRequest(BaseModel):
     arguments: dict[str, Any]
 
 
-class RetireRequest(BaseModel):
-    """Request to retire from a task without submitting an answer"""
+class ForfeitRequest(BaseModel):
+    """Request to forfeit from a task without submitting an answer"""
 
-    # No parameters needed for retirement
+    # No parameters needed for forfeit

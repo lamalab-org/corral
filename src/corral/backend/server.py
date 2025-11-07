@@ -183,16 +183,16 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             "trial_id": finished_trial_id,
         }
 
-    @app.post("/tasks/{task_id}/retire")
-    def retire_task(task_id: str):
-        """Retire from a task without submitting an answer"""
+    @app.post("/tasks/{task_id}/forfeit")
+    def forfeit_task(task_id: str):
+        """Forfeit from a task without submitting an answer"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
 
-        # 1. Retire and get score (0 for now, can be decided to be something else later)
-        score = env.retire()
+        # 1. Forfeit and get score (0 for now, can be decided to be something else later)
+        score = env.forfeit()
 
         # 2. Get completed trial data (before any reset)
         completed_trial = env.get_completed_trial_data()
@@ -204,7 +204,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             "score": score,
             "state": completed_trial["state"],
             "trial_id": finished_trial_id,
-            "retired": True,
+            "forfeited": True,
         }
 
     @app.get("/tasks/{task_id}/status")

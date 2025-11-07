@@ -39,7 +39,7 @@ class TaskState:
     score: float | None = None
     submitted_answer: str | None = None
     feedback: str | None = None
-    retired: bool = False
+    forfeited: bool = False
     start_time: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     end_time: datetime | None = None
 
@@ -362,9 +362,9 @@ class Environment(ABC):
             self.state.end_time = datetime.now(tz=timezone.utc)
         return score
 
-    def retire(self) -> float:
-        """Retire from the current task without submitting an answer"""
-        self.state.retired = True
+    def forfeit(self) -> float:
+        """Forfeit from the current task without submitting an answer"""
+        self.state.forfeited = True
         self.state.score = 0.0
         self.state.is_completed = True
         if self.state.end_time is None:
@@ -385,7 +385,7 @@ class Environment(ABC):
             "is_completed": self.state.is_completed,
             "score": self.state.score,
             "submitted_answer": self.state.submitted_answer,
-            "retired": self.state.retired,
+            "forfeited": self.state.forfeited,
             "duration": duration,
             "tool_statistics": self._get_complete_tool_statistics(),
         }
