@@ -139,11 +139,11 @@ The framework includes several pre-built environments:
 | Environment | Description |
 |-------------|-------------|
 | `samplemath` | Basic mathematical operations |
-| `spectra_elu_easy` | Spectroscopy data analysis |
-| `md_simulations` | Molecular dynamics setup |
-| `catalyst` | Catalysis research tasks |
-| `afm` | Atomic force microscopy |
-| `md_tutorials` | MD tutorial completion |
+| `spectra_elucidation` | Spectroscopy/NMR spectra elucidation tasks |
+| `corral_md` | LAMMPS molecular dynamics simulation setup |
+| `catalyst` | Catalysis research and material design tasks |
+| `afm` | Atomic force microscopy image analysis |
+| `ml` | Machine learning model training and evaluation |
 
 ## 🤖 Available Agents
 
