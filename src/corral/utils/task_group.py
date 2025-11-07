@@ -1,3 +1,5 @@
+import inspect
+
 from loguru import logger
 
 from corral.backend.env import Environment
@@ -136,7 +138,14 @@ Required submission format:
         return prompt
 
     def score(self) -> float:
-        """Score the submitted answer"""
+        """Score the submitted answer
+        
+        This method supports scoring functions with two different signatures:
+        1. Single parameter: scoring_fn(answer) - for scoring functions that don't need ground truth
+        2. Dual parameters: scoring_fn(prediction, ground_truth) - for scoring functions that compare against ground truth
+        
+        The detection is based on checking if the scoring function accepts 'ground_truth' or 'target' parameters.
+        """
         if not self.state.submitted_answer:
             logger.warning(f"No submission found for task {self.task_id}")
             return 0.0
@@ -149,11 +158,12 @@ Required submission format:
             logger.info(f"Resolved answer for {self.task_id}: {resolved_answer!r}")
             
             # Call the scoring function - support both single and dual parameter signatures
-            # Check if the scoring function accepts 'ground_truth' parameter
-            import inspect
+            # Check the scoring function signature to determine how to call it
             sig = inspect.signature(self.current_task.scoring_fn)
             params = sig.parameters
             
+            # Check if the function expects ground_truth or target parameter
+            # These are the standard parameter names for dual-parameter scoring functions
             if 'ground_truth' in params or 'target' in params:
                 # Scoring function expects both prediction and ground_truth
                 score = self.current_task.scoring_fn(
@@ -161,7 +171,7 @@ Required submission format:
                     ground_truth=self.current_task.scoring_inputs
                 )
             else:
-                # Scoring function expects only the answer
+                # Scoring function expects only the answer (single parameter)
                 score = self.current_task.scoring_fn(resolved_answer)
 
             # Store result in task group
