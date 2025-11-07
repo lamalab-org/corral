@@ -7,8 +7,10 @@ from score import check_numerical, check_potential_file, check_structure
 from tools import (
     convert_structure_to_lammps_data,
     execute_python_script,
+    get_nth_run_log,
     get_potential_metadata,
     get_structure_from_mp_text,
+    keyword_log_extractor,
     run_lammps,
 )
 
@@ -217,7 +219,20 @@ Required submission format:
 
         # Add workspace info
         if self.current_work_dir:
-            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir} when using tools use this path.\n"
+            prompt += (
+                f"\nYour current workspace directory is: {self.current_work_dir}\n"
+                "All files you generate should be saved in this directory.\n\n"
+                "### Important Resource and File Access Guidelines ###\n"
+                "1. **Potential Files**:\n"
+                "   - These files are *fully verified and correct*.\n"
+                "   - You must **not attempt to read or parse them directly**.\n"
+                "   - Reading them is unnecessary and will waste important computational resources.\n\n"
+                "2. **Simulation Log Files**:\n"
+                "   - These files are *very large* and should **not be directly parsed**.\n"
+                "   - Direct parsing would cause excessive cost and resource usage.\n\n"
+                "Important : Files in /structures and /potentials should not be modified at any cost, including operations like copying or moving them. Doing this will immediately return in error.\n"
+            )
+            # prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir} when using tools use this path.\n"
 
         # Add note about dependencies
         if self.current_task.input_from_tasks:
@@ -317,6 +332,8 @@ def create_environments(
         "get_potential_metadata": get_potential_metadata,
         "get_structure_from_mp_text": get_structure_from_mp_text,
         "run_lammps": run_lammps,
+        "get_nth_run_log": get_nth_run_log,
+        "keyword_log_extractor": keyword_log_extractor,
     }
 
     environments = {}
