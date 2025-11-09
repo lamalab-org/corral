@@ -112,26 +112,31 @@ document.getElementById('helpToggleBtn').addEventListener('click', function() {
     }
 });
 
-// Marker selector handler
-document.getElementById('markerSelect').addEventListener('change', function() {
-    if (selectedNodeIndex === -1 || !this.value) return;
+// Marker button handlers - Set up event delegation for marker buttons
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('marker-btn')) {
+        if (selectedNodeIndex === -1 || e.target.disabled) return;
 
-    const nodeId = currentNodes[selectedNodeIndex].id;
-    const marker = this.value;
+        const nodeId = currentNodes[selectedNodeIndex].id;
+        const marker = e.target.dataset.marker;
 
-    // Initialize annotations for this node if not exists
-    if (!nodeAnnotations[nodeId]) {
-        nodeAnnotations[nodeId] = { markers: [], notes: '' };
+        // Initialize annotations for this node if not exists
+        if (!nodeAnnotations[nodeId]) {
+            nodeAnnotations[nodeId] = { markers: [], notes: '' };
+        }
+
+        // Toggle marker - if already present, remove it; otherwise add it
+        const markerIndex = nodeAnnotations[nodeId].markers.indexOf(marker);
+        if (markerIndex > -1) {
+            nodeAnnotations[nodeId].markers.splice(markerIndex, 1);
+            e.target.classList.remove('selected');
+        } else {
+            nodeAnnotations[nodeId].markers.push(marker);
+            e.target.classList.add('selected');
+        }
+
+        updateMarkersDisplay(nodeId);
     }
-
-    // Add marker to the array if it's not already present (allow multiple markers per node)
-    if (!nodeAnnotations[nodeId].markers.includes(marker)) {
-        nodeAnnotations[nodeId].markers.push(marker);
-    }
-    updateMarkersDisplay(nodeId);
-
-    // Reset selector
-    this.value = '';
 });
 
 // Trace comments textarea handler
@@ -204,6 +209,16 @@ function loadNodeAnnotations(nodeId) {
 
     // Update markers display
     updateMarkersDisplay(nodeId);
+
+    // Update marker button states
+    document.querySelectorAll('.marker-btn').forEach(btn => {
+        const marker = btn.dataset.marker;
+        if (annotations && annotations.markers.includes(marker)) {
+            btn.classList.add('selected');
+        } else {
+            btn.classList.remove('selected');
+        }
+    });
 
     // Update notes textarea
     const notesTextarea = document.getElementById('notesTextarea');
@@ -338,8 +353,11 @@ function clearDetailsPanel() {
     document.getElementById('selectedMarkers').innerHTML = '';
     document.getElementById('notesTextarea').value = '';
 
-    // Disable inputs when no node is selected
-    document.getElementById('markerSelect').disabled = true;
+    // Disable marker buttons and notes textarea when no node is selected
+    document.querySelectorAll('.marker-btn').forEach(btn => {
+        btn.disabled = true;
+        btn.classList.remove('selected');
+    });
     document.getElementById('notesTextarea').disabled = true;
 
     // Hide disabled message
@@ -785,8 +803,10 @@ function showDetails(event, d) {
     // Check if this node is annotatable
     const annotatable = isNodeAnnotatable(d);
 
-    // Enable/disable inputs based on whether the node is annotatable
-    document.getElementById('markerSelect').disabled = !annotatable;
+    // Enable/disable marker buttons and notes textarea based on whether the node is annotatable
+    document.querySelectorAll('.marker-btn').forEach(btn => {
+        btn.disabled = !annotatable;
+    });
     document.getElementById('notesTextarea').disabled = !annotatable;
 
     // Show/hide disabled message
@@ -802,6 +822,10 @@ function showDetails(event, d) {
         // Clear annotations display for non-annotatable nodes
         document.getElementById('selectedMarkers').innerHTML = '';
         document.getElementById('notesTextarea').value = '';
+        // Clear button selections
+        document.querySelectorAll('.marker-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
     }
 
     let html = '';
