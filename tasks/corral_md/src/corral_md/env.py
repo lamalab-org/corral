@@ -161,8 +161,10 @@ class MDTaskGroupEnvironment(TaskGroupEnvironment):
             parts = base_prompt.split("Available input data:\n", 1)
             if len(parts) == 2:
                 prompt = (
-                    parts[0] + "Available input data:\n"
-                    + "\n".join(md_additions) + "\n\n"
+                    parts[0]
+                    + "Available input data:\n"
+                    + "\n".join(md_additions)
+                    + "\n\n"
                     + parts[1]
                 )
             else:
@@ -219,7 +221,7 @@ def create_environments(
     ordered_tasks = task_group.get_ordered_tasks()
     logger.info("\nTask Execution Order:")
     for i, task_id in enumerate(ordered_tasks):
-        logger.info(f"{i+1}. {task_id}")
+        logger.info(f"{i + 1}. {task_id}")
 
     # Create environments for all tasks
     subtask_specific_tools = {
