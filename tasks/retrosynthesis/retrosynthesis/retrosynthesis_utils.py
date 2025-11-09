@@ -530,7 +530,7 @@ def filter_price_data(df, smiles_list, limit=10):
     Args:
         df (pandas.DataFrame): The dataframe containing price information.
         smiles_list (list[str]): List of SMILES strings to filter the dataframe.
-        limit (int): Maximum number of entries to return per SMILES.
+        limit (int): Maximum number of entries to return per SMILES. If 0, return all results sorted by price.
 
     Returns:
         dict: Dictionary where keys are SMILES from smiles_list and values are lists of
@@ -578,9 +578,13 @@ def filter_price_data(df, smiles_list, limit=10):
                     }
                 )
 
-                # Stop if we've reached the limit
-                if len(matching_rows) >= limit:
+                # Stop if we've reached the limit (unless limit is 0)
+                if limit > 0 and len(matching_rows) >= limit:
                     break
+
+        # If limit is 0, return all results sorted by price
+        if limit == 0:
+            matching_rows.sort(key=lambda x: x["Price"])
 
         result[target_smiles] = matching_rows
 
@@ -959,3 +963,28 @@ def return_matching(smiles, template_id):
     """
     matches = apply_template_retro(smiles, template_id)
     return len(matches) > 0
+
+
+def check_templates_equal(pred_rxn: str, ground_rxn_mapped: str) -> float:
+    """
+    Check if two mapped reactions are equal.
+
+    Args:
+        pred_rxn: The predicted mapped reaction SMILES.
+        ground_rxn_mapped: The ground truth mapped reaction SMILES.
+    """
+    try:
+        pred_reaction = ChemicalReaction(pred_rxn)
+        ground_reaction = ChemicalReaction(ground_rxn_mapped)
+
+        pred_reaction.generate_reaction_template()
+        ground_reaction.generate_reaction_template()
+        pred_hash = pred_reaction.retro_template.hash_from_bits()
+        ground_hash = ground_reaction.retro_template.hash_from_bits()
+
+        return 1.0 if pred_hash == ground_hash else 0.0
+    except Exception as e:
+        logger.warning(
+            f"Error comparing reactions:\nPredicted: {pred_rxn}\nGround Truth: {ground_rxn_mapped}\nError: {e}"
+        )
+        return 0.0

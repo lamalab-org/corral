@@ -121,6 +121,11 @@ def search_template_catalog_by_criteria(
             [RETURNS_EXAMPLES] [{"template_id": "123", "smarts": "..."}], [] [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
+        ValueError:
+            [ERROR_WHEN] Raised when none of the criteria parameters are provided. [/ERROR_WHEN]
+            [ERROR_DETAILS] At least one of the parameters `functional_groups_broken`, `functional_groups_formed`, `bonds_formed`, `bonds_broken`, or `bonds_order_changed` must be provided as a list of strings to perform a search. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Provide at least one of the criteria parameters as a list of strings to perform the search. [/ERROR_RECOVERY]
+
         TypeError:
             [ERROR_WHEN] Raised when any of the list parameters is not a list. [/ERROR_WHEN]
             [ERROR_DETAILS] This occurs if the user provides a string or other non-list type for any of the parameters that expect a list of strings. [/ERROR_DETAILS]
@@ -155,6 +160,11 @@ def search_template_catalog_by_criteria(
                 f"Received: {param_value!r}. "
                 f"Example: If you want to search for 'alcohol', use [{param_value!r}] instead of {param_value!r}"
             )
+
+    if all(list_params.values()) is None:
+        raise ValueError(
+            "At least one of the criteria parameters must be provided as a list of strings."
+        )
 
     return search_reactions_by_criteria(
         functional_groups_broken=functional_groups_broken,
