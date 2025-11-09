@@ -103,7 +103,7 @@ def percentage_calculator(value: float, percentage: float = 100.0) -> float:
 
 ## Modal Tools API
 
-For running computationally intensive tasks in the cloud, use Modal. See [Modal docs](https://modal.com/docs) and the [Modal App Documentation](../modal_app/README.md).
+For running computationally intensive tasks in the cloud, use Modal. See [Modal docs](https://modal.com/docs) and the [Modal App Documentation](../tasks/corral_md/modal_app/README.md).
 
 ### Using modal_tool Decorator in Corral
 

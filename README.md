@@ -385,7 +385,7 @@ def complex_calculation(data: str) -> str:
 tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]
 ```
 
-For Corral-specific usage, see the [Modal App Documentation](modal_app/README.md).
+For Corral-specific usage, see the [Modal App Documentation](tasks/corral_md/modal_app/README.md).
 
 ### Environment Configuration
 
