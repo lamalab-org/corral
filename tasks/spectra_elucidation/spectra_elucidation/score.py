@@ -184,7 +184,7 @@ def score_molecule_fragments(prediction: list[str], ground_truth: str) -> float:
         return 0.0
 
     if not seq:  # Empty list
-        return 1.0
+        return 0.0
 
     target_mol = Chem.MolFromSmiles(ground_truth)
     if target_mol is None:

@@ -132,7 +132,7 @@ class TestScoreMoleculeFragments:
         prediction = []
         ground_truth = "CCO"
         score = score_molecule_fragments(prediction, ground_truth)
-        assert score == 1.0
+        assert score == 0.0
 
     def test_string_representation(self):
         """Test with string representation of a list."""

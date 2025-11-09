@@ -10,21 +10,6 @@ _PAREN_PAT = re.compile(r"\(([^()]*)\)(\d*)")
 _DOT_PAT = re.compile(r"·|\.")
 
 
-def differs_by_one_atom(parent_formula, fragment_formula):
-    """Check if fragment differs from parent by exactly one atom"""
-    total_diff = 0
-    all_elements = set(parent_formula.keys()) | set(fragment_formula.keys())
-
-    for element in all_elements:
-        parent_count = parent_formula.get(element, 0)
-        fragment_count = fragment_formula.get(element, 0)
-        diff = abs(parent_count - fragment_count)
-        total_diff += diff
-
-    # If total difference is exactly 1, it means one atom was added/removed
-    return total_diff == 1 or total_diff == 0
-
-
 def _parse_simple(formula: str) -> dict[str, int]:
     """
     Parse an already-expanded, dot-free formula into {element: count}.
