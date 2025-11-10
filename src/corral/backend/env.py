@@ -39,7 +39,7 @@ class TaskState:
     score: float | None = None
     submitted_answer: str | None = None
     feedback: str | None = None
-    forfeited: bool = False
+    surrendered: bool = False
     start_time: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     end_time: datetime | None = None
 
@@ -362,9 +362,9 @@ class Environment(ABC):
             self.state.end_time = datetime.now(tz=timezone.utc)
         return score
 
-    def forfeit(self) -> float:
-        """Forfeit from the current task without submitting an answer"""
-        self.state.forfeited = True
+    def surrender(self) -> float:
+        """Surrender from the current task without submitting an answer"""
+        self.state.surrendered = True
         self.state.is_attempted = True
         if self.state.end_time is None:
             self.state.end_time = datetime.now(tz=timezone.utc)
@@ -384,7 +384,7 @@ class Environment(ABC):
             "is_attempted": self.state.is_attempted,
             "score": self.state.score,
             "submitted_answer": self.state.submitted_answer,
-            "forfeited": self.state.forfeited,
+            "surrendered": self.state.surrendered,
             "duration": duration,
             "tool_statistics": self._get_complete_tool_statistics(),
         }

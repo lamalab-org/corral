@@ -30,7 +30,7 @@ def _parse_trial_completion(task_id: str, response_data: dict) -> TaskTrialResul
         score=completion.score,
         state=completion.state,
         tool_statistics=completion.state["tool_statistics"],
-        forfeited=completion.forfeited,
+        surrendered=completion.surrendered,
     )
 
 
@@ -127,10 +127,10 @@ class CorralRouter:
         response.raise_for_status()
         return _parse_trial_completion(task_id, response.json())
 
-    def forfeit_task(self, task_id: str) -> TaskTrialResult:
-        """Forfeit from a task without submitting an answer"""
+    def surrender_task(self, task_id: str) -> TaskTrialResult:
+        """Surrender from a task without submitting an answer"""
         logger.info(f"Agent retiring from task {task_id}")
-        response = requests.post(f"{self.base_url}/tasks/{task_id}/forfeit")
+        response = requests.post(f"{self.base_url}/tasks/{task_id}/surrender")
         response.raise_for_status()
         return _parse_trial_completion(task_id, response.json())
 

@@ -43,16 +43,16 @@ class ToolRequest(BaseModel):
     arguments: dict[str, Any]
 
 
-class ForfeitRequest(BaseModel):
-    """Request to forfeit from a task without submitting an answer"""
+class SurrenderRequest(BaseModel):
+    """Request to surrender from a task without submitting an answer"""
 
-    # No parameters needed for forfeit
+    # No parameters needed for surrender
 
 
 class TrialCompletionResponse(BaseModel):
-    """Response when a trial is completed (via submission or forfeiture)"""
+    """Response when a trial is completed (via submission or surrender)"""
 
     score: float
     state: dict[str, Any]
     trial_id: str
-    forfeited: bool = False
+    surrendered: bool = False

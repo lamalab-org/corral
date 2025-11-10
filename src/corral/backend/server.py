@@ -14,7 +14,7 @@ from corral.router.verbosity import (
 
 
 def _finalize_trial(
-    env: Environment, score: float, forfeited: bool = False
+    env: Environment, score: float, surrendered: bool = False
 ) -> TrialCompletionResponse:
     """
     Finalize a trial by capturing state and resetting environment.
@@ -27,7 +27,7 @@ def _finalize_trial(
     Args:
         env: The environment instance
         score: Trial score
-        forfeited: Whether trial was forfeited
+        surrendered: Whether trial was surrendered
 
     Returns:
         TrialCompletionResponse with all trial completion data
@@ -42,7 +42,7 @@ def _finalize_trial(
         score=score,
         state=completed_trial["state"],
         trial_id=finished_trial_id,
-        forfeited=forfeited,
+        surrendered=surrendered,
     )
 
 
@@ -203,18 +203,18 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         env = environments[task_id]
         score = env.submit_answer(answer["answer"])
 
-        return _finalize_trial(env, score, forfeited=False)
+        return _finalize_trial(env, score, surrendered=False)
 
-    @app.post("/tasks/{task_id}/forfeit")
-    def forfeit_task(task_id: str) -> TrialCompletionResponse:
-        """Forfeit from a task without submitting an answer"""
+    @app.post("/tasks/{task_id}/surrender")
+    def surrender_task(task_id: str) -> TrialCompletionResponse:
+        """Surrender from a task without submitting an answer"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
-        score = env.forfeit()
+        score = env.surrender()
 
-        return _finalize_trial(env, score, forfeited=True)
+        return _finalize_trial(env, score, surrendered=True)
 
     @app.get("/tasks/{task_id}/status")
     def get_task_status(task_id: str):
