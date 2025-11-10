@@ -1,19 +1,19 @@
 # Corral: Scientific Agent Benchmark
 
 <p align="center">
-    <a href="https://github.com/lamalab-org/corral/actions/workflows/tests.yaml">
-        <img alt="Tests" src="https://github.com/lamalab-org/corral/actions/workflows/tests.yaml/badge.svg" />
+    <a href="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yaml">
+        <img alt="Tests" src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yaml/badge.svg" />
     </a>
     <a href="https://pypi.org/project/corral">
         <img alt="PyPI" src="https://img.shields.io/pypi/v/corral" />
     </a>
-    <a href="https://github.com/lamalab-org/corral/blob/main/LICENSE.md">
+    <a href="https://github.com/lamalab-org/mat-agent-bench/blob/main/LICENSE.md">
         <img alt="PyPI - License" src="https://img.shields.io/pypi/l/corral" />
     </a>
-    <a href='https://lamalab-org.github.io/corral/'>
-        <img src="https://github.com/lamalab-org/corral/actions/workflows/docs.yaml/badge.svg" alt='Documentation Status' />
+    <a href='https://lamalab-org.github.io/mat-agent-bench/'>
+        <img src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/docs.yaml/badge.svg" alt='Documentation Status' />
     </a>
-    <a href="https://github.com/lamalab-org/corral/blob/main/CODE_OF_CONDUCT.md">
+    <a href="https://github.com/lamalab-org/mat-agent-bench/blob/main/CODE_OF_CONDUCT.md">
         <img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Contributor Covenant"/>
     </a>
 </p>
@@ -39,8 +39,8 @@ A comprehensive benchmarking framework for evaluating AI agents on science tasks
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/lamalab-org/corral.git
-   cd corral
+   git clone https://github.com/lamalab-org/mat-agent-bench.git
+   cd mat-agent-bench
    ```
 
 2. **Install the framework**
@@ -139,11 +139,11 @@ The framework includes several pre-built environments:
 | Environment | Description |
 |-------------|-------------|
 | `samplemath` | Basic mathematical operations |
-| `spectra_elucidation` | Spectroscopy/NMR spectra elucidation tasks |
-| `corral_md` | LAMMPS molecular dynamics simulation setup |
-| `catalyst` | Catalysis research and material design tasks |
-| `afm` | Atomic force microscopy image analysis |
-| `ml` | Machine learning model training and evaluation |
+| `spectra_elu_easy` | Spectroscopy data analysis |
+| `md_simulations` | Molecular dynamics setup |
+| `catalyst` | Catalysis research tasks |
+| `afm` | Atomic force microscopy |
+| `md_tutorials` | MD tutorial completion |
 
 ## 🤖 Available Agents
 
@@ -366,29 +366,21 @@ def calculate_molecular_weight(formula: str) -> float:
 
 #### [Modal](https://modal.com) Tools (Cloud Execution)
 
-Modal allows you to run computationally intensive tasks in the cloud. See [Modal docs](https://modal.com/docs) for setup.
-
 ```python
 from corral.utils.modal import modal_tool, MODAL_TOOL_REGISTRY
-from modal import App, Image
-
-app = App("my-corral-tools")
+from modal import Image
 
 
 @modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
 def complex_calculation(data: str) -> str:
     """Run computationally intensive task in the cloud."""
-    from rdkit import Chem
-
-    mol = Chem.MolFromSmiles(data)
-    return f"Molecule has {mol.GetNumAtoms()} atoms"
+    # This runs in Modal's cloud environment
+    pass
 
 
 # Access the tool
 tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]
 ```
-
-For Corral-specific usage, see the [Modal App Documentation](tasks/corral_md/modal_app/README.md).
 
 ### Environment Configuration
 
@@ -419,8 +411,8 @@ for task_id, task_result in result.task_results.items():
 
 ## 🤝 Community
 
-- **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/lamalab-org/corral/issues)
-- **Discussions**: Join conversations on [GitHub Discussions](https://github.com/lamalab-org/corral/discussions)
+- **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/lamalab-org/mat-agent-bench/issues)
+- **Discussions**: Join conversations on [GitHub Discussions](https://github.com/lamalab-org/mat-agent-bench/discussions)
 - **Contributing**: See our [Contributing Guide](CONTRIBUTING.md)
 
 ## 📄 License
