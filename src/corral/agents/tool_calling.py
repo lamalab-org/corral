@@ -146,7 +146,7 @@ class ToolCallingAgent(BaseAgent):
                 content = llm_response.content
                 if content:
                     final_answer_match = re.search(
-                        r"Final Answer:\s*(.*)", content, re.IGNORECASE
+                        r"Final Answer: (.*)", content, re.DOTALL | re.IGNORECASE
                     )
                     if final_answer_match:
                         self.messages.append(

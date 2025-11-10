@@ -180,21 +180,21 @@ def main():
         final_inputs = []
         for j, template in enumerate(TEMPLATES[i]):
             if j == 0:
-                input_from_task = [f"make_{i+1}_lvl1-template_search-{j+1}"]
+                input_from_task = [f"make_{i+1}_lvl2-template_search-{j+1}"]
                 initial_inputs = {"initial_molecule": molecule}
                 input_from_task_search = False
             else:
                 input_from_task = [
-                    f"make_{i+1}_lvl1-apply_template-{j}",
-                    f"make_{i+1}_lvl1-template_search-{j+1}",
+                    f"make_{i+1}_lvl2-apply_template-{j}",
+                    f"make_{i+1}_lvl2-template_search-{j+1}",
                 ]
                 input_from_task_search = [
-                    f"make_{i+1}_lvl1-apply_template-{j}",
+                    f"make_{i+1}_lvl2-apply_template-{j}",
                 ]
                 initial_inputs = {}
             task = {
-                "id": f"make_{i+1}_lvl1-template_search-{j+1}",
-                "name": f"make_{i+1}_lvl1-template_search-{j+1}",
+                "id": f"make_{i+1}_lvl2-template_search-{j+1}",
+                "name": f"make_{i+1}_lvl2-template_search-{j+1}",
                 "keywords": [
                     "chemistry",
                     "synthesis",
@@ -206,8 +206,8 @@ def main():
                     "prompt": f"Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: {HINTS[i][j]}.",
                     "input_from_task": input_from_task_search,
                     "input_for_task": [
-                        f"make_{i+1}_lvl1-apply_template-{j+1}",
-                        f"make_{i+1}_lvl1-build_complete_route",
+                        f"make_{i+1}_lvl2-apply_template-{j+1}",
+                        f"make_{i+1}_lvl2-build_complete_route",
                     ],
                 },
                 "output": [
@@ -231,22 +231,22 @@ def main():
                     "detect_protection_groups",
                 ],
             }
-            final_inputs.append(f"make_{i+1}_lvl1-template_search-{j+1}")
+            final_inputs.append(f"make_{i+1}_lvl2-template_search-{j+1}")
             if j == len(TEMPLATES[i]) - 1:
                 input_for_task = [
-                    f"make_{i+1}_lvl1-build_complete_route",
+                    f"make_{i+1}_lvl2-build_complete_route",
                 ]
             else:
                 input_for_task = [
-                    f"make_{i+1}_lvl1-search_template-{j+2}",
-                    f"make_{i+1}_lvl1-apply_template-{j+2}",
-                    f"make_{i+1}_lvl1-build_complete_route",
+                    f"make_{i+1}_lvl2-search_template-{j+2}",
+                    f"make_{i+1}_lvl2-apply_template-{j+2}",
+                    f"make_{i+1}_lvl2-build_complete_route",
                 ]
             tasks.append(task)
-            previous_task = f"make_{i+1}_lvl1-template_search-{j+1}"
+            previous_task = f"make_{i+1}_lvl2-template_search-{j+1}"
             task = {
-                "id": f"make_{i+1}_lvl1-apply_template-{j+1}",
-                "name": f"make_{i+1}_lvl1-apply_template-{j+1}",
+                "id": f"make_{i+1}_lvl2-apply_template-{j+1}",
+                "name": f"make_{i+1}_lvl2-apply_template-{j+1}",
                 "keywords": [
                     "chemistry",
                     "synthesis",
@@ -275,15 +275,15 @@ def main():
                     "verify_step",
                 ],
             }
-            final_inputs.append(f"make_{i+1}_lvl1-apply_template-{j+1}")
+            final_inputs.append(f"make_{i+1}_lvl2-apply_template-{j+1}")
             tasks.append(task)
 
         final_targets = []
         for k in TARGETS[i]:
             final_targets.extend(k)
         task = {
-            "id": f"make_{i+1}_lvl1-build_complete_route",
-            "name": f"make_{i+1}_lvl1-build_complete_route",
+            "id": f"make_{i+1}_lvl2-build_complete_route",
+            "name": f"make_{i+1}_lvl2-build_complete_route",
             "keywords": ["chemistry", "synthesis", "retrosynthesis", "route_building"],
             "metrics": ["binary"],
             "input": {

@@ -7,6 +7,7 @@ from retrosynthesis.retrosynthesis_utils import (
     _is_buyable,
     apply_template_retro,
     check_price,
+    check_templates_equal,
     search_by_template,
     species_match,
     valid_smiles,
@@ -122,14 +123,20 @@ def score_final(prediction: dict, target: dict) -> float:
     Returns:
         float: 1.0 if all conditions are met, 0.0 if any condition is violated.
     """
-    max_steps = target.get("max_steps")
-    if max_steps is None:
-        raise NotImplementedError(
-            "Step count validation is not implemented in this scoring function."
-        )
-    target = target.get("prize")
+    try:
+        max_steps = int(target.get("max_steps"))
+        if max_steps is None:
+            raise NotImplementedError(
+                "Step count validation is not implemented in this scoring function."
+            )
+        target = float(target.get("prize"))
+    except Exception as e:
+        raise ValueError(f"Invalid target format: {e}") from e
     prediction = prediction.replace("```json", "").replace("```", "").strip()
     try:
+        # Parse the JSON string into a dictionary
+        prediction = json.loads(prediction)
+
         # Step 0: Check if the number of reactions exceeds max_steps
         num_reactions = count_reactions(prediction)
         if num_reactions > max_steps:
@@ -144,19 +151,26 @@ def score_final(prediction: dict, target: dict) -> float:
 
         if not leaf_molecules:
             return 0.0
+
         # Step 3: Check if all starting materials are buyable
         for smiles in leaf_molecules:
             if not valid_smiles(smiles):
                 return 0.0
-            if not _is_buyable(smiles):
+            if not _is_buyable([smiles]):
                 return 0.0
 
         # Step 4: Calculate total price
         total_price = 0.0
         for smiles in leaf_molecules:
             try:
-                price = check_price(smiles)
-                total_price += price
+                price_data = check_price([smiles], limit=0)
+                # check_price returns a dict: {smiles: [list of price entries]}
+                # Since limit=0, results are sorted by price, so first entry is cheapest
+                if price_data.get(smiles):
+                    total_price += float(price_data[smiles][0]["Price"])
+                else:
+                    # No price data available for this molecule
+                    return 0.0
             except Exception:
                 # If price cannot be determined, consider it as failure
                 return 0.0
@@ -271,13 +285,15 @@ def check_reactants(prediction: dict, target: list) -> float:
 
 
 def check_template(prediction: str, target: str) -> float:
+    target = int(target)
+    prediction = prediction.replace("```json", "").replace("```", "").strip()
+    prediction = prediction.replace("'", '"')
     try:
         prediction = json.loads(prediction)
     except Exception as e:
         logger.warning(f"Exception during JSON loading: {e}")
         return 0.0
     try:
-        target = int(target)
         pred_template = prediction.get("template_id")
         if pred_template is None or pred_template != target:
             return 0.0
@@ -285,10 +301,7 @@ def check_template(prediction: str, target: str) -> float:
         ground_rxn = search_by_template(target)
         ground_rxn_mapped = ground_rxn["mapped_rxn"]
         pred_rxn = prediction.get("mapped_rxn")
-        if pred_rxn is None or pred_rxn != ground_rxn_mapped:
-            return 0.0
-
-        return 1.0
+        return check_templates_equal(pred_rxn, ground_rxn_mapped)
 
     except Exception as e:
         logger.warning(f"Exception during template checking: {e}")
