@@ -215,7 +215,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
 
         env = environments[task_id]
         return {
-            "is_completed": env.state.is_completed,
+            "is_attempted": env.state.is_attempted,
             "score": env.state.score,
             "submitted_answer": env.state.submitted_answer,
             "tool_statistics": env.state.get_tool_statistics(),

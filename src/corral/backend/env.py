@@ -35,7 +35,7 @@ class TaskState:
     trial_id: str = "0"
     messages: list[LLMMessage] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
-    is_completed: bool = False
+    is_attempted: bool = False
     score: float | None = None
     submitted_answer: str | None = None
     feedback: str | None = None
@@ -93,7 +93,7 @@ class Environment(ABC):
     def reset_state(self) -> str:
         """Reset the environment state with a new trial id and fresh TaskState and return finished trail id."""
         if hasattr(self, "state") and self.state is not None:
-            if self.state.is_completed and self.state.end_time is None:
+            if self.state.is_attempted and self.state.end_time is None:
                 self.state.end_time = datetime.now(tz=timezone.utc)
             archived_snapshot = self.save_current_state()
             self.trial_states[self.state.trial_id] = archived_snapshot
@@ -357,7 +357,7 @@ class Environment(ABC):
         self.state.submitted_answer = answer
         score = self.score()  # Using existing abstract score method
         self.state.score = score
-        self.state.is_completed = True
+        self.state.is_attempted = True
         if self.state.end_time is None:
             self.state.end_time = datetime.now(tz=timezone.utc)
         return score
@@ -366,7 +366,7 @@ class Environment(ABC):
         """Forfeit from the current task without submitting an answer"""
         self.state.forfeited = True
         self.state.score = 0.0
-        self.state.is_completed = True
+        self.state.is_attempted = True
         if self.state.end_time is None:
             self.state.end_time = datetime.now(tz=timezone.utc)
         return 0.0
@@ -382,7 +382,7 @@ class Environment(ABC):
         state_data = {
             "task_id": self.state.task_id,
             "trial_id": self.state.trial_id,
-            "is_completed": self.state.is_completed,
+            "is_attempted": self.state.is_attempted,
             "score": self.state.score,
             "submitted_answer": self.state.submitted_answer,
             "forfeited": self.state.forfeited,
