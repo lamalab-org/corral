@@ -26,12 +26,12 @@ class TaskTrialResult:
     duration: float | None = None
     token_usage: dict[str, int] | None = None
     error_message: str | None = None
-    forfeited: bool = False
+    surrendered: bool = False
 
     @property
     def success(self) -> bool:
         """Whether the trial was successful"""
-        return self.score > 0 and self.error_message is None and not self.forfeited
+        return self.score > 0 and self.error_message is None and not self.surrendered
 
 
 @dataclass
@@ -178,9 +178,9 @@ class BenchmarkResult:
             "total": successful_calls + failed_calls,
         }
 
-    def total_forfeited_trials(self) -> int:
-        """Calculate total number of forfeited trials across all tasks"""
-        return sum(bool(trial.forfeited) for trial in self.all_results)
+    def total_surrendered_trials(self) -> int:
+        """Calculate total number of surrendered trials across all tasks"""
+        return sum(bool(trial.surrendered) for trial in self.all_results)
 
     def average_score(self) -> float:
         """Calculate average score across all results"""
@@ -343,9 +343,9 @@ class BenchmarkResult:
         )
         summary_table.add_row("Failed Tool Calls", str(tool_call_stats["failed"]))
 
-        # Add forfeiture statistics
-        forfeited_count = self.total_forfeited_trials()
-        summary_table.add_row("Forfeited Trials", str(forfeited_count))
+        # Add surrender statistics
+        surrendered_count = self.total_surrendered_trials()
+        summary_table.add_row("Surrendered Trials", str(surrendered_count))
 
         # Add token usage statistics
         total_tokens = self.total_token_usage()
@@ -397,7 +397,7 @@ class BenchmarkResult:
         task_table.add_column("Trial ID", style="yellow")
         task_table.add_column("Score", style="cyan")
         task_table.add_column("Success", style="white")
-        task_table.add_column("Forfeited", style="red")
+        task_table.add_column("Surrendered", style="red")
         task_table.add_column("Duration (s)", style="green")
         task_table.add_column("Tokens", style="green")
         task_table.add_column("Tool Duration (s)", style="blue")
@@ -422,7 +422,7 @@ class BenchmarkResult:
             "Overall",
             f"{self._calculate_task_average_score(task_id):.3f}",
             f"{task_success_rate:.3f}",
-            "-",  # No overall forfeited status
+            "-",  # No overall surrendered status
             duration_str,
             token_str,
             "-",  # No overall tool duration for task level
@@ -447,7 +447,7 @@ class BenchmarkResult:
                 trial.trial_id,
                 f"{trial.score:.3f}",
                 "✓" if trial.success else "✗",
-                "✓" if trial.forfeited else "✗",
+                "✓" if trial.surrendered else "✗",
                 duration_str,
                 token_str,
                 f"{trial_tool_duration:.3f}",  # Tool duration for this trial
@@ -570,7 +570,7 @@ class BenchmarkResult:
                         "total_tool_calls": tool_call_stats["total"],
                         "successful_tool_calls": tool_call_stats["successful"],
                         "failed_tool_calls": tool_call_stats["failed"],
-                        "forfeited_trials": self.total_forfeited_trials(),
+                        "surrendered_trials": self.total_surrendered_trials(),
                         "total_token_usage": total_tokens,
                         # Add duration metric
                         "total_tool_execution_duration": self.total_tool_execution_duration(),
@@ -623,7 +623,7 @@ class BenchmarkResult:
                             if trial.state and isinstance(trial.state, dict)
                             else None,
                             "success": trial.success,
-                            "forfeited": trial.forfeited,
+                            "surrendered": trial.surrendered,
                             "tool_execution_duration": self.get_trial_tool_execution_duration(
                                 trial
                             ),

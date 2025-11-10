@@ -36,8 +36,8 @@ class BaseAgent(ABC):
     - **extractor_prompt**: Used to extract and clean final answers from agent responses.
       This prompt takes the raw agent output and extracts just the answer portion, removing
       explanatory text, formatting artifacts, or multiple choice options.
-    - **forfeit_prompt**: Instructions for how the agent can forfeit from unsolvable tasks.
-      This prompt is only included when enable_forfeit=True in the run() method.
+    - **surrender_prompt**: Instructions for how the agent can surrender from unsolvable tasks.
+      This prompt is only included when enable_surrender=True in the run() method and will be added to the task prompt.
 
     ### How to Provide Custom Prompts:
 
@@ -99,7 +99,7 @@ class BaseAgent(ABC):
         user_prompt (str | Any, optional): The user prompt to use. Can be a string or prompt object
             that implements .fill() method. Different templates are used for each agent type. Must support Jinja templating.
         extractor_prompt (str | Any, optional): The extractor prompt for cleaning final answers. Can be a string or prompt object that implements .fill() method. Must support Jinja templating.
-        forfeit_prompt (str | Any, optional): The forfeit prompt with instructions for forfeiting. Can be a string or prompt object that implements .fill() method. Must support Jinja templating.
+        surrender_prompt (str | Any, optional): The surrender prompt with instructions for surrendering (When agent cannot solve a task, it can give up by following this instruction). Can be a string or prompt object that implements .fill() method. Must support Jinja templating.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use for managing templated prompts.
             If None, uses default store from package resources.
@@ -109,7 +109,7 @@ class BaseAgent(ABC):
             Defaults to None (each agent type has its own default).
         extractor_prompt_id (str, optional): The ID of the extractor prompt to use from the prompt store.
             Defaults to "9d37e4a0-26c5-438a-ba1b-a273388fcded".
-        forfeit_prompt_id (str, optional): The ID of the forfeit prompt to use from the prompt store.
+        surrender_prompt_id (str, optional): The ID of the surrender prompt to use from the prompt store.
             Defaults to None (each agent type has its own default).
         **kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
@@ -122,13 +122,13 @@ class BaseAgent(ABC):
         system_prompt: str | Any | None = None,
         user_prompt: str | Any | None = None,
         extractor_prompt: str | Any | None = None,
-        forfeit_prompt: str | Any | None = None,
+        surrender_prompt: str | Any | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
         system_prompt_id: str = "400fcecf-f5f2-464b-aff5-8a4377c9685c",
         user_prompt_id: str | None = None,
         extractor_prompt_id: str | None = "9d37e4a0-26c5-438a-ba1b-a273388fcded",
-        forfeit_prompt_id: str | None = None,
+        surrender_prompt_id: str | None = None,
         **kwargs,
     ):
         """Initialize the base agent with common parameters"""
@@ -165,12 +165,12 @@ class BaseAgent(ABC):
         else:
             self.extractor_prompt = extractor_prompt
 
-        if forfeit_prompt_id and forfeit_prompt is None:
-            self.forfeit_prompt = get_prompt(
-                self.store, forfeit_prompt, forfeit_prompt_id
+        if surrender_prompt_id and surrender_prompt is None:
+            self.surrender_prompt = get_prompt(
+                self.store, surrender_prompt, surrender_prompt_id
             )
         else:
-            self.forfeit_prompt = forfeit_prompt
+            self.surrender_prompt = surrender_prompt
 
     def get_llm_response(self, tools: list[dict[str, Any]] | None = None) -> Any:
         """Get response from the LLM using LiteLLM
@@ -228,7 +228,7 @@ class BaseAgent(ABC):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
-        enable_forfeit: bool = False,
+        enable_surrender: bool = False,
     ) -> str:
         """
         Run the agent to solve a task
@@ -241,7 +241,7 @@ class BaseAgent(ABC):
             history (list[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
-            enable_forfeit (bool, optional): Whether to enable the forfeit option. Defaults to False.
+            enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
 
         Returns:
             str: The final answer from the agent
@@ -257,7 +257,7 @@ class BaseAgent(ABC):
         examples: list[str] | None = None,
         verbose: bool = False,
         tool_verbosity: str = "brief",
-        enable_forfeit: bool = False,
+        enable_surrender: bool = False,
     ) -> tuple[str, dict[str, int]]:
         """Run the agent to solve a task
 
@@ -271,7 +271,7 @@ class BaseAgent(ABC):
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             verbose (bool, optional): Whether to save agent messages. Defaults to False.
             tool_verbosity (str, optional): The verbosity level for tool information. Defaults to "brief".
-            enable_forfeit (bool, optional): Whether to enable the forfeit option. Defaults to False.
+            enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
 
         Returns:
             str: The final answer from the agent
@@ -283,12 +283,12 @@ class BaseAgent(ABC):
 
         try:
             final_answer = self.run(
-                interface, task_id, history, task_prompt, examples, enable_forfeit
+                interface, task_id, history, task_prompt, examples, enable_surrender
             )
 
-            # Check if agent decided to forfeit
+            # Check if agent decided to surrender
             if final_answer == "GIVE UP":
-                logger.info(f"Agent forfeit from task {task_id}")
+                logger.info(f"Agent surrender from task {task_id}")
                 return "GIVE UP", self.get_total_token_usage()
 
             if verbose:

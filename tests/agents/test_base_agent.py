@@ -248,7 +248,7 @@ def test_run_agent_success(monkeypatch, concrete_agent, mock_benchmark_interface
         history=None,
         task_prompt=None,
         examples=None,
-        enable_forfeit=False,
+        enable_surrender=False,
     ):
         return "test_answer"
 
@@ -316,7 +316,7 @@ def test_run_agent_with_error_in_answer(
         history=None,
         task_prompt=None,
         examples=None,
-        enable_forfeit=False,
+        enable_surrender=False,
     ):
         return "Error: Something went wrong"
 
@@ -341,7 +341,7 @@ def test_run_agent_with_exception(
         history=None,
         task_prompt=None,
         examples=None,
-        enable_forfeit=False,
+        enable_surrender=False,
     ):
         raise Exception("Run failed")
 
@@ -405,7 +405,7 @@ def test_run_agent_extractor_error(
         history=None,
         task_prompt=None,
         examples=None,
-        enable_forfeit=False,
+        enable_surrender=False,
     ):
         return "test_answer"
 
@@ -528,7 +528,7 @@ def test_extractor_prompt_filling(
         history=None,
         task_prompt=None,
         examples=None,
-        enable_forfeit=False,
+        enable_surrender=False,
     ):
         return "test_answer"
 

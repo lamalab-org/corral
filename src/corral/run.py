@@ -60,7 +60,7 @@ def execute_single_trial(
     verbose: bool = False,
     tool_verbosity: str | None = None,
     configure_timeout: float | None = None,
-    enable_forfeit: bool = False,
+    enable_surrender: bool = False,
 ) -> TaskTrialResult:
     """Execute a single trial - pure function"""
     try:
@@ -72,26 +72,26 @@ def execute_single_trial(
             task_id,
             verbose=verbose,
             tool_verbosity=tool_verbosity or "brief",
-            enable_forfeit=enable_forfeit,
+            enable_surrender=enable_surrender,
         )
 
-        # Check if agent decided to forfeited
-        if answer == "GIVE UP":
+        # Check if agent decided to surrender
+        if answer == "SURRENDER":
             try:
-                result = interface.forfeit_task(task_id)
+                result = interface.surrender_task(task_id)
                 result.token_usage = token_usage
                 return result
-            except Exception as forfeiture_error:
+            except Exception as surrender_error:
                 return TaskTrialResult(
                     task_id=task_id,
                     trial_id=f"attempt_{trial_index + 1}",
                     score=0.0,
-                    state={"error": str(forfeiture_error), "attempt": trial_index + 1},
-                    tool_statistics={"error": str(forfeiture_error)},
+                    state={"error": str(surrender_error), "attempt": trial_index + 1},
+                    tool_statistics={"error": str(surrender_error)},
                     duration=None,
                     token_usage=token_usage,
-                    error_message=f"Forfeiture Error: {forfeiture_error}",
-                    forfeited=True,
+                    error_message=f"Surrender Error: {surrender_error}",
+                    surrendered=True,
                 )
 
         # Submit answer
@@ -205,7 +205,7 @@ class CorralRunner:
         checkpoint_dir: str = "./benchmark_checkpoints",
         checkpoint_name: str | None = None,
         logger: CorralWandbLogger | None = None,
-        enable_forfeit: bool = False,
+        enable_surrender: bool = False,
     ):
         self.interface = interface
         self.agent = agent
@@ -215,7 +215,7 @@ class CorralRunner:
             checkpoint_name or f"checkpoint_{agent.__class__.__name__}"
         )
         self.logger = logger
-        self.enable_forfeit = enable_forfeit
+        self.enable_surrender = enable_surrender
 
     def bench(
         self,
@@ -253,7 +253,7 @@ class CorralRunner:
                 verbose=verbose,
                 tool_verbosity=tool_verbosity,
                 configure_timeout=configure_timeout,
-                enable_forfeit=self.enable_forfeit,
+                enable_surrender=self.enable_surrender,
             )
 
         checkpoint_saver = partial(self._save_checkpoint, session_id)
@@ -268,7 +268,7 @@ class CorralRunner:
                 tool_verbosity=self.interface.current_verbosity,
                 task_ids=task_ids,
                 dependency_chain=self.interface.supports_dependency_chain(),
-                enable_forfeit=self.enable_forfeit,
+                enable_surrender=self.enable_surrender,
             )
             self.logger.start_logging(config)
 
