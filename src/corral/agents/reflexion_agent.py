@@ -177,7 +177,7 @@ class ReflexionAgent(BaseAgent):
         if reflexion_history:
             combined_history.extend(reflexion_history)
 
-        final_history = combined_history if combined_history else None
+        final_history = combined_history or None
 
         # Run the actor with enriched history
         try:
