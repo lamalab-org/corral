@@ -5,12 +5,45 @@ from fastapi import FastAPI, HTTPException, Query
 from loguru import logger
 
 from corral.backend.env import Environment
-from corral.backend.schema import ToolRequest
+from corral.backend.schema import ToolRequest, TrialCompletionResponse
 from corral.router.verbosity import (
     ToolVerbosity,
     VerbosityConfig,
     get_tools_guide_with_verbosity,
 )
+
+
+def _finalize_trial(
+    env: Environment, score: float, forfeited: bool = False
+) -> TrialCompletionResponse:
+    """
+    Finalize a trial by capturing state and resetting environment.
+
+    This centralizes the 3-step finalization process:
+    1. Capture completed trial data (before reset)
+    2. Reset environment state for next trial
+    3. Return structured response
+
+    Args:
+        env: The environment instance
+        score: Trial score
+        forfeited: Whether trial was forfeited
+
+    Returns:
+        TrialCompletionResponse with all trial completion data
+    """
+    # Get completed trial data before reset
+    completed_trial = env.get_completed_trial_data()
+
+    # Reset state for next trial
+    finished_trial_id = env.reset_state()
+
+    return TrialCompletionResponse(
+        score=score,
+        state=completed_trial["state"],
+        trial_id=finished_trial_id,
+        forfeited=forfeited,
+    )
 
 
 def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
@@ -162,50 +195,26 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         return environments[task_id].state
 
     @app.post("/tasks/{task_id}/submit")
-    def submit_answer(task_id: str, answer: dict):
+    def submit_answer(task_id: str, answer: dict) -> TrialCompletionResponse:
+        """Submit an answer and finalize the trial"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
-
-        # 1. Submit answer and score
         score = env.submit_answer(answer["answer"])
 
-        # 2. Get completed trial data (before any reset)
-        completed_trial = env.get_completed_trial_data()
-
-        # 3. Reset for next trial
-        finished_trial_id = env.reset_state()
-
-        return {
-            "score": score,
-            "state": completed_trial["state"],
-            "trial_id": finished_trial_id,
-        }
+        return _finalize_trial(env, score, forfeited=False)
 
     @app.post("/tasks/{task_id}/forfeit")
-    def forfeit_task(task_id: str):
+    def forfeit_task(task_id: str) -> TrialCompletionResponse:
         """Forfeit from a task without submitting an answer"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
-
-        # 1. Forfeit and get score (0 for now, can be decided to be something else later)
         score = env.forfeit()
 
-        # 2. Get completed trial data (before any reset)
-        completed_trial = env.get_completed_trial_data()
-
-        # 3. Reset for next trial
-        finished_trial_id = env.reset_state()
-
-        return {
-            "score": score,
-            "state": completed_trial["state"],
-            "trial_id": finished_trial_id,
-            "forfeited": True,
-        }
+        return _finalize_trial(env, score, forfeited=True)
 
     @app.get("/tasks/{task_id}/status")
     def get_task_status(task_id: str):

@@ -365,11 +365,10 @@ class Environment(ABC):
     def forfeit(self) -> float:
         """Forfeit from the current task without submitting an answer"""
         self.state.forfeited = True
-        self.state.score = 0.0
         self.state.is_attempted = True
         if self.state.end_time is None:
             self.state.end_time = datetime.now(tz=timezone.utc)
-        return 0.0
+        return 0.0 if self.state.score is None else self.state.score
 
     def get_completed_trial_data(self) -> dict:
         """Get all data for the completed trial"""

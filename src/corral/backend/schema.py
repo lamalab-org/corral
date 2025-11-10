@@ -47,3 +47,12 @@ class ForfeitRequest(BaseModel):
     """Request to forfeit from a task without submitting an answer"""
 
     # No parameters needed for forfeit
+
+
+class TrialCompletionResponse(BaseModel):
+    """Response when a trial is completed (via submission or forfeiture)"""
+
+    score: float
+    state: dict[str, Any]
+    trial_id: str
+    forfeited: bool = False

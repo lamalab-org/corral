@@ -3,9 +3,35 @@ from typing import Any
 import requests  # type: ignore[import-untyped]
 from loguru import logger
 
+from corral.backend.schema import TrialCompletionResponse
 from corral.report.results import TaskTrialResult
 from corral.router.verbosity import ToolVerbosity
 from corral.types import ToolResponse
+
+
+def _parse_trial_completion(task_id: str, response_data: dict) -> TaskTrialResult:
+    """
+    Convert TrialCompletionResponse JSON to TaskTrialResult.
+
+    This helper validates the server response using the Pydantic model and
+    converts it to the TaskTrialResult format used for reporting.
+
+    Args:
+        task_id: The task identifier
+        response_data: JSON response data from server
+
+    Returns:
+        TaskTrialResult with data from the completion response
+    """
+    completion = TrialCompletionResponse(**response_data)
+    return TaskTrialResult(
+        task_id=task_id,
+        trial_id=completion.trial_id,
+        score=completion.score,
+        state=completion.state,
+        tool_statistics=completion.state["tool_statistics"],
+        forfeited=completion.forfeited,
+    )
 
 
 class CorralRouter:
@@ -99,29 +125,14 @@ class CorralRouter:
             f"{self.base_url}/tasks/{task_id}/submit", json={"answer": answer}
         )
         response.raise_for_status()
-        data = response.json()
-        return TaskTrialResult(
-            task_id=task_id,
-            trial_id=data["trial_id"],
-            score=data["score"],
-            state=data["state"],
-            tool_statistics=data["state"]["tool_statistics"],
-        )
+        return _parse_trial_completion(task_id, response.json())
 
     def forfeit_task(self, task_id: str) -> TaskTrialResult:
         """Forfeit from a task without submitting an answer"""
         logger.info(f"Agent retiring from task {task_id}")
         response = requests.post(f"{self.base_url}/tasks/{task_id}/forfeit")
         response.raise_for_status()
-        data = response.json()
-        return TaskTrialResult(
-            task_id=task_id,
-            trial_id=data["trial_id"],
-            score=data["score"],
-            state=data["state"],
-            tool_statistics=data["state"]["tool_statistics"],
-            forfeited=data.get("forfeited", False),
-        )
+        return _parse_trial_completion(task_id, response.json())
 
     def get_task_status(self, task_id: str) -> dict[str, Any]:
         """Get current status of a task"""
