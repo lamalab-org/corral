@@ -3,24 +3,31 @@ from loguru import logger
 from retrosynthesis.config import get_db_config
 
 # Expected schema - tables and their required columns
+# This schema only includes columns that are actually used by the retrosynthesis tools
+# to avoid technical debt from schema changes that don't affect functionality.
+# Based on columns used in search_by_template() and search_reactions_by_criteria()
 EXPECTED_SCHEMA = {
     "reactions": [
+        # Primary key
         "reaction_id",
+        # Template identifiers and patterns (used in both query functions)
         "template_hash",
         "retro_smarts_template",
         "canonical_smarts_template",
         "mapped_rxn",
+        # SMILES strings (used in search_reactions_by_criteria)
         "product_smiles",
         "reactant_smiles",
+        # Metadata (used in search_reactions_by_criteria)
         "dataset",
         "source_row_id",
-        "staging_id",
+        "derive_version",
+        # RDKit molecule objects (used for substructure matching when reference_smiles provided)
         "product_qmol",
         "reactant_qmol",
+        # RDKit fingerprints (used for similarity calculations when reference_smiles provided)
         "product_pattern_fp",
         "reactant_pattern_fp",
-        "derive_version",
-        "created_at",
     ],
     "bonds": [
         "bond_id",
@@ -49,14 +56,6 @@ EXPECTED_SCHEMA = {
     "reaction_functional_groups_broken": [
         "reaction_id",
         "functional_group_id",
-    ],
-    "molecules": [
-        "molecule_id",
-        "name",
-        "smiles",
-        "mol",
-        "pattern_fp",
-        "created_at",
     ],
 }
 
