@@ -286,32 +286,34 @@ class BaseAgent(ABC):
             logger.error(f"Error running agent: {e}")
             return f"Error running agent: {e}", self.get_total_token_usage()
 
-        message = "The task is to:\n" + self.messages[0]["content"]
-        if self.messages[0]["role"] == "system":
-            message += "\n\n" + self.messages[1]["content"]
-        message += f"\n\nAnd the answer provided by the model\n\n{self.messages[-1]['content']}"
+        return final_answer, self.get_total_token_usage()
 
-        prompt = self.extractor_prompt.fill(
-            {
-                "answer": final_answer,
-                "message": message,
-            }
-        )
+        # message = "The task is to:\n" + self.messages[0]["content"]
+        # if self.messages[0]["role"] == "system":
+        #     message += "\n\n" + self.messages[1]["content"]
+        # message += f"\n\nAnd the answer provided by the model\n\n{self.messages[-1]['content']}"
 
-        try:
-            answer = llm_call(
-                model=self.model,
-                messages=[LiteLLMMessage(role="user", content=prompt)],
-                temperature=0.0,
-                api_endpoint=self.api_endpoint,
-                **self.kwargs,
-            )
+        # prompt = self.extractor_prompt.fill(
+        #     {
+        #         "answer": final_answer,
+        #         "message": message,
+        #     }
+        # )
 
-            return answer.content, self.get_total_token_usage()
+        # try:
+        #     answer = llm_call(
+        #         model=self.model,
+        #         messages=[LiteLLMMessage(role="user", content=prompt)],
+        #         temperature=0.0,
+        #         api_endpoint=self.api_endpoint,
+        #         **self.kwargs,
+        #     )
 
-        except Exception as e:
-            logger.error(f"Error extracting final answer: {e}")
-            return final_answer, self.get_total_token_usage()
+        #     return answer.content, self.get_total_token_usage()
+
+        # except Exception as e:
+        #     logger.error(f"Error extracting final answer: {e}")
+        #     return final_answer, self.get_total_token_usage()
 
     def get_total_token_usage(self) -> dict[str, int]:
         """Calculate total token usage across all LLM calls
