@@ -14,7 +14,7 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "gpt-4o",
+    model: str = "gpt-4o-2024-08-06",
     task_ids: list | None = None,
     temperature: float = 0.0,
     run_name: str = "corral_benchmark_run_ml_toolcalling",
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
-            model = "gpt-4o"
+            model = "gpt-4o-2024-08-06"
             run_name = f"gpt-4o-React-test_afm-{verbose}_verbosity"
             run_benchmark(model=model, run_name=run_name, verbose=verbose)
 

@@ -58,7 +58,7 @@ if __name__ == "__main__":
         try:
             model = "claude-3-5-sonnet-20241022"
             run_name = f"claude-3-5-sonnet-20241022_Tool_calling-test_afm-{verbose}_verbosity"
-            run_benchmark(model=model, run_name=run_name, verbose=verbose)
+            run_benchmark(model=model, run_name=run_name, verbose=verbose, temperature=0)
 
         except Exception as e:
             logger.error(f"Benchmark failed: {e!s}")

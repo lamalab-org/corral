@@ -22,11 +22,7 @@ from pymoo.algorithms.soo.nonconvex.ga import GA
 from pymoo.optimize import minimize
 from pymoo.termination import get_termination
 
-from aila_image_process import (
-    get_subscan_parameters,
-    image_process,
-    patches,
-)
+from aila_image_process import *
 from corral.backend.tool import tool
 from tool_utils import Document_Retriever, MyProblem
 
@@ -450,9 +446,6 @@ def Code_Executor(code: str) -> int:
                 zcontrol.PGain = 100
                 zcontrol.IGain = 6000
                 zcontrol.DGain = 10
-
-                scan.StartFrameUp()
-
                 del spm)`
     ]
     [/SYNTACTICAL]
