@@ -113,20 +113,19 @@ from modal import App, Image
 
 app = App("my-tools")
 
-@modal_tool(
-    app=app,
-    image=Image.debian_slim().pip_install("rdkit"),
-    memory=1024
-)
+
+@modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
 def molecular_analysis(smiles: str) -> dict:
     """Analyze molecular structure in the cloud."""
     from rdkit import Chem
     from rdkit.Chem import Descriptors
+
     mol = Chem.MolFromSmiles(smiles)
     return {
         "molecular_weight": Descriptors.MolWt(mol),
-        "logp": Descriptors.MolLogP(mol)
+        "logp": Descriptors.MolLogP(mol),
     }
+
 
 # Tool is automatically registered
 tool = MODAL_TOOL_REGISTRY["molecular_analysis"]

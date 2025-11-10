@@ -374,12 +374,15 @@ from modal import App, Image
 
 app = App("my-corral-tools")
 
+
 @modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
 def complex_calculation(data: str) -> str:
     """Run computationally intensive task in the cloud."""
     from rdkit import Chem
+
     mol = Chem.MolFromSmiles(data)
     return f"Molecule has {mol.GetNumAtoms()} atoms"
+
 
 # Access the tool
 tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]

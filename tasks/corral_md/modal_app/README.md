@@ -31,10 +31,12 @@ from modal import App, Image
 
 app = App("my-app-name")
 
+
 @app.function(image=Image.debian_slim().pip_install("numpy"))
 def compute_something(data: str) -> float:
     """A function that runs on Modal's servers."""
     import numpy as np
+
     return np.sum([1, 2, 3, 4, 5])
 ```
 
@@ -48,17 +50,16 @@ from modal import App, Image
 
 app = App("my-tools")
 
-@modal_tool(
-    app=app,
-    image=Image.debian_slim().pip_install("rdkit"),
-    memory=1024
-)
+
+@modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
 def calculate_mol_weight(smiles: str) -> float:
     """Calculate molecular weight in the cloud."""
     from rdkit import Chem
     from rdkit.Chem import Descriptors
+
     mol = Chem.MolFromSmiles(smiles)
     return Descriptors.MolWt(mol)
+
 
 # Tool is automatically registered
 tool = MODAL_TOOL_REGISTRY["calculate_mol_weight"]
@@ -75,7 +76,9 @@ import modal
 
 # Look up the deployed function
 # Note: Both from_name() and lookup() work, this codebase uses from_name()
-calculate_lattice_energy = modal.Function.from_name("simagent", "calculate_lattice_energy")
+calculate_lattice_energy = modal.Function.from_name(
+    "simagent", "calculate_lattice_energy"
+)
 
 # Call the function remotely
 energy = calculate_lattice_energy.remote("structure.cif")
