@@ -114,13 +114,10 @@ class ReflectionMemory:
         if not self.reflections:
             return ""
 
-        formatted_reflections = []
-        for _i, reflection in enumerate(self.reflections, 1):
-            formatted_reflections.append(
-                f"Attempt {reflection.trial_index + 1} (Score: {reflection.score:.2f}):\n"
-                f"{reflection.reflection_text}"
-            )
-
+        formatted_reflections = [
+            f"Attempt {reflection.trial_index + 1} (Score: {reflection.score:.2f}):\n{reflection.reflection_text}"
+            for _i, reflection in enumerate(self.reflections, 1)
+        ]
         return "\n\n".join(formatted_reflections)
 
     def to_dict(self) -> dict[str, Any]:
