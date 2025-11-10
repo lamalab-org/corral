@@ -7,6 +7,7 @@ from chemprice import PriceCollector
 from loguru import logger
 from psycopg2.extras import RealDictCursor
 from rdkit import Chem
+from retrosynthesis.config import get_db_config
 from retrosynthesis.constants import FG_PATTERNS
 from rxnutils.chem.reaction import ChemicalReaction
 
@@ -15,14 +16,6 @@ HEADERS = {
     "Accept-Encoding": "gzip, deflate, br, zstd",
     "Accept-Language": "en,es-ES;q=0.9,es;q=0.8",
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-}
-
-PRODUCTION_DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "reactions_production_db",
-    "user": "postgres",
-    "password": "postgres",
 }
 
 if (
@@ -41,7 +34,7 @@ pc.setMCuleApiKey(os.environ.get("MCULE_API_KEY", ""))
 
 def get_production_connection():
     """Connect to Phase B production database"""
-    conn = psycopg2.connect(**PRODUCTION_DB_CONFIG)
+    conn = psycopg2.connect(**get_db_config())
     conn.set_client_encoding("UTF8")
     return conn
 

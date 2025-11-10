@@ -1,14 +1,6 @@
 import psycopg2
 from loguru import logger
-
-# Database configuration - should match the production database
-PRODUCTION_DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "reactions_production_db",
-    "user": "postgres",
-    "password": "postgres",
-}
+from retrosynthesis.config import get_db_config
 
 # Expected schema - tables and their required columns
 EXPECTED_SCHEMA = {
@@ -85,16 +77,19 @@ def check_database():
     """
     conn = None
     try:
+        # Get database configuration
+        db_config = get_db_config()
+
         # Check 1: Database connectivity
         logger.info("Checking database connectivity...")
         try:
-            conn = psycopg2.connect(**PRODUCTION_DB_CONFIG)
+            conn = psycopg2.connect(**db_config)
             conn.set_client_encoding("UTF8")
             logger.info(
-                f"✓ Successfully connected to database '{PRODUCTION_DB_CONFIG['database']}'"
+                f"✓ Successfully connected to database '{db_config['database']}'"
             )
         except psycopg2.OperationalError as e:
-            error_msg = f"Failed to connect to database '{PRODUCTION_DB_CONFIG['database']}': {e}"
+            error_msg = f"Failed to connect to database '{db_config['database']}': {e}"
             logger.error(f"✗ {error_msg}")
             raise ConnectionError(error_msg) from e
 
