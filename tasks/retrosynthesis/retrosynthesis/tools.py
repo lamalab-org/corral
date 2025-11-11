@@ -16,6 +16,7 @@ from retrosynthesis.retrosynthesis_utils import (
     search_by_template,
     search_reactions_by_criteria,
     species_match,
+    validate_molecule,
 )
 from retrosynthesis.types import FunctionalGroup
 from rxnmapper import RXNMapper
@@ -131,6 +132,11 @@ def search_template_catalog_by_criteria(
             [ERROR_DETAILS] This occurs if the user provides a string or other non-list type for any of the parameters that expect a list of strings. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Ensure that all parameters expecting lists are provided with list types, even if they contain only a single string. [/ERROR_RECOVERY]
 
+        ValueError:
+            [ERROR_WHEN] Raised when the provided SMILES string is invalid. [/ERROR_WHEN]
+            [ERROR_DETAILS] This occurs if the SMILES string cannot be parsed into a valid molecular structure. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Check the SMILES string for correctness and try again. [/ERROR_RECOVERY]
+
         Exception:
             [ERROR_WHEN] Raised for any unexpected errors during the search process. [/ERROR_WHEN]
             [ERROR_DETAILS] This can occur due to various reasons, such as issues with the retrosynthetic template database or internal processing errors. [/ERROR_DETAILS]
@@ -165,6 +171,10 @@ def search_template_catalog_by_criteria(
         raise ValueError(
             "At least one of the criteria parameters must be provided as a list of strings."
         )
+
+    mol = Chem.MolFromSmiles(molecule_smiles)
+    if mol is None:
+        raise ValueError(f"Invalid SMILES string: {molecule_smiles}")
 
     return search_reactions_by_criteria(
         functional_groups_broken=functional_groups_broken,
@@ -521,79 +531,6 @@ def verify_route(route: str) -> tuple[bool, str]:
     - Error messages may not always pinpoint the exact location of the error in deeply nested structures.
     [/LIMITATIONS]
     """
-
-    def validate_molecule(mol: dict[str, Any], path: str = "root") -> tuple[bool, str]:
-        """Validate a molecule node"""
-        # Check required fields
-        if not isinstance(mol, dict):
-            return False, f"Node at {path} is not a dictionary"
-
-        if mol.get("type") != "mol":
-            actual_type = mol.get("type", "missing")
-            return False, f"Molecule at {path} has type '{actual_type}', expected 'mol'"
-
-        if "smiles" not in mol:
-            return False, f"Molecule at {path} is missing required 'smiles' field"
-
-        if not isinstance(mol["smiles"], str):
-            return False, f"Molecule at {path} has non-string 'smiles' field"
-
-        # SMILES should not be empty
-        if not mol["smiles"].strip():
-            return False, f"Molecule at {path} has empty SMILES string"
-
-        # Check optional children
-        if "children" in mol:
-            if not isinstance(mol["children"], list):
-                return False, f"Molecule at {path} has non-list 'children' field"
-            # Children should contain exactly one reaction for synthesis routes
-            if len(mol["children"]) != 1:
-                return (
-                    False,
-                    f"Molecule at {path} has {len(mol['children'])} children, expected exactly 1 reaction",
-                )
-            is_valid, error = validate_reaction(
-                mol["children"][0], f"{path}.children[0]"
-            )
-            if not is_valid:
-                return False, error
-
-        return True, ""
-
-    def validate_reaction(
-        reaction: dict[str, Any], path: str = "reaction"
-    ) -> tuple[bool, str]:
-        """Validate a reaction node"""
-        if not isinstance(reaction, dict):
-            return False, f"Reaction at {path} is not a dictionary"
-
-        if reaction.get("type") != "reaction":
-            actual_type = reaction.get("type", "missing")
-            return (
-                False,
-                f"Reaction at {path} has type '{actual_type}', expected 'reaction'",
-            )
-
-        if "template_id" not in reaction:
-            return False, f"Reaction at {path} is missing required 'template_id' field"
-
-        if not isinstance(reaction["template_id"], int):
-            return False, f"Reaction at {path} has non-integer 'template_id' field"
-
-        if "children" not in reaction:
-            return False, f"Reaction at {path} is missing required 'children' field"
-
-        if not isinstance(reaction["children"], list):
-            return False, f"Reaction at {path} has non-list 'children' field"
-
-        # All children must be valid molecules
-        for i, child in enumerate(reaction["children"]):
-            is_valid, error = validate_molecule(child, f"{path}.children[{i}]")
-            if not is_valid:
-                return False, error
-
-        return True, ""
-
     try:
         # Parse JSON string
         data = json.loads(route)

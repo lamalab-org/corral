@@ -16,6 +16,7 @@ import sys
 from collections import defaultdict
 from enum import Enum
 from multiprocessing import Pool, cpu_count
+from pathlib import Path
 from typing import Any
 
 import psycopg2
@@ -27,23 +28,9 @@ from psycopg2.extras import RealDictCursor, execute_batch, execute_values
 from rxnutils.chem.reaction import ChemicalReaction
 from tqdm import tqdm
 
-# Phase A (source) database
-STAGING_DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "reactions_raw_db",
-    "user": "postgres",
-    "password": "postgres",
-}
-
-# Phase B (target) database
-PRODUCTION_DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "reactions_production_db",
-    "user": "postgres",
-    "password": "postgres",
-}
+# Add parent directory to path to import config
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from retrosynthesis.config import get_db_config, get_staging_db_config
 
 # Processing parameters
 BATCH_SIZE = 10000  # Rows per batch
@@ -159,27 +146,30 @@ class ErrorTracker:
 
 def get_staging_connection():
     """Connect to Phase A staging database"""
-    conn = psycopg2.connect(**STAGING_DB_CONFIG)
+    conn = psycopg2.connect(**get_staging_db_config())
     conn.set_client_encoding("UTF8")
     return conn
 
 
 def get_production_connection():
     """Connect to Phase B production database"""
-    conn = psycopg2.connect(**PRODUCTION_DB_CONFIG)
+    conn = psycopg2.connect(**get_db_config())
     conn.set_client_encoding("UTF8")
     return conn
 
 
 def create_production_database():
     """Create the production database if it doesn't exist"""
+    # Get database configuration
+    db_config = get_db_config()
+
     # Connect to default postgres database to create new DB
     conn = psycopg2.connect(
-        host=PRODUCTION_DB_CONFIG["host"],
-        port=PRODUCTION_DB_CONFIG["port"],
+        host=db_config["host"],
+        port=db_config["port"],
         database="postgres",
-        user=PRODUCTION_DB_CONFIG["user"],
-        password=PRODUCTION_DB_CONFIG["password"],
+        user=db_config["user"],
+        password=db_config["password"],
     )
     conn.set_client_encoding("UTF8")
     conn.autocommit = True
@@ -189,16 +179,16 @@ def create_production_database():
         # Check if database exists
         cursor.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",
-            (PRODUCTION_DB_CONFIG["database"],),
+            (db_config["database"],),
         )
         exists = cursor.fetchone()
 
         if not exists:
-            logger.info(f"Creating database {PRODUCTION_DB_CONFIG['database']}...")
-            cursor.execute(f"CREATE DATABASE {PRODUCTION_DB_CONFIG['database']}")
+            logger.info(f"Creating database {db_config['database']}...")
+            cursor.execute(f"CREATE DATABASE {db_config['database']}")
             logger.info("Database created successfully")
         else:
-            logger.info(f"Database {PRODUCTION_DB_CONFIG['database']} already exists")
+            logger.info(f"Database {db_config['database']} already exists")
 
     finally:
         cursor.close()

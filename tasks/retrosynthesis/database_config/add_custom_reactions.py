@@ -17,6 +17,8 @@ The script will prompt you to enter reaction SMILES, or you can modify
 the CUSTOM_REACTIONS list in the script directly.
 """
 
+import sys
+from pathlib import Path
 from typing import Any
 
 import psycopg2
@@ -27,14 +29,9 @@ from psycopg2.extras import RealDictCursor
 # Import chemistry tools
 from rxnutils.chem.reaction import ChemicalReaction
 
-# Production database configuration
-PRODUCTION_DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "reactions_production_db",
-    "user": "postgres",
-    "password": "postgres",
-}
+# Add parent directory to path to import config
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from retrosynthesis.config import get_db_config
 
 # Derive version for these custom additions
 DERIVE_VERSION = "custom_v1"
@@ -75,7 +72,7 @@ CUSTOM_REACTIONS = [
 
 def get_production_connection():
     """Connect to production database"""
-    conn = psycopg2.connect(**PRODUCTION_DB_CONFIG)
+    conn = psycopg2.connect(**get_db_config())
     conn.set_client_encoding("UTF8")
     return conn
 
