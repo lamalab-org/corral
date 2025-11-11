@@ -105,23 +105,7 @@ class Tool:
                       Import from corral.router.verbosity.ToolVerbosity
 
         Returns:
-            Dictionary containing MCP tool definition:
-            {
-                "name": str,
-                "description": str,
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {...},
-                    "required": [...]
-                }
-            }
-
-        Example:
-            >>> tool = my_tool_instance
-            >>> mcp_def = tool.for_mcp()
-            >>> # Use with MCP server
-            >>> from mcp.types import Tool as MCPTool
-            >>> mcp_tool = MCPTool(**mcp_def)
+            Dictionary containing MCP tool definition
         """
         # Import here to avoid circular import issues
         from corral.mcp.schema_converter import tool_to_json_schema

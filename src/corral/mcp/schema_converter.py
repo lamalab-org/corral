@@ -12,6 +12,35 @@ from corral.backend.tool import Tool
 from corral.router.verbosity import ToolVerbosity, VerbosityConfig
 
 
+def _extract_inner_type(type_str: str, outer_type: str) -> str:
+    """
+    Extract the inner type from a generic type annotation.
+
+    Args:
+        type_str: The full type string (e.g., "list[str]", "dict[str, int]")
+        outer_type: The outer type to match (e.g., "list", "dict")
+
+    Returns:
+        The inner type string (e.g., "str", "str, int")
+    """
+    if not type_str.startswith(f"{outer_type}["):
+        return ""
+
+    # Find matching closing bracket
+    bracket_count = 0
+    start_idx = len(outer_type) + 1
+
+    for i in range(start_idx, len(type_str)):
+        if type_str[i] == "[":
+            bracket_count += 1
+        elif type_str[i] == "]":
+            if bracket_count == 0:
+                return type_str[start_idx:i]
+            bracket_count -= 1
+
+    return type_str[start_idx:-1] if type_str.endswith("]") else ""
+
+
 def _python_type_to_json_schema(
     python_type: str, required: bool = True
 ) -> dict[str, Any]:
@@ -19,7 +48,7 @@ def _python_type_to_json_schema(
     Convert a Python type string to JSON Schema type specification.
 
     Args:
-        python_type: String representation of the Python type (e.g., "str", "int", "list[str]")
+        python_type: String representation of the Python type (e.g., "str", "int", "list[str]", "list[list[int]]")
         required: Whether the field is required
 
     Returns:
@@ -30,21 +59,61 @@ def _python_type_to_json_schema(
     if is_optional:
         python_type = python_type.replace("| None", "").replace("|None", "").strip()
 
-    # Handle list types
+    # Handle list types (including nested lists)
     if python_type.startswith("list["):
-        # Extract inner type (e.g., "list[str]" -> "str")
-        inner_type = python_type[5:-1].strip()
+        inner_type = _extract_inner_type(python_type, "list").strip()
 
         # Handle list of unions (e.g., "list[str | int]")
-        if "|" in inner_type:
+        if "|" in inner_type and not inner_type.startswith(("list[", "dict[")):
             inner_types = [t.strip() for t in inner_type.split("|")]
             items_schema = {"type": [_map_simple_type(t) for t in inner_types]}
+        # Handle nested lists or dicts (e.g., "list[list[str]]", "list[dict[str, int]]")
+        elif inner_type.startswith(("list[", "dict[")):
+            items_schema = _python_type_to_json_schema(inner_type, required=True)
         else:
             items_schema = {"type": _map_simple_type(inner_type)}
 
         schema = {"type": "array", "items": items_schema}
+    elif python_type.startswith("dict["):
+        # Extract key and value types from dict[K, V]
+        inner_type = _extract_inner_type(python_type, "dict").strip()
+
+        # For dict with type parameters, we still use object type in JSON Schema
+        # but we could add additionalProperties if needed
+        schema = {"type": "object"}
+
+        # If there are type parameters, add additionalProperties
+        if inner_type:
+            # Split by comma, handling nested types
+            parts = []
+            current = ""
+            bracket_count = 0
+            for char in inner_type:
+                if char == "," and bracket_count == 0:
+                    parts.append(current.strip())
+                    current = ""
+                else:
+                    if char == "[":
+                        bracket_count += 1
+                    elif char == "]":
+                        bracket_count -= 1
+                    current += char
+            if current:
+                parts.append(current.strip())
+
+            # If we have a value type (second parameter), add additionalProperties
+            if len(parts) >= 2:
+                value_type = parts[1]
+                if value_type.startswith(("list[", "dict[")):
+                    schema["additionalProperties"] = _python_type_to_json_schema(
+                        value_type, required=True
+                    )
+                else:
+                    schema["additionalProperties"] = {
+                        "type": _map_simple_type(value_type)
+                    }
     elif python_type.startswith("dict"):
-        # Handle dict types
+        # Handle simple dict without type parameters
         schema = {"type": "object"}
     else:
         # Simple types
