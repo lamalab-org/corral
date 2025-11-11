@@ -143,6 +143,9 @@ function addMarkerFromDropdown(marker) {
     if (!nodeAnnotations[nodeId].markers.includes(marker)) {
         nodeAnnotations[nodeId].markers.push(marker);
         updateMarkersDisplay(nodeId);
+
+        // Refresh node colors to reflect which nodes can now be annotated
+        updateNodeAnnotatability();
     }
 }
 
@@ -170,6 +173,9 @@ document.addEventListener('click', function(e) {
         }
 
         updateMarkersDisplay(nodeId);
+
+        // Refresh node colors to reflect which nodes can now be annotated
+        updateNodeAnnotatability();
     }
 });
 
@@ -195,6 +201,9 @@ document.getElementById('notesTextarea').addEventListener('input', function() {
 
     // Save notes
     nodeAnnotations[nodeId].notes = this.value;
+
+    // Refresh node colors to reflect which nodes can now be annotated
+    updateNodeAnnotatability();
 });
 
 function updateMarkersDisplay(nodeId) {
@@ -235,6 +244,9 @@ function removeMarker(nodeId, marker) {
     if (index > -1) {
         nodeAnnotations[nodeId].markers.splice(index, 1);
         updateMarkersDisplay(nodeId);
+
+        // Refresh node colors to reflect which nodes can now be annotated
+        updateNodeAnnotatability();
     }
 }
 
@@ -279,7 +291,71 @@ function isNodeAnnotatable(node) {
         }
     }
 
+    // Check if all previous annotatable nodes have been labeled
+    if (!allPreviousNodesLabeled(node)) {
+        return false;
+    }
+
     return true;
+}
+
+function getAnnotationDisabledReason(node) {
+    // Provide specific reason why a node cannot be annotated
+    if (node.type === 'system') {
+        return 'System nodes cannot be annotated.';
+    }
+
+    if (node.type === 'tool') {
+        return 'Tool nodes cannot be annotated.';
+    }
+
+    if (node.type === 'user') {
+        const firstUserNode = currentNodes.find(n => n.type === 'user');
+        if (firstUserNode && firstUserNode.id === node.id) {
+            return 'The first user node cannot be annotated.';
+        }
+    }
+
+    if (!allPreviousNodesLabeled(node)) {
+        return 'Please label all previous annotatable nodes first before labeling this one.';
+    }
+
+    return 'This node cannot be annotated.';
+}
+
+function allPreviousNodesLabeled(node) {
+    // Find the index of the current node
+    const nodeIndex = currentNodes.findIndex(n => n.id === node.id);
+    if (nodeIndex === -1) return true;
+
+    // Check all previous nodes
+    for (let i = 0; i < nodeIndex; i++) {
+        const prevNode = currentNodes[i];
+
+        // Skip non-annotatable node types (system, tool, first user)
+        if (prevNode.type === 'system' || prevNode.type === 'tool') {
+            continue;
+        }
+
+        // Check if this is the first user node (which is not annotatable)
+        if (prevNode.type === 'user') {
+            const firstUserNode = currentNodes.find(n => n.type === 'user');
+            if (firstUserNode && firstUserNode.id === prevNode.id) {
+                continue;
+            }
+        }
+
+        // This is an annotatable node - check if it has been labeled
+        const hasAnnotations = nodeAnnotations[prevNode.id] &&
+                              (nodeAnnotations[prevNode.id].markers.length > 0 ||
+                               nodeAnnotations[prevNode.id].notes.trim().length > 0);
+
+        if (!hasAnnotations) {
+            return false; // Found an unlabeled previous annotatable node
+        }
+    }
+
+    return true; // All previous annotatable nodes are labeled
 }
 
 // Node navigation button handlers
@@ -790,7 +866,25 @@ function drawGraph(nodes, links) {
     node.append('circle')
         .attr('r', 20)
         .attr('fill', d => getNodeColor(d.type))
-        .attr('stroke', '#333');
+        .attr('stroke', '#333')
+        .attr('opacity', d => {
+            // Dim nodes that cannot be annotated yet
+            if (d.type === 'system' || d.type === 'tool') {
+                return 1.0; // Keep system and tool nodes at full opacity
+            }
+            return isNodeAnnotatable(d) ? 1.0 : 0.4;
+        })
+        .attr('stroke-dasharray', d => {
+            // Add dashed border for nodes that need previous nodes to be labeled
+            if (d.type === 'system' || d.type === 'tool') {
+                return null;
+            }
+            // Check if this would be annotatable if all previous nodes were labeled
+            const wouldBeAnnotatable = d.type !== 'system' &&
+                                      d.type !== 'tool' &&
+                                      !(d.type === 'user' && currentNodes.find(n => n.type === 'user')?.id === d.id);
+            return (!isNodeAnnotatable(d) && wouldBeAnnotatable) ? '5,5' : null;
+        });
 
     node.append('text')
         .attr('dy', 35)
@@ -829,6 +923,31 @@ function getNodeLabel(node) {
     return node.type;
 }
 
+function updateNodeAnnotatability() {
+    // Update the visual appearance of all nodes based on their annotatable state
+    if (!svg) return;
+
+    d3.selectAll('.node circle')
+        .attr('opacity', d => {
+            // Dim nodes that cannot be annotated yet
+            if (d.type === 'system' || d.type === 'tool') {
+                return 1.0; // Keep system and tool nodes at full opacity
+            }
+            return isNodeAnnotatable(d) ? 1.0 : 0.4;
+        })
+        .attr('stroke-dasharray', d => {
+            // Add dashed border for nodes that need previous nodes to be labeled
+            if (d.type === 'system' || d.type === 'tool') {
+                return null;
+            }
+            // Check if this would be annotatable if all previous nodes were labeled
+            const wouldBeAnnotatable = d.type !== 'system' &&
+                                      d.type !== 'tool' &&
+                                      !(d.type === 'user' && currentNodes.find(n => n.type === 'user')?.id === d.id);
+            return (!isNodeAnnotatable(d) && wouldBeAnnotatable) ? '5,5' : null;
+        });
+}
+
 function showDetails(event, d) {
     const panel = document.getElementById('detailsPanel');
     const content = document.getElementById('detailsContent');
@@ -861,7 +980,12 @@ function showDetails(event, d) {
     // Show/hide disabled message
     const disabledMsg = document.getElementById('annotationDisabledMsg');
     if (disabledMsg) {
-        disabledMsg.style.display = annotatable ? 'none' : 'block';
+        if (annotatable) {
+            disabledMsg.style.display = 'none';
+        } else {
+            disabledMsg.style.display = 'block';
+            disabledMsg.textContent = getAnnotationDisabledReason(d);
+        }
     }
 
     // Load annotations for this node (or clear if not annotatable)
