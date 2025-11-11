@@ -16,6 +16,15 @@ let nodeAnnotations = {}; // Current file's annotations
 // Storage for trace-level comments per file
 let allFileTraceComments = {}; // Format: { fileName: 'trace comment text' }
 
+// Cache configuration
+const CACHE_VERSION = '1.0'; // Increment this to invalidate old caches
+const CACHE_KEY = 'trace_annotator_cache_v1'; // Single cache key for all sessions
+
+// Check for cached session on startup and show notification
+window.addEventListener('DOMContentLoaded', function() {
+    checkForCachedSession();
+});
+
 // Color scheme
 const colors = {
     system: '#6c757d',
@@ -52,6 +61,9 @@ document.getElementById('folderInput').addEventListener('change', function(e) {
     // Show file selector
     document.getElementById('fileSelectorGroup').style.display = 'flex';
     document.getElementById('totalFiles').textContent = files.length;
+
+    // Try to load cached data for these files
+    loadCachedData();
 
     // Load first file
     loadFileByIndex(0);
@@ -112,6 +124,29 @@ document.getElementById('helpToggleBtn').addEventListener('click', function() {
     }
 });
 
+// Clear Cache button handler
+document.getElementById('clearCacheBtn').addEventListener('click', function() {
+    if (confirm('Are you sure you want to clear all cached annotations? This cannot be undone.')) {
+        clearCachedData();
+
+        // Reset current annotations
+        allFileAnnotations = {};
+        allFileNodes = {};
+        allFileTraceComments = {};
+        nodeAnnotations = {};
+
+        // Clear UI
+        document.getElementById('traceCommentsTextarea').value = '';
+        document.getElementById('notesTextarea').value = '';
+        document.getElementById('selectedMarkers').innerHTML = '';
+
+        // Reload current file to reset visualization
+        if (allFiles.length > 0) {
+            loadFileByIndex(currentFileIndex);
+        }
+    }
+});
+
 // Marker dropdown handlers
 document.getElementById('neutralMarkerSelect').addEventListener('change', function(e) {
     if (selectedNodeIndex === -1 || this.disabled || !e.target.value) return;
@@ -146,8 +181,46 @@ function addMarkerFromDropdown(marker) {
 
         // Refresh node colors to reflect which nodes can now be annotated
         updateNodeAnnotatability();
+
+        // Auto-save annotations to cache
+        autoSaveAnnotations();
     }
 }
+
+// Annotator info change handlers - reload cache when identifiers are entered
+document.getElementById('annotatorName').addEventListener('blur', function() {
+    if (this.value.trim() && document.getElementById('mongodbKey').value.trim()) {
+        loadCachedData();
+    }
+});
+
+document.getElementById('mongodbKey').addEventListener('blur', function() {
+    if (this.value.trim() && document.getElementById('annotatorName').value.trim()) {
+        loadCachedData();
+    }
+});
+
+// Clear cache button handler
+document.getElementById('clearCacheBtn').addEventListener('click', function() {
+    if (confirm('Are you sure you want to clear all cached annotations? This action cannot be undone.')) {
+        clearCachedData();
+
+        // Reset current session data
+        allFileAnnotations = {};
+        allFileTraceComments = {};
+        nodeAnnotations = {};
+
+        // Clear UI
+        document.getElementById('traceCommentsTextarea').value = '';
+        document.getElementById('notesTextarea').value = '';
+        document.getElementById('selectedMarkers').innerHTML = '';
+
+        // Reload current file to refresh display
+        if (allFiles.length > 0) {
+            loadFileByIndex(currentFileIndex);
+        }
+    }
+});
 
 // Marker button handlers - Set up event delegation for marker buttons (keeping for backwards compatibility)
 document.addEventListener('click', function(e) {
@@ -176,6 +249,9 @@ document.addEventListener('click', function(e) {
 
         // Refresh node colors to reflect which nodes can now be annotated
         updateNodeAnnotatability();
+
+        // Auto-save annotations to cache
+        autoSaveAnnotations();
     }
 });
 
@@ -185,6 +261,9 @@ document.getElementById('traceCommentsTextarea').addEventListener('input', funct
     if (allFiles.length > 0 && allFiles[currentFileIndex]) {
         const currentFileName = allFiles[currentFileIndex].name;
         allFileTraceComments[currentFileName] = this.value;
+
+        // Auto-save annotations to cache
+        autoSaveAnnotations();
     }
 });
 
@@ -204,6 +283,9 @@ document.getElementById('notesTextarea').addEventListener('input', function() {
 
     // Refresh node colors to reflect which nodes can now be annotated
     updateNodeAnnotatability();
+
+    // Auto-save annotations to cache
+    autoSaveAnnotations();
 });
 
 function updateMarkersDisplay(nodeId) {
@@ -432,6 +514,9 @@ function loadFileByIndex(index) {
         // Save trace comments for current file
         const traceCommentsTextarea = document.getElementById('traceCommentsTextarea');
         allFileTraceComments[currentFileName] = traceCommentsTextarea.value;
+
+        // Auto-save to cache when switching files
+        autoSaveAnnotations();
     }
 
     currentFileIndex = index;
@@ -1461,6 +1546,9 @@ document.getElementById('submitBtn').addEventListener('click', async function() 
 
             // Log successful submission
             console.log('Submission successful:', result);
+
+            // Clear cache after successful submission
+            clearCachedData();
         } else {
             // API returned an error
             let errorMessage = '❌ Submission Failed\n\n';
@@ -1484,3 +1572,287 @@ document.getElementById('submitBtn').addEventListener('click', async function() 
         submitBtn.disabled = false;
     }
 });
+
+// ============================================================================
+// Cache Management Functions
+// ============================================================================
+
+/**
+ * Generate cache key - now simplified to a single key for all users
+ */
+function getCacheKey() {
+    return CACHE_KEY;
+}
+
+/**
+ * Save current annotations to localStorage
+ * Automatically called when switching files or making annotations
+ */
+function saveCachedData() {
+    const cacheKey = getCacheKey();
+
+    try {
+        const cacheData = {
+            version: CACHE_VERSION,
+            timestamp: Date.now(),
+            annotations: allFileAnnotations,
+            nodes: allFileNodes,
+            traceComments: allFileTraceComments,
+            currentFileIndex: currentFileIndex,
+            fileNames: allFiles.map(f => f.name)
+        };
+
+        localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+        console.log(`✓ Annotations cached successfully`);
+    } catch (error) {
+        console.warn('Failed to cache annotations:', error);
+        // localStorage quota exceeded or unavailable - fail silently
+    }
+}
+
+/**
+ * Load cached annotations from localStorage
+ * Called on page load and when files are loaded
+ */
+function loadCachedData() {
+    const cacheKey = getCacheKey();
+
+    try {
+        const cached = localStorage.getItem(cacheKey);
+        if (!cached) {
+            console.log('ℹ No cached data found');
+            return false;
+        }
+
+        const cacheData = JSON.parse(cached);
+
+        // Validate cache version
+        if (cacheData.version !== CACHE_VERSION) {
+            console.log('Cache version mismatch, ignoring cached data');
+            localStorage.removeItem(cacheKey);
+            return false;
+        }
+
+        // Only load if we have files loaded and they match the cached file names
+        if (allFiles.length > 0) {
+            const currentFileNames = allFiles.map(f => f.name);
+            const cachedFileNames = cacheData.fileNames || [];
+
+            console.log(`Checking cache: current=${currentFileNames.length} files, cached=${cachedFileNames.length} files`);
+
+            // Check if file sets match (same files loaded)
+            if (JSON.stringify(currentFileNames.sort()) === JSON.stringify(cachedFileNames.sort())) {
+                allFileAnnotations = cacheData.annotations || {};
+                allFileNodes = cacheData.nodes || {};
+                allFileTraceComments = cacheData.traceComments || {};
+
+                // Restore current file's annotations
+                const currentFileName = allFiles[currentFileIndex].name;
+                nodeAnnotations = allFileAnnotations[currentFileName] || {};
+
+                // Restore trace comments
+                const traceCommentsTextarea = document.getElementById('traceCommentsTextarea');
+                if (traceCommentsTextarea) {
+                    traceCommentsTextarea.value = allFileTraceComments[currentFileName] || '';
+                }
+
+                // Refresh the visualization to show annotated nodes
+                updateNodeAnnotatability();
+
+                // If a node is selected, update its details
+                if (selectedNodeIndex >= 0 && currentNodes[selectedNodeIndex]) {
+                    loadNodeAnnotations(currentNodes[selectedNodeIndex].id);
+                }
+
+                console.log(`✓ Loaded cached annotations (${Object.keys(allFileAnnotations).length} files)`);
+                showCacheNotification('Restored previous annotations from cache');
+                return true;
+            } else {
+                console.log('⚠ File sets do not match - cache not loaded');
+            }
+        }
+
+        return false;
+    } catch (error) {
+        console.warn('Failed to load cached annotations:', error);
+        return false;
+    }
+}
+
+/**
+ * Clear cached data for current session
+ */
+function clearCachedData() {
+    const cacheKey = getCacheKey();
+    if (cacheKey) {
+        try {
+            localStorage.removeItem(cacheKey);
+            console.log('✓ Cache cleared');
+            showCacheNotification('Cache cleared successfully');
+        } catch (error) {
+            console.warn('Failed to clear cache:', error);
+        }
+    }
+}
+
+/**
+ * Show a temporary notification about cache operations
+ */
+function showCacheNotification(message) {
+    const notification = document.createElement('div');
+    notification.className = 'cache-notification';
+    notification.textContent = message;
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #28a745;
+        color: white;
+        padding: 12px 24px;
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 10000;
+        animation: slideIn 0.3s ease-out;
+        font-size: 14px;
+    `;
+
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease-in';
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
+
+/**
+ * Auto-save wrapper for annotation changes
+ */
+function autoSaveAnnotations() {
+    // Save current file's annotations
+    if (allFiles.length > 0 && allFiles[currentFileIndex]) {
+        const currentFileName = allFiles[currentFileIndex].name;
+        allFileAnnotations[currentFileName] = JSON.parse(JSON.stringify(nodeAnnotations));
+        const traceCommentsTextarea = document.getElementById('traceCommentsTextarea');
+        allFileTraceComments[currentFileName] = traceCommentsTextarea.value;
+    }
+
+    // Save to cache
+    saveCachedData();
+}
+
+/**
+ * Check if there's a cached session available on page load
+ */
+function checkForCachedSession() {
+    try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (!cached) {
+            return;
+        }
+
+        const cachedData = JSON.parse(cached);
+        if (cachedData && cachedData.fileNames && cachedData.fileNames.length > 0) {
+            const fileCount = cachedData.fileNames.length;
+            const timestamp = new Date(cachedData.timestamp).toLocaleString();
+
+            // Show persistent notification about cached session
+            showPersistentCacheNotification(
+                `💾 Cached session found!\n` +
+                `${fileCount} files, last saved: ${timestamp}\n` +
+                `Load the same files to restore your annotations.`,
+                cachedData.fileNames
+            );
+        }
+    } catch (error) {
+        console.warn('Error checking for cached session:', error);
+    }
+}
+
+/**
+ * Show a persistent notification with file list
+ */
+function showPersistentCacheNotification(message, fileNames) {
+    const notification = document.createElement('div');
+    notification.className = 'cache-notification persistent';
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        color: white;
+        padding: 20px 24px;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        z-index: 10000;
+        animation: slideIn 0.4s ease-out;
+        font-size: 14px;
+        max-width: 450px;
+        line-height: 1.6;
+        border: 2px solid rgba(255,255,255,0.3);
+    `;
+
+    const lines = message.split('\n');
+    let html = `<div style="margin-bottom: 10px; font-size: 16px;"><strong>✨ ${lines[0]}</strong></div>`;
+    for (let i = 1; i < lines.length; i++) {
+        if (lines[i]) {
+            html += `<div style="font-size: 13px; opacity: 0.95; margin-top: 4px;">${lines[i]}</div>`;
+        }
+    }
+
+    if (fileNames && fileNames.length > 0) {
+        html += `<details style="margin-top: 12px; font-size: 12px; cursor: pointer;">
+            <summary style="cursor: pointer; opacity: 0.9; user-select: none; padding: 4px 0;">
+                📁 Show cached files (${fileNames.length})
+            </summary>
+            <ul style="margin: 8px 0 0 0; padding-left: 20px; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.1); border-radius: 4px; padding: 8px 8px 8px 24px;">
+                ${fileNames.slice(0, 20).map(f => `<li style="margin: 4px 0;">${f}</li>`).join('')}
+                ${fileNames.length > 20 ? `<li style="margin: 4px 0; opacity: 0.8;"><em>... and ${fileNames.length - 20} more</em></li>` : ''}
+            </ul>
+        </details>`;
+    }
+
+    html += `<button style="
+        margin-top: 16px;
+        padding: 8px 16px;
+        background: rgba(255,255,255,0.25);
+        border: 1px solid rgba(255,255,255,0.5);
+        color: white;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        transition: all 0.2s;
+    " onmouseover="this.style.background='rgba(255,255,255,0.35)'"
+       onmouseout="this.style.background='rgba(255,255,255,0.25)'"
+       onclick="this.parentElement.remove()">Got it, dismiss</button>`;
+
+    notification.innerHTML = html;
+    document.body.appendChild(notification);
+}
+
+// Add CSS animations for notifications
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideIn {
+        from {
+            transform: translateX(400px);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+
+    @keyframes slideOut {
+        from {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateX(400px);
+            opacity: 0;
+        }
+    }
+`;
+document.head.appendChild(style);
