@@ -1,9 +1,12 @@
 import inspect
 from collections.abc import Callable
-from typing import Any, get_type_hints
+from typing import TYPE_CHECKING, Any, get_type_hints
 
 from corral.backend.schema import ToolArgument
 from corral.backend.tool_utils import parse_docstring
+
+if TYPE_CHECKING:
+    from corral.router.verbosity import ToolVerbosity
 
 
 class Tool:
@@ -63,6 +66,82 @@ class Tool:
     def execute(self, **kwargs) -> str:
         """Execute the tool functionality"""
         raise NotImplementedError
+
+    @classmethod
+    def from_mcp(cls, mcp_tool_definition: dict[str, Any]) -> "Tool":
+        """
+        Create a Tool instance from an MCP tool definition.
+
+        This method is currently not implemented as Corral tools are the source,
+        not the target of MCP conversions.
+
+        Args:
+            mcp_tool_definition: MCP tool definition dict containing:
+                - name: str
+                - description: str
+                - inputSchema: JSON Schema dict
+
+        Returns:
+            Tool instance
+
+        Raises:
+            NotImplementedError: This conversion is not currently supported
+        """
+        raise NotImplementedError(
+            "Converting from MCP to Corral Tool is not currently supported. "
+            "Corral tools are designed to be converted TO MCP format, not FROM it."
+        )
+
+    def for_mcp(self, verbosity: "ToolVerbosity | None" = None) -> dict[str, Any]:
+        """
+        Convert this Tool to MCP-compatible format.
+
+        Creates an MCP tool definition with JSON Schema for input parameters,
+        using the schema conversion logic from schema_converter.
+
+        Args:
+            verbosity: Tool description verbosity level for filtering descriptions.
+                      If None, uses COMPREHENSIVE verbosity.
+                      Import from corral.router.verbosity.ToolVerbosity
+
+        Returns:
+            Dictionary containing MCP tool definition:
+            {
+                "name": str,
+                "description": str,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {...},
+                    "required": [...]
+                }
+            }
+
+        Example:
+            >>> tool = my_tool_instance
+            >>> mcp_def = tool.for_mcp()
+            >>> # Use with MCP server
+            >>> from mcp.types import Tool as MCPTool
+            >>> mcp_tool = MCPTool(**mcp_def)
+        """
+        # Import here to avoid circular import issues
+        from corral.mcp.schema_converter import tool_to_json_schema
+        from corral.router.verbosity import ToolVerbosity, VerbosityConfig
+
+        # Use COMPREHENSIVE as default if not specified
+        if verbosity is None:
+            verbosity = ToolVerbosity.COMPREHENSIVE
+
+        # Filter description based on verbosity
+        filtered_description = VerbosityConfig.filter_tool_description(
+            self.description, verbosity
+        )
+
+        # Convert to MCP format
+        return {
+            "name": self.name,
+            "description": filtered_description,
+            "inputSchema": tool_to_json_schema(self, verbosity),
+        }
 
     def get_usage_guide(self) -> str:
         """Generate a usage guide for the tool"""

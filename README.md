@@ -382,6 +382,66 @@ def complex_calculation(data: str) -> str:
 tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]
 ```
 
+### MCP (Model Context Protocol) Integration
+
+Corral tools can be easily converted to MCP format for use with MCP-compatible clients like Claude Desktop:
+
+```python
+from corral.backend.tool import tool
+from corral.router.verbosity import ToolVerbosity
+
+
+@tool
+def my_scientific_tool(param: str) -> str:
+    """Scientific tool description.
+
+    Args:
+        param: Parameter description
+
+    Returns:
+        Result description
+    """
+    return f"Result: {param}"
+
+
+# Convert to MCP format
+mcp_definition = my_scientific_tool.for_mcp()
+
+# With specific verbosity level
+mcp_brief = my_scientific_tool.for_mcp(verbosity=ToolVerbosity.BRIEF)
+```
+
+Create a custom MCP server:
+
+```python
+from mcp.server import Server
+from mcp.types import Tool as MCPTool
+import importlib
+import inspect
+from corral.backend.tool import Tool
+
+# Load tools from a module
+module = importlib.import_module("my_domain.tools")
+tools = {name: obj for name, obj in inspect.getmembers(module) if isinstance(obj, Tool)}
+
+# Create MCP server
+server = Server("my-corral-tools")
+
+
+@server.list_tools()
+async def list_tools():
+    return [MCPTool(**tool.for_mcp()) for tool in tools.values()]
+
+
+@server.call_tool()
+async def call_tool(name: str, arguments: dict):
+    tool = tools[name]
+    # Execute and return results
+    ...
+```
+
+For detailed MCP integration examples and migration information, see the [MCP Migration Guide](docs/MCP_MIGRATION.md).
+
 ### Environment Configuration
 
 For environments requiring file I/O:
