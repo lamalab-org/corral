@@ -17,7 +17,7 @@ def run_benchmark(
     model: str = "gpt-4o-2024-08-06",
     task_ids: list | None = None,
     temperature: float = 0.0,
-    run_name: str = "corral_benchmark_run_ml_toolcalling",
+    run_name: str = "corral_benchmark_run_afm_ReAct",
     verbose: str = "brief",
 ):
     """Run the benchmark with specified model and tasks"""
@@ -28,9 +28,8 @@ def run_benchmark(
         group="tool_description_ablation",
         name=run_name,
     )
-    agent = ReActAgent(model="gpt-4o", max_iterations=10, temperature=temperature)
+    agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
     runner = CorralRunner(interface, agent, logger=wandblogger)
-    #claude-3-5-sonnet-20241022
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
     result = runner.bench(
@@ -49,16 +48,16 @@ if __name__ == "__main__":
     setup_litellm()
 
     verboses = [
-        # "brief",
-        # "workflow",
+        "brief",
+        "workflow",
         "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
             model = "gpt-4o-2024-08-06"
-            run_name = f"gpt-4o-React-test_afm-{verbose}_verbosity"
-            run_benchmark(model=model, run_name=run_name, verbose=verbose)
+            run_name = f"gpt-4o-React-task_4-{verbose}_verbosity"
+            run_benchmark(model=model, run_name=run_name, verbose=verbose, temperature=0)
 
         except Exception as e:
             logger.error(f"Benchmark failed: {e!s}")
