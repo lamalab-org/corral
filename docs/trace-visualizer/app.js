@@ -112,7 +112,41 @@ document.getElementById('helpToggleBtn').addEventListener('click', function() {
     }
 });
 
-// Marker button handlers - Set up event delegation for marker buttons
+// Marker dropdown handlers
+document.getElementById('neutralMarkerSelect').addEventListener('change', function(e) {
+    if (selectedNodeIndex === -1 || this.disabled || !e.target.value) return;
+    addMarkerFromDropdown(e.target.value);
+    this.value = ''; // Reset dropdown
+});
+
+document.getElementById('positiveMarkerSelect').addEventListener('change', function(e) {
+    if (selectedNodeIndex === -1 || this.disabled || !e.target.value) return;
+    addMarkerFromDropdown(e.target.value);
+    this.value = ''; // Reset dropdown
+});
+
+document.getElementById('negativeMarkerSelect').addEventListener('change', function(e) {
+    if (selectedNodeIndex === -1 || this.disabled || !e.target.value) return;
+    addMarkerFromDropdown(e.target.value);
+    this.value = ''; // Reset dropdown
+});
+
+function addMarkerFromDropdown(marker) {
+    const nodeId = currentNodes[selectedNodeIndex].id;
+
+    // Initialize annotations for this node if not exists
+    if (!nodeAnnotations[nodeId]) {
+        nodeAnnotations[nodeId] = { markers: [], notes: '' };
+    }
+
+    // Only add if not already present
+    if (!nodeAnnotations[nodeId].markers.includes(marker)) {
+        nodeAnnotations[nodeId].markers.push(marker);
+        updateMarkersDisplay(nodeId);
+    }
+}
+
+// Marker button handlers - Set up event delegation for marker buttons (keeping for backwards compatibility)
 document.addEventListener('click', function(e) {
     if (e.target.classList.contains('marker-btn')) {
         if (selectedNodeIndex === -1 || e.target.disabled) return;
@@ -210,7 +244,7 @@ function loadNodeAnnotations(nodeId) {
     // Update markers display
     updateMarkersDisplay(nodeId);
 
-    // Update marker button states
+    // Update marker button states (for backwards compatibility if buttons are used)
     document.querySelectorAll('.marker-btn').forEach(btn => {
         const marker = btn.dataset.marker;
         if (annotations && annotations.markers.includes(marker)) {
@@ -353,7 +387,17 @@ function clearDetailsPanel() {
     document.getElementById('selectedMarkers').innerHTML = '';
     document.getElementById('notesTextarea').value = '';
 
-    // Disable marker buttons and notes textarea when no node is selected
+    // Disable marker dropdowns
+    document.getElementById('neutralMarkerSelect').disabled = true;
+    document.getElementById('positiveMarkerSelect').disabled = true;
+    document.getElementById('negativeMarkerSelect').disabled = true;
+
+    // Reset dropdown values
+    document.getElementById('neutralMarkerSelect').value = '';
+    document.getElementById('positiveMarkerSelect').value = '';
+    document.getElementById('negativeMarkerSelect').value = '';
+
+    // Disable marker buttons (for backwards compatibility) and notes textarea when no node is selected
     document.querySelectorAll('.marker-btn').forEach(btn => {
         btn.disabled = true;
         btn.classList.remove('selected');
@@ -803,7 +847,12 @@ function showDetails(event, d) {
     // Check if this node is annotatable
     const annotatable = isNodeAnnotatable(d);
 
-    // Enable/disable marker buttons and notes textarea based on whether the node is annotatable
+    // Enable/disable marker dropdowns based on whether the node is annotatable
+    document.getElementById('neutralMarkerSelect').disabled = !annotatable;
+    document.getElementById('positiveMarkerSelect').disabled = !annotatable;
+    document.getElementById('negativeMarkerSelect').disabled = !annotatable;
+
+    // Enable/disable marker buttons (for backwards compatibility) and notes textarea based on whether the node is annotatable
     document.querySelectorAll('.marker-btn').forEach(btn => {
         btn.disabled = !annotatable;
     });
@@ -822,7 +871,7 @@ function showDetails(event, d) {
         // Clear annotations display for non-annotatable nodes
         document.getElementById('selectedMarkers').innerHTML = '';
         document.getElementById('notesTextarea').value = '';
-        // Clear button selections
+        // Clear button selections (for backwards compatibility)
         document.querySelectorAll('.marker-btn').forEach(btn => {
             btn.classList.remove('selected');
         });
