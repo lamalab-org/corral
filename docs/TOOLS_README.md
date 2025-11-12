@@ -548,18 +548,3 @@ def test_my_tool():
     assert "description" in mcp_def
     assert "inputSchema" in mcp_def
 ```
-
-## Examples
-
-See the `tasks/` directory for complete examples of tool implementations across different scientific domains:
-
-- `tasks/retrosynthesis/retrosynthesis/tools.py` - Chemistry tools
-- `tasks/catalyst/catalyst/tools.py` - Catalysis tools
-- `tasks/spectra_elucidation/spectra_elucidation/tools.py` - Spectroscopy tools
-- `tasks/samplemath/samplemath/tools.py` - Mathematical tools
-
-## Additional Resources
-
-- [API Specifications](API_specs.md)
-- [MCP Migration Guide](MCP_MIGRATION.md)
-- [Environment Documentation](README.md)
