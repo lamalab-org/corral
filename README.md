@@ -192,7 +192,7 @@ agent = LLMPlanner(model="gpt-4o", temperature=0.1, max_iterations=5)
 Implements the Reflexion architecture ([paper](https://arxiv.org/abs/2303.11366)) which adds self-reflection and learning from mistakes.
 
 ```python
-from corral.agents import ReActAgent, ReflexionAgent
+from corral.agents import ReActAgent, ReflexionAgent, ToolCallingAgent
 
 # Create base agent (the "Actor")
 base_agent = ToolCallingAgent(model="gpt-4o", max_iterations=10, temperature=0.1)
