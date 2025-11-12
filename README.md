@@ -366,21 +366,29 @@ def calculate_molecular_weight(formula: str) -> float:
 
 #### [Modal](https://modal.com) Tools (Cloud Execution)
 
+Modal allows you to run computationally intensive tasks in the cloud. See [Modal docs](https://modal.com/docs) for setup.
+
 ```python
 from corral.utils.modal import modal_tool, MODAL_TOOL_REGISTRY
-from modal import Image
+from modal import App, Image
+
+app = App("my-corral-tools")
 
 
 @modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
 def complex_calculation(data: str) -> str:
     """Run computationally intensive task in the cloud."""
-    # This runs in Modal's cloud environment
-    pass
+    from rdkit import Chem
+
+    mol = Chem.MolFromSmiles(data)
+    return f"Molecule has {mol.GetNumAtoms()} atoms"
 
 
 # Access the tool
 tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]
 ```
+
+For Corral-specific usage, see the [Modal App Documentation](tasks/corral_md/modal_app/README.md).
 
 ### MCP (Model Context Protocol) Integration
 

@@ -63,11 +63,14 @@ class ReActAgent(BaseAgent):
             Defaults to ReAct-formatted prompt with Thought-Action-Observation structure.
         extractor_prompt (str | Any, optional): The prompt to use for extracting final answers. Can be a string,
             PromptStore ID, or prompt object that implements .fill() method. Defaults to None.
+        surrender_prompt (str | Any, optional):Instructions for how the agent can surrender from unsolvable tasks. This prompt is only included when enable_surrender=True in the run() method and will be added to the task prompt. Can be a string,
+            PromptStore ID, or prompt object that implements .fill() method. Defaults to None.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         system_prompt_id (str, optional): The ID of the system prompt to use. Defaults to "400fcecf-f5f2-464b-aff5-8a4377c9685c".
         user_prompt_id (str, optional): The ID of the user prompt to use. Defaults to "d880c4d3-fe60-4cf4-813b-2008076cd595".
         extractor_prompt_id (str, optional): The ID of the extractor prompt to use. Defaults to "9d37e4a0-26c5-438a-ba1b-a273388fcded".
+        surrender_prompt_id (str, optional): The ID of the surrender prompt to use. Defaults to "1d9059d5-763e-4efd-93b6-308977635ef3".
         **kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
@@ -79,11 +82,13 @@ class ReActAgent(BaseAgent):
         system_prompt: str | Any | None = None,
         user_prompt: str | Any | None = None,
         extractor_prompt: str | Any | None = None,
+        surrender_prompt: str | Any | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
         system_prompt_id: str = "400fcecf-f5f2-464b-aff5-8a4377c9685c",
         user_prompt_id: str | None = "d880c4d3-fe60-4cf4-813b-2008076cd595",
         extractor_prompt_id: str | None = "9d37e4a0-26c5-438a-ba1b-a273388fcded",
+        surrender_prompt_id: str | None = "1d9059d5-763e-4efd-93b6-308977635ef3",
         **kwargs,
     ):
         """Initialize the agent"""
@@ -94,11 +99,13 @@ class ReActAgent(BaseAgent):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             extractor_prompt=extractor_prompt,
+            surrender_prompt=surrender_prompt,
             temperature=temperature,
             prompt_store=prompt_store,
             system_prompt_id=system_prompt_id,
             user_prompt_id=user_prompt_id,
             extractor_prompt_id=extractor_prompt_id,
+            surrender_prompt_id=surrender_prompt_id,
             **kwargs,
         )
 
@@ -148,6 +155,7 @@ class ReActAgent(BaseAgent):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
+        enable_surrender: bool = False,
     ) -> str:
         """Main ReAct loop implementation
 
@@ -157,6 +165,7 @@ class ReActAgent(BaseAgent):
             history (List[Dict[str, Any]], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. `task_prompt` is intended to be a plan or description about the task, that should always be provided when this agent is called as a subagent of a main orchestrator. Defaults to None.
             examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
+            enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
 
         Returns:
             str: The final answer to the task
@@ -172,6 +181,8 @@ class ReActAgent(BaseAgent):
             task_guide=task_guide,
             history=history,
             examples=examples,
+            surrender_prompt=self.surrender_prompt,
+            enable_surrender=enable_surrender,
         )
 
         for _iteration in range(self.max_iterations):
@@ -182,6 +193,19 @@ class ReActAgent(BaseAgent):
 
             # Parse response
             thoughts, actions = self.parse_llm_response(llm_response)
+
+            # Check for surrender (XML format) if enabled
+            if enable_surrender and (
+                surrender_match := re.search(
+                    r"<surrender>(.*?)</surrender>",
+                    llm_response,
+                    re.DOTALL | re.IGNORECASE,
+                )
+            ):
+                logger.info(
+                    f"Agent surrendering from task {task_id}. Reason: {surrender_match[1].strip()}"
+                )
+                return "SURRENDER"
 
             # Check for final answer (XML format)
             final_answer_match = re.search(
