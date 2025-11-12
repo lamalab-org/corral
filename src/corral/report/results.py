@@ -28,11 +28,12 @@ class TaskTrialResult:
     duration: float | None = None
     token_usage: dict[str, int] | None = None
     error_message: str | None = None
+    surrendered: bool = False
 
     @property
     def success(self) -> bool:
         """Whether the trial was successful"""
-        return self.score > 0 and self.error_message is None
+        return self.score > 0 and self.error_message is None and not self.surrendered
 
 
 @dataclass
@@ -52,6 +53,8 @@ class BenchmarkResult:
         task_results: dictionary mapping task IDs to their trial results
         k: The k value(s) to use for pass@k and pass^k calculations.
            Can be a single int or a list of ints.
+        total_duration: Total duration of the benchmark run
+        verbosity: Verbosity level of tool description
     """
 
     task_results: dict[str, TaskTrialResults]
@@ -178,6 +181,10 @@ class BenchmarkResult:
             "failed": failed_calls,
             "total": successful_calls + failed_calls,
         }
+
+    def total_surrendered_trials(self) -> int:
+        """Calculate total number of surrendered trials across all tasks"""
+        return sum(bool(trial.surrendered) for trial in self.all_results)
 
     def average_score(self) -> float:
         """Calculate average score across all results"""
@@ -340,6 +347,10 @@ class BenchmarkResult:
         )
         summary_table.add_row("Failed Tool Calls", str(tool_call_stats["failed"]))
 
+        # Add surrender statistics
+        surrendered_count = self.total_surrendered_trials()
+        summary_table.add_row("Surrendered Trials", str(surrendered_count))
+
         # Add token usage statistics
         total_tokens = self.total_token_usage()
         if total_tokens:
@@ -390,9 +401,10 @@ class BenchmarkResult:
         task_table.add_column("Trial ID", style="yellow")
         task_table.add_column("Score", style="cyan")
         task_table.add_column("Success", style="white")
+        task_table.add_column("Surrendered", style="red")
         task_table.add_column("Duration (s)", style="green")
         task_table.add_column("Tokens", style="green")
-        task_table.add_column("Tool Duration (s)", style="blue")  # New column
+        task_table.add_column("Tool Duration (s)", style="blue")
 
         # Add columns for each k value
         for k_val in self.k:
@@ -414,6 +426,7 @@ class BenchmarkResult:
             "Overall",
             f"{self._calculate_task_average_score(task_id):.3f}",
             f"{task_success_rate:.3f}",
+            "-",  # No overall surrendered status
             duration_str,
             token_str,
             "-",  # No overall tool duration for task level
@@ -438,6 +451,7 @@ class BenchmarkResult:
                 trial.trial_id,
                 f"{trial.score:.3f}",
                 "✓" if trial.success else "✗",
+                "✓" if trial.surrendered else "✗",
                 duration_str,
                 token_str,
                 f"{trial_tool_duration:.3f}",  # Tool duration for this trial
@@ -556,6 +570,7 @@ class BenchmarkResult:
                 "total_tool_calls": tool_call_stats["total"],
                 "successful_tool_calls": tool_call_stats["successful"],
                 "failed_tool_calls": tool_call_stats["failed"],
+                "surrendered_trials": self.total_surrendered_trials(),
                 "total_token_usage": total_tokens,
                 "total_tool_execution_duration": self.total_tool_execution_duration(),
             }
@@ -603,6 +618,7 @@ class BenchmarkResult:
                     if trial.state and isinstance(trial.state, dict)
                     else None,
                     "success": trial.success,
+                    "surrendered": trial.surrendered,
                     "tool_execution_duration": self.get_trial_tool_execution_duration(
                         trial
                     ),

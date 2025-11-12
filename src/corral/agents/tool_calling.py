@@ -59,11 +59,14 @@ class ToolCallingAgent(BaseAgent):
             Should NOT include tool descriptions as tools are provided via function calling API.
         extractor_prompt (str | Any, optional): The prompt to use for extracting final answers. Can be a string,
             PromptStore ID, or prompt object that implements .fill() method. Defaults to None.
+        surrender_prompt (str | Any, optional):Instructions for how the agent can surrender from unsolvable tasks. This prompt is only included when enable_surrender=True in the run() method and will be added to the task prompt. Can be a string,
+            PromptStore ID, or prompt object that implements .fill() method. Defaults to None.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
         system_prompt_id (str, optional): The ID of the system prompt to use. Defaults to "400fcecf-f5f2-464b-aff5-8a4377c9685c".
         user_prompt_id (str, optional): The ID of the user prompt to use. Defaults to "fe04453b-5469-4611-bba6-6d81487df787".
         extractor_prompt_id (str, optional): The ID of the extractor prompt to use. Defaults to "9d37e4a0-26c5-438a-ba1b-a273388fcded".
+        surrender_prompt_id (str, optional): The ID of the surrender prompt to use. Defaults to "b2afa52c-ce88-4cb1-93bf-657a7c7b5933".
         **kwargs: Additional keyword arguments to pass to the LiteLLM API
     """
 
@@ -75,11 +78,13 @@ class ToolCallingAgent(BaseAgent):
         system_prompt: str | Any | None = None,
         user_prompt: str | Any | None = None,
         extractor_prompt: str | Any | None = None,
+        surrender_prompt: str | Any | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
         system_prompt_id: str = "400fcecf-f5f2-464b-aff5-8a4377c9685c",
         user_prompt_id: str | None = "fe04453b-5469-4611-bba6-6d81487df787",
         extractor_prompt_id: str | None = "9d37e4a0-26c5-438a-ba1b-a273388fcded",
+        surrender_prompt_id: str | None = "b2afa52c-ce88-4cb1-93bf-657a7c7b5933",
         **kwargs,
     ):
         """Initialize the agent"""
@@ -90,11 +95,13 @@ class ToolCallingAgent(BaseAgent):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             extractor_prompt=extractor_prompt,
+            surrender_prompt=surrender_prompt,
             temperature=temperature,
             prompt_store=prompt_store,
             system_prompt_id=system_prompt_id,
             user_prompt_id=user_prompt_id,
             extractor_prompt_id=extractor_prompt_id,
+            surrender_prompt_id=surrender_prompt_id,
             **kwargs,
         )
         # Initialize available tools for logging
@@ -107,6 +114,7 @@ class ToolCallingAgent(BaseAgent):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
+        enable_surrender: bool = False,
     ) -> str:
         """Run the agent to solve the task
 
@@ -116,6 +124,8 @@ class ToolCallingAgent(BaseAgent):
             history (list[LiteLLMMessage]], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
+            enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
+
 
         Returns:
             str: The final answer to the task
@@ -137,6 +147,8 @@ class ToolCallingAgent(BaseAgent):
             task_guide=task_guide,
             history=history,
             examples=examples,
+            surrender_prompt=self.surrender_prompt,
+            enable_surrender=enable_surrender,
         )
 
         for _i in range(self.max_iterations):
@@ -145,6 +157,18 @@ class ToolCallingAgent(BaseAgent):
 
                 content = llm_response.content
                 if content:
+                    # Check for surrender if enabled
+                    if enable_surrender:
+                        surrender_match = re.search(
+                            r"(?:Final Answer:\s*)?SURRENDER", content, re.IGNORECASE
+                        )
+                        if surrender_match:
+                            logger.info(f"Agent retiring from task {task_id}")
+                            self.messages.append(
+                                LiteLLMMessage(role="assistant", content=content)
+                            )
+                            return "GIVE UP"
+
                     final_answer_match = re.search(
                         r"Final Answer:\s*(.*)", content, re.IGNORECASE
                     )

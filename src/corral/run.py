@@ -52,6 +52,53 @@ def filter_incomplete_tasks(
     ]
 
 
+def get_score_from_state(interface: CorralRouter, task_id: str) -> float:
+    """Retrieve current score from task state, defaulting to 0.0 if unavailable"""
+    try:
+        status = interface.get_task_status(task_id)
+        return status.get("score", 0.0) or 0.0  # Handle None case
+    except Exception as e:
+        logger.warning(f"Failed to retrieve score from state: {e}")
+        return 0.0
+
+
+def exception_trial_result(
+    task_id: str,
+    trial_index: int,
+    interface: CorralRouter,
+    error: Exception,
+    error_type: str,
+    token_usage: dict[str, Any],
+    surrendered: bool = False,
+) -> TaskTrialResult:
+    """Create a TaskTrialResult when there is an exception during trial execution. Benchmark continues.
+
+    Args:
+        task_id: The task identifier
+        trial_index: The trial index
+        interface: Router interface to retrieve task state
+        error: The exception that occurred
+        error_type: Type of error (e.g., "Surrender Error", "Submission Error", "Agent Error")
+        token_usage: Token usage statistics
+        surrendered: Whether this was a surrender operation
+
+    Returns:
+        TaskTrialResult with score retrieved from state or 0.0 if unavailable
+    """
+    score = get_score_from_state(interface, task_id)
+    return TaskTrialResult(
+        task_id=task_id,
+        trial_id=f"attempt_{trial_index + 1}",
+        score=score,
+        state={"error": str(error), "attempt": trial_index + 1},
+        tool_statistics={"error": str(error)},
+        duration=None,
+        token_usage=token_usage,
+        error_message=f"{error_type}: {error}",
+        surrendered=surrendered,
+    )
+
+
 def execute_single_trial(
     task_id: str,
     trial_index: int,
@@ -60,6 +107,7 @@ def execute_single_trial(
     verbose: bool = False,
     tool_verbosity: str | None = None,
     configure_timeout: float | None = None,
+    enable_surrender: bool = False,
 ) -> TaskTrialResult:
     """Execute a single trial - pure function"""
     try:
@@ -71,7 +119,25 @@ def execute_single_trial(
             task_id,
             verbose=verbose,
             tool_verbosity=tool_verbosity or "brief",
+            enable_surrender=enable_surrender,
         )
+
+        # Check if agent decided to surrender
+        if answer == "SURRENDER":
+            try:
+                result = interface.surrender_task(task_id)
+                result.token_usage = token_usage
+                return result
+            except Exception as surrender_error:
+                return exception_trial_result(
+                    task_id=task_id,
+                    trial_index=trial_index,
+                    interface=interface,
+                    error=surrender_error,
+                    error_type="Surrender Error",
+                    token_usage=token_usage,
+                    surrendered=True,
+                )
 
         # Submit answer
         try:
@@ -79,26 +145,22 @@ def execute_single_trial(
             result.token_usage = token_usage
             return result
         except Exception as submit_error:
-            return TaskTrialResult(
+            return exception_trial_result(
                 task_id=task_id,
-                trial_id=f"attempt_{trial_index + 1}",
-                score=0.0,
-                state={"error": str(submit_error), "attempt": trial_index + 1},
-                tool_statistics={"error": str(submit_error)},
-                duration=None,
+                trial_index=trial_index,
+                interface=interface,
+                error=submit_error,
+                error_type="Submission Error",
                 token_usage=token_usage,
-                error_message=f"Submission Error: {submit_error}",
             )
     except Exception as agent_error:
-        return TaskTrialResult(
+        return exception_trial_result(
             task_id=task_id,
-            trial_id=f"attempt_{trial_index + 1}",
-            score=0.0,
-            state={"error": str(agent_error), "attempt": trial_index + 1},
-            tool_statistics=agent.get_total_token_usage(),
-            duration=None,
+            trial_index=trial_index,
+            interface=interface,
+            error=agent_error,
+            error_type="Agent Error",
             token_usage=agent.get_total_token_usage(),
-            error_message=f"Agent Error: {agent_error}",
         )
 
 
@@ -184,6 +246,7 @@ class CorralRunner:
         checkpoint_dir: str = "./benchmark_checkpoints",
         checkpoint_name: str | None = None,
         logger: CorralWandbLogger | None = None,
+        enable_surrender: bool = False,
     ):
         self.interface = interface
         self.agent = agent
@@ -193,6 +256,7 @@ class CorralRunner:
             checkpoint_name or f"checkpoint_{agent.__class__.__name__}"
         )
         self.logger = logger
+        self.enable_surrender = enable_surrender
 
     def bench(
         self,
@@ -230,6 +294,7 @@ class CorralRunner:
                 verbose=verbose,
                 tool_verbosity=tool_verbosity,
                 configure_timeout=configure_timeout,
+                enable_surrender=self.enable_surrender,
             )
 
         checkpoint_saver = partial(self._save_checkpoint, session_id)
@@ -244,6 +309,7 @@ class CorralRunner:
                 tool_verbosity=self.interface.current_verbosity,
                 task_ids=task_ids,
                 dependency_chain=self.interface.supports_dependency_chain(),
+                enable_surrender=self.enable_surrender,
             )
             self.logger.start_logging(config)
 
