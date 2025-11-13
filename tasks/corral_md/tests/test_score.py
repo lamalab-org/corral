@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from corral_md.score import check_numerical, check_potential_file
@@ -8,7 +9,26 @@ BASE_DIR = Path(__file__).parent.parent.resolve()
 GROUND_TRUTH_DIR = BASE_DIR / "ground_truth"
 
 
-def test_check_potential_file():
+@pytest.fixture()
+def mock_modal_function():
+    """Fixture to mock modal.Function.from_name and return a configurable mock."""
+    with patch("modal.Function.from_name") as mock_from_name:
+        mock_function = MagicMock()
+        mock_from_name.return_value = mock_function
+        yield mock_from_name, mock_function
+
+
+def test_check_potential_file(mock_modal_function):
+    mock_from_name, mock_function = mock_modal_function
+
+    # Mock the file_info function to return success for specific paths
+    def mock_file_info(path):
+        if path == "/potentials/EAM/Al99.eam.alloy":
+            return {"exists": True, "size": 1024}
+        raise RuntimeError("File not found")
+
+    mock_function.remote.side_effect = mock_file_info
+
     target = "/potentials/EAM/Al99.eam.alloy"
     score_fn = check_potential_file(target)
 
@@ -85,65 +105,26 @@ def test_check_potential_file():
         (2.2173842, "2.2173842", 1.0),
     ],
 )
-def test_check_numerical_submission_format(target, json_string, expected):
+def test_check_numerical_submission_format(
+    mock_modal_function, target, json_string, expected
+):
+    mock_from_name, mock_function = mock_modal_function
+
+    # Mock the file_info function to return success for specific paths
+    def mock_file_info(path):
+        # These are the "valid" file paths that should pass the file check
+        valid_paths = [
+            "/test_files/test_minimise/Al_minimised_structure.dat",
+            "/test_files/Al_new/melt_Al_0.001_1500_npt_eam.lammpstrj",
+        ]
+        if path in valid_paths:
+            return {"exists": True, "size": 1024}
+        raise RuntimeError("File not found")
+
+    mock_function.remote.side_effect = mock_file_info
+
     score_fn = check_numerical(target=target, tolerance=2e-2)
     assert score_fn(json_string) == expected
-
-
-# @pytest.mark.parametrize(
-#     ("target_path", "result_path", "atom_style", "expected_score"),
-#     [
-#         (
-#             (f"{GROUND_TRUTH_DIR}/structures/Al.data"),
-#             "/results/1_August_2025/MD_TASKS/aluminum_structure_retrieval_subtask_sa_trial_0/Aluminum_structure.data",
-#             "atomic",
-#             1.0,
-#         ),
-#         (f"{GROUND_TRUTH_DIR}/structures/Al.data", None, "atomic", 0.0),
-#         (f"{GROUND_TRUTH_DIR}/structures/Al.data", "", "atomic", 0.0),
-#         (
-#             f"{GROUND_TRUTH_DIR}/structures/Al.data",
-#             "/results/23_July_2025/test/gpt_4o/subtask/aluminum_structure_retrieval_subtask_em_trial_0/Aluminum_structure.data",
-#             "atomic",
-#             1.0,
-#         ),
-#         (
-#             f"{GROUND_TRUTH_DIR}/energy_minimisation/Aluminum/Al_minimised_structure.dat",
-#             "/test_files/test_minimise/Al_minimised_structure.dat	",
-#             "atomic",
-#             1.0,
-#         ),
-#         (
-#             f"{GROUND_TRUTH_DIR}/energy_minimisation/Aluminum/Al_minimised_structure.dat",
-#             "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.in",
-#             "atomic",
-#             0.0,
-#         ),
-#         (
-#             f"{GROUND_TRUTH_DIR}/structures/Si.data",
-#             "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.in",
-#             "atomic",
-#             0.0,
-#         ),
-#         (
-#             f"{GROUND_TRUTH_DIR}/structures/Si.data",
-#             "/results/23_July_2025/test/gpt_4o/subtask/aluminum_energy_minimisation_subtask_npt_trial_0/relaxed_structure.in",
-#             "full",
-#             0.0,
-#         ),
-#         (
-#             f"{GROUND_TRUTH_DIR}/structures/Si.data",
-#             "/results/new_benchmark_data_new/react/gpt_4o/surface_energy/task_10/task_10_4_05142114/silicon.data",
-#             "full",
-#             1.0,
-#         ),
-#     ],
-# )
-# def test_check_structure_varied_styles(
-#     target_path, result_path, atom_style, expected_score
-# ):
-#     score_fn = check_structure(target_path, atom_style=atom_style)
-#     assert score_fn(result_path) == expected_score
 
 
 if __name__ == "__main__":
