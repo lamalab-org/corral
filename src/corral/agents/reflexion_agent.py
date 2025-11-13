@@ -5,10 +5,7 @@ This implements the Reflexion architecture (https://arxiv.org/abs/2303.11366)
 by wrapping existing agents with a trial-reflect-retry loop.
 """
 
-from typing import Any
-
 from loguru import logger
-from promptstore import PromptStore
 
 from corral.agents import BaseAgent
 from corral.agents.reflection import (
@@ -47,22 +44,38 @@ class ReflexionAgent(BaseAgent):
     result = runner.bench(task_ids=["task_1"], trials_per_task=5)
     ```
 
+    ### Custom Prompt Requirements:
+    The ReflexionAgent requires a specific user prompt that instructs the agent:
+    - Generate reflections based on previous trial results.
+    - Ideally encourage concise and actionable reflections.
+    - Include {{task_id}}, {{trial_id}}, {{score}}, {{task_description}} and {{trajectory}} placeholders.
+
+
     Args:
         actor (BaseAgent): The base agent to wrap (ReActAgent, ToolCallingAgent, etc.)
-        reflection_model (str): Model to use for generating reflections
-        reflection_prompt (str | Any | None): Custom reflection prompt
+        reflection_model (str | None): Model to use for generating reflections. Defaults to actor's model.
+        api_endpoint (str | None): Custom API endpoint for reflection model
+        reflection_system_prompt (str | None): Custom system prompt for reflection generation
+        reflection_prompt (str | None): The prompt to use for reflection generation.
+            It must be a string that supports the next variables:
+            - task_id
+            - trial_id
+            - score
+            - task_description
+            - trajectory
+        If None, uses default prompt with ID "src/corral/agents/prompts/reflexion/user_prompt/prompt.md".
         reflection_temperature (float | None): Temperature for reflection generation (default: 0.0)
-        prompt_store (PromptStore | None): Prompt store instance for reflection prompts
         **kwargs: Additional arguments passed to the actor
     """
 
     def __init__(
         self,
         actor: BaseAgent,
-        reflection_model: str,
-        reflection_prompt: str | Any | None = None,
+        reflection_model: str | None = None,
+        api_endpoint: str | None = None,
+        reflection_system_prompt: str | None = None,
+        reflection_prompt: str | None = None,
         reflection_temperature: float | None = None,
-        prompt_store: PromptStore | None = None,
         **kwargs,
     ):
         # Validate that actor is a BaseAgent instance
@@ -71,12 +84,15 @@ class ReflexionAgent(BaseAgent):
                 f"actor must be an instance of BaseAgent, got {type(actor).__name__}"
             )
 
+        if reflection_prompt is None:
+            reflection_prompt = "reflexion/user_prompt"
+
         super().__init__(
-            model=actor.model,
+            model=reflection_model or actor.model,
             max_iterations=actor.max_iterations,
+            user_prompt=reflection_prompt,
             api_endpoint=actor.api_endpoint,
             temperature=actor.temperature,
-            prompt_store=prompt_store or actor.store,
             **kwargs,
         )
 
@@ -90,10 +106,11 @@ class ReflexionAgent(BaseAgent):
         # Initialize reflection components
         self.memory = ReflectionMemory(max_size=3)
         self.reflection_module = ReflectionModule(
-            model=reflection_model,
-            reflection_prompt=reflection_prompt,
-            prompt_store=prompt_store or actor.store,
+            model=reflection_model or actor.model,
+            reflection_prompt=self.user_prompt,
             temperature=final_reflection_temperature,
+            api_endpoint=api_endpoint or actor.api_endpoint,
+            reflection_system_prompt=reflection_system_prompt,
         )
 
         # Track current task

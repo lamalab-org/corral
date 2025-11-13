@@ -12,9 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
-from promptstore import PromptStore
 
-from corral.agents.prompt_utils import get_prompt
 from corral.agents.utils import LiteLLMMessage, llm_call
 
 
@@ -152,63 +150,26 @@ class ReflectionModule:
 
     Args:
         model (str): The LLM model to use for generating reflections
-        reflection_prompt (str | Any): The prompt template for generating reflections
+        reflection_prompt (str): The prompt template for generating reflections
         temperature (float): Temperature for reflection generation
         prompt_store (PromptStore | None): The prompt store instance to use
     """
 
-    # Default reflection prompt ID - will be created in prompt store
-    DEFAULT_REFLECTION_PROMPT_ID = "reflexion-default-v1"
-
     def __init__(
         self,
         model: str,
-        reflection_prompt: str | Any | None = None,
-        reflection_prompt_id: str | None = None,
-        prompt_store: PromptStore | None = None,
+        reflection_prompt: str,
         temperature: float = 0.0,  # Use deterministic reflection
+        api_endpoint: str | None = None,
+        reflection_system_prompt: str | None = None,
         **kwargs,
     ):
         self.model = model
+        self.reflection_prompt = reflection_prompt
         self.temperature = temperature
+        self.system_prompt = reflection_system_prompt
+        self.api_endpoint = api_endpoint
         self.kwargs = kwargs
-        self.prompt_store = prompt_store
-
-        # Load or use provided prompt
-        if reflection_prompt is not None:
-            self.reflection_prompt = reflection_prompt
-        elif reflection_prompt_id:
-            if not prompt_store:
-                raise ValueError(
-                    "prompt_store must be provided when using reflection_prompt_id"
-                )
-            self.reflection_prompt = get_prompt(
-                prompt_store, None, reflection_prompt_id
-            )
-        else:
-            # Use default inline prompt if no store available
-            self.reflection_prompt = self._get_default_prompt()
-
-    def _get_default_prompt(self) -> str:
-        """Get default reflection prompt as inline string."""
-        return """You are a reflection module analyzing a failed attempt at solving a task.
-
-Your goal is to provide a concise, actionable reflection that will help improve performance on the next attempt.
-
-Task:
-{task_id} - {trial_id}
-- Task description: {task_}
-
-- Score achieved: {score}
-
-Trajectory (key steps):
-{trajectory_summary}
-
-Please provide a brief reflection (2-5 sentences) that:
-1. Identifies what went wrong in this attempt
-2. Suggests a specific strategy to avoid this mistake in the next attempt
-3. Is actionable and directly applicable to solving this task
-"""
 
     def generate_reflection(
         self,
@@ -238,29 +199,24 @@ Please provide a brief reflection (2-5 sentences) that:
         trajectory_summary = self._summarize_trajectory(trajectory)
 
         # Prepare prompt
-        if hasattr(self.reflection_prompt, "fill"):
-            # Use Jinja template
-            prompt_text = self.reflection_prompt.fill(
-                {
-                    "task_id": task_id,
-                    "trial_id": trial_id,
-                    "score": score,
-                    "trajectory_summary": trajectory_summary,
-                    "task_description": task_description,
-                }
-            )
-        else:
-            # Use string format
-            prompt_text = self.reflection_prompt.format(
-                task_id=task_id,
-                trial_id=trial_id,
-                score=score,
-                trajectory_summary=trajectory_summary,
-                task_description=task_description,
-            )
+        prompt_text = self.reflection_prompt.fill(
+            {
+                "task_id": task_id,
+                "trial_id": trial_id,
+                "score": score,
+                "trajectory_summary": trajectory_summary,
+                "task_description": task_description,
+            }
+        )
 
         # Generate reflection
         messages = [LiteLLMMessage(role="user", content=prompt_text)]
+
+        if self.system_prompt:
+            messages.insert(
+                0,
+                LiteLLMMessage(role="system", content=self.system_prompt),
+            )
 
         try:
             response, usage_info = llm_call(
@@ -268,6 +224,7 @@ Please provide a brief reflection (2-5 sentences) that:
                 messages=messages,
                 temperature=self.temperature,
                 return_usage=True,
+                api_endpoint=self.api_endpoint,
                 **self.kwargs,
             )
 

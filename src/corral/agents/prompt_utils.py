@@ -115,14 +115,6 @@ def _convert_to_jinja2_format(text: str) -> str:
         >>> _convert_to_jinja2_format("{a} and {b}")
         '{{a}} and {{b}}'
     """
-    # Pattern explanation:
-    # (?<!\{) - negative lookbehind: not preceded by {
-    # \{      - literal opening brace
-    # ([^{}]+) - capture group: one or more non-brace characters (the variable name)
-    # \}      - literal closing brace
-    # (?!\})  - negative lookahead: not followed by }
-    #
-    # This ensures we only match single braces, not already-doubled ones
     pattern = r"(?<!\{)\{([^{}]+)\}(?!\})"
 
     # Replace {variable} with {{variable}}
