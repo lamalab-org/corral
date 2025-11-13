@@ -23,8 +23,8 @@ def main():
     load_dotenv()
 
     # Configuration
-    model = "gpt-4o"
-    max_iterations = 25
+    model = "claude-sonnet-4-5"
+    max_iterations = 20
     temperature = 0.0
     trials_per_task = 5
     port = 8004
@@ -37,7 +37,7 @@ def main():
     work_dir.mkdir(exist_ok=True)
     os.environ["CORRAL_WORK_DIR"] = str(work_dir)
 
-    logger.info(f"🧪 Running kinetic fitting benchmark")
+    logger.info("🧪 Running kinetic fitting benchmark")
     logger.info(f"Model: {model}")
     logger.info(f"Max iterations: {max_iterations}, Temperature: {temperature}")
     logger.info("=" * 60)

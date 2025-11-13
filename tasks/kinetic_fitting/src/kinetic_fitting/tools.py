@@ -417,7 +417,7 @@ def fit_reaction_network(
     oxygen_exp: np.ndarray,
     reaction_network: dict,
     experimental_conditions: dict,
-    maxiter: int = 100,  # Increased for better optimization
+    maxiter: int = 300,  # Increased for better optimization
     reference_params: dict = None,  # Optional reference parameters to seed optimization
 ) -> dict:
     """Fit reaction network parameters to experimental oxygen evolution data."""
@@ -1314,16 +1314,15 @@ def evaluate_phenomenological_trends(
         network_path: Path to reaction network JSON file
         results_path: Path to results JSON file (updated with trend scores)
     """
-    import random
 
     try:
         data = load_experimental_data(data_path)
 
         # If there are more than 5 experiments, randomly sample 5 of them
-        all_exp_names = list(data.keys())
-        if len(all_exp_names) > 5:
-            sampled_exp_names = random.sample(all_exp_names, 20)
-            data = {name: data[name] for name in sampled_exp_names}
+        # all_exp_names = list(data.keys())
+        # if len(all_exp_names) > 5:
+        #     sampled_exp_names = random.sample(all_exp_names, 20)
+        #     data = {name: data[name] for name in sampled_exp_names}
 
         trends = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}, "pH": {}}
         trends_original = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}, "pH": {}}
@@ -1335,7 +1334,7 @@ def evaluate_phenomenological_trends(
             oxygen = np.array(exp_data["oxygen"])
             time = np.array(exp_data["time"])
             predictions = fit_reaction_network(
-                time, oxygen, reaction_network, meta, maxiter=30
+                time, oxygen, reaction_network, meta, maxiter=300
             )
 
             y_pred = predictions["y_pred"]
@@ -1546,7 +1545,7 @@ def analyze_fit_with_vision(
     data_path: str,
     network_path: str,
     exp_name: str,
-    model: str = "gpt-4o",
+    model: str = "claude-sonnet-4-5",
 ) -> str:
     """Use vision model to analyze fit quality from plot.
 
@@ -1947,76 +1946,58 @@ def initialize_default_network() -> Dict[str, Any]:
     return {
         "reactions": [
             {
-                "equation": "RuII + hv -> RuII*",
+                "equation": "RuII + hv -> RuII_ex",
                 "type": "light",
-                "quantum_yield": [0.8, 1.0],
-                "description": "Photoexcitation of Ru(II) catalyst",
+                "quantum_yield": [0.1, 1.0],
+                "description": "Photoexcitation of Ru catalyst (\u03a6\u2081)",
             },
             {
-                "equation": "RuII* + S2O8 -> RuIII + SO4_rad + SO4",
+                "equation": "RuII_ex -> RuII",
                 "type": "dark",
-                "k_range": [1e7, 1e9],
-                "description": "Excited Ru oxidation by persulfate",
+                "k_range": [1538461.4384615384, 1538461.7384615385],
+                "description": "Excited state decay (k\u2088 = 1/650ns)",
             },
             {
-                "equation": "RuII + SO4_rad -> RuIII + SO4",
+                "equation": "RuII_ex + S2O8 -> RuIII + SO4",
                 "type": "dark",
-                "k_range": [1e8, 1e10],
-                "description": "Ru oxidation by sulfate radical",
+                "k_range": [1.0, 60.0],
+                "description": "Oxidative quenching (k\u2087)",
             },
             {
-                "equation": "RuIII + OH -> RuII + OH_rad",
-                "type": "dark",
-                "k_range": [1e3, 1e5],
-                "description": "Ru(III) reduction by hydroxide",
-            },
-            {
-                "equation": "2 OH_rad -> H2O2",
-                "type": "dark",
-                "k_range": [1e9, 1e10],
-                "description": "OH radical dimerization",
-            },
-            {
-                "equation": "2 RuIII + H2O2 -> 2 RuII + O2 + 2 H",
-                "type": "dark",
-                "k_range": [1e3, 1e5],
-                "description": "O2 evolution from H2O2",
-            },
-            {
-                "equation": "RuIII + hv -> RuIII*",
+                "equation": "RuIII + H2O + hv -> H2O2 + RuII + H+",
                 "type": "light",
-                "quantum_yield": [0.8, 1.0],
-                "description": "Photoexcitation of Ru(III)",
+                "quantum_yield": [0.1, 1.0],
+                "description": "Light-driven water oxidation (\u03a6\u2082)",
             },
             {
-                "equation": "RuIII* + S2O8 -> RuIV_intermediate",
+                "equation": "RuIII + RuIII -> Ru_Dimer",
                 "type": "dark",
-                "k_range": [1e7, 1e9],
-                "description": "Formation of Ru(IV) intermediate",
+                "k_range": [0.001, 0.1],
+                "description": "Dimer formation (k\u2083)",
             },
             {
-                "equation": "2 RuIV_intermediate -> Ru_Dimer_active",
+                "equation": "RuIII + RuIII + Ru_Dimer -> Ru_Dimer + Ru_Dimer",
                 "type": "dark",
-                "k_range": [1e5, 1e7],
-                "description": "Active dimer formation",
+                "k_range": [0.001, 0.1],
+                "description": "Autocatalytic dimer formation (k\u2084)",
             },
             {
-                "equation": "RuIV_intermediate + RuIV_intermediate -> Ru_oligomer_inactive",
+                "equation": "H2O2 -> O2",
                 "type": "dark",
-                "k_range": [1e6, 1e8],
-                "description": "Inactive oligomer formation",
+                "k_range": [0.001, 0.5],
+                "description": "H2O2 decomposition to O2 (k\u2085)",
             },
             {
-                "equation": "OH_rad + RuII -> decomposed_Ru",
+                "equation": "RuIII -> Inactive",
                 "type": "dark",
-                "k_range": [1e8, 1e10],
-                "description": "Catalyst decomposition",
+                "k_range": [0.001, 0.5],
+                "description": "Catalyst deactivation (k\u2086)",
             },
         ],
         "metadata": {
-            "created_by": "initialize_default_network",
-            "description": "Akhtar network structure for agent to discover improved kinetic pathways",
-            "version": "4.0",
+            "created_by": "reaction_network_conversion",
+            "description": "8-reaction network for Ru-catalyzed photochemical water oxidation with dimer formation",
+            "version": "2.0",
         },
     }
 
