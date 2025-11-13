@@ -13,13 +13,13 @@ GROUND_TRUTH_DIR = BASE_DIR / "ground_truth"
 def mock_modal_function():
     """Fixture to mock modal.Function.from_name and return a configurable mock."""
     with patch("modal.Function.from_name") as mock_from_name:
-        mock_remote = MagicMock()
-        mock_from_name.return_value.remote = mock_remote
-        yield mock_from_name, mock_remote
+        mock_function = MagicMock()
+        mock_from_name.return_value = mock_function
+        yield mock_from_name, mock_function
 
 
 def test_check_potential_file(mock_modal_function):
-    mock_from_name, mock_remote = mock_modal_function
+    mock_from_name, mock_function = mock_modal_function
 
     # Mock the file_info function to return success for specific paths
     def mock_file_info(path):
@@ -27,7 +27,7 @@ def test_check_potential_file(mock_modal_function):
             return {"exists": True, "size": 1024}
         raise RuntimeError("File not found")
 
-    mock_remote.side_effect = mock_file_info
+    mock_function.remote.side_effect = mock_file_info
 
     target = "/potentials/EAM/Al99.eam.alloy"
     score_fn = check_potential_file(target)
