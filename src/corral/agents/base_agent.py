@@ -114,6 +114,8 @@ class BaseAgent(ABC):
 
         if surrender_prompt is not None:
             self.surrender_prompt = ensure_jinja_compatible(surrender_prompt)
+        else:
+            self.surrender_prompt = None
 
     def get_llm_response(self, tools: list[dict[str, Any]] | None = None) -> Any:
         """Get response from the LLM using LiteLLM

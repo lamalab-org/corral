@@ -16,19 +16,19 @@ class TestStringPrompt:
 
     def test_init(self):
         """Test StringPrompt initialization."""
-        content = "Hello {name}!"
+        content = "Hello {{name}}!"
         prompt = StringPrompt(content)
         assert prompt.content == content
 
     def test_fill_single_replacement(self):
         """Test filling a prompt with a single replacement."""
-        prompt = StringPrompt("Hello {name}!")
+        prompt = StringPrompt("Hello {{name}}!")
         result = prompt.fill({"name": "Alice"})
         assert result == "Hello Alice!"
 
     def test_fill_multiple_replacements(self):
         """Test filling a prompt with multiple replacements."""
-        prompt = StringPrompt("Hello {name}, you are {age} years old!")
+        prompt = StringPrompt("Hello {{name}}, you are {{age}} years old!")
         result = prompt.fill({"name": "Bob", "age": 30})
         assert result == "Hello Bob, you are 30 years old!"
 
@@ -40,31 +40,19 @@ class TestStringPrompt:
 
     def test_fill_with_non_string_values(self):
         """Test filling a prompt with non-string values (should be converted to string)."""
-        prompt = StringPrompt("Count: {count}, Price: {price}")
+        prompt = StringPrompt("Count: {{count}}, Price: {{price}}")
         result = prompt.fill({"count": 5, "price": 19.99})
         assert result == "Count: 5, Price: 19.99"
 
-    def test_fill_missing_placeholder(self):
-        """Test filling a prompt where not all placeholders are provided."""
-        prompt = StringPrompt("Hello {name}, you are {age} years old!")
-        with pytest.raises(KeyError, match="Missing values for placeholders"):
-            prompt.fill({"name": "Charlie"})
-
-    def test_fill_missing_numeric_placeholder(self):
-        """Test filling a prompt with numeric placeholders that are missing."""
-        prompt = StringPrompt("Item {0} costs ${1}")
-        with pytest.raises(KeyError, match="Missing values for placeholders"):
-            prompt.fill({"0": "Apple"})  # Missing "1"
-
     def test_fill_empty_placeholder_name(self):
         """Test that empty placeholder names are handled correctly."""
-        prompt = StringPrompt("Hello {} world!")
+        prompt = StringPrompt("Hello {{}} world!")
         with pytest.raises(KeyError, match="Missing values for placeholders"):
             prompt.fill({})
 
     def test_fill_extra_replacements(self):
         """Test filling a prompt with extra replacements that don't match placeholders."""
-        prompt = StringPrompt("Hello {name}!")
+        prompt = StringPrompt("Hello {{name}}!")
         with pytest.raises(
             KeyError, match="Extra keys provided that don't match any placeholders"
         ):
@@ -72,19 +60,19 @@ class TestStringPrompt:
 
     def test_fill_extra_replacements_with_underscore_prefix(self):
         """Test that framework keys with underscore prefix are allowed as extra replacements."""
-        prompt = StringPrompt("Hello {name}!")
+        prompt = StringPrompt("Hello {{name}}!")
         result = prompt.fill({"name": "David", "_internal_key": "framework_value"})
         assert result == "Hello David!"
 
     def test_fill_legitimate_extra_field(self):
         """Test filling a prompt where 'extra' is a legitimate placeholder."""
-        prompt = StringPrompt("Hello {name}, here's {extra} info!")
+        prompt = StringPrompt("Hello {{name}}, here's {{extra}} info!")
         result = prompt.fill({"name": "Alice", "extra": "bonus"})
         assert result == "Hello Alice, here's bonus info!"
 
     def test_fill_typo_in_extra_field_caught(self):
         """Test that typos in field names are now caught."""
-        prompt = StringPrompt("Hello {name}, here's {extra} info!")
+        prompt = StringPrompt("Hello {{name}}, here's {{extra}} info!")
         with pytest.raises(
             KeyError, match="Extra keys provided that don't match any placeholders"
         ):

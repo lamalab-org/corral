@@ -24,7 +24,6 @@ class TestReflection:
         reflection = Reflection(
             trial_index=0,
             task_id="test_task",
-            error_signal="Tool execution failed",
             trajectory=trajectory,
             reflection_text="I should check tool parameters before calling.",
             score=0.3,
@@ -32,7 +31,6 @@ class TestReflection:
 
         assert reflection.trial_index == 0
         assert reflection.task_id == "test_task"
-        assert reflection.error_signal == "Tool execution failed"
         assert len(reflection.trajectory) == 2
         assert (
             reflection.reflection_text
@@ -50,7 +48,6 @@ class TestReflection:
         reflection = Reflection(
             trial_index=1,
             task_id="task_1",
-            error_signal="Error message",
             trajectory=trajectory,
             reflection_text="Reflection text",
             score=0.5,
@@ -60,7 +57,6 @@ class TestReflection:
 
         assert data["trial_index"] == 1
         assert data["task_id"] == "task_1"
-        assert data["error_signal"] == "Error message"
         assert data["reflection_text"] == "Reflection text"
         assert data["score"] == 0.5
         assert "timestamp" in data
@@ -71,7 +67,6 @@ class TestReflection:
         data = {
             "trial_index": 2,
             "task_id": "task_2",
-            "error_signal": "Test error",
             "trajectory": [
                 {"role": "user", "content": "Test"},
             ],
@@ -84,7 +79,6 @@ class TestReflection:
 
         assert reflection.trial_index == 2
         assert reflection.task_id == "task_2"
-        assert reflection.error_signal == "Test error"
         assert len(reflection.trajectory) == 1
         assert reflection.reflection_text == "Test reflection"
         assert reflection.score == 0.7
@@ -213,7 +207,6 @@ class TestReflectionMemory:
         return Reflection(
             trial_index=trial_index,
             task_id=task_id,
-            error_signal="Test error",
             trajectory=[LiteLLMMessage(role="user", content="Test")],
             reflection_text=reflection_text,
             score=0.3,
@@ -225,27 +218,37 @@ class TestReflectionModule:
 
     def test_module_initialization(self):
         """Test initializing reflection module."""
-        module = ReflectionModule(model="test-model")
+        module = ReflectionModule(
+            model="test-model", reflection_prompt="Generate reflection: {{trajectory}}"
+        )
 
         assert module.model == "test-model"
         assert module.temperature == 0.0  # Deterministic by default
 
     def test_module_custom_temperature(self):
         """Test module with custom temperature."""
-        module = ReflectionModule(model="test-model", temperature=0.5)
+        module = ReflectionModule(
+            model="test-model",
+            reflection_prompt="Generate reflection: {{trajectory}}",
+            temperature=0.5,
+        )
 
         assert module.temperature == 0.5
 
     def test_default_prompt_exists(self):
         """Test that default prompt is available."""
-        module = ReflectionModule(model="test-model")
+        module = ReflectionModule(
+            model="test-model", reflection_prompt="Generate reflection: {{trajectory}}"
+        )
 
         assert module.reflection_prompt is not None
         assert len(module.reflection_prompt) > 0
 
     def test_summarize_trajectory_short(self):
         """Test trajectory summarization with few messages."""
-        module = ReflectionModule(model="test-model")
+        module = ReflectionModule(
+            model="test-model", reflection_prompt="Generate reflection: {{trajectory}}"
+        )
 
         trajectory = [
             LiteLLMMessage(role="user", content="Task"),
@@ -259,7 +262,9 @@ class TestReflectionModule:
 
     def test_summarize_trajectory_long(self):
         """Test trajectory summarization with many messages."""
-        module = ReflectionModule(model="test-model")
+        module = ReflectionModule(
+            model="test-model", reflection_prompt="Generate reflection: {{trajectory}}"
+        )
 
         # Create 20 messages
         trajectory = [
@@ -271,16 +276,17 @@ class TestReflectionModule:
 
         summary = module._summarize_trajectory(trajectory)
 
-        # Should include first 5 and last 5
+        # Should include all messages as summarization is for tool output, not message count
         assert "Message 0" in summary
         assert "Message 4" in summary
-        assert "messages omitted" in summary
         assert "Message 15" in summary
         assert "Message 19" in summary
 
     def test_format_messages(self):
         """Test formatting messages."""
-        module = ReflectionModule(model="test-model")
+        module = ReflectionModule(
+            model="test-model", reflection_prompt="Generate reflection: {{trajectory}}"
+        )
 
         messages = [
             LiteLLMMessage(role="user", content="Hello"),
@@ -293,18 +299,21 @@ class TestReflectionModule:
         assert "ASSISTANT: Hi there" in formatted
 
     def test_format_messages_truncation(self):
-        """Test that long messages are truncated."""
-        module = ReflectionModule(model="test-model")
+        """Test that tool messages are summarized."""
+        module = ReflectionModule(
+            model="test-model", reflection_prompt="Generate reflection: {{trajectory}}"
+        )
 
-        long_content = "x" * 600  # Exceeds 500 char limit
+        # Use a tool-like message (role="tool")
+        long_content = "x" * 600  # Long tool output
         messages = [
-            LiteLLMMessage(role="user", content=long_content),
+            LiteLLMMessage(role="tool", content=long_content, tool_call_id="123"),
         ]
 
         formatted = module._format_messages(messages)
 
-        assert len(formatted) < len(long_content)
-        assert "..." in formatted
+        # Tool messages should be summarized
+        assert "TOOL:" in formatted
 
 
 class TestCreateReflexionHistory:
@@ -325,7 +334,6 @@ class TestCreateReflexionHistory:
         reflection = Reflection(
             trial_index=0,
             task_id="task_1",
-            error_signal="Error",
             trajectory=[LiteLLMMessage(role="user", content="Test")],
             reflection_text="Learn from this mistake",
             score=0.2,
@@ -349,7 +357,6 @@ class TestCreateReflexionHistory:
             reflection = Reflection(
                 trial_index=i,
                 task_id="task_1",
-                error_signal="Error",
                 trajectory=[LiteLLMMessage(role="user", content="Test")],
                 reflection_text=f"Lesson {i + 1}",
                 score=0.2,

@@ -15,9 +15,10 @@ class MockPrompt:
         self.content = content
 
     def fill(self, replacements: dict[str, Any]) -> str:
-        """Fill the prompt with replacements."""
+        """Fill the prompt with replacements, same behavior as StringPrompt."""
         result = self.content
         for key, value in replacements.items():
+            # Fill all keys including framework keys
             result = result.replace(f"{{{{{key}}}}}", str(value))
         return result
 
@@ -46,6 +47,7 @@ class MockBenchmarkInterface:
         self.tool_responses = []
         self.tool_calls = []
         self.call_counts = {}
+        self.get_last_score = None  # Can be overridden in tests
 
     def get_task_guide(self, task_id: str) -> str:
         self._record_call("get_task_guide", task_id)
@@ -113,7 +115,15 @@ def mock_prompt_store():
 
     class MockPromptStore:
         def get(self, prompt_name: str):
-            return MockPrompt("Test prompt: {{task_guide}}")
+            # Return specific prompts for known IDs
+            if "system_prompt" in prompt_name:
+                return MockPrompt("You are a helpful assistant.")
+            elif "extractor_prompt" in prompt_name:
+                return MockPrompt("Extract the answer from: {{answer}}")
+            elif "user_prompt" in prompt_name:
+                return MockPrompt("Task: {{task_guide}}")
+            else:
+                return MockPrompt("Test prompt: {{task_guide}}")
 
     return MockPromptStore()
 
