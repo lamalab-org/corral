@@ -11,6 +11,15 @@ from corral_md.tools import (
 )
 
 
+@pytest.fixture()
+def mock_modal_function():
+    """Fixture to mock modal.Function.from_name and return a configurable mock."""
+    with patch("modal.Function.from_name") as mock_from_name:
+        mock_remote = MagicMock()
+        mock_from_name.return_value.remote = mock_remote
+        yield mock_from_name, mock_remote
+
+
 @pytest.mark.parametrize(
     ("file_path", "expected_metadata"),
     [
@@ -55,49 +64,44 @@ def test_get_potential_metadata_none_or_empty(invalid_path):
         get_potential_metadata.execute(file_path=invalid_path)
 
 
-def test_run_lammps_success():
+def test_run_lammps_success(mock_modal_function):
     input_file = "input_file.data"
     expected_log_file = f"{Path(input_file).stem}.log"
+    mock_from_name, mock_remote = mock_modal_function
 
-    with patch("modal.Function.from_name") as mock_from_name:
-        mock_remote = MagicMock()
-        mock_from_name.return_value.remote = mock_remote
+    result = run_lammps.execute(input_file=input_file)
 
-        result = run_lammps.execute(input_file=input_file)
-
-        mock_remote.assert_called_once_with(input_file, expected_log_file)
-        assert (
-            result
-            == f"Simulation ran successfully using input: {input_file}, log saved at: {expected_log_file}"
-        )
+    mock_remote.assert_called_once_with(input_file, expected_log_file)
+    assert (
+        result
+        == f"Simulation ran successfully using input: {input_file}, log saved at: {expected_log_file}"
+    )
 
 
-def test_run_lammps_value_error():
-    input_file = "input_file.data"
-
-    with patch("modal.Function.from_name") as mock_from_name:
-        mock_remote = MagicMock(side_effect=ValueError("Some value error"))
-        mock_from_name.return_value.remote = mock_remote
-
-        with pytest.raises(
+@pytest.mark.parametrize(
+    ("exception_type", "exception_message", "expected_match"),
+    [
+        (
             ValueError,
-            match="The LAMMPS simulation failed with a ValueError: Some value error",
-        ):
-            run_lammps.execute(input_file=input_file)
-
-
-def test_run_lammps_unexpected_exception():
+            "Some value error",
+            "The LAMMPS simulation failed with a ValueError: Some value error",
+        ),
+        (
+            RuntimeError,
+            "Unexpected error",
+            "An unexpected error occurred while running the LAMMPS simulation: Unexpected error",
+        ),
+    ],
+)
+def test_run_lammps_exceptions(
+    mock_modal_function, exception_type, exception_message, expected_match
+):
     input_file = "input_file.data"
+    mock_from_name, mock_remote = mock_modal_function
+    mock_remote.side_effect = exception_type(exception_message)
 
-    with patch("modal.Function.from_name") as mock_from_name:
-        mock_remote = MagicMock(side_effect=RuntimeError("Unexpected error"))
-        mock_from_name.return_value.remote = mock_remote
-
-        with pytest.raises(
-            Exception,
-            match="An unexpected error occurred while running the LAMMPS simulation: Unexpected error",
-        ):
-            run_lammps.execute(input_file=input_file)
+    with pytest.raises((ValueError, Exception), match=expected_match):
+        run_lammps.execute(input_file=input_file)
 
 
 def test_run_lammps_with_none():
@@ -105,7 +109,7 @@ def test_run_lammps_with_none():
         run_lammps.execute(input_file=None)
 
 
-def test_get_structure_from_mp_text_mocked():
+def test_get_structure_from_mp_text():
     mp_id = "mp-149"
     file_path = "/results/Si.cif"
 
@@ -143,7 +147,7 @@ def test_get_structure_from_mp_text_mocked():
         mock_write.assert_called_once()
 
 
-def test_get_structure_from_mp_text_invalid_id_mocked():
+def test_get_structure_from_mp_text_invalid_id():
     invalid_mp_id = "mp-9999999"
     file_path = "/results/fake.cif"
 
@@ -162,71 +166,59 @@ def test_get_structure_from_mp_text_invalid_id_mocked():
         assert result.lower().startswith("failed to retrieve or save structure")
 
 
-def test_convert_structure_to_lammps_data_mocked():
+def test_convert_structure_to_lammps_data(mock_modal_function):
     structure_path = "/results/Si.cif"
     output_file = "/results/Si.data"
+    mock_from_name, mock_remote = mock_modal_function
 
-    with patch("modal.Function.from_name") as mock_function:
-        mock_convert = MagicMock()
-        mock_function.return_value.remote = mock_convert
+    result = convert_structure_to_lammps_data.execute(
+        structure_path=structure_path, output_file=output_file, atom_style="full"
+    )
 
-        result = convert_structure_to_lammps_data.execute(
-            structure_path=structure_path, output_file=output_file, atom_style="full"
-        )
-
-        assert result == f"LAMMPS data file successfully written to: {output_file}"
-        mock_convert.assert_called_once_with(structure_path, output_file, "full")
+    assert result == f"LAMMPS data file successfully written to: {output_file}"
+    mock_remote.assert_called_once_with(structure_path, output_file, "full")
 
 
-def test_convert_structure_to_lammps_data_invalid_input():
+def test_convert_structure_to_lammps_data_invalid_input(mock_modal_function):
     invalid_structure_path = "/nonexistent/path/invalid.cif"
     output_file = "/results/invalid.data"
+    mock_from_name, mock_remote = mock_modal_function
+    mock_remote.side_effect = Exception("No such file or directory")
 
-    with patch("modal.Function.from_name") as mock_function:
-        mock_convert = MagicMock()
-        mock_convert.side_effect = Exception("No such file or directory")
-        mock_function.return_value.remote = mock_convert
-
-        with pytest.raises(Exception) as exc_info:
-            convert_structure_to_lammps_data.execute(
-                structure_path=invalid_structure_path,
-                output_file=output_file,
-                atom_style="atomic",
-            )
-
-        msg = str(exc_info.value).lower()
-        assert "unexpected error" in msg
-
-
-def test_execute_python_script_success():
-    script_path = "/path/to/script.py"
-    args = ["--input", "data.json"]
-
-    with patch("modal.Function.from_name") as mock_function:
-        mock_execute = MagicMock()
-        mock_execute.return_value = '{"success": true, "stdout": "Done"}'
-        mock_function.return_value.remote = mock_execute
-
-        result = execute_python_script.execute(
-            script_path=script_path, args=args, timeout=300
+    with pytest.raises(Exception) as exc_info:
+        convert_structure_to_lammps_data.execute(
+            structure_path=invalid_structure_path,
+            output_file=output_file,
+            atom_style="atomic",
         )
 
-        assert "success" in result
-        mock_execute.assert_called_once()
+    msg = str(exc_info.value).lower()
+    assert "unexpected error" in msg
 
 
-def test_execute_python_script_failure():
+def test_execute_python_script_success(mock_modal_function):
+    script_path = "/path/to/script.py"
+    args = ["--input", "data.json"]
+    mock_from_name, mock_remote = mock_modal_function
+    mock_remote.return_value = '{"success": true, "stdout": "Done"}'
+
+    result = execute_python_script.execute(
+        script_path=script_path, args=args, timeout=300
+    )
+
+    assert "success" in result
+    mock_remote.assert_called_once()
+
+
+def test_execute_python_script_failure(mock_modal_function):
     script_path = "/nonexistent/script.py"
+    mock_from_name, mock_remote = mock_modal_function
+    mock_remote.side_effect = Exception("Script not found")
 
-    with patch("modal.Function.from_name") as mock_function:
-        mock_execute = MagicMock()
-        mock_execute.side_effect = Exception("Script not found")
-        mock_function.return_value.remote = mock_execute
+    with pytest.raises(Exception) as exc_info:
+        execute_python_script.execute(script_path=script_path)
 
-        with pytest.raises(Exception) as exc_info:
-            execute_python_script.execute(script_path=script_path)
-
-        assert "unexpected error" in str(exc_info.value).lower()
+    assert "unexpected error" in str(exc_info.value).lower()
 
 
 if __name__ == "__main__":
