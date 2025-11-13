@@ -108,11 +108,19 @@ def execute_single_trial(
     tool_verbosity: str | None = None,
     configure_timeout: float | None = None,
     enable_surrender: bool = False,
+    intervention_map: dict[str, str] | None = None,
+    execute_intervention_tools: bool = False,
 ) -> TaskTrialResult:
     """Execute a single trial - pure function"""
     try:
         status = interface.configure_additional_apps(task_id, timeout=configure_timeout)
         logger.info(f"Task {task_id} additional apps/services configured: {status}")
+
+        # Extract intervention thought for this task if available
+        intervention_thought = None
+        if intervention_map and task_id in intervention_map:
+            intervention_thought = intervention_map[task_id]
+            logger.info(f"Using intervention thought for task {task_id}")
 
         answer, token_usage = agent.run_agent(
             interface,
@@ -120,6 +128,8 @@ def execute_single_trial(
             verbose=verbose,
             tool_verbosity=tool_verbosity or "brief",
             enable_surrender=enable_surrender,
+            intervention_thought=intervention_thought,
+            execute_intervention_tools=execute_intervention_tools,
         )
 
         # Check if agent decided to surrender
@@ -267,6 +277,8 @@ class CorralRunner:
         session_id: str | None = None,
         tool_verbosity: str | None = None,
         configure_timeout: float | None = None,
+        intervention_map: dict[str, str] | None = None,
+        execute_intervention_tools: bool = False,
     ) -> BenchmarkResult:
         """Run benchmark with functional approach"""
 
@@ -280,6 +292,19 @@ class CorralRunner:
 
         if trials_per_task == 0:
             raise ValueError("Number of trials per task must be greater than 0")
+
+        # Validate intervention_map if provided
+        if intervention_map:
+            unknown_tasks = set(intervention_map.keys()) - set(task_ids)
+            if unknown_tasks:
+                logger.warning(
+                    f"Intervention map contains unknown task IDs: {unknown_tasks}"
+                )
+            intervention_tasks = set(intervention_map.keys()) & set(task_ids)
+            if intervention_tasks:
+                logger.info(
+                    f"Using intervention thoughts for {len(intervention_tasks)} tasks: {intervention_tasks}"
+                )
 
         # Initialize or load results
         task_results = self._load_or_initialize_results(task_ids, session_id)
@@ -295,6 +320,8 @@ class CorralRunner:
                 tool_verbosity=tool_verbosity,
                 configure_timeout=configure_timeout,
                 enable_surrender=self.enable_surrender,
+                intervention_map=intervention_map,
+                execute_intervention_tools=execute_intervention_tools,
             )
 
         checkpoint_saver = partial(self._save_checkpoint, session_id)
@@ -310,6 +337,13 @@ class CorralRunner:
                 task_ids=task_ids,
                 dependency_chain=self.interface.supports_dependency_chain(),
                 enable_surrender=self.enable_surrender,
+                intervention_enabled=intervention_map is not None,
+                intervention_task_count=(
+                    len(set(intervention_map.keys()) & set(task_ids))
+                    if intervention_map
+                    else 0
+                ),
+                execute_intervention_tools=execute_intervention_tools,
             )
             self.logger.start_logging(config)
 

@@ -115,6 +115,8 @@ class ToolCallingAgent(BaseAgent):
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         enable_surrender: bool = False,
+        intervention_thought: str | None = None,
+        execute_intervention_tools: bool = False,
     ) -> str:
         """Run the agent to solve the task
 
@@ -125,7 +127,8 @@ class ToolCallingAgent(BaseAgent):
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
-
+            intervention_thought (str, optional): An intervention thought to inject at the start of the task. Defaults to None.
+            execute_intervention_tools (bool, optional): Whether to execute tools found in the intervention thought. Defaults to False.
 
         Returns:
             str: The final answer to the task
@@ -150,6 +153,18 @@ class ToolCallingAgent(BaseAgent):
             surrender_prompt=self.surrender_prompt,
             enable_surrender=enable_surrender,
         )
+
+        # Inject intervention thought if provided
+        if intervention_thought:
+            # For tool calling agents, add intervention as plain assistant message. (The intervention thought is just added as context text since ToolCallingAgent uses native function calling)
+            self.messages.append(
+                LiteLLMMessage(role="assistant", content=intervention_thought)
+            )
+            logger.info(f"Injected intervention thought for task {task_id}")
+            if execute_intervention_tools:
+                logger.warning(
+                    "execute_intervention_tools is True, but will be ignored for ToolCallingAgent."
+                )
 
         for _i in range(self.max_iterations):
             try:

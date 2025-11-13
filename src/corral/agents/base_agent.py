@@ -229,6 +229,8 @@ class BaseAgent(ABC):
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         enable_surrender: bool = False,
+        intervention_thought: str | None = None,
+        execute_intervention_tools: bool = False,
     ) -> str:
         """
         Run the agent to solve a task
@@ -242,6 +244,8 @@ class BaseAgent(ABC):
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
+            intervention_thought (str, optional): An intervention thought (It can have tool calls in there)to inject at the start of the task. Defaults to None.
+            execute_intervention_tools (bool, optional): Whether to execute tools found in the intervention thought. Defaults to False and if the intervention thought has tool calls it will be stripped out.
 
         Returns:
             str: The final answer from the agent
@@ -258,6 +262,8 @@ class BaseAgent(ABC):
         verbose: bool = False,
         tool_verbosity: str = "brief",
         enable_surrender: bool = False,
+        intervention_thought: str | None = None,
+        execute_intervention_tools: bool = False,
     ) -> tuple[str, dict[str, int]]:
         """Run the agent to solve a task
 
@@ -272,6 +278,8 @@ class BaseAgent(ABC):
             verbose (bool, optional): Whether to save agent messages. Defaults to False.
             tool_verbosity (str, optional): The verbosity level for tool information. Defaults to "brief".
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
+            intervention_thought (str, optional): An intervention thought to inject at the start of the task. Defaults to None.
+            execute_intervention_tools (bool, optional): Whether to execute tools found in the intervention thought. Defaults to False and if the intervention thought has tool calls it will be stripped out.
 
         Returns:
             str: The final answer from the agent
@@ -283,7 +291,14 @@ class BaseAgent(ABC):
 
         try:
             final_answer = self.run(
-                interface, task_id, history, task_prompt, examples, enable_surrender
+                interface,
+                task_id,
+                history,
+                task_prompt,
+                examples,
+                enable_surrender,
+                intervention_thought,
+                execute_intervention_tools,
             )
 
             # Check if agent decided to surrender
