@@ -5,6 +5,7 @@ This module implements the Self-Reflection module (Msr) and long-term episodic m
 components of the Reflexion architecture as described in the paper (https://arxiv.org/abs/2303.11366).
 """
 
+import ast
 import json
 from collections import deque
 from dataclasses import dataclass, field
@@ -268,14 +269,10 @@ class ReflectionModule:
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
 
-            # Check if this is a tool-related message
-            is_tool_message = role == "tool" or (
-                role == "user"
-                and isinstance(content, str)
-                and content.startswith("Observation:")
-            )
+            # Check if this is a tool output message by looking for tool output structure
+            is_tool_output = self._is_tool_output_message(msg, content)
 
-            if is_tool_message:
+            if is_tool_output:
                 # Reduce tool message content to essential metadata
                 summarized_content = self._summarize_tool_message(msg, content)
                 formatted.append(f"{role.upper()}: {summarized_content}")
@@ -283,6 +280,48 @@ class ReflectionModule:
                 formatted.append(f"{role.upper()}: {content}")
 
         return "\n\n".join(formatted)
+
+    def _is_tool_output_message(self, msg: LiteLLMMessage, content: str) -> bool:
+        """
+        Detect if a message contains tool output.
+
+        Tool outputs can appear in different formats:
+        1. Messages with role="tool"
+        2. Messages with content starting with "Observation:" (ReAct style)
+        3. Messages with content containing tool output structure (tool_name, status, etc.)
+
+        Args:
+            msg: The message to check
+            content: The message content
+
+        Returns:
+            bool: True if this is a tool output message
+        """
+        role = msg.get("role", "")
+
+        # Direct tool role
+        if role == "tool":
+            return True
+
+        # ReAct-style observation format
+        if isinstance(content, str) and content.startswith("Observation:"):
+            return True
+
+        # Check if content contains tool output structure
+        if isinstance(content, str):
+            try:
+                # Try to parse as dict representation or JSON
+                parsed = ast.literal_eval(content) if content.startswith("{") else None
+                if isinstance(parsed, dict) and (
+                    "tool_name" in parsed
+                    or ("status" in parsed and "result" in parsed)
+                    or ("arguments" in parsed and "result" in parsed)
+                ):
+                    return True
+            except (ValueError, SyntaxError):
+                pass
+
+        return False
 
     def _summarize_tool_message(self, msg: LiteLLMMessage, content: str) -> str:
         """
@@ -299,19 +338,31 @@ class ReflectionModule:
             str: Summarized tool message string
         """
         try:
-            # Try to parse content as JSON for tool messages
+            tool_data = None
+
+            # Try to parse content - it can be in different formats
             if content.startswith("Observation:"):
-                # Extract JSON from "Observation: {json}" format
+                # Extract from "Observation: {data}" format (ReAct style)
                 json_str = content.replace("Observation:", "").strip()
-                tool_data = json.loads(json_str)
+                try:
+                    tool_data = json.loads(json_str)
+                except json.JSONDecodeError:
+                    tool_data = ast.literal_eval(json_str)
+            elif isinstance(content, str) and content.startswith("{"):
+                # Try parsing as dict representation first (Python dict string)
+                try:
+                    tool_data = ast.literal_eval(content)
+                except (ValueError, SyntaxError):
+                    # Fall back to JSON parsing
+                    tool_data = json.loads(content)
             else:
-                # For role="tool", content is typically the JSON directly
+                # Last resort - try JSON
                 tool_data = json.loads(content) if isinstance(content, str) else content
 
-            # Extract essential fields
+            # Extract essential fields (handle both ToolCall and ToolResponse formats)
             tool_name = tool_data.get("tool_name") or msg.get("name", "unknown_tool")
             status = tool_data.get("status", "unknown")
-            error_message = tool_data.get("error_message", "")
+            error_message = tool_data.get("error_message") or tool_data.get("error", "")
             duration = tool_data.get("duration", "N/A")
             arguments = tool_data.get("arguments", {})
 
@@ -319,7 +370,11 @@ class ReflectionModule:
             parts = [f"Tool: {tool_name}", f"Status: {status}"]
 
             if duration != "N/A":
-                parts.append(f"Duration: {duration}s")
+                parts.append(
+                    f"Duration: {duration:.2f}s"
+                    if isinstance(duration, float)
+                    else f"Duration: {duration}s"
+                )
 
             if error_message:
                 parts.append(f"Error: {error_message}")
@@ -346,7 +401,13 @@ class ReflectionModule:
 
             return " | ".join(parts)
 
-        except (json.JSONDecodeError, TypeError, AttributeError) as e:
+        except (
+            json.JSONDecodeError,
+            TypeError,
+            AttributeError,
+            ValueError,
+            SyntaxError,
+        ) as e:
             # If parsing fails, return truncated original content
             logger.debug(f"Failed to parse tool message, using truncated content: {e}")
             truncated = content[:200] if len(content) > 200 else content

@@ -1,6 +1,7 @@
 """Integration tests for ReflexionAgent."""
 
 from corral.agents.react import ReActAgent
+from corral.agents.reflection import Reflection, ReflectionModule
 from corral.agents.reflexion_agent import ReflexionAgent
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.agents.utils import LiteLLMMessage
@@ -385,8 +386,6 @@ Action Input: <action_input>{}</action_input>"""
         )
 
         # Add some reflections manually
-        from corral.agents.reflection import Reflection
-
         reflection = Reflection(
             trial_index=0,
             task_id="task_1",
@@ -460,3 +459,110 @@ class TestReflexionAgentEdgeCases:
         assert reflexion_agent._is_successful_answer("The answer is 42")
         assert reflexion_agent._is_successful_answer("Success! Task completed")
         assert reflexion_agent._is_successful_answer("Here is the result: ...")
+
+
+class TestReflectionModuleToolFormatting:
+    """Test cases for tool output detection and formatting in ReflectionModule."""
+
+    def test_is_tool_output_message_with_tool_role(self):
+        """Test detection of messages with role='tool'."""
+        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
+        msg = LiteLLMMessage(role="tool", content="some content", tool_call_id="123")
+
+        assert module._is_tool_output_message(msg, "some content") is True
+
+    def test_is_tool_output_message_with_observation(self):
+        """Test detection of ReAct-style Observation messages."""
+        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
+        msg = LiteLLMMessage(role="user", content="Observation: tool result")
+
+        assert module._is_tool_output_message(msg, msg["content"]) is True
+
+    def test_is_tool_output_message_with_tool_structure(self):
+        """Test detection of messages with tool output structure."""
+        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
+        content = "{'tool_name': 'test', 'status': 'success', 'result': 'data'}"
+        msg = LiteLLMMessage(role="user", content=content)
+
+        assert module._is_tool_output_message(msg, content) is True
+
+    def test_is_tool_output_message_regular_message(self):
+        """Test that regular messages are not detected as tool outputs."""
+        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
+        msg = LiteLLMMessage(role="user", content="What is the answer?")
+
+        assert module._is_tool_output_message(msg, msg["content"]) is False
+
+    def test_summarize_tool_message_with_dict_string(self):
+        """Test summarization of tool message with Python dict string format."""
+        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
+        content = "{'tool_name': 'list_files', 'arguments': {'path': '/test'}, 'result': 'file1\\nfile2\\nfile3', 'status': 'success', 'error_message': None, 'duration': 1.234, 'timestamp': '2025-08-03T10:16:37'}"
+        msg = LiteLLMMessage(role="tool", content=content, name="list_files")
+
+        summary = module._summarize_tool_message(msg, content)
+
+        assert "Tool: list_files" in summary
+        assert "Status: success" in summary
+        assert "Duration: 1.23s" in summary
+        assert "Arguments:" in summary
+        assert "Result: <returned" in summary
+
+    def test_summarize_tool_message_with_observation_format(self):
+        """Test summarization of ReAct-style observation format."""
+        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
+        content = "Observation: {'tool_name': 'search', 'status': 'success', 'result': 'found data'}"
+        msg = LiteLLMMessage(role="user", content=content, name="search")
+
+        summary = module._summarize_tool_message(msg, content)
+
+        assert "Tool: search" in summary
+        assert "Status: success" in summary
+
+    def test_summarize_tool_message_with_error(self):
+        """Test summarization of tool message with error."""
+        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
+        content = "{'tool_name': 'execute_python', 'arguments': {}, 'result': None, 'status': 'execution_error', 'error_message': 'Syntax error in code', 'duration': 0.5}"
+        msg = LiteLLMMessage(role="tool", content=content, name="execute_python")
+
+        summary = module._summarize_tool_message(msg, content)
+
+        assert "Tool: execute_python" in summary
+        assert "Status: execution_error" in summary
+        assert "Error: Syntax error in code" in summary
+
+    def test_format_messages_preserves_non_tool_messages(self):
+        """Test that non-tool messages are preserved as-is."""
+        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
+        messages = [
+            LiteLLMMessage(role="system", content="You are a helpful assistant"),
+            LiteLLMMessage(role="user", content="What is 2+2?"),
+            LiteLLMMessage(role="assistant", content="The answer is 4"),
+        ]
+
+        formatted = module._format_messages(messages)
+
+        assert "SYSTEM: You are a helpful assistant" in formatted
+        assert "USER: What is 2+2?" in formatted
+        assert "ASSISTANT: The answer is 4" in formatted
+
+    def test_format_messages_summarizes_tool_outputs(self):
+        """Test that tool output messages are summarized."""
+        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
+        messages = [
+            LiteLLMMessage(role="user", content="List files"),
+            LiteLLMMessage(
+                role="tool",
+                content="{'tool_name': 'list_files', 'status': 'success', 'result': 'very long file list...', 'arguments': {}, 'duration': 0.5}",
+                name="list_files",
+            ),
+        ]
+
+        formatted = module._format_messages(messages)
+
+        # Tool output should be summarized
+        assert "USER: List files" in formatted
+        assert "TOOL:" in formatted
+        assert "Tool: list_files" in formatted
+        assert "Status: success" in formatted
+        # Should not contain the full result
+        assert "very long file list" not in formatted
