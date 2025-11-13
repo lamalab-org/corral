@@ -2,10 +2,11 @@
 Reflection components for the Reflexion agent architecture.
 
 This module implements the Self-Reflection module (Msr) and long-term episodic memory
-components of the Reflexion architecture as described in the paper.
+components of the Reflexion architecture as described in the paper (https://arxiv.org/abs/2303.11366).
 """
 
 import json
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -28,7 +29,6 @@ class Reflection:
     Attributes:
         trial_index (int): The index of the trial that generated this reflection
         task_id (str): The task being attempted
-        error_signal (str): Error message or feedback from the evaluator
         trajectory (list[LiteLLMMessage]): Copy of the agent's message history during the attempt
         reflection_text (str): The LLM-generated reflection text (actionable insight)
         score (float): The score achieved in this attempt
@@ -75,30 +75,31 @@ class ReflectionMemory:
     maintain a bounded memory size.
 
     Args:
-        reflections (list[Reflection]): List of stored reflections
+        reflections (deque[Reflection]): Deque of stored reflections
         max_size (int): Maximum number of reflections to keep
     """
 
     def __init__(self, max_size: int = 3):
-        self.reflections: list[Reflection] = []
+        self.reflections: deque[Reflection] = deque(maxlen=max_size)
         self.max_size = max_size
 
     def add_reflection(self, reflection: Reflection) -> None:
         """
         Add a reflection to memory, removing oldest if at capacity.
 
+        Uses deque with maxlen for O(1) append and automatic removal of oldest items.
+
         Args:
             reflection (Reflection): The reflection to add
         """
-        self.reflections.append(reflection)
-
-        # Maintain max size with FIFO policy
-        if len(self.reflections) > self.max_size:
-            removed = self.reflections.pop(0)
+        if len(self.reflections) == self.max_size:
+            removed = self.reflections[0]
             logger.debug(
-                f"Removed oldest reflection from attempt {removed.trial_index} "
+                f"Removing oldest reflection from attempt {removed.trial_index} "
                 f"to maintain max_size={self.max_size}"
             )
+
+        self.reflections.append(reflection)
 
     def clear(self) -> None:
         """Clear all reflections from memory."""
@@ -131,7 +132,10 @@ class ReflectionMemory:
     def from_dict(cls, data: dict[str, Any]) -> "ReflectionMemory":
         """Create memory from dictionary."""
         memory = cls(max_size=data["max_size"])
-        memory.reflections = [Reflection.from_dict(r) for r in data["reflections"]]
+        memory.reflections = deque(
+            (Reflection.from_dict(r) for r in data["reflections"]),
+            maxlen=data["max_size"],
+        )
         return memory
 
 
@@ -193,9 +197,9 @@ Your goal is to provide a concise, actionable reflection that will help improve 
 
 Task:
 {task_id} - {trial_id}
+- Task description: {task_}
 
 - Score achieved: {score}
-- Error/Feedback: {error_message}
 
 Trajectory (key steps):
 {trajectory_summary}
@@ -212,6 +216,7 @@ Please provide a brief reflection (2-5 sentences) that:
         trial_id: str,
         trajectory: list[LiteLLMMessage],
         score: float,
+        task_description: str,
     ) -> tuple[str, dict[str, int]]:
         """
         Generate a reflection from a failed attempt.
@@ -221,6 +226,7 @@ Please provide a brief reflection (2-5 sentences) that:
             trial_id (str): The specific trial/attempt identifier
             trajectory (list[LiteLLMMessage]): The agent's message history during the attempt
             score (float): The score achieved (typically low for failed attempts)
+            task_description (str): Description of the task
 
         Returns:
             tuple[str, dict[str, int]]: A tuple of (reflection_text, token_usage_dict) where
@@ -240,6 +246,7 @@ Please provide a brief reflection (2-5 sentences) that:
                     "trial_id": trial_id,
                     "score": score,
                     "trajectory_summary": trajectory_summary,
+                    "task_description": task_description,
                 }
             )
         else:
@@ -249,6 +256,7 @@ Please provide a brief reflection (2-5 sentences) that:
                 trial_id=trial_id,
                 score=score,
                 trajectory_summary=trajectory_summary,
+                task_description=task_description,
             )
 
         # Generate reflection

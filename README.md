@@ -200,7 +200,6 @@ base_agent = ToolCallingAgent(model="gpt-4o", max_iterations=10, temperature=0.1
 # Wrap with Reflexion capabilities
 reflexion_agent = ReflexionAgent(
     actor=base_agent,
-    max_reflexion_attempts=3,  # Try up to 3 times with reflections
     reflection_model="gpt-4o",  # Model for generating reflections
     reflection_temperature=0.0,  # Deterministic reflections
 )

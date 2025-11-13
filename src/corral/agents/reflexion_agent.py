@@ -51,7 +51,6 @@ class ReflexionAgent(BaseAgent):
         actor (BaseAgent): The base agent to wrap (ReActAgent, ToolCallingAgent, etc.)
         reflection_model (str): Model to use for generating reflections
         reflection_prompt (str | Any | None): Custom reflection prompt
-        reflection_prompt_id (str | None): ID of reflection prompt in prompt store
         reflection_temperature (float | None): Temperature for reflection generation (default: 0.0)
         prompt_store (PromptStore | None): Prompt store instance for reflection prompts
         **kwargs: Additional arguments passed to the actor
@@ -62,11 +61,16 @@ class ReflexionAgent(BaseAgent):
         actor: BaseAgent,
         reflection_model: str,
         reflection_prompt: str | Any | None = None,
-        reflection_prompt_id: str | None = None,
         reflection_temperature: float | None = None,
         prompt_store: PromptStore | None = None,
         **kwargs,
     ):
+        # Validate that actor is a BaseAgent instance
+        if not isinstance(actor, BaseAgent):
+            raise TypeError(
+                f"actor must be an instance of BaseAgent, got {type(actor).__name__}"
+            )
+
         super().__init__(
             model=actor.model,
             max_iterations=actor.max_iterations,
@@ -79,10 +83,6 @@ class ReflexionAgent(BaseAgent):
         # Store the actor (the actual agent doing the work)
         self.actor = actor
 
-        # Determine reflection parameters (prioritize explicitly passed values)
-        final_reflection_model = (
-            reflection_model if reflection_model is not None else actor.model
-        )
         final_reflection_temperature = (
             reflection_temperature if reflection_temperature is not None else 0.0
         )
@@ -90,9 +90,8 @@ class ReflexionAgent(BaseAgent):
         # Initialize reflection components
         self.memory = ReflectionMemory(max_size=3)
         self.reflection_module = ReflectionModule(
-            model=final_reflection_model,
+            model=reflection_model,
             reflection_prompt=reflection_prompt,
-            reflection_prompt_id=reflection_prompt_id,
             prompt_store=prompt_store or actor.store,
             temperature=final_reflection_temperature,
         )
@@ -155,7 +154,8 @@ class ReflexionAgent(BaseAgent):
 
         # If we have a previous score, generate reflection from previous attempt
         if last_score_data is not None:
-            score = last_score_data.get("score", 0.0)
+            task_description = interface.get_task_prompt(task_id)
+            score = last_score_data.get("score")
             trial_id = last_score_data.get("trial_id", "unknown")
 
             # Generate and store reflection from previous trial
@@ -165,6 +165,7 @@ class ReflexionAgent(BaseAgent):
                     task_id=task_id,
                     trial_id=trial_id,
                     score=score,
+                    task_description=task_description,
                 )
 
         # Inject reflections from memory into history
@@ -208,6 +209,7 @@ class ReflexionAgent(BaseAgent):
         task_id: str,
         trial_id: str,
         score: float,
+        task_description: str,
     ) -> None:
         """
         Generate a reflection from the previous trial and store it in memory.
@@ -219,6 +221,7 @@ class ReflexionAgent(BaseAgent):
             task_id (str): The task ID
             trial_id (str): The trial ID from the previous attempt
             score (float): The score achieved in the previous trial
+            task_description (str): Description of the task
         """
         # Use the messages stored from the previous trial
         trajectory = self._previous_messages
@@ -236,6 +239,7 @@ class ReflexionAgent(BaseAgent):
             trial_id=trial_id,
             trajectory=trajectory,
             score=score,
+            task_description=task_description,
         )
 
         # Accumulate reflection token usage

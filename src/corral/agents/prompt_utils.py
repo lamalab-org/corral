@@ -7,14 +7,15 @@ from corral.agents.utils import LiteLLMMessage
 
 
 class StringPrompt:
-    """A simple string-based prompt that mimics PromptStore prompt interface."""
+    """A simple string-based prompt that mimics PromptStore prompt interface with Jinja2 support."""
 
     def __init__(self, content):
         self.content = content
 
     def fill(self, replacements):
-        # Extract all placeholders from the template
-        template_placeholders = set(re.findall(r"\{([^}]*)\}", self.content))
+        # Extract all placeholders from the template (Jinja2 double-brace format)
+        # Match {{variable}} patterns
+        template_placeholders = set(re.findall(r"\{\{([^}]*)\}\}", self.content))
 
         # Separate framework keys (with underscore prefix) from user keys
         framework_keys = {k for k in replacements if k.startswith("_")}
@@ -29,14 +30,103 @@ class StringPrompt:
 
         result = self.content
         for key, value in replacements.items():
-            result = result.replace(f"{{{key}}}", str(value))
+            # Replace {{key}} with the value
+            result = result.replace(f"{{{{{key}}}}}", str(value))
 
         # Check for any remaining unfilled placeholders
-        remaining_placeholders = re.findall(r"\{([^}]*)\}", result)
+        remaining_placeholders = re.findall(r"\{\{([^}]*)\}\}", result)
         if remaining_placeholders:
             raise KeyError(f"Missing values for placeholders: {remaining_placeholders}")
 
         return result
+
+
+def ensure_jinja_compatible(prompt: str | Any) -> Any:
+    """
+    Convert a prompt to a Jinja2-compatible format with a .fill() method.
+
+    This function takes various prompt formats and ensures they have a .fill() method
+    that can be used for Jinja-style variable substitution. It also converts old-style
+    {variable} format to Jinja2 {{variable}} format.
+
+    Args:
+        prompt (str | Any): The prompt to convert. Can be:
+            - A string (will be converted to Jinja2 format if needed, then wrapped in StringPrompt)
+            - An object that already has a .fill() method (returned as-is)
+            - Any other object (will raise TypeError)
+
+    Returns:
+        Any: A prompt object with a .fill() method that accepts a dict of variables
+            and returns the filled prompt string
+
+    Raises:
+        TypeError: If the prompt is not a string or doesn't have a .fill() method
+
+    Examples:
+        >>> # String prompt with old format
+        >>> prompt = ensure_jinja_compatible("Hello {name}")
+        >>> prompt.fill({"name": "World"})
+        'Hello World'
+
+        >>> # String prompt with Jinja2 format (unchanged)
+        >>> prompt = ensure_jinja_compatible("Hello {{name}}")
+        >>> prompt.fill({"name": "World"})
+        'Hello World'
+
+        >>> # Already compatible prompt object
+        >>> from promptstore import Prompt
+        >>> prompt = ensure_jinja_compatible(Prompt("Task: {{task}}"))
+        >>> prompt.fill({"task": "Solve this"})
+        'Task: Solve this'
+    """
+    if isinstance(prompt, str):
+        # Convert old-style {variable} to Jinja2 {{variable}} format
+        converted_prompt = _convert_to_jinja2_format(prompt)
+        return StringPrompt(converted_prompt)
+    elif hasattr(prompt, "fill") and callable(prompt.fill):
+        return prompt
+    else:
+        raise TypeError(
+            f"Prompt must be a string or an object with a .fill() method, "
+            f"got {type(prompt).__name__}"
+        )
+
+
+def _convert_to_jinja2_format(text: str) -> str:
+    """
+    Convert old-style {variable} format to Jinja2 {{variable}} format.
+
+    This function is careful to:
+    1. Only convert single braces {variable} to double braces {{variable}}
+    2. Leave already-doubled braces {{variable}} unchanged
+    3. Handle nested structures and edge cases
+
+    Args:
+        text: The text potentially containing {variable} placeholders
+
+    Returns:
+        Text with all single-brace variables converted to double-brace Jinja2 format
+
+    Examples:
+        >>> _convert_to_jinja2_format("Task: {task_guide}")
+        'Task: {{task_guide}}'
+        >>> _convert_to_jinja2_format("Task: {{task_guide}}")
+        'Task: {{task_guide}}'
+        >>> _convert_to_jinja2_format("{a} and {b}")
+        '{{a}} and {{b}}'
+    """
+    # Pattern explanation:
+    # (?<!\{) - negative lookbehind: not preceded by {
+    # \{      - literal opening brace
+    # ([^{}]+) - capture group: one or more non-brace characters (the variable name)
+    # \}      - literal closing brace
+    # (?!\})  - negative lookahead: not followed by }
+    #
+    # This ensures we only match single braces, not already-doubled ones
+    pattern = r"(?<!\{)\{([^{}]+)\}(?!\})"
+
+    # Replace {variable} with {{variable}}
+    return re.sub(pattern, r"{{\1}}", text)
 
 
 def get_prompt(

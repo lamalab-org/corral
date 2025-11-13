@@ -209,7 +209,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="No trials completed yet")
 
         # Get the most recent trial_id
-        trial_ids = sorted(env.trial_states.keys(), key=lambda x: int(x))
+        trial_ids = sorted(env.trial_states.keys(), key=int)
         if not trial_ids:
             raise HTTPException(status_code=404, detail="No trials completed yet")
 

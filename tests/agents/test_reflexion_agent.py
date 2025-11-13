@@ -15,20 +15,22 @@ class TestReflexionAgentInitialization:
     def test_init_with_react_agent(self):
         """Test initializing ReflexionAgent with ReActAgent."""
         base_agent = ReActAgent(model="test-model", max_iterations=5)
-        reflexion_agent = ReflexionAgent(actor=base_agent, max_reflexion_attempts=3)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         assert reflexion_agent.actor == base_agent
-        assert reflexion_agent.max_reflexion_attempts == 3
         assert reflexion_agent.model == base_agent.model
         assert reflexion_agent.max_iterations == base_agent.max_iterations
 
     def test_init_with_tool_calling_agent(self):
         """Test initializing ReflexionAgent with ToolCallingAgent."""
         base_agent = ToolCallingAgent(model="test-model", max_iterations=10)
-        reflexion_agent = ReflexionAgent(actor=base_agent)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         assert reflexion_agent.actor == base_agent
-        assert reflexion_agent.max_reflexion_attempts == 3  # Default
 
     def test_init_custom_reflection_model(self):
         """Test initializing with custom reflection model."""
@@ -40,7 +42,9 @@ class TestReflexionAgentInitialization:
     def test_memory_initialization(self):
         """Test that memory is properly initialized."""
         base_agent = ReActAgent(model="test-model")
-        reflexion_agent = ReflexionAgent(actor=base_agent)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         assert len(reflexion_agent.memory.reflections) == 0
         assert reflexion_agent.memory.max_size == 3
@@ -53,7 +57,9 @@ class TestReflexionAgentRun:
         """Test that reflexion agent succeeds on first attempt."""
         # Create base agent
         base_agent = ReActAgent(model="test-model", max_iterations=3)
-        reflexion_agent = ReflexionAgent(actor=base_agent, max_reflexion_attempts=3)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         # Mock successful response
         response = MockLLMResponse(
@@ -90,7 +96,9 @@ class TestReflexionAgentRun:
     def test_retry_with_reflection(self, mock_interface, monkeypatch):
         """Test that agent retries with reflection after failure."""
         base_agent = ReActAgent(model="test-model", max_iterations=3)
-        reflexion_agent = ReflexionAgent(actor=base_agent, max_reflexion_attempts=3)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         # First attempt fails (needs 3 responses to exhaust iterations), second succeeds
         responses = [
@@ -150,7 +158,9 @@ class TestReflexionAgentRun:
     def test_exhausts_all_attempts(self, mock_interface, monkeypatch):
         """Test that agent exhausts all attempts before giving up."""
         base_agent = ReActAgent(model="test-model", max_iterations=3)
-        reflexion_agent = ReflexionAgent(actor=base_agent, max_reflexion_attempts=3)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         # All attempts fail - each needs 3 responses to exhaust iterations
         call_count = {"llm": 0, "reflection": 0}
@@ -193,7 +203,9 @@ class TestReflexionAgentRun:
     def test_memory_injection_into_history(self, mock_interface, monkeypatch):
         """Test that reflections are injected into actor's history."""
         base_agent = ReActAgent(model="test-model", max_iterations=3)
-        reflexion_agent = ReflexionAgent(actor=base_agent, max_reflexion_attempts=2)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         # First fails, second succeeds
         responses = [
@@ -231,7 +243,7 @@ class TestReflexionAgentRun:
         )
 
         # Run
-        _result = reflexion_agent.run(mock_interface, "test_task")
+        reflexion_agent.run(mock_interface, "test_task")
 
         # Check that history was injected on second attempt
         assert len(captured_history) == 2
@@ -248,7 +260,9 @@ class TestReflexionAgentRun:
     def test_memory_clears_for_new_task(self, mock_interface, monkeypatch):
         """Test that memory clears when switching tasks."""
         base_agent = ReActAgent(model="test-model", max_iterations=3)
-        reflexion_agent = ReflexionAgent(actor=base_agent, max_reflexion_attempts=2)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         def mock_actor_run(self, interface, task_id, history=None, **kwargs):
             self.messages = [LiteLLMMessage(role="assistant", content="Error")]
@@ -277,7 +291,9 @@ class TestReflexionAgentRun:
     def test_with_tool_execution(self, mock_interface, monkeypatch):
         """Test reflexion agent with tool execution."""
         base_agent = ReActAgent(model="test-model", max_iterations=5)
-        reflexion_agent = ReflexionAgent(actor=base_agent, max_reflexion_attempts=2)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         # First attempt uses wrong tool and exhausts iterations, second uses right tool and succeeds
         responses = [
@@ -364,7 +380,9 @@ Action Input: <action_input>{}</action_input>"""
     def test_get_reflection_summary(self):
         """Test getting reflection summary."""
         base_agent = ReActAgent(model="test-model")
-        reflexion_agent = ReflexionAgent(actor=base_agent)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         # Add some reflections manually
         from corral.agents.reflection import Reflection
@@ -394,7 +412,9 @@ class TestReflexionAgentEdgeCases:
     def test_exception_handling(self, mock_interface, monkeypatch):
         """Test that exceptions are handled gracefully."""
         base_agent = ReActAgent(model="test-model", max_iterations=3)
-        reflexion_agent = ReflexionAgent(actor=base_agent, max_reflexion_attempts=2)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         call_count = {"attempt": 0}
 
@@ -424,7 +444,9 @@ class TestReflexionAgentEdgeCases:
     def test_is_successful_answer(self):
         """Test the success detection heuristic."""
         base_agent = ReActAgent(model="test-model")
-        reflexion_agent = ReflexionAgent(actor=base_agent)
+        reflexion_agent = ReflexionAgent(
+            reflection_model="test-model", actor=base_agent
+        )
 
         # These should be considered failures
         assert not reflexion_agent._is_successful_answer("Error solving the task")

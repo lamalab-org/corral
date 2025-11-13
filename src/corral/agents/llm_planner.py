@@ -1,7 +1,7 @@
 from promptstore import PromptStore
 
 from corral.agents.base_agent import BaseAgent
-from corral.agents.prompt_utils import create_prompt
+from corral.agents.prompt_utils import create_prompt, get_prompt
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.agents.utils import LiteLLMMessage
@@ -44,18 +44,16 @@ class LLMPlanner(BaseAgent):
         model (str): The model to use for running the agent. Defaults to "openai/gpt-4o".
         max_iterations (int, optional): The maximum number of iterations to plan. Defaults to 10.
         api_endpoint (str, optional): The API endpoint URL for the LLM provider (e.g., OpenAI, VLLM, or self-hosted models) to handle tool/function calling requests. Defaults to None.
-        system_prompt (str | Any, optional): The system prompt to use. Can be a string, PromptStore ID, or prompt object
-            that implements .fill() method. Defaults to "You are a helpful AI assistant that solves tasks step by step."
+        system_prompt (str | Any, optional): The system prompt to use. Can be a string or prompt object
+            that implements .fill() method. If None, uses default system prompt. Must support Jinja templating.
         user_prompt (str | Any, optional): The user prompt template. Must contain {{task_guide}}, {{tools}},
             {{iterations}}, and {{examples}} fields for hierarchical planning functionality.
-            Can be a string, PromptStore ID, or prompt object that implements .fill() method.
-        extractor_prompt (str | Any, optional): The prompt to use for extracting final answers. Can be a string,
-            PromptStore ID, or prompt object that implements .fill() method. Defaults to None.
+            Can be a string or prompt object that implements .fill() method.
+            If None, uses default planner prompt (ID: "1c7f064f-9a3b-40f5-a555-94e551722d50").
+        extractor_prompt (str | Any, optional): The prompt to use for extracting final answers. Can be a string
+            or prompt object that implements .fill() method. If None, uses default extractor prompt.
         temperature (float, optional): The temperature to use for sampling. Defaults to 0.7.
         prompt_store (PromptStore, optional): The prompt store to use. Defaults to None.
-        system_prompt_id (str, optional): The ID of the system prompt to use. Defaults to "400fcecf-f5f2-464b-aff5-8a4377c9685c".
-        user_prompt_id (str, optional): The ID of the user prompt to use. Defaults to "1c7f064f-9a3b-40f5-a555-94e551722d50".
-        extractor_prompt_id (str, optional): The ID of the extractor prompt to use. Defaults to "9d37e4a0-26c5-438a-ba1b-a273388fcded".
         **kwargs: Additional keyword arguments to pass to the LiteLLM API for all LLM calls
     """
 
@@ -69,12 +67,14 @@ class LLMPlanner(BaseAgent):
         extractor_prompt: str | None = None,
         temperature: float = 0.7,
         prompt_store: PromptStore | None = None,
-        system_prompt_id: str = "400fcecf-f5f2-464b-aff5-8a4377c9685c",
-        user_prompt_id: str = "1c7f064f-9a3b-40f5-a555-94e551722d50",
-        extractor_prompt_id: str | None = "9d37e4a0-26c5-438a-ba1b-a273388fcded",
         **kwargs,
     ):
         """Initialize the agent"""
+        # Set default user prompt if not provided
+        if self.user_prompt is None:
+            default_user_prompt_id = "1c7f064f-9a3b-40f5-a555-94e551722d50"
+            self.user_prompt = get_prompt(self.store, None, default_user_prompt_id)
+
         super().__init__(
             model=model,
             max_iterations=max_iterations,
@@ -84,9 +84,6 @@ class LLMPlanner(BaseAgent):
             extractor_prompt=extractor_prompt,
             temperature=temperature,
             prompt_store=prompt_store,
-            system_prompt_id=system_prompt_id,
-            user_prompt_id=user_prompt_id,
-            extractor_prompt_id=extractor_prompt_id,
             **kwargs,
         )
 

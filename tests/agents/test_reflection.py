@@ -232,34 +232,34 @@ class TestReflectionModule:
 
     def test_module_custom_temperature(self):
         """Test module with custom temperature."""
-        module = ReflectionModule(temperature=0.5)
+        module = ReflectionModule(model="test-model", temperature=0.5)
 
         assert module.temperature == 0.5
 
     def test_default_prompt_exists(self):
         """Test that default prompt is available."""
-        module = ReflectionModule()
+        module = ReflectionModule(model="test-model")
 
         assert module.reflection_prompt is not None
         assert len(module.reflection_prompt) > 0
 
     def test_summarize_trajectory_short(self):
         """Test trajectory summarization with few messages."""
-        module = ReflectionModule()
+        module = ReflectionModule(model="test-model")
 
         trajectory = [
             LiteLLMMessage(role="user", content="Task"),
             LiteLLMMessage(role="assistant", content="Response"),
         ]
 
-        summary = module._summarize_trajectory(trajectory, max_messages=10)
+        summary = module._summarize_trajectory(trajectory)
 
         assert "USER: Task" in summary
         assert "ASSISTANT: Response" in summary
 
     def test_summarize_trajectory_long(self):
         """Test trajectory summarization with many messages."""
-        module = ReflectionModule()
+        module = ReflectionModule(model="test-model")
 
         # Create 20 messages
         trajectory = [
@@ -269,7 +269,7 @@ class TestReflectionModule:
             for i in range(20)
         ]
 
-        summary = module._summarize_trajectory(trajectory, max_messages=10)
+        summary = module._summarize_trajectory(trajectory)
 
         # Should include first 5 and last 5
         assert "Message 0" in summary
@@ -280,7 +280,7 @@ class TestReflectionModule:
 
     def test_format_messages(self):
         """Test formatting messages."""
-        module = ReflectionModule()
+        module = ReflectionModule(model="test-model")
 
         messages = [
             LiteLLMMessage(role="user", content="Hello"),
@@ -294,7 +294,7 @@ class TestReflectionModule:
 
     def test_format_messages_truncation(self):
         """Test that long messages are truncated."""
-        module = ReflectionModule()
+        module = ReflectionModule(model="test-model")
 
         long_content = "x" * 600  # Exceeds 500 char limit
         messages = [
