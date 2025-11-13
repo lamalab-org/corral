@@ -108,7 +108,7 @@ def test_check_potential_file(mock_modal_function):
 def test_check_numerical_submission_format(
     mock_modal_function, target, json_string, expected
 ):
-    mock_from_name, mock_remote = mock_modal_function
+    mock_from_name, mock_function = mock_modal_function
 
     # Mock the file_info function to return success for specific paths
     def mock_file_info(path):
@@ -121,7 +121,7 @@ def test_check_numerical_submission_format(
             return {"exists": True, "size": 1024}
         raise RuntimeError("File not found")
 
-    mock_remote.side_effect = mock_file_info
+    mock_function.remote.side_effect = mock_file_info
 
     score_fn = check_numerical(target=target, tolerance=2e-2)
     assert score_fn(json_string) == expected
