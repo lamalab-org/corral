@@ -159,6 +159,8 @@ def create_prompt(
     user_prompt: Any,
     task_guide: str | list,
     history: list[LiteLLMMessage] | None = None,
+    surrender_prompt: Any | None = None,
+    enable_surrender: bool = False,
     **kwargs,
 ) -> list[LiteLLMMessage]:
     """Create prompt for LLM including context and history
@@ -168,6 +170,8 @@ def create_prompt(
         user_prompt: The user prompt object
         task_guide (Union[str, list]): The task guide or prompt to use
         history (list[LiteLLMMessage], optional): Message history to include. Defaults to None.
+        surrender_prompt: The surrender prompt object. Instructions for how the agent can surrender from unsolvable tasks. Defaults to None.
+        enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
         **kwargs: Additional keyword arguments for building user content
 
     Returns:
@@ -183,6 +187,11 @@ def create_prompt(
 
     if system_prompt:
         messages.append(LiteLLMMessage(role="system", content=system_prompt))
+
+    # Add surrender instructions if enabled
+    if enable_surrender and surrender_prompt:
+        surrender_instructions = surrender_prompt.fill({})
+        kwargs["surrender_instructions"] = surrender_instructions
 
     user_content = build_user_content(user_prompt, task_guide=task_guide, **kwargs)
 
@@ -216,6 +225,10 @@ def build_user_content(
     fill_kwargs = kwargs.copy()
 
     fill_kwargs["task_guide"] = task_guide
+
+    # Provide default empty string for surrender_instructions if not specified
+    if "surrender_instructions" not in fill_kwargs:
+        fill_kwargs["surrender_instructions"] = ""
 
     if isinstance(task_guide, list):
         LIST_PROMPT = "The task is to correctly answer the question with an image specified below."
