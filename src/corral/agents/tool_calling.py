@@ -151,7 +151,7 @@ class ToolCallingAgent(BaseAgent):
             enable_surrender=enable_surrender,
         )
 
-        # Execute BEFORE_TASK hooks (e.g., intervention)
+        # Execute BEFORE_TASK hooks
         self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
 
         for _i in range(self.max_iterations):
@@ -161,15 +161,6 @@ class ToolCallingAgent(BaseAgent):
             self._execute_hooks(HookPoint.BEFORE_ITERATION, interface, task_id)
             try:
                 llm_response = self.get_llm_response(tools)
-
-                # Execute AFTER_LLM_RESPONSE hooks
-                if llm_response.content:
-                    self._execute_hooks(
-                        HookPoint.AFTER_LLM_RESPONSE,
-                        interface,
-                        task_id,
-                        llm_response=llm_response.content,
-                    )
 
                 content = llm_response.content
                 if content:
@@ -213,28 +204,9 @@ class ToolCallingAgent(BaseAgent):
                                 arguments=raw_arguments,
                             )
 
-                            # Execute BEFORE_TOOL_EXECUTION hooks
-                            self._execute_hooks(
-                                HookPoint.BEFORE_TOOL_EXECUTION,
-                                interface,
-                                task_id,
-                                tool_name=action.tool_name,
-                                tool_arguments=action.arguments,
-                            )
-
                             # Execute tool - this can also fail
                             function_call = interface.execute_tool(
                                 task_id, action.tool_name, action.arguments
-                            )
-
-                            # Execute AFTER_TOOL_EXECUTION hooks
-                            self._execute_hooks(
-                                HookPoint.AFTER_TOOL_EXECUTION,
-                                interface,
-                                task_id,
-                                tool_name=action.tool_name,
-                                tool_arguments=action.arguments,
-                                tool_result=function_call,
                             )
 
                             result = str(function_call.result)
@@ -273,9 +245,6 @@ class ToolCallingAgent(BaseAgent):
                         content=f"Error during agent iteration: {e!s}",
                     )
                 )
-
-            # Execute AFTER_ITERATION hooks
-            self._execute_hooks(HookPoint.AFTER_ITERATION, interface, task_id)
 
         self.messages.append(
             LiteLLMMessage(

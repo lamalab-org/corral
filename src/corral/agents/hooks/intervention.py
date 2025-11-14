@@ -1,10 +1,11 @@
 """Intervention hook for injecting thoughts and actions into agent execution.
 
-This module provides a hook that can inject pre-defined thoughts at the start of a task. (For example take reasoning from Claude and inject it into GPT).
-This is useful for context engineerting scenarios such as the ones below or running ablations
+This module provides a hook that can inject pre-defined thoughts at the start of a task.
+(For example take reasoning from Claude and inject it into GPT).
+
+This is useful for context engineering scenarios such as the ones below or running ablations:
 - Guiding agents based on successful/failed trajectories
 - Providing hints or constraints
-
 """
 
 import json

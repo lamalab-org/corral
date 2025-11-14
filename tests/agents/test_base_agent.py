@@ -15,16 +15,25 @@ from .conftest import MockBenchmarkInterface, MockLLMResponse, MockPrompt
 class ConcreteAgent(BaseAgent):
     """Concrete implementation of BaseAgent for testing purposes."""
 
-    def run(
-        self,
-        interface: CorralRouter,
-        task_id: str,
-        history: list[LiteLLMMessage] | None = None,
-        task_prompt: str | None = None,
-        examples: list[str] | None = None,
-    ) -> str:
-        """Simple implementation for testing."""
-        return "test_answer"
+    def _parse_response(self, llm_response):
+        """Mock implementation."""
+        return None, "test_answer", None
+
+    def _execute_actions(self, actions, interface, task_id):
+        """Mock implementation."""
+        return []
+
+    def _get_llm_response_content(self, llm_response):
+        """Mock implementation."""
+        return llm_response.content if hasattr(llm_response, "content") else str(llm_response)
+
+    def _handle_no_actions(self):
+        """Mock implementation."""
+        pass
+
+    def _get_tools_for_llm(self, interface, task_id):
+        """Mock implementation."""
+        return None
 
 
 @pytest.fixture()
@@ -41,6 +50,7 @@ def concrete_agent(mock_prompt_store):
         prompt_store=mock_prompt_store,
         temperature=0.5,
         max_iterations=5,
+        user_prompt_id="test_user_prompt",  # Add default user_prompt_id
     )
 
 

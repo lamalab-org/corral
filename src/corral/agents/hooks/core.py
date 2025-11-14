@@ -23,32 +23,31 @@ class HookPoint(str, Enum):
 
     Hook points represent specific moments in the agent execution where
     custom callbacks can be injected to modify behavior or observe state.
+
+    Minimal hook points design:
+    - BEFORE_TASK: For intervention injection after task guide is created
+    - BEFORE_ITERATION: Before each LLM call
+    - AFTER_ITERATION: After tools execute with full iteration context
+    - AFTER_TASK: Cleanup after task completion
     """
 
     # Task lifecycle
     BEFORE_TASK = "before_task"
-    """Called once at the start of a task, after prompt initialization"""
+    """Called once at the start of a task, after prompt/task guide initialization.
+    Perfect for intervention injection."""
 
     AFTER_TASK = "after_task"
     """Called once at the end of a task, regardless of success/failure"""
 
     # Iteration lifecycle
     BEFORE_ITERATION = "before_iteration"
-    """Called at the start of each agent iteration"""
+    """Called at the start of each agent iteration, before LLM call"""
 
     AFTER_ITERATION = "after_iteration"
-    """Called at the end of each agent iteration"""
+    """Called at the end of each agent iteration, after all tools execute.
+    Context includes: llm_response, parsed_actions, tool_results in iteration_data"""
 
-    # Tool execution
-    BEFORE_TOOL_EXECUTION = "before_tool_execution"
-    """Called before executing each tool"""
-
-    AFTER_TOOL_EXECUTION = "after_tool_execution"
-    """Called after executing each tool"""
-
-    # Response processing
-    AFTER_LLM_RESPONSE = "after_llm_response"
-    """Called after receiving LLM response, before parsing"""
+    ## WE CAN ADD MORE LATER IF NEEDED for example tool execution hooks, LLM parsing hooks, etc.
 
 
 @dataclass
@@ -67,12 +66,8 @@ class HookContext:
         should_continue: Flag to control execution flow (set to False to stop)
         skip_current_step: Flag to skip the current step without stopping
         metadata: Dictionary for storing arbitrary hook-specific data
-        llm_response: The LLM's response text (when available)
-        tool_name: Name of the tool being executed (when available)
-        tool_arguments: Arguments for the tool (when available)
-        tool_result: Result from tool execution (when available)
-        final_answer: The final answer if detected (when available)
-        surrender_reason: Reason for surrender if agent surrendered (when available)
+        iteration_data: Rich data from current iteration (populated in AFTER_ITERATION)
+            Contains: llm_response, parsed_actions, tool_results, final_answer, etc.
     """
 
     task_id: str
@@ -90,17 +85,16 @@ class HookContext:
     # Optional data
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    # LLM response (when available)
-    llm_response: str | None = None
-
-    # Tool execution data (when available)
-    tool_name: str | None = None
-    tool_arguments: dict[str, Any] | None = None
-    tool_result: Any = None
-
-    # Final answer tracking
-    final_answer: str | None = None
-    surrender_reason: str | None = None
+    # Rich iteration data (primarily for AFTER_ITERATION hook)
+    # Example contents:
+    # {
+    #   "llm_response": "...",
+    #   "parsed_actions": [Action(...)],
+    #   "tool_results": [{"tool_name": "...", "arguments": {...}, "result": ...}],
+    #   "final_answer": "..." (if detected),
+    #   "surrender_reason": "..." (if surrendered)
+    # }
+    iteration_data: dict[str, Any] = field(default_factory=dict)
 
 
 class HookCallback(Protocol):

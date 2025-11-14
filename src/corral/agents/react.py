@@ -186,7 +186,7 @@ class ReActAgent(BaseAgent):
             enable_surrender=enable_surrender,
         )
 
-        # Execute BEFORE_TASK hooks (e.g., intervention)
+        # Execute BEFORE_TASK hooks
         self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
 
         for _iteration in range(self.max_iterations):
@@ -196,14 +196,6 @@ class ReActAgent(BaseAgent):
             self._execute_hooks(HookPoint.BEFORE_ITERATION, interface, task_id)
             # Create prompt and get LLM response
             llm_response = self.get_llm_response().content
-
-            # Execute AFTER_LLM_RESPONSE hooks
-            self._execute_hooks(
-                HookPoint.AFTER_LLM_RESPONSE,
-                interface,
-                task_id,
-                llm_response=llm_response,
-            )
 
             self.messages.append(LiteLLMMessage(role="assistant", content=llm_response))
 
@@ -232,28 +224,9 @@ class ReActAgent(BaseAgent):
             if actions:
                 # Check for final answer
                 for action in actions:
-                    # Execute BEFORE_TOOL_EXECUTION hooks
-                    self._execute_hooks(
-                        HookPoint.BEFORE_TOOL_EXECUTION,
-                        interface,
-                        task_id,
-                        tool_name=action.tool_name,
-                        tool_arguments=action.arguments,
-                    )
-
                     # Execute tool and get response
                     tool_response = interface.execute_tool(
                         task_id, action.tool_name, action.arguments
-                    )
-
-                    # Execute AFTER_TOOL_EXECUTION hooks
-                    self._execute_hooks(
-                        HookPoint.AFTER_TOOL_EXECUTION,
-                        interface,
-                        task_id,
-                        tool_name=action.tool_name,
-                        tool_arguments=action.arguments,
-                        tool_result=tool_response,
                     )
 
                     observation = (
@@ -279,9 +252,6 @@ class ReActAgent(BaseAgent):
                         content="No actions to execute. This is due to parsing error or missing action in the response. Please follow the format <thought>[your reasoning]</thought>\n<action>[tool name]</action>\n<action_input>[tool arguments as JSON]</action_input>.\n\nIf you have the final answer, respond with:\n<thought>[your reasoning]</thought>\n<final_answer>[answer]</final_answer>. For tool calls without arguments, use `<action_input>{}</action_input>`. Remember the closing tags. Try again.",
                     )
                 )
-
-            # Execute AFTER_ITERATION hooks
-            self._execute_hooks(HookPoint.AFTER_ITERATION, interface, task_id)
 
         self.messages.append(
             LiteLLMMessage(
