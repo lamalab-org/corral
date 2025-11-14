@@ -7,6 +7,7 @@ from litellm.types.utils import Message
 from loguru import logger
 from promptstore import PromptStore
 
+from corral.agents.hooks import AgentHooks, HookContext, HookPoint
 from corral.agents.prompt_utils import get_prompt
 from corral.agents.utils import (
     LiteLLMMessage,
@@ -129,6 +130,7 @@ class BaseAgent(ABC):
         user_prompt_id: str | None = None,
         extractor_prompt_id: str | None = "9d37e4a0-26c5-438a-ba1b-a273388fcded",
         surrender_prompt_id: str | None = None,
+        hooks: AgentHooks | None = None,
         **kwargs,
     ):
         """Initialize the base agent with common parameters"""
@@ -138,6 +140,8 @@ class BaseAgent(ABC):
         self.temperature = temperature
         self.messages: list = []
         self.token_usage: list = {}  # Track token usage per LLM call
+        self.hooks = hooks or AgentHooks()
+        self._current_iteration = 0  # Track current iteration for hooks
 
         if prompt_store:
             self.store = prompt_store
@@ -229,8 +233,6 @@ class BaseAgent(ABC):
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         enable_surrender: bool = False,
-        intervention_thought: str | None = None,
-        execute_intervention_tools: bool = False,
     ) -> str:
         """
         Run the agent to solve a task
@@ -244,8 +246,6 @@ class BaseAgent(ABC):
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
-            intervention_thought (str, optional): An intervention thought (It can have tool calls in there)to inject at the start of the task. Defaults to None.
-            execute_intervention_tools (bool, optional): Whether to execute tools found in the intervention thought. Defaults to False and if the intervention thought has tool calls it will be stripped out.
 
         Returns:
             str: The final answer from the agent
@@ -262,8 +262,6 @@ class BaseAgent(ABC):
         verbose: bool = False,
         tool_verbosity: str = "brief",
         enable_surrender: bool = False,
-        intervention_thought: str | None = None,
-        execute_intervention_tools: bool = False,
     ) -> tuple[str, dict[str, int]]:
         """Run the agent to solve a task
 
@@ -278,8 +276,6 @@ class BaseAgent(ABC):
             verbose (bool, optional): Whether to save agent messages. Defaults to False.
             tool_verbosity (str, optional): The verbosity level for tool information. Defaults to "brief".
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
-            intervention_thought (str, optional): An intervention thought to inject at the start of the task. Defaults to None.
-            execute_intervention_tools (bool, optional): Whether to execute tools found in the intervention thought. Defaults to False and if the intervention thought has tool calls it will be stripped out.
 
         Returns:
             str: The final answer from the agent
@@ -297,8 +293,6 @@ class BaseAgent(ABC):
                 task_prompt,
                 examples,
                 enable_surrender,
-                intervention_thought,
-                execute_intervention_tools,
             )
 
             # Check if agent decided to surrender
@@ -372,3 +366,34 @@ class BaseAgent(ABC):
     def reset_token_usage(self) -> None:
         """Reset token usage tracking"""
         self.token_usage = {}
+
+    def _execute_hooks(
+        self,
+        hook_point: HookPoint,
+        interface: CorralRouter,
+        task_id: str,
+        **extra_context,
+    ) -> HookContext:
+        """Execute hooks at a specific point in agent lifecycle.
+
+        This is a helper method that creates a HookContext and executes
+        all registered hooks for the given hook point.
+
+        Args:
+            hook_point: The lifecycle point to execute hooks for
+            interface: The router interface
+            task_id: The current task ID
+            **extra_context: Additional context fields to include
+
+        Returns:
+            The hook context (potentially modified by hooks)
+        """
+        context = HookContext(
+            task_id=task_id,
+            agent=self,
+            interface=interface,
+            messages=self.messages,
+            iteration=self._current_iteration,
+            **extra_context,
+        )
+        return self.hooks.execute(hook_point, context)

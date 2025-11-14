@@ -7,6 +7,7 @@ from loguru import logger
 from promptstore import PromptStore
 
 from corral.agents.base_agent import BaseAgent
+from corral.agents.hooks import HookPoint
 from corral.agents.prompt_utils import create_prompt
 from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
 from corral.router.routes import CorralRouter
@@ -156,8 +157,6 @@ class ReActAgent(BaseAgent):
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         enable_surrender: bool = False,
-        intervention_thought: str | None = None,
-        execute_intervention_tools: bool = False,
     ) -> str:
         """Main ReAct loop implementation
 
@@ -168,8 +167,6 @@ class ReActAgent(BaseAgent):
             task_prompt (str, optional): The task prompt to use. `task_prompt` is intended to be a plan or description about the task, that should always be provided when this agent is called as a subagent of a main orchestrator. Defaults to None.
             examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
-            intervention_thought (str, optional): An intervention thought to inject at the start of the task. Defaults to None.
-            execute_intervention_tools (bool, optional): Whether to execute tools found in the intervention thought. Defaults to False and if tool execution is present it will be stripped out.
 
         Returns:
             str: The final answer to the task
@@ -189,18 +186,24 @@ class ReActAgent(BaseAgent):
             enable_surrender=enable_surrender,
         )
 
-        # Inject intervention thought if provided
-        if intervention_thought:
-            self._inject_intervention(
-                intervention_thought=intervention_thought,
-                interface=interface,
-                task_id=task_id,
-                execute_tools=execute_intervention_tools,
-            )
+        # Execute BEFORE_TASK hooks (e.g., intervention)
+        self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
 
         for _iteration in range(self.max_iterations):
+            self._current_iteration = _iteration
+
+            # Execute BEFORE_ITERATION hooks
+            self._execute_hooks(HookPoint.BEFORE_ITERATION, interface, task_id)
             # Create prompt and get LLM response
             llm_response = self.get_llm_response().content
+
+            # Execute AFTER_LLM_RESPONSE hooks
+            self._execute_hooks(
+                HookPoint.AFTER_LLM_RESPONSE,
+                interface,
+                task_id,
+                llm_response=llm_response,
+            )
 
             self.messages.append(LiteLLMMessage(role="assistant", content=llm_response))
 
@@ -229,9 +232,28 @@ class ReActAgent(BaseAgent):
             if actions:
                 # Check for final answer
                 for action in actions:
+                    # Execute BEFORE_TOOL_EXECUTION hooks
+                    self._execute_hooks(
+                        HookPoint.BEFORE_TOOL_EXECUTION,
+                        interface,
+                        task_id,
+                        tool_name=action.tool_name,
+                        tool_arguments=action.arguments,
+                    )
+
                     # Execute tool and get response
                     tool_response = interface.execute_tool(
                         task_id, action.tool_name, action.arguments
+                    )
+
+                    # Execute AFTER_TOOL_EXECUTION hooks
+                    self._execute_hooks(
+                        HookPoint.AFTER_TOOL_EXECUTION,
+                        interface,
+                        task_id,
+                        tool_name=action.tool_name,
+                        tool_arguments=action.arguments,
+                        tool_result=tool_response,
                     )
 
                     observation = (
@@ -258,6 +280,9 @@ class ReActAgent(BaseAgent):
                     )
                 )
 
+            # Execute AFTER_ITERATION hooks
+            self._execute_hooks(HookPoint.AFTER_ITERATION, interface, task_id)
+
         self.messages.append(
             LiteLLMMessage(
                 role="assistant",
@@ -267,85 +292,3 @@ class ReActAgent(BaseAgent):
         )
 
         return "Error solving the task: unable to complete it in the iteration limit"
-
-    def _inject_intervention(
-        self,
-        intervention_thought: str,
-        interface: CorralRouter,
-        task_id: str,
-        execute_tools: bool = False,
-    ) -> None:
-        """Inject intervention thought and optionally execute tools
-
-        Args:
-            intervention_thought (str): The intervention thought to inject from successful/failed trajectories.
-            interface (CorralRouter): The interface to use for tool execution
-            task_id (str): The task ID
-            execute_tools (bool): Whether to execute tools found in the intervention
-        """
-        if not execute_tools:
-            # Just add the thought and strip tool calls
-            thought_only = re.sub(
-                r"<action>.*?</action>(?:\s*<action_input>.*?</action_input>)?",
-                "",
-                intervention_thought,
-                flags=re.DOTALL,
-            ).strip()
-            # Format as ReAct-style thought
-            intervention_message = f"<thought>{thought_only}</thought>"
-            self.messages.append(
-                LiteLLMMessage(role="assistant", content=intervention_message)
-            )
-            logger.info(
-                f"Injected intervention thought (tools stripped) for task {task_id}"
-            )
-        else:
-            # Execute tools and add observations
-            # Format the full intervention with thought tags if not already present
-            if not intervention_thought.strip().startswith("<thought>"):
-                intervention_message = f"<thought>{intervention_thought}</thought>"
-            else:
-                intervention_message = intervention_thought
-
-            self.messages.append(
-                LiteLLMMessage(role="assistant", content=intervention_message)
-            )
-
-            # Parse and execute any actions
-            _, actions = self.parse_llm_response(intervention_message)
-            if actions:
-                logger.info(
-                    f"Executing {len(actions)} tool(s) from intervention for task {task_id}"
-                )
-                for action in actions:
-                    try:
-                        tool_response = interface.execute_tool(
-                            task_id, action.tool_name, action.arguments
-                        )
-                        observation = (
-                            f"Observation: {tool_response.result}"
-                            if tool_response.success
-                            else f"Error: {tool_response.error}"
-                        )
-                        self.messages.append(
-                            LiteLLMMessage(
-                                role="user",
-                                content=observation,
-                                name=action.tool_name,
-                            )
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Error executing intervention tool {action.tool_name}: {e}"
-                        )
-                        self.messages.append(
-                            LiteLLMMessage(
-                                role="user",
-                                content=f"Error: Failed to execute {action.tool_name}: {e}",
-                                name=action.tool_name,
-                            )
-                        )
-            else:
-                logger.info(
-                    f"Injected intervention thought (no tools found) for task {task_id}"
-                )

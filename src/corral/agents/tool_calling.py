@@ -7,6 +7,7 @@ from loguru import logger
 from promptstore import PromptStore
 
 from corral.agents.base_agent import BaseAgent
+from corral.agents.hooks import HookPoint
 from corral.agents.prompt_utils import create_prompt
 from corral.agents.utils import (
     LiteLLMMessage,
@@ -115,8 +116,6 @@ class ToolCallingAgent(BaseAgent):
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         enable_surrender: bool = False,
-        intervention_thought: str | None = None,
-        execute_intervention_tools: bool = False,
     ) -> str:
         """Run the agent to solve the task
 
@@ -127,8 +126,6 @@ class ToolCallingAgent(BaseAgent):
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
-            intervention_thought (str, optional): An intervention thought to inject at the start of the task. Defaults to None.
-            execute_intervention_tools (bool, optional): Whether to execute tools found in the intervention thought. Defaults to False.
 
         Returns:
             str: The final answer to the task
@@ -154,21 +151,25 @@ class ToolCallingAgent(BaseAgent):
             enable_surrender=enable_surrender,
         )
 
-        # Inject intervention thought if provided
-        if intervention_thought:
-            # For tool calling agents, add intervention as plain assistant message. (The intervention thought is just added as context text since ToolCallingAgent uses native function calling)
-            self.messages.append(
-                LiteLLMMessage(role="assistant", content=intervention_thought)
-            )
-            logger.info(f"Injected intervention thought for task {task_id}")
-            if execute_intervention_tools:
-                logger.warning(
-                    "execute_intervention_tools is True, but will be ignored for ToolCallingAgent."
-                )
+        # Execute BEFORE_TASK hooks (e.g., intervention)
+        self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
 
         for _i in range(self.max_iterations):
+            self._current_iteration = _i
+
+            # Execute BEFORE_ITERATION hooks
+            self._execute_hooks(HookPoint.BEFORE_ITERATION, interface, task_id)
             try:
                 llm_response = self.get_llm_response(tools)
+
+                # Execute AFTER_LLM_RESPONSE hooks
+                if llm_response.content:
+                    self._execute_hooks(
+                        HookPoint.AFTER_LLM_RESPONSE,
+                        interface,
+                        task_id,
+                        llm_response=llm_response.content,
+                    )
 
                 content = llm_response.content
                 if content:
@@ -212,10 +213,30 @@ class ToolCallingAgent(BaseAgent):
                                 arguments=raw_arguments,
                             )
 
+                            # Execute BEFORE_TOOL_EXECUTION hooks
+                            self._execute_hooks(
+                                HookPoint.BEFORE_TOOL_EXECUTION,
+                                interface,
+                                task_id,
+                                tool_name=action.tool_name,
+                                tool_arguments=action.arguments,
+                            )
+
                             # Execute tool - this can also fail
                             function_call = interface.execute_tool(
                                 task_id, action.tool_name, action.arguments
                             )
+
+                            # Execute AFTER_TOOL_EXECUTION hooks
+                            self._execute_hooks(
+                                HookPoint.AFTER_TOOL_EXECUTION,
+                                interface,
+                                task_id,
+                                tool_name=action.tool_name,
+                                tool_arguments=action.arguments,
+                                tool_result=function_call,
+                            )
+
                             result = str(function_call.result)
                             if result is None:
                                 result = str(function_call.error)
@@ -252,6 +273,9 @@ class ToolCallingAgent(BaseAgent):
                         content=f"Error during agent iteration: {e!s}",
                     )
                 )
+
+            # Execute AFTER_ITERATION hooks
+            self._execute_hooks(HookPoint.AFTER_ITERATION, interface, task_id)
 
         self.messages.append(
             LiteLLMMessage(
