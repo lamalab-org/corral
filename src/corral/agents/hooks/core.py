@@ -85,7 +85,7 @@ class HookContext:
     # Optional data
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    # Rich iteration data (primarily for AFTER_ITERATION hook)
+    # (primarily for AFTER_ITERATION hook)
     # Example contents:
     # {
     #   "llm_response": "...",
