@@ -1,0 +1,393 @@
+{
+  "task_id": "make_5_lvl1-build_complete_route",
+  "model": "claude-sonnet-4-5-20250929",
+  "agent": "ToolCallingAgent",
+  "tool_verbosity": "brief",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "verify_step",
+        "description": "Verifies if a retrosynthetic step is valid. This tool might fail for intramolecular reactions.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the target molecule.",
+              "type": "string"
+            },
+            "template_id": {
+              "description": "Retrosynthetic template in SMARTS format.",
+              "type": "string"
+            },
+            "precursors": {
+              "description": "List of SMILES strings representing the precursor molecules. - Provide as an array of strings, e.g., [\"item1\", \"item2\"]",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "molecule_smiles",
+            "template_id",
+            "precursors"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "verify_route",
+        "description": "Verifies if a synthesis route follows the expected schema.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "description": "JSON string representing the synthesis route.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "route"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_catalog_by_smiles",
+        "description": "Searches a catalog for available precursors.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "smiles_list": {
+              "description": "List of SMILES strings representing the chemicals to search for. - Provide as an array of strings, e.g., [\"item1\", \"item2\"]",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "limit": {
+              "description": "Maximum number of results to return. Default is 5.",
+              "type": "integer",
+              "default": 5
+            }
+          },
+          "required": [
+            "smiles_list"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "is_buyable",
+        "description": "Checks if a list of molecules are commercially available.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "smiles_list": {
+              "description": "List of SMILES strings representing the molecules to check. - Provide as an array of strings, e.g., [\"item1\", \"item2\"]",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "smiles_list"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_template_catalog_by_criteria",
+        "description": "Searches the retrosynthetic template database based on specified criteria.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the target molecule.",
+              "type": "string"
+            },
+            "functional_groups_broken": {
+              "description": "List of functional groups that are broken in the forward reaction. None will result in not filtering with this criterion.",
+              "type": "string"
+            },
+            "functional_groups_formed": {
+              "description": "List of functional groups that are formed in the forward reaction. None will result in not filtering with this criterion.",
+              "type": "string"
+            },
+            "bonds_formed": {
+              "description": "List of bonds that are formed in the forward reaction (e.g., \"6-6\", \"6-8\"). None will result in not filtering with this criterion.",
+              "type": "string"
+            },
+            "bonds_broken": {
+              "description": "List of bonds that are broken in the forward reaction (e.g., \"6-6\", \"6-8\"). None will result in not filtering with this criterion.",
+              "type": "string"
+            },
+            "bonds_order_changed": {
+              "description": "List of bonds whose order is changed in the forward reaction (e.g., \"6-6 (1.0->2.0)\"). None will result in not filtering with this criterion.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "molecule_smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_template",
+        "description": "Retrieves a retrosynthetic template and other information by its ID.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "template_id": {
+              "description": "Identifier of the retrosynthetic template to retrieve.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "template_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_available_functional_groups",
+        "description": "Returns a list of available functional groups for querying the database.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "apply_template",
+        "description": "Applies a retrosynthetic template to a molecule. If one template is applicable to different groups, all possible outcomes are returned.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the target molecule.",
+              "type": "string"
+            },
+            "template_id": {
+              "description": "Identifier of the retrosynthetic template to apply.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "molecule_smiles",
+            "template_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "suggest_protecting_groups",
+        "description": "Suggests protecting groups for a given functional group.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "functional_group": {
+              "description": "The functional group for which to suggest protecting groups. It must be one of the following: '1,2-Aminoalcohol', '1,2-Diol', '1,3-Diol', 'Acetylene', 'Alcohol', 'Aldehyde, Ketone', 'Amide, Carbamate', 'Amine', 'Carboxylic acid', 'Indole', 'Phenol', 'Sulfonamide'.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "functional_group"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "deprotect_molecule",
+        "description": "Removes protecting groups from a molecule represented by a SMILES string.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the molecule with protecting groups.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "molecule_smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "detect_protection_groups",
+        "description": "Detects protecting groups in a molecule and their positions.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "smiles": {
+              "description": "SMILES string of the molecule to analyze.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "detect_functional_groups",
+        "description": "Detects functional groups in a molecule represented by a SMILES string.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "smiles": {
+              "description": "SMILES string of the molecule to analyze.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "map_reaction_smiles",
+        "description": "Maps atoms in a reaction SMILES string using attention-guided atom mapping. Sometimes, the mapping may help to get the templates to work.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "reaction_smiles": {
+              "description": "Reaction SMILES string to be mapped.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reaction_smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "smiles_to_cas",
+        "description": "Converts a SMILES string to a CAS number.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the molecule to convert.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "molecule_smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "cas_to_smiles",
+        "description": "Converts a CAS number to an isomeric SMILES string.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "cas_number": {
+              "description": "CAS number of the molecule to convert.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cas_number"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "check_smiles_reaction_template_matching",
+        "description": "Checks if the SMARTS of a reaction template matches any substructure in the given SMILES.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "smiles": {
+              "description": "SMILES string of the molecule to check.",
+              "type": "string"
+            },
+            "template_id": {
+              "description": "ID of the reaction template to check.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "smiles",
+            "template_id"
+          ]
+        }
+      }
+    }
+  ],
+  "timestamp": "20251104_083934",
+  "messages": [
+    {
+      "role": "system",
+      "content": "[CONTEXT_BUDGET]\nNote that the context budget is not exact since it is based on previous iterations.\nmodel: claude-sonnet-4-5-20250929\nmax_context_tokens: 200000\nprompt_tokens_now: 6215\nreserve_for_output: 100\nremaining_budget: 193685\nactions_if_low_budget:\n  - avoid reading entire files\n  - prefer short answers (<= 150 tokens)\n  - summarize or drop thoughts if needed\n[/CONTEXT_BUDGET]\nYou are an autonomous agent that will only interact with the environment.\n\nTake into account that the measurements, simulations and other experiments are expensive. Try always to minimize costs and avoid unnecessary actions."
+    },
+    {
+      "role": "user",
+      "content": "Task Guide:\n\nTask make_5_lvl1-build_complete_route:\nCan you build and return the complete route of chemicals based on the inputs?\n\nRequired submission format:\nSubmit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  \"type\": \"mol\",\n  \"smiles\": \"CO\",\n  \"children\": [\n    {\n      \"type\": \"reaction\",\n      \"template_id\": 1234,\n      \"children\": [\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"BrC\"\n        },\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"[OH-]\"\n        }\n      ]\n    }\n  ]\n}`.\n\n\nAvailable input data:\n- Input from 'make_5_lvl1-template_search-1' with question: 'Can you return the `mapped_rxn` associated with the template 29648?' and answer: '{\"mapped_rxn\": \"(CC(C)(C)[Si](C)(C)[O:17][C@H:16]1[CH2:15][C@H:6]([CH2:7]/[CH:8]=[CH:9]/[CH:10]=[CH:11]/[C:12](=[O:13])[OH:14])[O:5][C@H:4](/[CH:3]=[C:2](/[CH3:1])[CH2:20][OH:21])[C@@H:18]1[CH3:19])>>([CH3:1]/[C:2](=[CH:3]/[C@H:4]1[O:5][C@@H:6]([CH2:7]/[CH:8]=[CH:9]/[CH:10]=[CH:11]/[C:12](=[O:13])[OH:14])[CH2:15][C@H:16]([OH:17])[C@H:18]1[CH3:19])[CH2:20][OH:21])\", \"template_id\": 29648}'\n- Input from 'make_5_lvl1-apply_template-1' with question: 'Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-1 to the molecule below?' and answer: '[['C/C(=C/[C@H]1O[C@@H](C/C=C/C=C/C(=O)O[Si](C)(C)C(C)(C)C)C[C@H](O)[C@H]1C)CO'], ['C/C(=C/[C@H]1O[C@@H](C/C=C/C=C/C(=O)O)C[C@H](O[Si](C)(C)C(C)(C)C)[C@H]1C)CO'], ['C/C(=C/[C@H]1O[C@@H](C/C=C/C=C/C(=O)O)C[C@H](O)[C@H]1C)CO[Si](C)(C)C(C)(C)C']]'\n- Input from 'make_5_lvl1-template_search-2' with question: 'Can you return the `mapped_rxn` associated with the template 1914401?' and answer: '{\"mapped_rxn\": \"O=[CH:8][CH2:7][C@@H:6]1[O:5][C@H:4](/[CH:3]=[C:2](/[CH3:1])[CH2:27][OH:28])[C@H:25]([CH3:26])[C@@H:16]([O:17][Si:18]([CH3:19])([CH3:20])[C:21]([CH3:22])([CH3:23])[CH3:24])[CH2:15]1.CCOP(=O)(OCC)[CH2:9]/[CH:10]=[CH:11]/[C:12](=[O:13])[O:14]CC>>[CH3:1]/[C:2](=[CH:3]/[C@H:4]1[O:5][C@@H:6]([CH2:7]/[CH:8]=[CH:9]/[CH:10]=[CH:11]/[C:12](=[O:13])[OH:14])[CH2:15][C@H:16]([O:17][Si:18]([CH3:19])([CH3:20])[C:21]([CH3:22])([CH3:23])[CH3:24])[C@H:25]1[CH3:26])[CH2:27][OH:28]\", \"template_id\": 1914401}'\n- Input from 'make_5_lvl1-apply_template-2' with question: 'Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-2 to the molecule below?' and answer: '[['C/C(=C/[C@H]1O[C@@H](CC=O)C[C@H](O[Si](C)(C)C(C)(C)C)[C@H]1C)CO', 'CCOC(=O)/C=C/CP(=O)(OCC)OCC']]'\n- Input from 'make_5_lvl1-template_search-3' with question: 'Can you return the `mapped_rxn` associated with the template 1914414?' and answer: '{\"mapped_rxn\": \"(CCO[C:8]([CH2:7][C@@H:6]1[O:5][C@H:4](/[CH:3]=[C:2](/[CH3:1])[C:22](OC)=[O:23])[C@H:20]([CH3:21])[C@@H:11]([O:12][Si:13]([CH3:14])([CH3:15])[C:16]([CH3:17])([CH3:18])[CH3:19])[CH2:10]1)=[O:9])>>([CH3:1]/[C:2](=[CH:3]/[C@H:4]1[O:5][C@@H:6]([CH2:7][CH:8]=[O:9])[CH2:10][C@H:11]([O:12][Si:13]([CH3:14])([CH3:15])[C:16]([CH3:17])([CH3:18])[CH3:19])[C@H:20]1[CH3:21])[CH2:22][OH:23])\", \"template_id\": 1914414}'\n- Input from 'make_5_lvl1-apply_template-3' with question: 'Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-3 to the molecule below?' and answer: '[['CCOC(=O)C[C@H]1C[C@H](O[Si](C)(C)C(C)(C)C)[C@@H](C)[C@@H](/C=C(/C)C(=O)OC)O1']]'\n- Input from 'make_5_lvl1-template_search-4' with question: 'Can you return the `mapped_rxn` associated with the template 149046?' and answer: '{\"mapped_rxn\": \"O=S(=O)(O[Si:11]([CH3:12])([CH3:13])[C:14]([CH3:15])([CH3:16])[CH3:17])C(F)(F)F.[CH3:1][CH2:2][O:3][C:4](=[O:5])[CH2:6][C@H:7]1[CH2:8][C@H:9]([OH:10])[C@@H:18]([CH3:19])[C@@H:20](/[CH:21]=[C:22](/[CH3:23])[C:24](=[O:25])[O:26][CH3:27])[O:28]1>>[CH3:1][CH2:2][O:3][C:4](=[O:5])[CH2:6][C@H:7]1[CH2:8][C@H:9]([O:10][Si:11]([CH3:12])([CH3:13])[C:14]([CH3:15])([CH3:16])[CH3:17])[C@@H:18]([CH3:19])[C@@H:20](/[CH:21]=[C:22](/[CH3:23])[C:24](=[O:25])[O:26][CH3:27])[O:28]1\", \"template_id\": 149046}'\n- Input from 'make_5_lvl1-apply_template-4' with question: 'Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-4 to the molecule below?' and answer: '[['CC(C)(C)[Si](C)(C)OS(=O)(=O)C(F)(F)F', 'CCOC(=O)C[C@H]1C[C@H](O)[C@@H](C)[C@@H](/C=C(/C)C(=O)OC)O1']]'\n- Input from 'make_5_lvl1-template_search-5' with question: 'Can you return the `mapped_rxn` associated with the template 1914403?' and answer: '{\"mapped_rxn\": \"[CH3:1][CH2:2][O:3][C:4](=[O:5])[CH2:6][C@H:7]1[CH2:8][C@H:9]([OH:10])[C@@H:11]([CH3:12])[C@@H:13]([CH:14]=[O:18])[O:21]1.C[CH:16](P(=O)(OCC(F)(F)F)OCC(F)(F)F)[C:15]#[C:17][O:19][CH3:20]>>[CH3:1][CH2:2][O:3][C:4](=[O:5])[CH2:6][C@H:7]1[CH2:8][C@H:9]([OH:10])[C@@H:11]([CH3:12])[C@@H:13](/[CH:14]=[C:15](/[CH3:16])[C:17](=[O:18])[O:19][CH3:20])[O:21]1\", \"template_id\": 1914403}'\n- Input from 'make_5_lvl1-apply_template-5' with question: 'Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-5 to the molecule below?' and answer: '[['CCOC(=O)C[C@H]1C[C@H](O)[C@@H](C)[C@@H](C=O)O1', 'COC#CC(C)P(=O)(OCC(F)(F)F)OCC(F)(F)F']]'\n\n\nYou must think what to do next. You can use some of the tools available in the system.\n\nWhen you think that the task is completed, you can submit the answer.\nFor that, answer with: \"Final Answer: <your answer>\". It is very important to follow this format."
+    },
+    {
+      "role": "assistant",
+      "content": "Let me analyze the provided information to build the complete retrosynthesis route.\n\nFrom the inputs, I can see a sequence of retrosynthetic steps:\n\n1. **Target molecule**: `C/C(=C/[C@H]1O[C@@H](C/C=C/C=C/C(=O)O)C[C@H](O)[C@H]1C)CO`\n   - Template 29648 gives precursors (deprotection step)\n\n2. **Intermediate**: `C/C(=C/[C@H]1O[C@@H](C/C=C/C=C/C(=O)O)C[C@H](O[Si](C)(C)C(C)(C)C)[C@H]1C)CO`\n   - Template 1914401 gives precursors (Wittig-type reaction)\n\n3. **Intermediates**: `C/C(=C/[C@H]1O[C@@H](CC=O)C[C@H](O[Si](C)(C)C(C)(C)C)[C@H]1C)CO` + `CCOC(=O)/C=C/CP(=O)(OCC)OCC`\n   - Template 1914414 applied to the first intermediate\n\n4. **Intermediate**: `CCOC(=O)C[C@H]1C[C@H](O[Si](C)(C)C(C)(C)C)[C@@H](C)[C@@H](/C=C(/C)C(=O)OC)O1`\n   - Template 149046 gives precursors (protection step)\n\n5. **Intermediates**: `CC(C)(C)[Si](C)(C)OS(=O)(=O)C(F)(F)F` + `CCOC(=O)C[C@H]1C[C@H](O)[C@@H](C)[C@@H](/C=C(/C)C(=O)OC)O1`\n   - Template 1914403 applied to the second intermediate\n\n6. **Intermediates**: `CCOC(=O)C[C@H]1C[C@H](O)[C@@H](C)[C@@H](C=O)O1` + `COC#CC(C)P(=O)(OCC(F)(F)F)OCC(F)(F)F`\n\nLet me verify which molecules are buyable to determine where to stop the retrosynthesis:",
+      "tool_calls": [
+        {
+          "id": "toolu_01UDAZ1Q1PYCL8r8RTA8HkeB",
+          "function": {
+            "name": "is_buyable",
+            "arguments": "{\"smiles_list\": [\"CCOC(=O)/C=C/CP(=O)(OCC)OCC\", \"CC(C)(C)[Si](C)(C)OS(=O)(=O)C(F)(F)F\", \"CCOC(=O)C[C@H]1C[C@H](O)[C@@H](C)[C@@H](C=O)O1\", \"COC#CC(C)P(=O)(OCC(F)(F)F)OCC(F)(F)F\"]}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01UDAZ1Q1PYCL8r8RTA8HkeB",
+      "content": "{'tool_name': 'is_buyable', 'arguments': {'smiles_list': ['CCOC(=O)/C=C/CP(=O)(OCC)OCC', 'CC(C)(C)[Si](C)(C)OS(=O)(=O)C(F)(F)F', 'CCOC(=O)C[C@H]1C[C@H](O)[C@@H](C)[C@@H](C=O)O1', 'COC#CC(C)P(=O)(OCC(F)(F)F)OCC(F)(F)F']}, 'result': \"{'CCOC(=O)/C=C/CP(=O)(OCC)OCC': True, 'CC(C)(C)[Si](C)(C)OS(=O)(=O)C(F)(F)F': True, 'CCOC(=O)C[C@H]1C[C@H](O)[C@@H](C)[C@@H](C=O)O1': False, 'COC#CC(C)P(=O)(OCC(F)(F)F)OCC(F)(F)F': False}\", 'status': 'success', 'error_message': None, 'duration': 13.332807041995693, 'timestamp': '2025-11-04T08:39:21.542167+00:00'}",
+      "name": "is_buyable"
+    },
+    {
+      "role": "assistant",
+      "content": "Good! Now I can build the complete route. The buyable molecules are:\n- `CCOC(=O)/C=C/CP(=O)(OCC)OCC`\n- `CC(C)(C)[Si](C)(C)OS(=O)(=O)C(F)(F)F`\n\nAnd I need to continue the retrosynthesis for:\n- `CCOC(=O)C[C@H]1C[C@H](O)[C@@H](C)[C@@H](C=O)O1`\n- `COC#CC(C)P(=O)(OCC(F)(F)F)OCC(F)(F)F`\n\nLet me check if there are further steps needed for these non-buyable molecules. Based on the data provided, the last step (template 1914403) produces these molecules, so I should search for templates to break them down further or check if simpler precursors exist.\n\nLet me construct the complete route based on the information provided:\n\nFinal Answer: ```json\n{\n  \"type\": \"mol\",\n  \"smiles\": \"C/C(=C/[C@H]1O[C@@H](C/C=C/C=C/C(=O)O)C[C@H](O)[C@H]1C)CO\",\n  \"children\": [\n    {\n      \"type\": \"reaction\",\n      \"template_id\": \"29648\",\n      \"children\": [\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"C/C(=C/[C@H]1O[C@@H](C/C=C/C=C/C(=O)O)C[C@H](O[Si](C)(C)C(C)(C)C)[C@H]1C)CO\",\n          \"children\": [\n            {\n              \"type\": \"reaction\",\n              \"template_id\": \"1914401\",\n              \"children\": [\n                {\n                  \"type\": \"mol\",\n                  \"smiles\": \"C/C(=C/[C@H]1O[C@@H](CC=O)C[C@H](O[Si](C)(C)C(C)(C)C)[C@H]1C)CO\",\n                  \"children\": [\n                    {\n                      \"type\": \"reaction\",\n                      \"template_id\": \"1914414\",\n                      \"children\": [\n                        {\n                          \"type\": \"mol\",\n                          \"smiles\": \"CCOC(=O)C[C@H]1C[C@H](O[Si](C)(C)C(C)(C)C)[C@@H](C)[C@@H](/C=C(/C)C(=O)OC)O1\",\n                          \"children\": [\n                            {\n                              \"type\": \"reaction\",\n                              \"template_id\": \"149046\",\n                              \"children\": [\n                                {\n                                  \"type\": \"mol\",\n                                  \"smiles\": \"CC(C)(C)[Si](C)(C)OS(=O)(=O)C(F)(F)F\"\n                                },\n                                {\n                                  \"type\": \"mol\",\n                                  \"smiles\": \"CCOC(=O)C[C@H]1C[C@H](O)[C@@H](C)[C@@H](/C=C(/C)C(=O)OC)O1\",\n                                  \"children\": [\n                                    {\n                                      \"type\": \"reaction\",\n                                      \"template_id\": \"1914403\",\n                                      \"children\": [\n                                        {\n                                          \"type\": \"mol\",\n                                          \"smiles\": \"CCOC(=O)C[C@H]1C[C@H](O)[C@@H](C)[C@@H](C=O)O1\"\n                                        },\n                                        {\n                                          \"type\": \"mol\",\n                                          \"smiles\": \"COC#CC(C)P(=O)(OCC(F)(F)F)OCC(F)(F)F\"\n                                        }\n                                      ]\n                                    }\n                                  ]\n                                }\n                              ]\n                            }\n                          ]\n                        }\n                      ]\n                    }\n                  ]\n                },\n                {\n                  \"type\": \"mol\",\n                  \"smiles\": \"CCOC(=O)/C=C/CP(=O)(OCC)OCC\"\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}\n```"
+    }
+  ]
+}
