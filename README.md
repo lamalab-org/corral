@@ -448,7 +448,7 @@ async def call_tool(name: str, arguments: dict):
     ...
 ```
 
-For detailed MCP integration examples and migration information, see the [MCP Migration Guide](docs/MCP_MIGRATION.md).
+For more details on creating tools and MCP integration, see the [Tools Documentation](docs/TOOLS_README.md).
 
 ### Environment Configuration
 

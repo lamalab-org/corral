@@ -303,7 +303,7 @@ def test_tool_for_mcp_basic():
         """
         return f"{param1}-{param2}"
 
-    mcp_def = sample_tool.for_mcp()
+    mcp_def = sample_tool.to_mcp()
 
     # Check structure
     assert "name" in mcp_def
@@ -353,7 +353,7 @@ def test_tool_for_mcp_with_choices():
         """
         return f"Mode: {mode}"
 
-    mcp_def = tool_with_choices.for_mcp()
+    mcp_def = tool_with_choices.to_mcp()
 
     # Check that choices are converted to enum
     assert "enum" in mcp_def["inputSchema"]["properties"]["mode"]
@@ -384,15 +384,15 @@ def test_tool_for_mcp_with_verbosity():
         return param
 
     # Test COMPREHENSIVE (default)
-    comprehensive = verbose_tool.for_mcp()
+    comprehensive = verbose_tool.to_mcp()
     assert "Brief description" in comprehensive["description"]
 
     # Test BRIEF
-    brief = verbose_tool.for_mcp(verbosity=ToolVerbosity.BRIEF)
+    brief = verbose_tool.to_mcp(verbosity=ToolVerbosity.BRIEF)
     assert "description" in brief
 
     # Test WORKFLOW
-    workflow = verbose_tool.for_mcp(verbosity=ToolVerbosity.WORKFLOW)
+    workflow = verbose_tool.to_mcp(verbosity=ToolVerbosity.WORKFLOW)
     assert "description" in workflow
 
 
@@ -417,7 +417,7 @@ def test_tool_for_mcp_complex_types():
         """
         return "result"
 
-    mcp_def = complex_tool.for_mcp()
+    mcp_def = complex_tool.to_mcp()
     props = mcp_def["inputSchema"]["properties"]
 
     # Check type mappings (required params have simple types)
@@ -480,7 +480,7 @@ def test_tool_for_mcp_preserves_descriptions():
         """
         return "result"
 
-    mcp_def = documented_tool.for_mcp()
+    mcp_def = documented_tool.to_mcp()
     props = mcp_def["inputSchema"]["properties"]
 
     assert "detailed description of param1" in props["param1"]["description"]
@@ -502,7 +502,7 @@ def test_tool_for_mcp_with_hidden_args():
         """
         return f"Calling {endpoint} with {api_key}"
 
-    mcp_def = api_tool.for_mcp()
+    mcp_def = api_tool.to_mcp()
     props = mcp_def["inputSchema"]["properties"]
 
     # Only endpoint should be in the schema

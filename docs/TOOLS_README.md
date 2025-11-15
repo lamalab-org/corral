@@ -4,6 +4,15 @@
 
 Corral provides a powerful tool system that allows you to create reusable, type-safe tools for AI agents. Tools are the building blocks that agents use to perform actions and gather information.
 
+**Key Features:**
+
+- Simple `@tool` decorator for creating tools from functions
+- Automatic MCP (Model Context Protocol) compatibility via FastMCP integration
+- Type-safe parameter validation with comprehensive type hint support
+- Verbosity levels for controlling description detail
+- Hidden arguments for secure configuration
+- Support for complex and nested types
+
 ## Creating Tools
 
 ### Basic Tool with `@tool` Decorator
@@ -102,7 +111,9 @@ def query_api(endpoint: str, api_key: str = "secret-key-123") -> str:
 
 ### `to_mcp(verbosity=None)`
 
-Convert a Corral tool to MCP (Model Context Protocol) format:
+Convert a Corral tool to MCP (Model Context Protocol) format.
+
+This method leverages **FastMCP's** automatic schema generation to create MCP-compatible tool definitions. FastMCP automatically inspects your function's type hints and docstrings to build a Pydantic model and generate JSON Schema.
 
 ```python
 from corral.backend.tool import tool
@@ -123,7 +134,7 @@ def my_tool(param: str) -> str:
 
 
 # Convert to MCP format
-mcp_def = my_tool.for_mcp()
+mcp_def = my_tool.to_mcp()
 print(mcp_def)
 # {
 #     "name": "my_tool",
@@ -141,29 +152,85 @@ print(mcp_def)
 # }
 
 # With specific verbosity level
-brief_def = my_tool.for_mcp(verbosity=ToolVerbosity.BRIEF)
-workflow_def = my_tool.for_mcp(verbosity=ToolVerbosity.WORKFLOW)
-comprehensive_def = my_tool.for_mcp(verbosity=ToolVerbosity.COMPREHENSIVE)
+brief_def = my_tool.to_mcp(verbosity=ToolVerbosity.BRIEF)
+workflow_def = my_tool.to_mcp(verbosity=ToolVerbosity.WORKFLOW)
+comprehensive_def = my_tool.to_mcp(verbosity=ToolVerbosity.COMPREHENSIVE)
 ```
 
 **Verbosity Levels:**
-- `BRIEF`: Minimal descriptions, just the essentials
-- `WORKFLOW`: Moderate detail, suitable for workflow documentation
-- `COMPREHENSIVE`: Full detail (default), all information included
+
+Corral supports multiple verbosity levels that control how much detail is included in tool descriptions and schemas. You can use special uppercase tags in your docstrings to mark content for specific verbosity levels.
+
+The verbosity levels are cumulative (each level includes content from previous levels):
+
+- **`MINIMAL`**: Just tool name and basic description (no tags needed)
+
+- **`BRIEF`**: Essential information only
+  - Tag content with `[BRIEF]...[/BRIEF]`
+
+- **`DETAILED`**: Brief + additional context
+  - Tag content with `[DETAILED]...[/DETAILED]`
+
+- **`PROCEDURAL`**: Detailed + when/how to use the tool
+  - Tag content with `[PROCEDURAL]...[/PROCEDURAL]`
+
+- **`CONTEXTUAL`**: Procedural + implementation details
+  - Tag content with `[CONTEXTUAL]...[/CONTEXTUAL]`
+
+- **`WORKFLOW`**: Contextual + workflow integration notes
+  - Tag content with `[WORKFLOW_INTEGRATION]...[/WORKFLOW_INTEGRATION]`
+
+- **`SYNTACTICAL`**: Workflow + syntax examples
+  - Tag content with `[SYNTACTICAL]...[/SYNTACTICAL]`
+
+- **`COMPREHENSIVE`**: All sections including errors and limitations
+  - Additional tags: `[RAISES]...[/RAISES]`, `[LIMITATIONS]...[/LIMITATIONS]`, `[EXAMPLES]...[/EXAMPLES]`
+
+- **`FULL`**: Complete original docstring without any filtering
+
+**Example with verbosity tags:**
+
+```python
+@tool
+def analyze_data(data: str, method: str) -> str:
+    """
+    [BRIEF] Analyze data using specified method [/BRIEF]
+
+    [DETAILED] This performs comprehensive statistical analysis including
+    mean, median, standard deviation, and outlier detection. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+        - When you need statistical insights from numerical data
+        - When outlier detection is required
+    [/PROCEDURAL]
+
+    Args:
+        data:
+            [BRIEF] Input data [/BRIEF]
+            [DETAILED] JSON string containing numerical data points [/DETAILED]
+        method:
+            [BRIEF] Analysis method [/BRIEF]
+            [SYNTACTICAL] (choices: ["basic", "advanced"]) [/SYNTACTICAL]
+
+    Returns:
+        [BRIEF] Analysis results [/BRIEF]
+        [DETAILED] JSON string with mean, median, std dev, and outliers [/DETAILED]
+    """
+    return f"Analyzing {data} with {method}"
+```
+
+**How it works:**
+
+1. FastMCP analyzes your function's type hints to automatically generate JSON Schema
+2. Pydantic models are built from the function signature
+3. The schema is enriched with descriptions from docstrings
+4. Parameter choices (from docstring) are added as enum constraints
+5. Hidden arguments are filtered out from the final schema
+6. Description verbosity is applied based on the verbosity parameter
 
 ### `from_mcp(mcp_tool_definition)`
 
-This method is intentionally not implemented. Corral tools are the source of truth for tool definitions:
-
-```python
-from corral.backend.tool import Tool
-
-# This will raise NotImplementedError
-try:
-    tool = Tool.from_mcp({"name": "test", "description": "test", "inputSchema": {}})
-except NotImplementedError as e:
-    print(e)  # "Converting from MCP to Corral Tool is not currently supported..."
-```
+This class method is not implemented yet.
 
 ### `validate_arguments(arguments)`
 
@@ -289,13 +356,58 @@ def complex_simulation(parameters: str) -> str:
 
     # Perform expensive computation
     return "Simulation complete"
-
-
-# Access the tool
-tool_instance = MODAL_TOOL_REGISTRY["complex_simulation"]
 ```
 
+**When to use `MODAL_TOOL_REGISTRY`:**
+
+The `@modal_tool` decorator automatically registers your tool in `MODAL_TOOL_REGISTRY`. You need to retrieve the tool from the registry when:
+
+1. **Passing tools to agents**: After defining modal tools, access them from the registry to use with your agent:
+
+```python
+from corral.utils.modal import MODAL_TOOL_REGISTRY
+
+# Get the tool instance
+tool = MODAL_TOOL_REGISTRY["complex_simulation"]
+
+# Use with agent
+agent = MyAgent(tools=[tool])
+```
+
+2. **Tool discovery**: When you want to discover all registered modal tools in your module:
+
+```python
+# Get all modal tools
+all_modal_tools = list(MODAL_TOOL_REGISTRY.values())
+
+# Or get specific tools by name
+simulation_tool = MODAL_TOOL_REGISTRY.get("complex_simulation")
+```
+
+**You don't need the registry if:**
+- You assign the decorated function to a variable and use it directly (though this is less common)
+- You're just defining the tool but not immediately using it
+
+The registry pattern ensures modal tools are easily discoverable and accessible throughout your application, especially when tools are defined across multiple modules.
+
 ## MCP Integration
+
+Corral tools are fully compatible with the Model Context Protocol (MCP). The `to_mcp()` method uses **FastMCP** internally to automatically generate MCP-compatible JSON Schema from your tool's type hints and docstrings.
+
+### How FastMCP Integration Works
+
+FastMCP provides automatic schema generation by:
+
+1. **Type Analysis**: Inspects function signatures and type hints using Python's `inspect` module
+2. **Pydantic Model Creation**: Builds Pydantic models from the function parameters
+3. **JSON Schema Generation**: Uses Pydantic's `model_json_schema()` to create JSON Schema
+4. **Enhancement**: Corral enriches this schema with:
+   - Descriptions from docstrings
+   - Enum constraints from parameter choices
+   - Filtering of hidden arguments
+   - Verbosity-based description filtering
+
+This approach ensures that complex types (nested lists, dicts, unions, Optional types, etc.) are handled correctly without manual schema writing.
 
 ### Creating an MCP Server
 
@@ -319,7 +431,7 @@ server = Server("my-corral-tools")
 
 @server.list_tools()
 async def list_tools() -> list[MCPTool]:
-    return [MCPTool(**tool.for_mcp()) for tool in tools.values()]
+    return [MCPTool(**tool.to_mcp()) for tool in tools.values()]
 
 
 @server.call_tool()
@@ -354,7 +466,15 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-For complete MCP integration examples and patterns, see [MCP Migration Guide](MCP_MIGRATION.md).
+**Note:** The MCP integration uses FastMCP under the hood for robust type conversion and schema generation. This ensures compatibility with a wide range of Python type hints including:
+
+- Basic types: `str`, `int`, `float`, `bool`
+- Collections: `list[T]`, `dict[K, V]`
+- Nested types: `list[list[int]]`, `dict[str, list[float]]`
+- Union types: `str | int`, `Optional[str]`
+- Custom Pydantic models
+
+For more information on FastMCP, see the [FastMCP documentation](https://github.com/jlowin/fastmcp).
 
 ## Tool Discovery
 
@@ -380,7 +500,7 @@ for name, tool in tools.items():
     print(f"{name}: {tool.description}")
 ```
 
-## Best Practices
+## Best Practices for Creating Tools
 
 ### 1. Clear Documentation
 
@@ -475,27 +595,6 @@ def set_calculation_method(method: str) -> str:
     return f"Method set to {method}"
 ```
 
-### 5. Hidden Arguments for Configuration
-
-Keep sensitive or fixed configuration out of agent control:
-
-```python
-@tool(hidden_args=["api_key", "base_url"])
-def query_database(
-    query: str, api_key: str = "secret-key", base_url: str = "https://api.example.com"
-) -> str:
-    """Query remote database.
-
-    Args:
-        query: Search query
-
-    Returns:
-        Query results
-    """
-    # Agent only controls 'query', not api_key or base_url
-    return f"Querying {base_url} with query: {query}"
-```
-
 ## Tool Schema
 
 The `ToolArgument` class defines parameter specifications:
@@ -515,12 +614,38 @@ arg = ToolArgument(
 
 ### Supported Types
 
+With the FastMCP-based MCP integration, Corral supports a wide range of Python type hints:
+
+**Basic Types:**
+
 - `str` - String values
 - `int` - Integer values
 - `float` - Floating point values
 - `bool` - Boolean values
-- `list[str]`, `list[int]`, etc. - Lists of typed values
-- `dict` - Dictionary/object values
+
+**Collections:**
+
+- `list[T]` - Lists of typed values (e.g., `list[str]`, `list[int]`)
+- `dict[K, V]` - Dictionaries with typed keys and values (e.g., `dict[str, int]`)
+
+**Complex/Nested Types:**
+
+- `list[list[T]]` - Nested lists (e.g., `list[list[int]]` for 2D matrices)
+- `dict[str, list[T]]` - Dictionaries with list values
+- `list[dict[K, V]]` - Lists of dictionaries
+- Any level of nesting is supported
+
+**Optional/Union Types:**
+
+- `str | None`, `Optional[str]` - Optional parameters
+- `str | int` - Union types (multiple allowed types)
+
+**Advanced Types:**
+
+- Custom Pydantic models
+- `Any` - Accepts any type (mapped to JSON Schema `object`)
+
+The FastMCP integration automatically handles type conversion to JSON Schema, ensuring compatibility with MCP clients.
 
 ## Testing Tools
 
@@ -543,7 +668,7 @@ def test_my_tool():
     assert error is not None
 
     # Test MCP conversion
-    mcp_def = my_tool.for_mcp()
+    mcp_def = my_tool.to_mcp()
     assert "name" in mcp_def
     assert "description" in mcp_def
     assert "inputSchema" in mcp_def
