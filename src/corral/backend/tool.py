@@ -73,7 +73,6 @@ class Tool:
         Create a Tool instance from an MCP tool definition.
 
         This method is currently not implemented.
-        not the target of MCP conversions.
 
         Args:
             mcp_tool_definition: MCP tool definition dict containing:
