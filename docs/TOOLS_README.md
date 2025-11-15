@@ -100,7 +100,7 @@ def query_api(endpoint: str, api_key: str = "secret-key-123") -> str:
 
 ## Tool Class Methods
 
-### `for_mcp(verbosity=None)`
+### `to_mcp(verbosity=None)`
 
 Convert a Corral tool to MCP (Model Context Protocol) format:
 
