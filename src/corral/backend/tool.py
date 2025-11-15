@@ -92,7 +92,7 @@ class Tool:
             "Corral tools are designed to be converted TO MCP format, not FROM it."
         )
 
-    def for_mcp(self, verbosity: "ToolVerbosity | None" = None) -> dict[str, Any]:
+    def to_mcp(self, verbosity: "ToolVerbosity | None" = None) -> dict[str, Any]:
         """
         Convert this Tool to MCP-compatible format.
 
