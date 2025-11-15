@@ -200,7 +200,8 @@ def main():
             for annotator, paths in annotator_file_map.items():
                 logger.info(f"Annotator '{annotator}' labeled {len(paths)} file(s):")
                 for p in paths:
-                    logger.info(f"  - {p.stem}.json")
+                    parts = p.parts[-6:]  # Show last 5 parts for brevity
+                    logger.info(f"  - {'/'.join(parts)}")
     else:
         logger.info("No accepted tasks found.")
 
