@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 repo_path = Path("reports/corral_md_optimised")
@@ -37,6 +38,13 @@ for path_ in the_path.iterdir():
             raise ValueError(f"Unexpected level value: {level}")
 
         final_path = current_path / model_dir / "md" / level_dir / subtask_dir
-        print()
-        print(str(path_))
-        print(final_path)
+
+        # Create the destination directory if it doesn't exist
+        final_path.mkdir(parents=True, exist_ok=True)
+
+        # Copy all files and directories from path_ to final_path
+        for item in path_.iterdir():
+            if item.is_dir():
+                shutil.copytree(item, final_path / item.name, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, final_path / item.name)

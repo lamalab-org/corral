@@ -1,3 +1,4 @@
+import random
 from pathlib import Path
 
 from loguru import logger
@@ -7,15 +8,22 @@ LIMIT = 160
 
 def take_questions(env) -> list[str]:
     root_path = Path(__file__).parent / "reports_v2"
+
+    # Dictionary to store model -> task_id -> list of file paths
+    model_task_files_dict = {}
+
+    # Collect files from all models
     for model in root_path.iterdir():
         if "claude" not in model.name and "gpt" not in model.name:
             continue
         if model.is_dir():
             env_path = model / env
             if not env_path.exists():
-                return [], []
-            all_questions = []
-            accepted_tasks = []
+                continue
+
+            # Dictionary to store task_id -> list of file paths for this model
+            task_files_dict = {}
+
             for level in env_path.iterdir():
                 if level.is_dir():
                     task_path = level / "tasks"
@@ -23,52 +31,94 @@ def take_questions(env) -> list[str]:
                         for logs_dir in task_path.iterdir():
                             if "workflow" not in logs_dir.name:
                                 continue
-                            tasks = []
                             if logs_dir.is_dir():
                                 for json_file in logs_dir.glob("*.json"):
                                     task_id_parts = json_file.stem.split("_")[:-2]
-                                    all_questions.append(json_file)
                                     task_id = "_".join(task_id_parts)
-                                    if task_id not in tasks:
-                                        tasks.append(json_file)
-                                        accepted_tasks.append(json_file)
 
-    return accepted_tasks, all_questions
+                                    # Add file to the task's list
+                                    if task_id not in task_files_dict:
+                                        task_files_dict[task_id] = []
+                                    task_files_dict[task_id].append(json_file)
+
+            if task_files_dict:
+                model_task_files_dict[model.name] = task_files_dict
+
+    if not model_task_files_dict:
+        return []
+
+    # Hierarchical sampling with round-robin across models
+    accepted_tasks = []
+
+    # Determine max files per task across all models
+    max_files_per_task = 0
+    for task_files_dict in model_task_files_dict.values():
+        if task_files_dict:
+            max_files = max(len(files) for files in task_files_dict.values())
+            max_files_per_task = max(max_files_per_task, max_files)
+
+    # Sample round-robin: for each file index, go through all models and all tasks
+    for file_index in range(max_files_per_task):
+        if len(accepted_tasks) >= LIMIT:
+            break
+
+        for model_name in sorted(model_task_files_dict.keys()):  # Sort for consistency
+            if len(accepted_tasks) >= LIMIT:
+                break
+
+            task_files_dict = model_task_files_dict[model_name]
+
+            for files in task_files_dict.values():
+                if len(accepted_tasks) >= LIMIT:
+                    break
+
+                # Get files not yet selected for this task
+                remaining_files = [f for f in files if f not in accepted_tasks]
+
+                if remaining_files and file_index < len(files):
+                    # For the first iteration, sample randomly
+                    # For subsequent iterations, sample from remaining files
+                    if file_index == 0:
+                        sampled_file = random.choice(files)
+                    else:
+                        sampled_file = random.choice(remaining_files)
+
+                    if sampled_file not in accepted_tasks:
+                        accepted_tasks.append(sampled_file)
+
+    return accepted_tasks
 
 
 def copy_questions():
     envs = [
+        "catalyst",
+        "md",
+        "ml",
+        "resistor",
         "retrosynthesis",
     ]
     for env in envs:
-        accepted_tasks, all_questions = take_questions(env)
+        accepted_tasks = take_questions(env)
         root_path = Path(__file__).parent
-        dest_path = root_path / "accepted_questions"
-        if not dest_path.exists():
-            dest_path.mkdir()
-        env_path = dest_path / env
-        if not env_path.exists():
-            env_path.mkdir()
-        for i, question in enumerate(accepted_tasks):
-            if i >= LIMIT:
-                break
-            dest_file = env_path / question.name
+        reports_v2_path = root_path / "reports_v2"
+        dest_base_path = root_path / "accepted_questions"
+
+        for question in accepted_tasks:
+            # Get the relative path from reports_v2
+            relative_path = question.relative_to(reports_v2_path)
+            # Create the destination path preserving the structure
+            dest_file = dest_base_path / relative_path
+            # Create parent directories if they don't exist
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            # Copy the file
             with question.open("r") as src, dest_file.open("w") as dst:
                 dst.write(src.read())
 
-        if len(accepted_tasks) < LIMIT:
-            for j, question in enumerate(all_questions):
-                if i + j >= LIMIT:
-                    break
-                dest_file = env_path / question.name
-                with question.open("r") as src, dest_file.open("w") as dst:
-                    dst.write(src.read())
-
-    return accepted_tasks, all_questions
+    return accepted_tasks
 
 
 def main():
-    accepted_tasks, _all_questions = copy_questions()
+    accepted_tasks = copy_questions()
     if accepted_tasks:
         logger.info("Copied accepted tasks.")
 
