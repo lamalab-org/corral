@@ -1,12 +1,34 @@
+import os
 import random
+from collections import defaultdict
 from pathlib import Path
 
+from dotenv import load_dotenv
 from loguru import logger
+from pymongo import MongoClient  # <- new
+
+load_dotenv(".env", override=True)
 
 LIMIT = 160
 
+# ---- MongoDB config (adjust to your environment) ----
+MONGO_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "Corral")
+MONGO_COLLECTION_NAME = os.getenv("MONGO_COLLECTION_NAME", "First-traces")
 
-def take_questions(env) -> list[str]:
+
+def file_id_from_path(path: Path) -> str:
+    """
+    Map a question file path to the MongoDB fileId.
+    Currently: use the file's stem (filename without extension).
+
+    If your fileId is something else (e.g., stored inside the JSON),
+    change this function accordingly.
+    """
+    return path.stem
+
+
+def take_questions(env) -> list[Path]:
     root_path = Path(__file__).parent / "reports_v2"
 
     # Dictionary to store model -> task_id -> list of file paths
@@ -48,7 +70,7 @@ def take_questions(env) -> list[str]:
         return []
 
     # Hierarchical sampling with round-robin across models
-    accepted_tasks = []
+    accepted_tasks: list[Path] = []
 
     # Determine max files per task across all models
     max_files_per_task = 0
@@ -97,8 +119,11 @@ def copy_questions():
         "resistor",
         "retrosynthesis",
     ]
+    all_accepted_tasks: list[Path] = []
     for env in envs:
         accepted_tasks = take_questions(env)
+        all_accepted_tasks.extend(accepted_tasks)
+
         root_path = Path(__file__).parent
         reports_v2_path = root_path / "reports_v2"
         dest_base_path = root_path / "accepted_questions"
@@ -114,13 +139,70 @@ def copy_questions():
             with question.open("r") as src, dest_file.open("w") as dst:
                 dst.write(src.read())
 
-    return accepted_tasks
+    return all_accepted_tasks
+
+
+# ---- New: MongoDB integration ----
+def get_annotator_file_map(accepted_tasks: list[Path]) -> dict[str, list[Path]]:
+    """
+    Given the list of accepted task files, query MongoDB and return
+    annotator -> list of Paths (those accepted files that have annotations).
+    """
+    if not accepted_tasks:
+        return {}
+
+    # Map fileId -> Path for quick lookup
+    fileid_to_path: dict[str, Path] = {}
+    for p in accepted_tasks:
+        fid = file_id_from_path(p) + ".json"
+        fileid_to_path[fid] = p
+
+    file_ids = list(fileid_to_path.keys())
+
+    client = MongoClient(MONGO_URI)
+    coll = client[MONGO_DB_NAME][MONGO_COLLECTION_NAME]
+
+    # Find all documents for these fileIds
+    cursor = coll.find({"fileId": {"$in": file_ids}})
+
+    annotator_to_paths: dict[str, set[Path]] = defaultdict(set)
+
+    for doc in cursor:
+        annotator = doc.get("annotator", "UNKNOWN")
+        fid = doc.get("fileId")
+        if not fid:
+            continue
+        path = fileid_to_path.get(fid)
+        if path:
+            annotator_to_paths[annotator].add(path)
+
+    client.close()
+
+    # Convert sets to sorted lists for determinism
+    return {
+        annotator: sorted(paths, key=lambda p: str(p.stem + ".json"))
+        for annotator, paths in annotator_to_paths.items()
+    }
 
 
 def main():
     accepted_tasks = copy_questions()
     if accepted_tasks:
         logger.info("Copied accepted tasks.")
+
+        # Query MongoDB for annotations on the accepted files
+        annotator_file_map = get_annotator_file_map(accepted_tasks)
+
+        if not annotator_file_map:
+            logger.info("No annotations found in MongoDB for accepted files.")
+        else:
+            logger.info("Annotations per annotator for accepted files:")
+            for annotator, paths in annotator_file_map.items():
+                logger.info(f"Annotator '{annotator}' labeled {len(paths)} file(s):")
+                for p in paths:
+                    logger.info(f"  - {p.stem}.json")
+    else:
+        logger.info("No accepted tasks found.")
 
 
 if __name__ == "__main__":
