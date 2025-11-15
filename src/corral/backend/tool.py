@@ -72,7 +72,7 @@ class Tool:
         """
         Create a Tool instance from an MCP tool definition.
 
-        This method is currently not implemented as Corral tools are the source,
+        This method is currently not implemented.
         not the target of MCP conversions.
 
         Args:
