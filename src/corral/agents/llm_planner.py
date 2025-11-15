@@ -89,6 +89,7 @@ class LLMPlanner(BaseAgent):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
+        **kwargs,  # noqa: ARG002
     ) -> str:
         """Run the LLM planner agent
 
@@ -98,6 +99,7 @@ class LLMPlanner(BaseAgent):
             history (List[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
+            **kwargs: Additional keyword arguments (e.g., enable_surrender - not used by this agent)
 
         Returns:
             str: The final answer to the task

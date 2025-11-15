@@ -86,8 +86,6 @@ class ReflectionMemory:
         """
         Add a reflection to memory, removing oldest if at capacity.
 
-        Uses deque with maxlen for O(1) append and automatic removal of oldest items.
-
         Args:
             reflection (Reflection): The reflection to add
         """

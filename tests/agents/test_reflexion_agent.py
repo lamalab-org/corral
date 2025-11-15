@@ -50,7 +50,7 @@ class TestReflexionAgentInitialization:
         )
 
         assert len(reflexion_agent.memory.reflections) == 0
-        assert reflexion_agent.memory.max_size == 3
+        assert reflexion_agent.memory.max_size == 5
 
 
 class TestReflexionAgentRun:

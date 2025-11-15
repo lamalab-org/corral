@@ -146,6 +146,7 @@ class ReActAgent(BaseAgent):
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         enable_surrender: bool = False,
+        **kwargs,  # noqa: ARG002
     ) -> str:
         """Main ReAct loop implementation
 

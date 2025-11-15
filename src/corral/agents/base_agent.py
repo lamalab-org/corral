@@ -173,7 +173,7 @@ class BaseAgent(ABC):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
-        enable_surrender: bool = False,
+        **kwargs,
     ) -> str:
         """
         Run the agent to solve a task
@@ -186,7 +186,9 @@ class BaseAgent(ABC):
             history (list[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
-            enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
+            **kwargs: Additional keyword arguments that may include:
+                - enable_surrender (bool): Whether to enable the surrender option. Defaults to False.
+                  Only used by agents that support surrendering.
 
         Returns:
             str: The final answer from the agent
@@ -228,7 +230,12 @@ class BaseAgent(ABC):
 
         try:
             final_answer = self.run(
-                interface, task_id, history, task_prompt, examples, enable_surrender
+                interface,
+                task_id,
+                history,
+                task_prompt,
+                examples,
+                enable_surrender=enable_surrender,
             )
 
             # Check if agent decided to surrender

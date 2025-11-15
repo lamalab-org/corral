@@ -104,6 +104,7 @@ class ToolCallingAgent(BaseAgent):
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         enable_surrender: bool = False,
+        **kwargs,  # noqa: ARG002
     ) -> str:
         """Run the agent to solve the task
 

@@ -65,6 +65,7 @@ class ReflexionAgent(BaseAgent):
             - trajectory
         If None, uses default prompt with ID "src/corral/agents/prompts/reflexion/user_prompt/prompt.md".
         reflection_temperature (float | None): Temperature for reflection generation (default: 0.0)
+        max_reflections (int): Maximum number of reflections to store in memory. Defaults to 5.
         **kwargs: Additional arguments passed to the actor
     """
 
@@ -76,6 +77,7 @@ class ReflexionAgent(BaseAgent):
         reflection_system_prompt: str | None = None,
         reflection_prompt: str | None = None,
         reflection_temperature: float | None = None,
+        max_reflections: int = 5,
         **kwargs,
     ):
         # Validate that actor is a BaseAgent instance
@@ -104,7 +106,7 @@ class ReflexionAgent(BaseAgent):
         )
 
         # Initialize reflection components
-        self.memory = ReflectionMemory(max_size=3)
+        self.memory = ReflectionMemory(max_size=max_reflections)
         self.reflection_module = ReflectionModule(
             model=reflection_model or actor.model,
             reflection_prompt=self.user_prompt,
@@ -133,6 +135,7 @@ class ReflexionAgent(BaseAgent):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
+        **kwargs,  # noqa: ARG002
     ) -> str:
         """
         Run the agent with reflexion capabilities.
@@ -150,6 +153,7 @@ class ReflexionAgent(BaseAgent):
             history (list[LiteLLMMessage] | None): Initial history items (optional)
             task_prompt (str | None): Custom task prompt (optional)
             examples (list[str] | None): Few-shot examples (optional)
+            enable_surrender (bool): Whether to enable surrendering (not used here)
 
         Returns:
             str: The final answer from the actor
@@ -213,6 +217,8 @@ class ReflexionAgent(BaseAgent):
 
             # Store messages for next trial's reflection generation
             self._previous_messages = self.messages.copy()
+            if hasattr(self.actor, "_available_tools") and self.actor._available_tools:
+                self._available_tools = self.actor._available_tools.copy()
 
             logger.info(f"ReflexionAgent completed task {task_id}")
             return answer

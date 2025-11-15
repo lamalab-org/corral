@@ -32,13 +32,16 @@ def run_benchmark(
     )
 
     runner = CorralRunner(interface, agent)
+    task_ids = [
+        "10_15227_orgsyn_084_0077",
+    ]
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
     result = runner.bench(
         task_ids,
-        trials_per_task=1,
-        k_values=[1],
+        trials_per_task=3,
+        k_values=[1, 2, 3],
         verbose=True,
         tool_verbosity=verbose,
     )
