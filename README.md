@@ -438,7 +438,7 @@ server = Server("my-corral-tools")
 
 @server.list_tools()
 async def list_tools():
-    return [MCPTool(**tool.for_mcp()) for tool in tools.values()]
+    return [MCPTool(**tool.to_mcp()) for tool in tools.values()]
 
 
 @server.call_tool()
