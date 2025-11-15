@@ -413,7 +413,7 @@ def my_scientific_tool(param: str) -> str:
 
 
 # Convert to MCP format
-mcp_definition = my_scientific_tool.for_mcp()
+mcp_definition = my_scientific_tool.to_mcp()
 
 # With specific verbosity level
 mcp_brief = my_scientific_tool.for_mcp(verbosity=ToolVerbosity.BRIEF)
