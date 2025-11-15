@@ -416,7 +416,7 @@ def my_scientific_tool(param: str) -> str:
 mcp_definition = my_scientific_tool.to_mcp()
 
 # With specific verbosity level
-mcp_brief = my_scientific_tool.for_mcp(verbosity=ToolVerbosity.BRIEF)
+mcp_brief = my_scientific_tool.to_mcp(verbosity=ToolVerbosity.BRIEF)
 ```
 
 Create a custom MCP server:
