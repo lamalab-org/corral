@@ -9,7 +9,7 @@ Corral provides a powerful tool system that allows you to create reusable, type-
 - Simple `@tool` decorator for creating tools from functions
 - Automatic [MCP (Model Context Protocol)](https://modelcontextprotocol.io/docs/getting-started/intro) compatibility via [FastMCP](https://github.com/jlowin/fastmcp) integration
 - Type-safe parameter validation with comprehensive type hint support
-- Verbosity levels for controlling description detail
+- Verbosity levels for controlling description detail (if provided in the tool description) 
 - Hidden arguments for secure configuration
 - Support for complex and nested types
 
