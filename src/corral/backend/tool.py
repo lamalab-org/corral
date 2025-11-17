@@ -112,10 +112,7 @@ class Tool:
             NotImplementedError: This base implementation is not supported.
                                 Use the @tool decorator for function-based tools.
         """
-        raise NotImplementedError(
-            "to_mcp is only supported for function-based tools. "
-            "Use the @tool decorator or extend this method for custom tools."
-        )
+        raise NotImplementedError("to_mcp is not supported yet")
 
     def get_usage_guide(self) -> str:
         """Generate a usage guide for the tool"""

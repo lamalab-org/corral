@@ -9,7 +9,7 @@ Corral provides a powerful tool system that allows you to create reusable, type-
 - Simple `@tool` decorator for creating tools from functions
 - Automatic [MCP (Model Context Protocol)](https://modelcontextprotocol.io/docs/getting-started/intro) compatibility via [FastMCP](https://github.com/jlowin/fastmcp) integration
 - Type-safe parameter validation with comprehensive type hint support
-- Verbosity levels for controlling description detail (if provided in the tool description) 
+- Verbosity levels for controlling description detail (if provided in the tool description)
 - Hidden arguments for secure configuration
 - Support for complex and nested types
 
@@ -42,7 +42,7 @@ def calculate_sum(a: int, b: int) -> str:
 Every tool function must have:
 
 1. **Type hints** for all parameters and return value
-2. **Complete docstring** with:
+2. **Complete docstring** following [Google style](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings) with:
    - Brief description
    - `Args:` section documenting each parameter
    - `Returns:` section describing the return value
@@ -86,7 +86,7 @@ def analyze_molecule(smiles: str, property_type: str) -> str:
     return f"Analyzing {property_type} of {smiles}"
 ```
 
-The docstring format `(choices: ["option1", "option2"])` automatically creates validation.
+The docstring format `(choices: ["option1", "option2"])` automatically creates validation, that the different options are enforced as enum values for that argument.
 
 ### Hidden Arguments
 
@@ -499,7 +499,7 @@ for name, tool in tools.items():
 
 ### 1. Clear Documentation
 
-Always provide clear, comprehensive docstrings:
+Always provide clear, descriptive docstrings:
 
 ```python
 @tool
