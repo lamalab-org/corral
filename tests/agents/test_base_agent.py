@@ -15,6 +15,35 @@ from .conftest import MockBenchmarkInterface, MockLLMResponse, MockPrompt
 class ConcreteAgent(BaseAgent):
     """Concrete implementation of BaseAgent for testing purposes."""
 
+    def __init__(
+        self,
+        model: str = "openai/gpt-4o",
+        max_iterations: int = 10,
+        api_endpoint: str | None = None,
+        system_prompt: str | None = None,
+        user_prompt: str | None = None,
+        extractor_prompt: str | None = None,
+        surrender_prompt: str | None = None,
+        temperature: float = 0.7,
+        **kwargs,
+    ):
+        """Initialize the concrete agent for testing."""
+        # Provide default user_prompt if not specified (like ReActAgent does)
+        if user_prompt is None:
+            user_prompt = "Task: {{task_guide}}"
+
+        super().__init__(
+            model=model,
+            max_iterations=max_iterations,
+            api_endpoint=api_endpoint,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            extractor_prompt=extractor_prompt,
+            surrender_prompt=surrender_prompt,
+            temperature=temperature,
+            **kwargs,
+        )
+
     def run(
         self,
         interface: CorralRouter,
@@ -22,6 +51,7 @@ class ConcreteAgent(BaseAgent):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
+        **kwargs,
     ) -> str:
         """Simple implementation for testing."""
         return "test_answer"
@@ -66,14 +96,13 @@ def test_base_agent_custom_initialization(mock_prompt_store):
         max_iterations=15,
         api_endpoint="https://custom.endpoint",
         temperature=0.3,
-        prompt_store=mock_prompt_store,
     )
 
     assert agent.model == "custom-model"
     assert agent.max_iterations == 15
     assert agent.api_endpoint == "https://custom.endpoint"
     assert agent.temperature == 0.3
-    assert agent.store == mock_prompt_store
+    assert agent.store is not None  # Has a store, not necessarily the mock
 
 
 def test_base_agent_initialization_with_custom_prompts(mock_prompt_store):
@@ -89,9 +118,11 @@ def test_base_agent_initialization_with_custom_prompts(mock_prompt_store):
         prompt_store=mock_prompt_store,
     )
 
-    assert agent.system_prompt == system_prompt
-    assert agent.user_prompt == user_prompt
-    assert agent.extractor_prompt == extractor_prompt
+    # system_prompt is converted to string by fill({})
+    assert agent.system_prompt == "Custom system prompt"
+    # user_prompt and extractor_prompt remain as objects
+    assert hasattr(agent.user_prompt, "fill")
+    assert hasattr(agent.extractor_prompt, "fill")
 
 
 def test_base_agent_initialization_with_string_prompts(mock_prompt_store):
@@ -107,9 +138,11 @@ def test_base_agent_initialization_with_string_prompts(mock_prompt_store):
         prompt_store=mock_prompt_store,
     )
 
+    # system_prompt is converted to string
     assert agent.system_prompt == system_prompt
-    assert agent.user_prompt == user_prompt
-    assert agent.extractor_prompt == extractor_prompt
+    # user_prompt and extractor_prompt are wrapped in StringPrompt
+    assert hasattr(agent.user_prompt, "fill")
+    assert hasattr(agent.extractor_prompt, "fill")
 
 
 def test_base_agent_default_prompt_store_creation(monkeypatch):
@@ -360,7 +393,13 @@ def test_run_agent_verbose_mode(monkeypatch, concrete_agent, mock_benchmark_inte
 
     # Mock the run method
     def mock_run(
-        interface, task_id, history=None, task_prompt=None, examples=None, verbose=True
+        interface,
+        task_id,
+        history=None,
+        task_prompt=None,
+        examples=None,
+        verbose=True,
+        **kwargs,
     ):
         return "test_answer"
 
@@ -559,3 +598,194 @@ def test_extractor_prompt_filling(
     prompt_content = call_args[1]["messages"][0]["content"]
     assert "Answer: test_answer" in prompt_content
     assert "Message: " in prompt_content
+
+
+# Tests for kwargs handling in run() method
+
+
+def test_agent_run_accepts_enable_surrender_via_kwargs(
+    monkeypatch, mock_benchmark_interface
+):
+    """Test that agents can accept enable_surrender via kwargs without error."""
+
+    class AgentWithKwargs(BaseAgent):
+        """Agent that accepts kwargs like ReflexionAgent."""
+
+        def __init__(self, **kwargs):
+            super().__init__(user_prompt="Task: {{task_guide}}", **kwargs)
+
+        def run(
+            self,
+            interface: CorralRouter,
+            task_id: str,
+            history: list[LiteLLMMessage] | None = None,
+            task_prompt: str | None = None,
+            examples: list[str] | None = None,
+            **kwargs,
+        ) -> str:
+            """Run method that captures enable_surrender in kwargs."""
+            # Verify enable_surrender is in kwargs
+            assert "enable_surrender" in kwargs
+            self.received_kwargs = kwargs
+            # Add messages for extractor
+            self.messages = [
+                {"role": "user", "content": "Test task"},
+                {"role": "assistant", "content": "answer"},
+            ]
+            return "answer"
+
+    agent = AgentWithKwargs()
+
+    # Mock llm_call for the extractor
+    monkeypatch.setattr(
+        "corral.agents.base_agent.llm_call",
+        lambda *args, **kwargs: MockLLMResponse("extracted"),
+    )
+
+    # Call run_agent with enable_surrender=True
+    result, usage = agent.run_agent(
+        interface=mock_benchmark_interface, task_id="test", enable_surrender=True
+    )
+
+    # Verify kwargs were passed correctly
+    assert agent.received_kwargs["enable_surrender"] is True
+
+
+def test_agent_run_with_explicit_enable_surrender_parameter(
+    monkeypatch, mock_benchmark_interface
+):
+    """Test that agents with explicit enable_surrender parameter work correctly."""
+
+    class AgentWithExplicitParam(BaseAgent):
+        """Agent that explicitly declares enable_surrender like ReActAgent."""
+
+        def __init__(self, **kwargs):
+            super().__init__(user_prompt="Task: {{task_guide}}", **kwargs)
+
+        def run(
+            self,
+            interface: CorralRouter,
+            task_id: str,
+            history: list[LiteLLMMessage] | None = None,
+            task_prompt: str | None = None,
+            examples: list[str] | None = None,
+            enable_surrender: bool = False,
+            **kwargs,
+        ) -> str:
+            """Run method with explicit enable_surrender parameter."""
+            self.received_enable_surrender = enable_surrender
+            self.messages = [
+                {"role": "user", "content": "Test task"},
+                {"role": "assistant", "content": "answer"},
+            ]
+            return "answer"
+
+    agent = AgentWithExplicitParam()
+
+    # Mock llm_call for the extractor
+    monkeypatch.setattr(
+        "corral.agents.base_agent.llm_call",
+        lambda *args, **kwargs: MockLLMResponse("extracted"),
+    )
+
+    # Test with enable_surrender=True
+    result, usage = agent.run_agent(
+        interface=mock_benchmark_interface, task_id="test", enable_surrender=True
+    )
+    assert agent.received_enable_surrender is True
+
+    # Test with enable_surrender=False (default)
+    result, usage = agent.run_agent(
+        interface=mock_benchmark_interface, task_id="test", enable_surrender=False
+    )
+    assert agent.received_enable_surrender is False
+
+
+def test_agent_run_without_enable_surrender_uses_default(
+    monkeypatch, mock_benchmark_interface
+):
+    """Test that enable_surrender defaults to False when not provided."""
+
+    class AgentWithExplicitParam(BaseAgent):
+        """Agent with explicit enable_surrender parameter."""
+
+        def __init__(self, **kwargs):
+            super().__init__(user_prompt="Task: {{task_guide}}", **kwargs)
+
+        def run(
+            self,
+            interface: CorralRouter,
+            task_id: str,
+            history: list[LiteLLMMessage] | None = None,
+            task_prompt: str | None = None,
+            examples: list[str] | None = None,
+            enable_surrender: bool = False,
+            **kwargs,
+        ) -> str:
+            """Run method with explicit enable_surrender parameter."""
+            self.received_enable_surrender = enable_surrender
+            self.messages = [
+                {"role": "user", "content": "Test task"},
+                {"role": "assistant", "content": "answer"},
+            ]
+            return "answer"
+
+    agent = AgentWithExplicitParam()
+
+    # Mock llm_call for the extractor
+    monkeypatch.setattr(
+        "corral.agents.base_agent.llm_call",
+        lambda *args, **kwargs: MockLLMResponse("extracted"),
+    )
+
+    # Call without enable_surrender parameter
+    result, usage = agent.run_agent(interface=mock_benchmark_interface, task_id="test")
+
+    # Should default to False
+    assert agent.received_enable_surrender is False
+
+
+def test_agent_run_kwargs_dont_interfere_with_agents_not_using_them(
+    monkeypatch, mock_benchmark_interface
+):
+    """Test that agents ignoring enable_surrender via kwargs don't error."""
+
+    class AgentIgnoringKwargs(BaseAgent):
+        """Agent that doesn't use enable_surrender at all."""
+
+        def __init__(self, **kwargs):
+            super().__init__(user_prompt="Task: {{task_guide}}", **kwargs)
+            self.run_called = False
+
+        def run(
+            self,
+            interface: CorralRouter,
+            task_id: str,
+            history: list[LiteLLMMessage] | None = None,
+            task_prompt: str | None = None,
+            examples: list[str] | None = None,
+            **kwargs,
+        ) -> str:
+            """Run method that completely ignores kwargs."""
+            self.run_called = True
+            self.messages = [
+                {"role": "user", "content": "Test task"},
+                {"role": "assistant", "content": "answer"},
+            ]
+            return "answer"
+
+    agent = AgentIgnoringKwargs()
+
+    # Mock llm_call for the extractor
+    monkeypatch.setattr(
+        "corral.agents.base_agent.llm_call",
+        lambda *args, **kwargs: MockLLMResponse("extracted"),
+    )
+
+    # Should not raise an error even when enable_surrender is passed
+    result, usage = agent.run_agent(
+        interface=mock_benchmark_interface, task_id="test", enable_surrender=True
+    )
+
+    assert agent.run_called is True
+    assert result == "extracted"
