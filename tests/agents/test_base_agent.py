@@ -64,11 +64,12 @@ def mock_benchmark_interface():
 
 
 @pytest.fixture()
-def concrete_agent(mock_prompt_store):
+def concrete_agent():
     """Create a concrete agent instance for testing."""
     return ConcreteAgent(
         model="test-model",
-        prompt_store=mock_prompt_store,
+        system_prompt="You are a helpful assistant.",
+        extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
         temperature=0.5,
         max_iterations=5,
     )
@@ -79,7 +80,10 @@ def concrete_agent(mock_prompt_store):
 
 def test_base_agent_default_initialization():
     """Test agent initialization with default values."""
-    agent = ConcreteAgent()
+    agent = ConcreteAgent(
+        system_prompt="You are a helpful assistant.",
+        extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+    )
 
     assert agent.model == "openai/gpt-4o"
     assert agent.max_iterations == 10
@@ -89,13 +93,15 @@ def test_base_agent_default_initialization():
     assert agent.token_usage == {}
 
 
-def test_base_agent_custom_initialization(mock_prompt_store):
+def test_base_agent_custom_initialization():
     """Test agent initialization with custom values."""
     agent = ConcreteAgent(
         model="custom-model",
         max_iterations=15,
         api_endpoint="https://custom.endpoint",
         temperature=0.3,
+        system_prompt="You are a helpful assistant.",
+        extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
     )
 
     assert agent.model == "custom-model"
@@ -105,7 +111,7 @@ def test_base_agent_custom_initialization(mock_prompt_store):
     assert agent.store is not None  # Has a store, not necessarily the mock
 
 
-def test_base_agent_initialization_with_custom_prompts(mock_prompt_store):
+def test_base_agent_initialization_with_custom_prompts():
     """Test initialization with custom prompt objects."""
     system_prompt = MockPrompt("Custom system prompt")
     user_prompt = MockPrompt("Custom user prompt")
@@ -115,7 +121,6 @@ def test_base_agent_initialization_with_custom_prompts(mock_prompt_store):
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         extractor_prompt=extractor_prompt,
-        prompt_store=mock_prompt_store,
     )
 
     # system_prompt is converted to string by fill({})
@@ -125,7 +130,7 @@ def test_base_agent_initialization_with_custom_prompts(mock_prompt_store):
     assert hasattr(agent.extractor_prompt, "fill")
 
 
-def test_base_agent_initialization_with_string_prompts(mock_prompt_store):
+def test_base_agent_initialization_with_string_prompts():
     """Test initialization with string prompts."""
     system_prompt = "You are a helpful assistant"
     user_prompt = "Task: {{task_guide}}"
@@ -135,7 +140,6 @@ def test_base_agent_initialization_with_string_prompts(mock_prompt_store):
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         extractor_prompt=extractor_prompt,
-        prompt_store=mock_prompt_store,
     )
 
     # system_prompt is converted to string
@@ -172,10 +176,13 @@ def test_base_agent_default_prompt_store_creation(monkeypatch):
     ConcreteAgent()
 
 
-def test_base_agent_kwargs_passed_through(mock_prompt_store):
+def test_base_agent_kwargs_passed_through():
     """Test that additional kwargs are stored."""
     agent = ConcreteAgent(
-        prompt_store=mock_prompt_store, custom_arg="test_value", another_arg=42
+        system_prompt="You are a helpful assistant.",
+        extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        custom_arg="test_value",
+        another_arg=42,
     )
 
     assert agent.kwargs["custom_arg"] == "test_value"
@@ -612,7 +619,12 @@ def test_agent_run_accepts_enable_surrender_via_kwargs(
         """Agent that accepts kwargs like ReflexionAgent."""
 
         def __init__(self, **kwargs):
-            super().__init__(user_prompt="Task: {{task_guide}}", **kwargs)
+            super().__init__(
+                user_prompt="Task: {{task_guide}}",
+                system_prompt="You are a helpful assistant.",
+                extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+                **kwargs,
+            )
 
         def run(
             self,
@@ -660,7 +672,12 @@ def test_agent_run_with_explicit_enable_surrender_parameter(
         """Agent that explicitly declares enable_surrender like ReActAgent."""
 
         def __init__(self, **kwargs):
-            super().__init__(user_prompt="Task: {{task_guide}}", **kwargs)
+            super().__init__(
+                user_prompt="Task: {{task_guide}}",
+                system_prompt="You are a helpful assistant.",
+                extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+                **kwargs,
+            )
 
         def run(
             self,
@@ -710,7 +727,12 @@ def test_agent_run_without_enable_surrender_uses_default(
         """Agent with explicit enable_surrender parameter."""
 
         def __init__(self, **kwargs):
-            super().__init__(user_prompt="Task: {{task_guide}}", **kwargs)
+            super().__init__(
+                user_prompt="Task: {{task_guide}}",
+                system_prompt="You are a helpful assistant.",
+                extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+                **kwargs,
+            )
 
         def run(
             self,
@@ -754,7 +776,12 @@ def test_agent_run_kwargs_dont_interfere_with_agents_not_using_them(
         """Agent that doesn't use enable_surrender at all."""
 
         def __init__(self, **kwargs):
-            super().__init__(user_prompt="Task: {{task_guide}}", **kwargs)
+            super().__init__(
+                user_prompt="Task: {{task_guide}}",
+                system_prompt="You are a helpful assistant.",
+                extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+                **kwargs,
+            )
             self.run_called = False
 
         def run(

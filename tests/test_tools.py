@@ -458,10 +458,7 @@ def test_tool_from_mcp_raises_not_implemented():
     with pytest.raises(NotImplementedError) as exc_info:
         Tool.from_mcp(mcp_definition)
 
-    assert "not currently supported" in str(exc_info.value)
-    assert "Corral tools are designed to be converted TO MCP format" in str(
-        exc_info.value
-    )
+    assert "is not currently supported." in str(exc_info.value)
 
 
 def test_tool_for_mcp_preserves_descriptions():

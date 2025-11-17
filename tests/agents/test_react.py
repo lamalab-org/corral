@@ -15,6 +15,9 @@ def create_react_agent():
         model="test-model",
         max_iterations=3,
         temperature=0.5,
+        system_prompt="You are a helpful assistant.",
+        user_prompt="Task: {{task_guide}}",
+        extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
         surrender_prompt=MockPrompt("You may give up if the task is impossible."),
     )
 
@@ -104,7 +107,10 @@ class TestReActAgentInitialization:
 
     def test_default_initialization(self):
         """Test ReActAgent initialization with default parameters."""
-        agent = ReActAgent()
+        agent = ReActAgent(
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
 
         assert agent.model == "openai/gpt-4o"
         assert agent.max_iterations == 10
@@ -118,6 +124,8 @@ class TestReActAgentInitialization:
             max_iterations=5,
             temperature=0.3,
             api_endpoint="http://custom-endpoint",
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
         )
 
         assert agent.model == "custom-model"
@@ -137,17 +145,24 @@ class TestReActAgentInitialization:
         # user_prompt is wrapped in StringPrompt
         assert hasattr(agent.user_prompt, "fill")
 
-    def test_initialization_with_prompt_store(self, mock_prompt_store):
+    def test_initialization_with_prompt_store(self):
         """Test ReActAgent initialization with PromptStore."""
         # Note: prompt_store is not directly passed to ReActAgent
         # The agent creates its own store internally
-        agent = ReActAgent()
+        agent = ReActAgent(
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
         assert agent.store is not None
 
     def test_initialization_with_kwargs(self):
         """Test ReActAgent initialization with additional kwargs."""
         agent = ReActAgent(
-            model="test-model", custom_param="custom_value", another_param=42
+            model="test-model",
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+            custom_param="custom_value",
+            another_param=42,
         )
 
         assert agent.model == "test-model"
@@ -1045,6 +1060,9 @@ class TestReActAgentIntegration:
         agent = ReActAgent(
             model="test-model",
             max_iterations=5,
+            system_prompt="You are a helpful assistant.",
+            user_prompt="Task: {{task_guide}}",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
             surrender_prompt=MockPrompt("You may give up if the task is impossible."),
         )
 
@@ -1111,6 +1129,9 @@ Final Answer: <final_answer>The solution is X because of Y and Z.</final_answer>
         agent = ReActAgent(
             model="test-model",
             max_iterations=5,
+            system_prompt="You are a helpful assistant.",
+            user_prompt="Task: {{task_guide}}",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
             surrender_prompt=MockPrompt("You may give up if the task is impossible."),
         )
 
@@ -1178,6 +1199,9 @@ Final Answer: <final_answer>Successfully recovered and found the answer.</final_
         agent = ReActAgent(
             model="test-model",
             max_iterations=5,
+            system_prompt="You are a helpful assistant.",
+            user_prompt="Task: {{task_guide}}",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
             surrender_prompt=MockPrompt("You may give up if the task is impossible."),
         )
 

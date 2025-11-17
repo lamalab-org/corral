@@ -32,10 +32,9 @@ def tool_calling_agent():
         model="openai/gpt-4o",
         max_iterations=5,
         temperature=0.7,
-        system_prompt=MockPrompt("You are a helpful AI assistant."),
-        user_prompt=MockPrompt(
-            "Task: {{task_guide}}\n\nExamples: {{examples}}\n\nSolve this step by step."
-        ),
+        system_prompt="You are a helpful AI assistant.",
+        user_prompt="Task: {{task_guide}}\n\nExamples: {{examples}}\n\n{{surrender_instructions}}\n\nSolve this step by step.",
+        extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
         surrender_prompt=MockPrompt("You may give up if the task is impossible."),
     )
 
@@ -71,7 +70,10 @@ def test_action_with_complex_arguments():
 
 def test_tool_calling_agent_init_with_defaults():
     """Test ToolCallingAgent initialization with defaults."""
-    agent = ToolCallingAgent()
+    agent = ToolCallingAgent(
+        system_prompt="You are a helpful assistant.",
+        extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+    )
 
     assert agent.model == "openai/gpt-4o"
     assert agent.max_iterations == 10
@@ -87,6 +89,8 @@ def test_tool_calling_agent_init_with_custom_params():
         max_iterations=15,
         temperature=0.3,
         api_endpoint="https://custom.api.endpoint",
+        system_prompt="You are a helpful assistant.",
+        extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
     )
 
     assert agent.model == "anthropic/claude-3-5-sonnet-20241022"
@@ -95,11 +99,14 @@ def test_tool_calling_agent_init_with_custom_params():
     assert agent.api_endpoint == "https://custom.api.endpoint"
 
 
-def test_tool_calling_agent_init_with_prompt_store(mock_prompt_store):
+def test_tool_calling_agent_init_with_prompt_store():
     """Test ToolCallingAgent initialization with PromptStore."""
     # Note: prompt_store is not directly passed to ToolCallingAgent
     # The agent creates its own store internally
-    agent = ToolCallingAgent()
+    agent = ToolCallingAgent(
+        system_prompt="You are a helpful assistant.",
+        extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+    )
 
     # The prompt_store is stored as 'store' in BaseAgent
     assert hasattr(agent, "store")
@@ -549,6 +556,9 @@ def test_tool_calling_agent_inheritance_from_base_agent():
     assert issubclass(ToolCallingAgent, BaseAgent)
 
     # Test that it has the required abstract method
-    agent = ToolCallingAgent()
+    agent = ToolCallingAgent(
+        system_prompt="You are a helpful assistant.",
+        extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+    )
     assert hasattr(agent, "run")
     assert callable(agent.run)
