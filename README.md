@@ -187,6 +187,28 @@ from corral.agents import LLMPlanner
 agent = LLMPlanner(model="gpt-4o", temperature=0.1, max_iterations=5)
 ```
 
+### ReflexionAgent
+
+Implements the Reflexion architecture ([paper](https://arxiv.org/abs/2303.11366)) which adds self-reflection and learning from mistakes.
+
+```python
+from corral.agents import ReActAgent, ReflexionAgent, ToolCallingAgent
+
+# Create base agent (the "Actor")
+base_agent = ToolCallingAgent(model="gpt-4o", max_iterations=10, temperature=0.1)
+
+# Wrap with Reflexion capabilities
+reflexion_agent = ReflexionAgent(
+    actor=base_agent,
+    reflection_model="gpt-4o",  # Model for generating reflections
+    reflection_temperature=0.0,  # Deterministic reflections
+)
+
+# Use like any other agent
+runner = CorralRunner(interface, reflexion_agent)
+result = runner.bench(task_ids=["task_1"], trials_per_task=5)
+```
+
 ## 💾 Checkpoint System
 
 The framework automatically saves checkpoints during benchmark runs.

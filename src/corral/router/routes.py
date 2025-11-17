@@ -140,6 +140,12 @@ class CorralRouter:
         response.raise_for_status()
         return response.json()
 
+    def get_last_score(self, task_id: str) -> dict[str, Any]:
+        """Get the score from the most recent trial submission"""
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/last_score")
+        response.raise_for_status()
+        return response.json()
+
     def get_trial_state(self, task_id: str, trial_id: str) -> dict[str, Any]:
         """Get specific trial state"""
         response = requests.get(f"{self.base_url}/tasks/{task_id}/trials/{trial_id}")
