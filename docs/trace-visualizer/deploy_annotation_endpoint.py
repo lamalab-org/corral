@@ -7,7 +7,7 @@ import modal
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
-from pymongo import MongoClient, UpdateOne
+from pymongo import MongoClient
 
 image = modal.Image.debian_slim().pip_install(
     "fastapi[standard]", "pydantic", "pymongo>=4.7"
@@ -112,10 +112,10 @@ def _build_fastapi_app() -> FastAPI:
         if not is_key_allowed(payload.mongodbKey):
             raise HTTPException(status_code=403, detail="mongodbKey is not allowed")
 
-        # 2) Write
+        # 2) Write - each submission creates new entries, never updates
         coll = _get_collection()
         now = datetime.now(tz=timezone.utc)
-        ops: list[UpdateOne] = []
+        docs: list[dict] = []
 
         for file_id, nodes_dict in payload.annotations.items():
             file_comment = payload.traceComments.get(file_id)
@@ -129,26 +129,18 @@ def _build_fastapi_app() -> FastAPI:
                 "annotations": node_annotations,
                 "traceComment": file_comment,
                 "fileNodes": [fn.dict() for fn in file_nodes],
-                "updatedAt": now,
+                "createdAt": now,
+                "submittedAt": now,
             }
+            docs.append(doc)
 
-            ops.append(
-                UpdateOne(
-                    {"mongodbKey": payload.mongodbKey, "fileId": file_id},
-                    {"$set": doc, "$setOnInsert": {"createdAt": now}},
-                    upsert=True,
-                )
-            )
-
-        if not ops:
+        if not docs:
             raise HTTPException(status_code=400, detail="No annotations provided")
 
-        result = coll.bulk_write(ops, ordered=False)
+        result = coll.insert_many(docs, ordered=False)
         return {
             "ok": True,
-            "matched": result.matched_count,
-            "upserted": len(result.upserted_ids or {}),
-            "modified": result.modified_count,
+            "inserted": len(result.inserted_ids),
         }
 
     @web.get("/healthz")

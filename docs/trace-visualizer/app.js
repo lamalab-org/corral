@@ -1538,9 +1538,7 @@ document.getElementById('submitBtn').addEventListener('click', async function() 
             successMessage += `Files Processed: ${totalFiles}/${totalFiles}\n`;
             successMessage += `Total Markers: ${totalMarkers}\n`;
             successMessage += `Nodes with Notes: ${totalNotes}\n\n`;
-            successMessage += `Matched: ${result.matched}\n`;
-            successMessage += `Upserted: ${result.upserted}\n`;
-            successMessage += `Modified: ${result.modified}`;
+            successMessage += `New Entries Inserted: ${result.inserted}`;
 
             alert(successMessage);
 
