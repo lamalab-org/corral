@@ -88,7 +88,6 @@ class Tool:
         """
         raise NotImplementedError(
             "Converting from MCP to Corral Tool is not currently supported. "
-            "Corral tools are designed to be converted TO MCP format, not FROM it."
         )
 
     def to_mcp(self, verbosity: "ToolVerbosity | None" = None) -> dict[str, Any]:
