@@ -384,11 +384,6 @@ all_modal_tools = list(MODAL_TOOL_REGISTRY.values())
 simulation_tool = MODAL_TOOL_REGISTRY.get("complex_simulation")
 ```
 
-**You don't need the registry if:**
-- You assign the decorated function to a variable and use it directly (though this is less common)
-- You're just defining the tool but not immediately using it
-
-The registry pattern ensures modal tools are easily discoverable and accessible throughout your application, especially when tools are defined across multiple modules.
 
 ## MCP Integration
 
