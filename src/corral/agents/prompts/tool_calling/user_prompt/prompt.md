@@ -19,7 +19,7 @@ Task Guide:
 
 **`{{task_guide}}`**
 
-You must think about what to do next. You can use some of the tools available in the system.
+You must think what to do next. You can use some of the tools available in the system.
 
 When you think that the task is completed, you can submit the answer.
 For that, answer with: "Final Answer: <your answer>". It is very important to follow this format.
