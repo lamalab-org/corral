@@ -133,7 +133,7 @@ class TestReActAgentInitialization:
         assert agent.temperature == 0.3
         assert agent.api_endpoint == "http://custom-endpoint"
 
-    def test_initialization_with_custom_prompts(self):
+    def test_initialization_with_custom_prompts(self, mock_promptstore_module):
         """Test ReActAgent initialization with custom prompts."""
         system_prompt = "Custom system prompt"
         user_prompt = "Custom user prompt: {{task_guide}}"
@@ -1030,7 +1030,7 @@ Action Input: <action_input>{"path": "slab_with_co2.cif", "content": "# generate
             == "Error solving the task: unable to complete it in the iteration limit"
         )
 
-    def test_initialization_with_none_values(self):
+    def test_initialization_with_none_values(self, mock_promptstore_module):
         """Test ReActAgent initialization with None values."""
         agent = ReActAgent(
             system_prompt=None,
