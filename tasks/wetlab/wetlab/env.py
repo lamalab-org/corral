@@ -17,7 +17,7 @@ from typing import Dict
 
 from wetlab.score import score_ion_list
 from wetlab.tools import create_tools
-from wetlab.engine import Solution, StockSolution
+from wetlab.engine import set_chemical_system, Solution, StockSolution
 
 from corral.base import Environment
 from corral.server import run_server
@@ -32,21 +32,57 @@ SCORING_FUNCTIONS = {
 }
 
 DEFAULT_REAGENTS = {
-    "HCl(dil.)": StockSolution(composition={"H+": 0.005, "Cl-": 0.005}, description="HCl 0.005 M, in water"),
-    "HCl(conc.)": StockSolution(composition={"H+": 5, "Cl-": 5}, description="HCl 5.0 M, in water"),
-    "H2SO4": StockSolution(composition={"H+": 1, "SO4-2": 0.5}, description="H2SO4 0.5 M, in water"),
-    "NH3": StockSolution(composition={"NH3": 1}, description="NH3 1.0 M, in water"),
+    "HCl(0.02M)": StockSolution(composition={"H+": 0.02, "Cl-": 0.02}, description="HCl 0.02 M, in water"),
+    "HCl(1M)": StockSolution(composition={"H+": 1, "Cl-":1}, description="HCl 1.0 M, in water"),
+    "HCl(6M)": StockSolution(composition={"H+": 6, "Cl-": 6}, description="HCl 6.0 M, in water"),
+    "HNO3": StockSolution(composition={"H+": 6, "NO3-": 6}, description="HNO3 6.0 M, in water"),
+    "KOH(6M)": StockSolution(composition={"K+": 6, "OH-": 6}, description="KOH 6.0 M, in water"),
+    "KOH(0.02M)": StockSolution(composition={"K+": 0.02, "OH-": 0.02}, description="KOH 0.02 M, in water"),
+    "H2SO4": StockSolution(composition={"H+": 2, "SO4-2": 1}, description="H2SO4 1.0 M, in water"),
+    "NH3": StockSolution(composition={"NH3": 5}, description="NH3 5.0 M, in water"),
     "NH4Cl": StockSolution(composition={"NH4+": 1, "Cl-": 1}, description="NH4Cl 1.0 M, in water"),
+    "BUFFER_9": StockSolution(composition={"NH3": 0.36, "NH4+": 0.64, "Cl-": 1}, description="1.0 M ammonia buffer pH=9 (NH3 0.36 M, NH4Cl 0.64 M), in water"),
     "NH4I": StockSolution(composition={"NH4+": 1, "I-": 1}, description="NH4I 1.0 M, in water"),
     "H2S(acidic)": StockSolution(composition={"H2S": 0.1, "H+": 0.01, "Cl-": 0.01}, description="H2S 0.1 M, HCl 0.01 M, in water"),
-    "(NH4)2S": StockSolution(composition={"NH4+":0.2, "S-2":0.1}, description="(NH4)2S 0.1 M, in water")
+    "(NH4)2S": StockSolution(composition={"NH4+": 0.2, "S-2": 0.1}, description="(NH4)2S 0.1 M, in water"),
+    "(NH4)2CO3": StockSolution(composition={"NH4+": 0.4, "CO3-2": 0.2}, description="(NH4)2CO3 0.2 M, in water"),
+    "(NH4)2HPO4": StockSolution(composition={"NH4+": 0.4, "HPO4-2": 0.2}, description="(NH4)2HPO4 0.2 M, in water"),
+    "K2CrO4": StockSolution(composition={"K+": 0.4, "CrO4-2": 0.2}, description="K2CrO4 0.2 M, in water"),
+    "NH4SCN": StockSolution(composition={"NH4+": 0.1, "SCN-": 0.1}, description="NH4SCN 0.1 M, in water"),
+    "DMG": StockSolution(composition={"K+": 0.01, "Hdmg-": 0.01}, description="dimethylglyoxime potassium salt 0.01 M, in water"),
 }
+
+DEFAULT_SYS = "Cl N S I C K P Cr dmg"
 
 @dataclass
 class QualitativeAnalysisTask(TaskDefinition):
-    sample: Solution
-    reagents: Dict[str, StockSolution]=DEFAULT_REAGENTS
+    sys: str = None
+    sample_list: Dict[str, Solution] = None
+    reagent_list: Dict[str, StockSolution] = None
 
+    def __post_init__(self): # setting up the engine
+
+        if self.reagent_list == "default":
+            reagent_solutions = DEFAULT_REAGENTS
+            sys = ' '.join([DEFAULT_SYS, self.sys])
+        else:
+            reagent_solutions = {reagent["label"]: StockSolution(composition=reagent["composition"], description=reagent["description"]) for reagent in self.reagent_list}
+            sys = self.sys
+        
+        chemical_system = set_chemical_system(sys)
+        original_samples = {sample["label"]: Solution(composition=sample["composition"], volume=sample["vol"], description="unknown") for sample in self.sample_list}
+        # equilibrating the samples
+        sample_solutions = {}
+        for label, solution in original_samples.items():
+            solution.equilibrate()
+            if solution.has_precipitate:
+                raise RuntimeError(f"Sample with label {label} resulted in a precipitate after equilibration.")
+            else:
+                sample_solutions[label] = solution
+
+        object.__setattr__(self, "samples", sample_solutions)
+        object.__setattr__(self, "reagents", reagent_solutions)
+        object.__setattr__(self, "chemical_system", chemical_system)
 
 def load_tasks_from_json(
     json_path: Path, work_dir: str = BASE_WORK_DIR
@@ -65,9 +101,6 @@ def load_tasks_from_json(
             input_from_tasks = data.get("input", {}).get("input_from_task", [])
             if not isinstance(input_from_tasks, list):
                 input_from_tasks = []
-            sample_vol = data["input"]["sample_vol"]
-            sample_composition = data["input"]["sample_composition"]
-            sample = Solution(sample_composition, volume=sample_vol)
 
             tasks[task_id] = QualitativeAnalysisTask(
                 name=data["name"],
@@ -78,7 +111,9 @@ def load_tasks_from_json(
                 submission_format=data.get("submission_format", ""),
                 input_from_tasks=input_from_tasks,
                 initial_input=initial_input,
-                sample=sample,
+                sys=data["input"]["sys"],
+                sample_list=data["input"]["samples"],
+                reagent_list=data["input"]["reagents"],
             )
     return tasks
 
@@ -114,7 +149,7 @@ class TaskEnvironment(Environment):
         # Initialize environment
         super().__init__(f"{task_group.group_id}_{task_id}", base_work_dir=work_dir)
 
-        compositions = {"sample": self.current_task.sample}
+        compositions = self.current_task.samples | self.current_task.reagents
         self.hidden_args = {"compositions": compositions}
 
         logger.info(f"Initializing environment for task {self.task_id}")

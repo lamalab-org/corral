@@ -1,60 +1,48 @@
-ALL_IONS = [
-    # Common cations
-    'Ag+',
-    'Al3+',
-    'Ba2+',
-    'Ca2+',
-    'Cd2+',
-    'Co2+',
-    'Cr3+',
-    'Cs+',
-    'Cu2+',
-    'Fe2+',
-    'Fe3+',
-    'Ga3+',
-    'Hg2+',
-    'Hg2^2+',
-    'K+',
-    'Li+',
-    'Mg2+',
-    'Mn2+',
-    'Na+',
-    'NH4+',
-    'Ni2+',
-    'Pb2+',
-    'Rb+',
-    'Sn2+',
-    'Sr2+',
-    'Zn2+',
+from tools import CATIONS, ANIONS
 
-    # Common anions
-    'Br-',
-    'Cl-',
-    'CN-',
-    'CO3^2-',
-    'CrO4^2-',
-    'F-',
-    'I-',
-    'NO2-',
-    'NO3-',
-    'OH-',
-    'PO4^3-',
-    'S2-'
-    'SO3^2-',
-    'SO4^2-',
-    'SCN-',
-]
+ALL_IONS = CATIONS + ANIONS
 
-def score_ion_list(prediction: str, ground_truth: str) -> float:
+CARBONATES = ["CO3-2", "HCO3-"]
+SULFATES = ["SO4-2", "HSO4-"]
+PHOSPHATES = ["PO4-3", "HPO4-2", "H2PO4-"]
+OXALATES = ["C2O4-2", "HC2O4-", "Ox-2", "HOx-"]
+CHROMATES = ["CrO4-2", "HCrO4-"]
+SULFIDES = ["S-2", "HS-"]
 
-    pred_list = prediction.split(", ")
-    gt_list = ground_truth.split(", ")
 
-    for ion in gt_list:
-        if ion not in ALL_IONS:
-            raise ValueError(f"Invalid ion in the ground truth: {ion}")
-        
-    if set(pred_list) == set(gt_list):
-        return 1.0
+def _normalize_ion(ion: str) -> str:
+    if ion not in ALL_IONS:
+        raise ValueError(f"Undefined Ion: {ion}")
+    elif ion in CATIONS:
+        return ion
+    elif ion in CARBONATES:
+        return "CO3-2"
+    elif ion in SULFATES:
+        return "SO4-2"
+    elif ion in PHOSPHATES:
+        return "PO4-3"
+    elif ion in OXALATES:
+        return "Ox-2"
+    elif ion in CHROMATES:
+        return "CrO4-2"
+    elif ion in SULFIDES:
+        return "S-2"
     else:
+        return ion
+        
+
+def score_ion_list(prediction: str, ground_truth: str, binarize=True) -> float:
+
+    gt_set = set([_normalize_ion(x.strip()) for x in ground_truth.split(",")])
+    
+    try:
+        pred_set = set([_normalize_ion(x.strip()) for x in prediction.split(",")])
+    except ValueError:
         return 0.0
+        
+    iou = len(gt_set.intersection(pred_set))/len(gt_set.union(pred_set))
+
+    if binarize:
+        return 1.0 if (iou == 1) else 0.0
+    else:
+        return iou
