@@ -87,7 +87,7 @@ def ensure_jinja_compatible(prompt: str | Any) -> Any:
     """
     if isinstance(prompt, str):
         # Wrap PromptStore's Prompt in ValidatedPrompt for typo detection
-        base_prompt = Prompt(content=prompt, version=1)
+        base_prompt = Prompt(content=prompt, version=1, uuid="1234-5678-9012-3456")
         return ValidatedPrompt(base_prompt)
     elif hasattr(prompt, "fill") and callable(prompt.fill):
         return prompt
@@ -118,7 +118,9 @@ def get_prompt(
             raise ValueError("default_uuid cannot be None when prompt_input is None")
         return store.get(default_uuid)
     elif isinstance(prompt_input, str):
-        base_prompt = Prompt(content=prompt_input, version=1)
+        base_prompt = Prompt(
+            content=prompt_input, version=1, uuid="inline_prompt/inline_prompt"
+        )
         return ValidatedPrompt(base_prompt)
     else:
         return prompt_input

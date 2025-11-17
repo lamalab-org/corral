@@ -18,13 +18,13 @@ class TestValidatedPrompt:
     def test_init(self):
         """Test ValidatedPrompt initialization."""
         content = "Hello {{name}}!"
-        base_prompt = Prompt(content=content, version=1)
+        base_prompt = Prompt(content=content, version=1, uuid="test/test_init")
         prompt = ValidatedPrompt(base_prompt)
         assert prompt._prompt == base_prompt
 
     def test_fill_single_replacement(self):
         """Test filling a prompt with a single replacement."""
-        base_prompt = Prompt(content="Hello {{name}}!", version=1)
+        base_prompt = Prompt(content="Hello {{name}}!", version=1, uuid="test/single")
         prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({"name": "Alice"})
         assert result == "Hello Alice!"
@@ -32,7 +32,9 @@ class TestValidatedPrompt:
     def test_fill_multiple_replacements(self):
         """Test filling a prompt with multiple replacements."""
         base_prompt = Prompt(
-            content="Hello {{name}}, you are {{age}} years old!", version=1
+            content="Hello {{name}}, you are {{age}} years old!",
+            version=1,
+            uuid="test/multiple",
         )
         prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({"name": "Bob", "age": 30})
@@ -40,21 +42,25 @@ class TestValidatedPrompt:
 
     def test_fill_empty_replacements(self):
         """Test filling a prompt with empty replacements."""
-        base_prompt = Prompt(content="Hello world!", version=1)
+        base_prompt = Prompt(content="Hello world!", version=1, uuid="test/empty")
         prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({})
         assert result == "Hello world!"
 
     def test_fill_with_non_string_values(self):
         """Test filling a prompt with non-string values (should be converted to string)."""
-        base_prompt = Prompt(content="Count: {{count}}, Price: {{price}}", version=1)
+        base_prompt = Prompt(
+            content="Count: {{count}}, Price: {{price}}",
+            version=1,
+            uuid="test/non_string",
+        )
         prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({"count": 5, "price": 19.99})
         assert result == "Count: 5, Price: 19.99"
 
     def test_fill_extra_replacements(self):
         """Test filling a prompt with extra replacements that don't match placeholders."""
-        base_prompt = Prompt(content="Hello {{name}}!", version=1)
+        base_prompt = Prompt(content="Hello {{name}}!", version=1, uuid="test/extra")
         prompt = ValidatedPrompt(base_prompt)
         with pytest.raises(
             KeyError, match="Extra keys provided that don't match any placeholders"
@@ -63,7 +69,9 @@ class TestValidatedPrompt:
 
     def test_fill_extra_replacements_with_underscore_prefix(self):
         """Test that framework keys with underscore prefix are allowed as extra replacements."""
-        base_prompt = Prompt(content="Hello {{name}}!", version=1)
+        base_prompt = Prompt(
+            content="Hello {{name}}!", version=1, uuid="test/underscore"
+        )
         prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({"name": "David", "_internal_key": "framework_value"})
         assert result == "Hello David!"
@@ -71,7 +79,9 @@ class TestValidatedPrompt:
     def test_fill_legitimate_extra_field(self):
         """Test filling a prompt where 'extra' is a legitimate placeholder."""
         base_prompt = Prompt(
-            content="Hello {{name}}, here's {{extra}} info!", version=1
+            content="Hello {{name}}, here's {{extra}} info!",
+            version=1,
+            uuid="test/legitimate",
         )
         prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({"name": "Alice", "extra": "bonus"})
@@ -80,7 +90,9 @@ class TestValidatedPrompt:
     def test_fill_typo_in_extra_field_caught(self):
         """Test that typos in field names are now caught."""
         base_prompt = Prompt(
-            content="Hello {{name}}, here's {{extra}} info!", version=1
+            content="Hello {{name}}, here's {{extra}} info!",
+            version=1,
+            uuid="test/typo",
         )
         prompt = ValidatedPrompt(base_prompt)
         with pytest.raises(

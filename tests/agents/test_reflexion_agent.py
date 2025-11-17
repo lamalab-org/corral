@@ -15,9 +15,14 @@ from .conftest import MockLLMResponse
 class TestReflexionAgentInitialization:
     """Test cases for ReflexionAgent initialization."""
 
-    def test_init_with_react_agent(self):
+    def test_init_with_react_agent(self, mock_promptstore_module):
         """Test initializing ReflexionAgent with ReActAgent."""
-        base_agent = ReActAgent(model="test-model", max_iterations=5)
+        base_agent = ReActAgent(
+            model="test-model",
+            max_iterations=5,
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
         reflexion_agent = ReflexionAgent(
             reflection_model="test-model", actor=base_agent
         )
@@ -26,25 +31,38 @@ class TestReflexionAgentInitialization:
         assert reflexion_agent.model == base_agent.model
         assert reflexion_agent.max_iterations == base_agent.max_iterations
 
-    def test_init_with_tool_calling_agent(self):
+    def test_init_with_tool_calling_agent(self, mock_promptstore_module):
         """Test initializing ReflexionAgent with ToolCallingAgent."""
-        base_agent = ToolCallingAgent(model="test-model", max_iterations=10)
+        base_agent = ToolCallingAgent(
+            model="test-model",
+            max_iterations=10,
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
         reflexion_agent = ReflexionAgent(
             reflection_model="test-model", actor=base_agent
         )
 
         assert reflexion_agent.actor == base_agent
 
-    def test_init_custom_reflection_model(self):
+    def test_init_custom_reflection_model(self, mock_promptstore_module):
         """Test initializing with custom reflection model."""
-        base_agent = ReActAgent(model="gpt-4")
+        base_agent = ReActAgent(
+            model="gpt-4",
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
         reflexion_agent = ReflexionAgent(actor=base_agent, reflection_model="gpt-4o")
 
         assert reflexion_agent.reflection_module.model == "gpt-4o"
 
-    def test_memory_initialization(self):
+    def test_memory_initialization(self, mock_promptstore_module):
         """Test that memory is properly initialized."""
-        base_agent = ReActAgent(model="test-model")
+        base_agent = ReActAgent(
+            model="test-model",
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
         reflexion_agent = ReflexionAgent(
             reflection_model="test-model", actor=base_agent
         )
@@ -56,12 +74,16 @@ class TestReflexionAgentInitialization:
 class TestReflexionAgentRun:
     """Test cases for ReflexionAgent.run method."""
 
-    def test_success_on_first_attempt(self, mock_interface, monkeypatch):
+    def test_success_on_first_attempt(
+        self, mock_interface, monkeypatch, mock_promptstore_module
+    ):
         """Test that reflexion agent succeeds on first attempt."""
         # Create base agent
         base_agent = ReActAgent(
             model="test-model",
             max_iterations=3,
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
         )
         reflexion_agent = ReflexionAgent(
             reflection_model="test-model", actor=base_agent
@@ -99,9 +121,16 @@ class TestReflexionAgentRun:
         assert call_count["reflection"] == 0  # No reflection needed
         assert len(reflexion_agent.memory.reflections) == 0
 
-    def test_retry_with_reflection(self, mock_interface, monkeypatch):
+    def test_retry_with_reflection(
+        self, mock_interface, monkeypatch, mock_promptstore_module
+    ):
         """Test that agent retries with reflection after failure."""
-        base_agent = ReActAgent(model="test-model", max_iterations=3)
+        base_agent = ReActAgent(
+            model="test-model",
+            max_iterations=3,
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
         reflexion_agent = ReflexionAgent(
             reflection_model="test-model", actor=base_agent
         )
@@ -178,9 +207,16 @@ class TestReflexionAgentRun:
         assert call_count["reflection"] == 1
         assert len(reflexion_agent.memory.reflections) == 1
 
-    def test_exhausts_all_attempts(self, mock_interface, monkeypatch):
+    def test_exhausts_all_attempts(
+        self, mock_interface, monkeypatch, mock_promptstore_module
+    ):
         """Test that agent can be called multiple times and generates reflections."""
-        base_agent = ReActAgent(model="test-model", max_iterations=3)
+        base_agent = ReActAgent(
+            model="test-model",
+            max_iterations=3,
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
         reflexion_agent = ReflexionAgent(
             reflection_model="test-model", actor=base_agent
         )
@@ -236,9 +272,16 @@ class TestReflexionAgentRun:
         )  # Generate reflection after first 2 failures
         assert len(reflexion_agent.memory.reflections) == 2
 
-    def test_memory_injection_into_history(self, mock_interface, monkeypatch):
+    def test_memory_injection_into_history(
+        self, mock_interface, monkeypatch, mock_promptstore_module
+    ):
         """Test that reflections are injected into actor's history."""
-        base_agent = ReActAgent(model="test-model", max_iterations=3)
+        base_agent = ReActAgent(
+            model="test-model",
+            max_iterations=3,
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
         reflexion_agent = ReflexionAgent(
             reflection_model="test-model", actor=base_agent
         )
@@ -305,9 +348,16 @@ class TestReflexionAgentRun:
         assert captured_history[1][0]["role"] == "system"
         assert "LESSONS FROM PREVIOUS ATTEMPTS" in captured_history[1][0]["content"]
 
-    def test_memory_clears_for_new_task(self, mock_interface, monkeypatch):
+    def test_memory_clears_for_new_task(
+        self, mock_interface, monkeypatch, mock_promptstore_module
+    ):
         """Test that memory accumulates reflections across tasks."""
-        base_agent = ReActAgent(model="test-model", max_iterations=3)
+        base_agent = ReActAgent(
+            model="test-model",
+            max_iterations=3,
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
         reflexion_agent = ReflexionAgent(
             reflection_model="test-model", actor=base_agent
         )
@@ -354,9 +404,16 @@ class TestReflexionAgentRun:
         # Memory continues to accumulate (FIFO with max_size=3)
         assert len(reflexion_agent.memory.reflections) >= 1
 
-    def test_with_tool_execution(self, mock_interface, monkeypatch):
+    def test_with_tool_execution(
+        self, mock_interface, monkeypatch, mock_promptstore_module
+    ):
         """Test reflexion agent with tool execution across trials."""
-        base_agent = ReActAgent(model="test-model", max_iterations=5)
+        base_agent = ReActAgent(
+            model="test-model",
+            max_iterations=5,
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
         reflexion_agent = ReflexionAgent(
             reflection_model="test-model", actor=base_agent
         )
@@ -461,9 +518,16 @@ Action Input: <action_input>{}</action_input>"""
 class TestReflexionAgentEdgeCases:
     """Test edge cases for ReflexionAgent."""
 
-    def test_exception_handling(self, mock_interface, monkeypatch):
+    def test_exception_handling(
+        self, mock_interface, monkeypatch, mock_promptstore_module
+    ):
         """Test that exceptions from the actor are propagated."""
-        base_agent = ReActAgent(model="test-model", max_iterations=3)
+        base_agent = ReActAgent(
+            model="test-model",
+            max_iterations=3,
+            system_prompt="You are a helpful assistant.",
+            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        )
         reflexion_agent = ReflexionAgent(
             reflection_model="test-model", actor=base_agent
         )

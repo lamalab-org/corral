@@ -128,6 +128,34 @@ def mock_prompt_store():
     return MockPromptStore()
 
 
+@pytest.fixture(autouse=True)
+def mock_promptstore_module(monkeypatch):
+    """Automatically mock the promptstore module for all tests."""
+
+    class MockPromptStoreClass:
+        """Mock PromptStore class that mimics promptstore.PromptStore."""
+
+        def __init__(self, *args, **kwargs):
+            # Ignore initialization arguments
+            pass
+
+        def get(self, prompt_name: str):
+            """Return mock prompts based on prompt_name."""
+            if "system_prompt" in prompt_name:
+                return MockPrompt("You are a helpful assistant.")
+            elif "extractor_prompt" in prompt_name:
+                return MockPrompt("Extract the answer from: {{answer}}")
+            elif "user_prompt" in prompt_name:
+                return MockPrompt("Task: {{task_guide}}")
+            else:
+                return MockPrompt("Test prompt: {{task_guide}}")
+
+    # Mock the PromptStore class in the promptstore module
+    monkeypatch.setattr("promptstore.PromptStore", MockPromptStoreClass)
+    # Also mock it where it's imported in the agents module
+    monkeypatch.setattr("corral.agents.base_agent.PromptStore", MockPromptStoreClass)
+
+
 @pytest.fixture()
 def mock_interface():
     """Mock BenchmarkInterface for testing."""
