@@ -15,7 +15,7 @@ from loguru import logger
 
 from corral.agents.base_agent import Action
 from corral.agents.hooks.adapter import HookAdapterRegistry
-from corral.agents.hooks.core import HookCallback, HookContext
+from corral.agents.hooks.core import CriticalHookError, HookCallback, HookContext
 from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
 
 
@@ -29,7 +29,11 @@ def _default_intervention(context: HookContext, intervention: str, execute_tools
 
 
 def _react_intervention(context: HookContext, intervention: str, execute_tools: bool):
-    """ReAct-specific intervention with optional tool execution."""
+    """ReAct-specific intervention with optional tool execution.
+
+    Raises:
+        CriticalHookError: If execute_tools=True and tool execution fails
+    """
     # Strip action tags if not executing
     if not execute_tools:
         intervention = re.sub(
@@ -48,32 +52,67 @@ def _react_intervention(context: HookContext, intervention: str, execute_tools: 
     # Execute tools if requested
     if execute_tools:
         actions = _parse_react_actions(intervention)
+
+        # Check if actions were intended but couldn't be parsed
+        if not actions and "<action>" in intervention:
+            raise CriticalHookError(
+                "Failed to parse intervention actions despite execute_tools=True. "
+                "Intervention contains <action> tags but parsing failed."
+            )
+
         for action in actions:
             try:
                 tool_response = context.interface.execute_tool(
                     context.task_id, action.tool_name, action.arguments
                 )
-                observation = (
-                    f"Observation: {tool_response.result}"
-                    if tool_response.success
-                    else f"Error: {tool_response.error}"
-                )
+
+                # Check if tool execution succeeded
+                if not tool_response.success:
+                    raise CriticalHookError(
+                        f"Tool '{action.tool_name}' execution failed during intervention: "
+                        f"{tool_response.error}"
+                    )
+
+                observation = f"Observation: {tool_response.result}"
                 context.messages.append(
                     LiteLLMMessage(
                         role="user", content=observation, name=action.tool_name
                     )
                 )
+            except CriticalHookError:
+                # Re-raise critical errors
+                raise
             except Exception as e:
-                logger.error(f"Error executing tool {action.tool_name}: {e}")
+                # Unexpected errors during tool execution are critical
+                raise CriticalHookError(
+                    f"Unexpected error executing intervention tool '{action.tool_name}': {e}"
+                ) from e
 
 
 def _toolcalling_intervention(
     context: HookContext, intervention: str, execute_tools: bool
 ):
-    """ToolCalling-specific intervention."""
+    """ToolCalling-specific intervention with thought injection.
+
+    ToolCallingAgent uses OpenAI function calling format, so we inject the
+    intervention thought as an assistant message. Tool execution during
+    intervention is not supported since ToolCallingAgent expects tool calls
+    in the structured API format (tool_calls field), not as text.
+
+    Args:
+        context: Hook context with agent state
+        intervention: The thought/content to inject
+        execute_tools: If True, warns that tool execution is not supported
+    """
+    # Add the intervention thought as assistant message
     context.messages.append(LiteLLMMessage(role="assistant", content=intervention))
+
     if execute_tools:
-        logger.warning("execute_tools not supported for ToolCallingAgent")
+        logger.warning(
+            "execute_tools not supported for ToolCallingAgent. "
+            "ToolCallingAgent uses structured function calling API format, not text-based tool calls. "
+            "Only the intervention thought has been injected."
+        )
 
 
 def _parse_react_actions(text: str) -> list[Action]:

@@ -18,6 +18,21 @@ from typing import Any, Protocol
 from loguru import logger
 
 
+class CriticalHookError(Exception):
+    """Raised by hooks when an error should halt agent execution.
+
+    Hooks should raise this exception for critical failures that should
+    stop the agent execution entirely. Non-critical errors should be
+    handled within the hook or allowed to be caught and logged by the
+    hook execution system.
+
+    Example:
+        >>> def my_hook(context: HookContext) -> None:
+        ...     if not validate_critical_condition():
+        ...         raise CriticalHookError("Critical validation failed")
+    """
+
+
 class HookPoint(str, Enum):
     """Available hook points in agent lifecycle.
 
@@ -152,8 +167,8 @@ class AgentHooks:
         Hooks are executed in priority order. If a hook sets
         context.should_continue = False, execution stops early.
 
-        Errors in individual hooks are logged but don't stop execution
-        of subsequent hooks.
+        Non-critical errors in hooks are logged but don't stop execution.
+        Critical errors (CriticalHookError) are re-raised to halt agent execution.
 
         Args:
             hook_point: The hook point to execute
@@ -161,6 +176,9 @@ class AgentHooks:
 
         Returns:
             The context (potentially modified)
+
+        Raises:
+            CriticalHookError: If a hook raises a critical error that should halt execution
         """
         point = hook_point.value if isinstance(hook_point, HookPoint) else hook_point
 
@@ -175,6 +193,9 @@ class AgentHooks:
                 if not context.should_continue:
                     break
 
+            except CriticalHookError:
+                logger.critical(f"Critical error in hook at {point}, halting execution")
+                raise  # Re-raise to stop agent execution
             except Exception as e:
                 logger.error(f"Error executing hook at {point}: {e}")
 
