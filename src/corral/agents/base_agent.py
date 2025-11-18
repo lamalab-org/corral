@@ -249,7 +249,7 @@ class BaseAgent(ABC):
                 task_prompt,
                 examples,
                 enable_surrender,
-            )
+            
 
             # Check if agent decided to surrender
             if final_answer == "GIVE UP":
