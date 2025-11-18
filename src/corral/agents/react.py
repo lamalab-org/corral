@@ -187,10 +187,7 @@ class ReActAgent(BaseAgent):
             # Execute tools if actions exist
             if actions:
                 for action in actions:
-                    action_content = f"{thought_prefix}Action: {
-                        action.tool_name}\nAction Input: {
-                        json.dumps(
-                            action.arguments)}"
+                    action_content = f"{thought_prefix}Action: {action.tool_name}\nAction Input: {json.dumps(action.arguments)}"
                     self.messages.append(
                         LiteLLMMessage(role="assistant", content=action_content)
                     )

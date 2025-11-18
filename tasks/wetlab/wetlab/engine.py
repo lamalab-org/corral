@@ -25,6 +25,7 @@ def _speciate(element_str):
     pseudo_elements = set([
         'C(+2)', 'C(+4)', 'N(-3)', 'N(+5)', 'S(-2)', 'S(0)', 'S(+6)',
         'Fe(+2)', 'Fe(+3)', 'Hg(+2)', 'Hg(+1)',
+        'Ox', 'dmg',
     ])
     real = [element for element in elements if (element not in pseudo_elements) and (element not in ['C', 'N', 'S', 'Fe', 'Hg'])]
     pseudo = [element for element in elements if element in pseudo_elements]

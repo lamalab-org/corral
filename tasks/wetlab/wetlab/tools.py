@@ -383,7 +383,7 @@ def lookup_flame_colors() -> str:
 
 
 @tool(hidden_args=['compositions'])
-def checkout_color(compositions, label) -> str:
+def checkout_color(compositions, label: str) -> str:
     """[BRIEF] Observe the color of a solution or precipitate. [/BRIEF]
     
     [DETAILED] Observe the color of a solution or precipitate from the Inventory. This can be the color of a sample solution, a reagent or a precipitate from previous tests. [/DETAILED]
@@ -760,7 +760,7 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
 
 
 @tool(hidden_args=['compositions'])
-def add_a_solution(compositions, test_label: str, sol1_label: str, sol2_label: str,  sol2_vol: int) -> str:
+def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label: str,  sol2_vol: int) -> str:
     """[BRIEF] Adds a specific volume of `sol2_label` to all of `sol1_label` and returns observations about the changes of solution color and precipitation amount and color. [/BRIEF]
     
     [DETAILED] Add the given volumes (in mL) of `sol2_label` (which must not contain any precipitates) to the remaining volume of `sol1_label` (which can have precipitates) and reports observations about color change or precipitate formation/dissolution. It also adds the resulting solution to the Inventory and labels it `test_label`. [/DETAILED]
@@ -1018,7 +1018,7 @@ def filter_solution(compositions, label: str) -> str:
 
 
 @tool(hidden_args=['compositions'])
-def add_precipitate_to_solution(compositions, test_label: str, prec_label: str, sol_label: str,  sol_vol: int) -> str:
+def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: str, sol_label: str,  sol_vol: int) -> str:
     """[BRIEF] Adds a precipitate to a specific volume of a solution and returns observations about the changes in the amount/color of the added precipitate or the solution color. [/BRIEF]
     
     [DETAILED] Draws `sol_vol` mL of `sol_label` (which must not contain any precipitates), adds to it all of the precipitate `prec_label` and reports observations about any changes in the color or the amount of the added precipitate and any color changes in the solution. It also adds the resulting solution to the Inventory and labels it `test_label`. [/DETAILED]
