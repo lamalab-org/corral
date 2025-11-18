@@ -1,5 +1,6 @@
 import importlib.resources
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any
 
 from litellm.exceptions import ContextWindowExceededError
@@ -16,6 +17,14 @@ from corral.agents.utils import (
     save_agent_messages,
 )
 from corral.router.routes import CorralRouter
+
+
+@dataclass
+class Action:
+    """Represents an action to be taken"""
+
+    tool_name: str
+    arguments: dict[str, Any]
 
 
 class BaseAgent(ABC):

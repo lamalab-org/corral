@@ -6,7 +6,7 @@ from typing import Any
 from loguru import logger
 from promptstore import PromptStore
 
-from corral.agents.base_agent import BaseAgent
+from corral.agents.base_agent import Action, BaseAgent
 from corral.agents.hooks import HookPoint
 from corral.agents.prompt_utils import create_prompt
 from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
@@ -18,14 +18,6 @@ class Thought:
     """Represents agent's reasoning step"""
 
     content: str
-
-
-@dataclass
-class Action:
-    """Represents an action to be taken"""
-
-    tool_name: str
-    arguments: dict[str, Any]
 
 
 class ReActAgent(BaseAgent):
