@@ -1,9 +1,9 @@
-from typing import Optional, Union
+from typing import Union
 
 import pytest
 
-from corral.base import Tool
-from corral.utils import format_type_annotation, tool
+from corral.backend.tool import Tool, tool
+from corral.backend.tool_utils import format_type_annotation
 
 
 # Sample functions for testing
@@ -214,7 +214,7 @@ def test_format_type_annotation():
     assert format_type_annotation(union_type_old) == "str | int"
 
     # Optional type (which is Union[T, None])
-    optional_type = Optional[str]  # noqa: UP007
+    optional_type = str | None
     assert format_type_annotation(optional_type) == "str | None"
 
     # Nested unions and complex types
@@ -284,3 +284,227 @@ def test_integration_with_actual_docstring():
         slab_cif="sample_slab", adsorbate_cif="sample_adsorbate", height=2.5
     )
     assert result == "Test result"
+
+
+# Tests for MCP integration methods
+def test_tool_for_mcp_basic():
+    """Test basic conversion of tool to MCP format"""
+
+    @tool
+    def sample_tool(param1: str, param2: int = 5) -> str:
+        """Sample tool description
+
+        Args:
+            param1: First parameter
+            param2: Second parameter (default: 5)
+
+        Returns:
+            Result string
+        """
+        return f"{param1}-{param2}"
+
+    mcp_def = sample_tool.to_mcp()
+
+    # Check structure
+    assert "name" in mcp_def
+    assert "description" in mcp_def
+    assert "inputSchema" in mcp_def
+
+    # Check values
+    assert mcp_def["name"] == "sample_tool"
+    assert "Sample tool description" in mcp_def["description"]
+
+    # Check schema
+    schema = mcp_def["inputSchema"]
+    assert schema["type"] == "object"
+    assert "properties" in schema
+    assert "required" in schema
+
+    # Check properties
+    assert "param1" in schema["properties"]
+    assert "param2" in schema["properties"]
+
+    # Check param1 (required)
+    assert schema["properties"]["param1"]["type"] == "string"
+    assert "param1" in schema["required"]
+
+    # Check param2 (optional with default) - optional params get ['type', 'null']
+    param2_type = schema["properties"]["param2"]["type"]
+    if isinstance(param2_type, list):
+        assert "integer" in param2_type
+        assert "null" in param2_type
+    else:
+        assert param2_type == "integer"
+    assert schema["properties"]["param2"]["default"] == 5
+
+
+def test_tool_for_mcp_with_choices():
+    """Test MCP conversion with parameter choices"""
+
+    @tool
+    def tool_with_choices(mode: str) -> str:
+        """Tool with restricted parameter values
+
+        Args:
+            mode: Operation mode (choices: ["fast", "accurate", "balanced"])
+
+        Returns:
+            Result
+        """
+        return f"Mode: {mode}"
+
+    mcp_def = tool_with_choices.to_mcp()
+
+    # Check that choices are converted to enum
+    assert "enum" in mcp_def["inputSchema"]["properties"]["mode"]
+    assert mcp_def["inputSchema"]["properties"]["mode"]["enum"] == [
+        "fast",
+        "accurate",
+        "balanced",
+    ]
+
+
+def test_tool_for_mcp_with_verbosity():
+    """Test MCP conversion with different verbosity levels"""
+    from corral.router.verbosity import ToolVerbosity
+
+    @tool
+    def verbose_tool(param: str) -> str:
+        """Brief description of the tool
+
+        Long detailed description that should be filtered
+        based on verbosity level.
+
+        Args:
+            param: Parameter description
+
+        Returns:
+            Result
+        """
+        return param
+
+    # Test COMPREHENSIVE (default)
+    comprehensive = verbose_tool.to_mcp()
+    assert "Brief description" in comprehensive["description"]
+
+    # Test BRIEF
+    brief = verbose_tool.to_mcp(verbosity=ToolVerbosity.BRIEF)
+    assert "description" in brief
+
+    # Test WORKFLOW
+    workflow = verbose_tool.to_mcp(verbosity=ToolVerbosity.WORKFLOW)
+    assert "description" in workflow
+
+
+def test_tool_for_mcp_complex_types():
+    """Test MCP conversion with complex parameter types"""
+
+    @tool
+    def complex_tool(
+        name: str, count: int, value: float, active: bool, tags: str = "[]"
+    ) -> str:
+        """Tool with various parameter types
+
+        Args:
+            name: Name as string
+            count: Count as integer
+            value: Value as float
+            active: Active flag as boolean
+            tags: JSON array of tags (default: [])
+
+        Returns:
+            Result
+        """
+        return "result"
+
+    mcp_def = complex_tool.to_mcp()
+    props = mcp_def["inputSchema"]["properties"]
+
+    # Check type mappings (required params have simple types)
+    assert props["name"]["type"] == "string"
+    assert props["count"]["type"] == "integer"
+    assert props["value"]["type"] == "number"
+    assert props["active"]["type"] == "boolean"
+
+    # Optional param with default gets ['type', 'null']
+    tags_type = props["tags"]["type"]
+    if isinstance(tags_type, list):
+        assert "string" in tags_type
+    else:
+        assert tags_type == "string"
+
+    # Check required fields
+    required = mcp_def["inputSchema"]["required"]
+    assert "name" in required
+    assert "count" in required
+    assert "value" in required
+    assert "active" in required
+    assert "tags" not in required  # Has default
+
+
+def test_tool_from_mcp_raises_not_implemented():
+    """Test that from_mcp raises NotImplementedError"""
+
+    mcp_definition = {
+        "name": "test_tool",
+        "description": "Test tool",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"param": {"type": "string"}},
+            "required": ["param"],
+        },
+    }
+
+    with pytest.raises(NotImplementedError) as exc_info:
+        Tool.from_mcp(mcp_definition)
+
+    assert "is not currently supported." in str(exc_info.value)
+
+
+def test_tool_for_mcp_preserves_descriptions():
+    """Test that parameter descriptions are preserved in MCP format"""
+
+    @tool
+    def documented_tool(param1: str, param2: int) -> str:
+        """Tool with detailed documentation
+
+        Args:
+            param1: This is a detailed description of param1
+            param2: This is a detailed description of param2
+
+        Returns:
+            Result string
+        """
+        return "result"
+
+    mcp_def = documented_tool.to_mcp()
+    props = mcp_def["inputSchema"]["properties"]
+
+    assert "detailed description of param1" in props["param1"]["description"]
+    assert "detailed description of param2" in props["param2"]["description"]
+
+
+def test_tool_for_mcp_with_hidden_args():
+    """Test that hidden args are not exposed in MCP format"""
+
+    @tool(hidden_args=["api_key"])
+    def api_tool(endpoint: str, api_key: str = "secret") -> str:
+        """Call an API endpoint
+
+        Args:
+            endpoint: The API endpoint to call
+
+        Returns:
+            API response
+        """
+        return f"Calling {endpoint} with {api_key}"
+
+    mcp_def = api_tool.to_mcp()
+    props = mcp_def["inputSchema"]["properties"]
+
+    # Only endpoint should be in the schema
+    assert "endpoint" in props
+    assert "api_key" not in props
+
+    # endpoint should be required
+    assert "endpoint" in mcp_def["inputSchema"]["required"]

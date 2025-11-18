@@ -4,7 +4,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from corral.base import Environment, Tool, ToolArgument, ToolCall, ToolCallStatus
+from corral.backend.env import Environment
+from corral.backend.schema import ToolArgument, ToolCall, ToolCallStatus
+from corral.backend.tool import Tool
 
 
 class TestEnv(Environment):

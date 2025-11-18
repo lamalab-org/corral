@@ -26,7 +26,7 @@ from ml.tools import (
 )
 from ml.utils import extract_path_from_answer, smart_resolve_path
 
-from corral.utils import execute_python_code
+from corral.utils.code_tools import execute_python_code
 
 
 class TestUtilityFunctions:

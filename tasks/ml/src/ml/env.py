@@ -15,10 +15,12 @@ from ml.score import (
     score_polymorph_dataset,
 )
 from ml.tools import create_ml_tools
-from ml.utils import smart_resolve_path
 
-from corral.base import Environment, Tool
-from corral.io import (
+from corral.backend.env import Environment
+from corral.backend.server import run_server
+from corral.backend.task import TaskDefinition, TaskGroup
+from corral.backend.tool import Tool
+from corral.utils.io_tools import (
     CatFilesTool,
     CopyFileTool,
     FileInfoTool,
@@ -27,8 +29,7 @@ from corral.io import (
     ReadFileTool,
     WriteFileTool,
 )
-from corral.server import run_server
-from corral.task import TaskDefinition, TaskGroup
+from corral.utils.tool_helpers import smart_resolve_path
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:
@@ -338,7 +339,7 @@ if __name__ == "__main__":
 
     # Get server settings from environment if provided
     host = os.environ.get("CORRAL_HOST", "0.0.0.0")
-    port = int(os.environ.get("CORRAL_PORT", "8000"))
+    port = int(os.environ.get("CORRAL_PORT", "8005"))
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)
     # Create environments
