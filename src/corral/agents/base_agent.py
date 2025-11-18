@@ -243,13 +243,8 @@ class BaseAgent(ABC):
 
         try:
             final_answer = self.run(
-                interface,
-                task_id,
-                history,
-                task_prompt,
-                examples,
-                enable_surrender,
-            
+                interface, task_id, history, task_prompt, examples, enable_surrender
+            )
 
             # Check if agent decided to surrender
             if final_answer == "GIVE UP":
