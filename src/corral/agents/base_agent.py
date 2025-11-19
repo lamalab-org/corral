@@ -80,7 +80,7 @@ class BaseAgent(ABC):
         self.api_endpoint = api_endpoint
         self.temperature = temperature
         self.messages: list = []
-        self.token_usage: list = {}  # Track token usage per LLM call
+        self.token_usage: dict = {}  # Track token usage per LLM call
         self.hooks = hooks or AgentHooks()
         self._current_iteration = 0  # Track current iteration for hooks
 
