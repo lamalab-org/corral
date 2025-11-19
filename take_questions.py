@@ -113,11 +113,12 @@ def take_questions(env) -> list[Path]:
 
 def copy_questions():
     envs = [
-        "catalyst",
-        "md",
-        "ml",
-        "resistor",
-        "retrosynthesis",
+        # "catalyst",
+        # "md",
+        # "ml",
+        # "resistor",
+        # "retrosynthesis",
+        "afm"
     ]
     all_accepted_tasks: list[Path] = []
     for env in envs:
