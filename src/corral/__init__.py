@@ -3,7 +3,6 @@ from corral.report.metrics import (
     Metric,
     MetricMetadata,
     TaskMetric,
-    discover_plugin_metrics,
     get_registry,
     register_default_metrics,
 )
@@ -16,7 +15,6 @@ __all__ = [
     "Metric",
     "MetricMetadata",
     "TaskMetric",
-    "discover_plugin_metrics",
     # Metrics API
     "get_registry",
     "register_default_metrics",

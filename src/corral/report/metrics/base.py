@@ -62,14 +62,6 @@ class MetricContext(Protocol):
 class MetricMetadata(BaseModel):
     """Metadata about a metric.
 
-    Uses Pydantic for robust validation and configuration management.
-
-    Benefits:
-    - Automatic type validation and coercion
-    - Built-in error handling with detailed messages
-    - JSON schema generation for config files
-    - Performance optimized (Pydantic v2 with Rust core)
-
     Attributes:
         name: Unique metric identifier (must be valid Python identifier)
         display_name: Human-readable name for reports
@@ -100,7 +92,7 @@ class MetricMetadata(BaseModel):
 
 
 class Metric(ABC):
-    """Base class for all metrics - PORTABLE.
+    """Base class for all metrics.
 
     Works with any object that satisfies the MetricContext protocol.
 
@@ -155,7 +147,7 @@ class Metric(ABC):
 
 
 class TaskMetric(Metric):
-    """Base class for metrics calculated per task - PORTABLE.
+    """Base class for metrics calculated per task.
 
     Automatically iterates over all tasks in the context and calculates
     a metric for each one. Returns a dictionary mapping task_id to value.

@@ -8,7 +8,6 @@ from corral.report.metrics import (
     AverageScoreMetric,
     Metric,
     MetricMetadata,
-    discover_plugin_metrics,
     get_registry,
     register_default_metrics,
 )
@@ -300,9 +299,3 @@ def test_custom_metric_registration():
 
     # Cleanup
     registry.unregister("custom_test_metric")
-
-
-def test_plugin_discovery_handles_missing_entry_points():
-    """Test that plugin discovery doesn't crash if no plugins are found."""
-    # Should run without errors even if no plugins exist
-    discover_plugin_metrics()

@@ -128,29 +128,6 @@ class MetricRegistry:
         Returns:
             Dictionary mapping metric names to their calculated values.
             Metrics that failed calculation will have None as their value.
-
-        Example:
-            >>> # Calculate all metrics sequentially
-            >>> results = registry.calculate_all(benchmark_result)
-            >>>
-            >>> # Calculate only specific metrics
-            >>> results = registry.calculate_all(
-            ...     benchmark_result,
-            ...     enabled_only=["average_score", "pass_at_1"]
-            ... )
-            >>>
-            >>> # Calculate all metrics in parallel
-            >>> results = registry.calculate_all(
-            ...     benchmark_result,
-            ...     parallel=True
-            ... )
-            >>>
-            >>> # Calculate with custom thread pool size
-            >>> results = registry.calculate_all(
-            ...     benchmark_result,
-            ...     parallel=True,
-            ...     max_workers=8
-            ... )
         """
         metrics_to_calc = (
             [self._metrics[name] for name in enabled_only if name in self._metrics]

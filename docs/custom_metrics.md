@@ -4,13 +4,30 @@ This guide explains how to create, register, and manage custom metrics in Corral
 
 ## Table of Contents
 
-- [Introduction](#introduction)
-- [Creating a Custom Metric](#creating-a-custom-metric)
-- [Registering Metrics](#registering-metrics)
-- [Unregistering Metrics](#unregistering-metrics)
-- [Listing Available Metrics](#listing-available-metrics)
-- [Enabling/Disabling Metrics](#enablingdisabling-metrics)
-- [Creating a Metrics Plugin](#creating-a-metrics-plugin)
+- [Custom Metrics Guide](#custom-metrics-guide)
+  - [Table of Contents](#table-of-contents)
+  - [Introduction](#introduction)
+    - [Default Metrics](#default-metrics)
+    - [The MetricContext Protocol](#the-metriccontext-protocol)
+    - [Parallel Metric Calculation](#parallel-metric-calculation)
+  - [Creating a Custom Metric](#creating-a-custom-metric)
+    - [Example: Creating an Overall Metric](#example-creating-an-overall-metric)
+    - [Example: Creating a Task Metric](#example-creating-a-task-metric)
+  - [Registering Metrics](#registering-metrics)
+    - [Programmatic Registration](#programmatic-registration)
+    - [During Benchmark Initialization](#during-benchmark-initialization)
+  - [Unregistering Metrics](#unregistering-metrics)
+  - [Listing Available Metrics](#listing-available-metrics)
+    - [List All Metrics](#list-all-metrics)
+    - [Filter by Type](#filter-by-type)
+    - [Check if a Metric Exists](#check-if-a-metric-exists)
+  - [Enabling/Disabling Metrics](#enablingdisabling-metrics)
+    - [Disable Specific Metrics](#disable-specific-metrics)
+    - [Keep Only Specific Metrics](#keep-only-specific-metrics)
+    - [Clear All and Register Only Custom Metrics](#clear-all-and-register-only-custom-metrics)
+  - [Advanced Examples](#advanced-examples)
+    - [Metric with Parameters](#metric-with-parameters)
+    - [Metric with Dependencies](#metric-with-dependencies)
 
 ## Introduction
 
@@ -18,8 +35,73 @@ Corral provides a flexible metrics system that allows you to:
 
 - Define custom metrics without modifying core code
 - Register/unregister metrics dynamically
-- Distribute metrics as installable packages
 - Enable/disable specific metrics as needed
+
+### Default Metrics
+
+Corral automatically registers the following metrics when the module is imported:
+
+**Overall Metrics:**
+
+- `average_score`: Mean score across all task trials
+- `overall_success_rate`: Percentage of successful trials across all tasks
+- `total_tasks`: Number of unique tasks in the benchmark
+- `total_surrendered_trials`: Number of trials that were surrendered
+- `overall_total_duration`: Total duration across all trials (seconds)
+- `overall_average_duration`: Average trial duration across all tasks (seconds)
+- `total_tool_execution_duration`: Total time spent executing tools across all trials (seconds)
+- `total_token_usage`: Total token usage across all trials (dict with token types)
+- `total_tool_calls`: Total successful and failed tool calls (dict)
+- `pass_at_k`: Probability that at least 1 of k trials succeeds (for each k value)
+- `pass_hat_k`: Probability that all k trials succeed (for each k value)
+
+**Task-Level Metrics:**
+
+- `task_success_rate`: Success rate for each individual task
+- `task_average_score`: Average score for each individual task
+- `task_average_duration`: Average trial duration for each task (seconds)
+- `task_total_token_usage`: Total token usage for each task (dict)
+- `task_pass_at_k`: Pass@k for each individual task (for each k value)
+- `task_pass_hat_k`: Pass^k for each individual task (for each k value)
+
+The `k` values for pass@k and pass^k metrics default to `[1]` but can be configured when creating a `BenchmarkResult` or by calling `register_default_metrics(k_values=[1, 3, 5])`.
+
+### The MetricContext Protocol
+
+Metrics work with any object that satisfies the `MetricContext` protocol. This makes the metrics system portable and testable without tight coupling to `BenchmarkResult`.
+
+A `MetricContext` must provide:
+
+- `all_task_ids` property: Returns a `set[str]` of all task identifiers
+- `get_task_trials(task_id: str)` method: Returns trial results for a specific task or `None` if not found
+
+This protocol-based design allows you to:
+
+- Use metrics with different benchmarking systems
+- Create mock objects for testing
+- Integrate with custom test harnesses
+
+### Parallel Metric Calculation
+
+The registry supports parallel calculation of metrics for improved performance:
+
+```python
+from corral.report.metrics import get_registry
+
+registry = get_registry()
+
+# Calculate all metrics in parallel
+results = registry.calculate_all(
+    benchmark_result, parallel=True, max_workers=8  # Optional: control thread pool size
+)
+
+# Calculate only specific metrics in parallel
+results = registry.calculate_all(
+    benchmark_result, enabled_only=["average_score", "pass_at_1"], parallel=True
+)
+```
+
+Parallel calculation is beneficial when you have many independent metrics to compute.
 
 ## Creating a Custom Metric
 
@@ -31,7 +113,7 @@ There are two types of metrics you can create:
 ### Example: Creating an Overall Metric
 
 ```python
-from corral import Metric, MetricMetadata
+from corral.report.metrics import Metric, MetricMetadata
 
 
 class MyCustomMetric(Metric):
@@ -43,28 +125,30 @@ class MyCustomMetric(Metric):
             name="total_trials",
             display_name="Total Trials",
             description="Total number of trials across all tasks",
-            category="overall",
         )
 
-    def calculate(self, benchmark_result):
+    def calculate(self, context):
         """Calculate the metric value.
 
         Args:
-            benchmark_result: BenchmarkResult instance containing all results
+            context: Object satisfying MetricContext protocol (e.g., BenchmarkResult)
 
         Returns:
             The calculated metric value (int, float, dict, etc.)
         """
         total = 0
-        for task_results in benchmark_result.results.values():
-            total += len(task_results)
+        for task_id in context.all_task_ids:
+            task_trials = context.get_task_trials(task_id)
+            if task_trials:
+                total += len(task_trials.trials)
         return total
 ```
 
 ### Example: Creating a Task Metric
 
 ```python
-from corral import TaskMetric, MetricMetadata
+from corral.report.metrics import TaskMetric, MetricMetadata
+from corral.types import TaskNotFoundError, NoResultsError
 
 
 class TaskMaxScoreMetric(TaskMetric):
@@ -76,23 +160,27 @@ class TaskMaxScoreMetric(TaskMetric):
             name="task_max_score",
             display_name="Task Maximum Score",
             description="Maximum score achieved across all trials for a task",
-            category="task",
         )
 
-    def calculate(self, task_name, task_results):
+    def calculate_for_task(self, context, task_id):
         """Calculate the metric value for a specific task.
 
         Args:
-            task_name: Name of the task
-            task_results: List of BenchmarkTaskResult for this task
+            context: Object satisfying MetricContext protocol
+            task_id: ID of the task to calculate metric for
 
         Returns:
             The calculated metric value
         """
-        if not task_results:
-            return 0.0
+        task_trials = context.get_task_trials(task_id)
+        if not task_trials:
+            raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
 
-        return max(result.score for result in task_results)
+        trials = task_trials.trials
+        if not trials:
+            raise NoResultsError(f"No trials available for task ID '{task_id}'.")
+
+        return max(trial.score for trial in trials)
 ```
 
 ## Registering Metrics
@@ -102,7 +190,7 @@ class TaskMaxScoreMetric(TaskMetric):
 You can register custom metrics at runtime:
 
 ```python
-from corral import get_registry
+from corral.report.metrics import get_registry
 
 # Create your metric
 custom_metric = MyCustomMetric()
@@ -114,7 +202,8 @@ registry = get_registry()
 registry.register(custom_metric)
 
 # Verify registration
-print(f"Registered metrics: {list(registry.list_metrics().keys())}")
+registered_names = [m.metadata.name for m in registry.list_all()]
+print(f"Registered metrics: {registered_names}")
 ```
 
 ### During Benchmark Initialization
@@ -122,7 +211,8 @@ print(f"Registered metrics: {list(registry.list_metrics().keys())}")
 You can register metrics before running a benchmark:
 
 ```python
-from corral import CorralRunner, get_registry
+from corral import CorralRunner
+from corral.report.metrics import get_registry
 from my_metrics import MyCustomMetric
 
 # Register custom metric
@@ -139,7 +229,7 @@ results = runner.run()
 You can unregister metrics by name:
 
 ```python
-from corral import get_registry
+from corral.report.metrics import get_registry
 
 registry = get_registry()
 
@@ -150,59 +240,67 @@ registry.unregister("average_score")
 registry.unregister("total_trials")
 
 # Verify
-remaining_metrics = registry.list_metrics()
-print(f"Remaining metrics: {list(remaining_metrics.keys())}")
+remaining_names = [m.metadata.name for m in registry.list_all()]
+print(f"Remaining metrics: {remaining_names}")
 ```
+
+**Note:** `unregister()` raises `KeyError` if the metric is not found in the registry.
 
 ## Listing Available Metrics
 
 ### List All Metrics
 
 ```python
-from corral import get_registry
+from corral.report.metrics import get_registry
 
 registry = get_registry()
 
 # Get all metrics
-all_metrics = registry.list_metrics()
+all_metrics = registry.list_all()
 
-for name, metric in all_metrics.items():
+for metric in all_metrics:
     metadata = metric.metadata
-    print(f"{name}: {metadata.display_name}")
+    print(f"{metadata.name}: {metadata.display_name}")
     print(f"  Description: {metadata.description}")
-    print(f"  Category: {metadata.category}")
 ```
 
-### Filter by Category
+### Filter by Type
 
 ```python
-from corral import get_registry
+from corral.report.metrics import get_registry, Metric, TaskMetric
 
 registry = get_registry()
 
-# Get only overall metrics
-overall_metrics = registry.list_metrics(category="overall")
+# Get all metrics
+all_metrics = registry.list_all()
 
-# Get only task metrics
-task_metrics = registry.list_metrics(category="task")
+# Filter by type
+overall_metrics = [
+    m for m in all_metrics if isinstance(m, Metric) and not isinstance(m, TaskMetric)
+]
+task_metrics = [m for m in all_metrics if isinstance(m, TaskMetric)]
 
-print(f"Overall metrics: {list(overall_metrics.keys())}")
-print(f"Task metrics: {list(task_metrics.keys())}")
+print(f"Overall metrics: {[m.metadata.name for m in overall_metrics]}")
+print(f"Task metrics: {[m.metadata.name for m in task_metrics]}")
 ```
 
 ### Check if a Metric Exists
 
 ```python
-from corral import get_registry
+from corral.report.metrics import get_registry
 
 registry = get_registry()
 
-if "average_score" in registry.list_metrics():
+# Check if metric exists
+metric_names = [m.metadata.name for m in registry.list_all()]
+if "average_score" in metric_names:
     print("Average score metric is available")
 
-# Or use get() with default
-metric = registry.get("my_custom_metric", default=None)
-if metric is None:
+# Or use get() with error handling
+try:
+    metric = registry.get("my_custom_metric")
+    print(f"Found metric: {metric.metadata.display_name}")
+except KeyError:
     print("Custom metric not found")
 ```
 
@@ -211,7 +309,7 @@ if metric is None:
 ### Disable Specific Metrics
 
 ```python
-from corral import get_registry
+from corral.report.metrics import get_registry
 
 registry = get_registry()
 
@@ -222,22 +320,22 @@ for metric_name in metrics_to_disable:
     try:
         registry.unregister(metric_name)
         print(f"Disabled: {metric_name}")
-    except ValueError:
+    except KeyError:
         print(f"Metric not found: {metric_name}")
 ```
 
 ### Keep Only Specific Metrics
 
 ```python
-from corral import get_registry
+from corral.report.metrics import get_registry
 
 registry = get_registry()
 
 # Define metrics to keep
-metrics_to_keep = ["average_score", "success_rate", "total_tasks"]
+metrics_to_keep = ["average_score", "overall_success_rate", "total_tasks"]
 
 # Get all current metrics
-all_metrics = list(registry.list_metrics().keys())
+all_metrics = [m.metadata.name for m in registry.list_all()]
 
 # Unregister everything except what we want to keep
 for metric_name in all_metrics:
@@ -248,14 +346,14 @@ for metric_name in all_metrics:
 ### Clear All and Register Only Custom Metrics
 
 ```python
-from corral import get_registry
+from corral.report.metrics import get_registry
 from my_metrics import MetricA, MetricB, MetricC
 
 registry = get_registry()
 
 # Clear all registered metrics
-all_metrics = list(registry.list_metrics().keys())
-for metric_name in all_metrics:
+all_metric_names = [m.metadata.name for m in registry.list_all()]
+for metric_name in all_metric_names:
     registry.unregister(metric_name)
 
 # Register only your custom metrics
@@ -264,142 +362,12 @@ registry.register(MetricB())
 registry.register(MetricC())
 ```
 
-## Creating a Metrics Plugin
-
-You can distribute your custom metrics as an installable package using Python's entry points system.
-
-### Package Structure
-
-```
-my_metrics_package/
-├── pyproject.toml
-├── README.md
-├── src/
-│   └── my_metrics/
-│       ├── __init__.py
-│       └── metrics.py
-└── tests/
-    └── test_metrics.py
-```
-
-### Define Your Metrics
-
-`src/my_metrics/metrics.py`:
-
-```python
-from corral import Metric, MetricMetadata
-
-
-class CustomMetricA(Metric):
-    @property
-    def metadata(self):
-        return MetricMetadata(
-            name="custom_metric_a",
-            display_name="Custom Metric A",
-            description="My first custom metric",
-            category="overall",
-        )
-
-    def calculate(self, benchmark_result):
-        # Your calculation logic
-        return 42.0
-
-
-class CustomMetricB(Metric):
-    @property
-    def metadata(self):
-        return MetricMetadata(
-            name="custom_metric_b",
-            display_name="Custom Metric B",
-            description="My second custom metric",
-            category="overall",
-        )
-
-    def calculate(self, benchmark_result):
-        # Your calculation logic
-        return 100.0
-```
-
-`src/my_metrics/__init__.py`:
-
-```python
-from .metrics import CustomMetricA, CustomMetricB
-
-__all__ = ["CustomMetricA", "CustomMetricB"]
-```
-
-### Configure Entry Points
-
-#### Using `pyproject.toml` (Recommended)
-
-```toml
-[project]
-name = "my-metrics-package"
-version = "0.1.0"
-description = "Custom metrics for Corral"
-dependencies = [
-    "corral>=0.2.0",
-]
-
-[project.entry-points."corral.metrics"]
-custom_metric_a = "my_metrics.metrics:CustomMetricA"
-custom_metric_b = "my_metrics.metrics:CustomMetricB"
-```
-
-#### Using `setup.py` (Legacy)
-
-```python
-from setuptools import setup, find_packages
-
-setup(
-    name="my-metrics-package",
-    version="0.1.0",
-    packages=find_packages(where="src"),
-    package_dir={"": "src"},
-    install_requires=[
-        "corral>=0.2.0",
-    ],
-    entry_points={
-        "corral.metrics": [
-            "custom_metric_a = my_metrics.metrics:CustomMetricA",
-            "custom_metric_b = my_metrics.metrics:CustomMetricB",
-        ],
-    },
-)
-```
-
-### Install Your Plugin
-
-```bash
-# Install in development mode
-pip install -e .
-
-# Or install from PyPI (after publishing)
-pip install my-metrics-package
-```
-
-### Automatic Discovery
-
-Once installed, your metrics will be automatically discovered and registered when Corral imports its metrics module:
-
-```python
-from corral import get_registry
-
-# Your plugin metrics are automatically registered
-registry = get_registry()
-metrics = registry.list_metrics()
-
-# Your custom metrics should appear
-assert "custom_metric_a" in metrics
-assert "custom_metric_b" in metrics
-```
-
 ## Advanced Examples
 
 ### Metric with Parameters
 
 ```python
-from corral import Metric, MetricMetadata
+from corral.report.metrics import Metric, MetricMetadata, get_registry
 
 
 class TopNScoresMetric(Metric):
@@ -414,21 +382,20 @@ class TopNScoresMetric(Metric):
             name=f"top_{self.n}_scores",
             display_name=f"Top {self.n} Scores",
             description=f"The {self.n} highest scores across all tasks",
-            category="overall",
         )
 
-    def calculate(self, benchmark_result):
+    def calculate(self, context):
         all_scores = []
-        for task_results in benchmark_result.results.values():
-            all_scores.extend([r.score for r in task_results])
+        for task_id in context.all_task_ids:
+            task_trials = context.get_task_trials(task_id)
+            if task_trials:
+                all_scores.extend([trial.score for trial in task_trials.trials])
 
         all_scores.sort(reverse=True)
         return all_scores[: self.n]
 
 
 # Register with different parameters
-from corral import get_registry
-
 registry = get_registry()
 
 registry.register(TopNScoresMetric(n=3))
@@ -438,7 +405,7 @@ registry.register(TopNScoresMetric(n=10))
 ### Metric with Dependencies
 
 ```python
-from corral import Metric, MetricMetadata
+from corral.report.metrics import Metric, MetricMetadata, get_registry
 
 
 class SuccessRatioMetric(Metric):
@@ -450,61 +417,17 @@ class SuccessRatioMetric(Metric):
             name="success_ratio",
             display_name="Success Ratio",
             description="Ratio of successful tasks to total tasks",
-            category="overall",
         )
 
-    def calculate(self, benchmark_result):
+    def calculate(self, context):
         # Use other metrics if needed
         registry = get_registry()
 
-        success_rate = registry.get("success_rate").calculate(benchmark_result)
-        total_tasks = registry.get("total_tasks").calculate(benchmark_result)
+        success_rate = registry.get("overall_success_rate").calculate(context)
+        total_tasks = registry.get("total_tasks").calculate(context)
 
         if total_tasks == 0:
             return 0.0
 
         return success_rate / total_tasks
 ```
-
-## Best Practices
-
-1. **Clear Naming**: Use descriptive, unique names for your metrics
-2. **Documentation**: Provide clear descriptions in `MetricMetadata`
-3. **Error Handling**: Handle edge cases (empty results, division by zero, etc.)
-4. **Performance**: Keep calculations efficient, especially for large result sets
-5. **Testing**: Write unit tests for your custom metrics
-6. **Versioning**: Version your metric plugins appropriately
-7. **Dependencies**: Clearly specify dependencies in your package metadata
-
-## Troubleshooting
-
-### Plugin Not Discovered
-
-If your plugin metrics aren't being discovered:
-
-1. Verify the entry point configuration in `pyproject.toml` or `setup.py`
-2. Reinstall the package: `pip install -e .`
-3. Check for import errors: `python -c "from my_metrics.metrics import CustomMetricA"`
-4. Enable debug logging to see discovery messages
-
-### Metric Registration Errors
-
-If you get registration errors:
-
-- **"Metric already registered"**: The metric name is already in use
-- **"Invalid metric type"**: Ensure your class inherits from `Metric` or `TaskMetric`
-- **"Missing metadata"**: Implement the `metadata` property correctly
-
-### Calculation Errors
-
-If metrics fail during calculation:
-
-- Add try/except blocks in your `calculate()` method
-- Return sensible defaults for edge cases
-- Log warnings for unexpected inputs
-
-## See Also
-
-- [API Documentation](API_specs.md)
-- [Core Metrics Reference](../src/corral/report/metrics/core.py)
-- [Metrics Registry API](../src/corral/report/metrics/registry.py)

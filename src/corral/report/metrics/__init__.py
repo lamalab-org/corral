@@ -111,7 +111,6 @@ __all__ = [
     "TotalTokenUsageMetric",
     "TotalToolCallsMetric",
     "TotalToolExecutionDurationMetric",
-    "discover_plugin_metrics",
     "get_registry",
     "register_default_metrics",
 ]
