@@ -43,7 +43,7 @@ from tools import (
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt_4o").strip()
 logger.info(f"[SERVER] Using LLM_MODEL={LLM_MODEL}")
 ENVIRONMENT = "enviroment"
-TASK_TYPE = "tasks_2"  # "single_task" or "subtasks"
+TASK_TYPE = "tasks_3"  # "single_task" or "subtasks"
 BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\{TASK_TYPE}"
 
 SCORING_FUNCTIONS = {
