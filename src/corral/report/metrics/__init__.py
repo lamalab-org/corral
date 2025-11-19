@@ -1,14 +1,4 @@
-"""Metrics system for benchmark results.
-
-This module provides a flexible, registry-based metrics system that allows:
-- Custom metric registration without modifying core code
-- Enable/disable specific metrics via configuration
-- Modular and extensible metric calculations
-- Full backward compatibility with existing code
-
-The metrics are automatically registered when this module is imported,
-making them immediately available through the global registry.
-"""
+"""Metrics system for benchmark results."""
 
 from loguru import logger
 

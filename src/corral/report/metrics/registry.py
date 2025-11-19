@@ -1,35 +1,3 @@
-"""Metric registry for managing and accessing metrics.
-
-This module provides a central registry for all metrics in the system.
-It allows metrics to be registered, discovered, and calculated in batch.
-
-The registry pattern enables:
-- Dynamic metric registration at runtime
-- Selective metric execution based on configuration
-- Plugin-based metric discovery
-- Centralized metric management
-
-Example:
-    >>> from corral.report.metrics.registry import get_registry
-    >>> from corral.report.metrics.base import Metric, MetricMetadata
-    >>>
-    >>> class CustomMetric(Metric):
-    ...     @property
-    ...     def metadata(self):
-    ...         return MetricMetadata(
-    ...             name="custom_metric",
-    ...             display_name="Custom Metric",
-    ...             description="A custom metric"
-    ...         )
-    ...     def calculate(self, benchmark_result):
-    ...         return 42.0
-    >>>
-    >>> registry = get_registry()
-    >>> registry.register(CustomMetric())
-    >>> metric = registry.get("custom_metric")
-    >>> all_metrics = registry.list_all()
-"""
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any
 

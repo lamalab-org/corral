@@ -1,10 +1,3 @@
-"""Core metrics implementation.
-
-This module contains all the core metrics implemented independently of BenchmarkResult.
-Each metric calculates its value directly from the benchmark result data structures,
-making them framework-independent and reusable.
-"""
-
 from statistics import mean
 
 from corral.report.metrics.base import Metric, MetricContext, MetricMetadata, TaskMetric

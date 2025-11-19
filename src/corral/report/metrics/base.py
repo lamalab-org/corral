@@ -1,31 +1,3 @@
-"""Base classes for the metrics system - PORTABLE, NO CORRAL DEPENDENCIES.
-
-This module can be copied to other projects and used with any benchmark system.
-
-This module defines the core abstractions for metrics:
-- MetricContext: Protocol defining the interface any context must provide
-- MetricMetadata: Configuration and metadata for metrics
-- Metric: Base class for all metrics
-- TaskMetric: Base class for per-task metrics
-
-Example:
-    >>> from corral.report.metrics.base import Metric, MetricMetadata
-    >>>
-    >>> class AverageScoreMetric(Metric):
-    ...     @property
-    ...     def metadata(self) -> MetricMetadata:
-    ...         return MetricMetadata(
-    ...             name="average_score",
-    ...             display_name="Average Score",
-    ...             description="Mean score across all tasks"
-    ...         )
-    ...
-    ...     def calculate(self, context):
-    ...         scores = [r.score for r in context.task_results
-    ...                   if r.score is not None]
-    ...         return sum(scores) / len(scores) if scores else 0.0
-"""
-
 from abc import ABC, abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
