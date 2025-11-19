@@ -5,6 +5,8 @@ from typing import Any
 
 from loguru import logger
 
+from corral.report.metrics.base import TaskMetric
+
 
 @dataclass
 class TaskTrialResult:
@@ -76,38 +78,6 @@ class BenchmarkResult:
 
         # Register default metrics with k values
         register_default_metrics(k_values=self.k)
-
-    def _get_task_metrics_for_k(self, task_id: str) -> dict[str, float]:
-        """Get all task-level metrics that require k parameter.
-
-        Automatically detects which registered metrics are task-level metrics
-        requiring k parameter and calculates them.
-
-        Args:
-            task_id: The task ID
-
-        Returns:
-            Dictionary mapping metric names to calculated values
-        """
-        from corral.report.metrics.base import TaskMetric
-
-        results = {}
-        # Get all registered metrics
-        all_metrics = self.metric_registry.list_all()
-
-        for metric in all_metrics:
-            # Check if it's a TaskMetric and has a k parameter
-            if isinstance(metric, TaskMetric) and hasattr(metric, "k"):
-                metric_name = metric.metadata.name
-                try:
-                    value = metric.calculate_for_task(self, task_id)
-                    results[metric_name] = value
-                except Exception as e:
-                    logger.warning(
-                        f"Error calculating {metric_name} for {task_id}: {e}"
-                    )
-
-        return results
 
     @property
     def all_task_ids(self) -> set[str]:
@@ -252,57 +222,21 @@ class BenchmarkResult:
                 "trials": trials_data,
             }
 
-            # Add task-level metrics from registry
-            # Get task success rate
-            try:
-                task_success_rate_metric = self.metric_registry.get("task_success_rate")
-                task_result_data["success_rate"] = (
-                    task_success_rate_metric.calculate_for_task(self, task_id)
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Error calculating task_success_rate for {task_id}: {e}"
-                )
-
-            # Get task average score
-            try:
-                task_avg_score_metric = self.metric_registry.get("task_average_score")
-                task_result_data["average_score"] = (
-                    task_avg_score_metric.calculate_for_task(self, task_id)
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Error calculating task_average_score for {task_id}: {e}"
-                )
-
-            # Get task total token usage
-            try:
-                task_token_metric = self.metric_registry.get("task_total_token_usage")
-                task_result_data["total_token_usage"] = (
-                    task_token_metric.calculate_for_task(self, task_id)
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Error calculating task_total_token_usage for {task_id}: {e}"
-                )
-
-            # Get task average duration
-            try:
-                task_duration_metric = self.metric_registry.get("task_average_duration")
-                task_avg_duration = task_duration_metric.calculate_for_task(
-                    self, task_id
-                )
-                if task_avg_duration is not None:
-                    task_result_data["average_duration"] = task_avg_duration
-            except Exception as e:
-                logger.warning(
-                    f"Error calculating task_average_duration for {task_id}: {e}"
-                )
-
-            # Add pass@k and pass^k dynamically using registry metrics
-            pass_metrics = self._get_task_metrics_for_k(task_id)
-            # Add all metrics that have k parameter using their actual names
-            task_result_data.update(pass_metrics)
+            # Add all task-level metrics from registry
+            all_metrics = self.metric_registry.list_all()
+            for metric in all_metrics:
+                # Check if it's a TaskMetric
+                if isinstance(metric, TaskMetric):
+                    metric_name = metric.metadata.name
+                    display_name = metric.metadata.display_name
+                    try:
+                        value = metric.calculate_for_task(self, task_id)
+                        # Use display name as key in task_result_data
+                        task_result_data[display_name] = value
+                    except Exception as e:
+                        logger.warning(
+                            f"Error calculating {metric_name} for {task_id}: {e}"
+                        )
 
             report_data["task_results"][task_id] = task_result_data
 
