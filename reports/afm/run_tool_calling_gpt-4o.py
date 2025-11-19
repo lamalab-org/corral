@@ -52,8 +52,8 @@ if __name__ == "__main__":
     setup_litellm()
 
     verboses = [
-        # "brief",
-        # "workflow",
+        "brief",
+        "workflow",
         "comprehensive",
     ]
     for verbose in verboses:
