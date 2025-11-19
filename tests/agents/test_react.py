@@ -2,7 +2,8 @@
 
 import pytest
 
-from corral.agents.react import Action, ReActAgent, Thought
+from corral.agents.react import ReActAgent, Thought
+from corral.agents.schema import Action
 from corral.agents.utils import LiteLLMMessage
 from corral.types import ToolResponse
 
@@ -1368,15 +1369,15 @@ Final Answer: <final_answer>Based on the search and analysis, the answer is 42.<
             and "Observation: Script created successfully" in msg.get("content", "")
             for msg in messages
         )
-        assert (
-            first_observation_found
-        ), "First script creation observation should be in message history"
+        assert first_observation_found, (
+            "First script creation observation should be in message history"
+        )
 
         second_observation_found = any(
             msg.get("role") == "user"
             and "Observation: Analysis script created" in msg.get("content", "")
             for msg in messages
         )
-        assert (
-            second_observation_found
-        ), "Second script creation observation should be in message history"
+        assert second_observation_found, (
+            "Second script creation observation should be in message history"
+        )

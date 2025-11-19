@@ -1,6 +1,5 @@
 import importlib.resources
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Any
 
 from litellm.exceptions import ContextWindowExceededError
@@ -17,14 +16,6 @@ from corral.agents.utils import (
     save_agent_messages,
 )
 from corral.router.routes import CorralRouter
-
-
-@dataclass
-class Action:
-    """Represents an action to be taken"""
-
-    tool_name: str
-    arguments: dict[str, Any]
 
 
 class BaseAgent(ABC):
@@ -243,7 +234,7 @@ class BaseAgent(ABC):
 
         try:
             final_answer = self.run(
-                interface, task_id, history, task_prompt, examples, enable_surrender
+                interface, task_id, history, task_prompt, examples, enable_surrender=enable_surrender
             )
 
             # Check if agent decided to surrender

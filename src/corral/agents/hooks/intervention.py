@@ -13,9 +13,9 @@ import re
 
 from loguru import logger
 
-from corral.agents.base_agent import Action
 from corral.agents.hooks.adapter import HookAdapterRegistry
 from corral.agents.hooks.core import CriticalHookError, HookCallback, HookContext
+from corral.agents.schema import Action
 from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
 
 

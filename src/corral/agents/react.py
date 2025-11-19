@@ -1,21 +1,14 @@
 import json
 import re
-from dataclasses import dataclass
 
 from loguru import logger
 
-from corral.agents.base_agent import Action, BaseAgent
+from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint
 from corral.agents.prompt_utils import create_prompt
+from corral.agents.schema import Action, Thought
 from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
 from corral.router.routes import CorralRouter
-
-
-@dataclass
-class Thought:
-    """Represents agent's reasoning step"""
-
-    content: str
 
 
 class ReActAgent(BaseAgent):

@@ -3,9 +3,10 @@ import re
 
 from loguru import logger
 
-from corral.agents.base_agent import Action, BaseAgent
+from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint
 from corral.agents.prompt_utils import create_prompt
+from corral.agents.schema import Action
 from corral.agents.utils import (
     LiteLLMMessage,
     convert_to_openai_tool_format,
