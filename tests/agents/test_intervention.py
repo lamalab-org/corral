@@ -17,8 +17,7 @@ class MockAgent:
 
     @property
     def __class__(self):
-        class_obj = type(self._class_name, (), {})
-        return class_obj
+        return type(self._class_name, (), {})
 
 
 class MockInterface:

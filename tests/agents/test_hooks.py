@@ -13,13 +13,9 @@ from corral.agents.hooks.core import (
 class MockAgent:
     """Mock agent for testing."""
 
-    pass
-
 
 class MockInterface:
     """Mock interface for testing."""
-
-    pass
 
 
 def test_hook_registration_and_execution():
