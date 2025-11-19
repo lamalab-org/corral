@@ -394,12 +394,13 @@ def get_library_documentation(
         # text, resolved_lib_id = asyncio.run(_fetch())
         try:
             text, resolved_lib_id = asyncio.run(_fetch())
-        except ExceptionGroup as eg:
-            for sub in eg.exceptions:
-                logger.exception(f"Sub-exception in TaskGroup: {sub}")
-            raise
         except Exception as e:
-            logger.exception(f"Regular exception: {e}")
+            # Handle both ExceptionGroup (Python 3.11+) and regular exceptions
+            if hasattr(e, "exceptions"):
+                for sub in e.exceptions:
+                    logger.exception(f"Sub-exception in TaskGroup: {sub}")
+            else:
+                logger.exception(f"Regular exception: {e}")
             raise
 
         # Cache the result

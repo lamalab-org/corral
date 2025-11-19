@@ -167,6 +167,7 @@ class CorralWandbLogger:
         # Overall metrics
         overall_metrics = {}
 
+        # Always use fallback for now until all core metrics are auto-registered in Phase 3
         try:
             overall_metrics.update(
                 {
@@ -182,47 +183,49 @@ class CorralWandbLogger:
                     result.total_duration
                 )
 
-            total_trial_duration = result.overall_total_duration()
-            if total_trial_duration:
-                overall_metrics["overall/total_trial_duration_s"] = total_trial_duration
-
-            avg_duration = result.overall_average_duration()
-            if avg_duration:
-                overall_metrics["overall/average_trial_duration_s"] = avg_duration
-
-            overall_metrics["overall/total_tool_execution_duration_s"] = (
-                result.total_tool_execution_duration()
-            )
-
-            # Add pass@k and pass^k metrics
-            for k_val in k_values:
-                try:
-                    overall_metrics[f"overall/pass@{k_val}"] = result.overall_pass_at_k(
-                        k_val
+                total_trial_duration = result.overall_total_duration()
+                if total_trial_duration:
+                    overall_metrics["overall/total_trial_duration_s"] = (
+                        total_trial_duration
                     )
-                    overall_metrics[f"overall/pass^{k_val}"] = (
-                        result.overall_pass_hat_k(k_val)
-                    )
-                except Exception as e:
-                    logger.warning(f"Error calculating pass@{k_val}: {e}")
 
-            # Add token usage
-            for key, value in result.total_token_usage().items():
-                overall_metrics[f"overall/token_usage/{key}"] = value
+                avg_duration = result.overall_average_duration()
+                if avg_duration:
+                    overall_metrics["overall/average_trial_duration_s"] = avg_duration
 
-            # Add tool stats
-            for key, value in result.total_tool_calls().items():
-                overall_metrics[f"overall/tool_calls/{key}"] = value
+                overall_metrics["overall/total_tool_execution_duration_s"] = (
+                    result.total_tool_execution_duration()
+                )
 
-            self.run.log(overall_metrics)
-            self.run.summary.update(overall_metrics)
+                # Add pass@k and pass^k metrics
+                for k_val in k_values:
+                    try:
+                        overall_metrics[f"overall/pass@{k_val}"] = (
+                            result.overall_pass_at_k(k_val)
+                        )
+                        overall_metrics[f"overall/pass^{k_val}"] = (
+                            result.overall_pass_hat_k(k_val)
+                        )
+                    except Exception as e:
+                        logger.warning(f"Error calculating pass@{k_val}: {e}")
+
+                # Add token usage
+                for key, value in result.total_token_usage().items():
+                    overall_metrics[f"overall/token_usage/{key}"] = value
+
+                # Add tool stats
+                for key, value in result.total_tool_calls().items():
+                    overall_metrics[f"overall/tool_calls/{key}"] = value
+
+                self.run.log(overall_metrics)
+                self.run.summary.update(overall_metrics)
 
         except Exception as e:
             logger.error(f"Error calculating or logging overall metrics: {e}")
             if self.run:
-                self.run.log({"overall_metrics_error": str(e)})
-
-        # Log task-level metrics
+                self.run.log(
+                    {"overall_metrics_error": str(e)}
+                )  # Log task-level metrics
         logger.info("Logging task-level metrics to wandb")
         for task_id in result.all_task_ids:
             if not result.task_results[task_id].trials:
