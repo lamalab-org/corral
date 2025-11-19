@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Dump all documents from the MongoDB collection defined in your Modal app
 to a local JSON file.
@@ -17,6 +16,7 @@ from pathlib import Path
 
 from bson.json_util import dumps as bson_dumps  # handles ObjectId, datetime, etc.
 from dotenv import load_dotenv
+from loguru import logger
 from pymongo import MongoClient
 
 load_dotenv(".env", override=True)
@@ -25,7 +25,7 @@ load_dotenv(".env", override=True)
 def main():
     uri = os.environ.get("MONGODB_URI")
     if not uri:
-        print("Error: MONGODB_URI is not set.", file=sys.stderr)
+        logger.error("MONGODB_URI is not set.")
         sys.exit(1)
 
     db_name = os.environ.get("MONGODB_DB", "Corral")
@@ -33,12 +33,13 @@ def main():
 
     output_path = Path("corral_dump.json")
 
-    print("Connecting to MongoDB...")
+    logger.info("Connecting to MongoDB...")
     client = MongoClient(uri)
     coll = client[db_name][coll_name]
 
-    print(f"Dumping all documents from {db_name}.{coll_name} to {output_path} ...")
-
+    logger.info(
+        f"Dumping all documents from {db_name}.{coll_name} to {output_path} ..."
+    )
     cursor = coll.find({})
 
     # If the collection is not massive, collecting into a list is fine.
@@ -50,7 +51,7 @@ def main():
     with output_path.open("w", encoding="utf-8") as f:
         f.write(json_str)
 
-    print(f"Done. Wrote {len(docs)} documents to {output_path}.")
+    logger.info(f"Done. Wrote {len(docs)} documents to {output_path}.")
 
 
 if __name__ == "__main__":
