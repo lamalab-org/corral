@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from corral.agents import ToolCallingAgent
-from corral.evaluate import BenchmarkInterface, MatAgentBenchmark
+from corral import CorralRouter, CorralRunner
 from corral.report import CorralWandbLogger
 
 
@@ -21,14 +21,14 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = BenchmarkInterface(base_url="https://127.0.1.1:8080")
+    interface = CorralRouter(base_url="http://127.0.1.1:8080")
     # wandblogger = CorralWandbLogger(
     #     project="corral",
     #     group="tool_description_ablation",
     #     name=run_name,
     # )
     agent = ToolCallingAgent(model=model, max_iterations=20, temperature=temperature)
-    runner = MatAgentBenchmark(interface, agent)
+    runner = CorralRunner(interface, agent)
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")

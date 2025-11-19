@@ -11,6 +11,8 @@ class VolumeError(ValueError):
 class NotEquilibratedError(RuntimeError):
     pass
 
+class NegativeMassError(ArithmeticError):
+    pass
 
 DB = rk.Database.fromFile('WetChem.yaml')
 ZERO = 1e-20
@@ -82,7 +84,7 @@ class Precipitate:
         state = _new_empty_state()
         for solid, mol in self.composition.items():
             if mol < 0:
-                raise ValueError(f"Negative amount for {solid}: {mol}")
+                raise NegativeMassError(f"Negative amount for {solid}: {mol}")
             state.set(solid+"(s)", mol, "mol")
             total_mass += state.speciesMass(solid+"(s)")
             total_mol += mol
@@ -100,17 +102,17 @@ class Precipitate:
     def __add__(self, other: "Precipitate") -> "Precipitate":
         if other is None:
             return self
-        elif not isinstance(other, Precipitate):
-            raise NotImplementedError
         
-        if self.state.system().id() != other.state.system().id():
-            raise ValueError("Cannot mix Precipitates from different chemical systems!")
+        if isinstance(other, Precipitate):
+            if self.state.system().id() != other.state.system().id():
+                raise ValueError("Cannot mix Precipitates from different chemical systems!")
+            all_species = set(self.components + other.components)
+            new_composition = {sp: self[sp]+other[sp] for sp in all_species}
+            return Precipitate(new_composition)
         
-        all_species = set(self.components + other.components)
-        new_composition = {sp: self[sp]+other[sp] for sp in all_species}
-
-        return Precipitate(new_composition)
+        return NotImplemented
     
+    __radd__ = __add__ 
 
     @property
     def sys_species(self) -> Generator:
@@ -143,7 +145,7 @@ class StockSolution:
     def __post_init__(self):
         for sp, conc in self.composition.items():
             if conc < 0:
-                raise ValueError(f"Negative concentration for {sp}: {conc}")
+                raise NegativeMassError(f"Negative concentration for {sp}: {conc}")
     
 
     def __rmul__(self, vol_mL: float) -> "Solution":
@@ -193,37 +195,57 @@ class Solution(StockSolution):
     
 
     def __add__(self, other: "Solution") -> "Solution":
-        if not isinstance(other, Solution):
-            raise NotImplementedError
-        if self.state.system().id() != other.state.system().id():
-            raise ValueError("Cannot mix Solutions from different chemical systems!")
+        if other is None:
+            return self
         
-        new_volume = self.volume + other.volume
-        all_species = set(self.components + other.components) - {'H2O'}
-
-        new_composition = {}
-        for sp in all_species:
-            total_mol = self[sp] * self.volume + other[sp] * other.volume
-            new_composition[sp] = total_mol/new_volume
+        if isinstance(other, Solution):
+            if self.state.system().id() != other.state.system().id():
+                raise ValueError("Cannot mix Solutions from different chemical systems!")
         
-        self.volume = 0.0
-        other.volume = 0.0
+            new_volume = self.volume + other.volume
+            all_species = set(self.components + other.components) - {'H2O'}
 
-        precipitate = None
-        if self.has_precipitate or other.has_precipitate:
-            precipitate =  self.precipitate + other.precipitate
+            new_composition = {}
+            for sp in all_species:
+                total_mol = self[sp] * self.volume + other[sp] * other.volume
+                new_composition[sp] = total_mol/new_volume
+        
+            self.volume = 0.0
+            other.volume = 0.0
 
-        new_solution = Solution(new_composition, volume=new_volume)
-        if precipitate is not None:
-            object.__setattr__(new_solution, "precipitate", precipitate)
+            precipitate = None
+            if self.has_precipitate or other.has_precipitate:
+                precipitate =  self.precipitate + other.precipitate
+
+            new_solution = Solution(new_composition, volume=new_volume)
+            if precipitate is not None:
+                object.__setattr__(new_solution, "precipitate", precipitate)
+                object.__setattr__(new_solution, "has_precipitate", True)
+                for sp in precipitate.components:
+                    new_solution.state.set(sp+"(s)", precipitate[sp], 'mol')
+
+            return new_solution
+        
+        if isinstance(other, Precipitate):
+            solid = self.precipitate + other
+            
+            new_solution = Solution(self.composition, volume=self.volume)
+            for sp in solid.components:
+                new_solution.state.set(sp+"(s)", solid[sp], 'mol')
+        
             object.__setattr__(new_solution, "has_precipitate", True)
-            for sp in precipitate.components:
-                new_solution.state.set(sp+"(s)", precipitate[sp], 'mol')
+            object.__setattr__(new_solution, "precipitate", solid)
+            object.__setattr__(new_solution, "is_equilibrated", False)
 
-        return new_solution
+            return new_solution
+        
+        return NotImplemented
     
 
-    def equilibrate(self, precipitation_threshold=5e-6) -> None:
+    __radd__ = __add__ 
+
+
+    def equilibrate(self, precipitation_threshold=5e-5) -> None:
 
         SOLVER.solve(self.state)
 
@@ -261,17 +283,19 @@ class Solution(StockSolution):
 
 
     def add_solid(self, solid: Precipitate) -> None:
+        if not isinstance(solid, Precipitate):
+            raise TypeError("The given solid must be a Precipitate object!")
+        
         if self.state.system().id() != solid.state.system().id():
             raise ValueError("Cannot add a solid from a different chemical system!")
         
-        if self.has_precipitate:
-            solid += self.precipitate
+        new_precipitate = solid + self.precipitate
 
-        for sp in solid.components:
+        for sp in new_precipitate.components:
             self.state.set(sp+"(s)", solid[sp], 'mol')
         
         object.__setattr__(self, "has_precipitate", True)
-        object.__setattr__(self, "precipitate", solid)
+        object.__setattr__(self, "precipitate", new_precipitate)
         object.__setattr__(self, "is_equilibrated", False)
 
         return None

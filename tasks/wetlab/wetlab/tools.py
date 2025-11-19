@@ -1,7 +1,6 @@
-from corral.base import Tool
-from corral.utils import tool
+from corral.backend.tool import Tool, tool
 
-from wetlab.engine import StockSolution, Solution, Precipitate, VolumeError
+from wetlab.engine import StockSolution, Solution, Precipitate, VolumeError, NegativeMassError
 from wetlab.colors import PRECIPITATE_COLORS, PALLETT, mix_colors, closest_color_names
 
 CATIONS = [
@@ -421,7 +420,7 @@ def checkout_color(compositions, label: str) -> str:
         str:
             [BRIEF] the type and color of the object [/BRIEF]
             [DETAILED] a string containing an statement about the type and the color of the object. The type can be: a reagent solution, a precipitate, a clear solution (meaning it has no precipitate), or a solution containing a precipitate. In the latter case, the color of both the supernatant solution and the existing precipitate will be repoted. [/DETAILED]
-            [EXAMPLES] "sample_B is a clear solution with the following color: pale yellow", "test_03 is a solution that also contains a precipitate.\n Color of the precipitate: black\n Color of the supernatant solution: colorless", "test_1_precipitate is a precipitate with the following color: rosy brown / reddish gray"[/EXAMPLES]
+            [EXAMPLES] "sample_B is a clear solution with the following color: pale yellow", "test_03 is a solution that also contains a precipitate.\n Color of the precipitate: black\n Color of the supernatant solution: colorless", "test_1_precipitate is a precipitate with the following color: rosy brown / reddish gray" [/EXAMPLES]
 
     [RAISES] Exceptions:
         KeyError: [ERROR_WHEN] When the given `label` is invalid [/ERROR_WHEN]
@@ -866,7 +865,7 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
 
     description = f"{int(sol1.volume)} mL {sol1_label} + {int(sol2_vol)} mL {sol2_label}"
 
-    old_precipitate = sol1.precipitate
+    old_supernatant, old_precipitate = sol1.filter()
     old_sol_color = sol1.color_name
 
     new_sol = sol1 + sol2_vol * sol2
@@ -891,32 +890,43 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
         if new_sol.has_precipitate:
             new_amount = new_sol.precipitate.total_mol
             new_color = new_sol.precipitate.color_name
-
+            # if there is at least one shared color name between the old and new color, we add a "slightly" modifier 
+            old_color_set = set(old_color.split(' / '))
+            new_color_set = set(new_color.split(' / '))
+            shared_colors = old_color_set.intersection(new_color_set)
+            slightly = "slightly" if len(shared_colors)>0 else ""
+            
             precipitate_ratio = new_amount / old_amount 
 
             if precipitate_ratio >= 1.1 :
-                if new_color == old_color:
-                    observations.append("More precipitate forms but the color of the precipitate does not noticeably change.")
+                # getting the color of the newly formed precipitate
+                test = old_supernatant + sol2_vol * sol2
+                test.equilibrate()
+                additional_color = "(" + test.precipitate.color_name + ")"
+                if additional_color == old_color:
+                    observations.append("More precipitate with the same color as the existing precipitate forms.")
+                elif new_color == old_color: 
+                    observations.append(f"A new precipitate {additional_color} forms, but does not cause the color of the existing precipitate to noticeably change.")
                 else:
-                    observations.append(f"More precipitate forms, mixing with the existing precipitate causing it to change color. New color: {new_color}.")
+                    observations.append(f"A new precipitate {additional_color} forms, mixing with the existing precipitate causing it to {slightly} change color. New color: {new_color}.")
             
             elif 0.8 <= precipitate_ratio < 1.1 :
                 if new_color == old_color:
                     observations.append("The amount and color of the existing precipitate does not noticeably change.")
                 else:
-                    observations.append(f"The amount of the existing precipitate does not noticeably change, but its color changes. New color: {new_color}.")
+                    observations.append(f"The amount of the existing precipitate does not noticeably change, but its color {slightly} changes. New color: {new_color}.")
 
             elif 0.5 <= precipitate_ratio <= 0.8 :
                 if new_color == old_color:
                     observations.append("The existing precipitate partially dissolves. Its color does not noticeably change.")
                 else:
-                    observations.append(f"The existing precipitate partially dissolves and changes color. New color: {new_color}.")
+                    observations.append(f"The existing precipitate partially dissolves and {slightly} changes color. New color: {new_color}.")
             
             else: # precipitate_ratio < 0.5
                 if new_color == old_color:
                     observations.append("The existing precipitate mostly (but not fully) dissolves. Its color does not noticeably change.")
                 else:
-                    observations.append(f"The existing precipitate mostly (but not fully) dissolves and changes color. New color: {new_color}.")
+                    observations.append(f"The existing precipitate mostly (but not fully) dissolves and {slightly} changes color. New color: {new_color}.")
 
         else:
             observations.append(f"The precipitate fully dissolves.")
@@ -1073,7 +1083,7 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
         str:
             [BRIEF] a string containing the observations from the test [/BRIEF]
             [DETAILED] a string containing two lines where the first line is an observation about any changes in the color or the amount of the added precipitate, and the second line is about any color changes of the supernatant solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slahses. [/DETAILED]
-            [EXAMPLES] "The added precipitate partially dissolves. Its color does not noticeably change.\nColor of the supernatant solution changes to very pale blue." , "The added precipitate fully dissolves.\nColor of the supernatant solution does not noticeably change."
+            [EXAMPLES] "The added precipitate partially dissolves. Its color does not noticeably change.\nColor of the supernatant solution changes to very pale blue." , "The added precipitate fully dissolves.\nColor of the supernatant solution does not noticeably change." [/EXAMPLES]
 
     [RAISES] Exceptions:
         KeyError: [ERROR_WHEN] When `sol_label` or `prec_label` is invalid [/ERROR_WHEN]
@@ -1117,8 +1127,9 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
         raise RuntimeError(f"{prec_label} is not a precipitate!")
     if type(sol) not in [Solution, StockSolution]:
         raise RuntimeError(f"{sol_label} is not a solution!")
-    if sol.has_precipitate: 
-        raise VolumeError(f"{sol_label} already has a precipitate. If you want to add a different precipitate, you must filter it first!")
+    if type(sol) == Solution:
+        if sol.has_precipitate: 
+            raise VolumeError(f"{sol_label} already has a precipitate. If you want to add a different precipitate, you must filter it first!")
 
     if type(sol_vol) != int or sol_vol > 5:
         raise ValueError(f"`sol_vol` must be an integer greater than or equal to 5")

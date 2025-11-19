@@ -19,9 +19,9 @@ from wetlab.score import score_ion_list
 from wetlab.tools import create_tools
 from wetlab.engine import set_chemical_system, Solution, StockSolution
 
-from corral.base import Environment
-from corral.server import run_server
-from corral.task import TaskDefinition, TaskGroup
+from corral.backend.env import Environment
+from corral.backend.server import run_server
+from corral.backend.task import TaskDefinition, TaskGroup
 
 BASE_WORK_DIR = os.environ.get(
     "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/WetLab"
