@@ -1,25 +1,17 @@
 import json
 import re
-from dataclasses import dataclass
-from typing import Any
 
 from loguru import logger
 
 from corral.agents.base_agent import BaseAgent
+from corral.agents.hooks import HookPoint
 from corral.agents.prompt_utils import create_prompt
+from corral.agents.schema import Action
 from corral.agents.utils import (
     LiteLLMMessage,
     convert_to_openai_tool_format,
 )
 from corral.router.routes import CorralRouter
-
-
-@dataclass
-class Action:
-    """Represents an action to be taken"""
-
-    tool_name: str
-    arguments: dict[str, Any]
 
 
 class ToolCallingAgent(BaseAgent):
@@ -116,7 +108,6 @@ class ToolCallingAgent(BaseAgent):
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
 
-
         Returns:
             str: The final answer to the task
         """
@@ -141,7 +132,14 @@ class ToolCallingAgent(BaseAgent):
             enable_surrender=enable_surrender,
         )
 
+        # Execute BEFORE_TASK hooks
+        self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
+
         for _i in range(self.max_iterations):
+            self._current_iteration = _i
+
+            # Execute BEFORE_ITERATION hooks
+            self._execute_hooks(HookPoint.BEFORE_ITERATION, interface, task_id)
             try:
                 llm_response = self.get_llm_response(tools)
 
@@ -191,6 +189,7 @@ class ToolCallingAgent(BaseAgent):
                             function_call = interface.execute_tool(
                                 task_id, action.tool_name, action.arguments
                             )
+
                             result = str(function_call.result)
                             if result is None:
                                 result = str(function_call.error)
