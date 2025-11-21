@@ -744,7 +744,8 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
     #precipitate observation
     if test.has_precipitate:
         prec_colors = test.precipitate.color_name
-        observations.append(f"A precipitate forms. Color: {prec_colors}")
+        tiny = "tiny amount of " if (test.precipitate.total_mol / test.volume < 5e-4) else ""
+        observations.append(f"A {tiny}precipitate forms. Color: {prec_colors}")
     else:
         observations.append("No precipitate forms.")
     
@@ -868,18 +869,19 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
     old_supernatant, old_precipitate = sol1.filter()
     old_sol_color = sol1.color_name
 
-    new_sol = sol1 + sol2_vol * sol2
-    new_sol.description = description
-    new_sol.equilibrate()
-    compositions[test_label] = new_sol
+    test = sol1 + sol2_vol * sol2
+    test.description = description
+    test.equilibrate()
+    compositions[test_label] = test
 
     observations = []
 
     #precipitate observation
     if old_precipitate is None:
-        if new_sol.has_precipitate:
-            prec_colors = new_sol.precipitate.color_name
-            observations.append(f"A precipitate forms. Color: {prec_colors}")
+        if test.has_precipitate:
+            prec_colors = test.precipitate.color_name
+            tiny = "tiny amount of "  if (test.precipitate.total_mol / test.volume < 5e-4) else ""
+            observations.append(f"A {tiny}precipitate forms. Color: {prec_colors}")
         else:
             observations.append("No precipitate forms.")
     
@@ -887,61 +889,62 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
         old_amount = old_precipitate.total_mol
         old_color = old_precipitate.color_name
 
-        if new_sol.has_precipitate:
-            new_amount = new_sol.precipitate.total_mol
-            new_color = new_sol.precipitate.color_name
+        if test.has_precipitate:
+            new_amount = test.precipitate.total_mol
+            new_color = test.precipitate.color_name
             # if there is at least one shared color name between the old and new color, we add a "slightly" modifier 
             old_color_set = set(old_color.split(' / '))
             new_color_set = set(new_color.split(' / '))
             shared_colors = old_color_set.intersection(new_color_set)
-            slightly = "slightly" if len(shared_colors)>0 else ""
+            slightly = "slightly " if len(shared_colors)>0 else ""
             
             precipitate_ratio = new_amount / old_amount 
 
             if precipitate_ratio >= 1.1 :
-                # getting the color of the newly formed precipitate
-                test = old_supernatant + sol2_vol * sol2
-                test.equilibrate()
-                additional_color = "(" + test.precipitate.color_name + ")"
+                # getting the newly formed precipitate
+                test_no_prec = old_supernatant + sol2_vol * sol2
+                test_no_prec.equilibrate()
+                additional_color = "(" + test_no_prec.precipitate.color_name + ")"
+                tiny = "tiny amount of "  if (test_no_prec.precipitate.total_amount / test.volume < 5e-4) else ""
                 if additional_color == old_color:
-                    observations.append("More precipitate with the same color as the existing precipitate forms.")
+                    observations.append(f"A {tiny}precipitate with the same color as the existing precipitate forms.")
                 elif new_color == old_color: 
-                    observations.append(f"A new precipitate {additional_color} forms, but does not cause the color of the existing precipitate to noticeably change.")
+                    observations.append(f"A {tiny}new precipitate {additional_color} forms, but does not cause the color of the existing precipitate to noticeably change.")
                 else:
-                    observations.append(f"A new precipitate {additional_color} forms, mixing with the existing precipitate causing it to {slightly} change color. New color: {new_color}.")
+                    observations.append(f"A {tiny}new precipitate {additional_color} forms, mixing with the existing precipitate causing it to {slightly}change color. New color: {new_color}.")
             
             elif 0.8 <= precipitate_ratio < 1.1 :
                 if new_color == old_color:
                     observations.append("The amount and color of the existing precipitate does not noticeably change.")
                 else:
-                    observations.append(f"The amount of the existing precipitate does not noticeably change, but its color {slightly} changes. New color: {new_color}.")
+                    observations.append(f"The amount of the existing precipitate does not noticeably change, but its color {slightly}changes. New color: {new_color}.")
 
             elif 0.5 <= precipitate_ratio <= 0.8 :
                 if new_color == old_color:
                     observations.append("The existing precipitate partially dissolves. Its color does not noticeably change.")
                 else:
-                    observations.append(f"The existing precipitate partially dissolves and {slightly} changes color. New color: {new_color}.")
+                    observations.append(f"The existing precipitate partially dissolves and {slightly}changes color. New color: {new_color}.")
             
             else: # precipitate_ratio < 0.5
                 if new_color == old_color:
                     observations.append("The existing precipitate mostly (but not fully) dissolves. Its color does not noticeably change.")
                 else:
-                    observations.append(f"The existing precipitate mostly (but not fully) dissolves and {slightly} changes color. New color: {new_color}.")
+                    observations.append(f"The existing precipitate mostly (but not fully) dissolves and {slightly}changes color. New color: {new_color}.")
 
         else:
             observations.append(f"The precipitate fully dissolves.")
 
 
     #solution observation
-    new_sol_color = new_sol.color_name
+    new_sol_color = test.color_name
     if new_sol_color == old_sol_color:
-        if new_sol.has_precipitate:
+        if test.has_precipitate:
             observations.append("Color of the supernatant solution does not noticeably change.")
         else:
             observations.append("Color of the solution does not noticeably change.")
     
     else:
-        if new_sol.has_precipitate:
+        if test.has_precipitate:
             observations.append(f"Color of the supernatant solution changes to {new_sol_color}.")
         else:
             observations.append(f"Color of the solution changes to {new_sol_color}.")
@@ -1024,7 +1027,7 @@ def filter_solution(compositions, label: str) -> str:
             return "The solution was succesfully filtered! The filtrate and precipitate are added to the Inventory."
         
         else:
-            return "The target solution has no precipitate to filter! No change was made to the Inventory."
+            return "The target solution has no visible precipitate to filter! No change was made to the Inventory."
 
 
 @tool(hidden_args=['compositions'])
@@ -1138,53 +1141,59 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
     old_color = prec.color_name
     old_sol_color = sol.color_name
 
-    new_sol = sol_vol * sol
-    new_sol.add_solid(prec)
-    new_sol.equilibrate()
+    test = sol_vol * sol
+    test.add_solid(prec)
+    test.equilibrate()
 
-    new_sol.description = f"{int(sol_vol)} mL {sol_label} + {prec_label}"
-    compositions[test_label] = new_sol
+    test.description = f"{int(sol_vol)} mL {sol_label} + {prec_label}"
+    compositions[test_label] = test
     compositions.pop(prec_label)
 
     observations = []
 
     #precipitate observation
-    if new_sol.has_precipitate:
-        new_amount = new_sol.precipitate.total_mol
-        new_color = new_sol.precipitate.color_name
+    if test.has_precipitate:
+        new_amount = test.precipitate.total_mol
+        new_color = test.precipitate.color_name
+        # if there is at least one shared color name between the old and new color, we add a "slightly" modifier 
+        old_color_set = set(old_color.split(' / '))
+        new_color_set = set(new_color.split(' / '))
+        shared_colors = old_color_set.intersection(new_color_set)
+        slightly = "slightly " if len(shared_colors)>0 else ""
+        
         precipitate_ratio = new_amount / old_amount 
 
         if 0.8 <=  precipitate_ratio :
             if new_color == old_color:
                 observations.append("The amount and color of the added precipitate does not noticeably change.")
             else:
-                observations.append(f"The amount of the added precipitate does not noticeably change, but its color changes. New color: {new_color}")
+                observations.append(f"The amount of the added precipitate does not noticeably change, but its color {slightly}changes. New color: {new_color}")
 
         elif 0.50 <= precipitate_ratio < 0.80 :
             if new_color == old_color:
                 observations.append("The added precipitate partially dissolves. Its color does not noticeably change.")
             else:
-                observations.append(f"The added precipitate partially dissolves and changes color. New color: {new_color}")
+                observations.append(f"The added precipitate partially dissolves and its color {slightly}changes. New color: {new_color}")
         
         else:
             if new_color == old_color:
                 observations.append("The added precipitate mostly (but not fully) dissolves. Its color does not noticeably change.")
             else:
-                observations.append(f"The added precipitate mostly (but not fully) dissolves and changes color. New color: {new_color}")
+                observations.append(f"The added precipitate mostly (but not fully) dissolves and its color {slightly}changes. New color: {new_color}")
 
     else:
         observations.append(f"The added precipitate fully dissolves.")
     
     #solution observation
-    new_sol_color = new_sol.color_name
+    new_sol_color = test.color_name
     if new_sol_color == old_sol_color:
-        if new_sol.has_precipitate:
+        if test.has_precipitate:
             observations.append("Color of the supernatant solution does not noticeably change.")
         else:
             observations.append("Color of the solution does not noticeably change.")
     
     else:
-        if new_sol.has_precipitate:
+        if test.has_precipitate:
             observations.append(f"Color of the supernatant solution changes to {new_sol_color}.")
         else:
             observations.append(f"Color of the solution changes to {new_sol_color}.")

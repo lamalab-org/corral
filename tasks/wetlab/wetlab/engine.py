@@ -114,6 +114,16 @@ class Precipitate:
     
     __radd__ = __add__ 
 
+    def __rmul__(self, other: float) -> "Precipitate":
+        if other == 0:
+            return None
+        
+        if type(other) == float and other > 0 :
+            new_composition = {sp: other*self[sp] for sp in self.components}
+            return Precipitate(new_composition)
+        
+        return NotImplemented
+    
     @property
     def sys_species(self) -> Generator:
         sys = self.state.system()
@@ -180,6 +190,7 @@ class Solution(StockSolution):
         object.__setattr__(self, "is_equilibrated", False)
         object.__setattr__(self, "has_precipitate", False)
         object.__setattr__(self, "precipitate", None)
+        object.__setattr__(self, "_invisible_solids", None)
     
 
     def __rmul__(self, vol_mL: float) -> "Solution":
@@ -190,8 +201,18 @@ class Solution(StockSolution):
         if self.has_precipitate:
             raise VolumeError("Cannot draw from solutions that have precipitation. Filter it first!")
         
+        frac = round(vol_mL,2) / (self.volume + 1e-8)
         self.volume -= vol_mL
-        return Solution(self.composition, volume=vol_mL)
+        new_solution = Solution(self.composition, volume=vol_mL)
+        object.__setattr__(new_solution, "is_equilibrated", self.is_equilibrated)
+        
+        if self._invisible_solids is not None:
+            invisible_solids = frac * self._invisible_solids
+            for sp in invisible_solids.components:
+                new_solution.state.set(sp+"(s)", invisible_solids[sp], 'mol')
+            object.__setattr__(new_solution, "_invisible_solids", invisible_solids)
+
+        return new_solution
     
 
     def __add__(self, other: "Solution") -> "Solution":
@@ -203,39 +224,46 @@ class Solution(StockSolution):
                 raise ValueError("Cannot mix Solutions from different chemical systems!")
         
             new_volume = self.volume + other.volume
-            all_species = set(self.components + other.components) - {'H2O'}
+            all_aq_species = set(self.components + other.components) - {'H2O'}
 
             new_composition = {}
-            for sp in all_species:
+            for sp in all_aq_species:
                 total_mol = self[sp] * self.volume + other[sp] * other.volume
                 new_composition[sp] = total_mol/new_volume
-        
-            self.volume = 0.0
-            other.volume = 0.0
+
+            new_solution = Solution(new_composition, volume=new_volume)
+
+            invisible_solids = None
+            if (self._invisible_solids is not None) or (other._invisible_solids is not None):
+                invisible_solids = self._invisible_solids + other._invisible_solids
+                object.__setattr__(new_solution, "_invisible_solids", invisible_solids)
 
             precipitate = None
             if self.has_precipitate or other.has_precipitate:
                 precipitate =  self.precipitate + other.precipitate
-
-            new_solution = Solution(new_composition, volume=new_volume)
-            if precipitate is not None:
                 object.__setattr__(new_solution, "precipitate", precipitate)
                 object.__setattr__(new_solution, "has_precipitate", True)
-                for sp in precipitate.components:
-                    new_solution.state.set(sp+"(s)", precipitate[sp], 'mol')
+            
+            if (invisible_solids is not None) or (precipitate is not None):
+                all_solids = invisible_solids + precipitate
+                for sp in all_solids.components:
+                    new_solution.state.set(sp+"(s)", all_solids[sp], 'mol')
 
+            self.volume = 0.0
+            other.volume = 0.0
             return new_solution
         
         if isinstance(other, Precipitate):
-            solid = self.precipitate + other
+            new_precipitate = self.precipitate + other
+            all_solids = self._invisible_solids + new_precipitate
             
             new_solution = Solution(self.composition, volume=self.volume)
-            for sp in solid.components:
-                new_solution.state.set(sp+"(s)", solid[sp], 'mol')
+            for sp in all_solids.components:
+                new_solution.state.set(sp+"(s)", all_solids[sp], 'mol')
         
             object.__setattr__(new_solution, "has_precipitate", True)
-            object.__setattr__(new_solution, "precipitate", solid)
-            object.__setattr__(new_solution, "is_equilibrated", False)
+            object.__setattr__(new_solution, "precipitate", new_precipitate)
+            object.__setattr__(new_solution, "_invisible_solids", self._invisible_solids)
 
             return new_solution
         
@@ -245,26 +273,33 @@ class Solution(StockSolution):
     __radd__ = __add__ 
 
 
-    def equilibrate(self, precipitation_threshold=5e-5) -> None:
+    def equilibrate(self, precipitation_threshold=8e-5) -> None:
 
         SOLVER.solve(self.state)
 
-        solids = {}
+        visible_solids = {}
+        invisible_solids = {}
         aqueous = {}
         for sp in self.sys_species:
             mol = self.state.speciesAmount(sp)
-            if sp.endswith('(s)') and (1000*mol/self.volume >= precipitation_threshold):
-                solids[sp.removesuffix('(s)')] = float(mol)
-            elif not sp.endswith('(s)') and (sp != 'H2O') and (mol > 1.1*ZERO):
+            if sp.endswith('(s)'):
+                if (1000*mol/self.volume >= precipitation_threshold):
+                    visible_solids[sp.removesuffix('(s)')] = float(mol)
+                else:
+                    invisible_solids[sp.removesuffix('(s)')] = float(mol)
+
+            elif (sp != 'H2O') and (mol > 1.1*ZERO):
                 aqueous[sp] = 1000*float(mol)/self.volume
 
-        precipitate = Precipitate(solids) if solids != {} else None
+        precipitate = Precipitate(visible_solids) if visible_solids != {} else None
+        invisible_solids = Precipitate(invisible_solids) if invisible_solids != {} else None
         has_precipitate = precipitate is not None
         object.__setattr__(self, "composition", aqueous)
         object.__setattr__(self, "components", list(aqueous.keys()))
         object.__setattr__(self, "is_equilibrated", True)
         object.__setattr__(self, "precipitate", precipitate)
         object.__setattr__(self, "has_precipitate", has_precipitate)
+        object.__setattr__(self, "_invisible_solids", invisible_solids)
 
         return None
 
@@ -275,7 +310,7 @@ class Solution(StockSolution):
             raise NotEquilibratedError("Only equilibrated solutions can be filtered. "
                                        "Call .equilibrate() first.")
         
-        precipitate = self.precipitate
+        precipitate = self.precipitate + self._invisible_solids
         filtrate = Solution(self.composition, volume=self.volume)
         object.__setattr__(filtrate, "is_equilibrated", True)
         
