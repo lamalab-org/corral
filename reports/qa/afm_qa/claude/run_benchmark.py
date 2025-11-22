@@ -12,7 +12,7 @@ load_dotenv("../../../../.env", override=True)
 class Claude(ManegeModel):
     """Claude model wrapper for use with manege framework."""
 
-    def __init__(self, name: str = "anthropic/claude-3-5-sonnet-20241022"):
+    def __init__(self, name: str = "anthropic/claude-sonnet-4-5-20250929"):
         self.name = name
 
     def generate(self, prompt: list[list[dict[str, str]]]) -> list[str]:
