@@ -41,3 +41,18 @@ class ToolCall:
 class ToolRequest(BaseModel):
     tool_name: str
     arguments: dict[str, Any]
+
+
+class SurrenderRequest(BaseModel):
+    """Request to surrender from a task without submitting an answer"""
+
+    # No parameters needed for surrender
+
+
+class TrialCompletionResponse(BaseModel):
+    """Response when a trial is completed (via submission or surrender)"""
+
+    score: float
+    state: dict[str, Any]
+    trial_id: str
+    surrendered: bool = False

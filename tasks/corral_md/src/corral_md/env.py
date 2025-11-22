@@ -6,6 +6,7 @@ from loguru import logger
 from score import check_numerical, check_potential_file, check_structure
 from tools import (
     convert_structure_to_lammps_data,
+    execute_python_script,
     get_potential_metadata,
     get_structure_from_mp_text,
     run_lammps,
@@ -15,6 +16,7 @@ from corral.backend.env import Environment
 from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
 from corral.backend.tool import Tool
+from corral.utils.context7_tools import get_library_documentation
 from corral.utils.io_tools import (
     CatFilesTool,
     CopyFileTool,
@@ -28,8 +30,8 @@ from corral.utils.io_tools import (
 
 SCORING_FUNCTIONS = {
     "check_numerical": check_numerical,
-    "check_structure": check_structure,
     "check_potential_file": check_potential_file,
+    "check_structure": check_structure,
 }
 
 
@@ -70,7 +72,7 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
             # Resolve 'target' if it looks like a relative path
             target = scoring_params.get("target")
             if isinstance(target, str) and (target.endswith(".data")):
-                json_dir = Path(task_file).resolve().parent
+                json_dir = Path(task_file).resolve().parent.parent
                 abs_target_path = Path(json_dir, target).resolve()
                 logger.info(f"Resolving target path: {abs_target_path}")
 
@@ -166,6 +168,8 @@ class TaskGroupEnvironment(Environment):
                     "cat_files": CatFilesTool(fs_manager),
                     "copy_file": CopyFileTool(fs_manager),
                     "grep": GrepTool(fs_manager),
+                    "library_docs": get_library_documentation,
+                    "execute_python_script": execute_python_script,
                 }
             )
             logger.info(
@@ -194,7 +198,7 @@ Required submission format:
 
         prompt += "\nAvailable input data:\n"
 
-        prompt += "All the potentials, can be found at /potentials/. Note that in case of reaxff potentials, pair style 'reax/c' has been renamed to 'reaxff' and always use NULL for the control file (cfile), for example, this syntax is correct : pair_style reaxff NULL.\n\n"
+        prompt += "All the potentials, can be found at /potentials/.\n\n"
 
         # Display input data from dependencies
         for dep_task_id in self.current_task.input_from_tasks:
@@ -265,6 +269,7 @@ def create_environments(
     work_dir: str,
     subtask_level: bool,
     environment: str,
+    level: str,
     taskgroup_common_tools: dict[str, Tool] | None = None,
 ) -> dict[str, TaskGroupEnvironment]:
     logger.info("Creating environments for MD")
@@ -275,11 +280,16 @@ def create_environments(
             Path(__file__).parent.parent.parent
             / "environments"
             / environment
+            / level
             / "subtasks"
         )
     else:
         json_path = (
-            Path(__file__).parent.parent.parent / "environments" / environment / "tasks"
+            Path(__file__).parent.parent.parent
+            / "environments"
+            / environment
+            / level
+            / "tasks"
         )
 
     # Load tasks from JSON
@@ -332,6 +342,7 @@ if __name__ == "__main__":
         "--subtask_level", type=lambda x: x.lower() == "true", required=True
     )
     parser.add_argument("--environment", required=True)
+    parser.add_argument("--level", required=True)
     args = parser.parse_args()
 
     # Create all environments with file system tools
@@ -339,6 +350,7 @@ if __name__ == "__main__":
         work_dir=args.dir,
         subtask_level=args.subtask_level,
         environment=args.environment,
+        level=args.level,
     )
 
     logger.info("\nCreated Environments:")
