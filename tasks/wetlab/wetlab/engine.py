@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from math import log10
+from copy import deepcopy
 from typing import Optional, Dict, Generator
 from colors import mix_colors, solution_color, closest_color_names, PRECIPITATE_COLORS, PALLETT
 import reaktoro as rk
@@ -11,8 +12,10 @@ class VolumeError(ValueError):
 class NotEquilibratedError(RuntimeError):
     pass
 
+
 class NegativeMassError(ArithmeticError):
     pass
+
 
 DB = rk.Database.fromFile('WetChem.yaml')
 ZERO = 1e-20
@@ -47,13 +50,17 @@ def _speciate(element_str):
     return results
 
 
-def set_chemical_system(elements_str: str) -> rk.ChemicalSystem:
+def set_chemical_system(system: str | rk.ChemicalSystem) -> rk.ChemicalSystem:
     global DEFAULT_SYS, SOLVER, SOLVER_OPTIONS
-    aq_phase = rk.AqueousPhase(_speciate(elements_str))
-    try:
-        DEFAULT_SYS = rk.ChemicalSystem(DB, aq_phase, rk.MineralPhases())
-    except RuntimeError:
-        DEFAULT_SYS = rk.ChemicalSystem(DB, aq_phase)
+
+    if isinstance(system, rk.ChemicalSystem):
+        DEFAULT_SYS = system
+    else:
+        aq_phase = rk.AqueousPhase(_speciate(system))
+        try:
+            DEFAULT_SYS = rk.ChemicalSystem(DB, aq_phase, rk.MineralPhases())
+        except RuntimeError:
+            DEFAULT_SYS = rk.ChemicalSystem(DB, aq_phase)
 
     SOLVER = rk.EquilibriumSolver(DEFAULT_SYS)
     SOLVER.setOptions(SOLVER_OPTIONS)
@@ -124,6 +131,10 @@ class Precipitate:
         
         return NotImplemented
     
+    def clone(self) -> "Precipitate":
+        new_precipitate = Precipitate(self.composition, description=self.description)
+        return new_precipitate
+
     @property
     def sys_species(self) -> Generator:
         sys = self.state.system()
@@ -195,6 +206,9 @@ class Solution(StockSolution):
 
     def __rmul__(self, vol_mL: float) -> "Solution":
 
+        if type(vol_mL) not in [int, float]:
+            return NotImplemented
+        
         if vol_mL > self.volume + 1e-8:
             raise VolumeError(f"Requested to draw {vol_mL:.2f} mL but only {self.volume:.2f} mL available.")
         
@@ -282,13 +296,13 @@ class Solution(StockSolution):
         aqueous = {}
         for sp in self.sys_species:
             mol = self.state.speciesAmount(sp)
-            if sp.endswith('(s)'):
+            if sp.endswith('(s)') and (mol >= 10*ZERO):
                 if (1000*mol/self.volume >= precipitation_threshold):
                     visible_solids[sp.removesuffix('(s)')] = float(mol)
                 else:
                     invisible_solids[sp.removesuffix('(s)')] = float(mol)
 
-            elif (sp != 'H2O') and (mol > 1.1*ZERO):
+            elif (sp != 'H2O') and (mol >= 10*ZERO):
                 aqueous[sp] = 1000*float(mol)/self.volume
 
         precipitate = Precipitate(visible_solids) if visible_solids != {} else None
@@ -310,11 +324,17 @@ class Solution(StockSolution):
             raise NotEquilibratedError("Only equilibrated solutions can be filtered. "
                                        "Call .equilibrate() first.")
         
-        precipitate = self.precipitate + self._invisible_solids
-        filtrate = Solution(self.composition, volume=self.volume)
-        object.__setattr__(filtrate, "is_equilibrated", True)
+        precipitate = None
+        if (self.precipitate is not None) or (self._invisible_solids is not None):
+            precipitate = self.precipitate + self._invisible_solids
         
-        return filtrate, precipitate
+        if self.volume > 0:
+            filtrate = Solution(self.composition, volume=self.volume)
+            object.__setattr__(filtrate, "is_equilibrated", True)
+            return filtrate, precipitate
+        else:
+            raise VolumeError("Cannot filter solutions with a volume of zero!")
+
 
 
     def add_solid(self, solid: Precipitate) -> None:
@@ -335,7 +355,18 @@ class Solution(StockSolution):
 
         return None
     
-    
+    def clone(self) -> "Solution":
+        new_solution = Solution(self.composition, volume=self.volume, description=self.description)
+        new_state = self.state.clone()
+        new_precipitate = self.precipitate.clone() if self.precipitate is not None else None
+        new_invisible_solids = self._invisible_solids.clone() if self._invisible_solids is not None else None
+        object.__setattr__(new_solution, "state", new_state)
+        object.__setattr__(new_solution, "is_equilibrated", self.is_equilibrated)
+        object.__setattr__(new_solution, "has_precipitate", self.has_precipitate)
+        object.__setattr__(new_solution, "precipitate", new_precipitate)
+        object.__setattr__(new_solution, "_invisible_solids", new_invisible_solids)
+        return new_solution
+
     @property
     def sys_species(self) -> Generator:
         sys = self.state.system()

@@ -61,7 +61,7 @@ PRECIPITATE_COLORS = {# Many colors from Perry "Handbook of Inorganic Compounds"
     'Ag3PO4':    'dirty yellow',               
     'Ag2S':      'black',                
 
-    'BaCrO4':    'pale yellow',         
+    'BaCrO4':    'yellow',         
 
     'CaCrO4':    'yellow',          
 
@@ -72,6 +72,7 @@ PRECIPITATE_COLORS = {# Many colors from Perry "Handbook of Inorganic Compounds"
     'Co(OH)2':   'blue',
     'CoOx':      'pink', # there is a photo in DOI: 10.1021/acssuschemeng.5b01000
     'Co3(PO4)2': 'lavender',
+    'CoS':       'black',
 
 
     'CuCrO4':    'reddish brown',        
@@ -106,7 +107,7 @@ PRECIPITATE_COLORS = {# Many colors from Perry "Handbook of Inorganic Compounds"
     'NiCrO4':    'maroon', # this is weird but it was in Perry!!
     'Ni(OH)2':   'pale green',
     'Ni(Hdmg)2': 'crimson',
-    'Ni(CN)2':   'pale turqoise',
+    'Ni(CN)2':   'pale turquoise',
     'NiOx':      'pale green',
     'Ni3(PO4)2': 'pale green',
     'NiS':       'black',

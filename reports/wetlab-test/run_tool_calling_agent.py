@@ -1,3 +1,4 @@
+import os
 import litellm
 from dotenv import load_dotenv
 from loguru import logger
@@ -13,7 +14,7 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "claude-3-5-sonnet-20241022",
+    model: str = "gpt-4o-2024-08-06",
     task_ids: list | None = None,
     temperature: float = 0.0,
     run_name: str = "corral_benchmark_run",
@@ -21,13 +22,15 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = CorralRouter(base_url="http://127.0.1.1:8080")
+    host = os.environ.get("CORRAL_HOST","0.0.0.0")
+    port = os.environ.get("CORRAL_PORT","8000")
+    interface = CorralRouter(base_url=f"http://{host}:{port}")
     # wandblogger = CorralWandbLogger(
     #     project="corral",
     #     group="tool_description_ablation",
     #     name=run_name,
     # )
-    agent = ToolCallingAgent(model=model, max_iterations=20, temperature=temperature)
+    agent = ToolCallingAgent(model=model, max_iterations=30, temperature=temperature)
     runner = CorralRunner(interface, agent)
 
     # Run benchmark
@@ -48,17 +51,26 @@ if __name__ == "__main__":
     setup_litellm()
 
     verboses = [
-        "brief",
-        #"workflow",
+        #"brief",
+        "workflow",
         #"comprehensive",
     ]
-    for verbose in verboses:
-        logger.info(f"Running benchmark with verbosity: {verbose}")
-        try:
-            model = "claude-sonnet-4-5-20250929"
-            run_name = f"claude_45_sonnet-tool_calling-wetlab_env-{verbose}_verbosity"
-            run_benchmark(model=model, run_name=run_name, verbose=verbose)
 
-        except Exception as e:
-            logger.error(f"Benchmark failed: {e!s}")
-            raise
+    models = [
+        "gpt-4o-2024-08-06",
+        #"claude-sonnet-4-5-20250929"
+    ]
+    for model in models:
+        for verbose in verboses:
+            logger.info(f"Running benchmark with verbosity: {verbose}")
+            try: 
+                model_name = "gpt_4o" if model.startswith("gpt-4o") else ("claude_45" if model.startswith("claude") else None)
+                if model_name is not None:
+                    run_name = f"{model_name}-tool_calling-wetlab_env-{verbose}_verbosity"
+                    run_benchmark(model=model, run_name=run_name, verbose=verbose)
+                else: 
+                    logger.error(f"Invalid model: {model!r}")
+
+            except Exception as e:
+                logger.error(f"Benchmark failed: {e!s}")
+                raise

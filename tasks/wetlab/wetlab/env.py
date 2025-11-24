@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 from loguru import logger
+from dotenv import load_dotenv
 from dataclasses import dataclass
 from typing import Dict
 
@@ -23,15 +24,16 @@ from corral.backend.env import Environment
 from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
 
-BASE_WORK_DIR = os.environ.get(
-    "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/WetLab"
-)
+# BASE_WORK_DIR = os.environ.get(
+#     "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/WetLab"
+# )
 
 SCORING_FUNCTIONS = {
     "score_ion_list": score_ion_list,
 }
 
 REAGENTS_1 = {
+    "Water": StockSolution(composition={}, description="Distilled water"),
     "HCl(0.02M)": StockSolution(composition={"H+": 0.02, "Cl-": 0.02}, description="HCl 0.02 M, in water"),
     "HCl(1M)": StockSolution(composition={"H+": 1, "Cl-":1}, description="HCl 1.0 M, in water"),
     "HCl(6M)": StockSolution(composition={"H+": 6, "Cl-": 6}, description="HCl 6.0 M, in water"),
@@ -69,25 +71,24 @@ SYS_2 = "Ag Ba Cu Fe(+3) Hg(+2) Mn Pb N(+5) Cl S(+6)"
 
 @dataclass
 class QualitativeAnalysisTask(TaskDefinition):
-    sys: str = None
+    task_sys: str = None
     sample_list: Dict[str, Solution] = None
     reagent_list: Dict[str, StockSolution] | str = None
 
     def __post_init__(self): # setting up the engine
 
-        print(self.reagent_list)
-        if self.reagent_list == "def_1" or self.reagent_list == "default":
+        if self.reagent_list == "def_1":
             reagent_solutions = REAGENTS_1
-            sys = ' '.join([SYS_1, self.sys])
+            sys = ' '.join([SYS_1, self.task_sys])
         elif self.reagent_list == "def_2":
             reagent_solutions = REAGENTS_2
-            sys = ' '.join([SYS_2, self.sys])
+            sys = ' '.join([SYS_2, self.task_sys])
         elif self.reagent_list == "def_12":
             reagent_solutions = REAGENTS_1 | REAGENTS_2
-            sys = ' '.join([SYS_1, SYS_2, self.sys])
+            sys = ' '.join([SYS_1, SYS_2, self.task_sys])
         else:
             reagent_solutions = {reagent["label"]: StockSolution(composition=reagent["composition"], description=reagent["description"]) for reagent in self.reagent_list}
-            sys = self.sys
+            sys = self.task_sys
         
         chemical_system = set_chemical_system(sys)
         original_samples = {sample["label"]: Solution(composition=sample["composition"], volume=sample["vol"], description="unknown") for sample in self.sample_list}
@@ -103,21 +104,21 @@ class QualitativeAnalysisTask(TaskDefinition):
         object.__setattr__(self, "samples", sample_solutions)
         object.__setattr__(self, "reagents", reagent_solutions)
         object.__setattr__(self, "chemical_system", chemical_system)
+        object.__setattr__(self, "sys", sys)
 
 def load_tasks_from_json(
-    json_path: Path, work_dir: str = BASE_WORK_DIR
+    json_path: Path, #work_dir: str = BASE_WORK_DIR
 ) -> dict[str, TaskDefinition]:
-    task_files = json_path.glob("*.json")
     tasks = {}
-    for task_file in task_files:
-        if not Path(task_file).exists():
+    for task_file in json_path.glob("*.json"):
+        if not Path(task_file).is_file():
             raise ValueError(f"Task file {task_file} is not a valid file.")
 
         with task_file.open() as f:
             task_data = json.load(f)
         for data in task_data:
             task_id = data["id"]
-            initial_input = data.get("initial_input", {"work_dir": work_dir})
+            initial_input = data.get("initial_input", {}) #, {"work_dir": work_dir})
             input_from_tasks = data.get("input", {}).get("input_from_task", [])
             if not isinstance(input_from_tasks, list):
                 input_from_tasks = []
@@ -131,7 +132,7 @@ def load_tasks_from_json(
                 submission_format=data.get("submission_format", ""),
                 input_from_tasks=input_from_tasks,
                 initial_input=initial_input,
-                sys=data["input"]["sys"],
+                task_sys=data["input"]["sys"],
                 sample_list=data["input"]["samples"],
                 reagent_list=data["input"]["reagents"],
             )
@@ -144,7 +145,7 @@ class TaskEnvironment(Environment):
     Args:
         task_id (str): ID of the task to work on
         task_group (TaskGroup): Task group containing all the subtasks
-        available_tools (dict[str, Tool]): All tools available in the environment (including file system tools)
+        available_tools (dict[str, Tool]): All tools available in the environment
 
     Raises:
         ValueError: If task ID is not found in the task group
@@ -154,7 +155,7 @@ class TaskEnvironment(Environment):
         self,
         task_id: str,
         task_group: TaskGroup,
-        work_dir: str,
+        work_dir: str = "",
     ):
         self.task_id = task_id
         self.task_group = task_group
@@ -167,7 +168,7 @@ class TaskEnvironment(Environment):
         self.current_task = task_group.tasks[task_id]
 
         # Initialize environment
-        super().__init__(f"{task_group.group_id}_{task_id}", base_work_dir=work_dir)
+        super().__init__(f"{task_group.group_id}_{task_id}" , base_work_dir=work_dir)
 
         compositions = self.current_task.samples | self.current_task.reagents
         self.hidden_args = {"compositions": compositions}
@@ -176,19 +177,25 @@ class TaskEnvironment(Environment):
         logger.info(f"Task name: {self.current_task}")
         self._add_task_tools()
 
+    def configure_additional_apps(self):
+        """Setting the Reaktoro chemical system"""
+        set_chemical_system(self.current_task.chemical_system)
+        logger.info(f"Reaktoro chemical system is set to '{self.current_task.sys}' for {self.task_id}.")
+
     def _add_task_tools(self):
         """Add tools required for the current task to the environment"""
-        for tool_name in self.current_task.tools:
-            if tool_name in self.available_tools:
+        if len(self.current_task.tools) > 0:
+            for tool_name in self.current_task.tools:
+                if tool_name in self.available_tools:
+                    self.add_tool(self.available_tools[tool_name])
+                else:
+                    logger.warning(
+                        f"Tool {tool_name} not found in available tools for task {self.task_id}"
+                    )
+        else:
+            # Adding all tools if no tools are specified
+            for tool_name in self.available_tools:
                 self.add_tool(self.available_tools[tool_name])
-            else:
-                logger.warning(
-                    f"Tool {tool_name} not found in available tools for task {self.task_id}"
-                )
-        if "subtask" not in self.current_task.name:
-            # Add file system tools if not already included
-            for tool in self.available_tools.values():
-                self.add_tool(self.available_tools[tool.name])
 
     def get_task_prompt(self) -> str:
         prompt = (
@@ -246,7 +253,7 @@ class TaskEnvironment(Environment):
 
 
 def create_qualysis_environments(
-    work_dir: str = BASE_WORK_DIR,
+    #work_dir: str = BASE_WORK_DIR,
     subtask_level: bool = False,
 ) -> dict[str, Environment]:
     """Create environments for the WetLab (Qualitative Inorganic Analysis) benchmark tasks."""
@@ -256,11 +263,11 @@ def create_qualysis_environments(
     else:
         json_path = Path(__file__).parent / "tasks_json"
     if not json_path.exists():
-        raise ValueError(f"Task file {json_path} does not exist.")
+        raise ValueError(f"The path {json_path!r} does not exist.")
 
-    logger.info(f"Loading tasks from {json_path}")
+    logger.info(f"Loading tasks from {json_path!r}")
 
-    tasks = load_tasks_from_json(json_path, work_dir=work_dir)
+    tasks = load_tasks_from_json(json_path) #, work_dir=work_dir)
 
     group_id = "qualitative_inorganic_analysis"
     logger.info(f"Creating task group {group_id} with {len(tasks)} tasks")
@@ -285,13 +292,16 @@ def create_qualysis_environments(
         environments[task_id] = TaskEnvironment(
             task_id=task_id,
             task_group=task_group,
-            work_dir=work_dir,
+            #work_dir=work_dir,
         )
 
     return environments
 
 
 if __name__ == "__main__":
+
+    load_dotenv()
+
     parser = argparse.ArgumentParser(description="Qualitative Inorganic Analysis Benchmark Server")
     parser.add_argument(
         "--host",
@@ -313,11 +323,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
+    #Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
 
     # Create all environments with file system tools
     environments = create_qualysis_environments(
-        work_dir=BASE_WORK_DIR, subtask_level=args.subtask_level
+        #work_dir=BASE_WORK_DIR,
+        subtask_level=args.subtask_level
     )
 
     logger.info("\nCreated Environments:")

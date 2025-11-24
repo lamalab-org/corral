@@ -3,6 +3,10 @@ from corral.backend.tool import Tool, tool
 from wetlab.engine import StockSolution, Solution, Precipitate, VolumeError, NegativeMassError
 from wetlab.colors import PRECIPITATE_COLORS, PALLETT, mix_colors, closest_color_names
 
+PREC_COLOR_LOOKUP = {}
+for k, v in PRECIPITATE_COLORS.items():
+    PREC_COLOR_LOOKUP[k.replace("Ox", "C2O4")] = v
+
 CATIONS = [
     'Ag+',
     'Al+3',
@@ -249,7 +253,8 @@ def perform_flame_test(compositions, label: str) -> str:
 
     [PROCEDURAL] When to use this tool:
     - Flame color can identify certain cations.
-    - It is especially useful to identify alkali metals because they do not commonly form precipitates. [/PROCEDURAL]
+    - Useful to identify copper, alkali, and alkaline earth metals because of their characteristic flame colors.
+    - It is especially useful for identifying alkali metals because they do not form percipitates under normal conditions. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
     1. [PREREQUISITE] Make sure that `label` points to a solution and that it does not contain a precipitate. If the solution has a precipitate, filter it before running this test. [/PREREQUISITE]
@@ -258,8 +263,8 @@ def perform_flame_test(compositions, label: str) -> str:
 
     [CONTEXTUAL] How this tool works:
     - It uses 1 mL of the solution to perform a flame test.
-    - If no species is present that give a characteristic flame color, the resulting observations is "No characteristic color".
-    - If the flame has a single characteristic color, the resulting observation will indicate that color.
+    - If no species are present that give a characteristic flame color, the resulting observations is "No characteristic color".
+    - If the flame has a single characteristic color, the resulting observation will indicate the exact name for that color.
     - If multiple different colors are observed, the resulting observation will be "A multi-colored flame". [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
@@ -501,7 +506,7 @@ def lookup_precipitate_colors() -> str:
     [/LIMITATIONS]
     """
     statement = "NOTE: This list only describes colored (non-white) precipitates. If the color of a precipitate is not listed below, it means that it's white.\n"
-    precipitate_colors = [f"{prec}     {color}" for prec,color in PRECIPITATE_COLORS.items()]
+    precipitate_colors = [f"{prec} :    {color}" for prec,color in PREC_COLOR_LOOKUP.items()]
 
     return statement + '\n'.join(precipitate_colors)
 
@@ -744,14 +749,14 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
     #precipitate observation
     if test.has_precipitate:
         prec_colors = test.precipitate.color_name
-        tiny = "tiny amount of " if (test.precipitate.total_mol / test.volume < 5e-4) else ""
+        tiny = "tiny amount of " if (1000 * test.precipitate.total_mol / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mM are described as 'tiny'.
         observations.append(f"A {tiny}precipitate forms. Color: {prec_colors}")
     else:
         observations.append("No precipitate forms.")
     
     #solution observation
+    sol_color = test.color_name
     if test.has_precipitate:
-        sol_color = test.color_name
         observations.append(f"The supernatant solution is {sol_color}.")
     else:
         observations.append(f"The resulting solution is {sol_color}.")
@@ -853,7 +858,7 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
         raise KeyError(f"Invalid sol1_label: {e}")
 
     if type(sol1) != Solution:
-        raise RuntimeError(f"{sol1_label} is not a solution!")
+        raise RuntimeError(f"{sol1_label} is not a valid solution!")
     
     try:
         sol2 = compositions[sol2_label]
@@ -862,8 +867,10 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
     
     if not isinstance(sol2, StockSolution):
         raise RuntimeError(f"{sol2_label} is not a solution!")
-    
 
+    if sol1.volume == 0:
+        raise VolumeError(f"The remaining volume of {sol1_label} is zero!")
+    
     description = f"{int(sol1.volume)} mL {sol1_label} + {int(sol2_vol)} mL {sol2_label}"
 
     old_supernatant, old_precipitate = sol1.filter()
@@ -880,7 +887,7 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
     if old_precipitate is None:
         if test.has_precipitate:
             prec_colors = test.precipitate.color_name
-            tiny = "tiny amount of "  if (test.precipitate.total_mol / test.volume < 5e-4) else ""
+            tiny = "tiny amount of "  if (1000 * test.precipitate.total_mol / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mM are described as 'tiny'.
             observations.append(f"A {tiny}precipitate forms. Color: {prec_colors}")
         else:
             observations.append("No precipitate forms.")
@@ -902,16 +909,16 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
 
             if precipitate_ratio >= 1.1 :
                 # getting the newly formed precipitate
-                test_no_prec = old_supernatant + sol2_vol * sol2
+                test_no_prec = old_supernatant + sol2_vol * sol2.clone() # .clone() is used to prevent the volume of sol2 from decreasing
                 test_no_prec.equilibrate()
-                additional_color = "(" + test_no_prec.precipitate.color_name + ")"
-                tiny = "tiny amount of "  if (test_no_prec.precipitate.total_amount / test.volume < 5e-4) else ""
+                additional_color = " (color: " + test_no_prec.precipitate.color_name + " )"
+                tiny = "tiny amount of "  if (1000 * test_no_prec.precipitate.total_amount / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mM are described as 'tiny'.
                 if additional_color == old_color:
                     observations.append(f"A {tiny}precipitate with the same color as the existing precipitate forms.")
                 elif new_color == old_color: 
-                    observations.append(f"A {tiny}new precipitate {additional_color} forms, but does not cause the color of the existing precipitate to noticeably change.")
+                    observations.append(f"A {tiny}new precipitate{additional_color} forms, but does not cause the color of the existing precipitate to noticeably change.")
                 else:
-                    observations.append(f"A {tiny}new precipitate {additional_color} forms, mixing with the existing precipitate causing it to {slightly}change color. New color: {new_color}.")
+                    observations.append(f"A {tiny}new precipitate{additional_color} forms, mixing with the existing precipitate causing it to {slightly}change color. New color: {new_color}.")
             
             elif 0.8 <= precipitate_ratio < 1.1 :
                 if new_color == old_color:
@@ -1079,7 +1086,7 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
         
         sol_vol (int):
             [BRIEF] volume of the solution [/BRIEF]
-            [DETAILED] the volume (in mL) of the host solution, labeled `sol_label`. This volume will be drawn from the solution and the precipitate is then added to the drawn volume. The minimum allowed volume is 5 mL [/DETAILED]
+            [DETAILED] the volume (in mL) of the host solution, labeled `sol_label`. This volume will be drawn from the solution and the precipitate is then added to the drawn volume. The minimum allowed volume is 4 mL [/DETAILED]
         
   
     Returns:
@@ -1098,8 +1105,8 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
                       [ERROR_RECOVERY] Make sure you are passing the corrent labels. You can use the `get_available_reagets` and `check_inventory` tools. [/ERROR_RECOVERY]
         
         ValueError: [ERROR_WHEN] When `sol_vol` is invalid [/ERROR_WHEN]
-                    [ERROR_DETAILS] The given `sol_vol` is not an integer greater than or equal to 5 mL [/ERROR_DETAILS]
-                    [ERROR_RECOVERY] Make sure you are using at least 5 mL of the solution and passing it as an integer value [/ERROR_RECOVERY]
+                    [ERROR_DETAILS] The given `sol_vol` is not an integer greater than or equal to 4 mL [/ERROR_DETAILS]
+                    [ERROR_RECOVERY] Make sure you are using at least 4 mL of the solution and passing it as an integer value [/ERROR_RECOVERY]
         
         VolumeError: [ERROR_WHEN] When `sol_label` contains a precipitate or its remaining volume is less than the requested amount [/ERROR_WHEN]
                      [ERROR_DETAILS] The given `sol_label` was found in the Inventory and it is a solution but it either contains a precipitate or there is not enough of it remaining [/ERROR_DETAILS]
@@ -1108,7 +1115,7 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
 
     [LIMITATIONS] Known Limitations:
     - The solution may not contain any precipitates.
-    - The minimum allowed volume for the solution is 5 mL.
+    - The minimum allowed volume for the solution is 4 mL.
     - The reported colors are qualitative and approximate.
     - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
     - The perceived color of solutions will depend on the concentraion of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
@@ -1134,18 +1141,20 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
         if sol.has_precipitate: 
             raise VolumeError(f"{sol_label} already has a precipitate. If you want to add a different precipitate, you must filter it first!")
 
-    if type(sol_vol) != int or sol_vol > 5:
-        raise ValueError(f"`sol_vol` must be an integer greater than or equal to 5")
+    if type(sol_vol) != int or sol_vol < 4:
+        raise ValueError(f"`sol_vol` must be an integer greater than or equal to 4")
     
     old_amount = prec.total_mol
     old_color = prec.color_name
-    old_sol_color = sol.color_name
 
     test = sol_vol * sol
+    test.equilibrate()
+    old_sol_color = test.color_name
+
     test.add_solid(prec)
     test.equilibrate()
-
     test.description = f"{int(sol_vol)} mL {sol_label} + {prec_label}"
+
     compositions[test_label] = test
     compositions.pop(prec_label)
 
