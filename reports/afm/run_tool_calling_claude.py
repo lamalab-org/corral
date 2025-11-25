@@ -57,7 +57,7 @@ if __name__ == "__main__":
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
             model = "claude-sonnet-4-5-20250929"
-            run_name = f"claude-sonnet-4-5-Tool_calling-subtasks_1-{verbose}_verbosity"
+            run_name = f"claude-sonnet-4-5-Tool_calling-subtasks_2-{verbose}_verbosity"
             run_benchmark(model=model, run_name=run_name, verbose=verbose, temperature=0)
 
         except Exception as e:

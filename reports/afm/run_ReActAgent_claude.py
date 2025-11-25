@@ -28,7 +28,7 @@ def run_benchmark(
         group="tool_description_ablation",
         name=run_name,
     )
-    agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
+    agent = ReActAgent(model=model, max_iterations=10, temperature=temperature)
     runner = CorralRunner(interface, agent, logger=wandblogger)
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
@@ -56,7 +56,7 @@ if __name__ == "__main__":
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
             model = "claude-sonnet-4-5-20250929"
-            run_name = f"claude-sonnet-4-5-React-task_2-{verbose}_verbosity"
+            run_name = f"claude-sonnet-4-5-React-subtasks_4-{verbose}_verbosity"
             run_benchmark(model=model, run_name=run_name, verbose=verbose, temperature=0)
 
         except Exception as e:
