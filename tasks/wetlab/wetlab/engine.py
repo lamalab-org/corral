@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from math import log10
-from copy import deepcopy
 from typing import Optional, Dict, Generator
 from colors import mix_colors, solution_color, closest_color_names, PRECIPITATE_COLORS, PALLETT
 import reaktoro as rk
@@ -24,27 +23,29 @@ SOLVER_OPTIONS.epsilon = ZERO
 SOLVER_OPTIONS.use_ideal_activity_models = True
 
 
+PSEUDO_ELEMENTS = {
+    'C(+2)', 'C(+4)', 'N(-3)', 'N(+5)', 'S(-2)', 'S(0)', 'S(+6)',
+    'Fe(+2)', 'Fe(+3)', 'Hg(+2)', 'Hg(+1)','Ox', 'dmg',
+}
+
 def _speciate(element_str):
     elements = set(element_str.strip().split())
-    elements |= set({'H', 'O'})
-    pseudo_elements = set([
-        'C(+2)', 'C(+4)', 'N(-3)', 'N(+5)', 'S(-2)', 'S(0)', 'S(+6)',
-        'Fe(+2)', 'Fe(+3)', 'Hg(+2)', 'Hg(+1)',
-        'Ox', 'dmg',
-    ])
-    real = [element for element in elements if (element not in pseudo_elements) and (element not in ['C', 'N', 'S', 'Fe', 'Hg'])]
-    pseudo = [element for element in elements if element in pseudo_elements]
+    elements |= {'H', 'O'}
+    
     if 'C' in elements:
-        pseudo.extend(['C(+2)', 'C(+4)'])
+        elements = elements - {'C'} | {'C(+2)', 'C(+4)'}
     if 'N' in elements:
-        pseudo.extend(['N(-3)', 'N(+5)'])
+        elements = elements - {'N'} | {'N(-3)', 'N(+5)'}
     if 'S' in elements:
-        pseudo.extend(['S(-2)', 'S(0)', 'S(+6)'])
+        elements = elements - {'S'} | {'S(-2)', 'S(0)', 'S(+6)'}
     if 'Fe' in elements:
-        pseudo.extend(['Fe(+2)', 'Fe(+3)'])
+        elements = elements - {'Fe'} | {'Fe(+2)', 'Fe(+3)'}
     if 'Hg' in elements:
-        pseudo.extend(['Hg(+1)', 'Hg(+2)'])
-    pseudo = list(set(pseudo))
+        elements = elements - {'Hg'} | {'Hg(+1)', 'Hg(+2)'}
+
+    real = list(elements - PSEUDO_ELEMENTS)
+    pseudo = list(elements.intersection(PSEUDO_ELEMENTS))
+
     results = rk.speciate(real)
     results.symbols += pseudo
     return results
@@ -76,8 +77,6 @@ def _new_empty_state(sys: Optional[rk.ChemicalSystem]=None) -> rk.ChemicalState:
     state = rk.ChemicalState(sys)
     state.setSpeciesAmounts(ZERO)
     return state
-
-
 
 @dataclass
 class Precipitate:
@@ -195,13 +194,15 @@ class Solution(StockSolution):
         for sp, conc in self.composition.items():
             mol = conc * vol_L
             state.set(sp, mol, "mol")
-
+        
         object.__setattr__(self, "state", state)
         object.__setattr__(self, "components", list(self.composition.keys()))
         object.__setattr__(self, "is_equilibrated", False)
         object.__setattr__(self, "has_precipitate", False)
         object.__setattr__(self, "precipitate", None)
         object.__setattr__(self, "_invisible_solids", None)
+        object.__setattr__(self, "_eq_iters", 0)
+        object.__setattr__(self, "_eq_error", 0.0)
     
 
     def __rmul__(self, vol_mL: float) -> "Solution":
@@ -287,9 +288,22 @@ class Solution(StockSolution):
     __radd__ = __add__ 
 
 
-    def equilibrate(self, precipitation_threshold=8e-5) -> None:
-
-        SOLVER.solve(self.state)
+    def equilibrate(self, precipitation_threshold=8e-5, retry=3, error_threshold=3e-8) -> None:
+    
+        # trying to solve the equilibrium equations
+        self._eq_iters = 0
+        converged = False
+        for _ in range(retry):
+            eq_result = SOLVER.solve(self.state)
+            self._eq_iters += 1
+            error = eq_result.optima.error
+            if eq_result.succeeded() or (error < error_threshold):
+                self._eq_error = error
+                converged = True
+                break
+        if not converged:
+            self._eq_error = error
+            raise NotEquilibratedError("Equilibrium calculations failed to converge!")
 
         visible_solids = {}
         invisible_solids = {}
@@ -308,6 +322,7 @@ class Solution(StockSolution):
         precipitate = Precipitate(visible_solids) if visible_solids != {} else None
         invisible_solids = Precipitate(invisible_solids) if invisible_solids != {} else None
         has_precipitate = precipitate is not None
+        
         object.__setattr__(self, "composition", aqueous)
         object.__setattr__(self, "components", list(aqueous.keys()))
         object.__setattr__(self, "is_equilibrated", True)

@@ -38,9 +38,9 @@ ANIONS = [
     'Cl-',
     'CO3-2',
     'HCO3-',
-    'C2O4-2',
-    'HC2O4-',
-    'CN-',
+    #'C2O4-2',
+    #'HC2O4-',
+    #'CN-',
     'CrO4-2',
     'HCrO4-',
     'Cr2O7-2',
@@ -68,7 +68,7 @@ FLAME_COLORS = {
     "Na+": "yellow",
     "Rb+": "red-violet",
     "Sr+2": "red",
-    "Tl+": "green",
+    #"Tl+": "green",
 }
 
 @tool
@@ -749,7 +749,7 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
     #precipitate observation
     if test.has_precipitate:
         prec_colors = test.precipitate.color_name
-        tiny = "tiny amount of " if (1000 * test.precipitate.total_mol / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mM are described as 'tiny'.
+        tiny = "tiny amount of " if (1000 * test.precipitate.total_mol / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.
         observations.append(f"A {tiny}precipitate forms. Color: {prec_colors}")
     else:
         observations.append("No precipitate forms.")
@@ -887,7 +887,7 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
     if old_precipitate is None:
         if test.has_precipitate:
             prec_colors = test.precipitate.color_name
-            tiny = "tiny amount of "  if (1000 * test.precipitate.total_mol / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mM are described as 'tiny'.
+            tiny = "tiny amount of "  if (1000 * test.precipitate.total_mol / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.
             observations.append(f"A {tiny}precipitate forms. Color: {prec_colors}")
         else:
             observations.append("No precipitate forms.")
@@ -911,8 +911,8 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
                 # getting the newly formed precipitate
                 test_no_prec = old_supernatant + sol2_vol * sol2.clone() # .clone() is used to prevent the volume of sol2 from decreasing
                 test_no_prec.equilibrate()
-                additional_color = " (color: " + test_no_prec.precipitate.color_name + " )"
-                tiny = "tiny amount of "  if (1000 * test_no_prec.precipitate.total_amount / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mM are described as 'tiny'.
+                additional_color = " (color: " + test_no_prec.precipitate.color_name + ")"
+                tiny = "tiny amount of "  if (1000 * test_no_prec.precipitate.total_amount / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.
                 if additional_color == old_color:
                     observations.append(f"A {tiny}precipitate with the same color as the existing precipitate forms.")
                 elif new_color == old_color: 

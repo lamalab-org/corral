@@ -22,19 +22,23 @@ COLORED_SPECIES = { # (wavelength, FWHM, epsilon)
     'Cr2O7-2': [(350, 65, 3000), (440, 100, 400)],
     'Cu+2': (800, 230, 20),
     'Cu(NH3)4+2': (600, 160, 20),
+    'Cu(OH)3-': (600, 160, 20),
+    'Cu(OH)4-2': (600, 160, 30),
     'Ni+2': [(400, 95, 12), (610, 75, 6), (690, 75, 7)],
     'Ni(NH3)6+2': [(375, 65, 20), (575, 55, 15)],
     'Co+2': [(466, 45, 6), (512, 62, 10), (600, 150, 0.7)],
     'Co(NH3)6+2': [(450, 45, 6), (500, 60, 9), (650, 140, 3), (550, 1000, 1.5)], # The last "peak" is there just to uniformly reduce the absorbance over all wavelengths, resulting in a "brownish" color
+    'FeOH+2': (340, 70, 4000),
+    'Fe(OH)2+': (340, 70, 4000),
     'Fe2OH2+4': (340, 70, 4000),
     'FeCl+2': (335, 70, 1000), # DOI: 10.1016/j.chemgeo.2006.02.005
     'FeCl2+': (345, 70, 3800), # DOI: 10.1016/j.chemgeo.2006.02.005
     'FeCl3': (375, 80, 3000), # DOI: 10.1016/j.chemgeo.2006.02.005
     'FeSCN+2': (460, 85 , 5000),
     'Fe(SCN)2+': (485, 85, 9000),
-    'FeOx+':     (300, 110, 1000),  # DOI: 10.1021/jp8040583
-    'Fe(Ox)2-':  (300, 130, 2000),  # DOI: 10.1021/jp8040583
-    'Fe(Ox)3-3': (300, 150, 3000),  # DOI: 10.1021/jp8040583
+    #'FeOx+':     (300, 110, 1000),  # DOI: 10.1021/jp8040583
+    #'Fe(Ox)2-':  (300, 130, 2000),  # DOI: 10.1021/jp8040583
+    #'Fe(Ox)3-3': (300, 150, 3000),  # DOI: 10.1021/jp8040583
 }
 
 
@@ -70,24 +74,25 @@ PRECIPITATE_COLORS = {# Many colors from Perry "Handbook of Inorganic Compounds"
     
     'CoCO3':     'pink',
     'Co(OH)2':   'blue',
-    'CoOx':      'pink', # there is a photo in DOI: 10.1021/acssuschemeng.5b01000
+    #'CoOx':      'pink', # there is a photo in DOI: 10.1021/acssuschemeng.5b01000
     'Co3(PO4)2': 'lavender',
     'CoS':       'black',
 
 
     'CuCrO4':    'reddish brown',        
-    'CuCO3':     'turqoise',            
+    'CuCO3':     'turqoise', 
+    'Cu3(OH)2(CO3)2': 'dark blue',         
     'Cu(OH)2':   'blue',                
     'Cu3(PO4)2': 'turqoise',            
     'CuS':       'black',                 
-    'CuOx':      'cyan',                  
+    #'CuOx':      'cyan',                  
 
     'Fe(OH)3':   'reddish brown',
     'Fe(OH)2':   'pale olive',
     'FeS':       'black',
     'Fe2S3':     'black',
     'FePO4':     'dirty yellow',
-    'FeOx':      'pale yellow',
+    #'FeOx':      'pale yellow',
 
     'Hg':        'black',
     'HgCO3':     'brown',
@@ -102,13 +107,15 @@ PRECIPITATE_COLORS = {# Many colors from Perry "Handbook of Inorganic Compounds"
 
     'MnS':       'salmon',
     'Mn(OH)2':   'pale pink',
+    'MnHPO4':    'pale pink',
+    'Mn3(PO4)2': 'thistle', # Perry says "reddish white"
     
     'NiCO3':     'pale green',
-    'NiCrO4':    'maroon', # this is weird but it was in Perry!!
+    'NiCrO4':    'maroon', # this is weird but it was in Perry and also the image in the Wikipedia page for Nickel(II) chromate
     'Ni(OH)2':   'pale green',
     'Ni(Hdmg)2': 'crimson',
-    'Ni(CN)2':   'pale turquoise',
-    'NiOx':      'pale green',
+    #'Ni(CN)2':   'pale turquoise',
+    #'NiOx':      'pale green',
     'Ni3(PO4)2': 'pale green',
     'NiS':       'black',
 
@@ -116,13 +123,15 @@ PRECIPITATE_COLORS = {# Many colors from Perry "Handbook of Inorganic Compounds"
     'PbI2':      'yellow',
     'PbS':       'black',
 
-    'SnS':       'black',
+    #'SnS':       'black',
 
-    'Tl2CrO4':   'yellow', # CRC
-    'TlI':       'yellow',
-    'Tl2S':      'black',
+    'SrCrO4':     'yellow',
 
-    'ZnCrO4':    'yellow'
+    #'Tl2CrO4':   'yellow', # CRC
+    #'TlI':       'yellow',
+    #'Tl2S':      'black',
+
+    'ZnCrO4':    'yellow',
 }
 
 PALLETT = {
@@ -232,7 +241,7 @@ HUES = {
     19: 'red'                   # [340, 360]
 }
 
-# creating the augmented pallet by adding slightly darker and lighter version of the colors 
+# creating the augmented pallet by adding slightly darker and lighter versions of the colors 
 AUG_PALLETT = {}
 for name, hex in PALLETT.items():
     sRGB = sRGBColor.new_from_rgb_hex(hex)

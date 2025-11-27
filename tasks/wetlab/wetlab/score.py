@@ -1,4 +1,6 @@
 from tools import CATIONS, ANIONS
+from typing import Dict
+import json
 
 ALL_IONS = CATIONS + ANIONS
 
@@ -34,15 +36,56 @@ def _normalize_ion(ion: str) -> str:
 def score_ion_list(prediction: str, ground_truth: str, binarize=True) -> float:
 
     gt_set = set([_normalize_ion(x.strip()) for x in ground_truth.split(",")])
-    
     try:
         pred_set = set([_normalize_ion(x.strip()) for x in prediction.split(",")])
     except ValueError:
         return 0.0
-        
+    
     iou = len(gt_set.intersection(pred_set))/len(gt_set.union(pred_set))
-
+    
     if binarize:
         return 1.0 if (iou == 1) else 0.0
     else:
         return iou
+
+
+def score_salt(prediction: str, ground_truth: Dict, binarize=True) -> float:
+    if prediction.startswith("`"):
+        prediction = prediction.strip("`json")
+
+    try:
+        pred_dict = json.loads(prediction)
+    except json.JSONDecodeError:
+        return 0.0
+
+    if set(pred_dict.keys()) != {'cation', 'anion'}:
+        return 0.0
+    
+    true_cation = ground_truth['cation']
+    true_anion = ground_truth['anion']
+    pred_cation = pred_dict['cation']
+    pred_anion = pred_dict['anion']
+
+    cation_score = 1.0 if (pred_cation == true_cation) else 0.0
+
+    if pred_anion == true_anion:
+        anion_score = 1.0
+    else:
+        normal_true_anion = _normalize_ion(true_anion)
+        try:
+            normal_sub_anion = _normalize_ion(pred_dict['anion'])
+        except ValueError:
+            anion_score = 0.0
+
+        anion_score = 0.5 if (normal_sub_anion == normal_true_anion) else 0.0
+    
+    final_score = (cation_score + anion_score) / 2
+
+    if binarize:
+        return 1.0 if (final_score == 1.0) else 0.0
+    else:
+        return final_score
+
+
+    
+

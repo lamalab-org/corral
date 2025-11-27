@@ -4,7 +4,8 @@ WetLab (Qualitative Inorganic Analysis) Benchmark Server
 Command-line arguments:
     --host: Host address to run the server (default: value of CORRAL_HOST env var or '0.0.0.0').
     --port: Port to run the server (default: value of CORRAL_PORT env var or 8000).
-    --subtask_level: Whether to use subtask-level tasks (default: False).
+    --level: The level of tasks to run the benchmark on (default: 2)
+    --subtask: Whether to use subtask-level tasks (default: False).
 """
 
 import argparse
@@ -14,9 +15,9 @@ from pathlib import Path
 from loguru import logger
 from dotenv import load_dotenv
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, List
 
-from wetlab.score import score_ion_list
+from wetlab.score import score_ion_list, score_salt
 from wetlab.tools import create_tools
 from wetlab.engine import set_chemical_system, Solution, StockSolution
 
@@ -24,13 +25,17 @@ from corral.backend.env import Environment
 from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
 
-# BASE_WORK_DIR = os.environ.get(
-#     "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/WetLab"
-# )
-
 SCORING_FUNCTIONS = {
     "score_ion_list": score_ion_list,
+    "score_salt": score_salt
 }
+
+BASIC_REAGENTS = {
+    "Water": StockSolution(composition={}, description="Distilled water"),
+    "H2SO4": StockSolution(composition={"H+": 1, "HSO4-": 1}, description="H2SO4 1.0 M, in water"),
+    "KOH": StockSolution(composition={"K+": 1, "OH-": 1}, description="KOH 1.0 M, in water"),
+}
+BASIC_SYS = "K S(+6)"
 
 REAGENTS_1 = {
     "Water": StockSolution(composition={}, description="Distilled water"),
@@ -45,8 +50,8 @@ REAGENTS_1 = {
     "NH4Cl": StockSolution(composition={"NH4+": 1, "Cl-": 1}, description="NH4Cl 1.0 M, in water"),
     "BUFFER_9": StockSolution(composition={"NH3": 0.36, "NH4+": 0.64, "Cl-": 1}, description="1.0 M ammonia buffer pH=9 (NH3 0.36 M, NH4Cl 0.64 M), in water"),
     "NH4I": StockSolution(composition={"NH4+": 1, "I-": 1}, description="NH4I 1.0 M, in water"),
-    "H2S(acidic)": StockSolution(composition={"H2S": 0.1, "H+": 0.01, "Cl-": 0.01}, description="H2S 0.1 M, HCl 0.01 M, in water"),
-    "(NH4)2S": StockSolution(composition={"NH4+": 0.2, "S-2": 0.1}, description="(NH4)2S 0.1 M, in water"),
+    "H2S(acidic)": StockSolution(composition={"H2S": 0.1, "H+": 0.05, "Cl-": 0.05}, description="H2S 0.1 M, HCl 0.05 M, in water"),
+    "(NH4)2S": StockSolution(composition={"NH4+": 2, "S-2": 0.5, "NO3-": 1}, description="(NH4)2S 0.5 M + NH4NO3 1.0 M, in water"),
     "(NH4)2CO3": StockSolution(composition={"NH4+": 0.4, "CO3-2": 0.2}, description="(NH4)2CO3 0.2 M, in water"),
     "(NH4)2HPO4": StockSolution(composition={"NH4+": 0.4, "HPO4-2": 0.2}, description="(NH4)2HPO4 0.2 M, in water"),
     "(NH4)2SO4": StockSolution(composition={"NH4+": 1, "SO4-2": 0.5}, description="(NH4)2SO4 0.5 M, in water"),
@@ -54,50 +59,82 @@ REAGENTS_1 = {
     "NH4SCN": StockSolution(composition={"NH4+": 0.1, "SCN-": 0.1}, description="NH4SCN 0.1 M, in water"),
     "DMG": StockSolution(composition={"K+": 0.01, "Hdmg-": 0.01}, description="dimethylglyoxime potassium salt 0.01 M, in water"),
 }
-
 SYS_1 = "Cl N S I C K P Cr dmg"
 
 REAGENTS_2 = {
+    "Water": StockSolution(composition={}, description="Distilled water"),
     "AgNO3": StockSolution(composition={"Ag+": 0.1, "NO3-": 0.1}, description="AgNO3 0.1 M, in water"),
     "BaCl2": StockSolution(composition={"Ba+2": 0.1, "Cl-":0.2}, description="BaCl2 0.1 M, in water"),
-    "CuSO4": StockSolution(composition={"Cu+2": 0.1, "SO4-2": 0.1}, description="CuSO4 0.1 M, in water"),
     "FeCl3": StockSolution(composition={"Fe+3": 0.05, "Cl-": 0.15}, description="FeCl3 0.05 M, in water"),
-    "Hg(NO3)2": StockSolution(composition={"Hg+2": 0.05, "NO3-": 0.1}, description="Hg(NO3)2 0.05 M, in water"),
-    "MnSO4": StockSolution(composition={"Mn+2": 0.1, "SO4-2": 0.1}, description="MnSO4 0.1 M, in water"),
     "Pb(NO3)2": StockSolution(composition={"Pb+2": 0.1, "NO3-": 0.2}, description="Pb(NO3)2 0. M, in water"),
-}
 
-SYS_2 = "Ag Ba Cu Fe(+3) Hg(+2) Mn Pb N(+5) Cl S(+6)"
+    "HNO3": StockSolution(composition={"H+": 6, "NO3-": 6}, description="HNO3 6.0 M, in water"),
+    "KOH(6M)": StockSolution(composition={"K+": 6, "OH-": 6}, description="KOH 6.0 M, in water"),
+    "KOH(0.02M)": StockSolution(composition={"K+": 0.02, "OH-": 0.02}, description="KOH 0.02 M, in water"),
+    "H2SO4": StockSolution(composition={"H+": 1, "HSO4-": 1}, description="H2SO4 1.0 M, in water"),
+    "NH3": StockSolution(composition={"NH3": 5}, description="NH3 5.0 M, in water"),
+    "NH4Cl": StockSolution(composition={"NH4+": 1, "Cl-": 1}, description="NH4Cl 1.0 M, in water"),
+    "NH4I": StockSolution(composition={"NH4+": 1, "I-": 1}, description="NH4I 1.0 M, in water"),
+    "H2S(acidic)": StockSolution(composition={"H2S": 0.1, "H+": 0.05, "Cl-": 0.05}, description="H2S 0.1 M, HCl 0.05 M, in water"),
+    "(NH4)2S": StockSolution(composition={"NH4+": 2, "S-2": 0.5, "NO3-": 1}, description="(NH4)2S 0.5 M + NH4NO3 1.0 M, in water"),
+    "(NH4)2CO3": StockSolution(composition={"NH4+": 0.4, "CO3-2": 0.2}, description="(NH4)2CO3 0.2 M, in water"),
+    "(NH4)2HPO4": StockSolution(composition={"NH4+": 0.4, "HPO4-2": 0.2}, description="(NH4)2HPO4 0.2 M, in water"),
+    "K2CrO4": StockSolution(composition={"K+": 0.4, "CrO4-2": 0.2}, description="K2CrO4 0.2 M, in water"),
+    "NH4SCN": StockSolution(composition={"NH4+": 0.1, "SCN-": 0.1}, description="NH4SCN 0.1 M, in water"),
+}
+SYS_2 = "Ag Ba Fe(+3) Pb N K S Cl I C P Cr"
+
+
+def _is_charge_neutral(solution: StockSolution | Solution, threshold: float=1e-10) -> bool:
+    if type(solution) == StockSolution:
+        solution = 10 * solution
+    if abs(solution.state.charge()) > threshold:
+        return False
+    else:
+        return True
+    
 
 @dataclass
 class QualitativeAnalysisTask(TaskDefinition):
     task_sys: str = None
+    excluded_tools: List[str] = None
     sample_list: Dict[str, Solution] = None
-    reagent_list: Dict[str, StockSolution] | str = None
+    reagent_set: str = None
+    additional_reagents: Dict[str, StockSolution] = None
 
     def __post_init__(self): # setting up the engine
 
-        if self.reagent_list == "def_1":
+        if self.reagent_set == "Basic":
+            reagent_solutions = BASIC_REAGENTS
+            sys = ' '.join([BASIC_SYS, self.task_sys])
+        elif self.reagent_set == "R1":
             reagent_solutions = REAGENTS_1
             sys = ' '.join([SYS_1, self.task_sys])
-        elif self.reagent_list == "def_2":
+        elif self.reagent_set == "R2":
             reagent_solutions = REAGENTS_2
             sys = ' '.join([SYS_2, self.task_sys])
-        elif self.reagent_list == "def_12":
-            reagent_solutions = REAGENTS_1 | REAGENTS_2
-            sys = ' '.join([SYS_1, SYS_2, self.task_sys])
         else:
-            reagent_solutions = {reagent["label"]: StockSolution(composition=reagent["composition"], description=reagent["description"]) for reagent in self.reagent_list}
-            sys = self.task_sys
+            raise ValueError(f"Invalid reagent_set: {self.reagent_set}")
+
+        if len(self.additional_reagents) > 0:
+            additional_reagents = {reagent["label"]: StockSolution(composition=reagent["composition"], description=reagent["description"]) for reagent in self.additional_reagents}
+            reagent_solutions |= additional_reagents
         
         chemical_system = set_chemical_system(sys)
         original_samples = {sample["label"]: Solution(composition=sample["composition"], volume=sample["vol"], description="unknown") for sample in self.sample_list}
-        # equilibrating the samples
+        
+        # checking charge neutrality    
+        for label, solution in (original_samples | reagent_solutions).items() : 
+            if not _is_charge_neutral(solution):
+                solution_type = "Sample solution" if type(solution) == Solution else "Reagent solution"
+                raise RuntimeError(f"{solution_type} with label {label!r} is not charge neutral!")
+        
+        # equilibrating the samples and checking for precipitates
         sample_solutions = {}
         for label, solution in original_samples.items():
             solution.equilibrate()
             if solution.has_precipitate:
-                raise RuntimeError(f"Sample with label {label} resulted in a precipitate after equilibration.")
+                raise RuntimeError(f"Sample with label {label!r} resulted in a precipitate after equilibration.")
             else:
                 sample_solutions[label] = solution
 
@@ -107,8 +144,8 @@ class QualitativeAnalysisTask(TaskDefinition):
         object.__setattr__(self, "sys", sys)
 
 def load_tasks_from_json(
-    json_path: Path, #work_dir: str = BASE_WORK_DIR
-) -> dict[str, TaskDefinition]:
+    json_path: Path,
+) -> Dict[str, TaskDefinition]:
     tasks = {}
     for task_file in json_path.glob("*.json"):
         if not Path(task_file).is_file():
@@ -118,15 +155,17 @@ def load_tasks_from_json(
             task_data = json.load(f)
         for data in task_data:
             task_id = data["id"]
-            initial_input = data.get("initial_input", {}) #, {"work_dir": work_dir})
+            initial_input = data.get("initial_input", {})
             input_from_tasks = data.get("input", {}).get("input_from_task", [])
             if not isinstance(input_from_tasks, list):
                 input_from_tasks = []
+
 
             tasks[task_id] = QualitativeAnalysisTask(
                 name=data["name"],
                 description=data["input"]["prompt"],
                 tools=data.get("tools", []),
+                excluded_tools=data.get("excluded_tools", []),
                 scoring_fn=SCORING_FUNCTIONS[data["scoring_fn"]],
                 scoring_inputs=data["output"][0]["target"],
                 submission_format=data.get("submission_format", ""),
@@ -134,7 +173,8 @@ def load_tasks_from_json(
                 initial_input=initial_input,
                 task_sys=data["input"]["sys"],
                 sample_list=data["input"]["samples"],
-                reagent_list=data["input"]["reagents"],
+                reagent_set=data["input"]["reagent_set"],
+                additional_reagents=data["input"].get("additional_reagents",[]),
             )
     return tasks
 
@@ -186,16 +226,20 @@ class TaskEnvironment(Environment):
         """Add tools required for the current task to the environment"""
         if len(self.current_task.tools) > 0:
             for tool_name in self.current_task.tools:
-                if tool_name in self.available_tools:
+                if tool_name in self.available_tools: 
+                    if tool_name not in self.current_task.excluded_tools:
+                        self.add_tool(self.available_tools[tool_name])
+                    else:
+                        logger.warning(f"Tool `{tool_name}` is listed as both available and excluded for task {self.task_id}")
+                else:
+                    logger.warning(f"Tool `{tool_name}` not found in available tools for task {self.task_id}")
+        else:
+            # Adding all non-excluded tools if no tools are specified
+            for tool_name in self.available_tools:
+                if tool_name not in self.current_task.excluded_tools:
                     self.add_tool(self.available_tools[tool_name])
                 else:
-                    logger.warning(
-                        f"Tool {tool_name} not found in available tools for task {self.task_id}"
-                    )
-        else:
-            # Adding all tools if no tools are specified
-            for tool_name in self.available_tools:
-                self.add_tool(self.available_tools[tool_name])
+                    logger.info(f"Excluding tool `{tool_name}` from the list of available tools for task {self.task_id}")
 
     def get_task_prompt(self) -> str:
         prompt = (
@@ -253,23 +297,23 @@ class TaskEnvironment(Environment):
 
 
 def create_qualysis_environments(
-    #work_dir: str = BASE_WORK_DIR,
-    subtask_level: bool = False,
+    level: int = 2,
+    subtask: bool = False,
 ) -> dict[str, Environment]:
     """Create environments for the WetLab (Qualitative Inorganic Analysis) benchmark tasks."""
     logger.info("Creating environments for Qualitative Inorganic Analysis tasks...")
-    if subtask_level:
-        json_path = Path(__file__).parent / "subtasks_json"
+    if subtask:
+        json_path = Path(__file__).parent / "subtasks_json" / f"level_{level}"
     else:
-        json_path = Path(__file__).parent / "tasks_json"
+        json_path = Path(__file__).parent / "tasks_json" / f"level_{level}"
     if not json_path.exists():
         raise ValueError(f"The path {json_path!r} does not exist.")
 
     logger.info(f"Loading tasks from {json_path!r}")
 
-    tasks = load_tasks_from_json(json_path) #, work_dir=work_dir)
+    tasks = load_tasks_from_json(json_path)
 
-    group_id = "qualitative_inorganic_analysis"
+    group_id = "wetlab"
     logger.info(f"Creating task group {group_id} with {len(tasks)} tasks")
     task_group = TaskGroup(
         group_id=group_id,
@@ -292,7 +336,6 @@ def create_qualysis_environments(
         environments[task_id] = TaskEnvironment(
             task_id=task_id,
             task_group=task_group,
-            #work_dir=work_dir,
         )
 
     return environments
@@ -316,19 +359,23 @@ if __name__ == "__main__":
         help="Port to run the server on",
     )
     parser.add_argument(
-        "--subtask_level",
+        "--level",
+        type=int,
+        default=2,
+        help="The level of tasks"
+    )
+    parser.add_argument(
+        "--subtask",
         type=bool,
         default=False,
-        help="Whether to use subtask level",
+        help="Whether to use subtasks",
     )
     args = parser.parse_args()
 
-    #Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
-
-    # Create all environments with file system tools
+    # Create all environments
     environments = create_qualysis_environments(
-        #work_dir=BASE_WORK_DIR,
-        subtask_level=args.subtask_level
+        level=args.level,
+        subtask=args.subtask
     )
 
     logger.info("\nCreated Environments:")
