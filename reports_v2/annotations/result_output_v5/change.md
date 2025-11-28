@@ -1,7 +1,7 @@
 # Added new features
 - Model
-- Agent type 
-- QA score 
+- Agent type
+- QA score
 
 
 
