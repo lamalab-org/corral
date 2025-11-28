@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 from loguru import logger
 
-from .schema import StepData, ToolCallData, TraceData
+from corral_trace_analyzer.data.schema import StepData, ToolCallData, TraceData
 
 
 class TraceDataLoader:

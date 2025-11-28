@@ -14,9 +14,9 @@ class ToolCallData:
     arguments: dict[str, Any]
     result: Any
     status: str
-    error_message: str | None = None
     duration: float
     timestamp: str
+    error_message: str | None = None
 
 
 @dataclass

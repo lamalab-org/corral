@@ -9,7 +9,7 @@ import pandas as pd
 from loguru import logger
 from scipy import stats
 
-from ..config import ALPHA, ENVIRONMENT_TARGET_METRIC
+from corral_trace_analyzer.config import ALPHA, ENVIRONMENT_TARGET_METRIC
 
 
 class EnvironmentAnalyzer:

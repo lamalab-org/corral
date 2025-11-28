@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 from loguru import logger
 
-from ..config import (
+from corral_trace_analyzer.config import (
     SELECTED_AGENT_TYPES,
     SELECTED_ENVIRONMENTS,
     SELECTED_MODELS,

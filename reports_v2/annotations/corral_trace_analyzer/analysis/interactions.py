@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from ..config import ALPHA
+from corral_trace_analyzer.config import ALPHA
 
 
 class InteractionAnalyzer:

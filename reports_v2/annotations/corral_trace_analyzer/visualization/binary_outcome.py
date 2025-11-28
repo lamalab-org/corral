@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from ..config import VIZ_CONFIG
+from corral_trace_analyzer.config import VIZ_CONFIG
 
 
 class BinaryOutcomeVisualizer:

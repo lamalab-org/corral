@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import seaborn as sns
 
-from ..config import VIZ_CONFIG
+from corral_trace_analyzer.config import VIZ_CONFIG
 
 
 class CorrelationVisualizer:

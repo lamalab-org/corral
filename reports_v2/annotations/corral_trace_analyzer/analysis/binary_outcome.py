@@ -3,10 +3,11 @@ Analysis methods specifically for binary outcomes (success/failure)
 """
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
+from loguru import logger
 from pycm import ConfusionMatrix
 from scipy import stats
 from sklearn.compose import ColumnTransformer
@@ -17,8 +18,7 @@ from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
-from ..config import ALPHA
-from loguru import logger
+from corral_trace_analyzer.config import ALPHA
 
 
 class BinaryOutcomeAnalyzer:
@@ -71,8 +71,8 @@ class BinaryOutcomeAnalyzer:
                     categorical_features_present.append(cat_feat)
 
         # Get data with no NaNs
-        df = self.features_df[cols_to_use + [self.target_col]].dropna()
-        X_df = df[cols_to_use]
+        df_ = self.features_df[[*cols_to_use, self.target_col]].dropna()
+        X_df = df_[cols_to_use]
 
         return X_df, cols_to_use, categorical_features_present
 
@@ -124,10 +124,9 @@ class BinaryOutcomeAnalyzer:
 
         else:
             # No categorical features
-            if scale_numeric:
-                preprocessor = StandardScaler()
-            else:
-                preprocessor = None  # Will just use raw data
+            preprocessor = (
+                StandardScaler() if scale_numeric else None
+            )  # Will just use raw data
 
             encoded_feature_names = numeric_features
 
@@ -161,8 +160,9 @@ class BinaryOutcomeAnalyzer:
             for i, cat_feat in enumerate(categorical_features):
                 categories = cat_encoder.categories_[i]
                 # Drop first, so we get n-1 categories
-                for cat in categories[1:]:  # Skip first due to drop='first'
-                    encoded_feature_names.append(f"{cat_feat}_{cat}")
+                encoded_feature_names.extend(
+                    [f"{cat_feat}_{cat}" for cat in categories[1:]]
+                )
 
         logger.info(f"  Total features after encoding: {len(encoded_feature_names)}")
 
@@ -192,13 +192,13 @@ class BinaryOutcomeAnalyzer:
 
         results = []
 
-        target_values = self.features_df[self.target_col].values
+        target_values = self.features_df[self.target_col].to_numpy()
 
         for col in feature_cols:
             if col not in self.features_df.columns:
                 continue
 
-            feature_values = self.features_df[col].values
+            feature_values = self.features_df[col].to_numpy()
 
             # Remove NaN values
             mask = ~(np.isnan(target_values) | np.isnan(feature_values))
@@ -329,7 +329,7 @@ class BinaryOutcomeAnalyzer:
         test_size: float = 0.2,
         cv_folds: int = 5,
         save_html: bool = True,
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
     ) -> dict[str, Any]:
         """
         Perform logistic regression with train/test split and cross-validation
@@ -366,7 +366,7 @@ class BinaryOutcomeAnalyzer:
                 # Use top correlated features (backward compatibility)
                 point_biserial = self.point_biserial_correlation()
                 feature_cols = point_biserial.head(10)["feature"].tolist()
-                logger.info(f"Using top 10 correlated features")
+                logger.info("Using top 10 correlated features")
 
         # Prepare features with categorical encoding
         X_df, cols_to_use, categorical_features_present = (
@@ -378,7 +378,7 @@ class BinaryOutcomeAnalyzer:
         if len(X_df) < 10:
             return {"error": "Insufficient data for logistic regression"}
 
-        y = self.features_df.loc[X_df.index, self.target_col].values
+        y = self.features_df.loc[X_df.index, self.target_col].to_numpy()
 
         # Create preprocessor
         preprocessor, _ = self._create_preprocessor(
@@ -454,7 +454,7 @@ class BinaryOutcomeAnalyzer:
 
         # PyCM metrics and HTML report
         pycm_metrics = {}
-        if PYCM_AVAILABLE and save_html:
+        if save_html:
             try:
                 cm = ConfusionMatrix(
                     actual_vector=y_test.tolist(), predict_vector=y_test_pred.tolist()
@@ -462,15 +462,13 @@ class BinaryOutcomeAnalyzer:
 
                 # Extract important metrics
                 pycm_metrics = {
-                    "TPR": cm.TPR[1] if 1 in cm.TPR else np.nan,  # Sensitivity/Recall
-                    "TNR": cm.TNR[1] if 1 in cm.TNR else np.nan,  # Specificity
-                    "PPV": cm.PPV[1] if 1 in cm.PPV else np.nan,  # Precision
-                    "NPV": cm.NPV[1]
-                    if 1 in cm.NPV
-                    else np.nan,  # Negative Predictive Value
-                    "FPR": cm.FPR[1] if 1 in cm.FPR else np.nan,  # False Positive Rate
-                    "FNR": cm.FNR[1] if 1 in cm.FNR else np.nan,  # False Negative Rate
-                    "F1_Score": cm.F1[1] if 1 in cm.F1 else np.nan,
+                    "TPR": cm.TPR.get(1, np.nan),  # Sensitivity/Recall
+                    "TNR": cm.TNR.get(1, np.nan),  # Specificity
+                    "PPV": cm.PPV.get(1, np.nan),  # Precision
+                    "NPV": cm.NPV.get(1, np.nan),  # Negative Predictive Value
+                    "FPR": cm.FPR.get(1, np.nan),  # False Positive Rate
+                    "FNR": cm.FNR.get(1, np.nan),  # False Negative Rate
+                    "F1_Score": cm.F1.get(1, np.nan),
                     "MCC": cm.MCC,  # Matthews Correlation Coefficient
                     "Kappa": cm.Kappa,  # Cohen's Kappa
                 }
@@ -629,7 +627,7 @@ class BinaryOutcomeAnalyzer:
         cv_folds: int = 5,
         n_estimators: int = 100,
         save_html: bool = True,
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
     ) -> dict[str, Any]:
         """
         Perform Random Forest classification with train/test split and cross-validation
@@ -675,7 +673,7 @@ class BinaryOutcomeAnalyzer:
         if len(X_df) < 10:
             return {"error": "Insufficient data for Random Forest"}
 
-        y = self.features_df.loc[X_df.index, self.target_col].values
+        y = self.features_df.loc[X_df.index, self.target_col].to_numpy()
 
         # Create preprocessor (no scaling for Random Forest)
         preprocessor, _ = self._create_preprocessor(
@@ -690,7 +688,7 @@ class BinaryOutcomeAnalyzer:
                 preprocessor, feature_cols, categorical_features_present
             )
         else:
-            X_processed = X_df.values
+            X_processed = X_df.to_numpy()
             encoded_feature_names = feature_cols
 
         # Train/test split
@@ -759,22 +757,21 @@ class BinaryOutcomeAnalyzer:
 
         # PyCM metrics
         pycm_metrics = {}
-        if PYCM_AVAILABLE and save_html:
+        if save_html:
             try:
                 cm = ConfusionMatrix(
                     actual_vector=y_test.tolist(), predict_vector=y_test_pred.tolist()
                 )
-
                 pycm_metrics = {
-                    "TPR": cm.TPR[1] if 1 in cm.TPR else np.nan,
-                    "TNR": cm.TNR[1] if 1 in cm.TNR else np.nan,
-                    "PPV": cm.PPV[1] if 1 in cm.PPV else np.nan,
-                    "NPV": cm.NPV[1] if 1 in cm.NPV else np.nan,
-                    "FPR": cm.FPR[1] if 1 in cm.FPR else np.nan,
-                    "FNR": cm.FNR[1] if 1 in cm.FNR else np.nan,
-                    "F1_Score": cm.F1[1] if 1 in cm.F1 else np.nan,
-                    "MCC": cm.MCC,
-                    "Kappa": cm.Kappa,
+                    "TPR": cm.TPR.get(1, np.nan),  # Sensitivity/Recall
+                    "TNR": cm.TNR.get(1, np.nan),  # Specificity
+                    "PPV": cm.PPV.get(1, np.nan),  # Precision
+                    "NPV": cm.NPV.get(1, np.nan),  # Negative Predictive Value
+                    "FPR": cm.FPR.get(1, np.nan),  # False Positive Rate
+                    "FNR": cm.FNR.get(1, np.nan),  # False Negative Rate
+                    "F1_Score": cm.F1.get(1, np.nan),
+                    "MCC": cm.MCC,  # Matthews Correlation Coefficient
+                    "Kappa": cm.Kappa,  # Cohen's Kappa
                 }
 
                 if output_dir:
@@ -837,7 +834,7 @@ class BinaryOutcomeAnalyzer:
         test_size: float = 0.2,
         cv_folds: int = 5,
         save_html: bool = True,
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
     ) -> dict[str, Any]:
         """
         Perform XGBoost classification with train/test split and cross-validation
@@ -855,8 +852,6 @@ class BinaryOutcomeAnalyzer:
         Returns:
             dictionary with XGBoost results
         """
-        if not XGBOOST_AVAILABLE:
-            return {"error": "XGBoost not available. Install with: pip install xgboost"}
 
         if categorical_features is None:
             categorical_features = ["model", "agent_type"]
@@ -885,7 +880,7 @@ class BinaryOutcomeAnalyzer:
         if len(X_df) < 10:
             return {"error": "Insufficient data for XGBoost"}
 
-        y = self.features_df.loc[X_df.index, self.target_col].values
+        y = self.features_df.loc[X_df.index, self.target_col].to_numpy()
 
         # Create preprocessor (no scaling for XGBoost)
         preprocessor, _ = self._create_preprocessor(
@@ -900,7 +895,7 @@ class BinaryOutcomeAnalyzer:
                 preprocessor, feature_cols, categorical_features_present
             )
         else:
-            X_processed = X_df.values
+            X_processed = X_df.to_numpy()
             encoded_feature_names = feature_cols
 
         # Train/test split
@@ -972,22 +967,22 @@ class BinaryOutcomeAnalyzer:
 
         # PyCM metrics
         pycm_metrics = {}
-        if PYCM_AVAILABLE and save_html:
+        if save_html:
             try:
                 cm = ConfusionMatrix(
                     actual_vector=y_test.tolist(), predict_vector=y_test_pred.tolist()
                 )
 
                 pycm_metrics = {
-                    "TPR": cm.TPR[1] if 1 in cm.TPR else np.nan,
-                    "TNR": cm.TNR[1] if 1 in cm.TNR else np.nan,
-                    "PPV": cm.PPV[1] if 1 in cm.PPV else np.nan,
-                    "NPV": cm.NPV[1] if 1 in cm.NPV else np.nan,
-                    "FPR": cm.FPR[1] if 1 in cm.FPR else np.nan,
-                    "FNR": cm.FNR[1] if 1 in cm.FNR else np.nan,
-                    "F1_Score": cm.F1[1] if 1 in cm.F1 else np.nan,
-                    "MCC": cm.MCC,
-                    "Kappa": cm.Kappa,
+                    "TPR": cm.TPR.get(1, np.nan),  # Sensitivity/Recall
+                    "TNR": cm.TNR.get(1, np.nan),  # Specificity
+                    "PPV": cm.PPV.get(1, np.nan),  # Precision
+                    "NPV": cm.NPV.get(1, np.nan),  # Negative Predictive Value
+                    "FPR": cm.FPR.get(1, np.nan),  # False Positive Rate
+                    "FNR": cm.FNR.get(1, np.nan),  # False Negative Rate
+                    "F1_Score": cm.F1.get(1, np.nan),
+                    "MCC": cm.MCC,  # Matthews Correlation Coefficient
+                    "Kappa": cm.Kappa,  # Cohen's Kappa
                 }
 
                 if output_dir:

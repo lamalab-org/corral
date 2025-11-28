@@ -8,7 +8,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ..config import UNCERTAINTY_MARKERS
+from corral_trace_analyzer.config import UNCERTAINTY_MARKERS
+
 from .base import BaseFeatureExtractor
 from .constant import ALL_TEXT
 

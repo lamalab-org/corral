@@ -7,7 +7,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ..config import TEMPORAL_WINDOWS
+from corral_trace_analyzer.config import TEMPORAL_WINDOWS
+
 from .base import BaseFeatureExtractor
 from .constant import ALL_TEMPORAL
 
