@@ -42,13 +42,14 @@ REAGENTS_1 = {
     "HCl(0.02M)": StockSolution(composition={"H+": 0.02, "Cl-": 0.02}, description="HCl 0.02 M, in water"),
     "HCl(1M)": StockSolution(composition={"H+": 1, "Cl-":1}, description="HCl 1.0 M, in water"),
     "HCl(6M)": StockSolution(composition={"H+": 6, "Cl-": 6}, description="HCl 6.0 M, in water"),
-    "HNO3": StockSolution(composition={"H+": 6, "NO3-": 6}, description="HNO3 6.0 M, in water"),
+    "HNO3(6M)": StockSolution(composition={"H+": 6, "NO3-": 6}, description="HNO3 6.0 M, in water"),
     "KOH(6M)": StockSolution(composition={"K+": 6, "OH-": 6}, description="KOH 6.0 M, in water"),
+    "KOH(1M)": StockSolution(composition={"K+": 1, "OH-": 1}, description="KOH 1.0 M, in water"),
     "KOH(0.02M)": StockSolution(composition={"K+": 0.02, "OH-": 0.02}, description="KOH 0.02 M, in water"),
-    "H2SO4": StockSolution(composition={"H+": 1, "HSO4-": 1}, description="H2SO4 1.0 M, in water"),
-    "NH3": StockSolution(composition={"NH3": 5}, description="NH3 5.0 M, in water"),
+    "H2SO4(1M)": StockSolution(composition={"H+": 1, "HSO4-": 1}, description="H2SO4 1.0 M, in water"),
+    "NH3(5M)": StockSolution(composition={"NH3": 5}, description="NH3 5.0 M, in water"),
     "NH4Cl": StockSolution(composition={"NH4+": 1, "Cl-": 1}, description="NH4Cl 1.0 M, in water"),
-    "BUFFER_9": StockSolution(composition={"NH3": 0.36, "NH4+": 0.64, "Cl-": 1}, description="1.0 M ammonia buffer pH=9 (NH3 0.36 M, NH4Cl 0.64 M), in water"),
+    "BUFFER_9": StockSolution(composition={"NH3": 0.72, "NH4+": 1.28, "Cl-": 1.28}, description="2.0 M ammonia buffer pH=9 (NH3 0.72 M, NH4Cl 1.28 M), in water"),
     "NH4I": StockSolution(composition={"NH4+": 1, "I-": 1}, description="NH4I 1.0 M, in water"),
     "H2S(acidic)": StockSolution(composition={"H2S": 0.1, "H+": 0.05, "Cl-": 0.05}, description="H2S 0.1 M, HCl 0.05 M, in water"),
     "(NH4)2S": StockSolution(composition={"NH4+": 2, "S-2": 0.5, "NO3-": 1}, description="(NH4)2S 0.5 M + NH4NO3 1.0 M, in water"),
@@ -57,14 +58,14 @@ REAGENTS_1 = {
     "(NH4)2SO4": StockSolution(composition={"NH4+": 1, "SO4-2": 0.5}, description="(NH4)2SO4 0.5 M, in water"),
     "K2CrO4": StockSolution(composition={"K+": 0.4, "CrO4-2": 0.2}, description="K2CrO4 0.2 M, in water"),
     "NH4SCN": StockSolution(composition={"NH4+": 0.1, "SCN-": 0.1}, description="NH4SCN 0.1 M, in water"),
-    "DMG": StockSolution(composition={"K+": 0.01, "Hdmg-": 0.01}, description="dimethylglyoxime potassium salt 0.01 M, in water"),
+    "DMG": StockSolution(composition={"K+": 0.02, "Hdmg-": 0.02}, description="dimethylglyoxime potassium salt 0.02 M, in water"),
 }
 SYS_1 = "Cl N S I C K P Cr dmg"
 
 REAGENTS_2 = {
     "Water": StockSolution(composition={}, description="Distilled water"),
     "AgNO3": StockSolution(composition={"Ag+": 0.1, "NO3-": 0.1}, description="AgNO3 0.1 M, in water"),
-    "BaCl2": StockSolution(composition={"Ba+2": 0.1, "Cl-":0.2}, description="BaCl2 0.1 M, in water"),
+    "Ba(NO3)2": StockSolution(composition={"Ba+2": 0.1, "NO3-":0.2}, description="Ba(NO3)2 0.1 M, in water"),
     "FeCl3": StockSolution(composition={"Fe+3": 0.05, "Cl-": 0.15}, description="FeCl3 0.05 M, in water"),
     "Pb(NO3)2": StockSolution(composition={"Pb+2": 0.1, "NO3-": 0.2}, description="Pb(NO3)2 0. M, in water"),
 

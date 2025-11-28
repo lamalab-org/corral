@@ -104,9 +104,9 @@ def possible_cations() -> str:
 
     Returns:
         str:
-            [BRIEF] a string containing all the possible cations [/BRIEF]
-            [DETAILED] a space-separated string, containing all possible cations that can be present in the unknown sample(s) [/DETAILED]
-            [EXAMPLES] "Ag+ Al+3 Ba+2 ..." [/EXAMPLES]
+            [RETURNS_BRIEF] a string containing all the possible cations [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] a space-separated string, containing all possible cations that can be present in the unknown sample(s) [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "Ag+ Al+3 Ba+2 ..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -204,14 +204,15 @@ def measure_pH(compositions, label: str) -> str:
 
     Args:
         label (str):
-            [BRIEF] label of the target solution [/BRIEF]
-            [DETAILED] a string representing the label of the solution in the Inventory, for which the pH will be measured [/DETAILED]
+            [ARGS_BRIEF] label of the target solution [/ARGS_BRIEF]
+            [ARGS_DETAILED] a string representing the label of the solution in the Inventory, for which the pH will be measured [/ARGS_DETAILED]
+            [ARGS_EXAMPLES] "sample", "test_1", "test2_filtrate" [/ARGS_EXAMPLES]
 
     Returns:
         int:
-            [BRIEF] the closest integer value to the actual pH of the solution [/BRIEF]
-            [DETAILED] an integer value between 0-14, representin the closest integer to the actual pH of the solution [/DETAILED]
-            [EXAMPLES] `4`, `6`, `11` [/EXAMPLES]
+            [RETURNS_BRIEF] the closest integer value to the actual pH of the solution [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] an integer value between 0-14, representin the closest integer to the actual pH of the solution [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] `4`, `6`, `11` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         KeyError: [ERROR_WHEN] When the given `label` is invalid [/ERROR_WHEN]
@@ -650,7 +651,8 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
     [CONTEXTUAL] How this tool works:
     - It draws `sol1_vol` mL from `sol1_label`.
     - It draws `sol2_vol` mL from `sol2_label`.
-    - Mixes the drawn volumes together in a new empty container labeled `test_label`, and stirs until equilibrium is reached. The resulting mixture is then added to the Inventory.
+    - Mixes the drawn volumes together in a new empty container labeled `test_label` and stirs until equilibrium is reached, at room temperature.
+    - The resulting mixture is then added to the Inventory with the label `test_label`.
     - It returns two observations on two separate lines: one for the formation of precipitates (if any) and one for the color of the resulting solution.
     - Sometimes it is possible that the resulting precipitate's color can be described using more than one color name. In those cases the different given names will be separated by a slash '/'.
     - Remember that the reported colors are qualitative and approximate. [/CONTEXTUAL]
@@ -711,6 +713,7 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
 
     [LIMITATIONS] Known Limitations:
     - This tool only works when mixing clear solutions, meaning solutions that do not contain any precipitates.
+    - All solutions are at room temperature; there are no ways no heat up or cool down the solutions/reagents.
     - The minimum allowed volume to draw is 1 mL.
     - The reported colors are qualitative and approximate.
     - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
@@ -784,7 +787,7 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
 
     [CONTEXTUAL] How this tool works:
     - It draws `sol2_vol` mL from `sol2_label`.
-    - Adds it to the same container as `sol1_label`, and stirs the contents until equilibrium is reached. 
+    - Adds it to the same container as `sol1_label`, and stirs the contents until equilibrium is reached, at room temperature.
     - The remaining volume of `sol1_label` is set to 0 mL in the Inventory. The new solution is labeled `test_label` and is added to the Inventory.
     - It returns two observations on two separate lines: one about the change in the color and the amount of precipitates (if any) and one about the change in the color of the solution.
     - The reference for observations about the change in solution color is `sol1_label`.
@@ -845,6 +848,7 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
 
     [LIMITATIONS] Known Limitations:
     - The host solution may contain precipitates but the second solution (the one being added) cannot contain any precipitates.
+    - All solutions are at room temperature; there are no ways no heat up or cool down the solutions/reagents.
     - The minimum allowed volume for the second solution is 1 mL.
     - The reported colors are qualitative and approximate.
     - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
@@ -1056,7 +1060,8 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
     [CONTEXTUAL] How this tool works:
     - It draws `sol_vol` mL from `sol_label`.
     - Adds it to a new empty container labeled `test_label`.
-    - Adds all of the precipitate labeld `prec_label` to the container and stirs the mixture until equilibrium is reached. The resulting mixture is added to the Inventory.
+    - Adds all of the precipitate labeld `prec_label` to the container and stirs the mixture until equilibrium is reached, at room temperature. 
+    - The resulting mixture is added to the Inventory with the label `test_label`.
     - It returns two observations on two separate lines: one about the change in the color and the amount of the added precipitate, and one about the change in the color of the supernatant solution.
     - The reference for observations about the change in solution color is `sol_label`.
     - When an observation mentions partial dissolution, it roughly means that about 20-50% of the added precipitate has dissolved.
@@ -1115,6 +1120,7 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
 
     [LIMITATIONS] Known Limitations:
     - The solution may not contain any precipitates.
+    - All solutions are at room temperature; there are no ways no heat up or cool down the solutions/reagents.
     - The minimum allowed volume for the solution is 4 mL.
     - The reported colors are qualitative and approximate.
     - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
