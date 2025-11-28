@@ -95,11 +95,13 @@ class ComparativePlotter:
             bars = ax.bar(x_labels, success_rates, alpha=0.7, edgecolor="black")
 
             # Color bars by success rate
-            for i, (bar, rate) in enumerate(zip(bars, success_rates)):
+            for i, (bar, rate) in enumerate(zip(bars, success_rates, strict=False)):
                 bar.set_color(plt.cm.RdYlGn(rate))
 
             # Add count labels on bars
-            for i, (x, y, count) in enumerate(zip(x_labels, success_rates, counts)):
+            for i, (x, y, count) in enumerate(
+                zip(x_labels, success_rates, counts, strict=False)
+            ):
                 ax.text(i, y + 0.02, f"n={count}", ha="center", fontsize=9)
 
             # Formatting
@@ -188,7 +190,9 @@ class ComparativePlotter:
                 )
 
                 # Color violins
-                for pc, color in zip(parts["bodies"], ["#ff7f7f", "#7fbf7f"]):
+                for pc, color in zip(
+                    parts["bodies"], ["#ff7f7f", "#7fbf7f"], strict=False
+                ):
                     pc.set_facecolor(color)
                     pc.set_alpha(0.7)
 
@@ -284,7 +288,7 @@ class ComparativePlotter:
             )
 
             # Add count labels
-            for i, (bar, count) in enumerate(zip(bars1, counts_0)):
+            for i, (bar, count) in enumerate(zip(bars1, counts_0, strict=False)):
                 if count > 0:
                     height = bar.get_height()
                     ax.text(
@@ -296,7 +300,7 @@ class ComparativePlotter:
                         fontsize=8,
                     )
 
-            for i, (bar, count) in enumerate(zip(bars2, counts_1)):
+            for i, (bar, count) in enumerate(zip(bars2, counts_1, strict=False)):
                 if count > 0:
                     height = bar.get_height()
                     ax.text(
@@ -456,7 +460,7 @@ class ComparativePlotter:
             )
 
             # Color violins
-            for pc, color in zip(parts["bodies"], ["#ff7f7f", "#7fbf7f"]):
+            for pc, color in zip(parts["bodies"], ["#ff7f7f", "#7fbf7f"], strict=False):
                 pc.set_facecolor(color)
                 pc.set_alpha(0.7)
 

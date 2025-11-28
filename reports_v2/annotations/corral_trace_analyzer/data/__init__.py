@@ -1,8 +1,8 @@
 """Data loading and schema modules"""
 
-from .loader import TraceDataLoader
-from .schema import TraceData, StepData, ToolCallData
 from .environment_loader import EnvironmentDataLoader
+from .loader import TraceDataLoader
+from .schema import StepData, ToolCallData, TraceData
 
 __all__ = [
     "TraceDataLoader",

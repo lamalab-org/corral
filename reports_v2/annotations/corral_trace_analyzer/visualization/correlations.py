@@ -321,7 +321,7 @@ class CorrelationVisualizer:
 
         from scipy import stats
 
-        for ax, group in zip(axes, groups):
+        for ax, group in zip(axes, groups, strict=False):
             subset = self.features_df[self.features_df[group_col] == group]
             mask = ~(subset[feature_col].isna() | subset[target_col].isna())
             x = subset[mask][feature_col].values

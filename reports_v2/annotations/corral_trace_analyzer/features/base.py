@@ -37,7 +37,6 @@ class BaseFeatureExtractor(ABC):
         Returns:
             DataFrame with extracted features (indexed by trace_id)
         """
-        pass
 
     def filter_steps_by_node_type(
         self, steps_df: pd.DataFrame, node_types: list[str] | None = None

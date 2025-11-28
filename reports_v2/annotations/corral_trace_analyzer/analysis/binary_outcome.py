@@ -94,7 +94,9 @@ class BinaryOutcomeAnalyzer:
             tuple of (preprocessor, encoded_feature_names)
         """
         if categorical_features:
-            logger.info(f"  One-hot encoding categorical features: {categorical_features}")
+            logger.info(
+                f"  One-hot encoding categorical features: {categorical_features}"
+            )
 
             transformers = []
 
@@ -167,7 +169,7 @@ class BinaryOutcomeAnalyzer:
         return encoded_feature_names
 
     def point_biserial_correlation(
-        self, feature_cols: [list[str] | None = None
+        self, feature_cols: list[str] | None = None
     ) -> pd.DataFrame:
         """
         Compute point-biserial correlations (Pearson for binary outcome)
@@ -255,9 +257,7 @@ class BinaryOutcomeAnalyzer:
 
         return results_df
 
-    def mann_whitney_tests(
-        self, feature_cols: [list[str] | None = None
-    ) -> pd.DataFrame:
+    def mann_whitney_tests(self, feature_cols: list[str] | None = None) -> pd.DataFrame:
         """
         Perform Mann-Whitney U tests for each feature
 
@@ -322,10 +322,10 @@ class BinaryOutcomeAnalyzer:
 
     def logistic_regression_analysis(
         self,
-        feature_cols: [list[str] | None = None,
+        feature_cols: list[str] | None = None,
         use_all_features: bool = True,
         include_categorical: bool = True,
-        categorical_features: [list[str] | None = None,
+        categorical_features: list[str] | None = None,
         test_size: float = 0.2,
         cv_folds: int = 5,
         save_html: bool = True,
@@ -621,10 +621,10 @@ class BinaryOutcomeAnalyzer:
 
     def random_forest_analysis(
         self,
-        feature_cols: [list[str] | None = None,
+        feature_cols: list[str] | None = None,
         use_all_features: bool = True,
         include_categorical: bool = True,
-        categorical_features: [list[str] | None = None,
+        categorical_features: list[str] | None = None,
         test_size: float = 0.2,
         cv_folds: int = 5,
         n_estimators: int = 100,
@@ -785,7 +785,9 @@ class BinaryOutcomeAnalyzer:
                     html_path = Path("random_forest_confusion_matrix.html")
 
                 cm.save_html(str(html_path))
-                logger.info(f"  ✓ Saved Random Forest confusion matrix HTML to: {html_path}")
+                logger.info(
+                    f"  ✓ Saved Random Forest confusion matrix HTML to: {html_path}"
+                )
 
             except Exception as e:
                 logger.info(f"  ✗ Failed to generate PyCM report: {e}")
@@ -828,10 +830,10 @@ class BinaryOutcomeAnalyzer:
 
     def xgboost_analysis(
         self,
-        feature_cols: [list[str] | None = None,
+        feature_cols: list[str] | None = None,
         use_all_features: bool = True,
         include_categorical: bool = True,
-        categorical_features: [list[str] | None = None,
+        categorical_features: list[str] | None = None,
         test_size: float = 0.2,
         cv_folds: int = 5,
         save_html: bool = True,
@@ -866,7 +868,9 @@ class BinaryOutcomeAnalyzer:
                 ).columns.tolist()
                 if self.target_col in feature_cols:
                     feature_cols.remove(self.target_col)
-                logger.info(f"Using all {len(feature_cols)} numeric features for XGBoost")
+                logger.info(
+                    f"Using all {len(feature_cols)} numeric features for XGBoost"
+                )
             else:
                 point_biserial = self.point_biserial_correlation()
                 feature_cols = point_biserial.head(10)["feature"].tolist()
