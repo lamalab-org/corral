@@ -300,7 +300,7 @@ class ComparativePlotter:
                         fontsize=8,
                     )
 
-            for i, (bar, count) in enumerate(zip(bars2, counts_1, strict=False)):
+            for _i, (bar, count) in enumerate(zip(bars2, counts_1, strict=False)):
                 if count > 0:
                     height = bar.get_height()
                     ax.text(
