@@ -256,7 +256,7 @@ class TrajectoryVisualizer:
         fig, ax = plt.subplots(figsize=figsize)
 
         # Plot successes and failures
-        for idx, row in trace_tools.iterrows():
+        for _idx, row in trace_tools.iterrows():
             color = "green" if row["is_success"] else "red"
             marker = "o" if row["is_success"] else "x"
 

@@ -288,7 +288,7 @@ class ComparativePlotter:
             )
 
             # Add count labels
-            for i, (bar, count) in enumerate(zip(bars1, counts_0, strict=False)):
+            for _i, (bar, count) in enumerate(zip(bars1, counts_0, strict=False)):
                 if count > 0:
                     height = bar.get_height()
                     ax.text(

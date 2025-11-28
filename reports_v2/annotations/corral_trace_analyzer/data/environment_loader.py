@@ -177,24 +177,24 @@ class EnvironmentDataLoader:
             dictionary with summary statistics
         """
         if df is None:
-            df = self.df
+            df_ = self.df
 
         return {
-            "total_configs": len(df),
-            "unique_environments": df["environment"].nunique(),
-            "unique_models": df["model"].nunique(),
-            "unique_agent_types": df["agent_type"].nunique(),
-            "unique_verbosity": df["tool_verbosity"].nunique(),
-            "unique_levels": df["level"].nunique(),
-            "environments": df["environment"].unique().tolist(),
-            "models": df["model"].unique().tolist(),
-            "agent_types": df["agent_type"].unique().tolist(),
-            "verbosity_levels": df["tool_verbosity"].unique().tolist(),
-            "difficulty_levels": sorted(df["level"].unique().tolist()),
-            "avg_success_rate": df["average_score"].mean(),
-            "avg_total_calls": df["total_tool_calls"].mean(),
-            "avg_failed_calls": df["failed_tool_calls"].mean(),
-            "avg_tokens": df["total_overall_tokens"].mean(),
+            "total_configs": len(df_),
+            "unique_environments": df_["environment"].nunique(),
+            "unique_models": df_["model"].nunique(),
+            "unique_agent_types": df_["agent_type"].nunique(),
+            "unique_verbosity": df_["tool_verbosity"].nunique(),
+            "unique_levels": df_["level"].nunique(),
+            "environments": df_["environment"].unique().tolist(),
+            "models": df_["model"].unique().tolist(),
+            "agent_types": df_["agent_type"].unique().tolist(),
+            "verbosity_levels": df_["tool_verbosity"].unique().tolist(),
+            "difficulty_levels": sorted(df_["level"].unique().tolist()),
+            "avg_success_rate": df_["average_score"].mean(),
+            "avg_total_calls": df_["total_tool_calls"].mean(),
+            "avg_failed_calls": df_["failed_tool_calls"].mean(),
+            "avg_tokens": df_["total_overall_tokens"].mean(),
         }
 
     def get_environment_difficulty(
@@ -210,10 +210,10 @@ class EnvironmentDataLoader:
             DataFrame with difficulty metrics per environment
         """
         if df is None:
-            df = self.df
+            df_ = self.df
 
         difficulty = (
-            df.groupby("environment")
+            df_.groupby("environment")
             .agg(
                 {
                     "average_score": ["mean", "std", "min", "max"],
@@ -238,9 +238,7 @@ class EnvironmentDataLoader:
 
         # Add difficulty rank (lower success = harder)
         difficulty["difficulty_rank"] = difficulty["avg_success_rate"].rank()
-        difficulty = difficulty.sort_values("avg_success_rate")
-
-        return difficulty
+        return difficulty.sort_values("avg_success_rate")
 
     def pivot_by_model_agent(
         self, metric: str = "average_score", df: pd.DataFrame | None = None
@@ -256,9 +254,9 @@ class EnvironmentDataLoader:
             Pivot table
         """
         if df is None:
-            df = self.df
+            df_ = self.df
 
-        return df.pivot_table(
+        return df_.pivot_table(
             values=metric,
             index="environment",
             columns=["model", "agent_type"],
@@ -283,10 +281,10 @@ class EnvironmentDataLoader:
             Comparison DataFrame
         """
         if df is None:
-            df = self.df
+            df_ = self.df
 
         return (
-            df.groupby(group_by)
+            df_.groupby(group_by)
             .agg(
                 {
                     metric: ["mean", "std", "min", "max", "count"],

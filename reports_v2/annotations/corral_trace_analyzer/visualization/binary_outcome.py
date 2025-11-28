@@ -151,7 +151,7 @@ class BinaryOutcomeVisualizer:
         axes[0].grid(True, alpha=0.3)
 
         # Add count labels
-        for i, row in quantile_stats.iterrows():
+        for _i, row in quantile_stats.iterrows():
             axes[0].text(
                 row["quantile"],
                 row["success_rate"] * 100 + 2,
@@ -310,7 +310,7 @@ class BinaryOutcomeVisualizer:
             transform=ax.transAxes,
             ha="right",
             va="bottom",
-            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+            bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.5},
             fontsize=9,
         )
 

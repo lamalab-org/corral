@@ -213,20 +213,22 @@ class InteractionAnalyzer:
         Returns:
             dictionary with three-way interaction results
         """
-        df = self.features_df[[factor1, factor2, factor3, self.target_col]].copy()
-        df = df.dropna()
+        df_ = self.features_df[[factor1, factor2, factor3, self.target_col]].copy()
+        df_ = df_.dropna()
 
-        if len(df) < 20:
+        if len(df_) < 20:
             return {"error": "Insufficient data for three-way analysis"}
 
         # Get means for each combination
         combination_means = {}
 
-        for l1 in df[factor1].unique():
-            for l2 in df[factor2].unique():
-                for l3 in df[factor3].unique():
-                    combo_data = df[
-                        (df[factor1] == l1) & (df[factor2] == l2) & (df[factor3] == l3)
+        for l1 in df_[factor1].unique():
+            for l2 in df_[factor2].unique():
+                for l3 in df_[factor3].unique():
+                    combo_data = df_[
+                        (df_[factor1] == l1)
+                        & (df_[factor2] == l2)
+                        & (df_[factor3] == l3)
                     ][self.target_col]
 
                     if len(combo_data) > 0:
@@ -257,7 +259,7 @@ class InteractionAnalyzer:
                 "combination": worst_combo[0] if worst_combo else None,
                 "stats": worst_combo[1] if worst_combo else None,
             },
-            "n_samples": len(df),
+            "n_samples": len(df_),
         }
 
     def analyze_all_main_effects(self) -> dict[str, dict[str, Any]]:
