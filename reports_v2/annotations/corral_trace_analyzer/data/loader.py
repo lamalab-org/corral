@@ -122,7 +122,7 @@ class TraceDataLoader:
             tool_calls.append(tc)
 
         # Create TraceData object
-        trace = TraceData(
+        return TraceData(
             trace_id=row["fileId"],
             file_id=row["fileId"],
             annotator=row.get("annotator", ""),
@@ -176,8 +176,6 @@ class TraceDataLoader:
             tool_calls=tool_calls,
         )
 
-        return trace
-
     def create_traces_dataframe(self) -> pd.DataFrame:
         """
         Create a flat dataframe with one row per trace
@@ -191,7 +189,7 @@ class TraceDataLoader:
         logger.info("Creating traces dataframe...")
         traces_data = []
 
-        for idx, row in self.raw_df.iterrows():
+        for _idx, row in self.raw_df.iterrows():
             trace = self.parse_trace(row)
 
             trace_dict = {
@@ -267,7 +265,7 @@ class TraceDataLoader:
         logger.info("Creating steps dataframe...")
         steps_data = []
 
-        for idx, row in self.raw_df.iterrows():
+        for _idx, row in self.raw_df.iterrows():
             trace = self.parse_trace(row)
 
             for step in trace.steps:
@@ -317,7 +315,7 @@ class TraceDataLoader:
         logger.info("Creating tools dataframe...")
         tools_data = []
 
-        for idx, row in self.raw_df.iterrows():
+        for _idx, row in self.raw_df.iterrows():
             trace = self.parse_trace(row)
 
             for tool_idx, tool in enumerate(trace.tool_calls):

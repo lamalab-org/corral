@@ -49,13 +49,13 @@ class CorrelationAnalyzer:
 
         results = []
 
-        target_values = self.features_df[self.target_col].values
+        target_values = self.features_df[self.target_col].to_numpy()
 
         for col in feature_cols:
             if col not in self.features_df.columns:
                 continue
 
-            feature_values = self.features_df[col].values
+            feature_values = self.features_df[col].to_numpy()
 
             # Remove NaN values
             mask = ~(np.isnan(target_values) | np.isnan(feature_values))
@@ -108,13 +108,13 @@ class CorrelationAnalyzer:
 
         results = []
 
-        target_values = self.features_df[self.target_col].values
+        target_values = self.features_df[self.target_col].to_numpy()
 
         for col in feature_cols:
             if col not in self.features_df.columns:
                 continue
 
-            feature_values = self.features_df[col].values
+            feature_values = self.features_df[col].to_numpy()
 
             # Remove NaN values
             mask = ~(np.isnan(target_values) | np.isnan(feature_values))
@@ -310,14 +310,12 @@ class CorrelationAnalyzer:
         """
         logger.info("Running Tier 1 correlation analyses...")
 
-        results = {
+        return {
             "markers_vs_score": self.analyze_marker_score_correlations(),
             "errors_vs_score": self.analyze_error_score_correlations(),
             "efficiency_vs_score": self.analyze_efficiency_score_correlations(),
             "qa_analyses": self.analyze_qa_correlations(),
         }
-
-        return results
 
     def run_all_tier2_analyses(self) -> dict[str, pd.DataFrame]:
         """
@@ -328,13 +326,11 @@ class CorrelationAnalyzer:
         """
         logger.info("Running Tier 2 correlation analyses...")
 
-        results = {
+        return {
             "recovery_vs_score": self.analyze_recovery_score_correlations(),
             "planning_vs_score": self.analyze_planning_score_correlations(),
             "tool_usage_vs_score": self.analyze_tool_usage_correlations(),
         }
-
-        return results
 
     def run_all_analyses(self) -> dict[str, Any]:
         """
@@ -365,17 +361,17 @@ class CorrelationAnalyzer:
         if "pearson" not in self.correlation_results:
             self.compute_pearson_correlations()
 
-        df = self.correlation_results["pearson"]
-        df = df[df["abs_correlation"] >= min_abs_corr]
-        return df.head(n)
+        df_ = self.correlation_results["pearson"]
+        df_ = df_[df_["abs_correlation"] >= min_abs_corr]
+        return df_.head(n)
 
     def _analyze_two_variables(self, var1: str, var2: str) -> dict[str, float]:
         """Helper to analyze correlation between two variables"""
         if var1 not in self.features_df.columns or var2 not in self.features_df.columns:
             return {}
 
-        v1 = self.features_df[var1].values
-        v2 = self.features_df[var2].values
+        v1 = self.features_df[var1].to_numpy()
+        v2 = self.features_df[var2].to_numpy()
 
         mask = ~(np.isnan(v1) | np.isnan(v2))
         if mask.sum() < 3:

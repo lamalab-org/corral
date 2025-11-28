@@ -113,49 +113,58 @@ class EnvironmentDataLoader:
         Returns:
             DataFrame with additional features
         """
+        # Ensure there is a DataFrame to work with; load from file if necessary
         if df is None:
-            df = self.df.copy()
+            if self.df is None:
+                self.load()
+            df_ = self.df.copy()
         else:
-            df = df.copy()
+            df_ = df.copy()
 
         # Error rates
-        df["failed_call_rate"] = df["failed_tool_calls"] / df["total_tool_calls"]
-        df["success_call_rate"] = df["successful_tool_calls"] / df["total_tool_calls"]
+        df_["failed_call_rate"] = df_["failed_tool_calls"] / df_["total_tool_calls"]
+        df_["success_call_rate"] = (
+            df_["successful_tool_calls"] / df_["total_tool_calls"]
+        )
 
         # Token efficiency
-        df["tokens_per_call"] = df["total_overall_tokens"] / df["total_tool_calls"]
-        df["prompt_to_completion_ratio"] = df["total_prompt_tokens"] / (
-            df["total_completion_tokens"] + 1
+        df_["tokens_per_call"] = df_["total_overall_tokens"] / df_["total_tool_calls"]
+        df_["prompt_to_completion_ratio"] = df_["total_prompt_tokens"] / (
+            df_["total_completion_tokens"] + 1
         )  # +1 to avoid division by zero
 
         # Time efficiency
-        df["time_per_call"] = df["total_tool_execution_time"] / df["total_tool_calls"]
-        df["benchmark_time_per_call"] = (
-            df["total_benchmark_time"] / df["total_tool_calls"]
+        df_["time_per_call"] = (
+            df_["total_tool_execution_time"] / df_["total_tool_calls"]
         )
-        df["execution_overhead"] = (
-            df["total_benchmark_time"] - df["total_tool_execution_time"]
-        ) / df["total_benchmark_time"]
+        df_["benchmark_time_per_call"] = (
+            df_["total_benchmark_time"] / df_["total_tool_calls"]
+        )
+        df_["execution_overhead"] = (
+            df_["total_benchmark_time"] - df_["total_tool_execution_time"]
+        ) / df_["total_benchmark_time"]
 
         # Success-normalized metrics
-        df["calls_per_success"] = df["total_tool_calls"] / (df["average_score"] + 0.01)
-        df["tokens_per_success"] = df["total_overall_tokens"] / (
-            df["average_score"] + 0.01
+        df_["calls_per_success"] = df_["total_tool_calls"] / (
+            df_["average_score"] + 0.01
         )
-        df["time_per_success"] = df["total_benchmark_time"] / (
-            df["average_score"] + 0.01
+        df_["tokens_per_success"] = df_["total_overall_tokens"] / (
+            df_["average_score"] + 0.01
+        )
+        df_["time_per_success"] = df_["total_benchmark_time"] / (
+            df_["average_score"] + 0.01
         )
 
         # Pass rate improvements
-        df["pass@1_to_pass@5_improvement"] = df["pass@5"] - df["pass@1"]
-        df["pass^1_to_pass^5_degradation"] = df["pass^1"] - df["pass^5"]
+        df_["pass@1_to_pass@5_improvement"] = df_["pass@5"] - df_["pass@1"]
+        df_["pass^1_to_pass^5_degradation"] = df_["pass^1"] - df_["pass^5"]
 
         # Binary indicators
-        df["has_failures"] = (df["failed_tool_calls"] > 0).astype(int)
-        df["perfect_success"] = (df["average_score"] == 1.0).astype(int)
-        df["zero_success"] = (df["average_score"] == 0.0).astype(int)
+        df_["has_failures"] = (df_["failed_tool_calls"] > 0).astype(int)
+        df_["perfect_success"] = (df_["average_score"] == 1.0).astype(int)
+        df_["zero_success"] = (df_["average_score"] == 0.0).astype(int)
 
-        return df
+        return df_
 
     def get_summary_stats(self, df: pd.DataFrame | None = None) -> dict[str, Any]:
         """

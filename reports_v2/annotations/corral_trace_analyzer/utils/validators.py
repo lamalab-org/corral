@@ -60,7 +60,7 @@ def check_data_quality(df: pd.DataFrame) -> dict[str, Any]:
         "total_rows": len(df),
         "total_columns": len(df.columns),
         "missing_values": df.isnull().sum().to_dict(),
-        "missing_percentage": (df.isnull().sum() / len(df) * 100).to_dict(),
+        "missing_percentage": (df.isna().sum() / len(df) * 100).to_dict(),
         "duplicate_rows": df.duplicated().sum(),
         "numeric_columns": df.select_dtypes(include="number").columns.tolist(),
         "categorical_columns": df.select_dtypes(include="object").columns.tolist(),

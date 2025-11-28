@@ -52,7 +52,7 @@ class BinaryOutcomeVisualizer:
             feature_col
         ].dropna()
 
-        parts = axes[0].violinplot(
+        _parts = axes[0].violinplot(
             [failure_data, success_data],
             positions=[0, 1],
             showmeans=True,
@@ -115,19 +115,19 @@ class BinaryOutcomeVisualizer:
         Returns:
             Matplotlib figure
         """
-        df = self.features_df[[feature_col, self.target_col]].dropna()
+        df_ = self.features_df[[feature_col, self.target_col]].dropna()
 
-        if len(df) < n_bins:
+        if len(df_) < n_bins:
             raise ValueError(f"Not enough data for {n_bins} bins")
 
         # Create quantile bins
-        df["quantile"] = pd.qcut(
-            df[feature_col], q=n_bins, labels=False, duplicates="drop"
+        df_["quantile"] = pd.qcut(
+            df_[feature_col], q=n_bins, labels=False, duplicates="drop"
         )
 
         # Calculate success rate per quantile
         quantile_stats = (
-            df.groupby("quantile")
+            df_.groupby("quantile")
             .agg({feature_col: "mean", self.target_col: ["mean", "count"]})
             .reset_index()
         )
@@ -162,7 +162,7 @@ class BinaryOutcomeVisualizer:
 
         # Scatter plot showing trend
         axes[1].scatter(
-            df[feature_col], df[self.target_col], alpha=0.3, s=20, label="Data points"
+            df_[feature_col], df_[self.target_col], alpha=0.3, s=20, label="Data points"
         )
 
         # Add quantile means
@@ -222,10 +222,10 @@ class BinaryOutcomeVisualizer:
         """
         from sklearn.metrics import auc, roc_curve
 
-        df = self.features_df[[feature_col, self.target_col]].dropna()
+        df_ = self.features_df[[feature_col, self.target_col]].dropna()
 
-        y_true = df[self.target_col].values
-        y_score = df[feature_col].values
+        y_true = df_[self.target_col].to_numpy()
+        y_score = df_[feature_col].to_numpy()
 
         fpr, tpr, thresholds = roc_curve(y_true, y_score)
         roc_auc = auc(fpr, tpr)
@@ -340,11 +340,11 @@ class BinaryOutcomeVisualizer:
         Returns:
             Matplotlib figure
         """
-        df = self.features_df[[feature_col, self.target_col]].dropna()
+        df_ = self.features_df[[feature_col, self.target_col]].dropna()
 
         # Create bins
-        df["bin"] = pd.qcut(
-            df[feature_col],
+        df_["bin"] = pd.qcut(
+            df_[feature_col],
             q=n_bins,
             labels=["Low", "Medium", "High"],
             duplicates="drop",
@@ -352,7 +352,7 @@ class BinaryOutcomeVisualizer:
 
         # Create contingency table
         contingency = (
-            pd.crosstab(df["bin"], df[self.target_col], normalize="index") * 100
+            pd.crosstab(df_["bin"], df_[self.target_col], normalize="index") * 100
         )
 
         fig, ax = plt.subplots(figsize=figsize)

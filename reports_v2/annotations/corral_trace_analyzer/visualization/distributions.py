@@ -231,7 +231,7 @@ class DistributionVisualizer:
         ax.set_ylim(0, 100)
 
         # Add count labels
-        for i, (idx, row) in enumerate(success_rates.iterrows()):
+        for i, (_idx, row) in enumerate(success_rates.iterrows()):
             ax.text(
                 i,
                 row["success_rate"] + 2,
@@ -372,7 +372,7 @@ class DistributionVisualizer:
         ax.set_xlabel(factor1.replace("_", " ").title(), fontsize=12)
         ax.set_ylabel(f"Mean {value_col.replace('_', ' ').title()}", fontsize=12)
         ax.set_title(
-            f"Interaction: {factor1} × {factor2}", fontsize=14, fontweight="bold"
+            f"Interaction: {factor1} * {factor2}", fontsize=14, fontweight="bold"
         )
         ax.legend(title=factor2.replace("_", " ").title())
         ax.grid(True, alpha=0.3)

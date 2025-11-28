@@ -54,11 +54,11 @@ class ToolQualityFeatures(BaseFeatureExtractor):
                 index=pd.Index([], name="trace_id"), columns=self.feature_names
             )
 
-        df = pd.DataFrame(features_list).set_index("trace_id")
+        df_ = pd.DataFrame(features_list).set_index("trace_id")
 
         # Return only requested features, handling cases where a feature might not be computed for any trace
-        return_cols = [col for col in self.feature_names if col in df.columns]
-        return df[return_cols]
+        return_cols = [col for col in self.feature_names if col in df_.columns]
+        return df_[return_cols]
 
     def _extract_for_trace(
         self, trace_id: str, tools_df: pd.DataFrame, steps_df: pd.DataFrame
@@ -104,7 +104,7 @@ class ToolQualityFeatures(BaseFeatureExtractor):
         features["unique_tool_calls_ratio"] = unique_tools / total_calls
 
         # Retry rate (same tool called consecutively)
-        tool_names = tools_df["tool_name"].values
+        tool_names = tools_df["tool_name"].to_numpy()
         consecutive_same = sum(
             1 for i in range(1, len(tool_names)) if tool_names[i] == tool_names[i - 1]
         )
@@ -130,13 +130,13 @@ class ToolQualityFeatures(BaseFeatureExtractor):
         features["tool_diversity_entropy"] = self._calculate_entropy(tool_names)
 
         # Tool latency statistics
-        latencies = tools_df["duration"].values
+        latencies = tools_df["duration"].to_numpy()
         features["tool_latency_mean"] = np.mean(latencies)
         features["tool_latency_max"] = np.max(latencies)
         features["tool_latency_std"] = np.std(latencies) if len(latencies) > 1 else 0.0
 
         # Tools per step
-        tool_steps = len(steps_df[steps_df["node_type"] == "tool"])
+        _tool_steps = len(steps_df[steps_df["node_type"] == "tool"])
         features["avg_tools_per_step"] = (
             total_calls / len(steps_df) if len(steps_df) > 0 else 0.0
         )

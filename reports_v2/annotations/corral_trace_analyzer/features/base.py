@@ -68,7 +68,8 @@ class FeatureExtractor:
     """Main feature extractor that combines all feature extractors"""
 
     def __init__(self):
-        from ..config import FEATURES
+        from corral_trace_analyzer.config import FEATURES
+
         from .markers import MarkerFeatures
         from .temporal import TemporalFeatures
         from .text import TextFeatures
@@ -102,7 +103,7 @@ class FeatureExtractor:
         Returns:
             DataFrame with all extracted features
         """
-        from ..config import EXCLUDE_FROM_ANALYSIS
+        from corral_trace_analyzer.config import EXCLUDE_FROM_ANALYSIS
 
         logger.info("Extracting all features...")
 

@@ -76,8 +76,8 @@ class ComparativePlotter:
                     ["mean", "count"]
                 )
                 x_labels = ["0", "1"]
-                success_rates = grouped["mean"].values
-                counts = grouped["count"].values
+                success_rates = grouped["mean"].to_numpy()
+                counts = grouped["count"].to_numpy()
             else:
                 # Continuous feature - use 5 quantiles
                 features_df_copy = features_df.copy()
@@ -88,18 +88,18 @@ class ComparativePlotter:
                     ["mean", "count"]
                 )
                 x_labels = [f"Q{i+1}" for i in range(len(grouped))]
-                success_rates = grouped["mean"].values
-                counts = grouped["count"].values
+                success_rates = grouped["mean"].to_numpy()
+                counts = grouped["count"].to_numpy()
 
             # Plot bars
             bars = ax.bar(x_labels, success_rates, alpha=0.7, edgecolor="black")
 
             # Color bars by success rate
-            for i, (bar, rate) in enumerate(zip(bars, success_rates, strict=False)):
+            for _i, (bar, rate) in enumerate(zip(bars, success_rates, strict=False)):
                 bar.set_color(plt.cm.RdYlGn(rate))
 
             # Add count labels on bars
-            for i, (x, y, count) in enumerate(
+            for i, (_x, y, count) in enumerate(
                 zip(x_labels, success_rates, counts, strict=False)
             ):
                 ax.text(i, y + 0.02, f"n={count}", ha="center", fontsize=9)
@@ -477,7 +477,7 @@ class ComparativePlotter:
                 verticalalignment="top",
                 horizontalalignment="right",
                 fontsize=8,
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+                bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.5},
             )
 
             # Formatting

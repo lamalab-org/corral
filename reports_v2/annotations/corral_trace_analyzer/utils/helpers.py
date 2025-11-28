@@ -11,45 +11,45 @@ import pandas as pd
 from loguru import logger
 
 
-def save_results(results: Any, filepath: str, format: str = "json") -> None:
+def save_results(results: Any, filepath: str, format_: str = "json") -> None:
     """
     Save results to file
 
     Args:
         results: Results to save (dict, DataFrame, etc.)
         filepath: Path to save to
-        format: Format ('json', 'pickle', 'csv', 'parquet')
+        format_: Format ('json', 'pickle', 'csv', 'parquet')
     """
     filepath = Path(filepath)
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
-    if format == "json":
+    if format_ == "json":
         with filepath.open("w") as f:
             json.dump(results, f, indent=2, default=str)
 
-    elif format == "pickle":
+    elif format_ == "pickle":
         with filepath.open("wb") as f:
             pickle.dump(results, f)
 
-    elif format == "csv" and isinstance(results, pd.DataFrame):
+    elif format_ == "csv" and isinstance(results, pd.DataFrame):
         results.to_csv(filepath, index=False)
 
-    elif format == "parquet" and isinstance(results, pd.DataFrame):
+    elif format_ == "parquet" and isinstance(results, pd.DataFrame):
         results.to_parquet(filepath, index=False)
 
     else:
-        raise ValueError(f"Unsupported format: {format}")
+        raise ValueError(f"Unsupported format: {format_}")
 
     logger.info(f"Results saved to {filepath}")
 
 
-def load_results(filepath: str, format: str = "json") -> Any:
+def load_results(filepath: str, format_: str = "json") -> Any:
     """
     Load results from file
 
     Args:
         filepath: Path to load from
-        format: Format ('json', 'pickle', 'csv', 'parquet')
+        format_: Format ('json', 'pickle', 'csv', 'parquet')
 
     Returns:
         Loaded results
@@ -59,22 +59,22 @@ def load_results(filepath: str, format: str = "json") -> Any:
     if not filepath.exists():
         raise FileNotFoundError(f"File not found: {filepath}")
 
-    if format == "json":
+    if format_ == "json":
         with filepath.open() as f:
             return json.load(f)
 
-    elif format == "pickle":
+    elif format_ == "pickle":
         with filepath.open("rb") as f:
             return pickle.load(f)
 
-    elif format == "csv":
+    elif format_ == "csv":
         return pd.read_csv(filepath)
 
-    elif format == "parquet":
+    elif format_ == "parquet":
         return pd.read_parquet(filepath)
 
     else:
-        raise ValueError(f"Unsupported format: {format}")
+        raise ValueError(f"Unsupported format: {format_}")
 
 
 def export_to_csv(
@@ -108,17 +108,15 @@ def summarize_dataframe(df: pd.DataFrame) -> dict[str, Any]:
     Returns:
         dictionary with summary statistics
     """
-    summary = {
+    return {
         "shape": df.shape,
         "columns": df.columns.tolist(),
         "dtypes": df.dtypes.astype(str).to_dict(),
-        "missing_values": df.isnull().sum().to_dict(),
+        "missing_values": df.isna().sum().to_dict(),
         "numeric_summary": df.describe().to_dict()
         if len(df.select_dtypes(include="number").columns) > 0
         else {},
     }
-
-    return summary
 
 
 def filter_significant_correlations(

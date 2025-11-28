@@ -53,7 +53,7 @@ class TrajectoryVisualizer:
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, sharex=True)
 
         # Plot marker occurrences
-        for idx, row in trace_steps.iterrows():
+        for _idx, row in trace_steps.iterrows():
             step_idx = row["step_index"]
 
             if row["has_positive"]:
@@ -208,11 +208,9 @@ class TrajectoryVisualizer:
         Returns:
             Matplotlib figure
         """
-        # Group by step index and count node types
-        step_type_counts = (
-            self.steps_df.groupby(["step_index", "node_type"])
-            .size()
-            .unstack(fill_value=0)
+        # Group by step index and count node types using pivot_table instead of unstack
+        step_type_counts = self.steps_df.pivot_table(
+            index="step_index", columns="node_type", aggfunc="size", fill_value=0
         )
 
         fig, ax = plt.subplots(figsize=figsize)
@@ -332,7 +330,7 @@ class TrajectoryVisualizer:
                     y=[1] * len(positive_steps),
                     mode="markers",
                     name="Positive",
-                    marker=dict(color="green", size=12, symbol="triangle-up"),
+                    marker={"color": "green", "size": 12, "symbol": "triangle-up"},
                     text=positive_steps["message"].str[:100],
                     hovertemplate="<b>Step %{x}</b><br>%{text}<extra></extra>",
                 )
@@ -345,7 +343,7 @@ class TrajectoryVisualizer:
                     y=[0] * len(negative_steps),
                     mode="markers",
                     name="Negative",
-                    marker=dict(color="red", size=12, symbol="triangle-down"),
+                    marker={"color": "red", "size": 12, "symbol": "triangle-down"},
                     text=negative_steps["message"].str[:100],
                     hovertemplate="<b>Step %{x}</b><br>%{text}<extra></extra>",
                 )
@@ -356,9 +354,11 @@ class TrajectoryVisualizer:
             title=f"Interactive Trace Timeline: {trace_id}",
             xaxis_title="Step Index",
             yaxis_title="Marker Type",
-            yaxis=dict(
-                tickmode="array", tickvals=[0, 1], ticktext=["Negative", "Positive"]
-            ),
+            yaxis={
+                "tickmode": "array",
+                "tickvals": [0, 1],
+                "ticktext": ["Negative", "Positive"],
+            },
             hovermode="closest",
             height=400,
         )

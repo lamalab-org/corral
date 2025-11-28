@@ -15,7 +15,7 @@ from corral_trace_analyzer.config import ALPHA, ENVIRONMENT_TARGET_METRIC
 class EnvironmentAnalyzer:
     """Analyze environment-level aggregated results"""
 
-    def __init__(self, env_df: pd.DataFrame, target_metric: str = None):
+    def __init__(self, env_df: pd.DataFrame, target_metric: str | None = None):
         """
         Initialize environment analyzer
 
@@ -55,13 +55,13 @@ class EnvironmentAnalyzer:
             feature_cols = [c for c in feature_cols if c not in exclude_cols]
 
         results = []
-        target_values = self.env_df[self.target_metric].values
+        target_values = self.env_df[self.target_metric].to_numpy()
 
         for col in feature_cols:
             if col not in self.env_df.columns:
                 continue
 
-            feature_values = self.env_df[col].values
+            feature_values = self.env_df[col].to_numpy()
 
             # Remove NaN
             mask = ~(np.isnan(target_values) | np.isnan(feature_values))
@@ -284,14 +284,14 @@ class EnvironmentAnalyzer:
             return {"error": "Not enough groups for ANOVA"}
 
         # Perform ANOVA
-        f_stat, p_value = stats.f_oneway(*groups.values())
+        f_stat, p_value = stats.f_oneway(*groups.to_numpy()())
 
         # Calculate effect size (eta squared)
         grand_mean = self.env_df[self.target_metric].mean()
         ss_between = sum(
-            len(g) * (np.mean(g) - grand_mean) ** 2 for g in groups.values()
+            len(g) * (np.mean(g) - grand_mean) ** 2 for g in groups.to_numpy()()
         )
-        ss_total = sum((x - grand_mean) ** 2 for g in groups.values() for x in g)
+        ss_total = sum((x - grand_mean) ** 2 for g in groups.to_numpy()() for x in g)
         eta_squared = ss_between / ss_total if ss_total > 0 else 0
 
         # Group statistics

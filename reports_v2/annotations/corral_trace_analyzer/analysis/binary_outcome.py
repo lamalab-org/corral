@@ -543,19 +543,19 @@ class BinaryOutcomeAnalyzer:
         Returns:
             DataFrame with success rates by quantile
         """
-        df = self.features_df[[feature_col, self.target_col]].dropna()
+        df_ = self.features_df[[feature_col, self.target_col]].dropna()
 
-        if len(df) < n_bins:
+        if len(df_) < n_bins:
             return pd.DataFrame()
 
         # Create quantile bins
-        df["quantile"] = pd.qcut(
-            df[feature_col], q=n_bins, labels=False, duplicates="drop"
+        df_["quantile"] = pd.qcut(
+            df_[feature_col], q=n_bins, labels=False, duplicates="drop"
         )
 
         # Calculate success rate per quantile
         quantile_stats = (
-            df.groupby("quantile")
+            df_.groupby("quantile")
             .agg(
                 {
                     feature_col: ["min", "max", "mean"],

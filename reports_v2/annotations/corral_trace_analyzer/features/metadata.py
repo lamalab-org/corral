@@ -38,7 +38,7 @@ class MetadataFeatures(BaseFeatureExtractor):
         self.feature_names = self.features_to_extract.copy()
 
     def extract(
-        self, traces_df: pd.DataFrame, steps_df: pd.DataFrame, tools_df: pd.DataFrame
+        self, traces_df: pd.DataFrame, _steps_df: pd.DataFrame, _tools_df: pd.DataFrame
     ) -> pd.DataFrame:
         """
         Extract metadata features from traces_df

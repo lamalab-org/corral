@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from loguru import logger
 from scipy import stats
 
 from corral_trace_analyzer.config import ALPHA
@@ -96,19 +97,19 @@ class InteractionAnalyzer:
             return {}
 
         # Create interaction term
-        df = self.features_df[[factor1, factor2, self.target_col]].copy()
-        df = df.dropna()
+        df_ = self.features_df[[factor1, factor2, self.target_col]].copy()
+        df_ = df_.dropna()
 
-        if len(df) < 10:  # Need reasonable sample size
+        if len(df_) < 10:  # Need reasonable sample size
             return {"error": "Insufficient data for two-way ANOVA"}
 
         # Get unique levels
-        levels1 = df[factor1].unique()
-        levels2 = df[factor2].unique()
+        levels1 = df_[factor1].unique()
+        levels2 = df_[factor2].unique()
 
         # Main effect of factor1
         groups1 = [
-            df[df[factor1] == level][self.target_col].values for level in levels1
+            df_[df_[factor1] == level][self.target_col].to_numpy() for level in levels1
         ]
         groups1 = [g for g in groups1 if len(g) >= 2]
 
@@ -119,7 +120,7 @@ class InteractionAnalyzer:
 
         # Main effect of factor2
         groups2 = [
-            df[df[factor2] == level][self.target_col].values for level in levels2
+            df_[df_[factor2] == level][self.target_col].to_numpy() for level in levels2
         ]
         groups2 = [g for g in groups2 if len(g) >= 2]
 
@@ -133,7 +134,7 @@ class InteractionAnalyzer:
         interaction_means = {}
         for l1 in levels1:
             for l2 in levels2:
-                combo_data = df[(df[factor1] == l1) & (df[factor2] == l2)][
+                combo_data = df_[(df_[factor1] == l1) & (df_[factor2] == l2)][
                     self.target_col
                 ]
                 if len(combo_data) > 0:
@@ -168,7 +169,7 @@ class InteractionAnalyzer:
             "factor2_significant": f2_pval < ALPHA if not np.isnan(f2_pval) else False,
             "interaction_detected": interaction_detected,
             "interaction_means": interaction_means,
-            "n_samples": len(df),
+            "n_samples": len(df_),
         }
 
     def analyze_model_agent_interaction(self) -> dict[str, Any]:
@@ -266,7 +267,7 @@ class InteractionAnalyzer:
         Returns:
             dictionary with ANOVA results for each categorical variable
         """
-        print("Analyzing main effects...")
+        logger.info("Analyzing main effects...")
 
         categorical_cols = ["model", "environment", "agent_type", "level"]
         categorical_cols = [
@@ -276,7 +277,7 @@ class InteractionAnalyzer:
         results = {}
 
         for col in categorical_cols:
-            print(f"  Analyzing {col}...")
+            logger.info(f"  Analyzing {col}...")
             results[col] = self.one_way_anova(col)
 
         return results
@@ -288,7 +289,7 @@ class InteractionAnalyzer:
         Returns:
             dictionary with two-way ANOVA results
         """
-        print("Analyzing two-way interactions...")
+        logger.info("Analyzing two-way interactions...")
 
         categorical_cols = ["model", "environment", "agent_type"]
         categorical_cols = [
@@ -299,14 +300,14 @@ class InteractionAnalyzer:
 
         for factor1, factor2 in combinations(categorical_cols, 2):
             key = f"{factor1}_x_{factor2}"
-            print(f"  Analyzing {key}...")
+            logger.info(f"  Analyzing {key}...")
             results[key] = self.two_way_anova(factor1, factor2)
 
         return results
 
     def analyze_model_agent_environment(self) -> dict[str, Any]:
         """
-        Analyze three-way interaction: model × agent_type × environment
+        Analyze three-way interaction: model , agent_type , environment
 
         Returns:
             dictionary with three-way interaction results

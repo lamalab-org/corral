@@ -169,8 +169,8 @@ class CorrelationVisualizer:
 
         # Add regression line
         mask = ~(self.features_df[x_col].isna() | self.features_df[y_col].isna())
-        x = self.features_df[mask][x_col].values
-        y = self.features_df[mask][y_col].values
+        x = self.features_df[mask][x_col].to_numpy()
+        y = self.features_df[mask][y_col].to_numpy()
 
         if len(x) > 1:
             z = np.polyfit(x, y, 1)
@@ -195,7 +195,7 @@ class CorrelationVisualizer:
                 f"r = {corr:.3f}\np = {pval:.3e}",
                 transform=ax.transAxes,
                 verticalalignment="top",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+                bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.5},
             )
 
         ax.set_xlabel(x_col, fontsize=12)
@@ -242,7 +242,7 @@ class CorrelationVisualizer:
                 text=corr_matrix.values,
                 texttemplate="%{text:.2f}",
                 textfont={"size": 10},
-                colorbar=dict(title=f"{method.capitalize()} Correlation"),
+                colorbar={"title": f"{method.capitalize()} Correlation"},
             )
         )
 
@@ -260,7 +260,7 @@ class CorrelationVisualizer:
         self,
         feature_cols: list[str],
         hue_col: str | None = None,
-        figsize: tuple[int, int] = (12, 12),
+        _figsize: tuple[int, int] = (12, 12),
         save_path: str | None = None,
     ) -> plt.Figure:
         """
@@ -277,7 +277,7 @@ class CorrelationVisualizer:
         """
         if hue_col:
             g = sns.pairplot(
-                self.features_df[feature_cols + [hue_col]], hue=hue_col, diag_kind="kde"
+                self.features_df[[*feature_cols, hue_col]], hue=hue_col, diag_kind="kde"
             )
         else:
             g = sns.pairplot(self.features_df[feature_cols], diag_kind="kde")
@@ -324,8 +324,8 @@ class CorrelationVisualizer:
         for ax, group in zip(axes, groups, strict=False):
             subset = self.features_df[self.features_df[group_col] == group]
             mask = ~(subset[feature_col].isna() | subset[target_col].isna())
-            x = subset[mask][feature_col].values
-            y = subset[mask][target_col].values
+            x = subset[mask][feature_col].to_numpy()
+            y = subset[mask][target_col].to_numpy()
 
             if len(x) > 1:
                 ax.scatter(x, y, alpha=0.6, s=50)

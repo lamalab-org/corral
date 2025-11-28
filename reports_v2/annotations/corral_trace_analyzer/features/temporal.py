@@ -77,11 +77,11 @@ class TemporalFeatures(BaseFeatureExtractor):
                 index=pd.Index([], name="trace_id"), columns=self.feature_names
             )
 
-        df = pd.DataFrame(features_list).set_index("trace_id")
+        df_ = pd.DataFrame(features_list).set_index("trace_id")
 
         # Return only requested features, handling cases where a feature might not be computed for any trace
-        return_cols = [col for col in self.feature_names if col in df.columns]
-        return df[return_cols]
+        return_cols = [col for col in self.feature_names if col in df_.columns]
+        return df_[return_cols]
 
     def _extract_for_trace(
         self, trace_id: str, steps_df: pd.DataFrame, tools_df: pd.DataFrame
@@ -249,15 +249,14 @@ class TemporalFeatures(BaseFeatureExtractor):
         )
 
         # Fit linear regression
-        x = steps_with_markers["step_index"].values
-        y = steps_with_markers["positive_ratio"].values
+        x = steps_with_markers["step_index"].to_numpy()
+        y = steps_with_markers["positive_ratio"].to_numpy()
 
         if len(x) < 2:
             return 0.0
 
         # Simple linear regression
-        slope = np.polyfit(x, y, 1)[0]
-        return slope
+        return np.polyfit(x, y, 1)[0]
 
     def _has_planning_in_first_step(self, steps_df: pd.DataFrame) -> int:
         """
@@ -322,7 +321,7 @@ class TemporalFeatures(BaseFeatureExtractor):
         return max_consecutive
 
     def _assistant_steps_to_first_tool_call(
-        self, steps_df: pd.DataFrame, tools_df: pd.DataFrame
+        self, steps_df: pd.DataFrame, _tools_df: pd.DataFrame
     ) -> int:
         """
         Calculate assistant steps until first tool call

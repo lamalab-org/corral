@@ -181,10 +181,12 @@ class StatisticalTests:
         if len(data) < 2:
             return {"error": "Insufficient data for bootstrap"}
 
+        # Use a Generator instance for random sampling
+        rng = np.random.default_rng()
         bootstrap_stats = []
 
         for _ in range(n_bootstrap):
-            sample = np.random.choice(data, size=len(data), replace=True)
+            sample = rng.choice(data, size=len(data), replace=True)
             bootstrap_stats.append(statistic_func(sample))
 
         bootstrap_stats = np.array(bootstrap_stats)
@@ -218,7 +220,7 @@ class StatisticalTests:
             dictionary with partial correlation results
         """
         # Select relevant columns and drop NaNs
-        cols = [x_col, y_col] + control_cols
+        cols = [x_col, y_col, *control_cols]
         data = df[cols].dropna()
 
         if len(data) < len(cols) + 2:
@@ -227,9 +229,9 @@ class StatisticalTests:
         # Compute residuals after regressing x and y on control variables
         from sklearn.linear_model import LinearRegression
 
-        X_control = data[control_cols].values
-        x_values = data[x_col].values
-        y_values = data[y_col].values
+        X_control = data[control_cols].to_numpy()
+        x_values = data[x_col].to_numpy()
+        y_values = data[y_col].to_numpy()
 
         # Regress x on controls
         model_x = LinearRegression()

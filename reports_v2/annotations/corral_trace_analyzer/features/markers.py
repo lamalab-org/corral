@@ -63,11 +63,11 @@ class MarkerFeatures(BaseFeatureExtractor):
                 index=pd.Index([], name="trace_id"), columns=self.feature_names
             )
 
-        df = pd.DataFrame(features_list).set_index("trace_id")
+        df_ = pd.DataFrame(features_list).set_index("trace_id")
 
         # Return only requested features, handling cases where a feature might not be computed for any trace
-        return_cols = [col for col in self.feature_names if col in df.columns]
-        return df[return_cols]
+        return_cols = [col for col in self.feature_names if col in df_.columns]
+        return df_[return_cols]
 
     def _extract_for_trace(
         self,

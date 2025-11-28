@@ -5,7 +5,11 @@ Filtering utilities for selecting subsets of data
 import pandas as pd
 from loguru import logger
 
-from ..config import SELECTED_AGENT_TYPES, SELECTED_ENVIRONMENTS, SELECTED_MODELS
+from corral_trace_analyzer.config import (
+    SELECTED_AGENT_TYPES,
+    SELECTED_ENVIRONMENTS,
+    SELECTED_MODELS,
+)
 
 
 def filter_by_config(
