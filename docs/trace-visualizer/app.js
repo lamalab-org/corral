@@ -1572,6 +1572,297 @@ document.getElementById('submitBtn').addEventListener('click', async function() 
 });
 
 // ============================================================================
+// Offline Mode - Save and Load Functions
+// ============================================================================
+
+/**
+ * Validates annotation data before saving locally
+ * Same validation as submit, but without requiring annotator/mongodbKey
+ */
+function validateAnnotationsForLocalSave() {
+    // Save current file's annotations and trace comments
+    if (allFiles.length > 0 && allFiles[currentFileIndex]) {
+        const currentFileName = allFiles[currentFileIndex].name;
+        allFileAnnotations[currentFileName] = JSON.parse(JSON.stringify(nodeAnnotations));
+        const traceCommentsTextarea = document.getElementById('traceCommentsTextarea');
+        allFileTraceComments[currentFileName] = traceCommentsTextarea.value;
+    }
+
+    // Check all files for missing annotations
+    const missingAnnotations = [];
+
+    allFiles.forEach((file, fileIndex) => {
+        const fileName = file.name;
+        const fileAnnotations = allFileAnnotations[fileName] || {};
+        const fileNodes = allFileNodes[fileName] || [];
+
+        // Check if file has been loaded (has node data)
+        if (fileNodes.length === 0) {
+            missingAnnotations.push({
+                fileName: fileName,
+                fileIndex: fileIndex + 1,
+                reason: 'File has not been loaded yet'
+            });
+            return;
+        }
+
+        // Check all annotatable nodes in this file
+        const unannotatedInFile = [];
+        fileNodes.forEach((nodeInfo, nodeIndex) => {
+            if (nodeInfo.annotatable) {
+                const annotation = fileAnnotations[nodeInfo.id];
+                if (!annotation || annotation.markers.length === 0) {
+                    unannotatedInFile.push({
+                        nodeId: nodeInfo.id,
+                        nodeIndex: nodeIndex,
+                        nodeType: nodeInfo.type
+                    });
+                }
+            }
+        });
+
+        if (unannotatedInFile.length > 0) {
+            missingAnnotations.push({
+                fileName: fileName,
+                fileIndex: fileIndex + 1,
+                unannotatedNodes: unannotatedInFile
+            });
+        }
+    });
+
+    return missingAnnotations;
+}
+
+// Save Locally button handler
+document.getElementById('saveLocalBtn').addEventListener('click', function() {
+    // Check if files are loaded
+    if (allFiles.length === 0) {
+        alert('❌ No files loaded. Please load a directory with trace files first.');
+        return;
+    }
+
+    // Validate annotations
+    const missingAnnotations = validateAnnotationsForLocalSave();
+
+    // If there are missing annotations, show detailed error
+    if (missingAnnotations.length > 0) {
+        let message = '❌ Validation Error: Not all annotatable nodes have been marked.\n\n';
+
+        missingAnnotations.forEach(item => {
+            message += `📄 File ${item.fileIndex}: ${item.fileName}\n`;
+
+            if (item.reason) {
+                message += `   ${item.reason}\n`;
+            } else if (item.unannotatedNodes) {
+                message += `   Missing markers on ${item.unannotatedNodes.length} node(s):\n`;
+                item.unannotatedNodes.slice(0, 5).forEach(node => {
+                    message += `   • Node ${node.nodeIndex} (${node.nodeType})\n`;
+                });
+                if (item.unannotatedNodes.length > 5) {
+                    message += `   ... and ${item.unannotatedNodes.length - 5} more\n`;
+                }
+            }
+            message += '\n';
+        });
+
+        message += 'Please review all files and ensure all annotatable nodes have markers assigned.';
+        alert(message);
+        return;
+    }
+
+    // Get annotator info (optional for local save but include if present)
+    const annotatorName = document.getElementById('annotatorName').value.trim();
+    const mongodbKey = document.getElementById('mongodbKey').value.trim();
+
+    // Calculate stats
+    let totalMarkers = 0;
+    let totalNotes = 0;
+    Object.values(allFileAnnotations).forEach(fileAnnotations => {
+        Object.values(fileAnnotations).forEach(annotation => {
+            totalMarkers += annotation.markers.length;
+            if (annotation.notes && annotation.notes.trim()) {
+                totalNotes++;
+            }
+        });
+    });
+
+    // Prepare the data payload
+    const payload = {
+        savedAt: new Date().toISOString(),
+        annotator: annotatorName || 'Unknown',
+        mongodbKey: mongodbKey || '',
+        annotations: allFileAnnotations,
+        traceComments: allFileTraceComments,
+        fileNodes: allFileNodes,
+        fileNames: allFiles.map(f => f.name),
+        stats: {
+            totalFiles: allFiles.length,
+            totalMarkers: totalMarkers,
+            nodesWithNotes: totalNotes
+        }
+    };
+
+    // Create and download the JSON file
+    const jsonString = JSON.stringify(payload, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.download = `annotations_${timestamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    // Show success message
+    let successMessage = '💾 Annotations Saved Locally!\n\n';
+    successMessage += `Files Processed: ${allFiles.length}\n`;
+    successMessage += `Total Markers: ${totalMarkers}\n`;
+    successMessage += `Nodes with Notes: ${totalNotes}\n\n`;
+    successMessage += `File saved as: annotations_${timestamp}.json`;
+    alert(successMessage);
+
+    showCacheNotification('Annotations saved to local file');
+});
+
+// Load Local button handler
+document.getElementById('loadLocalInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Check if files are loaded
+    if (allFiles.length === 0) {
+        alert('❌ Please load a directory with trace files first, then load the saved annotations.');
+        e.target.value = ''; // Reset file input
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        try {
+            const savedData = JSON.parse(event.target.result);
+
+            // Validate the saved data structure
+            if (!savedData.annotations || !savedData.fileNodes || !savedData.fileNames) {
+                throw new Error('Invalid file format: missing required fields');
+            }
+
+            // Check if the loaded files match the saved annotations
+            const currentFileNames = allFiles.map(f => f.name).sort();
+            const savedFileNames = savedData.fileNames.sort();
+
+            // Find matching and mismatched files
+            const matchingFiles = currentFileNames.filter(f => savedFileNames.includes(f));
+            const missingInSaved = currentFileNames.filter(f => !savedFileNames.includes(f));
+            const extraInSaved = savedFileNames.filter(f => !currentFileNames.includes(f));
+
+            if (matchingFiles.length === 0) {
+                alert('❌ No matching files found!\n\nThe saved annotations were created for different trace files.\n\nPlease load the correct trace files or select a different annotations file.');
+                return;
+            }
+
+            // Warn if there are mismatches but allow partial load
+            if (missingInSaved.length > 0 || extraInSaved.length > 0) {
+                let warningMsg = '⚠️ Partial match detected!\n\n';
+                warningMsg += `Matching files: ${matchingFiles.length}\n`;
+
+                if (missingInSaved.length > 0) {
+                    warningMsg += `\nFiles in current directory but not in saved data (${missingInSaved.length}):\n`;
+                    missingInSaved.slice(0, 5).forEach(f => warningMsg += `  • ${f}\n`);
+                    if (missingInSaved.length > 5) warningMsg += `  ... and ${missingInSaved.length - 5} more\n`;
+                }
+
+                if (extraInSaved.length > 0) {
+                    warningMsg += `\nFiles in saved data but not in current directory (${extraInSaved.length}):\n`;
+                    extraInSaved.slice(0, 5).forEach(f => warningMsg += `  • ${f}\n`);
+                    if (extraInSaved.length > 5) warningMsg += `  ... and ${extraInSaved.length - 5} more\n`;
+                }
+
+                warningMsg += '\nDo you want to load the available annotations anyway?';
+
+                if (!confirm(warningMsg)) {
+                    return;
+                }
+            }
+
+            // Load the annotations for matching files
+            allFileAnnotations = {};
+            allFileNodes = {};
+            allFileTraceComments = {};
+
+            matchingFiles.forEach(fileName => {
+                if (savedData.annotations[fileName]) {
+                    allFileAnnotations[fileName] = savedData.annotations[fileName];
+                }
+                if (savedData.fileNodes[fileName]) {
+                    allFileNodes[fileName] = savedData.fileNodes[fileName];
+                }
+                if (savedData.traceComments && savedData.traceComments[fileName]) {
+                    allFileTraceComments[fileName] = savedData.traceComments[fileName];
+                }
+            });
+
+            // Load annotator info if present
+            if (savedData.annotator && savedData.annotator !== 'Unknown') {
+                document.getElementById('annotatorName').value = savedData.annotator;
+            }
+            if (savedData.mongodbKey) {
+                document.getElementById('mongodbKey').value = savedData.mongodbKey;
+            }
+
+            // Restore current file's annotations
+            const currentFileName = allFiles[currentFileIndex].name;
+            nodeAnnotations = allFileAnnotations[currentFileName] || {};
+
+            // Restore trace comments for current file
+            const traceCommentsTextarea = document.getElementById('traceCommentsTextarea');
+            traceCommentsTextarea.value = allFileTraceComments[currentFileName] || '';
+
+            // Refresh the current file visualization
+            loadFileByIndex(currentFileIndex);
+
+            // Update node annotatability display
+            updateNodeAnnotatability();
+
+            // If a node is selected, update its details
+            if (selectedNodeIndex >= 0 && currentNodes[selectedNodeIndex]) {
+                loadNodeAnnotations(currentNodes[selectedNodeIndex].id);
+            }
+
+            // Show success message
+            const stats = savedData.stats || {};
+            let successMsg = '✅ Annotations Loaded Successfully!\n\n';
+            successMsg += `Saved by: ${savedData.annotator || 'Unknown'}\n`;
+            successMsg += `Saved at: ${new Date(savedData.savedAt).toLocaleString()}\n`;
+            successMsg += `Files loaded: ${matchingFiles.length}\n`;
+            if (stats.totalMarkers) successMsg += `Total markers: ${stats.totalMarkers}\n`;
+            if (stats.nodesWithNotes) successMsg += `Nodes with notes: ${stats.nodesWithNotes}`;
+            alert(successMsg);
+
+            showCacheNotification('Annotations loaded from file');
+
+            // Auto-save to cache
+            autoSaveAnnotations();
+
+        } catch (error) {
+            alert('❌ Error loading file:\n\n' + error.message);
+            console.error('Load error:', error);
+        }
+    };
+
+    reader.onerror = function() {
+        alert('❌ Error reading file. Please try again.');
+    };
+
+    reader.readAsText(file);
+
+    // Reset file input so the same file can be selected again
+    e.target.value = '';
+});
+
+// ============================================================================
 // Cache Management Functions
 // ============================================================================
 
