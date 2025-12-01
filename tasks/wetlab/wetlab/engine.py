@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from math import log10
 from typing import Optional, Dict, Generator
-from colors import mix_colors, solution_color, closest_color_names, PRECIPITATE_COLORS, PALLETT
+from colors import mix_colors, solution_color, closest_color_names, PRECIPITATE_COLORS, PALETTE
 import reaktoro as rk
 
 class VolumeError(ValueError):
@@ -25,7 +25,7 @@ SOLVER_OPTIONS.use_ideal_activity_models = True
 
 PSEUDO_ELEMENTS = {
     'C(+2)', 'C(+4)', 'N(-3)', 'N(+5)', 'S(-2)', 'S(0)', 'S(+6)',
-    'Fe(+2)', 'Fe(+3)', 'Hg(+2)', 'Hg(+1)','Ox', 'dmg',
+    'Fe(+2)', 'Fe(+3)', 'Hg(+2)', 'Hg(+1)', 'Ox', 'dmg',
 }
 
 def _speciate(element_str):
@@ -111,7 +111,7 @@ class Precipitate:
         
         if isinstance(other, Precipitate):
             if self.state.system().id() != other.state.system().id():
-                raise ValueError("Cannot mix Precipitates from different chemical systems!")
+                raise ArithmeticError("Cannot mix Precipitates from different chemical systems!")
             all_species = set(self.components + other.components)
             new_composition = {sp: self[sp]+other[sp] for sp in all_species}
             return Precipitate(new_composition)
@@ -145,7 +145,7 @@ class Precipitate:
     def color(self) -> str:
         fracs = [mol/self.total_mol for mol in self.composition.values()]
         color_names = [PRECIPITATE_COLORS.get(name, 'white') for name in self.components]
-        color_hexes = [PALLETT[name] for name in color_names]
+        color_hexes = [PALETTE[name] for name in color_names]
         mixture = list(zip(color_hexes, fracs))
         return mix_colors(mixture)
     
@@ -169,12 +169,15 @@ class StockSolution:
     
 
     def __rmul__(self, vol_mL: float) -> "Solution":
-        return Solution(self.composition, volume=vol_mL)
+        return Solution(self.composition, description=self.description, volume=vol_mL)
     
 
     def __getitem__(self, item):
         return self.composition.get(item, 0.0)
-
+    
+    
+    def clone(self) -> "StockSolution":
+        return StockSolution(composition=self.composition, description=self.description)
 
 
 @dataclass(kw_only=True)
@@ -236,7 +239,7 @@ class Solution(StockSolution):
         
         if isinstance(other, Solution):
             if self.state.system().id() != other.state.system().id():
-                raise ValueError("Cannot mix Solutions from different chemical systems!")
+                raise ArithmeticError("Cannot mix Solutions from different chemical systems!")
         
             new_volume = self.volume + other.volume
             all_aq_species = set(self.components + other.components) - {'H2O'}
@@ -357,7 +360,7 @@ class Solution(StockSolution):
             raise TypeError("The given solid must be a Precipitate object!")
         
         if self.state.system().id() != solid.state.system().id():
-            raise ValueError("Cannot add a solid from a different chemical system!")
+            raise ArithmeticError("Cannot add a solid from a different chemical system!")
         
         new_precipitate = solid + self.precipitate
 

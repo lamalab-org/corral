@@ -50,7 +50,7 @@ if __name__ == "__main__":
     load_dotenv()
     setup_litellm()
 
-    verboses = [
+    verbosities = [
         #"brief",
         "workflow",
         #"comprehensive",
@@ -61,13 +61,13 @@ if __name__ == "__main__":
         #"claude-sonnet-4-5-20250929"
     ]
     for model in models:
-        for verbose in verboses:
-            logger.info(f"Running benchmark with verbosity: {verbose}")
+        for verbosity in verbosities:
+            logger.info(f"Running benchmark with verbosity: {verbosity}")
             try: 
                 model_name = "gpt_4o" if model.startswith("gpt-4o") else ("claude_45" if model.startswith("claude") else None)
                 if model_name is not None:
-                    run_name = f"{model_name}-tool_calling-wetlab_env-{verbose}_verbosity"
-                    run_benchmark(model=model, run_name=run_name, verbose=verbose)
+                    run_name = f"{model_name}-Tool_Calling-WetLab-{verbosity}"
+                    run_benchmark(model=model, run_name=run_name, verbose=verbosity)
                 else: 
                     logger.error(f"Invalid model: {model!r}")
 

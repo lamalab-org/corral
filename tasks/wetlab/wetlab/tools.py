@@ -1,11 +1,7 @@
 from corral.backend.tool import Tool, tool
 
-from wetlab.engine import StockSolution, Solution, Precipitate, VolumeError, NegativeMassError
-from wetlab.colors import PRECIPITATE_COLORS, PALLETT, mix_colors, closest_color_names
-
-PREC_COLOR_LOOKUP = {}
-for k, v in PRECIPITATE_COLORS.items():
-    PREC_COLOR_LOOKUP[k.replace("Ox", "C2O4")] = v
+from wetlab.engine import StockSolution, Solution, Precipitate, VolumeError
+from wetlab.colors import PRECIPITATE_COLORS, PALETTE, mix_colors, closest_color_names
 
 CATIONS = [
     'Ag+',
@@ -38,9 +34,6 @@ ANIONS = [
     'Cl-',
     'CO3-2',
     'HCO3-',
-    #'C2O4-2',
-    #'HC2O4-',
-    #'CN-',
     'CrO4-2',
     'HCrO4-',
     'Cr2O7-2',
@@ -62,20 +55,19 @@ FLAME_COLORS = {
     "Ba+2": "green",
     "Ca+2": "orange-red",
     "Cs+": "blue-violet",
-    "Cu+2": "turqoise",
+    "Cu+2": "turquoise",
     "K+": "pale violet",
     "Li+": "red",
     "Na+": "yellow",
     "Rb+": "red-violet",
     "Sr+2": "red",
-    #"Tl+": "green",
 }
 
 @tool
 def possible_cations() -> str:
     """[BRIEF] Returns the list of possible cations. [/BRIEF]
     
-    [DETAILED] This functions returns a space-separated string of all the possible cations that can be present in an unknown sample. One or more of these cations could be present in the unknown samples. [/DETAILED]
+    [DETAILED] This functions returns a space-separated string of all the possible cations that can be present in an unknown sample. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Used to define the space of possible cations in unknown samples.
@@ -153,9 +145,9 @@ def possible_anions() -> str:
 
     Returns:
         str:
-            [BRIEF] a string containing all the possible anions [/BRIEF]
-            [DETAILED] a space-separated string, containing all possible anions that can be present in the unknown sample(s) [/DETAILED]
-            [EXAMPLES] "Br- Cl- CO3-2 HPO4-2 ..." [/EXAMPLES]
+            [RETURNS_BRIEF] a string containing all the possible anions [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] a space-separated string, containing all possible anions that can be present in the unknown sample(s) [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "Br- Cl- CO3-2 HPO4-2 ..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -174,7 +166,7 @@ def possible_anions() -> str:
 def measure_pH(compositions, label: str) -> str:
     """[BRIEF] Measures the pH of the solution using a pH paper.[/BRIEF]
     
-    [DETAILED] This tool measure the pH of a solution using a universal indicator pH paper and reports the pH as the closest integer. [/DETAILED]
+    [DETAILED] This tool measure the pH of a solution using a universal pH-indicator paper and reports the pH as the closest integer. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Used to measure the pH of a solution.
@@ -206,12 +198,13 @@ def measure_pH(compositions, label: str) -> str:
         label (str):
             [ARGS_BRIEF] label of the target solution [/ARGS_BRIEF]
             [ARGS_DETAILED] a string representing the label of the solution in the Inventory, for which the pH will be measured [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] the label of supernatant solutions after filtration are appended with "_filtrate" [/ARGS_SYNTACTIC]
             [ARGS_EXAMPLES] "sample", "test_1", "test2_filtrate" [/ARGS_EXAMPLES]
 
     Returns:
         int:
             [RETURNS_BRIEF] the closest integer value to the actual pH of the solution [/RETURNS_BRIEF]
-            [RETURNS_DETAILED] an integer value between 0-14, representin the closest integer to the actual pH of the solution [/RETURNS_DETAILED]
+            [RETURNS_DETAILED] an integer value between 0-14, representing the closest integer to the actual pH of the solution [/RETURNS_DETAILED]
             [RETURNS_EXAMPLES] `4`, `6`, `11` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
@@ -236,13 +229,14 @@ def measure_pH(compositions, label: str) -> str:
     
     if isinstance(target, StockSolution):
         if type(target) == StockSolution:
-            target = 10 * target  # converting StockSolution --> Solution
-            target.equilibrarte()
+            target = 1 * target  # converting StockSolution --> Solution
+            target.equilibrate()
         pH = target.pH
     
     else:
         raise ValueError(f"{label} is not a solution!")
 
+    pH = min(max(pH, 0), 14)
     return round(pH)
 
 
@@ -255,7 +249,7 @@ def perform_flame_test(compositions, label: str) -> str:
     [PROCEDURAL] When to use this tool:
     - Flame color can identify certain cations.
     - Useful to identify copper, alkali, and alkaline earth metals because of their characteristic flame colors.
-    - It is especially useful for identifying alkali metals because they do not form percipitates under normal conditions. [/PROCEDURAL]
+    - It is especially useful for identifying alkali metals because they do not form precipitates under normal conditions. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
     1. [PREREQUISITE] Make sure that `label` points to a solution and that it does not contain a precipitate. If the solution has a precipitate, filter it before running this test. [/PREREQUISITE]
@@ -280,14 +274,16 @@ def perform_flame_test(compositions, label: str) -> str:
 
     Args:
         label (str):
-            [BRIEF] label of the target solution [/BRIEF]
-            [DETAILED] a string representing the label of the solution in the Inventory, for which the flame test will be performed [/DETAILED]
+            [ARGS_BRIEF] label of the target solution [/ARGS_BRIEF]
+            [ARGS_DETAILED] a string representing the label of the solution in the Inventory, for which the flame test will be performed [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] the label of supernatant solutions after filtration are appended with "_filtrate" [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] "sample", "test_1", "test2_filtrate" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] the resulting observation from the flame test [/BRIEF]
-            [DETAILED] the resulting observation depends on the color of the flame. If no species present has a positive flame test, "No characteristic color" is returned. If exactly one color is observed, the observation will indicate that color. If more than one color is present in the flame, the observation will be "multi-colored flame"  [/DETAILED]
-            [EXAMPLES] "A red flame is observed.", "No characteristic flame color is observed.", "A multi-colored flame is observed." [/EXAMPLES]
+            [RETURNS_BRIEF] the resulting observation from the flame test [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] the resulting observation depends on the color of the flame. If no species present has a positive flame test, "No characteristic color" is returned. If exactly one color is observed, the observation will indicate that color. If more than one color is present in the flame, the observation will be "multi-colored flame"  [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "A red flame is observed.", "No characteristic flame color is observed.", "A multi-colored flame is observed." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         KeyError: [ERROR_WHEN] When the given `label` is invalid [/ERROR_WHEN]
@@ -304,8 +300,8 @@ def perform_flame_test(compositions, label: str) -> str:
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
-        - The flame test's result depend on the concentration of cations; only species with a concentraion higher than 5e-4 molar will give a positive result.
-        - If you have inroduced known interfering cations to the solution in previous steps, they will affect the results.
+        - The flame test's result depends on the concentration of cations; only species with a concentration higher than 5e-4 molar will give a positive result.
+        - If you have introduced known interfering cations to the solution in previous steps, they will affect the results.
         - Some flame colors can be interpreted as more than one cation. Additional tests may be required to indicate the exact identity of the species.
         - A "multi-colored" flame means that there are at least two cations present with different flame colors. 
     [/LIMITATIONS]
@@ -318,7 +314,7 @@ def perform_flame_test(compositions, label: str) -> str:
     if not isinstance(target, StockSolution):
         raise ValueError(f"{label} is not a solution")
     
-    test = 1 * target
+    test = 1 * target # drawing 1 mL from the target solution
 
     colors = []
     total_copper = 0
@@ -369,9 +365,9 @@ def lookup_flame_colors() -> str:
 
     Returns:
         str:
-            [BRIEF] the list of characteristic flame colors [/BRIEF]
-            [DETAILED] a string in which each cation is on a separate line, along with its characteristic color [/DETAILED]
-            [EXAMPLES] "Ba+2     green\nCa+2     orange-red\n..." [/EXAMPLES]
+            [RETURNS_BRIEF] the list of characteristic flame colors [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] a string in which each cation is on a separate line, along with its characteristic color [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "Ba+2     green\nCa+2     orange-red\n..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None  
@@ -419,14 +415,16 @@ def checkout_color(compositions, label: str) -> str:
 
     Args:
         label (str):
-            [BRIEF] label of the target object [/BRIEF]
-            [DETAILED] a string representing the label of the object in the Inventory which can be a solution (with or without a precipitate), a reagent, or a filtered precipitate [/DETAILED]
+            [ARGS_BRIEF] label of the target object [/ARGS_BRIEF]
+            [ARGS_DETAILED] a string representing the label of the object in the Inventory which can be a solution (with or without a precipitate), a reagent, or a filtered precipitate [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] after filtration, the supernatant's label is appended with "_filtrate" and the precipitate is appended with "_precipitate" [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] "sample", "test2_filtrate", "test3_precipitate" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] the type and color of the object [/BRIEF]
-            [DETAILED] a string containing an statement about the type and the color of the object. The type can be: a reagent solution, a precipitate, a clear solution (meaning it has no precipitate), or a solution containing a precipitate. In the latter case, the color of both the supernatant solution and the existing precipitate will be repoted. [/DETAILED]
-            [EXAMPLES] "sample_B is a clear solution with the following color: pale yellow", "test_03 is a solution that also contains a precipitate.\n Color of the precipitate: black\n Color of the supernatant solution: colorless", "test_1_precipitate is a precipitate with the following color: rosy brown / reddish gray" [/EXAMPLES]
+            [RETURNS_BRIEF] the type and color of the object [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] a string containing an statement about the type and the color of the object. The type can be: a reagent solution, a precipitate, a clear solution (meaning it has no precipitate), or a solution containing a precipitate. In the latter case, the color of both the supernatant solution and the existing precipitate will be reported. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "sample_B is a clear solution with the following color: pale yellow", "test_03 is a solution that also contains a precipitate.\n Color of the precipitate: black\n Color of the supernatant solution: colorless", "test_1_precipitate is a precipitate with the following color: rosy brown / reddish gray" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         KeyError: [ERROR_WHEN] When the given `label` is invalid [/ERROR_WHEN]
@@ -437,7 +435,7 @@ def checkout_color(compositions, label: str) -> str:
     [LIMITATIONS] Known Limitations:
         - If the target object is the result of a previously performed test, all color observations were already reported as part of that test, so using this tool to check those colors again will be redundant.
         - All reported colors are qualitative and approximate.
-        - The perceived color of solutions will depend on the concentraion of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
+        - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
     [/LIMITATIONS]
     """
     try:
@@ -492,28 +490,28 @@ def lookup_precipitate_colors() -> str:
 
     Returns:
         str:
-            [BRIEF] the list of precipitate colors [/BRIEF]
-            [DETAILED] a string where each separate line contains a single pure precipitate followed by its perceived color [/DETAILED]
-            [EXAMPLES] "AgBr     pale yellow\nAg2CO3     pale yellow\nAg2CrO4     brick red\n..." [/EXAMPLES]
+            [RETURNS_BRIEF] the list of precipitate colors [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] a string where each separate line contains a single pure precipitate followed by its perceived color [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "AgBr     pale yellow\nAg2CO3     pale yellow\nAg2CrO4     brick red\n..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
-        - This tool just returns the pre-defined list of characteristic flame colors and does not perform any calculations or tests.
+        - This tool just returns the pre-defined list of precipitate colors and does not perform any calculations or tests.
         - The listed colors are for the pure precipitates only, not for the mixture of precipitates.
         - All reported colors are qualitative and approximate.
     [/LIMITATIONS]
     """
-    statement = "NOTE: This list only describes colored (non-white) precipitates. If the color of a precipitate is not listed below, it means that it's white.\n"
-    precipitate_colors = [f"{prec} :    {color}" for prec,color in PREC_COLOR_LOOKUP.items()]
+    statement = "NOTE: This list only describes colored (non-white) precipitates. White precipitates are omitted; if a precipitate is not listed below, it means that it's white.\n"
+    precipitate_colors = [f"{prec} :    {color}" for prec,color in PRECIPITATE_COLORS.items()]
 
     return statement + '\n'.join(precipitate_colors)
 
 @tool
 def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
-    """[BRIEF] Given a mixture of colors, it mixes them with the given fractions and returns the name of the resulting color. [/BRIEF]
+    """[BRIEF] Given a mixture of precipitate colors, it mixes them with the given fractions and returns the name of the resulting precipitate color. [/BRIEF]
     
     [DETAILED] This tool simulates the mixing of precipitate colors with the given fractions and returns the name of the closest matching color of the resulting precipitate mixture. [/DETAILED]
 
@@ -529,7 +527,7 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
 
     [CONTEXTUAL] How this tool works:
     - It receives a mixture of up to 3 color names and their fractions as a list of tuples.
-    - Each tuple must be formated as (color_name, fraction).
+    - Each tuple must be formatted as (color_name, fraction).
     - The fractions must be all positive and sum to 1.0. They will be rounded to one decimal place before performing the prediction, so there is no point in having more than one decimal points.
     - The colors will be mixed and the name of the closest matching color will be reported. [/CONTEXTUAL]
 
@@ -542,14 +540,16 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
 
     Args:
         mixture (list[tuple[str, float]]):
-            [BRIEF] mixture components and their fractions as a list of tuples [/BRIEF]
-            [DETAILED] a list of tuples, where the first element of the tuple is the color name and the second element its fraction in the mixture. The maximum allowed number of tuples in the list is three. [/DETAILED]
+            [ARGS_BRIEF] mixture components and their fractions as a list of tuples [/ARGS_BRIEF]
+            [ARGS_DETAILED] a list of tuples, where the first element of the tuple is the color name and the second element its fraction in the mixture. The maximum allowed number of tuples in the list is three. [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] list of tuples, each formatted as (<color>, <fraction>) [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] [("yellow", 0.5), ("red", 0.5)] , [("turquoise", 0.4), ("black", 0.3), ("dark blue", 0.3)] [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] name of the resulting color [/BRIEF]
-            [DETAILED] the closest matching name to the resulting color [/DETAILED]
-            [EXAMPLES] "dark olive", "lavender", "pale gray" [/EXAMPLES]
+            [RETURNS_BRIEF] name of the resulting color [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] the closest matching name to the resulting color [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "dark olive", "lavender", "pale gray" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError: [ERROR_WHEN] When a given color name is invalid [/ERROR_WHEN]
@@ -562,15 +562,15 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
+        - This simulation only works for the color of precipitates. It is not intended to be used to predict solution color.
         - Only a maximum of three (3) colors can be mixed.
         - The returned color name is an approximate close match to the actual color of the mixture and might not be an exact match.
-        - This simulation only works for the color of precipitates. It is not intended to be used to predict solution color.
     [/LIMITATIONS]
     """
     try:
         hex_mixture = []
         for name, frac in mixture:
-            hex = PALLETT[name]
+            hex = PALETTE[name]
             hex_mixture.append((hex, frac))
     except KeyError:
         raise ValueError(f"Undefined color name: {name}")
@@ -585,7 +585,7 @@ def get_available_reagents(compositions) -> str:
     [DETAILED] Returns a string where each reagent appears on a separate line. Each line contains the reagent's label as well as its composition. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - Usually called in the begining to know all of the possible reagents available (if any) to solve the task.
+    - Usually called in the beginning to know all of the possible reagents available (if any) to solve the task.
     - If you want to perform a certain test and need a specific known solution, you can use this tool to check if that is available as a reagent.
     - You can use this tool to get the exact concentration of the components in the reagent solutions. [/PROCEDURAL]
 
@@ -599,8 +599,7 @@ def get_available_reagents(compositions) -> str:
     - Each reagent appears on a separate line.
     - Each reagent is represented by its "reagent label" and its "composition".
     - The "reagent label" is the label to use when calling tools such as `mix_two_solutions` and `add_solution`.
-    - There is no limit on the amount of available reagent solutions, as opposed to sample solutions.
-    - Some tasks do not have any external known reagent solutions. In that case, the task can be solved by mixing the sample solutions among themselves. [/CONTEXTUAL]
+    - There is no limit on the amount of available reagent solutions, as opposed to sample solutions. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
     [
@@ -613,9 +612,9 @@ def get_available_reagents(compositions) -> str:
 
     Returns:
         str:
-            [BRIEF] a string containing all available reagents  [/BRIEF]
-            [DETAILED] a string where each available reagent appears on a separate line and is represented by "reagent label" and "composition". If no additional reagents are available in the tasks, it will be mentioned by this tool. [/DETAILED]
-            [EXAMPLES] "reagent label: HCl(0.02M)     composition: HCl 0.02 M, in water\nreagent label: KOH(6M)     composition: KOH 6.0 M, in water\n..." [/EXAMPLES]
+            [RETURNS_BRIEF] a string containing all available reagents  [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] a string where each available reagent appears on a separate line and is represented by "reagent label" and "composition". If no additional reagents are available in the tasks, it will be mentioned by this tool. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "reagent label: HCl(0.02M)     composition: HCl 0.02 M, in water\nreagent label: KOH(6M)     composition: KOH 6.0 M, in water\n..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -628,7 +627,7 @@ def get_available_reagents(compositions) -> str:
     """
     reagent_descriptions = [f"reagent label: {k}     composition: {v.description}" for k,v in compositions.items() if type(v)==StockSolution]
     if len(reagent_descriptions)==0:
-        return "There are no external reagents available in this task. You can still perform tests by mixing the sample solutions among themselves and make observations."
+        return "There are no external reagents available."
     else:
         return '\n'.join(reagent_descriptions)
 
@@ -639,7 +638,7 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
     [DETAILED] Mixes the two solutions (which must not contain any precipitates) with the given volumes (in mL) and reports observations about color change or precipitate formation. It also adds the resulting solution to the Inventory and labels it `test_label` [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - This is one of the main tools to perform chemical tests and observe color changes and precipitate formations.
+    - This tool lets you perform chemical tests and observe color changes and precipitate formations.
     - Use this tool when you want to mix two solutions with specific volumes and neither of them contain any precipitates.
     - This tool can be used to add a certain volume of a reagent to a certain volume of the sample solution or solutions from previous tests. [/PROCEDURAL]
 
@@ -668,41 +667,49 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
 
     Args:
         test_label (str):
-            [BRIEF] label of the resulting solution [/BRIEF]
-            [DETAILED] the label given to the resulting solution after the mixing. Use this label to refer to the resuling solution in further tests [/DETAILED]
-        
+            [ARGS_BRIEF] label of the resulting solution [/ARGS_BRIEF]
+            [ARGS_DETAILED] the label given to the resulting solution after the mixing. Use this label to refer to the resulting solution in further tests [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] use descriptive labels [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] "test1_HCl", "test2_NH3_filt_iodide", "test3_excess_KOH" [/ARGS_EXAMPLES]
+
         sol1_label (str):
-            [BRIEF] label of the first solution [/BRIEF]
-            [DETAILED] the label of the first solution. This is how the solution is referred to in the Inventory. `sol1_vol` mL of this solution will be drawn [/DETAILED]
-        
+            [ARGS_BRIEF] label of the first solution [/ARGS_BRIEF]
+            [ARGS_DETAILED] the label of the first solution (or reagent). This is how the solution (or reagent) is referred to in the Inventory (or reagent list). `sol1_vol` mL of this solution will be drawn [/ARGS_DETAILED]
+            [ARGS_EXAMPLES] "sample", "test_1", "test2_filtrate", "NH4I", "HCl(1M)" [/ARGS_EXAMPLES]
+
         sol1_vol (int):
-            [BRIEF] volume of the first solution to draw [/BRIEF]
-            [DETAILED] the volume (in mL) of the first solution, labeled `sol1_label`, to draw and mix with the second solution. The minimum allowed volume is 1 mL. [/DETAILED]
+            [ARGS_BRIEF] volume of the first solution to draw [/ARGS_BRIEF]
+            [ARGS_DETAILED] the volume (in mL) of the first solution, labeled `sol1_label`, to draw and mix with the second solution. The minimum allowed volume is 1 mL. [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] integer value [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] `1`, `2`, `4` [/ARGS_EXAMPLES]
 
         sol2_label (str):
-            [BRIEF] label of the second solution [/BRIEF]
-            [DETAILED] the label of the second solution. This is how the solution is referred to in the Inventory. `sol2_vol` mL of this solution will be drawn [/DETAILED]
-        
+            [ARGS_BRIEF] label of the second solution [/ARGS_BRIEF]
+            [ARGS_DETAILED] the label of the second solution (or reagent). This is how the solution (or reagent) is referred to in the Inventory (or reagent list). `sol2_vol` mL of this solution will be drawn [/ARGS_DETAILED]
+            [ARGS_EXAMPLES] "sample", "test_1", "test2_filtrate", "NH4I", "HCl(1M)" [/ARGS_EXAMPLES]
+
         sol2_vol (int):
-            [BRIEF] volume of the second solution to draw [/BRIEF]
-            [DETAILED] the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL. [/DETAILED]
-        
+            [ARGS_BRIEF] volume of the second solution to draw [/ARGS_BRIEF]
+            [ARGS_DETAILED] the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL. [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] integer value [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] `1`, `2`, `4` [/ARGS_EXAMPLES]
+
     Returns:
         str:
-            [BRIEF] a string containing the observations from the test [/BRIEF]
-            [DETAILED] a string containing two lines where the first line is an observation about the formation (or lack thereof) of precipitates and its color and the second line is about the color of the resulting solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slahses. [/DETAILED]
-            [EXAMPLES] "No precipitate forms.\nThe resulting solution is colorless.", "A precipitate forms. Color: black\nThe supernatant solution is pale yellow." [/EXAMPLES]
+            [RETURNS_BRIEF] a string containing the observations from the test [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] a string containing two lines where the first line is an observation about the formation (or lack thereof) of precipitates and its color and the second line is about the color of the resulting solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "No precipitate forms.\nThe resulting solution is colorless.", "A precipitate forms. Color: black\nThe supernatant solution is pale yellow." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         KeyError: [ERROR_WHEN] When `sol1_label` or `sol2_label` is invalid [/ERROR_WHEN]
                   [ERROR_DETAILS] The given `sol1_label` or `sol2_label` was not found in the Inventory [/ERROR_DETAILS]
-                  [ERROR_RECOVERY] Make sure you are passing the corrent labels. You can use the `get_available_reagets` and `check_inventory` tools. [/ERROR_RECOVERY]
+                  [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
         
         RuntimeError: [ERROR_WHEN] When `sol1_label` or `sol2_label` is not a solution [/ERROR_WHEN]
                       [ERROR_DETAILS] The given `sol1_label` or `sol2_label` was found in the Inventory but the object it points to is not a solution. [/ERROR_DETAILS]
-                      [ERROR_RECOVERY] Make sure you are passing the corrent labels. You can use the `get_available_reagets` and `check_inventory` tools. [/ERROR_RECOVERY]
+                      [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
         
-        ValueError: [ERROR_WHEN] When `sol1_vol` or `sol2_vol` is not a positive integer [/ERROR_WHEN]
+        ValueError: [ERROR_WHEN] When `sol1_vol` or `sol2_vol` is not a positive integer greater than or equal to 1 [/ERROR_WHEN]
                     [ERROR_DETAILS] The given `sol1_vol` or `sol2_vol` is not an integer or it is less than 1 mL [/ERROR_DETAILS]
                     [ERROR_RECOVERY] Make sure you use at least 1 mL of each solution [/ERROR_RECOVERY]
         
@@ -717,7 +724,7 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
     - The minimum allowed volume to draw is 1 mL.
     - The reported colors are qualitative and approximate.
     - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
-    - The perceived color of solutions will depend on the concentraion of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
+    - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
     - Sometimes a given change in color of precipitate formation needs more of one of the solutions to happen.
     [/LIMITATIONS]
     """
@@ -737,9 +744,9 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
         raise RuntimeError(f"{sol2_label} is not a solution!")
     
     if type(sol1_vol) != int or sol1_vol<1:
-        raise ValueError("sol1_vol must be a positive integer")
+        raise ValueError("sol1_vol must be a positive integer greater than or equal to 1")
     if type(sol2_vol) != int or sol2_vol<1:
-        raise ValueError("sol2_vol must be a positive integer")
+        raise ValueError("sol2_vol must be a positive integer greater than or equal to 1")
     
     test = sol1_vol * sol1 + sol2_vol * sol2
     description = f"{int(sol1_vol)} mL {sol1_label} + {int(sol2_vol)} mL {sol2_label}"
@@ -774,7 +781,7 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
     [DETAILED] Add the given volumes (in mL) of `sol2_label` (which must not contain any precipitates) to the remaining volume of `sol1_label` (which can have precipitates) and reports observations about color change or precipitate formation/dissolution. It also adds the resulting solution to the Inventory and labels it `test_label`. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - This is one of the main tools to perform chemical tests and observe color changes and precipitate formations/dissolutions.
+    - This tool lets you perform chemical tests and observe color changes and precipitate formations/dissolutions.
     - Use this tool when you want to mix two solutions and one of them (sol1) contains a precipitate.
     - This tool can be used to add a certain volume of a reagent or a clear solution to the remaining amount of another solution (which can also contain precipitates).
     - You can also use this tool to keep adding more of the same solution to a host solution (sol1).
@@ -791,7 +798,7 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
     - The remaining volume of `sol1_label` is set to 0 mL in the Inventory. The new solution is labeled `test_label` and is added to the Inventory.
     - It returns two observations on two separate lines: one about the change in the color and the amount of precipitates (if any) and one about the change in the color of the solution.
     - The reference for observations about the change in solution color is `sol1_label`.
-    - When an observation mentions partial dissolution, it roughly means that about 20-50% of the original precipitate has dissolved.
+    - When an observation mentions partial dissolution, it roughly means that somewhere between 15% to 50% of the original precipitate has dissolved.
     - When an observation mentions that a precipitate has mostly dissolved, it means that more than 50% of it has dissolved but there is still some undissolved precipitate remaining.
     - Sometimes it is possible that the precipitate's color can be described using more than one color name. In those cases the different given names will be separated by a slash '/'.
     - Remember that the reported colors are qualitative and approximate. [/CONTEXTUAL]
@@ -806,38 +813,43 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
 
     Args:
         test_label (str):
-            [BRIEF] label of the resulting solution [/BRIEF]
-            [DETAILED] the label given to the resulting solution after the mixing. Use this label to refer to the resuling solution in further tests [/DETAILED]
-        
+            [ARGS_BRIEF] label of the resulting solution [/ARGS_BRIEF]
+            [ARGS_DETAILED] the label given to the resulting solution after the mixing. Use this label to refer to the resulting solution in further tests [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] use descriptive labels [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] "test1_HCl", "test2_NH3_filt_iodide", "test3_excess_KOH"  [/ARGS_EXAMPLES]
+
         sol1_label (str):
-            [BRIEF] label of the first solution [/BRIEF]
-            [DETAILED] the label of the first (host) solution. This is how the solution is referred to in the Inventory. The remaining volume of this solution will be set to 0 mL after and it is replaced with `test_label` [/DETAILED]
-        
+            [ARGS_BRIEF] label of the first solution [/ARGS_BRIEF]
+            [ARGS_DETAILED] the label of the first (host) solution. This is how the solution is referred to in the Inventory. This cannot be a reagent. The remaining volume of this solution will be set to 0 mL after and it is replaced with `test_label` [/ARGS_DETAILED]
+            [ARGS_EXAMPLES] "test_1", "test2_filtrate" [/ARGS_EXAMPLES]
+
         sol2_label (str):
-            [BRIEF] label of the second solution [/BRIEF]
-            [DETAILED] the label of the second solution (the one being added to `sol1_label`). This is how the solution is referred to in the Inventory. `sol2_vol` mL of this solution will be drawn and added to the host solution [/DETAILED]
-        
+            [ARGS_BRIEF] label of the second solution [/ARGS_BRIEF]
+            [ARGS_DETAILED] the label of the second solution (or reagent), the one being added to `sol1_label`. This is how the solution (or reagent) is referred to in the Inventory (or reagent list). `sol2_vol` mL of this solution will be drawn and added to the host solution [/ARGS_DETAILED]
+            [ARGS_EXAMPLES] "sample", "test_1", "test2_filtrate", "NH4I", "HCl(1M)" [/ARGS_EXAMPLES]
+
         sol2_vol (int):
-            [BRIEF] volume of the second solution to draw [/BRIEF]
-            [DETAILED] the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL [/DETAILED]
-        
+            [ARGS_BRIEF] volume of the second solution to draw [/ARGS_BRIEF]
+            [ARGS_DETAILED] the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] integer value [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] `1`, `2`, `4` [/ARGS_EXAMPLES]
   
     Returns:
         str:
-            [BRIEF] a string containing the observations from the test [/BRIEF]
-            [DETAILED] a string containing two lines where the first line is an observation about the formation/color change (or lack thereof) of precipitates, and the second line is about any color change of the supernatant solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slahses. [/DETAILED]
-            [EXAMPLES] "The amount and color of the existing precipitate does not noticeably change.\nColor of the supernatant solution changes to very pale blue." , "The existing precipitate partially dissolves and changes color. New color: maroon / reddish brownn.\nColor of the supernatant solution does not noticeably change." [/EXAMPLES]
+            [RETURNS_BRIEF] a string containing the observations from the test [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] a string containing two lines where the first line is an observation about the formation/color change (or lack thereof) of precipitates, and the second line is about any color change of the supernatant solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "The amount and color of the existing precipitate does not noticeably change.\nColor of the supernatant solution changes to very pale blue." , "The existing precipitate partially dissolves and changes color. New color: maroon / reddish brown.\nColor of the supernatant solution does not noticeably change." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         KeyError: [ERROR_WHEN] When `sol1_label` or `sol2_label` is invalid [/ERROR_WHEN]
                   [ERROR_DETAILS] The given `sol1_label` or `sol2_label` was not found in the Inventory [/ERROR_DETAILS]
-                  [ERROR_RECOVERY] Make sure you are passing the corrent labels. You can use the `get_available_reagets` and `check_inventory` tools. [/ERROR_RECOVERY]
+                  [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
         
         RuntimeError: [ERROR_WHEN] When `sol1_label` or `sol2_label` is not a solution [/ERROR_WHEN]
                       [ERROR_DETAILS] The given `sol1_label` or `sol2_label` was found in the Inventory but the object it points to is not a solution. [/ERROR_DETAILS]
-                      [ERROR_RECOVERY] Make sure you are passing the corrent labels. You can use the `get_available_reagets` and `check_inventory` tools. [/ERROR_RECOVERY]
+                      [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
         
-        ValueError: [ERROR_WHEN] When `sol2_vol` is not a positive integer [/ERROR_WHEN]
+        ValueError: [ERROR_WHEN] When `sol2_vol` is not a positive integer greater than or equal to 1 [/ERROR_WHEN]
                     [ERROR_DETAILS] The given `sol2_vol` is not an integer or it is less than 1 mL [/ERROR_DETAILS]
                     [ERROR_RECOVERY] Make sure you are adding at least 1 mL of the second solution [/ERROR_RECOVERY]
         
@@ -852,8 +864,8 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
     - The minimum allowed volume for the second solution is 1 mL.
     - The reported colors are qualitative and approximate.
     - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
-    - The perceived color of solutions will depend on the concentraion of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
-    - Any observations mentioning that an existing precipitate "partially" or "mostly" dissolves are qualitative and approxiamte statements.
+    - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
+    - Any observations mentioning that an existing precipitate "partially" or "mostly" dissolves are qualitative and approximate statements.
     [/LIMITATIONS]
     """
     try:
@@ -864,6 +876,9 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
     if type(sol1) != Solution:
         raise RuntimeError(f"{sol1_label} is not a valid solution!")
     
+    if sol1.volume == 0:
+        raise VolumeError(f"The remaining volume of {sol1_label} is zero!")
+    
     try:
         sol2 = compositions[sol2_label]
     except KeyError as e:
@@ -871,9 +886,9 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
     
     if not isinstance(sol2, StockSolution):
         raise RuntimeError(f"{sol2_label} is not a solution!")
-
-    if sol1.volume == 0:
-        raise VolumeError(f"The remaining volume of {sol1_label} is zero!")
+    
+    if type(sol2_vol) != int or sol2_vol<1:
+        raise ValueError("sol2_vol must be a positive integer greater than or equal to 1")
     
     description = f"{int(sol1.volume)} mL {sol1_label} + {int(sol2_vol)} mL {sol2_label}"
 
@@ -911,39 +926,40 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
             
             precipitate_ratio = new_amount / old_amount 
 
-            if precipitate_ratio >= 1.1 :
-                # getting the newly formed precipitate
-                test_no_prec = old_supernatant + sol2_vol * sol2.clone() # .clone() is used to prevent the volume of sol2 from decreasing
-                test_no_prec.equilibrate()
-                additional_color = " (color: " + test_no_prec.precipitate.color_name + ")"
-                tiny = "tiny amount of "  if (1000 * test_no_prec.precipitate.total_amount / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.
+            # checking if a new precipitate was formed
+            test_no_prec = old_supernatant + sol2_vol * sol2.clone() # .clone() is used to prevent the volume of sol2 from decreasing
+            test_no_prec.equilibrate()
+
+            if test_no_prec.has_precipitate:
+                additional_color = test_no_prec.precipitate.color_name
+                tiny = "tiny amount of "  if (1000 * test_no_prec.precipitate.total_mol / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.
                 if additional_color == old_color:
                     observations.append(f"A {tiny}precipitate with the same color as the existing precipitate forms.")
                 elif new_color == old_color: 
-                    observations.append(f"A {tiny}new precipitate{additional_color} forms, but does not cause the color of the existing precipitate to noticeably change.")
+                    observations.append(f"A {tiny}new precipitate (color: {additional_color}) forms, but does not cause the color of the existing precipitate to noticeably change.")
                 else:
-                    observations.append(f"A {tiny}new precipitate{additional_color} forms, mixing with the existing precipitate causing it to {slightly}change color. New color: {new_color}.")
+                    observations.append(f"A {tiny}new precipitate (color: {additional_color}) forms, mixing with the existing precipitate causing it to {slightly}change color. New color: {new_color}.")
             
-            elif 0.8 <= precipitate_ratio < 1.1 :
+            elif 0.85 < precipitate_ratio : # we assume that a change of less than 15% will not be noticeable
                 if new_color == old_color:
                     observations.append("The amount and color of the existing precipitate does not noticeably change.")
                 else:
                     observations.append(f"The amount of the existing precipitate does not noticeably change, but its color {slightly}changes. New color: {new_color}.")
 
-            elif 0.5 <= precipitate_ratio <= 0.8 :
+            elif 0.5 <= precipitate_ratio <= 0.85 : # we will call a change of 15 to 50% 'partial dissolution'
                 if new_color == old_color:
                     observations.append("The existing precipitate partially dissolves. Its color does not noticeably change.")
                 else:
                     observations.append(f"The existing precipitate partially dissolves and {slightly}changes color. New color: {new_color}.")
             
-            else: # precipitate_ratio < 0.5
+            else: # meaning precipitate_ratio < 0.5
                 if new_color == old_color:
                     observations.append("The existing precipitate mostly (but not fully) dissolves. Its color does not noticeably change.")
                 else:
                     observations.append(f"The existing precipitate mostly (but not fully) dissolves and {slightly}changes color. New color: {new_color}.")
 
         else:
-            observations.append(f"The precipitate fully dissolves.")
+            observations.append(f"The existing precipitate fully dissolves.")
 
 
     #solution observation
@@ -963,6 +979,8 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
     return '\n'.join(observations)
 
 
+
+
 @tool(hidden_args=['compositions'])
 def filter_solution(compositions, label: str) -> str:
     """[BRIEF] Separates the precipitate from the supernatant solution. [/BRIEF]
@@ -970,16 +988,16 @@ def filter_solution(compositions, label: str) -> str:
     [DETAILED] Filters a solution, separating the precipitate from the supernatant solution, and adds the resulting filtrate and the precipitate to the Inventory. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - Use this tool when you want to remove the existing precipitate from a solution to perform furhter tests on only the supernatant 
+    - Use this tool when you want to remove the existing precipitate from a solution to perform further tests on only the supernatant 
     - Use this tool to collect the newly formed precipitate in a test if you want to perform further tests on the precipitate only [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] If performing a test using tools such as `mix_two_solutions` or `add_a_solution` result in the formation of a precipitate and you want to perform other tests only on the supernatant solution or the newly formed percipitate, you can use this tool two separate the two phases. [/PREREQUISITE]
+    1. [PREREQUISITE] If performing a test using tools such as `mix_two_solutions` or `add_a_solution` result in the formation of a precipitate and you want to perform other tests only on the supernatant solution or the newly formed precipitate, you can use this tool two separate the two phases. [/PREREQUISITE]
     2. [CURRENT] Use this tool to separate the supernatant and the precipitate. [/CURRENT]
     3. [FOLLOW_UP] You can perform further tests on the supernatant by calling tools like `mix_two_solutions` or `add_a_solution`. You can perform further tests on the precipitate by adding it to a solution using the `add_precipitate_to_solution` tool. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - It seprates the aqueous phase and the solid phase from the `label`, and removes it from the inventory.
+    - It separates the aqueous phase and the solid phase from the `label`, and removes it from the inventory.
     - The supernatant is added to the Inventory, with the original label appended by '_filtrate'.
     - The precipitate is added to the Inventory, with the original label appended by '_precipitate'. [/CONTEXTUAL]
 
@@ -991,23 +1009,25 @@ def filter_solution(compositions, label: str) -> str:
 
     Args:
         label (str):
-            [BRIEF] label of the target solution [/BRIEF]
-            [DETAILED] the label given to the solution being filtered. This label is appended by '_filtrate' or '_precipitate' to refer to the separated phases. [/DETAILED]
+            [ARGS_BRIEF] label of the target solution [/ARGS_BRIEF]
+            [ARGS_DETAILED] the label given to the solution being filtered. This label is appended by '_filtrate' or '_precipitate' to refer to the separated phases. [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] label of unfiltered solutions does not end with "_filtrate" [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] "test1_HCl", "test_NH3_filt_iodide" [/ARGS_EXAMPLES]
   
     Returns:
         str:
-            [BRIEF] a string with a message about the success/failure of the filtration [/BRIEF]
-            [DETAILED] if the solution does not contain a precipitate [/DETAILED]
-            [EXAMPLES] "The solution was succesfully filtered! The filtrate and precipitate are added to the Inventory." , "The target solution has no precipitate to filter! No change was made to the Inventory." [/EXAMPLES]
+            [RETURNS_BRIEF] a string with a message about the success/failure of the filtration [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] if the solution does not contain a precipitate [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "The solution was successfully filtered! The filtrate and precipitate are added to the Inventory." , "The target solution has no precipitate to filter! No change was made to the Inventory." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         KeyError: [ERROR_WHEN] When `label` is invalid [/ERROR_WHEN]
                   [ERROR_DETAILS] The given `label` was not found in the Inventory [/ERROR_DETAILS]
-                  [ERROR_RECOVERY] Make sure you are passing the corrent label. You can use the `check_inventory` tool. [/ERROR_RECOVERY]
+                  [ERROR_RECOVERY] Make sure you are passing the correct label. You can use the `check_inventory` tool. [/ERROR_RECOVERY]
         
         RuntimeError: [ERROR_WHEN] When `label` is a reagent solution or a precipitate [/ERROR_WHEN]
                       [ERROR_DETAILS] The given `label` was found in the Inventory but the object it points to is either a precipitate or a reagent solution [/ERROR_DETAILS]
-                      [ERROR_RECOVERY] Make sure you are passing the corrent label. You can use the `check_inventory` tool. [/ERROR_RECOVERY]
+                      [ERROR_RECOVERY] Make sure you are passing the correct label. You can use the `check_inventory` tool. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -1035,7 +1055,7 @@ def filter_solution(compositions, label: str) -> str:
             compositions[filt_label] = filtrate
             compositions[prec_label] = precipitate
             compositions.pop(label)
-            return "The solution was succesfully filtered! The filtrate and precipitate are added to the Inventory."
+            return "The solution was successfully filtered! The filtrate and precipitate are added to the Inventory."
         
         else:
             return "The target solution has no visible precipitate to filter! No change was made to the Inventory."
@@ -1048,19 +1068,19 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
     [DETAILED] Draws `sol_vol` mL of `sol_label` (which must not contain any precipitates), adds to it all of the precipitate `prec_label` and reports observations about any changes in the color or the amount of the added precipitate and any color changes in the solution. It also adds the resulting solution to the Inventory and labels it `test_label`. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - This is the main tool to perform chemical tests on the filtered precipitates.
+    - This tool lets you perform chemical tests on the filtered precipitates.
     - Use this tool when you want to add the filtered precipitate from a previous test to another solution.
     - Use this tool to test if a precipitate dissolves in another solution or causes any other observable change in that solution. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
     1. [PREREQUISITE] You need to have a separated precipitate in the Inventory before calling this tool. Separate the precipitates by using the `filter_solution` tool. [/PREREQUISITE]
-    2. [CURRENT] Use this tool to add the precipitate to a given volume of the solution. [/CURRENT]
+    2. [CURRENT] Use this tool to add the precipitate to a given volume of the solution. It's better to choose the known reagents as the solution. [/CURRENT]
     3. [FOLLOW_UP] You can use your chosen `test_label` to refer to the resulting solution when performing further tests. If the added precipitate does not fully dissolve, you can add other solutions to the mixture by calling the `add_a_solution` tool or filter the precipitate again using the `filter_solution` tool. If the added precipitate fully dissolves, you can perform further tests on the resulting solution by calling tools such as `measure_pH`, `mix_two_solutions`, `add_a_solution` or `perform_flame_test`. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
     - It draws `sol_vol` mL from `sol_label`.
     - Adds it to a new empty container labeled `test_label`.
-    - Adds all of the precipitate labeld `prec_label` to the container and stirs the mixture until equilibrium is reached, at room temperature. 
+    - Adds all of the precipitate labeled `prec_label` to the container and stirs the mixture until equilibrium is reached, at room temperature. 
     - The resulting mixture is added to the Inventory with the label `test_label`.
     - It returns two observations on two separate lines: one about the change in the color and the amount of the added precipitate, and one about the change in the color of the supernatant solution.
     - The reference for observations about the change in solution color is `sol_label`.
@@ -1078,36 +1098,42 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
 
     Args:
         test_label (str):
-            [BRIEF] label of the resulting mixture [/BRIEF]
-            [DETAILED] the label given to the resulting mixture after adding the precipitate. Use this label to refer to the resuling mixture in further tests [/DETAILED]
-        
+            [ARGS_BRIEF] label of the resulting mixture [/ARGS_BRIEF]
+            [ARGS_DETAILED] the label given to the resulting mixture after adding the precipitate. Use this label to refer to the resulting mixture in further tests [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] use descriptive labels [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] "test1_HCl_precipitate_NH3", "test4_carbonate_precipitate_HNO3", "test3_excess_KOH_precipitate_HNO3"  [/ARGS_EXAMPLES]
+
         prec_label (str):
-            [BRIEF] label of the precipitate [/BRIEF]
-            [DETAILED] the label of the precipitate to add. This is how the precipitate is referred to in the Inventory. All of the precipitate will be added to the `sol_label` solution and `prec_label` will be removed from the Inventory [/DETAILED]
-        
+            [ARGS_BRIEF] label of the precipitate [/ARGS_BRIEF]
+            [ARGS_DETAILED] the label of the precipitate to add. This is how the precipitate is referred to in the Inventory. All of the precipitate will be added to the `sol_label` solution and `prec_label` will be removed from the Inventory [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] label of filtered precipitates always end with "_precipitate" [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] "test1_HCl_precipitate", "test4_carbonate_precipitate", "test3_excess_KOH_precipitate" [/ARGS_EXAMPLES]
+
         sol_label (str):
-            [BRIEF] label of the solution [/BRIEF]
-            [DETAILED] the label of the solution that will receive the precipitate. This is how the solution is referred to in the Inventory. It must not contain any pre-existing precipitates [/DETAILED]
+            [ARGS_BRIEF] label of the solution [/ARGS_BRIEF]
+            [ARGS_DETAILED] the label of the solution (or reagent) that will receive the precipitate. This is how the solution (or reagent) is referred to in the Inventory (or reagent list). It must not contain any pre-existing precipitates [/ARGS_DETAILED]
+            [ARGS_EXAMPLES] "test_1", "test2_filtrate", "NH4I", "HCl(1M)" [/ARGS_EXAMPLES]
         
         sol_vol (int):
-            [BRIEF] volume of the solution [/BRIEF]
-            [DETAILED] the volume (in mL) of the host solution, labeled `sol_label`. This volume will be drawn from the solution and the precipitate is then added to the drawn volume. The minimum allowed volume is 4 mL [/DETAILED]
-        
+            [ARGS_BRIEF] volume of the solution [/ARGS_BRIEF]
+            [ARGS_DETAILED] the volume (in mL) of the host solution, labeled `sol_label`. This volume will be drawn from the solution and the precipitate is then added to the drawn volume. The minimum allowed volume is 4 mL [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] integer value [/ARGS_SYNTACTIC]
+            [ARGS_EXAMPLES] `1`, `2`, `4` [/ARGS_EXAMPLES]
   
     Returns:
         str:
-            [BRIEF] a string containing the observations from the test [/BRIEF]
-            [DETAILED] a string containing two lines where the first line is an observation about any changes in the color or the amount of the added precipitate, and the second line is about any color changes of the supernatant solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slahses. [/DETAILED]
-            [EXAMPLES] "The added precipitate partially dissolves. Its color does not noticeably change.\nColor of the supernatant solution changes to very pale blue." , "The added precipitate fully dissolves.\nColor of the supernatant solution does not noticeably change." [/EXAMPLES]
+            [RETURNS_BRIEF] a string containing the observations from the test [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] a string containing two lines where the first line is an observation about any changes in the color or the amount of the added precipitate, and the second line is about any color changes of the supernatant solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "The added precipitate partially dissolves. Its color does not noticeably change.\nColor of the supernatant solution changes to very pale blue." , "The added precipitate fully dissolves.\nColor of the supernatant solution does not noticeably change." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         KeyError: [ERROR_WHEN] When `sol_label` or `prec_label` is invalid [/ERROR_WHEN]
                   [ERROR_DETAILS] The given `sol_label` or `prec_label` was not found in the Inventory [/ERROR_DETAILS]
-                  [ERROR_RECOVERY] Make sure you are passing the corrent labels. You can use the `get_available_reagets` and `check_inventory` tools. [/ERROR_RECOVERY]
+                  [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
         
         RuntimeError: [ERROR_WHEN] When `sol_label` is not a solution or `prec_label` is not a precipitate [/ERROR_WHEN]
                       [ERROR_DETAILS] The given `sol_label` and `prec_label` were found in the Inventory but the do not point to the correct type of object [/ERROR_DETAILS]
-                      [ERROR_RECOVERY] Make sure you are passing the corrent labels. You can use the `get_available_reagets` and `check_inventory` tools. [/ERROR_RECOVERY]
+                      [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
         
         ValueError: [ERROR_WHEN] When `sol_vol` is invalid [/ERROR_WHEN]
                     [ERROR_DETAILS] The given `sol_vol` is not an integer greater than or equal to 4 mL [/ERROR_DETAILS]
@@ -1124,8 +1150,8 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
     - The minimum allowed volume for the solution is 4 mL.
     - The reported colors are qualitative and approximate.
     - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
-    - The perceived color of solutions will depend on the concentraion of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
-    - Any observations mentioning that the added precipitate "partially" or "mostly" dissolves are qualitative and approxiamte statements.
+    - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
+    - Any observations mentioning that the added precipitate "partially" or "mostly" dissolves are qualitative and approximate statements.
     - In some cases it is possible that the chemical identity of the added precipitate change without any noticeable effects on its color or the color of the solution.
     [/LIMITATIONS]
     """
@@ -1178,13 +1204,13 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
         
         precipitate_ratio = new_amount / old_amount 
 
-        if 0.8 <=  precipitate_ratio :
+        if 0.85 <=  precipitate_ratio : # we assume that a change of less than 15% will not be noticeable
             if new_color == old_color:
                 observations.append("The amount and color of the added precipitate does not noticeably change.")
             else:
                 observations.append(f"The amount of the added precipitate does not noticeably change, but its color {slightly}changes. New color: {new_color}")
 
-        elif 0.50 <= precipitate_ratio < 0.80 :
+        elif 0.50 <= precipitate_ratio < 0.85 : # we will call a change of 15 to 50% 'partial dissolution'
             if new_color == old_color:
                 observations.append("The added precipitate partially dissolves. Its color does not noticeably change.")
             else:
@@ -1220,7 +1246,7 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
 def check_inventory(compositions) -> str:
     """[BRIEF] Returns the current contents of the Inventory [/BRIEF]
     
-    [DETAILED] Returns a string cotaining the details of the solutions and precipitates in the Inventory, including their remaining volumes in mL [/DETAILED]
+    [DETAILED] Returns a string containing the details of the solutions and precipitates in the Inventory, including their remaining volumes in mL [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Typically used in the beginning to check the unknown samples.
@@ -1239,7 +1265,7 @@ def check_inventory(compositions) -> str:
     - Solutions with a remaining volume of 0 mL are kept in the Inventory for record-keeping purposes.
     - When a solution is filtered using the `filter_solution` tool, it is removed from the Inventory and is replaced by the filtrate and the collected precipitate.
     - When a precipitate is added to a solution using the `add_precipitate_to_solution` tool, it is removed from the Inventory.
-    - Reagent solutions are not part of the Inventory, use the `get_available_reagents` tool to check the reagnets.
+    - Reagent solutions are not part of the Inventory, use the `get_available_reagents` tool to check the reagents.
     [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
@@ -1253,9 +1279,9 @@ def check_inventory(compositions) -> str:
 
     Returns:
         str:
-            [BRIEF] a string containing the solutions and precipitates in the Inventory [/BRIEF]
-            [DETAILED] a string where each line represents a different item of the Inventory as a dictionary. [/DETAILED]
-            [EXAMPLES] "{'label': 'sample', 'type': 'clear solution', 'description': 'unknown', 'remaining_volume': '11 mL'}\n{'label': 'test_1', 'type': 'clear solution', 'description': '9 mL sample + 1 mL HCl(1M)', 'remaining_volume': '0 mL'}\n{'label': 'test_2_filtrate', 'type': 'clear solution', 'description': '5 mL test_1 + 1 mL NH4I --> filtered', 'remaining_volume': '6 mL'}\n{'label': 'test_2_precipitate', 'type': 'precipitate', 'description': '5 mL test_1 + 1 mL NH4I --> precipitate collected'}" [/EXAMPLES]
+            [RETURNS_BRIEF] a string containing the solutions and precipitates in the Inventory [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] a string where each line represents a different item of the Inventory as a dictionary. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "{'label': 'sample', 'type': 'clear solution', 'description': 'unknown', 'remaining_volume': '11 mL'}\n{'label': 'test_1', 'type': 'clear solution', 'description': '9 mL sample + 1 mL HCl(1M)', 'remaining_volume': '0 mL'}\n{'label': 'test_2_filtrate', 'type': 'clear solution', 'description': '5 mL test_1 + 1 mL NH4I --> filtered', 'remaining_volume': '6 mL'}\n{'label': 'test_2_precipitate', 'type': 'precipitate', 'description': '5 mL test_1 + 1 mL NH4I --> precipitate collected'}" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -1263,7 +1289,7 @@ def check_inventory(compositions) -> str:
 
     [LIMITATIONS] Known Limitations:
         - Reagents are not shown by tool. Use the `get_available_reagents` tool to check the available reagents.
-        - This tool does not report the color if items, use the `checkout_color` tool to observe the color of a specifi item.
+        - This tool does not report the color if items, use the `checkout_color` tool to observe the color of a specific item.
         - The observations made during an experiment involving an item are not stored in the Inventory.
     [/LIMITATIONS]
     """

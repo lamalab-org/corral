@@ -41,7 +41,7 @@ def score_ion_list(prediction: str, ground_truth: str, binarize=True) -> float:
     except ValueError:
         return 0.0
     
-    iou = len(gt_set.intersection(pred_set))/len(gt_set.union(pred_set))
+    iou = len(gt_set.intersection(pred_set)) / len(gt_set.union(pred_set))
     
     if binarize:
         return 1.0 if (iou == 1) else 0.0
@@ -73,11 +73,11 @@ def score_salt(prediction: str, ground_truth: Dict, binarize=True) -> float:
     else:
         normal_true_anion = _normalize_ion(true_anion)
         try:
-            normal_sub_anion = _normalize_ion(pred_dict['anion'])
+            normal_pred_anion = _normalize_ion(pred_anion)
         except ValueError:
-            anion_score = 0.0
+            normal_pred_anion = ""
 
-        anion_score = 0.5 if (normal_sub_anion == normal_true_anion) else 0.0
+        anion_score = 0.5 if (normal_pred_anion == normal_true_anion) else 0.0
     
     final_score = (cation_score + anion_score) / 2
 

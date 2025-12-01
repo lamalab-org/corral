@@ -58,7 +58,7 @@ REAGENTS_1 = {
     "(NH4)2SO4": StockSolution(composition={"NH4+": 1, "SO4-2": 0.5}, description="(NH4)2SO4 0.5 M, in water"),
     "K2CrO4": StockSolution(composition={"K+": 0.4, "CrO4-2": 0.2}, description="K2CrO4 0.2 M, in water"),
     "NH4SCN": StockSolution(composition={"NH4+": 0.1, "SCN-": 0.1}, description="NH4SCN 0.1 M, in water"),
-    "DMG": StockSolution(composition={"K+": 0.02, "Hdmg-": 0.02}, description="dimethylglyoxime potassium salt 0.02 M, in water"),
+    "DMG": StockSolution(composition={"K+": 0.01, "Hdmg-": 0.01}, description="dimethylglyoxime potassium salt 0.01 M, in water"),
 }
 SYS_1 = "Cl N S I C K P Cr dmg"
 
@@ -67,7 +67,7 @@ REAGENTS_2 = {
     "AgNO3": StockSolution(composition={"Ag+": 0.1, "NO3-": 0.1}, description="AgNO3 0.1 M, in water"),
     "Ba(NO3)2": StockSolution(composition={"Ba+2": 0.1, "NO3-":0.2}, description="Ba(NO3)2 0.1 M, in water"),
     "FeCl3": StockSolution(composition={"Fe+3": 0.05, "Cl-": 0.15}, description="FeCl3 0.05 M, in water"),
-    "Pb(NO3)2": StockSolution(composition={"Pb+2": 0.1, "NO3-": 0.2}, description="Pb(NO3)2 0. M, in water"),
+    "Pb(NO3)2": StockSolution(composition={"Pb+2": 0.1, "NO3-": 0.2}, description="Pb(NO3)2 0.1 M, in water"),
 
     "HNO3": StockSolution(composition={"H+": 6, "NO3-": 6}, description="HNO3 6.0 M, in water"),
     "KOH(6M)": StockSolution(composition={"K+": 6, "OH-": 6}, description="KOH 6.0 M, in water"),
@@ -180,7 +180,7 @@ def load_tasks_from_json(
     return tasks
 
 
-class TaskEnvironment(Environment):
+class QualitativeAnalysisEnvironment(Environment):
     """Environment that works with a task group
 
     Args:
@@ -334,7 +334,7 @@ def create_qualysis_environments(
 
     environments = {}
     for task_id in task_group.tasks:
-        environments[task_id] = TaskEnvironment(
+        environments[task_id] = QualitativeAnalysisEnvironment(
             task_id=task_id,
             task_group=task_group,
         )

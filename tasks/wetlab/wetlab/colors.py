@@ -36,9 +36,6 @@ COLORED_SPECIES = { # (wavelength, FWHM, epsilon)
     'FeCl3': (375, 80, 3000), # DOI: 10.1016/j.chemgeo.2006.02.005
     'FeSCN+2': (460, 85 , 5000),
     'Fe(SCN)2+': (485, 85, 9000),
-    #'FeOx+':     (300, 110, 1000),  # DOI: 10.1021/jp8040583
-    #'Fe(Ox)2-':  (300, 130, 2000),  # DOI: 10.1021/jp8040583
-    #'Fe(Ox)3-3': (300, 150, 3000),  # DOI: 10.1021/jp8040583
 }
 
 
@@ -74,25 +71,22 @@ PRECIPITATE_COLORS = {# Many colors from Perry "Handbook of Inorganic Compounds"
     
     'CoCO3':     'pink',
     'Co(OH)2':   'blue',
-    #'CoOx':      'pink', # there is a photo in DOI: 10.1021/acssuschemeng.5b01000
     'Co3(PO4)2': 'lavender',
     'CoS':       'black',
 
 
     'CuCrO4':    'reddish brown',        
-    'CuCO3':     'turqoise', 
+    'CuCO3':     'turquoise', 
     'Cu3(OH)2(CO3)2': 'dark blue',         
     'Cu(OH)2':   'blue',                
-    'Cu3(PO4)2': 'turqoise',            
+    'Cu3(PO4)2': 'turquoise',            
     'CuS':       'black',                 
-    #'CuOx':      'cyan',                  
 
     'Fe(OH)3':   'reddish brown',
     'Fe(OH)2':   'pale olive',
     'FeS':       'black',
     'Fe2S3':     'black',
     'FePO4':     'dirty yellow',
-    #'FeOx':      'pale yellow',
 
     'Hg':        'black',
     'HgCO3':     'brown',
@@ -114,8 +108,6 @@ PRECIPITATE_COLORS = {# Many colors from Perry "Handbook of Inorganic Compounds"
     'NiCrO4':    'maroon', # this is weird but it was in Perry and also the image in the Wikipedia page for Nickel(II) chromate
     'Ni(OH)2':   'pale green',
     'Ni(Hdmg)2': 'crimson',
-    #'Ni(CN)2':   'pale turquoise',
-    #'NiOx':      'pale green',
     'Ni3(PO4)2': 'pale green',
     'NiS':       'black',
 
@@ -123,18 +115,12 @@ PRECIPITATE_COLORS = {# Many colors from Perry "Handbook of Inorganic Compounds"
     'PbI2':      'yellow',
     'PbS':       'black',
 
-    #'SnS':       'black',
-
     'SrCrO4':     'yellow',
-
-    #'Tl2CrO4':   'yellow', # CRC
-    #'TlI':       'yellow',
-    #'Tl2S':      'black',
 
     'ZnCrO4':    'yellow',
 }
 
-PALLETT = {
+PALETTE = {
 
     'salmon':           '#FA8062',
     'tomato':           '#FF6344',
@@ -242,11 +228,11 @@ HUES = {
 }
 
 # creating the augmented pallet by adding slightly darker and lighter versions of the colors 
-AUG_PALLETT = {}
-for name, hex in PALLETT.items():
+AUG_PALETTE = {}
+for name, hex in PALETTE.items():
     sRGB = sRGBColor.new_from_rgb_hex(hex)
     h, s, l = convert_color(sRGB, HSLColor).get_value_tuple()
-    if 0.05 < l < 0.95:
+    if 0.05 < l < 0.95: # no need to create darker or lighter versions for super dark or super light colors
         darker_hsl  = HSLColor(h, s, l-0.025)
         lighter_hsl = HSLColor(h, s, l+0.025)
 
@@ -261,7 +247,7 @@ for name, hex in PALLETT.items():
     else:
         aug = {hex: name}
 
-    AUG_PALLETT.update(aug)
+    AUG_PALETTE.update(aug)
 
 
 def _hex_to_lab(hex: str) -> LabColor:
@@ -368,9 +354,9 @@ def solution_color(composition: Dict[str, float], optical_path_length: float=2, 
     First, the absorbance spectrum is calculated from `composition`
     and is scaled by `optical_path_length`. Then absorbance is converted
     to transmittance: T(λ) = 10^-A(λ).
-    Transmittance specturm is converted to tristimulus values using 'D65'
+    Transmittance spectrum is converted to tri-stimulus values using 'D65'
     as illuminant and 'CIE 1931 2 Degree Standard Observer' as the color-
-    matchin functions. XYZ color is then converted to sRGB or hex.
+    matching functions. XYZ color is then converted to sRGB or hex.
 
     Parameters
     ----------
@@ -418,7 +404,7 @@ def closest_color_names(target_hex: str, mode: Literal['precipitate', 'solution'
 
     1) Precipitate mode
        - Interprets `target_hex` as a solid/opaque color.
-       - Converts to CIE Lab (D65) and compares against `AUG_PALLETT` using both CMC and CIE2000 ΔE.
+       - Converts to CIE Lab (D65) and compares against `AUG_PALETTE` using both CMC and CIE2000 ΔE.
        - The closest match from each metric is kept if CIE ΔE < 17 or CMC ΔE < 18. Additionally,
          any other candidates (up to six) within 3 ΔE (for CIE) or 2 ΔE (for CMC) of that best score are included.
        - The candidates are then sorted by ΔE and at most, the top `max_names` different color names are reported. 
@@ -465,7 +451,7 @@ def closest_color_names(target_hex: str, mode: Literal['precipitate', 'solution'
         raise ValueError("Invalid hex color format! Must be either 'RRGGBB' or '#RRGGBB'.")
 
     if mode == 'precipitate':
-    # Precipitate Mode: target is converted to LabColor and compared to colors in AUG_PALLETT
+    # Precipitate Mode: target is converted to LabColor and compared to colors in AUG_PALETTE
     #                   If no close match is found, returns 'muddy'
     #                   If multiple close matches are found, all are reported as a set
 
@@ -475,7 +461,7 @@ def closest_color_names(target_hex: str, mode: Literal['precipitate', 'solution'
         cie = []
         candidates = []
 
-        for hex in AUG_PALLETT:
+        for hex in AUG_PALETTE:
             lab = _hex_to_lab(hex)
             cmc.append({'hex': hex, 'delta': delta_e_cmc(target_lab, lab, pl=1)})
             cie.append({'hex': hex, 'delta': delta_e_cie2000(target_lab, lab)})
@@ -506,7 +492,7 @@ def closest_color_names(target_hex: str, mode: Literal['precipitate', 'solution'
         candidates.sort(key=by_delta)
         names = []
         for candidate in candidates:
-            name = AUG_PALLETT[candidate['hex']]
+            name = AUG_PALETTE[candidate['hex']]
             if name not in names:
                 names.append(name)
 
