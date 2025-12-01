@@ -37,7 +37,7 @@ class BinaryOutcomeAnalyzer:
 
         # Validate binary outcome
         unique_values = set(features_df[target_col].dropna().unique())
-        if not unique_values.issubset({0, 1, True, False}):
+        if not unique_values.issubset({0, 1}):
             logger.info(f"Warning: {target_col} has non-binary values: {unique_values}")
 
     def _prepare_features_with_encoding(

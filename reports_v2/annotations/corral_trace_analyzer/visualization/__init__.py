@@ -7,9 +7,9 @@ from .distributions import DistributionVisualizer
 from .trajectories import TrajectoryVisualizer
 
 __all__ = [
+    "BinaryOutcomeVisualizer",
+    "ComparativePlotter",
     "CorrelationVisualizer",
     "DistributionVisualizer",
     "TrajectoryVisualizer",
-    "BinaryOutcomeVisualizer",
-    "ComparativePlotter",
 ]
