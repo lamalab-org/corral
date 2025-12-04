@@ -1,29 +1,14 @@
 import json
 import re
-from dataclasses import dataclass
-from typing import Any
 
 from loguru import logger
 
 from corral.agents.base_agent import BaseAgent
+from corral.agents.hooks import HookPoint
 from corral.agents.prompt_utils import create_prompt
+from corral.agents.schema import Action, Thought
 from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
 from corral.router.routes import CorralRouter
-
-
-@dataclass
-class Thought:
-    """Represents agent's reasoning step"""
-
-    content: str
-
-
-@dataclass
-class Action:
-    """Represents an action to be taken"""
-
-    tool_name: str
-    arguments: dict[str, Any]
 
 
 class ReActAgent(BaseAgent):
@@ -176,7 +161,14 @@ class ReActAgent(BaseAgent):
             enable_surrender=enable_surrender,
         )
 
+        # Execute BEFORE_TASK hooks
+        self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
+
         for _iteration in range(self.max_iterations):
+            self._current_iteration = _iteration
+
+            # Execute BEFORE_ITERATION hooks
+            self._execute_hooks(HookPoint.BEFORE_ITERATION, interface, task_id)
             # Create prompt and get LLM response
             llm_response = self.get_llm_response().content
 
@@ -207,11 +199,6 @@ class ReActAgent(BaseAgent):
             if actions:
                 # Check for final answer
                 for action in actions:
-                    action_content = f"{thought_prefix}Action: {action.tool_name}\nAction Input: {json.dumps(action.arguments)}"
-                    self.messages.append(
-                        LiteLLMMessage(role="assistant", content=action_content)
-                    )
-
                     # Execute tool and get response
                     tool_response = interface.execute_tool(
                         task_id, action.tool_name, action.arguments

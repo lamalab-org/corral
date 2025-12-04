@@ -139,7 +139,8 @@ def format_examples(examples: list[str] | None) -> str:
     if examples is None:
         return ""
     else:
-        example_prompt = f"To help you in understanding this task, the next {len(examples)} examples are provided:\n\n"
+        example_prompt = f"To help you in understanding this task, the next {
+            len(examples)} examples are provided:\n\n"
         return example_prompt + "\n\n".join(examples)
 
 

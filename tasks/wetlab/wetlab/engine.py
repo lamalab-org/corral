@@ -291,7 +291,7 @@ class Solution(StockSolution):
     __radd__ = __add__ 
 
 
-    def equilibrate(self, precipitation_threshold=8e-5, retry=3, error_threshold=3e-8) -> None:
+    def equilibrate(self, precipitation_threshold=8e-5, retry=3, error_threshold=4e-8) -> None:
     
         # trying to solve the equilibrium equations
         self._eq_iters = 0
@@ -306,7 +306,8 @@ class Solution(StockSolution):
                 break
         if not converged:
             self._eq_error = error
-            raise NotEquilibratedError("Equilibrium calculations failed to converge!")
+            err_percent = 100*(error-error_threshold)/error_threshold
+            raise NotEquilibratedError(f"Equilibrium calculations failed to converge after {retry} attempts! ({err_percent:.1f} %)")
 
         visible_solids = {}
         invisible_solids = {}

@@ -32,63 +32,66 @@ SCORING_FUNCTIONS = {
 
 BASIC_REAGENTS = {
     "Water": StockSolution(composition={}, description="Distilled water"),
-    "H2SO4": StockSolution(composition={"H+": 1, "HSO4-": 1}, description="H2SO4 1.0 M, in water"),
-    "KOH": StockSolution(composition={"K+": 1, "OH-": 1}, description="KOH 1.0 M, in water"),
+    "H2SO4": StockSolution(composition={"H+": 1, "HSO4-": 1}, description="H2SO4 1.0 M"),
+    "KOH": StockSolution(composition={"K+": 1, "OH-": 1}, description="KOH 1.0 M"),
 }
 BASIC_SYS = "K S(+6)"
 
 REAGENTS_1 = {
-    "Water": StockSolution(composition={}, description="Distilled water"),
-    "HCl(0.02M)": StockSolution(composition={"H+": 0.02, "Cl-": 0.02}, description="HCl 0.02 M, in water"),
-    "HCl(1M)": StockSolution(composition={"H+": 1, "Cl-":1}, description="HCl 1.0 M, in water"),
-    "HCl(6M)": StockSolution(composition={"H+": 6, "Cl-": 6}, description="HCl 6.0 M, in water"),
-    "HNO3(6M)": StockSolution(composition={"H+": 6, "NO3-": 6}, description="HNO3 6.0 M, in water"),
-    "KOH(6M)": StockSolution(composition={"K+": 6, "OH-": 6}, description="KOH 6.0 M, in water"),
-    "KOH(1M)": StockSolution(composition={"K+": 1, "OH-": 1}, description="KOH 1.0 M, in water"),
-    "KOH(0.02M)": StockSolution(composition={"K+": 0.02, "OH-": 0.02}, description="KOH 0.02 M, in water"),
-    "H2SO4(1M)": StockSolution(composition={"H+": 1, "HSO4-": 1}, description="H2SO4 1.0 M, in water"),
-    "NH3(5M)": StockSolution(composition={"NH3": 5}, description="NH3 5.0 M, in water"),
-    "NH4Cl": StockSolution(composition={"NH4+": 1, "Cl-": 1}, description="NH4Cl 1.0 M, in water"),
-    "BUFFER_9": StockSolution(composition={"NH3": 0.72, "NH4+": 1.28, "Cl-": 1.28}, description="2.0 M ammonia buffer pH=9 (NH3 0.72 M, NH4Cl 1.28 M), in water"),
-    "NH4I": StockSolution(composition={"NH4+": 1, "I-": 1}, description="NH4I 1.0 M, in water"),
-    "H2S(acidic)": StockSolution(composition={"H2S": 0.1, "H+": 0.05, "Cl-": 0.05}, description="H2S 0.1 M, HCl 0.05 M, in water"),
-    "(NH4)2S": StockSolution(composition={"NH4+": 2, "S-2": 0.5, "NO3-": 1}, description="(NH4)2S 0.5 M + NH4NO3 1.0 M, in water"),
-    "(NH4)2CO3": StockSolution(composition={"NH4+": 0.4, "CO3-2": 0.2}, description="(NH4)2CO3 0.2 M, in water"),
-    "(NH4)2HPO4": StockSolution(composition={"NH4+": 0.4, "HPO4-2": 0.2}, description="(NH4)2HPO4 0.2 M, in water"),
-    "(NH4)2SO4": StockSolution(composition={"NH4+": 1, "SO4-2": 0.5}, description="(NH4)2SO4 0.5 M, in water"),
-    "K2CrO4": StockSolution(composition={"K+": 0.4, "CrO4-2": 0.2}, description="K2CrO4 0.2 M, in water"),
-    "NH4SCN": StockSolution(composition={"NH4+": 0.1, "SCN-": 0.1}, description="NH4SCN 0.1 M, in water"),
-    "DMG": StockSolution(composition={"K+": 0.01, "Hdmg-": 0.01}, description="dimethylglyoxime potassium salt 0.01 M, in water"),
+    "Water": StockSolution(composition={}, description="distilled water"),
+    "HCl(0.02M)": StockSolution(composition={"H+": 0.02, "Cl-": 0.02}, description="HCl 0.02 M"),
+    "HCl(1M)": StockSolution(composition={"H+": 1, "Cl-":1}, description="HCl 1.0 M"),
+    "HCl(6M)": StockSolution(composition={"H+": 6, "Cl-": 6}, description="HCl 6.0 M"),
+    "HNO3(6M)": StockSolution(composition={"H+": 6, "NO3-": 6}, description="HNO3 6.0 M"),
+    "HNO3(0.1M)": StockSolution(composition={"H+": 0.1, "NO3-": 0.1}, description="HNO3 0.1 M"),
+    "KOH(6M)": StockSolution(composition={"K+": 6, "OH-": 6}, description="KOH 6.0 M"),
+    "KOH(1M)": StockSolution(composition={"K+": 1, "OH-": 1}, description="KOH 1.0 M"),
+    "KOH(0.05M)": StockSolution(composition={"K+": 0.05, "OH-": 0.05}, description="KOH 0.05 M"),
+    "H2SO4(1M)": StockSolution(composition={"H+": 1, "HSO4-": 1}, description="H2SO4 1.0 M"),
+    "NH3(1M)": StockSolution(composition={"NH3": 1}, description="NH3 1.0 M"),
+    "NH3(5M)": StockSolution(composition={"NH3": 5}, description="NH3 5.0 M"),
+    "NH4Cl": StockSolution(composition={"NH4+": 1, "Cl-": 1}, description="NH4Cl 1.0 M"),
+    "BUFFER_9": StockSolution(composition={"NH3": 0.72, "NH4+": 1.28, "Cl-": 1.28}, description="2.0 M NH3/NH4Cl buffer pH=9.0"),
+    "NH4I": StockSolution(composition={"NH4+": 1, "I-": 1}, description="NH4I 1.0 M"),
+    "H2S(acidic)": StockSolution(composition={"H2S": 0.1, "H+": 0.05, "Cl-": 0.05}, description="H2S 0.1 M + HCl 0.05 M"),
+    "(NH4)2S": StockSolution(composition={"NH4+": 1.4, "S-2": 0.5, "NO3-": 0.4}, description="(NH4)2S 0.5 M + NH4NO3 0.4 M, (pH=9.0)"),
+    "(NH4)2CO3": StockSolution(composition={"NH4+": 0.4, "CO3-2": 0.2}, description="(NH4)2CO3 0.2 M"),
+    "(NH4)2HPO4": StockSolution(composition={"NH4+": 0.4, "HPO4-2": 0.2}, description="(NH4)2HPO4 0.2 M"),
+    "(NH4)2SO4": StockSolution(composition={"NH4+": 1, "SO4-2": 0.5}, description="(NH4)2SO4 0.5 M"),
+    "K2CrO4": StockSolution(composition={"K+": 0.4, "CrO4-2": 0.2}, description="K2CrO4 0.2 M"),
+    "NH4SCN": StockSolution(composition={"NH4+": 0.1, "SCN-": 0.1}, description="NH4SCN 0.1 M"),
+    "DMG": StockSolution(composition={"K+": 0.01, "Hdmg-": 0.01}, description="dimethylglyoxime potassium salt 0.01 M"),
 }
 SYS_1 = "Cl N S I C K P Cr dmg"
 
 REAGENTS_2 = {
-    "Water": StockSolution(composition={}, description="Distilled water"),
-    "AgNO3": StockSolution(composition={"Ag+": 0.1, "NO3-": 0.1}, description="AgNO3 0.1 M, in water"),
-    "Ba(NO3)2": StockSolution(composition={"Ba+2": 0.1, "NO3-":0.2}, description="Ba(NO3)2 0.1 M, in water"),
-    "FeCl3": StockSolution(composition={"Fe+3": 0.05, "Cl-": 0.15}, description="FeCl3 0.05 M, in water"),
-    "Pb(NO3)2": StockSolution(composition={"Pb+2": 0.1, "NO3-": 0.2}, description="Pb(NO3)2 0.1 M, in water"),
-
-    "HNO3": StockSolution(composition={"H+": 6, "NO3-": 6}, description="HNO3 6.0 M, in water"),
-    "KOH(6M)": StockSolution(composition={"K+": 6, "OH-": 6}, description="KOH 6.0 M, in water"),
-    "KOH(0.02M)": StockSolution(composition={"K+": 0.02, "OH-": 0.02}, description="KOH 0.02 M, in water"),
-    "H2SO4": StockSolution(composition={"H+": 1, "HSO4-": 1}, description="H2SO4 1.0 M, in water"),
-    "NH3": StockSolution(composition={"NH3": 5}, description="NH3 5.0 M, in water"),
-    "NH4Cl": StockSolution(composition={"NH4+": 1, "Cl-": 1}, description="NH4Cl 1.0 M, in water"),
-    "NH4I": StockSolution(composition={"NH4+": 1, "I-": 1}, description="NH4I 1.0 M, in water"),
-    "H2S(acidic)": StockSolution(composition={"H2S": 0.1, "H+": 0.05, "Cl-": 0.05}, description="H2S 0.1 M, HCl 0.05 M, in water"),
-    "(NH4)2S": StockSolution(composition={"NH4+": 2, "S-2": 0.5, "NO3-": 1}, description="(NH4)2S 0.5 M + NH4NO3 1.0 M, in water"),
-    "(NH4)2CO3": StockSolution(composition={"NH4+": 0.4, "CO3-2": 0.2}, description="(NH4)2CO3 0.2 M, in water"),
-    "(NH4)2HPO4": StockSolution(composition={"NH4+": 0.4, "HPO4-2": 0.2}, description="(NH4)2HPO4 0.2 M, in water"),
-    "K2CrO4": StockSolution(composition={"K+": 0.4, "CrO4-2": 0.2}, description="K2CrO4 0.2 M, in water"),
-    "NH4SCN": StockSolution(composition={"NH4+": 0.1, "SCN-": 0.1}, description="NH4SCN 0.1 M, in water"),
+    "Water": StockSolution(composition={}, description="distilled water"),
+    "AgNO3": StockSolution(composition={"Ag+": 0.1, "NO3-": 0.1}, description="AgNO3 0.1 M"),
+    "Ba(NO3)2": StockSolution(composition={"Ba+2": 0.1, "NO3-":0.2}, description="Ba(NO3)2 0.1 M"),
+    "Pb(NO3)2": StockSolution(composition={"Pb+2": 0.1, "NO3-": 0.2}, description="Pb(NO3)2 0.1 M"),
+    "HNO3(6M)": StockSolution(composition={"H+": 6, "NO3-": 6}, description="HNO3 6.0 M"),
+    "HNO3(0.1M)": StockSolution(composition={"H+": 0.1, "NO3-": 0.1}, description="HNO3 0.1 M"),
+    "HCl(1M)": StockSolution(composition={"H+": 1, "Cl-": 1}, description="HCl 1.0 M"),
+    "KOH(6M)": StockSolution(composition={"K+": 6, "OH-": 6}, description="KOH 6.0 M"),
+    "KOH(0.05M)": StockSolution(composition={"K+": 0.05, "OH-": 0.05}, description="KOH 0.05 M"),
+    "H2SO4(1M)": StockSolution(composition={"H+": 1, "HSO4-": 1}, description="H2SO4 1.0 M"),
+    "NH3(1M)": StockSolution(composition={"NH3": 1}, description="NH3 1.0 M"),
+    "NH3(5M)": StockSolution(composition={"NH3": 5}, description="NH3 5.0 M"),
+    "NH4Cl": StockSolution(composition={"NH4+": 1, "Cl-": 1}, description="NH4Cl 1.0 M"),
+    "BUFFER_9": StockSolution(composition={"NH3": 0.72, "NH4+": 1.28, "Cl-": 1.28}, description="2.0 M NH3/NH4Cl buffer, (pH=9.0)"),
+    "NH4I": StockSolution(composition={"NH4+": 1, "I-": 1}, description="NH4I 1.0 M"),
+    "H2S(acidic)": StockSolution(composition={"H2S": 0.1, "H+": 0.05, "Cl-": 0.05}, description="H2S 0.1 M + HCl 0.05 M"),
+    "(NH4)2S": StockSolution(composition={"NH4+": 1.4, "S-2": 0.5, "NO3-": 0.4}, description="(NH4)2S 0.5 M + NH4NO3 0.4 M, (pH=9.0)"),
+    "(NH4)2CO3": StockSolution(composition={"NH4+": 0.4, "CO3-2": 0.2}, description="(NH4)2CO3 0.2 M"),
+    "(NH4)2HPO4": StockSolution(composition={"NH4+": 0.4, "HPO4-2": 0.2}, description="(NH4)2HPO4 0.2 M"),
+    "K2CrO4": StockSolution(composition={"K+": 0.4, "CrO4-2": 0.2}, description="K2CrO4 0.2 M"),
 }
-SYS_2 = "Ag Ba Fe(+3) Pb N K S Cl I C P Cr"
+SYS_2 = "Ag Ba Pb N K S(+6) S(-2) Cl I C(+4) P Cr"
 
 
 def _is_charge_neutral(solution: StockSolution | Solution, threshold: float=1e-10) -> bool:
     if type(solution) == StockSolution:
-        solution = 10 * solution
+        solution = 1 * solution
     if abs(solution.state.charge()) > threshold:
         return False
     else:
@@ -106,13 +109,13 @@ class QualitativeAnalysisTask(TaskDefinition):
     def __post_init__(self): # setting up the engine
 
         if self.reagent_set == "Basic":
-            reagent_solutions = BASIC_REAGENTS
+            reagent_solutions = BASIC_REAGENTS.copy()
             sys = ' '.join([BASIC_SYS, self.task_sys])
         elif self.reagent_set == "R1":
-            reagent_solutions = REAGENTS_1
+            reagent_solutions = REAGENTS_1.copy()
             sys = ' '.join([SYS_1, self.task_sys])
         elif self.reagent_set == "R2":
-            reagent_solutions = REAGENTS_2
+            reagent_solutions = REAGENTS_2.copy()
             sys = ' '.join([SYS_2, self.task_sys])
         else:
             raise ValueError(f"Invalid reagent_set: {self.reagent_set}")
@@ -144,9 +147,10 @@ class QualitativeAnalysisTask(TaskDefinition):
         object.__setattr__(self, "chemical_system", chemical_system)
         object.__setattr__(self, "sys", sys)
 
+
 def load_tasks_from_json(
     json_path: Path,
-) -> Dict[str, TaskDefinition]:
+) -> Dict[str, QualitativeAnalysisTask]:
     tasks = {}
     for task_file in json_path.glob("*.json"):
         if not Path(task_file).is_file():
@@ -181,7 +185,7 @@ def load_tasks_from_json(
 
 
 class QualitativeAnalysisEnvironment(Environment):
-    """Environment that works with a task group
+    """Environment that works with a QualitativeAnalysisTask group
 
     Args:
         task_id (str): ID of the task to work on
@@ -211,17 +215,20 @@ class QualitativeAnalysisEnvironment(Environment):
         # Initialize environment
         super().__init__(f"{task_group.group_id}_{task_id}" , base_work_dir=work_dir)
 
-        compositions = self.current_task.samples | self.current_task.reagents
-        self.hidden_args = {"compositions": compositions}
-
         logger.info(f"Initializing environment for task {self.task_id}")
         logger.info(f"Task name: {self.current_task}")
         self._add_task_tools()
 
     def configure_additional_apps(self):
-        """Setting the Reaktoro chemical system"""
+        """Setting the Reaktoro chemical system and the Inventory"""
         set_chemical_system(self.current_task.chemical_system)
         logger.info(f"Reaktoro chemical system is set to '{self.current_task.sys}' for {self.task_id}.")
+        
+        logger.info("Resetting the Inventory...")
+        new_samples = {label: sample.clone() for label, sample in self.current_task.samples.items()} # cloning the original task samples to make trials independent
+        compositions = new_samples | self.current_task.reagents
+        self.hidden_args = {"compositions": compositions}
+
 
     def _add_task_tools(self):
         """Add tools required for the current task to the environment"""
@@ -281,7 +288,7 @@ class QualitativeAnalysisEnvironment(Environment):
         try:
             # Clean the submission
             submission_str = self.state.submitted_answer.strip()
-            logger.info(f"Raw submission: {submission_str}")
+            logger.info(f"Raw submission: {submission_str!r}")
             score = self.current_task.scoring_fn(
                 prediction=submission_str, ground_truth=self.current_task.scoring_inputs
             )
@@ -293,7 +300,7 @@ class QualitativeAnalysisEnvironment(Environment):
 
         except Exception as e:
             logger.error(f"Error scoring submission for task {self.task_id}: {e!s}")
-            logger.error(f"Submission was: {self.state.submitted_answer}")
+            logger.error(f"Submission was: {self.state.submitted_answer!r}")
             return 0.0
 
 
@@ -308,9 +315,9 @@ def create_qualysis_environments(
     else:
         json_path = Path(__file__).parent / "tasks_json" / f"level_{level}"
     if not json_path.exists():
-        raise ValueError(f"The path {json_path!r} does not exist.")
+        raise ValueError(f"The path {json_path} does not exist.")
 
-    logger.info(f"Loading tasks from {json_path!r}")
+    logger.info(f"Loading tasks from {json_path}")
 
     tasks = load_tasks_from_json(json_path)
 

@@ -408,8 +408,10 @@ def checkout_color(compositions, label: str) -> str:
     [SYNTACTICAL] Usage examples:
     [
         `checkout_color("sample")`,
+        `checkout_color("sample_A")`,
         `checkout_color("test_1_filtrate")`,
         `checkout_color("test_2_precipitate")`,
+        `checkout_color("test3_precipitate_HNO3")`,
     ]
     [/SYNTACTICAL]
 
@@ -422,8 +424,8 @@ def checkout_color(compositions, label: str) -> str:
 
     Returns:
         str:
-            [RETURNS_BRIEF] the type and color of the object [/RETURNS_BRIEF]
-            [RETURNS_DETAILED] a string containing an statement about the type and the color of the object. The type can be: a reagent solution, a precipitate, a clear solution (meaning it has no precipitate), or a solution containing a precipitate. In the latter case, the color of both the supernatant solution and the existing precipitate will be reported. [/RETURNS_DETAILED]
+            [RETURNS_BRIEF] the type (reagent, solution, or precipitate) and the color of the object [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] a string containing a statement about the type and the color of the object. The type can be: a reagent solution, a precipitate, a clear solution (meaning it has no precipitate), or a solution containing a precipitate. In the latter case, the color of both the supernatant solution and the existing precipitate will be reported. [/RETURNS_DETAILED]
             [RETURNS_EXAMPLES] "sample_B is a clear solution with the following color: pale yellow", "test_03 is a solution that also contains a precipitate.\n Color of the precipitate: black\n Color of the supernatant solution: colorless", "test_1_precipitate is a precipitate with the following color: rosy brown / reddish gray" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
@@ -444,7 +446,7 @@ def checkout_color(compositions, label: str) -> str:
         raise KeyError(f"Invalid label: {e}")
     
     if type(target) == StockSolution:
-        sample = 10 * target
+        sample = 1 * target # converting StockSolution --> Solution
         return f"{label} is a reagent solution with the following color: {sample.color_name}"
     
     elif type(target) == Precipitate:
@@ -504,10 +506,10 @@ def lookup_precipitate_colors() -> str:
         - All reported colors are qualitative and approximate.
     [/LIMITATIONS]
     """
-    statement = "NOTE: This list only describes colored (non-white) precipitates. White precipitates are omitted; if a precipitate is not listed below, it means that it's white.\n"
+    note = "NOTE: This list only describes colored (non-white) precipitates. White precipitates are omitted; if a precipitate is not listed below, it means that it's white.\n"
     precipitate_colors = [f"{prec} :    {color}" for prec,color in PRECIPITATE_COLORS.items()]
 
-    return statement + '\n'.join(precipitate_colors)
+    return note + '\n'.join(precipitate_colors)
 
 @tool
 def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
@@ -534,7 +536,11 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
     [SYNTACTICAL] Usage examples:
     [
         `simulate_color_mixture([("black", 0.5), ("pale yellow", 0.5)])`,
+        `simulate_color_mixture([("white", 0.7), ("turquoise", 0.3)])`,
         `simulate_color_mixture([("cyan", 0.2), ("white", 0.2), ("pink", 0.6)])`,
+        `simulate_color_mixture([("white", 0.1), ("reddish brown", 0.1), ("crimson", 0.8)])`,
+        `simulate_color_mixture([("yellow", 0.6), ("brick red", 0.4)])`,
+        
     ]
     [/SYNTACTICAL]
 
@@ -585,7 +591,7 @@ def get_available_reagents(compositions) -> str:
     [DETAILED] Returns a string where each reagent appears on a separate line. Each line contains the reagent's label as well as its composition. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - Usually called in the beginning to know all of the possible reagents available (if any) to solve the task.
+    - Usually called in the beginning of a task to know all of the possible reagents available (if any) to solve the task.
     - If you want to perform a certain test and need a specific known solution, you can use this tool to check if that is available as a reagent.
     - You can use this tool to get the exact concentration of the components in the reagent solutions. [/PROCEDURAL]
 
@@ -598,7 +604,7 @@ def get_available_reagents(compositions) -> str:
     - This tool does not perform any tests; it simply returns the full list of available reagents.
     - Each reagent appears on a separate line.
     - Each reagent is represented by its "reagent label" and its "composition".
-    - The "reagent label" is the label to use when calling tools such as `mix_two_solutions` and `add_solution`.
+    - The "reagent label" is the label to use when calling tools such as `mix_two_solutions`, `add_solution`, or `add_precipitate_to_solution`.
     - There is no limit on the amount of available reagent solutions, as opposed to sample solutions. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
@@ -622,14 +628,15 @@ def get_available_reagents(compositions) -> str:
 
     [LIMITATIONS] Known Limitations:
     - This tool does not perform any tests; it simply returns the full list of available reagents.
-    - Some tasks do not have any external known reagent solutions. In that case, the task can be solved by mixing the sample solutions among themselves.
+    - All reagent solutions are at room temperature; there are no ways to heat up or cool down the reagents.
     [/LIMITATIONS]
     """
     reagent_descriptions = [f"reagent label: {k}     composition: {v.description}" for k,v in compositions.items() if type(v)==StockSolution]
     if len(reagent_descriptions)==0:
         return "There are no external reagents available."
     else:
-        return '\n'.join(reagent_descriptions)
+        note = "NOTE: All reagent solutions are made with distilled water.\n"
+        return note + '\n'.join(reagent_descriptions)
 
 @tool(hidden_args=['compositions'])
 def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vol: int, sol2_label: str,  sol2_vol: int) -> str:
@@ -645,7 +652,7 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
     [WORKFLOW_INTEGRATION] Typical workflow integration:
     1. [PREREQUISITE] Make sure that `sol1_label` and `sol2_label` both point to reagents or solutions in the Inventory and that neither of them contain a precipitate. If a solution has precipitation, filter it using the `filter_solution` tool.  [/PREREQUISITE]
     2. [CURRENT] Use this tool to mix the solutions and add the new resulting solution to the Inventory. Notice the reported observations. [/CURRENT]
-    3. [FOLLOW_UP] You can use your chosen `test_label` to refer to this solution when performing further tests. Sometimes for a given color change or precipitation to happen, you need to add more of one of the initial solutions, in that case you can use the `add_a_solution`. If the test resulted in the formation of a precipitate, you can either add other solutions to the mixture using the `add_a_solution` tool or filter the precipitate using the `filter_solution` tool. You can also lookup the color of precipitates by calling the `lookup_precipitates_color` tool. If you have a hypothesis about the composition of the formed precipitate you can try to check your hypothesis using the `simulate_color_mixture` tool. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
+    3. [FOLLOW_UP] You can use your chosen `test_label` to refer to this solution when performing further tests. Sometimes for a given color change or precipitation to happen, you need to add more of one of the initial solutions, in that case you can use the `add_a_solution` tool. If the test resulted in the formation of a precipitate, you can either add other solutions to the mixture using the `add_a_solution` tool or filter the precipitate using the `filter_solution` tool. You can also lookup the color of precipitates by calling the `lookup_precipitates_color` tool. If you have a hypothesis about the composition of the formed precipitate you can try to check your hypothesis using the `simulate_color_mixture` tool. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
     - It draws `sol1_vol` mL from `sol1_label`.
@@ -658,10 +665,11 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
 
     [SYNTACTICAL] Usage examples:
     [
-        `mix_two_solutions(test_label="test_1", sol1_label="HCl(1M)", sol1_vol=5, sol2_label="sample", sol2_vol=5)`, # mixing 5 mL of reagent 'HCl(1M)' and 5 mL of 'sample', labeling the result as 'test_1'
-        `mix_two_solutions(test_label="test_2_iodide", sol1_label="test_1", sol1_vol=3, sol2_label="NH4I", sol2_vol=2)`, # mixing 3 mL of 'test_1' and 2 mL of reagent 'NH4I', labeling the result as 'test_2_iodide'
-        `mix_two_solutions(test_label="A_B", sol1_label="sample_A", sol1_vol=10, sol2_label="sample_B", sol2_vol=10)`, # mixing 10 mL of 'sample_A' and 10 mL of 'sample_B', labeling the result as 'A_B'
-        `mix_two_solutions(test_label="A_B_HCl", sol1_label="A_B", sol1_vol=10, sol2_label="HCl(6M)", sol2_vol=2)`, # mixing 10 mL of 'A_B' and 2 mL of reagent 'HCl(6M)', labeling the result as 'A_B_HCl'
+        `mix_two_solutions(test_label="test_1", sol1_label="HCl(1M)", sol1_vol=5, sol2_label="sample", sol2_vol=5)`, # mixing 5 mL of the reagent 'HCl(1M)' and 5 mL of 'sample', labeling the result as 'test_1'
+        `mix_two_solutions(test_label="test_2_iodide", sol1_label="test_1", sol1_vol=3, sol2_label="NH4I", sol2_vol=2)`, # mixing 3 mL of 'test_1' and 2 mL of the reagent 'NH4I', labeling the result as 'test_2_iodide'
+        `mix_two_solutions(test_label="A_B", sol1_label="sample_A", sol1_vol=5, sol2_label="sample_B", sol2_vol=5)`, # mixing 10 mL of 'sample_A' and 10 mL of 'sample_B', labeling the result as 'A_B'
+        `mix_two_solutions(test_label="A_B_HCl", sol1_label="A_B", sol1_vol=2, sol2_label="HCl(6M)", sol2_vol=1)`, # mixing 10 mL of 'A_B' and 2 mL of the reagent 'HCl(6M)', labeling the result as 'A_B_HCl'
+        `mix_two_solutions(test_label="sample_buffer", sol1_label="sample", sol1_vol=3, sol2_label="BUFFER_9", sol2_vol=5)`, # mixing 3 mL of 'sample' and 5 mL of the reagent 'BUFFER_9', labeling the result as 'sample_buffer'
     ]
     [/SYNTACTICAL]
 
@@ -720,12 +728,12 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
 
     [LIMITATIONS] Known Limitations:
     - This tool only works when mixing clear solutions, meaning solutions that do not contain any precipitates.
-    - All solutions are at room temperature; there are no ways no heat up or cool down the solutions/reagents.
+    - All solutions are at room temperature; there are no ways to heat up or cool down the solutions/reagents.
     - The minimum allowed volume to draw is 1 mL.
     - The reported colors are qualitative and approximate.
-    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
+    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than one compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
     - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
-    - Sometimes a given change in color of precipitate formation needs more of one of the solutions to happen.
+    - Sometimes a given change in color or precipitate formation needs more of one of the solutions to happen.
     [/LIMITATIONS]
     """
     try:
@@ -808,6 +816,8 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
         `add_a_solution(test_label="test_2B", sol1_label="test_2A", sol2_label="HCl(0.02M)", sol2_vol=1)`, # adding 1 mL of the reagent 'HCl(0.02M)' to 'test_2A', labeling the result as 'test_2B'
         `add_a_solution(test_label="A_B_HCl", sol1_label="A_B", sol2_label="HCl(6M)", sol2_vol=5)`, # adding 5 mL of the reagent 'HCl(6M)' to 'A_B', labeling the result as 'A_B_HCl'
         `add_a_solution(test_label="test_3", sol1_label="test_1", sol2_label="test_2", sol2_vol=2)`, # adding 2 mL of 'test_2' to 'test_1', labeling the result as 'test_3'
+        `add_a_solution(test_label="test4_excess_KOH", sol1_label="test3_KOH", sol2_label="KOH(6M)", sol2_vol=2)`, # adding 2 mL of the reagent 'KOH(6M)' to 'test3_KOH', labeling the result as 'test4_excess_KOH'
+        `add_a_solution(test_label="test5_more_NH3", sol1_label="test4_NH3", sol2_label="NH3(1M)", sol2_vol=5)`, # adding 5 mL of the reagent 'NH3(1M)' to 'test4_NH3', labeling the result as 'test4_more_NH3'
     ]
     [/SYNTACTICAL]
 
@@ -859,11 +869,11 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
-    - The host solution may contain precipitates but the second solution (the one being added) cannot contain any precipitates.
-    - All solutions are at room temperature; there are no ways no heat up or cool down the solutions/reagents.
+    - The host solution (sol1) may contain precipitates but the second solution (sol2, the one being added) cannot contain any precipitates.
+    - All solutions are at room temperature; there are no ways to heat up or cool down the solutions/reagents.
     - The minimum allowed volume for the second solution is 1 mL.
     - The reported colors are qualitative and approximate.
-    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
+    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than one compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
     - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
     - Any observations mentioning that an existing precipitate "partially" or "mostly" dissolves are qualitative and approximate statements.
     [/LIMITATIONS]
@@ -927,7 +937,7 @@ def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label
             precipitate_ratio = new_amount / old_amount 
 
             # checking if a new precipitate was formed
-            test_no_prec = old_supernatant + sol2_vol * sol2.clone() # .clone() is used to prevent the volume of sol2 from decreasing
+            test_no_prec = old_supernatant + sol2_vol * sol2.clone() # .clone() is used to prevent the volume of sol2 from decreasing twice
             test_no_prec.equilibrate()
 
             if test_no_prec.has_precipitate:
@@ -1003,7 +1013,11 @@ def filter_solution(compositions, label: str) -> str:
 
     [SYNTACTICAL] Usage examples:
     [
-        `filter_solution(label="test_2B"), # 'test_2B' is removed from the Inventory and is replaced by 'test_2B_filtrate' and 'test_2B_precipitate'
+        `filter_solution(label="test_2B")`, # 'test_2B' is removed from the Inventory and is replaced by 'test_2B_filtrate' and 'test_2B_precipitate'
+        `filter_solution(label="test3_HCl")`, # 'test_HCl' is removed from the Inventory and is replaced by 'test3_HCl_filtrate' and 'test3_HCl_precipitate'
+        `filter_solution(label="test_2A_H2S")`, # 'test_2A_H2S' is removed from the Inventory and is replaced by 'test_2A_H2S_filtrate' and 'test_2A_H2S_precipitate'
+        `filter_solution(label="test2_filtrate_NH4I")`, # 'test2_filtrate_NH4I' is removed from the Inventory and is replaced by 'test2_filtrate_NH4I_filtrate' and 'test2_filtrate_NH4I_precipitate'
+        `filter_solution(label="test1_precipitate_NH3")`, # 'test1_precipitate_NH3' is removed from the Inventory and is replaced by 'test1_precipitate_NH3_filtrate' and 'test1_precipitate_NH3_precipitate'
     ]
     [/SYNTACTICAL]
 
@@ -1091,8 +1105,11 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
 
     [SYNTACTICAL] Usage examples:
     [
-        `add_precipitate_to_solution(test_label="test_3", prec_label="test_2_precipitate", sol_label="test_1", sol_vol=10)`, # adding all of the precipitate 'test_2_precipitate' to 10 mL of the solution 'test_1', labeling the result as 'test_3'
-        `add_precipitate_to_solution(test_label="prec3_HCl", prec_label="test3_precipitate", sol_label="HCl(1M)", sol_vol=20)`, # adding all of the precipitate 'test3_precipitate' to 20 mL of the reagent solution 'HCl(1M)', labeling the result as 'prec2_HCl'
+        `add_precipitate_to_solution(test_label="test_3", prec_label="test_2_precipitate", sol_label="test_1", sol_vol=4)`, # adding all of the precipitate 'test_2_precipitate' to 4 mL of the solution 'test_1', labeling the result as 'test_3'
+        `add_precipitate_to_solution(test_label="prec3_HCl", prec_label="test3_precipitate", sol_label="HCl(1M)", sol_vol=5)`, # adding all of the precipitate 'test3_precipitate' to 5 mL of the reagent solution 'HCl(1M)', labeling the result as 'prec2_HCl'
+        `add_precipitate_to_solution(test_label="filt4_ppt1", prec_label="test1_precipitate", sol_label="test4_K2CrO4_filtrate", sol_vol=10)`, # adding all of the precipitate 'test1_precipitate' to 10 mL of the solution 'test4_K2CrO4_filtrate', labeling the result as 'filt4_ppt1'
+        `add_precipitate_to_solution(test_label="test2_ppt_NH3", prec_label="test2_precipitate", sol_label="NH3(5M)", sol_vol=4)`, # adding all of the precipitate 'test2_precipitate' to 4 mL of the reagent solution 'NH3(5M)', labeling the result as 'test2_ppt_NH3'
+        `add_precipitate_to_solution(test_label="Ba_precipitate_HNO3", prec_label="test1_Ba_precipitate", sol_label="HNO3(1M)", sol_vol=10)`, # adding all of the precipitate 'test1_Ba_precipitate' to 10 mL of the reagent solution 'HNO3(1M)', labeling the result as 'Ba_precipitate_HNO3'
     ]
     [/SYNTACTICAL]
 
@@ -1146,10 +1163,10 @@ def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: st
 
     [LIMITATIONS] Known Limitations:
     - The solution may not contain any precipitates.
-    - All solutions are at room temperature; there are no ways no heat up or cool down the solutions/reagents.
+    - All solutions are at room temperature; there are no ways to heat up or cool down the solutions/reagents.
     - The minimum allowed volume for the solution is 4 mL.
     - The reported colors are qualitative and approximate.
-    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
+    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than one compound co-precipitate at the same time, the color may be different from the color of pure precipitates.
     - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.
     - Any observations mentioning that the added precipitate "partially" or "mostly" dissolves are qualitative and approximate statements.
     - In some cases it is possible that the chemical identity of the added precipitate change without any noticeable effects on its color or the color of the solution.
@@ -1249,13 +1266,13 @@ def check_inventory(compositions) -> str:
     [DETAILED] Returns a string containing the details of the solutions and precipitates in the Inventory, including their remaining volumes in mL [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - Typically used in the beginning to check the unknown samples.
+    - Typically used in the beginning of a task to check the unknown samples.
     - You can use this tool to check the Inventory, which is effectively a summary of the experiments performed so far. 
     - Use this tool to check the remaining volumes of the samples and test solutions.
     - Use this tool to check the correct label of solutions and precipitates to use in other tools. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] None [/PREREQUISITE]
+    1. [PREREQUISITE] None. [/PREREQUISITE]
     2. [CURRENT] Use this tool to retrieve the full Inventory of solutions and filtered precipitates, including their remaining volumes in mL. [/CURRENT]
     3. [FOLLOW_UP] Use the labels returned by this tool to call other tools. You can also use the returned Inventory as a summary of the experiments you have performed so far and decide what experiment you want to perform next. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 

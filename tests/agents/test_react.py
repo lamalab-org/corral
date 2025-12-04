@@ -2,7 +2,8 @@
 
 import pytest
 
-from corral.agents.react import Action, ReActAgent, Thought
+from corral.agents.react import ReActAgent, Thought
+from corral.agents.schema import Action
 from corral.agents.utils import LiteLLMMessage
 from corral.types import ToolResponse
 

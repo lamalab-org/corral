@@ -9,6 +9,7 @@ from typing import Any
 from loguru import logger
 
 from corral.agents import BaseAgent
+from corral.agents.hooks import AgentHooks
 from corral.report import (
     BenchmarkResult,
     CorralWandbLogger,
@@ -267,6 +268,7 @@ class CorralRunner:
         session_id: str | None = None,
         tool_verbosity: str | None = None,
         configure_timeout: float | None = None,
+        hooks: AgentHooks | None = None,
     ) -> BenchmarkResult:
         """Run benchmark with functional approach"""
 
@@ -280,6 +282,10 @@ class CorralRunner:
 
         if trials_per_task == 0:
             raise ValueError("Number of trials per task must be greater than 0")
+
+        # Set agent hooks if provided
+        if hooks:
+            self.agent.hooks = hooks
 
         # Initialize or load results
         task_results = self._load_or_initialize_results(task_ids, session_id)
@@ -310,6 +316,7 @@ class CorralRunner:
                 task_ids=task_ids,
                 dependency_chain=self.interface.supports_dependency_chain(),
                 enable_surrender=self.enable_surrender,
+                hooks_enabled=hooks is not None,
             )
             self.logger.start_logging(config)
 

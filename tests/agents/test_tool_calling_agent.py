@@ -3,7 +3,8 @@
 import pytest
 
 from corral.agents.base_agent import BaseAgent
-from corral.agents.tool_calling import Action, ToolCallingAgent
+from corral.agents.schema import Action
+from corral.agents.tool_calling import ToolCallingAgent
 from corral.agents.utils import LiteLLMMessage
 from corral.types import ToolResponse
 
