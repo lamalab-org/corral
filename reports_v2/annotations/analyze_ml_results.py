@@ -42,7 +42,7 @@ def load_all_results(environments: list[str]) -> dict:
             importance_file = ml_dir / f"{model_name}_feature_importance.csv"
 
             if metrics_file.exists():
-                with open(metrics_file, "r") as f:
+                with metrics_file.open() as f:
                     env_results[model_name] = json.load(f)
 
             if importance_file.exists():
@@ -119,11 +119,11 @@ def plot_model_comparison(all_results: dict, output_dir: Path):
     plt.tight_layout()
     plt.savefig(output_dir / "plot1_model_comparison.png", dpi=300, bbox_inches="tight")
     plt.close()
-    logger.info(f"  ✓ Saved plot1_model_comparison.png")
+    logger.info("  ✓ Saved plot1_model_comparison.png")
 
     # Save comparison table
     df.to_csv(output_dir / "model_comparison_metrics.csv", index=False)
-    logger.info(f"  ✓ Saved model_comparison_metrics.csv")
+    logger.info("  ✓ Saved model_comparison_metrics.csv")
 
 
 def plot_overfitting_analysis(all_results: dict, output_dir: Path):
@@ -186,15 +186,14 @@ def plot_overfitting_analysis(all_results: dict, output_dir: Path):
         output_dir / "plot2_overfitting_analysis.png", dpi=300, bbox_inches="tight"
     )
     plt.close()
-    logger.info(f"  ✓ Saved plot2_overfitting_analysis.png")
+    logger.info("  ✓ Saved plot2_overfitting_analysis.png")
 
 
 def plot_feature_importance_comparison(all_results: dict, output_dir: Path):
     """Plot 3: Feature Importance Comparison across models."""
     logger.info("Generating Plot 3: Feature Importance Comparison...")
 
-    for env in all_results.keys():
-        results = all_results[env]
+    for env, results in all_results.items():
 
         # Get top 20 features from each model
         top_features = set()
@@ -287,7 +286,7 @@ def plot_feature_importance_comparison(all_results: dict, output_dir: Path):
             output_dir / f"feature_importance_comparison_{env}.csv", index=False
         )
 
-    logger.info(f"  ✓ Saved feature importance plots for all environments")
+    logger.info("  ✓ Saved feature importance plots for all environments")
 
 
 def plot_feature_agreement_heatmap(all_results: dict, output_dir: Path):
@@ -298,12 +297,11 @@ def plot_feature_agreement_heatmap(all_results: dict, output_dir: Path):
     all_top_features = set()
     feature_ranks = {}
 
-    for env in all_results.keys():
-        results = all_results[env]
+    for env in all_results:
+    for env, results in all_results.items():
 
         for model_name in ["logreg", "rf", "xgb"]:
             imp_key = f"{model_name}_importance"
-            if imp_key in results:
                 imp_df = results[imp_key].head(15)
 
                 for idx, row in imp_df.iterrows():
@@ -357,7 +355,7 @@ def plot_feature_agreement_heatmap(all_results: dict, output_dir: Path):
         output_dir / "plot4_feature_agreement_heatmap.png", dpi=300, bbox_inches="tight"
     )
     plt.close()
-    logger.info(f"  ✓ Saved plot4_feature_agreement_heatmap.png")
+    logger.info("  ✓ Saved plot4_feature_agreement_heatmap.png")
 
 
 def analyze_universal_features(all_results: dict, output_dir: Path):
@@ -367,7 +365,7 @@ def analyze_universal_features(all_results: dict, output_dir: Path):
     # Count how many times each feature appears in top 10
     feature_counts = {}
 
-    for env in all_results.keys():
+    for env in all_results:
         results = all_results[env]
 
         for model_name in ["logreg", "rf", "xgb"]:
@@ -401,15 +399,13 @@ def analyze_universal_features(all_results: dict, output_dir: Path):
 
     # Color by importance level
     colors = plt.cm.RdYlGn(top_universal["count"] / top_universal["count"].max())
-    for bar, color in zip(bars, colors):
+    for bar, color in zip(bars, colors, strict=False):
         bar.set_color(color)
 
     ax.set_yticks(range(len(top_universal)))
     ax.set_yticklabels(top_universal["feature"])
     ax.set_xlabel(
-        "Times in Top 10 (out of {} model-environment combinations)".format(
-            len(all_results) * 3
-        ),
+        f"Times in Top 10 (out of {len(all_results) * 3} model-environment combinations)",
         fontweight="bold",
     )
     ax.set_title(
@@ -433,8 +429,8 @@ def analyze_universal_features(all_results: dict, output_dir: Path):
 
     # Save table
     universal_df.to_csv(output_dir / "universal_features_analysis.csv", index=False)
-    logger.info(f"  ✓ Saved plot5_universal_features.png")
-    logger.info(f"  ✓ Saved universal_features_analysis.csv")
+    logger.info("  ✓ Saved plot5_universal_features.png")
+    logger.info("  ✓ Saved universal_features_analysis.csv")
 
 
 def plot_environment_difficulty(all_results: dict, output_dir: Path):
@@ -474,7 +470,7 @@ def plot_environment_difficulty(all_results: dict, output_dir: Path):
 
     # Color by difficulty (red = hard, green = easy)
     colors = plt.cm.RdYlGn(env_df["avg_test_auc"])
-    for bar, color in zip(bars, colors):
+    for bar, color in zip(bars, colors, strict=False):
         bar.set_color(color)
 
     ax.set_xlabel("Average Test ROC-AUC", fontweight="bold")
@@ -528,8 +524,8 @@ def plot_environment_difficulty(all_results: dict, output_dir: Path):
 
     # Save table
     env_df.to_csv(output_dir / "environment_difficulty_analysis.csv", index=False)
-    logger.info(f"  ✓ Saved plot6_environment_difficulty.png")
-    logger.info(f"  ✓ Saved environment_difficulty_analysis.csv")
+    logger.info("  ✓ Saved plot6_environment_difficulty.png")
+    logger.info("  ✓ Saved environment_difficulty_analysis.csv")
 
 
 def plot_cv_stability(all_results: dict, output_dir: Path):
@@ -604,7 +600,7 @@ def plot_cv_stability(all_results: dict, output_dir: Path):
     plt.tight_layout()
     plt.savefig(output_dir / "plot7_cv_stability.png", dpi=300, bbox_inches="tight")
     plt.close()
-    logger.info(f"  ✓ Saved plot7_cv_stability.png")
+    logger.info("  ✓ Saved plot7_cv_stability.png")
 
 
 def plot_precision_recall_tradeoff(all_results: dict, output_dir: Path):
@@ -691,7 +687,7 @@ def plot_precision_recall_tradeoff(all_results: dict, output_dir: Path):
         output_dir / "plot8_precision_recall_tradeoff.png", dpi=300, bbox_inches="tight"
     )
     plt.close()
-    logger.info(f"  ✓ Saved plot8_precision_recall_tradeoff.png")
+    logger.info("  ✓ Saved plot8_precision_recall_tradeoff.png")
 
 
 def generate_comprehensive_report(all_results: dict, output_dir: Path):
@@ -833,10 +829,10 @@ def generate_comprehensive_report(all_results: dict, output_dir: Path):
 
     # Save report
     report_path = output_dir / "comprehensive_analysis_report.md"
-    with open(report_path, "w") as f:
+    with report_path.open("w") as f:
         f.write("\n".join(report))
 
-    logger.info(f"  ✓ Saved comprehensive_analysis_report.md")
+    logger.info("  ✓ Saved comprehensive_analysis_report.md")
 
 
 def main():
