@@ -337,7 +337,7 @@ def run_ml_analysis_for_environment(features_df: pd.DataFrame, env_name: str):
         metrics = {
             k: v
             for k, v in logreg_results.items()
-            if isinstance(v, (int, float, str)) and not k.startswith("_")
+            if isinstance(v, int | float | str) and not k.startswith("_")
         }
         with (ml_dir / "logreg_metrics.json").open("w") as f:
             json.dump(metrics, f, indent=4)
@@ -405,7 +405,7 @@ def run_ml_analysis_for_environment(features_df: pd.DataFrame, env_name: str):
         metrics = {
             k: v
             for k, v in xgb_results.items()
-            if isinstance(v, (int, float, str)) and not k.startswith("_")
+            if isinstance(v, int | float | str) and not k.startswith("_")
         }
         with (ml_dir / "xgb_metrics.json").open("w") as f:
             json.dump(metrics, f, indent=4)
@@ -496,7 +496,7 @@ def main():
     summary_lines = ["# ML Models Analysis - Master Summary\n"]
     summary_lines.append("## Environments Analyzed\n")
 
-    for env, results in all_results.items():
+    for env in all_results:
         summary_lines.append(f"### {env.upper()}\n")
         summary_lines.append(f"- Report: `output_{env}/ml_models/ml_models_report.md`")
         summary_lines.append(f"- HTML Reports: `output_{env}/ml_models/*.html`")
