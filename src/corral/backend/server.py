@@ -1,3 +1,4 @@
+import os
 from collections.abc import Mapping
 
 import uvicorn
@@ -266,15 +267,23 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
 
 
 def run_server(
-    environments: Mapping[str, Environment], host: str = "0.0.0.0", port: int = 8000
+    environments: Mapping[str, Environment],
+    host: str | None = None,
+    port: int | None = None,
 ):
     """Run the benchmark server with the provided environments
 
     Args:
         environments: dictionary of environments
-        host: Server host
-        port: Server port
+        host: Server host (defaults to CORRAL_HOST env var or "0.0.0.0")
+        port: Server port (defaults to CORRAL_PORT env var or 8000)
     """
+    # Use environment variables as defaults if not explicitly provided
+    if host is None:
+        host = os.environ.get("CORRAL_HOST", "0.0.0.0")
+    if port is None:
+        port = int(os.environ.get("CORRAL_PORT", "8000"))
+
     app = create_benchmark_server(dict(environments))
     logger.info(f"Starting server on {host}:{port}")
     uvicorn.run(app, host=host, port=port)

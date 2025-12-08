@@ -1,0 +1,114 @@
+version: '3.8'
+
+# =============================================================================
+# Corral Agent Runner - Two-Container Architecture
+# =============================================================================
+# This compose file runs the environment and agent as separate services.
+#
+# Usage (direct):
+#   ENV_IMAGE=ghcr.io/org/env:tag docker compose -f docker-compose.corral-two-container.yml up
+#   ENV_IMAGE=my-local-env:dev docker compose -f docker-compose.corral-two-container.yml up
+#
+# Usage (with CLI - recommended):
+#   corral bench run --image ghcr.io/org/env:tag --agent ReActAgent
+#
+# For kwargs, use AGENT_PARAMS as JSON:
+#   AGENT_PARAMS='{"temperature": 0.7, "custom": "value"}' docker compose ...
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Environment Server
+  # ---------------------------------------------------------------------------
+  # The Corral environment that provides tasks and tools for the agent
+  # ---------------------------------------------------------------------------
+  environment:
+    # Image must be specified via ENV_IMAGE environment variable
+    image: ${ENV_IMAGE:?ENV_IMAGE must be set to an environment Docker image}
+    container_name: ${ENV_CONTAINER_NAME:-corral-env}
+    ports:
+      - "${ENV_PORT:-8000}:8000"
+    environment:
+      - CORRAL_HOST=0.0.0.0
+      - CORRAL_PORT=8000
+      - CORRAL_WORK_DIR=/workspace
+    volumes:
+      - corral_workspace:/workspace
+    networks:
+      - corral-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/tasks"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Agent Runner
+  # ---------------------------------------------------------------------------
+  # The agent that runs benchmarks against the environment
+  # ---------------------------------------------------------------------------
+  agent-runner:
+    build:
+      context: ../..
+      dockerfile: ./.docker/corral-agent-runner/Dockerfile
+    image: ${REGISTRY:-}${ORGANIZATION:-corral}/${CORRAL_AGENT_RUNNER_IMAGE:-corral-agent-runner}${TAG:-}
+    depends_on:
+      environment:
+        condition: service_healthy
+    environment:
+      # ----- Agent Configuration -----
+      - MODEL=${MODEL:-claude-sonnet-4-5-20250929}
+      - AGENT_CLASS=${AGENT_CLASS:-ReActAgent}
+      - TEMPERATURE=${TEMPERATURE:-0.0}
+      - MAX_ITERATIONS=${MAX_ITERATIONS:-10}
+      - API_ENDPOINT=${API_ENDPOINT:-}
+      - AGENT_PARAMS=${AGENT_PARAMS:-}
+      # Point to the environment service
+      - BASE_URL=http://environment:8000
+      - DEFAULT_VERBOSITY=${DEFAULT_VERBOSITY:-brief}
+      - RUN_NAME=${RUN_NAME:-corral_run}
+      - TRIALS_PER_TASK=${TRIALS_PER_TASK:-5}
+      - K_VALUES=${K_VALUES:-1,2,3,4,5}
+      - TOOL_VERBOSITY=${TOOL_VERBOSITY:-brief}
+      - VERBOSE=${VERBOSE:-false}
+      - TASK_IDS=${TASK_IDS:-}
+      - CHECKPOINT_DIR=${CHECKPOINT_DIR:-./benchmark_checkpoints}
+      - CHECKPOINT_NAME=${CHECKPOINT_NAME:-}
+      - SESSION_ID=${SESSION_ID:-}
+      - CONFIGURE_TIMEOUT=${CONFIGURE_TIMEOUT:-}
+      - ENABLE_SURRENDER=${ENABLE_SURRENDER:-false}
+
+      # ----- Logging & Monitoring -----
+      - WANDB_PROJECT=${WANDB_PROJECT:-corral}
+      - WANDB_ENTITY=${WANDB_ENTITY:-}
+      - WANDB_GROUP=${WANDB_GROUP:-agent-runner}
+      - WANDB_API_KEY=${WANDB_API_KEY:-}
+
+      # ----- API Keys (pass any LiteLLM-supported provider) -----
+      # Use .env file or pass via environment: ANTHROPIC_API_KEY, OPENAI_API_KEY,
+      # GEMINI_API_KEY, MISTRAL_API_KEY, etc.
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ../../:/opt/corral-workspace:cached
+      - corral_results:/opt/corral-workspace/benchmark_checkpoints
+    networks:
+      - corral-network
+    tty: true
+    stdin_open: true
+    command: []
+
+volumes:
+  corral_workspace:
+    driver: local
+  corral_results:
+    driver: local
+
+networks:
+  corral-network:
+    name: ${DOCKER_NETWORK:-corral-network}
+    driver: bridge
