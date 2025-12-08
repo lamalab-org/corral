@@ -103,7 +103,7 @@ def plot_model_comparison(all_results: dict, output_dir: Path):
         ax = axes[idx // 2, idx % 2]
 
         # Pivot for grouped bar chart
-        pivot_df = df_.pivot(index="Environment", columns="Model", values=metric)
+        pivot_df = df_.pivot_table(index="Environment", columns="Model", values=metric)
         pivot_df.plot(kind="bar", ax=ax, width=0.8)
 
         ax.set_title(title, fontweight="bold")
@@ -253,9 +253,9 @@ def plot_feature_importance_comparison(all_results: dict, output_dir: Path):
         x = np.arange(len(comp_df))
         width = 0.25
 
-        bars1 = ax.barh(x - width, comp_df["logreg"], width, label="LogReg", alpha=0.8)
-        bars2 = ax.barh(x, comp_df["rf"], width, label="RF", alpha=0.8)
-        bars3 = ax.barh(x + width, comp_df["xgb"], width, label="XGB", alpha=0.8)
+        _bars1 = ax.barh(x - width, comp_df["logreg"], width, label="LogReg", alpha=0.8)
+        _bars2 = ax.barh(x, comp_df["rf"], width, label="RF", alpha=0.8)
+        _bars3 = ax.barh(x + width, comp_df["xgb"], width, label="XGB", alpha=0.8)
 
         ax.set_yticks(x)
         ax.set_yticklabels(comp_df["feature"])
@@ -408,7 +408,7 @@ def analyze_universal_features(all_results: dict, output_dir: Path):
     ax.grid(True, alpha=0.3, axis="x")
 
     # Add percentage labels
-    for i, (idx, row) in enumerate(top_universal.iterrows()):
+    for i, (_idx, row) in enumerate(top_universal.iterrows()):
         ax.text(
             row["count"] + 0.2, i, f"{row['percentage']:.0f}%", va="center", fontsize=8
         )
@@ -471,7 +471,7 @@ def plot_environment_difficulty(all_results: dict, output_dir: Path):
     ax.grid(True, alpha=0.3, axis="x")
 
     # Add value labels
-    for i, (idx, row) in enumerate(env_df.iterrows()):
+    for i, (_idx, row) in enumerate(env_df.iterrows()):
         ax.text(
             row["avg_test_auc"] + 0.02,
             i,
@@ -492,7 +492,7 @@ def plot_environment_difficulty(all_results: dict, output_dir: Path):
         edgecolors="black",
     )
 
-    for idx, row in env_df.iterrows():
+    for _idx, row in env_df.iterrows():
         ax.annotate(
             row["environment"],
             (row["n_samples"], row["avg_test_auc"]),
@@ -579,7 +579,7 @@ def plot_cv_stability(all_results: dict, output_dir: Path):
     # Plot 2: CV Std (stability measure - lower is better)
     ax = axes[1]
 
-    pivot_df = cv_df.pivot(index="Environment", columns="Model", values="CV Std")
+    pivot_df = cv_df.pivot_table(index="Environment", columns="Model", values="CV Std")
     pivot_df.plot(kind="bar", ax=ax, width=0.8)
 
     ax.set_ylabel("CV Standard Deviation (lower = more stable)", fontweight="bold")
@@ -604,7 +604,7 @@ def plot_precision_recall_tradeoff(all_results: dict, output_dir: Path):
     colors = {"LogReg": "blue", "RF": "green", "XGB": "red"}
     markers = {"LogReg": "o", "RF": "s", "XGB": "^"}
 
-    for env, results in all_results.items():
+    for results in all_results.values():
         for model_name, model_label in [
             ("logreg", "LogReg"),
             ("rf", "RF"),
@@ -729,7 +729,7 @@ def generate_comprehensive_report(all_results: dict, output_dir: Path):
 
     model_avg_scores = {"LogReg": [], "RF": [], "XGB": []}
 
-    for env, results in all_results.items():
+    for results in all_results.values():
         for model_name, model_label in [
             ("logreg", "LogReg"),
             ("rf", "RF"),
