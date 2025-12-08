@@ -82,7 +82,7 @@ def plot_model_comparison(all_results: dict, output_dir: Path):
                     }
                 )
 
-    df = pd.DataFrame(comparison_data)
+    df_ = pd.DataFrame(comparison_data)
 
     # Create subplot for multiple metrics
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
@@ -103,7 +103,7 @@ def plot_model_comparison(all_results: dict, output_dir: Path):
         ax = axes[idx // 2, idx % 2]
 
         # Pivot for grouped bar chart
-        pivot_df = df.pivot(index="Environment", columns="Model", values=metric)
+        pivot_df = df_.pivot(index="Environment", columns="Model", values=metric)
         pivot_df.plot(kind="bar", ax=ax, width=0.8)
 
         ax.set_title(title, fontweight="bold")
@@ -122,7 +122,7 @@ def plot_model_comparison(all_results: dict, output_dir: Path):
     logger.info("  ✓ Saved plot1_model_comparison.png")
 
     # Save comparison table
-    df.to_csv(output_dir / "model_comparison_metrics.csv", index=False)
+    df_.to_csv(output_dir / "model_comparison_metrics.csv", index=False)
     logger.info("  ✓ Saved model_comparison_metrics.csv")
 
 
@@ -194,7 +194,6 @@ def plot_feature_importance_comparison(all_results: dict, output_dir: Path):
     logger.info("Generating Plot 3: Feature Importance Comparison...")
 
     for env, results in all_results.items():
-
         # Get top 20 features from each model
         top_features = set()
 
@@ -204,10 +203,7 @@ def plot_feature_importance_comparison(all_results: dict, output_dir: Path):
                 imp_df = results[imp_key]
 
                 # Get appropriate column
-                if model_name == "logreg":
-                    imp_col = "abs_coefficient"
-                else:
-                    imp_col = "importance"
+                imp_col = "abs_coefficient" if model_name == "logreg" else "importance"
 
                 top_features.update(imp_df.head(20)["feature"].tolist())
 
@@ -233,10 +229,9 @@ def plot_feature_importance_comparison(all_results: dict, output_dir: Path):
                     # Find feature importance
                     feat_row = imp_df[imp_df["feature"] == feature]
                     if not feat_row.empty:
-                        row[model_name] = feat_row[imp_col].values[0]
+                        row[model_name] = feat_row[imp_col].to_numpy()[0]
                     else:
                         row[model_name] = 0
-
             feature_comparison.append(row)
 
         comp_df = pd.DataFrame(feature_comparison)
@@ -297,11 +292,10 @@ def plot_feature_agreement_heatmap(all_results: dict, output_dir: Path):
     all_top_features = set()
     feature_ranks = {}
 
-    for env in all_results:
     for env, results in all_results.items():
-
         for model_name in ["logreg", "rf", "xgb"]:
             imp_key = f"{model_name}_importance"
+            if imp_key in results:
                 imp_df = results[imp_key].head(15)
 
                 for idx, row in imp_df.iterrows():
@@ -365,9 +359,7 @@ def analyze_universal_features(all_results: dict, output_dir: Path):
     # Count how many times each feature appears in top 10
     feature_counts = {}
 
-    for env in all_results:
-        results = all_results[env]
-
+    for results in all_results.values():
         for model_name in ["logreg", "rf", "xgb"]:
             imp_key = f"{model_name}_importance"
             if imp_key in results:
