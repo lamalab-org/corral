@@ -225,12 +225,14 @@ class BinaryOutcomeAnalyzer:
             mean_shap = shap_values.mean(axis=0)
 
             # Create importance dataframe with signed values
-            shap_importance = pd.DataFrame({
-                "feature": feature_names,
-                "mean_abs_shap": mean_abs_shap,
-                "mean_shap": mean_shap,  # Signed: positive = increases prediction
-                "abs_mean_shap": np.abs(mean_shap),
-            }).sort_values("mean_abs_shap", ascending=False)
+            shap_importance = pd.DataFrame(
+                {
+                    "feature": feature_names,
+                    "mean_abs_shap": mean_abs_shap,
+                    "mean_shap": mean_shap,  # Signed: positive = increases prediction
+                    "abs_mean_shap": np.abs(mean_shap),
+                }
+            ).sort_values("mean_abs_shap", ascending=False)
 
             results = {
                 "shap_values": shap_values,
@@ -284,18 +286,24 @@ class BinaryOutcomeAnalyzer:
                     shap.plots.waterfall(
                         shap.Explanation(
                             values=shap_values[0],
-                            base_values=explainer.expected_value if hasattr(explainer, 'expected_value') else 0,
+                            base_values=explainer.expected_value
+                            if hasattr(explainer, "expected_value")
+                            else 0,
                             data=X_test[0],
                             feature_names=feature_names,
                         ),
                         show=False,
                         max_display=15,
                     )
-                    waterfall_plot_path = output_dir / f"{model_name}_shap_waterfall_example.png"
+                    waterfall_plot_path = (
+                        output_dir / f"{model_name}_shap_waterfall_example.png"
+                    )
                     plt.tight_layout()
                     plt.savefig(waterfall_plot_path, dpi=300, bbox_inches="tight")
                     plt.close()
-                    logger.info(f"    ✓ Saved SHAP waterfall plot to: {waterfall_plot_path}")
+                    logger.info(
+                        f"    ✓ Saved SHAP waterfall plot to: {waterfall_plot_path}"
+                    )
                     results["waterfall_plot_path"] = str(waterfall_plot_path)
 
             logger.info(f"  ✓ SHAP analysis complete for {model_name}")
