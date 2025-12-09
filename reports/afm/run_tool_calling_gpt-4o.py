@@ -60,7 +60,7 @@ if __name__ == "__main__":
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
             model = "gpt-4o-2024-08-06"
-            run_name = f"gpt-4o_Tool_calling-task_3-{verbose}_verbosity"
+            run_name = f"gpt-4o_Tool_calling-subtasks_4-{verbose}_verbosity"
             run_benchmark(model=model, run_name=run_name, verbose=verbose, temperature=0)
 
         except Exception as e:
