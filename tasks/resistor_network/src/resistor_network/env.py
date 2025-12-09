@@ -177,7 +177,7 @@ if __name__ == "__main__":
         try:
             port = int(sys.argv[2])
         except ValueError:
-            print(
+            logger.error(
                 f"Error: Invalid port number provided: {sys.argv[2]}. Using default port."
             )
             port = int(os.environ.get("CORRAL_PORT", "8000"))
