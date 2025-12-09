@@ -59,6 +59,61 @@ A comprehensive benchmarking framework for evaluating AI agents on science tasks
 
 ### Quick Start
 
+#### Using the CLI (Recommended)
+
+```bash
+# Run a full benchmark (starts Docker environment + runs agent)
+corral bench run --image ghcr.io/lamalab-org/corral-materials:latest
+
+# Or run environment and agent separately
+corral bench env --image ghcr.io/lamalab-org/corral-materials:latest --port 8000 --detach
+corral bench agent --base-url http://localhost:8000 --agent ReActAgent --model claude-sonnet-4-5-20250929
+
+# Stop running containers
+corral bench stop
+```
+
+**Available CLI Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `corral bench run` | Run full benchmark (environment + agent) |
+| `corral bench env` | Run only the environment container |
+| `corral bench agent` | Run only the agent against a running environment |
+| `corral bench stop` | Stop running benchmark containers |
+| `corral bench debug` | Show logs from benchmark containers |
+| `corral bench list-agents` | List available agent classes |
+
+**Common Options for `corral bench run`:**
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--config` | `-c` | - | Path to YAML/JSON config file |
+| `--image` | `-i` | `ghcr.io/lamalab-org/corral-materials:latest` | Docker image for environment |
+| `--agent` | `-a` | `ReActAgent` | Agent class to use |
+| `--model` | `-m` | `claude-sonnet-4-5-20250929` | LLM model to use |
+| `--trials` | `-t` | `5` | Number of trials per task |
+| `--tasks` | - | all | Comma-separated task IDs |
+| `--max-iterations` | - | `20` | Max iterations per trial |
+| `--temperature` | - | `1.0` | LLM temperature |
+| `--output` | `-o` | - | Output file for results |
+| `--detach` | `-d` | `false` | Run in background |
+| `--verbose` | `-v` | `false` | Enable verbose output |
+| `--agent-kwargs` | - | - | JSON string or `@file.yaml` with extra agent params |
+| `--runner-kwargs` | - | - | JSON string or `@file.yaml` with extra runner params |
+
+Use `corral --help` to see all available commands and options.
+
+**Example with config file:**
+
+```bash
+corral bench run --config examples/benchmark_config.yaml
+```
+
+See [`examples/benchmark_config.yaml`](examples/benchmark_config.yaml) for a complete configuration example.
+
+#### Using Python API
+
 1. **Start a task environment server**
 
    ```bash
