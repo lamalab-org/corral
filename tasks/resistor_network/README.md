@@ -39,5 +39,3 @@ score = scorer(json.dumps(topology))
 ```
 
 This function internally uses  `_simulate_resistance` , which performs nodal analysis to find resistance between two points.
-
-

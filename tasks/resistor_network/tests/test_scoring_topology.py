@@ -158,7 +158,7 @@ class TestMainTopologyChecker:
             topology_weight=0.5,
             functional_weight=0.0,
             exact_values_weight=0.5,
-            require_both=True
+            require_both=True,
         )
 
         proposed_json = json.dumps(
@@ -178,7 +178,7 @@ class TestMainTopologyChecker:
             topology_weight=0.5,
             functional_weight=0.0,
             exact_values_weight=0.5,
-            require_both=True
+            require_both=True,
         )
 
         proposed_json = json.dumps(
@@ -199,7 +199,7 @@ class TestMainTopologyChecker:
             functional_weight=0.0,
             exact_values_weight=0.5,
             tolerance=0.05,
-            require_both=True
+            require_both=True,
         )
 
         proposed_json = json.dumps(
@@ -220,7 +220,7 @@ class TestMainTopologyChecker:
             functional_weight=0.0,
             exact_values_weight=0.5,
             tolerance=0.05,
-            require_both=False
+            require_both=False,
         )
 
         proposed_json = json.dumps(
@@ -240,7 +240,7 @@ class TestMainTopologyChecker:
             topology_weight=0.5,
             functional_weight=0.0,
             exact_values_weight=0.5,
-            require_both=False
+            require_both=False,
         )
 
         proposed_json = json.dumps(
@@ -261,7 +261,7 @@ class TestMainTopologyChecker:
             functional_weight=0.0,
             exact_values_weight=0.5,
             tolerance=0.05,
-            require_both=False
+            require_both=False,
         )
 
         proposed_json = json.dumps(
@@ -280,7 +280,7 @@ class TestMainTopologyChecker:
             use_functional_scoring=False,
             topology_weight=0.5,
             functional_weight=0.0,
-            exact_values_weight=0.5
+            exact_values_weight=0.5,
         )
         assert checker("{ invalid json }") == 0.0
 
@@ -291,7 +291,7 @@ class TestMainTopologyChecker:
             use_functional_scoring=False,
             topology_weight=0.5,
             functional_weight=0.0,
-            exact_values_weight=0.5
+            exact_values_weight=0.5,
         )
 
         # Missing 'connections'
@@ -309,7 +309,7 @@ class TestMainTopologyChecker:
             use_functional_scoring=False,
             topology_weight=0.5,
             functional_weight=0.0,
-            exact_values_weight=0.5
+            exact_values_weight=0.5,
         )
         assert checker("null") == 0.0
         assert checker("{}") == 0.0
@@ -409,7 +409,7 @@ class TestPropertyBasedTests:
             use_functional_scoring=False,
             topology_weight=0.5,
             functional_weight=0.0,
-            exact_values_weight=0.5
+            exact_values_weight=0.5,
         )
 
         # Should not crash, should return a valid binary score
@@ -506,7 +506,7 @@ class TestIntegration:
             functional_weight=0.0,
             exact_values_weight=0.5,
             tolerance=0.05,
-            require_both=True
+            require_both=True,
         )
         checker_either = check_resistor_topology(
             expected_topology=expected_topology,
@@ -515,7 +515,7 @@ class TestIntegration:
             functional_weight=0.0,
             exact_values_weight=0.5,
             tolerance=0.05,
-            require_both=False
+            require_both=False,
         )
 
         # Test cases for binary scoring
@@ -621,7 +621,7 @@ class TestIntegration:
             functional_weight=0.0,
             exact_values_weight=0.5,
             tolerance=0.1,
-            require_both=True
+            require_both=True,
         )
 
         # Perfect match should work

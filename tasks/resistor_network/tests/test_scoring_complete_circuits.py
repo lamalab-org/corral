@@ -251,7 +251,7 @@ class TestCheckCompleteCircuitSolution:
             functional_weight=0.0,
             exact_values_weight=0.5,
             tolerance=custom_tolerance,
-            require_both=True
+            require_both=True,
         )
         mock_measurement_scorer.assert_called_once_with(
             expected_measurements, custom_tolerance
@@ -502,7 +502,7 @@ class TestCompleteCircuitHypothesis:
                 functional_weight=0.0,
                 exact_values_weight=0.5,
                 tolerance=tolerance,
-                require_both=True
+                require_both=True,
             )
             mock_measurement_scorer.assert_called_once_with(
                 expected_measurements, tolerance

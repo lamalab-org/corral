@@ -470,7 +470,7 @@ def check_complete_circuit_solution(
         functional_weight=0.0,
         exact_values_weight=0.5,
         tolerance=tolerance,
-        require_both=True
+        require_both=True,
     )
     measurement_scorer = check_resistance_measurements(expected_measurements, tolerance)
 
