@@ -5,9 +5,9 @@ from .loader import TraceDataLoader
 from .schema import StepData, ToolCallData, TraceData
 
 __all__ = [
-    "TraceDataLoader",
-    "TraceData",
+    "EnvironmentDataLoader",
     "StepData",
     "ToolCallData",
-    "EnvironmentDataLoader",
+    "TraceData",
+    "TraceDataLoader",
 ]

@@ -7,9 +7,9 @@ from .interactions import InteractionAnalyzer
 from .statistics import StatisticalTests
 
 __all__ = [
+    "BinaryOutcomeAnalyzer",
     "CorrelationAnalyzer",
+    "EnvironmentAnalyzer",
     "InteractionAnalyzer",
     "StatisticalTests",
-    "BinaryOutcomeAnalyzer",
-    "EnvironmentAnalyzer",
 ]
