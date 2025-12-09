@@ -17,7 +17,7 @@ variable "PLATFORMS" {
 }
 
 variable "TARGETS" {
-  default = ["corral-envs", "corral-agent-runner"]
+  default = ["corral-envs-base", "corral-agent-runner"]
 }
 
 function "tags" {
@@ -31,6 +31,28 @@ group "default" {
   targets = "${TARGETS}"
 }
 
+# CI publishing group - images that get pushed to GHCR on main branch
+group "ci-publish" {
+  targets = ["corral-envs-base", "corral-agent-runner"]
+}
+
+# Base image with corral installed but no environment package
+# Used as the base for environment-specific images
+target "corral-envs-base" {
+  tags = tags("corral-envs-base")
+  context = "corral-envs"
+  contexts = {
+    src = ".."
+  }
+  platforms = "${PLATFORMS}"
+  args = {
+    "PYTHON_VERSION" = "${PYTHON_VERSION}"
+    # No ENV_PACKAGE_URL - this builds the base image without any environment
+  }
+}
+
+# Standalone environment image with a specific environment package installed
+# Use this target for local testing with a specific environment
 target "corral-envs" {
   tags = tags("corral-envs")
   context = "corral-envs"
@@ -40,6 +62,8 @@ target "corral-envs" {
   platforms = "${PLATFORMS}"
   args = {
     "PYTHON_VERSION" = "${PYTHON_VERSION}"
+    # Set ENV_PACKAGE_URL to install a specific environment:
+    # ENV_PACKAGE_URL = "git+https://github.com/org/my-env.git"
   }
 }
 

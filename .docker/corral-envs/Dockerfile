@@ -1,16 +1,21 @@
 # syntax=docker/dockerfile:1
 
-# Corral Environment Server Docker Image
-# Installs corral core and an external environment package, then runs the environment server
+# Corral Environment Server Base Docker Image
+# Installs corral core and optionally an external environment package, then runs the environment server
+#
+# This image can be used in two ways:
+#   1. As a BASE IMAGE: Build without ENV_PACKAGE_URL to get a base image with just corral installed.
+#      Child images can then use FROM this image and install their own environment package.
+#   2. As a STANDALONE IMAGE: Build with ENV_PACKAGE_URL to get a complete image with an environment.
 #
 # Build args:
-#   ENV_PACKAGE_URL - Git URL or PyPI package to install (e.g., git+https://github.com/org/my-env.git)
-#   ENV_MODULE - Python module path to the env.py file (e.g., my_env.env)
+#   ENV_PACKAGE_URL - (Optional) Git URL or PyPI package to install (e.g., git+https://github.com/org/my-env.git)
+#   ENV_MODULE - (Optional at build time) Python module path to the env.py file (e.g., my_env.env)
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 LABEL maintainer="Corral Team"
-LABEL description="Corral Environment Server"
+LABEL description="Corral Environment Server Base Image"
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -40,12 +45,13 @@ ARG ENV_MODULE=""
 # Install corral core from GitHub
 RUN uv pip install --system git+https://github.com/lamalab-org/corral.git@main
 
-# Install the external environment package
-RUN if [ -z "${ENV_PACKAGE_URL}" ]; then \
-        echo "ERROR: ENV_PACKAGE_URL build arg is required" && exit 1; \
-    fi && \
-    echo "Installing environment package: ${ENV_PACKAGE_URL}" && \
-    uv pip install --system "${ENV_PACKAGE_URL}"
+# Install the external environment package (optional - skip if building base image)
+RUN if [ -n "${ENV_PACKAGE_URL}" ]; then \
+        echo "Installing environment package: ${ENV_PACKAGE_URL}" && \
+        uv pip install --system "${ENV_PACKAGE_URL}"; \
+    else \
+        echo "No ENV_PACKAGE_URL provided - building base image without environment package"; \
+    fi
 
 # Store ENV_MODULE as environment variable
 ENV ENV_MODULE=${ENV_MODULE}

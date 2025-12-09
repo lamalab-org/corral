@@ -73,6 +73,7 @@ def merge_settings(
 
 DEFAULTS = {
     "image": "ghcr.io/lamalab-org/corral-materials:latest",
+    "agent_image": None,  # Uses GHCR default from docker_runner
     "agent": "ReActAgent",
     "model": "claude-sonnet-4-5-20250929",
     "trials": 5,
@@ -100,6 +101,13 @@ def run_benchmark(
         "--image",
         "-i",
         help="Docker image for the environment",
+    ),
+    # Docker agent runner image
+    agent_image: str | None = typer.Option(
+        None,
+        "--agent-image",
+        help="Docker image for the agent runner. Defaults to GHCR image. "
+        "Use 'local' for locally built image, or specify a custom image.",
     ),
     # Agent and benchmark settings
     agent: str | None = typer.Option(
@@ -175,6 +183,7 @@ def run_benchmark(
     # Collect CLI arguments (only non-None values will override)
     cli_args = {
         "image": image,
+        "agent_image": agent_image,
         "agent": agent,
         "model": model,
         "trials": trials,
@@ -219,6 +228,7 @@ def run_benchmark(
             verbose=settings["verbose"],
             agent_kwargs=extra_agent_kwargs,
             runner_kwargs=extra_runner_kwargs,
+            agent_image=settings["agent_image"],
         )
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")

@@ -90,6 +90,7 @@ corral bench stop
 |--------|-------|---------|-------------|
 | `--config` | `-c` | - | Path to YAML/JSON config file |
 | `--image` | `-i` | `ghcr.io/lamalab-org/corral-materials:latest` | Docker image for environment |
+| `--agent-image` | - | `ghcr.io/lamalab-org/corral-agent-runner:latest` | Docker image for agent runner (use `local` for local build) |
 | `--agent` | `-a` | `ReActAgent` | Agent class to use |
 | `--model` | `-m` | `claude-sonnet-4-5-20250929` | LLM model to use |
 | `--trials` | `-t` | `5` | Number of trials per task |

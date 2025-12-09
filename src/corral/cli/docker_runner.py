@@ -19,6 +19,11 @@ if TYPE_CHECKING:
 console = Console()
 
 
+# Default GHCR images
+DEFAULT_AGENT_IMAGE = "ghcr.io/lamalab-org/corral-agent-runner:latest"
+DEFAULT_ENV_BASE_IMAGE = "ghcr.io/lamalab-org/corral-envs-base:latest"
+
+
 class DockerBenchmarkRunner:
     """Runs benchmarks using Docker containers."""
 
@@ -43,8 +48,26 @@ class DockerBenchmarkRunner:
         verbose: bool = False,
         agent_kwargs: dict[str, Any] | None = None,
         runner_kwargs: dict[str, Any] | None = None,
+        agent_image: str | None = None,
     ):
-        """Run benchmark with two-container architecture."""
+        """Run benchmark with two-container architecture.
+
+        Args:
+            env_image: Docker image for the environment.
+            agent_class: Agent class to use for benchmarking.
+            model: LLM model to use.
+            trials_per_task: Number of trials per task.
+            task_ids: Comma-separated task IDs to run.
+            max_iterations: Maximum iterations per trial.
+            temperature: LLM temperature.
+            output_file: Output file for results.
+            detach: Run in detached mode.
+            verbose: Enable verbose output.
+            agent_kwargs: Extra agent parameters.
+            runner_kwargs: Extra runner parameters.
+            agent_image: Docker image for the agent runner. Defaults to GHCR image.
+                        Use 'local' to use a locally built image named 'corral-agent-runner:latest'.
+        """
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -67,8 +90,13 @@ class DockerBenchmarkRunner:
             self._wait_for_healthy(env_container)
             progress.update(task, description="[green]✓[/green] Environment healthy")
 
-            # 4. Start agent container
-            task = progress.add_task("Starting agent runner...", total=None)
+            # 4. Resolve agent image
+            resolved_agent_image = self._resolve_agent_image(agent_image)
+
+            # 5. Start agent container
+            task = progress.add_task(
+                f"Starting agent runner ({resolved_agent_image})...", total=None
+            )
             agent_container = self._start_agent(
                 agent_class=agent_class,
                 model=model,
@@ -80,6 +108,7 @@ class DockerBenchmarkRunner:
                 verbose=verbose,
                 agent_kwargs=agent_kwargs,
                 runner_kwargs=runner_kwargs,
+                agent_image=resolved_agent_image,
             )
             progress.update(task, description="[green]✓[/green] Agent started")
 
@@ -111,6 +140,24 @@ class DockerBenchmarkRunner:
 
             # Cleanup
             self.stop()
+
+    def _resolve_agent_image(self, agent_image: str | None) -> str:
+        """Resolve the agent image to use.
+
+        Args:
+            agent_image: User-specified image. Can be:
+                - None: Use default GHCR image
+                - 'local': Use locally built 'corral-agent-runner:latest'
+                - Any other string: Use as-is (custom image)
+
+        Returns:
+            The resolved Docker image name.
+        """
+        if agent_image is None:
+            return DEFAULT_AGENT_IMAGE
+        if agent_image.lower() == "local":
+            return "corral-agent-runner:latest"
+        return agent_image
 
     def _ensure_network(self):
         """Create Docker network if it doesn't exist."""
@@ -153,8 +200,13 @@ class DockerBenchmarkRunner:
         verbose: bool,
         agent_kwargs: dict[str, Any] | None = None,
         runner_kwargs: dict[str, Any] | None = None,
+        agent_image: str = DEFAULT_AGENT_IMAGE,
     ) -> Container:
-        """Start the agent runner container."""
+        """Start the agent runner container.
+
+        Args:
+            agent_image: Docker image to use for the agent runner.
+        """
         # Stop existing container if running
         try:
             old = self.client.containers.get(self.AGENT_CONTAINER_NAME)
@@ -188,7 +240,7 @@ class DockerBenchmarkRunner:
             env["RUNNER_KWARGS"] = json.dumps(runner_kwargs)
 
         return self.client.containers.run(
-            "corral-agent-runner:latest",  # Built image
+            agent_image,
             name=self.AGENT_CONTAINER_NAME,
             network=self.NETWORK_NAME,
             environment=env,
