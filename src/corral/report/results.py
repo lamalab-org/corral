@@ -17,6 +17,7 @@ class TaskTrialResult:
     score: float
     state: dict[str, Any]  # TODO replace Any with specific types
     tool_statistics: dict[str, Any]  # TODO replace Any with specific types
+    messages: list[dict[str, Any]] | None = None  # Agent messages (verbose only)
     duration: float | None = None
     token_usage: dict[str, int] | None = None
     error_message: str | None = None

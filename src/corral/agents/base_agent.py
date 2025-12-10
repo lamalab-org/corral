@@ -284,11 +284,11 @@ class BaseAgent(ABC):
                 **self.kwargs,
             )
 
-            return answer.content, self.get_total_token_usage()
+            return answer.content, self.messages, self.get_total_token_usage()
 
         except Exception as e:
             logger.error(f"Error extracting final answer: {e}")
-            return final_answer, self.get_total_token_usage()
+            return final_answer, self.messages, self.get_total_token_usage()
 
     def get_total_token_usage(self) -> dict[str, int]:
         """Calculate total token usage across all LLM calls

@@ -73,6 +73,7 @@ def exception_trial_result(
     error_type: str,
     token_usage: dict[str, Any],
     surrendered: bool = False,
+    messages: list[dict[str, Any]] | None = None,
 ) -> TaskTrialResult:
     """Create a TaskTrialResult when there is an exception during trial execution. Benchmark continues.
 
@@ -84,6 +85,7 @@ def exception_trial_result(
         error_type: Type of error (e.g., "Surrender Error", "Submission Error", "Agent Error")
         token_usage: Token usage statistics
         surrendered: Whether this was a surrender operation
+        messages: Optional agent messages (only when verbose is True)
 
     Returns:
         TaskTrialResult with score retrieved from state or 0.0 if unavailable
@@ -95,6 +97,7 @@ def exception_trial_result(
         score=score,
         state={"error": str(error), "attempt": trial_index + 1},
         tool_statistics={"error": str(error)},
+        messages=messages,
         duration=None,
         token_usage=token_usage,
         error_message=f"{error_type}: {error}",
@@ -117,7 +120,8 @@ def execute_single_trial(
         status = interface.configure_additional_apps(task_id, timeout=configure_timeout)
         logger.info(f"Task {task_id} additional apps/services configured: {status}")
 
-        answer, token_usage = agent.run_agent(
+        # Agent always returns (answer, messages, token_usage)
+        answer, messages, token_usage = agent.run_agent(
             interface,
             task_id,
             verbose=verbose,
@@ -130,6 +134,9 @@ def execute_single_trial(
             try:
                 result = interface.surrender_task(task_id)
                 result.token_usage = token_usage
+                # Only store messages when verbose is True
+                if verbose:
+                    result.messages = messages
                 return result
             except Exception as surrender_error:
                 return exception_trial_result(
@@ -140,12 +147,22 @@ def execute_single_trial(
                     error_type="Surrender Error",
                     token_usage=token_usage,
                     surrendered=True,
+                    messages=messages if verbose else None,
                 )
 
         # Submit answer
         try:
             result = interface.submit_answer(task_id, answer)
             result.token_usage = token_usage
+            # Only store messages when verbose is True
+            if verbose:
+                result.messages = messages
+            # Only include tool_calls in tool_statistics when verbose is True
+            if not verbose and "tool_calls" in result.tool_statistics:
+                # Keep tool_statistics but remove detailed tool_calls
+                result.tool_statistics = {
+                    k: v for k, v in result.tool_statistics.items() if k != "tool_calls"
+                }
             return result
         except Exception as submit_error:
             return exception_trial_result(
@@ -155,6 +172,7 @@ def execute_single_trial(
                 error=submit_error,
                 error_type="Submission Error",
                 token_usage=token_usage,
+                messages=messages if verbose else None,
             )
     except Exception as agent_error:
         return exception_trial_result(
