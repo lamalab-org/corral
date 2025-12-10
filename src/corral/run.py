@@ -29,14 +29,26 @@ def create_session_id() -> str:
 def validate_k_values(
     k_values: int | list[int] | None, trials_per_task: int
 ) -> list[int]:
-    """Validate and normalize k_values"""
+    """Validate and normalize k_values."""
     if k_values is None:
-        return list(range(1, trials_per_task + 1))
+        # Default to range 1 to min(5, trials_per_task)
+        max_k = min(5, trials_per_task)
+        return list(range(1, max_k + 1))
     elif isinstance(k_values, int):
-        return [k_values]
-    elif isinstance(k_values, list) and max(k_values) > trials_per_task:
-        raise ValueError("k value is greater than the number of trials")
-    return k_values
+        # Single int means max k, generate range 1 to k
+        if k_values > trials_per_task:
+            raise ValueError(
+                f"k value ({k_values}) is greater than the number of trials ({trials_per_task})"
+            )
+        return list(range(1, k_values + 1))
+    else:
+        # List of k values - validate all are within bounds
+        max_k = max(k_values)
+        if max_k > trials_per_task:
+            raise ValueError(
+                f"k value ({max_k}) is greater than the number of trials ({trials_per_task})"
+            )
+        return sorted(k_values)
 
 
 def initialize_task_results(task_ids: list[str]) -> dict[str, TaskTrialResults]:
@@ -85,7 +97,7 @@ def exception_trial_result(
         error_type: Type of error (e.g., "Surrender Error", "Submission Error", "Agent Error")
         token_usage: Token usage statistics
         surrendered: Whether this was a surrender operation
-        messages: Optional agent messages (only when verbose is True)
+        messages: Optional agent messages
 
     Returns:
         TaskTrialResult with score retrieved from state or 0.0 if unavailable
@@ -134,9 +146,7 @@ def execute_single_trial(
             try:
                 result = interface.surrender_task(task_id)
                 result.token_usage = token_usage
-                # Only store messages when verbose is True
-                if verbose:
-                    result.messages = messages
+                result.messages = messages
                 return result
             except Exception as surrender_error:
                 return exception_trial_result(
@@ -147,22 +157,14 @@ def execute_single_trial(
                     error_type="Surrender Error",
                     token_usage=token_usage,
                     surrendered=True,
-                    messages=messages if verbose else None,
+                    messages=messages,
                 )
 
         # Submit answer
         try:
             result = interface.submit_answer(task_id, answer)
             result.token_usage = token_usage
-            # Only store messages when verbose is True
-            if verbose:
-                result.messages = messages
-            # Only include tool_calls in tool_statistics when verbose is True
-            if not verbose and "tool_calls" in result.tool_statistics:
-                # Keep tool_statistics but remove detailed tool_calls
-                result.tool_statistics = {
-                    k: v for k, v in result.tool_statistics.items() if k != "tool_calls"
-                }
+            result.messages = messages
             return result
         except Exception as submit_error:
             return exception_trial_result(
@@ -172,7 +174,7 @@ def execute_single_trial(
                 error=submit_error,
                 error_type="Submission Error",
                 token_usage=token_usage,
-                messages=messages if verbose else None,
+                messages=messages,
             )
     except Exception as agent_error:
         return exception_trial_result(
@@ -282,7 +284,7 @@ class CorralRunner:
 
         # Initialize metric registry
         self._metric_registry = MetricRegistry()
-        self._default_k_values: list[int] = [1]
+        self._default_k_values: list[int] = [5]  # Match BenchmarkResult default
 
         # Register initial metrics
         if metrics is not None:
@@ -528,6 +530,7 @@ class CorralRunner:
                 task_results=task_results,
                 k=k_values,
                 verbosity=self.interface.current_verbosity,
+                verbose=verbose,
                 total_duration=total_duration,
                 metrics=self._get_metrics_for_benchmark(),
             )

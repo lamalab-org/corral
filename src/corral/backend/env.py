@@ -40,7 +40,7 @@ class TaskState:
     submitted_answer: str | None = None
     feedback: str | None = None
     surrendered: bool = False
-    start_time: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    start_time: datetime | None = None  # Set lazily when trial actually starts
     end_time: datetime | None = None
 
     def get_tool_statistics(self) -> dict[str, Any]:
@@ -66,6 +66,11 @@ class TaskState:
         if self.end_time and self.start_time:
             return (self.end_time - self.start_time).total_seconds()
         return None
+
+    def ensure_started(self) -> None:
+        """Ensure the trial has started by setting start_time if not already set."""
+        if self.start_time is None:
+            self.start_time = datetime.now(tz=timezone.utc)
 
 
 class Environment(ABC):

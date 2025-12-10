@@ -53,24 +53,31 @@ def _create_task_metrics() -> list[Metric]:
     ]
 
 
-def get_pass_metrics(k_values: list[int]) -> list[Metric]:
+def get_pass_metrics(k_values: int | list[int]) -> list[Metric]:
     """Get pass@k and pass^k metrics for specified k values.
 
     This function creates new metric instances without registering them
     to any registry. Use this when you want explicit control over metrics.
 
     Args:
-        k_values: List of k values for pass@k and pass^k metrics.
+        k_values: Either a single int representing max k (generates metrics for
+                  k=1 to k), or a list of specific k values.
 
     Returns:
         List of Metric instances for the specified k values.
 
     Example:
-        >>> metrics = get_pass_metrics([1, 3, 5])
-        >>> # Returns PassAtKMetric(1), PassHatKMetric(1), TaskPassAtKMetric(1), ...
+        >>> metrics = get_pass_metrics(5)  # Returns metrics for k=1,2,3,4,5
+        >>> metrics = get_pass_metrics([1, 3, 5])  # Returns metrics for k=1,3,5
     """
+    # Normalize k_values to a list
+    if isinstance(k_values, int):
+        k_list = list(range(1, k_values + 1))
+    else:
+        k_list = sorted(k_values)
+
     metrics: list[Metric] = []
-    for k in k_values:
+    for k in k_list:
         metrics.extend(
             [
                 PassAtKMetric(k),
@@ -82,22 +89,23 @@ def get_pass_metrics(k_values: list[int]) -> list[Metric]:
     return metrics
 
 
-def get_default_metrics(k_values: list[int] | None = None) -> list[Metric]:
+def get_default_metrics(k_values: int | list[int] | None = None) -> list[Metric]:
     """Get all default metrics without registering them to any registry.
 
     This function creates new metric instances for explicit use. Use this
     when you want full visibility and control over which metrics are used.
 
     Args:
-        k_values: List of k values for pass@k and pass^k metrics.
-                  If None, uses [1] as default.
+        k_values: Either a single int representing max k (generates metrics for
+                  k=1 to k), or a list of specific k values. If None, uses k=5
+                  as default (generating metrics for k=1 to 5).
 
     Returns:
         List of all default Metric instances.
 
     Example:
-        >>> # Get all defaults with k=[1, 3]
-        >>> metrics = get_default_metrics([1, 3])
+        >>> # Get all defaults with k=3 (generates metrics for k=1,2,3)
+        >>> metrics = get_default_metrics(3)
         >>>
         >>> # Use explicitly with BenchmarkResult
         >>> result = BenchmarkResult(task_results=..., metrics=metrics)
@@ -106,11 +114,11 @@ def get_default_metrics(k_values: list[int] | None = None) -> list[Metric]:
         >>> from my_metrics import CustomMetric
         >>> result = BenchmarkResult(
         ...     task_results=...,
-        ...     metrics=get_default_metrics([1]) + [CustomMetric()]
+        ...     metrics=get_default_metrics(3) + [CustomMetric()]
         ... )
     """
     if k_values is None:
-        k_values = [1]
+        k_values = 5  # Default to k=5, will generate metrics for k=1 to 5
 
     return (
         _create_overall_metrics() + _create_task_metrics() + get_pass_metrics(k_values)

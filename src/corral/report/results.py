@@ -66,9 +66,10 @@ class BenchmarkResult:
     """
 
     task_results: dict[str, TaskTrialResults]
-    k: list[int] = field(default_factory=lambda: [1])
+    k: list[int] = field(default_factory=lambda: [5])
     total_duration: float | None = None
     verbosity: str | None = None
+    verbose: bool = False  # Whether to include messages and tool_calls in report
     metrics: list[Metric] | None = None  # Explicit metrics list
     metric_registry: Any = (
         None  # Instance-level by default, Any to avoid circular import
@@ -77,7 +78,7 @@ class BenchmarkResult:
     def __post_init__(self):
         """Initialize metric system with instance-level registry."""
         # Import here to avoid circular dependency
-        from corral.report.metrics import get_default_metrics  # noqa:
+        from corral.report.metrics import get_default_metrics
         from corral.report.metrics.registry import MetricRegistry
 
         # Create instance-level registry by default (no global state)
@@ -180,7 +181,8 @@ class BenchmarkResult:
         # Map registry metric results to report format
         report_data = {"metrics": {}}
 
-        # Add all metrics to the report
+        # Add all metrics to the report (sorted alphabetically by display name)
+        sorted_metrics = []
         for metric_name, metric_value in calculated_metrics.items():
             # Get display name from registry if available
             try:
@@ -189,7 +191,19 @@ class BenchmarkResult:
             except KeyError:
                 display_name = metric_name
 
-            # Use display name as the key
+            # Skip metrics that are dictionaries with task IDs as keys (task-level breakdowns)
+            if isinstance(metric_value, dict) and any(
+                task_id in metric_value for task_id in self.all_task_ids
+            ):
+                logger.debug(
+                    f"Skipping task-level metric '{display_name}' from top-level metrics section"
+                )
+                continue
+
+            sorted_metrics.append((display_name, metric_value))
+
+        # Sort by display name and add to report
+        for display_name, metric_value in sorted(sorted_metrics, key=lambda x: x[0]):
             report_data["metrics"][display_name] = metric_value
 
         # Add non-metric fields
@@ -199,8 +213,8 @@ class BenchmarkResult:
 
         report_data["task_results"] = {}
 
-        # Add task-specific results
-        for task_id in self.all_task_ids:
+        # Add task-specific results (sorted by task_id)
+        for task_id in sorted(self.all_task_ids):
             # Add trials information directly to the task results
             trials_data = []
             for trial in self.task_results[task_id].trials:
@@ -223,8 +237,12 @@ class BenchmarkResult:
                 if trial.token_usage is not None:
                     trial_data["token_usage"] = trial.token_usage
 
-                # Add tool calls data if available
-                if "tool_calls" in trial.tool_statistics:
+                # Add messages if available (verbose mode only)
+                if self.verbose and trial.messages is not None:
+                    trial_data["messages"] = trial.messages
+
+                # Add tool calls data if available (verbose mode only)
+                if self.verbose and "tool_calls" in trial.tool_statistics:
                     trial_data["tool_calls"] = [
                         {
                             "tool_name": tool_call["tool_name"],
@@ -254,8 +272,9 @@ class BenchmarkResult:
                 "trials": trials_data,
             }
 
-            # Add all task-level metrics from registry
+            # Add all task-level metrics from registry (sorted alphabetically)
             all_metrics = self.metric_registry.list_all()
+            task_metrics_to_add = []
             for metric in all_metrics:
                 # Check if it's a TaskMetric
                 if isinstance(metric, TaskMetric):
@@ -263,12 +282,16 @@ class BenchmarkResult:
                     display_name = metric.metadata.display_name
                     try:
                         value = metric.calculate_for_task(self, task_id)
-                        # Use display name as key in task_result_data
-                        task_result_data[display_name] = value
+                        task_metrics_to_add.append((display_name, value))
                     except Exception as e:
                         logger.warning(
                             f"Error calculating {metric_name} for {task_id}: {e}"
                         )
+
+            # Sort task-level metrics by display name and add to task_result_data
+            task_result_data.update(
+                dict(sorted(task_metrics_to_add, key=lambda x: x[0]))
+            )
 
             report_data["task_results"][task_id] = task_result_data
 
@@ -292,7 +315,8 @@ class BenchmarkResult:
         if self.verbosity:
             lines.append(f"Tool Verbosity: {self.verbosity}")
 
-        # Add all metrics dynamically
+        # Prepare metrics for sorting
+        metrics_for_summary = []
         for metric_name, metric_value in calculated_metrics.items():
             if metric_name == "total_tasks":  # Already shown
                 continue
@@ -305,13 +329,21 @@ class BenchmarkResult:
                 # Fallback to metric name if not in registry
                 display_name = metric_name
 
+            metrics_for_summary.append((display_name, metric_value))
+
+        # Add all metrics dynamically (sorted alphabetically by display name)
+        for display_name, metric_value in sorted(
+            metrics_for_summary, key=lambda x: x[0]
+        ):
             # Handle dict values specially
             if isinstance(metric_value, dict):
-                # Add rows for each key-value pair in the dict
-                for key, val in metric_value.items():
+                # Add rows for each key-value pair in the dict (sorted)
+                for key, val in sorted(metric_value.items(), key=lambda x: str(x[0])):
                     if isinstance(val, dict):
-                        # Nested dict - add sub-rows
-                        for sub_key, sub_val in val.items():
+                        # Nested dict - add sub-rows (sorted)
+                        for sub_key, sub_val in sorted(
+                            val.items(), key=lambda x: str(x[0])
+                        ):
                             lines.append(f"{display_name}.{key}.{sub_key}: {sub_val}")
                     else:
                         lines.append(f"{display_name}.{key}: {val}")
