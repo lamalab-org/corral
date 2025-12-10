@@ -8,7 +8,7 @@ from corral.report.metrics import (
     AverageScoreMetric,
     Metric,
     MetricMetadata,
-    get_registry,
+    get_default_metrics,
 )
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 from corral.types import (
@@ -170,8 +170,8 @@ def test_generate_report_json_output(tmp_path):
     # Verify task_1 structure
     task_1 = report_data["task_results"]["task_1"]
     assert "trials" in task_1
-    assert "success_rate" in task_1
-    assert "average_score" in task_1
+    assert "Task Success Rate" in task_1
+    assert "Task Average Score" in task_1
     assert len(task_1["trials"]) == 3
 
     # Verify task_1 metrics values
@@ -179,8 +179,8 @@ def test_generate_report_json_output(tmp_path):
     expected_success_rate = sum(
         1 if trial.success else 0 for trial in task_1_trials
     ) / len(task_1_trials)
-    assert task_1["success_rate"] == pytest.approx(expected_success_rate)
-    assert task_1["average_score"] == pytest.approx(
+    assert task_1["Task Success Rate"] == pytest.approx(expected_success_rate)
+    assert task_1["Task Average Score"] == pytest.approx(
         sum(trial.score for trial in task_1_trials) / len(task_1_trials)
     )
 
@@ -217,8 +217,8 @@ def test_prepare_report_data_structure():
         assert task_id in report_data["task_results"]
         task_data = report_data["task_results"][task_id]
         assert "trials" in task_data
-        assert "success_rate" in task_data
-        assert "average_score" in task_data
+        assert "Task Success Rate" in task_data
+        assert "Task Average Score" in task_data
 
 
 def test_display_console_report_no_crash():
@@ -235,14 +235,15 @@ def test_display_console_report_no_crash():
         pytest.fail(f"_display_console_report raised unexpected exception: {e}")
 
 
-# Auto-registration tests
+# Metrics tests - testing instance-level registries
 
 
 def test_default_metrics_registered_on_import():
-    """Test that default metrics are automatically registered when module is imported."""
-    registry = get_registry()
+    """Test that default metrics are available via get_default_metrics()."""
+    # get_default_metrics returns all default metrics
+    default_metrics = get_default_metrics(k_values=[1])
 
-    # Check that core metrics are registered
+    # Check that core metrics are available
     expected_metrics = [
         "average_score",
         "overall_success_rate",
@@ -258,38 +259,40 @@ def test_default_metrics_registered_on_import():
         "task_total_token_usage",
     ]
 
-    # registry.list_all() returns list of Metric objects
-    registered_names = [m.metadata.name for m in registry.list_all()]
+    metric_names = [m.metadata.name for m in default_metrics]
 
     for expected in expected_metrics:
-        assert expected in registered_names, f"Metric '{expected}' not registered"
+        assert expected in metric_names, f"Metric '{expected}' not in default metrics"
 
 
 def test_registry_has_metrics():
-    """Test that the registry contains metrics after import."""
-    registry = get_registry()
-    metrics = registry.list_all()
+    """Test that BenchmarkResult instance registry contains metrics."""
+    task_results = create_dummy_results()
+    benchmark = BenchmarkResult(task_results=task_results, k=[1])
 
-    assert len(metrics) > 0, "Registry should contain metrics after import"
+    metrics = benchmark.metric_registry.list_all()
+    assert len(metrics) > 0, "Instance registry should contain metrics"
     assert all(isinstance(m, Metric) for m in metrics)
 
 
 def test_can_get_registered_metrics():
-    """Test that we can retrieve registered metrics."""
-    registry = get_registry()
+    """Test that we can retrieve registered metrics from instance registry."""
+    task_results = create_dummy_results()
+    benchmark = BenchmarkResult(task_results=task_results, k=[1])
 
-    # Should be able to get a known metric
-    metric = registry.get("average_score")
+    # Should be able to get a known metric from instance registry
+    metric = benchmark.metric_registry.get("average_score")
     assert isinstance(metric, AverageScoreMetric)
     assert metric.metadata.name == "average_score"
 
 
 def test_can_list_all_metrics():
-    """Test that we can list all metrics."""
-    registry = get_registry()
+    """Test that we can list all metrics from instance registry."""
+    task_results = create_dummy_results()
+    benchmark = BenchmarkResult(task_results=task_results, k=[1])
 
-    # Get all metrics
-    all_metrics = registry.list_all()
+    # Get all metrics from instance registry
+    all_metrics = benchmark.metric_registry.list_all()
     assert len(all_metrics) > 0
 
     # All should be Metric instances
@@ -297,8 +300,10 @@ def test_can_list_all_metrics():
 
 
 def test_can_unregister_and_reregister_metrics():
-    """Test that metrics can be unregistered and re-registered."""
-    registry = get_registry()
+    """Test that metrics can be unregistered and re-registered on instance registry."""
+    task_results = create_dummy_results()
+    benchmark = BenchmarkResult(task_results=task_results, k=[1])
+    registry = benchmark.metric_registry
 
     # Get a metric name
     metric_name = "average_score"
@@ -337,7 +342,9 @@ def test_custom_metric_registration():
         def calculate(self, benchmark_result) -> float:
             return 42.0
 
-    registry = get_registry()
+    task_results = create_dummy_results()
+    benchmark = BenchmarkResult(task_results=task_results, k=[1])
+    registry = benchmark.metric_registry
 
     # Register custom metric
     custom = CustomMetric()
@@ -347,15 +354,14 @@ def test_custom_metric_registration():
     retrieved = registry.get("custom_test_metric")
     assert retrieved.metadata.name == "custom_test_metric"
 
-    # Cleanup
-    registry.unregister("custom_test_metric")
-
 
 def test_registry_prevents_duplicate_registration():
     """Test that registry prevents duplicate metric registration."""
-    registry = get_registry()
+    task_results = create_dummy_results()
+    benchmark = BenchmarkResult(task_results=task_results, k=[1])
+    registry = benchmark.metric_registry
 
-    # Try to register a metric that's already registered
+    # Try to register a metric that's already registered (average_score is in defaults)
     duplicate_metric = AverageScoreMetric()
 
     with pytest.raises(ValueError, match="already registered"):

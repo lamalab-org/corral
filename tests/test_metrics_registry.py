@@ -15,7 +15,7 @@ from threading import Lock
 import pytest
 
 from corral.report.metrics.base import Metric, MetricMetadata, TaskMetric
-from corral.report.metrics.registry import MetricRegistry, get_registry
+from corral.report.metrics.registry import MetricRegistry, get_metrics_registry
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 
 
@@ -344,10 +344,10 @@ class TestMetricRegistry:
 class TestGlobalRegistry:
     """Test the global registry instance."""
 
-    def test_get_registry_returns_same_instance(self):
-        """Test that get_registry() returns the same instance."""
-        registry1 = get_registry()
-        registry2 = get_registry()
+    def test_get_metrics_registry_returns_same_instance(self):
+        """Test that get_metrics_registry() returns the same instance."""
+        registry1 = get_metrics_registry()
+        registry2 = get_metrics_registry()
 
         assert registry1 is registry2
 
@@ -355,11 +355,11 @@ class TestGlobalRegistry:
         """Test that the global registry is a singleton."""
         # Register a metric
         metric = DummyMetric()
-        registry1 = get_registry()
+        registry1 = get_metrics_registry()
         registry1.register(metric)
 
         # Get registry again and check metric is there
-        registry2 = get_registry()
+        registry2 = get_metrics_registry()
         assert registry2.get("dummy_metric") == metric
 
         # Clean up

@@ -24,29 +24,13 @@ from corral.report.metrics.core import (
     TotalToolCallsMetric,
     TotalToolExecutionDurationMetric,
 )
-from corral.report.metrics.registry import MetricRegistry, get_registry
+from corral.report.metrics.registry import MetricRegistry, get_metrics_registry
 
 
-def register_default_metrics(k_values: list[int] | None = None) -> None:
-    """Register all built-in metrics to global registry.
-
-    This function is called automatically when the module is imported,
-    registering all core metrics so they're immediately available for use.
-
-    This function is idempotent - calling it multiple times will not duplicate metrics.
-
-    Args:
-        k_values: List of k values for pass@k and pass^k metrics.
-                  If None, uses [1] as default.
-    """
-    registry = get_registry()
-
-    if k_values is None:
-        k_values = [1]
-
-    # List of all default metrics to register
-    default_metrics = [
-        # Overall metrics
+# Explicit Metric Lists (for direct use without global registry)
+def _create_overall_metrics() -> list[Metric]:
+    """Create instances of all overall (non-task) metrics."""
+    return [
         AverageScoreMetric(),
         SuccessRateMetric(),
         TotalTasksMetric(),
@@ -56,16 +40,38 @@ def register_default_metrics(k_values: list[int] | None = None) -> None:
         TotalToolExecutionDurationMetric(),
         TotalTokenUsageMetric(),
         TotalToolCallsMetric(),
-        # Task-level metrics
+    ]
+
+
+def _create_task_metrics() -> list[Metric]:
+    """Create instances of all task-level metrics (excluding pass@k)."""
+    return [
         TaskSuccessRateMetric(),
         TaskAverageScoreMetric(),
         TaskAverageDurationMetric(),
         TaskTotalTokenUsageMetric(),
     ]
 
-    # Add pass@k and pass^k metrics for each k value
+
+def get_pass_metrics(k_values: list[int]) -> list[Metric]:
+    """Get pass@k and pass^k metrics for specified k values.
+
+    This function creates new metric instances without registering them
+    to any registry. Use this when you want explicit control over metrics.
+
+    Args:
+        k_values: List of k values for pass@k and pass^k metrics.
+
+    Returns:
+        List of Metric instances for the specified k values.
+
+    Example:
+        >>> metrics = get_pass_metrics([1, 3, 5])
+        >>> # Returns PassAtKMetric(1), PassHatKMetric(1), TaskPassAtKMetric(1), ...
+    """
+    metrics: list[Metric] = []
     for k in k_values:
-        default_metrics.extend(
+        metrics.extend(
             [
                 PassAtKMetric(k),
                 PassHatKMetric(k),
@@ -73,23 +79,46 @@ def register_default_metrics(k_values: list[int] | None = None) -> None:
                 TaskPassHatKMetric(k),
             ]
         )
+    return metrics
 
-    # Register each metric, skipping if already registered
-    for metric in default_metrics:
-        try:
-            registry.register(metric)
-        except ValueError:
-            # Metric already registered, skip it
-            logger.debug(
-                f"Metric '{metric.metadata.name}' already registered, skipping"
-            )
 
-    logger.debug(f"Registered all default metrics for k values: {k_values}")
+def get_default_metrics(k_values: list[int] | None = None) -> list[Metric]:
+    """Get all default metrics without registering them to any registry.
+
+    This function creates new metric instances for explicit use. Use this
+    when you want full visibility and control over which metrics are used.
+
+    Args:
+        k_values: List of k values for pass@k and pass^k metrics.
+                  If None, uses [1] as default.
+
+    Returns:
+        List of all default Metric instances.
+
+    Example:
+        >>> # Get all defaults with k=[1, 3]
+        >>> metrics = get_default_metrics([1, 3])
+        >>>
+        >>> # Use explicitly with BenchmarkResult
+        >>> result = BenchmarkResult(task_results=..., metrics=metrics)
+        >>>
+        >>> # Or combine with custom metrics
+        >>> from my_metrics import CustomMetric
+        >>> result = BenchmarkResult(
+        ...     task_results=...,
+        ...     metrics=get_default_metrics([1]) + [CustomMetric()]
+        ... )
+    """
+    if k_values is None:
+        k_values = [1]
+
+    return (
+        _create_overall_metrics() + _create_task_metrics() + get_pass_metrics(k_values)
+    )
 
 
 __all__ = [
     "AverageDurationMetric",
-    # Core metrics
     "AverageScoreMetric",
     "Metric",
     "MetricContext",
@@ -111,6 +140,7 @@ __all__ = [
     "TotalTokenUsageMetric",
     "TotalToolCallsMetric",
     "TotalToolExecutionDurationMetric",
-    "get_registry",
-    "register_default_metrics",
+    "get_default_metrics",
+    "get_metrics_registry",
+    "get_pass_metrics",
 ]

@@ -215,15 +215,15 @@ class MetricRegistry:
 _global_registry = MetricRegistry()
 
 
-def get_registry() -> MetricRegistry:
+def get_metrics_registry() -> MetricRegistry:
     """Get the global metric registry.
 
     Returns:
         The global MetricRegistry instance
 
     Example:
-        >>> from corral.report.metrics.registry import get_registry
-        >>> registry = get_registry()
+        >>> from corral.report.metrics.registry import get_metrics_registry
+        >>> registry = get_metrics_registry()
         >>> registry.register(MyCustomMetric())
     """
     return _global_registry

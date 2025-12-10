@@ -5,7 +5,7 @@ from typing import Any
 
 from loguru import logger
 
-from corral.report.metrics.base import TaskMetric
+from corral.report.metrics.base import Metric, TaskMetric
 
 
 @dataclass
@@ -57,27 +57,58 @@ class BenchmarkResult:
            Can be a single int or a list of ints.
         total_duration: Total duration of the benchmark run
         verbosity: Verbosity level of tool description
-        metric_registry: MetricRegistry instance (None = use global registry)
+        metrics: Explicit list of metrics to use. If None, uses default metrics.
+                 Using explicit metrics is recommended for clarity and visibility.
+        metric_registry: MetricRegistry instance. If None, creates an instance-level
+                        registry (recommended). Pass a shared registry to share metrics
+                        across multiple BenchmarkResult instances.
     """
 
     task_results: dict[str, TaskTrialResults]
     k: list[int] = field(default_factory=lambda: [1])
     total_duration: float | None = None
     verbosity: str | None = None
-    metric_registry: Any | None = None  # Using Any to avoid circular import
+    metrics: list[Metric] | None = None  # Explicit metrics list
+    metric_registry: Any = (
+        None  # Instance-level by default, Any to avoid circular import
+    )
 
     def __post_init__(self):
-        """Initialize metric system"""
+        """Initialize metric system with instance-level registry."""
         # Import here to avoid circular dependency
-        from corral.report.metrics import register_default_metrics
-        from corral.report.metrics.registry import get_registry
+        from corral.report.metrics import get_default_metrics  # noqa:
+        from corral.report.metrics.registry import MetricRegistry
 
-        # Use global registry by default
+        # Create instance-level registry by default (no global state)
         if self.metric_registry is None:
-            self.metric_registry = get_registry()
+            self.metric_registry = MetricRegistry()
 
-        # Register default metrics with k values
-        register_default_metrics(k_values=self.k)
+        # Determine which metrics to use
+        if self.metrics is not None:
+            # Explicit metrics provided - use them
+            metrics_to_register = self.metrics
+        else:
+            # No explicit metrics - use defaults (backward compatible)
+            metrics_to_register = get_default_metrics(k_values=self.k)
+
+        # Register metrics to this instance's registry
+        for metric in metrics_to_register:
+            try:
+                self.metric_registry.register(metric)
+            except ValueError:
+                # Metric already registered, skip it
+                logger.debug(
+                    f"Metric '{metric.metadata.name}' already registered, skipping"
+                )
+
+        # Log what metrics are active for visibility
+        metric_names = sorted(
+            [m.metadata.name for m in self.metric_registry.list_all()]
+        )
+        logger.debug(
+            f"BenchmarkResult initialized with {len(metric_names)} metrics: "
+            f"{', '.join(metric_names)}"
+        )
 
     @property
     def all_task_ids(self) -> set[str]:
@@ -117,7 +148,7 @@ class BenchmarkResult:
             for result in task_trials.trials
         ]
 
-    # Metric system methods
+    # Metric Calculation Methods
     def calculate_metrics(
         self, metrics_to_calculate: list[str] | None = None
     ) -> dict[str, Any]:

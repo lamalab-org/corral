@@ -15,6 +15,9 @@ from corral.report import (
     TaskTrialResult,
     TaskTrialResults,
 )
+from corral.report.metrics import Metric, get_default_metrics
+from corral.report.metrics.base import TaskMetric
+from corral.report.metrics.registry import MetricRegistry
 from corral.router import CorralRouter
 
 
@@ -237,7 +240,7 @@ def create_wandb_config(agent: BaseAgent, session_id: str, **kwargs) -> dict[str
 
 
 class CorralRunner:
-    """Simplified benchmark runner with functional approach"""
+    """Simplified benchmark runner with functional approach."""
 
     def __init__(
         self,
@@ -247,6 +250,7 @@ class CorralRunner:
         checkpoint_name: str | None = None,
         logger: CorralWandbLogger | None = None,
         enable_surrender: bool = False,
+        metrics: list[Metric] | None = None,
     ):
         self.interface = interface
         self.agent = agent
@@ -258,6 +262,148 @@ class CorralRunner:
         self.logger = logger
         self.enable_surrender = enable_surrender
 
+        # Initialize metric registry
+        self._metric_registry = MetricRegistry()
+        self._default_k_values: list[int] = [1]
+
+        # Register initial metrics
+        if metrics is not None:
+            for metric in metrics:
+                self._metric_registry.register(metric)
+        # If no metrics provided, registry stays empty until bench() is called
+        # This allows lazy initialization with proper k_values
+
+    @property
+    def metric_registry(self) -> MetricRegistry:
+        """Access the internal metric registry.
+
+        This allows advanced users to directly interact with the registry
+        for operations like parallel calculation.
+
+        Returns:
+            The MetricRegistry instance used by this runner.
+        """
+        return self._metric_registry
+
+    # Metric Introspection Methods
+    def list_metrics(self, k_values: list[int] | None = None) -> list[dict[str, str]]:
+        """List all metrics that will be used for benchmarking.
+
+        Args:
+            k_values: k values for pass@k metrics. Used only if no metrics
+                      have been explicitly configured. If None, uses [1].
+
+        Returns:
+            List of dicts with 'name', 'display_name', 'description', and 'type'
+        """
+        # If registry is empty and no explicit metrics, show defaults
+        if len(self._metric_registry.list_all()) == 0:
+            metrics = get_default_metrics(k_values or [1])
+        else:
+            metrics = self._metric_registry.list_all()
+
+        return [
+            {
+                "name": m.metadata.name,
+                "display_name": m.metadata.display_name,
+                "description": m.metadata.description,
+                "type": "task" if isinstance(m, TaskMetric) else "overall",
+            }
+            for m in metrics
+        ]
+
+    def print_metrics(self, k_values: list[int] | None = None) -> None:
+        """Print a formatted table of metrics that will be used.
+
+        Args:
+            k_values: k values for pass@k metrics. Used only if no metrics
+                      have been explicitly configured. If None, uses [1].
+        """
+        metrics = self.list_metrics(k_values)
+        logger.info(f"\n{'=' * 70}")
+        logger.info(f"Configured Metrics ({len(metrics)} total)")
+        logger.info(f"{'=' * 70}")
+        for m in sorted(metrics, key=lambda x: (x["type"], x["name"])):
+            logger.info(f"  [{m['type']:7}] {m['name']}: {m['description']}")
+        logger.info(f"{'=' * 70}\n")
+
+    # Metric Registration Methods
+    def register_metric(self, metric: Metric) -> None:
+        """Register a new metric.
+
+        If no metrics have been explicitly registered yet, this will first
+        populate the registry with default metrics before adding the new one.
+
+        Args:
+            metric: The metric instance to register.
+
+        Raises:
+            ValueError: If a metric with the same name already exists.
+        """
+        # Initialize with defaults if registry is empty
+        if len(self._metric_registry.list_all()) == 0:
+            for default_metric in get_default_metrics(self._default_k_values):
+                self._metric_registry.register(default_metric)
+
+        self._metric_registry.register(metric)
+
+    def unregister_metric(self, metric_name: str) -> Metric | None:
+        """Unregister a metric by name.
+
+        If no metrics have been explicitly registered yet, this will first
+        populate the registry with default metrics before removing.
+
+        Args:
+            metric_name: The name of the metric to remove.
+
+        Returns:
+            The removed metric instance, or None if not found.
+        """
+        # Initialize with defaults if registry is empty
+        if len(self._metric_registry.list_all()) == 0:
+            for default_metric in get_default_metrics(self._default_k_values):
+                self._metric_registry.register(default_metric)
+
+        try:
+            metric = self._metric_registry.get(metric_name)
+            self._metric_registry.unregister(metric_name)
+            return metric
+        except KeyError:
+            return None
+
+    def clear_metrics(self) -> None:
+        """Remove all registered metrics."""
+        # Create a fresh empty registry
+        self._metric_registry = MetricRegistry()
+
+    def reset_metrics(self, k_values: list[int] | None = None) -> None:
+        """Reset metrics to the default set.
+
+        Args:
+            k_values: k values for pass@k metrics. If None, uses [1].
+        """
+        k_vals = k_values or [1]
+        self._default_k_values = k_vals
+        self._metric_registry = MetricRegistry()
+        for metric in get_default_metrics(k_vals):
+            self._metric_registry.register(metric)
+
+    def _get_metrics_for_benchmark(self) -> list[Metric] | None:
+        """Get the metrics list for creating a BenchmarkResult.
+
+        If the registry is empty (no explicit configuration), returns None
+        to let BenchmarkResult use its default behavior with k_values.
+        Otherwise, returns the explicitly configured metrics.
+
+        Returns:
+            List of metrics if explicitly configured, or None for defaults.
+        """
+        registered = self._metric_registry.list_all()
+        if len(registered) == 0:
+            return None  # Let BenchmarkResult use defaults with k_values
+        return registered
+
+    # Run Benchmark Method
     def bench(
         self,
         task_ids: list[str] | None = None,
@@ -349,6 +495,7 @@ class CorralRunner:
                 k=k_values,
                 verbosity=self.interface.current_verbosity,
                 total_duration=total_duration,
+                metrics=self._get_metrics_for_benchmark(),
             )
 
             # Log final results
