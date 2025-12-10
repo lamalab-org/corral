@@ -413,8 +413,24 @@ class CorralRunner:
         session_id: str | None = None,
         tool_verbosity: str | None = None,
         configure_timeout: float | None = None,
+        run_name: str | None = None,
     ) -> BenchmarkResult:
-        """Run benchmark with functional approach"""
+        """Run benchmark with functional approach
+
+        Args:
+            task_ids: List of task IDs to benchmark. If None, uses all available tasks.
+            trials_per_task: Number of trials to run per task.
+            k_values: k values for pass@k metrics.
+            verbose: Whether to enable verbose logging.
+            session_id: Session identifier. Auto-generated if None.
+            tool_verbosity: Verbosity level for tools.
+            configure_timeout: Timeout for configuring additional apps.
+            run_name: Name for the benchmark run (used in report filename).
+                     If None, defaults to "unknown_env".
+
+        Returns:
+            BenchmarkResult containing all trial results and metrics.
+        """
 
         # Setup
         if tool_verbosity:
@@ -505,6 +521,9 @@ class CorralRunner:
             # Save final checkpoint with finished suffix and remove original
             self._save_finished_checkpoint(session_id, task_results)
             self._remove_original_checkpoint(session_id)
+
+            # Generate and save report
+            self._save_benchmark_report(result, run_name, tool_verbosity)
 
             return result
 
@@ -722,3 +741,41 @@ class CorralRunner:
                 logger.info(f"Original checkpoint removed for session {session_id}")
         except Exception as e:
             logger.warning(f"Failed to remove original checkpoint: {e}")
+
+    def _save_benchmark_report(
+        self, result: BenchmarkResult, run_name: str | None, tool_verbosity: str | None
+    ) -> None:
+        """
+        Save benchmark report to a JSON file.
+
+        If no run name is provided, generates a filename in the format:
+        {model}-{agent}-{env}-{verbosity}-{timestamp}.json
+
+        Args:
+            result: The BenchmarkResult to save
+            run_name: Name for the benchmark run. If None, uses "unknown_env"
+            tool_verbosity: The verbosity level used (or None)
+        """
+        if run_name is not None:
+            filename = run_name if run_name.endswith(".json") else f"{run_name}.json"
+        else:
+            # Extract components for filename
+            model_name = getattr(self.agent, "model", "unknown_model")
+            model_name = model_name.replace("-", "_")
+
+            agent_name = self.agent.__class__.__name__
+
+            verbosity_str = tool_verbosity if tool_verbosity else "None"
+
+            # Add timestamp
+            timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+            # Construct filename
+            filename = f"{model_name}-{agent_name}-{verbosity_str}-{timestamp}.json"
+
+        # Save the report
+        try:
+            result.generate_report(filename)
+            logger.info(f"Benchmark report saved to: {filename}")
+        except Exception as e:
+            logger.error(f"Failed to save benchmark report: {e}")
