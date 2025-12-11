@@ -107,9 +107,11 @@ def llm_call(
         message = response.choices[0].message
 
         # If message content is None, try to get reasoning_content
-        reasoning_content = response.choices[0].reasoning_content
-        if message is None and reasoning_content is not None:
-            message = reasoning_content
+        if message.content is None:
+            reasoning_content = getattr(message, "reasoning_content", None)
+            if reasoning_content is not None:
+                # Ensure reasoning_content is a string
+                message.content = str(reasoning_content) if reasoning_content else None
 
         if return_usage:
             # Extract usage information from the response
@@ -130,6 +132,45 @@ def llm_call(
 
     except Exception as e:
         raise e
+
+
+# {
+#     "id": "chatcmpl-b1bd9a96022b495b9db14b4871db5709",
+#     "choices": [
+#         {
+#             "finish_reason": "stop",
+#             "index": 0,
+#             "logprobs": null,
+#             "message": {
+#                 "content": "Final Answer: Unable to determine the SMILES string due to insufficient sample data.",
+#                 "refusal": null,
+#                 "role": "assistant",
+#                 "annotations": null,
+#                 "audio": null,
+#                 "function_call": null,
+#                 "tool_calls": [],
+#                 "reasoning_content": "We need to output SMILES of the provided organic compound sample. But we have no description of the sample. The prompt says \"Analyze the provided organic compound sample in a lab environment\". But we have no data. Possibly there is hidden data? Maybe we need to retrieve something like NMR spectra etc. But we have no sample data. Could be that the system expects us to call some tool to get the SMILES from some data. But we have no identifier. Maybe the sample is in the environment; we can call functions like carbon_nmr_spectra, proton_nmr_spectra, ir_spectra, mass_spectrometry_spectra, etc. Those would return data. Then we need to deduce structure and output SMILES. That is heavy. But maybe the sample is simple and we can guess? However we have no clue.\n\nMaybe the system expects us to call search_by_smiles? No, we need SMILES.\n\nWe could try to retrieve the sample's SMILES via some function that returns it directly? There's no function for that. But maybe the sample is preloaded and functions like carbon_nmr_spectra will give us data to infer. But that is expensive.\n\nGiven limited info, maybe the answer is that we cannot determine SMILES without data. But the task expects a SMILES string. Could be a trick: maybe the sample is just water? But water is not organic. Could be ethanol? Not sure.\n\nWe could ask to validate a SMILES? No.\n\nMaybe the system expects us to call a function that returns the SMILES of the sample. There is no such function. But maybe the sample is stored and the function \"search_by_smiles\" could be used with unknown? No.\n\nWe could try to call \"retrieve_protons_shifts\" etc. But that returns ranges, not specific.\n\nGiven no data, maybe we should respond that insufficient data. But the task says we must output SMILES.\n\nProbably the correct approach: ask for more info? But we cannot ask user; we must act.\n\nGiven constraints, maybe the sample is a known compound used in previous tasks. Could be \"acetophenone\"? Not sure.\n\nGiven no info, maybe we should output an empty string? That seems wrong.\n\nMaybe the system expects us to output nothing? Hmm.\n\nGiven the situation, I think we should respond that we cannot determine SMILES due to lack of data. But the required format is \"Final Answer: <SMILES>\". Could we output placeholder? Might be penalized.\n\nI'll answer with a note."
+#             },
+#             "stop_reason": null,
+#             "token_ids": null
+#         }
+#     ],
+#     "created": 1765446474,
+#     "model": "1 - GPT-OSS-120b - an open model released by OpenAI in August 2025",
+#     "object": "chat.completion",
+#     "service_tier": null,
+#     "system_fingerprint": null,
+#     "usage": {
+#         "completion_tokens": 546,
+#         "prompt_tokens": 1024,
+#         "total_tokens": 1570,
+#         "completion_tokens_details": null,
+#         "prompt_tokens_details": null
+#     },
+#     "prompt_logprobs": null,
+#     "prompt_token_ids": null,
+#     "kv_transfer_params": null
+# }
 
 
 def format_examples(examples: list[str] | None) -> str:

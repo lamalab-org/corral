@@ -178,6 +178,8 @@ class BenchmarkResult:
         Returns:
             Dictionary containing all report data ready for JSON export
         """
+        from corral.agents.utils import serialize_messages
+
         # Map registry metric results to report format
         report_data = {"metrics": {}}
 
@@ -239,7 +241,7 @@ class BenchmarkResult:
 
                 # Add messages if available (verbose mode only)
                 if self.verbose and trial.messages is not None:
-                    trial_data["messages"] = trial.messages
+                    trial_data["messages"] = serialize_messages(trial.messages)
 
                 # Add tool calls data if available (verbose mode only)
                 if self.verbose and "tool_calls" in trial.tool_statistics:

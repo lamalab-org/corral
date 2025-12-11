@@ -156,76 +156,68 @@ class CorralWandbLogger:
             tool_duration,
         )
 
-    def log_final_results(self, result: BenchmarkResult, k_values: list[int]) -> None:
+    def log_final_results(self, result: BenchmarkResult) -> None:
         """
         Logs final benchmark results, including overall and per-task metrics, to wandb.
-        This function aggregates and records comprehensive metrics for the entire benchmark, supporting reproducibility and in-depth analysis.
+        Uses the flexible metrics system - logs only the metrics that are registered
+        in the BenchmarkResult's metric registry.
+
+        Args:
+            result: The BenchmarkResult containing all metrics and trial data
         """
         if not self.run:
             return
 
-        # Overall metrics
-        overall_metrics = {}
-
-        # Always use fallback for now until all core metrics are auto-registered in Phase 3
+        # Calculate all metrics using the registry
         try:
-            overall_metrics.update(
-                {
-                    "overall/average_score": result.average_score(),
-                    "overall/overall_success_rate": result.overall_success_rate(),
-                    "overall/total_tasks": result.total_tasks,
-                }
+            calculated_metrics = result.calculate_metrics()
+        except Exception as e:
+            logger.error(f"Error calculating metrics: {e}")
+            if self.run:
+                self.run.log({"metrics_calculation_error": str(e)})
+            return
+
+        # Prepare overall metrics for WandB
+        overall_metrics = {}
+        task_level_metrics = {}
+
+        # Iterate through calculated metrics and categorize them
+        for metric_name, metric_value in calculated_metrics.items():
+            try:
+                # Check if this is a task-level metric (returns dict with task_ids as keys)
+                if isinstance(metric_value, dict) and any(
+                    task_id in metric_value for task_id in result.all_task_ids
+                ):
+                    # This is a task-level breakdown metric
+                    # Store it for task-level logging
+                    task_level_metrics[metric_name] = metric_value
+                else:
+                    # This is an overall metric
+                    # Use metric name (not display name) for WandB consistency
+                    overall_metrics[f"overall/{metric_name}"] = metric_value
+
+            except Exception as e:
+                logger.warning(f"Error processing metric '{metric_name}': {e}")
+                continue
+
+        # Add non-metric fields
+        if result.total_duration:
+            overall_metrics["overall/total_benchmark_duration_s"] = (
+                result.total_duration
             )
 
-            # Add timing metrics
-            if result.total_duration:
-                overall_metrics["overall/total_benchmark_duration_s"] = (
-                    result.total_duration
-                )
-
-                total_trial_duration = result.overall_total_duration()
-                if total_trial_duration:
-                    overall_metrics["overall/total_trial_duration_s"] = (
-                        total_trial_duration
-                    )
-
-                avg_duration = result.overall_average_duration()
-                if avg_duration:
-                    overall_metrics["overall/average_trial_duration_s"] = avg_duration
-
-                overall_metrics["overall/total_tool_execution_duration_s"] = (
-                    result.total_tool_execution_duration()
-                )
-
-                # Add pass@k and pass^k metrics
-                for k_val in k_values:
-                    try:
-                        overall_metrics[f"overall/pass@{k_val}"] = (
-                            result.overall_pass_at_k(k_val)
-                        )
-                        overall_metrics[f"overall/pass^{k_val}"] = (
-                            result.overall_pass_hat_k(k_val)
-                        )
-                    except Exception as e:
-                        logger.warning(f"Error calculating pass@{k_val}: {e}")
-
-                # Add token usage
-                for key, value in result.total_token_usage().items():
-                    overall_metrics[f"overall/token_usage/{key}"] = value
-
-                # Add tool stats
-                for key, value in result.total_tool_calls().items():
-                    overall_metrics[f"overall/tool_calls/{key}"] = value
-
+        # Log overall metrics
+        if overall_metrics:
+            try:
                 self.run.log(overall_metrics)
                 self.run.summary.update(overall_metrics)
+                logger.info(f"Logged {len(overall_metrics)} overall metrics to wandb")
+            except Exception as e:
+                logger.error(f"Error logging overall metrics: {e}")
+                if self.run:
+                    self.run.log({"overall_metrics_error": str(e)})
 
-        except Exception as e:
-            logger.error(f"Error calculating or logging overall metrics: {e}")
-            if self.run:
-                self.run.log(
-                    {"overall_metrics_error": str(e)}
-                )  # Log task-level metrics
+        # Log task-level metrics
         logger.info("Logging task-level metrics to wandb")
         for task_id in result.all_task_ids:
             if not result.task_results[task_id].trials:
@@ -235,38 +227,17 @@ class CorralWandbLogger:
                 continue
 
             try:
-                task_metrics = {
-                    f"task_{task_id}/average_score": result._calculate_task_average_score(
-                        task_id
-                    ),
-                    f"task_{task_id}/success_rate": result.task_success_rate(task_id),
-                }
+                task_metrics = {}
 
-                task_avg_duration = result.task_average_duration(task_id)
-                if task_avg_duration:
-                    task_metrics[f"task_{task_id}/average_duration_s"] = (
-                        task_avg_duration
-                    )
+                # Add metrics from the task-level breakdown
+                for metric_name, task_values in task_level_metrics.items():
+                    if task_id in task_values:
+                        task_metrics[f"task_{task_id}/{metric_name}"] = task_values[
+                            task_id
+                        ]
 
-                # Add task token usage
-                for key, value in result.task_total_token_usage(task_id).items():
-                    task_metrics[f"task_{task_id}/token_usage/{key}"] = value
-
-                # Add task pass@k and pass^k
-                for k_val in k_values:
-                    try:
-                        task_metrics[f"task_{task_id}/pass@{k_val}"] = (
-                            result.task_pass_at_k(task_id, k_val)
-                        )
-                        task_metrics[f"task_{task_id}/pass^{k_val}"] = (
-                            result.task_pass_hat_k(task_id, k_val)
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Not enough trials for task {task_id} to calculate pass@{k_val}: {e}"
-                        )
-
-                self.run.log(task_metrics)
+                if task_metrics:
+                    self.run.log(task_metrics)
 
             except Exception as e:
                 logger.error(
