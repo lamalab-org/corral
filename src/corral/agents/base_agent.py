@@ -7,6 +7,7 @@ from litellm.types.utils import Message
 from loguru import logger
 from promptstore import PromptStore
 
+from corral.agents.hooks import AgentHooks, HookContext, HookPoint
 from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
 from corral.agents.utils import (
     LiteLLMMessage,
@@ -70,6 +71,7 @@ class BaseAgent(ABC):
         extractor_prompt: str | None = None,
         surrender_prompt: str | None = None,
         temperature: float = 0.7,
+        hooks: AgentHooks | None = None,
         **kwargs,
     ):
         """Initialize the base agent with common parameters"""
@@ -79,6 +81,8 @@ class BaseAgent(ABC):
         self.temperature = temperature
         self.messages: list = []
         self.token_usage: dict = {}  # Track token usage per LLM call
+        self.hooks = hooks or AgentHooks()
+        self._current_iteration = 0  # Track current iteration for hooks
 
         with importlib.resources.path("corral.agents", "") as style_path:
             self.store = PromptStore(f"{style_path}/prompts")
@@ -316,3 +320,34 @@ class BaseAgent(ABC):
     def reset_token_usage(self) -> None:
         """Reset token usage tracking"""
         self.token_usage = {}
+
+    def _execute_hooks(
+        self,
+        hook_point: HookPoint,
+        interface: CorralRouter,
+        task_id: str,
+        **extra_context,
+    ) -> HookContext:
+        """Execute hooks at a specific point in agent lifecycle.
+
+        This is a helper method that creates a HookContext and executes
+        all registered hooks for the given hook point.
+
+        Args:
+            hook_point: The lifecycle point to execute hooks for
+            interface: The router interface
+            task_id: The current task ID
+            **extra_context: Additional context fields to include
+
+        Returns:
+            The hook context (potentially modified by hooks)
+        """
+        context = HookContext(
+            task_id=task_id,
+            agent=self,
+            interface=interface,
+            messages=self.messages,
+            iteration=self._current_iteration,
+            **extra_context,
+        )
+        return self.hooks.execute(hook_point, context)
