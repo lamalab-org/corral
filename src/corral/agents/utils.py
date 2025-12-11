@@ -106,6 +106,11 @@ def llm_call(
 
         message = response.choices[0].message
 
+        # If message content is None, try to get reasoning_content
+        reasoning_content = response.choices[0].reasoning_content
+        if message is None and reasoning_content is not None:
+            message = reasoning_content
+
         if return_usage:
             # Extract usage information from the response
             usage_info = {

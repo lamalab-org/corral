@@ -26,6 +26,36 @@ def create_session_id() -> str:
     return f"session_{datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
 
 
+def sanitize_model_name(model_name: str, max_length: int = 50) -> str:
+    """Sanitize model name for use in filenames.
+
+    Replaces invalid filesystem characters with underscores and limits length.
+
+    Args:
+        model_name: The raw model name to sanitize
+        max_length: Maximum length for the sanitized name (default: 50)
+
+    Returns:
+        Sanitized model name safe for use in filenames
+    """
+    # Replace invalid filesystem characters with underscores
+    invalid_chars = r"[/\\:*?\"<>|\s\-]+"
+    sanitized = re.sub(invalid_chars, "_", model_name)
+
+    # Remove leading/trailing underscores
+    sanitized = sanitized.strip("_")
+
+    # Limit length
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length].rstrip("_")
+
+    # Ensure we have a valid name
+    if not sanitized:
+        sanitized = "unknown_model"
+
+    return sanitized
+
+
 def validate_k_values(
     k_values: int | list[int] | None, trials_per_task: int
 ) -> list[int]:
@@ -782,7 +812,8 @@ class CorralRunner:
         else:
             # Extract components for filename
             model_name = getattr(self.agent, "model", "unknown_model")
-            model_name = model_name.replace("-", "_")
+            # Sanitize model name for filesystem safety
+            model_name = sanitize_model_name(model_name)
 
             agent_name = self.agent.__class__.__name__
 
