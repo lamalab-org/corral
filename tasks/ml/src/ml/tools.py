@@ -542,7 +542,7 @@ def batch_retrieve_polymorphs(
                        [ARGS_DETAILED] Base directory where individual JSON files for each composition will be saved.
                        The directory will be created if it doesn't exist.
                        Each composition will have its own JSON file named with the composition formula.
-                       This organization facilitates easy data management and selective loading of specific compositions. [/DETAILED]
+                       This organization facilitates easy data management and selective loading of specific compositions. [/ARGS_DETAILED]
                        [ARGS_SYNTACTIC] "Valid directory path" [/ARGS_SYNTACTIC]
                        [ARGS_EXAMPLES] "data/polymorphs", "materials/oxides", "results/batch_data" [/ARGS_EXAMPLES]
 

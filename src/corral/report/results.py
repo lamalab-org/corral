@@ -5,6 +5,8 @@ from statistics import mean
 from typing import Any
 
 from loguru import logger
+from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from corral.types import (
@@ -26,11 +28,12 @@ class TaskTrialResult:
     duration: float | None = None
     token_usage: dict[str, int] | None = None
     error_message: str | None = None
+    surrendered: bool = False
 
     @property
     def success(self) -> bool:
         """Whether the trial was successful"""
-        return self.score > 0 and self.error_message is None
+        return self.score > 0 and self.error_message is None and not self.surrendered
 
 
 @dataclass
@@ -50,6 +53,8 @@ class BenchmarkResult:
         task_results: dictionary mapping task IDs to their trial results
         k: The k value(s) to use for pass@k and pass^k calculations.
            Can be a single int or a list of ints.
+        total_duration: Total duration of the benchmark run
+        verbosity: Verbosity level of tool description
     """
 
     task_results: dict[str, TaskTrialResults]
@@ -176,6 +181,10 @@ class BenchmarkResult:
             "failed": failed_calls,
             "total": successful_calls + failed_calls,
         }
+
+    def total_surrendered_trials(self) -> int:
+        """Calculate total number of surrendered trials across all tasks"""
+        return sum(bool(trial.surrendered) for trial in self.all_results)
 
     def average_score(self) -> float:
         """Calculate average score across all results"""
@@ -338,6 +347,10 @@ class BenchmarkResult:
         )
         summary_table.add_row("Failed Tool Calls", str(tool_call_stats["failed"]))
 
+        # Add surrender statistics
+        surrendered_count = self.total_surrendered_trials()
+        summary_table.add_row("Surrendered Trials", str(surrendered_count))
+
         # Add token usage statistics
         total_tokens = self.total_token_usage()
         if total_tokens:
@@ -388,9 +401,10 @@ class BenchmarkResult:
         task_table.add_column("Trial ID", style="yellow")
         task_table.add_column("Score", style="cyan")
         task_table.add_column("Success", style="white")
+        task_table.add_column("Surrendered", style="red")
         task_table.add_column("Duration (s)", style="green")
         task_table.add_column("Tokens", style="green")
-        task_table.add_column("Tool Duration (s)", style="blue")  # New column
+        task_table.add_column("Tool Duration (s)", style="blue")
 
         # Add columns for each k value
         for k_val in self.k:
@@ -412,6 +426,7 @@ class BenchmarkResult:
             "Overall",
             f"{self._calculate_task_average_score(task_id):.3f}",
             f"{task_success_rate:.3f}",
+            "-",  # No overall surrendered status
             duration_str,
             token_str,
             "-",  # No overall tool duration for task level
@@ -436,6 +451,7 @@ class BenchmarkResult:
                 trial.trial_id,
                 f"{trial.score:.3f}",
                 "✓" if trial.success else "✗",
+                "✓" if trial.surrendered else "✗",
                 duration_str,
                 token_str,
                 f"{trial_tool_duration:.3f}",  # Tool duration for this trial
@@ -517,166 +533,159 @@ class BenchmarkResult:
                     )
         return tool_calls_table
 
-    def generate_report(self, report_path: str | None = None) -> None:
+    def _prepare_report_data(
+        self, pass_at_k_results: dict, pass_hat_k_results: dict
+    ) -> dict:
         """
-        Display and optionally save a detailed report of the benchmark results.
-        Shows overall metrics and detailed per-task tables including trial IDs.
+        Prepare report data for JSON export.
 
         Args:
-            report_path: Optional path to save the report. If provided, saves as JSON.
+            pass_at_k_results: Dictionary of pass@k values for each k
+            pass_hat_k_results: Dictionary of pass^k values for each k
+
+        Returns:
+            Dictionary containing all report data ready for JSON export
         """
+        # Create pass@k and pass^k dictionaries for the report
+        pass_at_k_dict = {f"pass@{k}": value for k, value in pass_at_k_results.items()}
+        pass_hat_k_dict = {
+            f"pass^{k}": value for k, value in pass_hat_k_results.items()
+        }
 
-        # Prepare pass metrics for the summary
-        pass_at_k_results = {k_val: self.overall_pass_at_k(k_val) for k_val in self.k}
-        pass_hat_k_results = {k_val: self.overall_pass_hat_k(k_val) for k_val in self.k}
+        # Get tool call statistics
+        tool_call_stats = self.total_tool_calls()
 
-        if report_path:
-            try:
-                # Create pass@k and pass^k dictionaries for the report
-                pass_at_k_dict = {
-                    f"pass@{k}": value for k, value in pass_at_k_results.items()
+        # Get token usage statistics
+        total_tokens = self.total_token_usage()
+
+        # Create report data with timing information
+        report_data = {
+            "metrics": {
+                "average_score": self.average_score(),
+                "overall_success_rate": self.overall_success_rate(),
+                **pass_at_k_dict,
+                **pass_hat_k_dict,
+                "total_tasks": self.total_tasks,
+                "tool_verbosity": self.verbosity,
+                "total_tool_calls": tool_call_stats["total"],
+                "successful_tool_calls": tool_call_stats["successful"],
+                "failed_tool_calls": tool_call_stats["failed"],
+                "surrendered_trials": self.total_surrendered_trials(),
+                "total_token_usage": total_tokens,
+                "total_tool_execution_duration": self.total_tool_execution_duration(),
+            }
+        }
+
+        # Add timing metrics to overall metrics
+        if self.total_duration:
+            report_data["metrics"]["total_benchmark_duration"] = self.total_duration
+
+        total_trial_duration = self.overall_total_duration()
+        if total_trial_duration:
+            report_data["metrics"]["total_trial_duration"] = total_trial_duration
+
+        avg_duration = self.overall_average_duration()
+        if avg_duration:
+            report_data["metrics"]["average_trial_duration"] = avg_duration
+
+        report_data["task_results"] = {}
+
+        # Add task-specific results
+        for task_id in self.all_task_ids:
+            # Calculate task-specific metrics for each k
+            task_pass_at_k = {}
+            task_pass_hat_k = {}
+
+            for k_val in self.k:
+                task_pass_at_k[k_val] = self.task_pass_at_k(task_id, k_val)
+                task_pass_hat_k[k_val] = self.task_pass_hat_k(task_id, k_val)
+
+            # Create task-specific pass@k and pass^k dictionaries
+            task_pass_at_k_dict = {
+                f"pass@{k}": value for k, value in task_pass_at_k.items()
+            }
+            task_pass_hat_k_dict = {
+                f"pass^{k}": value for k, value in task_pass_hat_k.items()
+            }
+
+            # Add trials information directly to the task results
+            trials_data = []
+            for trial in self.task_results[task_id].trials:
+                trial_data = {
+                    "trial_id": trial.trial_id,
+                    "score": trial.score,
+                    "submitted_answer": trial.state.get("submitted_answer")
+                    if trial.state and isinstance(trial.state, dict)
+                    else None,
+                    "success": trial.success,
+                    "surrendered": trial.surrendered,
+                    "tool_execution_duration": self.get_trial_tool_execution_duration(
+                        trial
+                    ),
                 }
-                pass_hat_k_dict = {
-                    f"pass^{k}": value for k, value in pass_hat_k_results.items()
-                }
 
-                # Get tool call statistics
-                tool_call_stats = self.total_tool_calls()
+                # Add duration if available
+                if trial.duration is not None:
+                    trial_data["duration"] = trial.duration
 
-                # Get token usage statistics
-                total_tokens = self.total_token_usage()
+                # Add token usage if available
+                if trial.token_usage is not None:
+                    trial_data["token_usage"] = trial.token_usage
 
-                # Create report data with timing information
-                report_data = {
-                    "metrics": {
-                        "average_score": self.average_score(),
-                        "overall_success_rate": self.overall_success_rate(),
-                        **pass_at_k_dict,
-                        **pass_hat_k_dict,
-                        "total_tasks": self.total_tasks,
-                        "tool_verbosity": self.verbosity,
-                        "total_tool_calls": tool_call_stats["total"],
-                        "successful_tool_calls": tool_call_stats["successful"],
-                        "failed_tool_calls": tool_call_stats["failed"],
-                        "total_token_usage": total_tokens,
-                        # Add duration metric
-                        "total_tool_execution_duration": self.total_tool_execution_duration(),
-                    }
-                }
-
-                # Add timing metrics to overall metrics
-                if self.total_duration:
-                    report_data["metrics"]["total_benchmark_duration"] = (
-                        self.total_duration
-                    )
-
-                total_trial_duration = self.overall_total_duration()
-                if total_trial_duration:
-                    report_data["metrics"]["total_trial_duration"] = (
-                        total_trial_duration
-                    )
-
-                avg_duration = self.overall_average_duration()
-                if avg_duration:
-                    report_data["metrics"]["average_trial_duration"] = avg_duration
-
-                report_data["task_results"] = {}
-
-                # Add task-specific results
-                for task_id in self.all_task_ids:
-                    # Calculate task-specific metrics for each k
-                    task_pass_at_k = {}
-                    task_pass_hat_k = {}
-
-                    for k_val in self.k:
-                        task_pass_at_k[k_val] = self.task_pass_at_k(task_id, k_val)
-                        task_pass_hat_k[k_val] = self.task_pass_hat_k(task_id, k_val)
-
-                    # Create task-specific pass@k and pass^k dictionaries
-                    task_pass_at_k_dict = {
-                        f"pass@{k}": value for k, value in task_pass_at_k.items()
-                    }
-                    task_pass_hat_k_dict = {
-                        f"pass^{k}": value for k, value in task_pass_hat_k.items()
-                    }
-
-                    # Add trials information directly to the task results
-                    trials_data = []
-                    for trial in self.task_results[task_id].trials:
-                        trial_data = {
-                            "trial_id": trial.trial_id,
-                            "score": trial.score,
-                            "submitted_answer": trial.state.get("submitted_answer")
-                            if trial.state and isinstance(trial.state, dict)
-                            else None,
-                            "success": trial.success,
-                            "tool_execution_duration": self.get_trial_tool_execution_duration(
-                                trial
-                            ),  # Add this
+                # Add tool calls data if available
+                if "tool_calls" in trial.tool_statistics:
+                    trial_data["tool_calls"] = [
+                        {
+                            "tool_name": tool_call["tool_name"],
+                            "arguments": tool_call["arguments"],
+                            "result": tool_call["result"],
+                            "status": tool_call["status"],
+                            "error_message": tool_call.get("error_message"),
+                            "duration": tool_call.get("duration"),
+                            "timestamp": tool_call.get("timestamp"),
                         }
+                        for tool_call in trial.tool_statistics["tool_calls"]
+                    ]
 
-                        # Add duration if available
-                        if trial.duration is not None:
-                            trial_data["duration"] = trial.duration
-
-                        # Add token usage if available
-                        if trial.token_usage is not None:
-                            trial_data["token_usage"] = trial.token_usage
-
-                        # Add tool calls data if available
-                        if "tool_calls" in trial.tool_statistics:
-                            trial_data["tool_calls"] = [
-                                {
-                                    "tool_name": tool_call["tool_name"],
-                                    "arguments": tool_call["arguments"],
-                                    "result": tool_call["result"],
-                                    "status": tool_call["status"],
-                                    "error_message": tool_call.get("error_message"),
-                                    "duration": tool_call.get(
-                                        "duration"
-                                    ),  # Make sure this is included
-                                    "timestamp": tool_call.get("timestamp"),
-                                }
-                                for tool_call in trial.tool_statistics["tool_calls"]
-                            ]
-
-                        # Add other tool statistics
-                        trial_data.update(
-                            {
-                                stat_key: stat_value
-                                for stat_key, stat_value in trial.tool_statistics.items()
-                                if stat_key != "tool_calls"
-                            }
-                        )
-
-                        trials_data.append(trial_data)
-
-                    task_result_data = {
-                        "success_rate": self.task_success_rate(task_id),
-                        "average_score": self._calculate_task_average_score(task_id),
-                        **task_pass_at_k_dict,
-                        **task_pass_hat_k_dict,
-                        "trials": trials_data,
-                        "total_token_usage": self.task_total_token_usage(task_id),
+                # Add other tool statistics
+                trial_data.update(
+                    {
+                        stat_key: stat_value
+                        for stat_key, stat_value in trial.tool_statistics.items()
+                        if stat_key != "tool_calls"
                     }
+                )
 
-                    # Add task-level timing metrics
-                    task_avg_duration = self.task_average_duration(task_id)
-                    if task_avg_duration:
-                        task_result_data["average_duration"] = task_avg_duration
+                trials_data.append(trial_data)
 
-                    report_data["task_results"][task_id] = task_result_data
+            task_result_data = {
+                "success_rate": self.task_success_rate(task_id),
+                "average_score": self._calculate_task_average_score(task_id),
+                **task_pass_at_k_dict,
+                **task_pass_hat_k_dict,
+                "trials": trials_data,
+                "total_token_usage": self.task_total_token_usage(task_id),
+            }
 
-                with Path(report_path).open("w") as f:
-                    json.dump(report_data, f, indent=2)
-                logger.info(f"Saved detailed report to: {report_path}")
-            except Exception as e:
-                logger.error(f"Error saving report file: {e}")
-                raise
+            # Add task-level timing metrics
+            task_avg_duration = self.task_average_duration(task_id)
+            if task_avg_duration:
+                task_result_data["average_duration"] = task_avg_duration
 
-        from rich.console import Console
-        from rich.panel import Panel
+            report_data["task_results"][task_id] = task_result_data
 
+        return report_data
+
+    def _display_console_report(
+        self, pass_at_k_results: dict, pass_hat_k_results: dict
+    ) -> None:
+        """
+        Display benchmark results to console using Rich tables.
+
+        Args:
+            pass_at_k_results: Dictionary of pass@k values for each k
+            pass_hat_k_results: Dictionary of pass^k values for each k
+        """
         console = Console()
 
         # Print header panel
@@ -708,3 +717,31 @@ class BenchmarkResult:
                     console.print()  # Add spacing between tasks
             else:
                 console.print()  # Add spacing between tasks
+
+    def generate_report(self, report_path: str | None = None) -> None:
+        """
+        Display and optionally save a detailed report of the benchmark results.
+        Shows overall metrics and detailed per-task tables including trial IDs.
+
+        Args:
+            report_path: Optional path to save the report. If provided, saves as JSON.
+        """
+        # Prepare pass metrics for the summary
+        pass_at_k_results = {k_val: self.overall_pass_at_k(k_val) for k_val in self.k}
+        pass_hat_k_results = {k_val: self.overall_pass_hat_k(k_val) for k_val in self.k}
+
+        # Save JSON report if path is provided
+        if report_path:
+            try:
+                report_data = self._prepare_report_data(
+                    pass_at_k_results, pass_hat_k_results
+                )
+                with Path(report_path).open("w") as f:
+                    json.dump(report_data, f, indent=2)
+                logger.info(f"Saved detailed report to: {report_path}")
+            except Exception as e:
+                logger.error(f"Error saving report file: {e}")
+                raise
+
+        # Display report to console
+        self._display_console_report(pass_at_k_results, pass_hat_k_results)

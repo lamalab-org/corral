@@ -1,19 +1,19 @@
 # Corral: Scientific Agent Benchmark
 
 <p align="center">
-    <a href="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yaml">
-        <img alt="Tests" src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/tests.yaml/badge.svg" />
+    <a href="https://github.com/lamalab-org/corral/actions/workflows/tests.yaml">
+        <img alt="Tests" src="https://github.com/lamalab-org/corral/actions/workflows/tests.yaml/badge.svg" />
     </a>
     <a href="https://pypi.org/project/corral">
         <img alt="PyPI" src="https://img.shields.io/pypi/v/corral" />
     </a>
-    <a href="https://github.com/lamalab-org/mat-agent-bench/blob/main/LICENSE.md">
+    <a href="https://github.com/lamalab-org/corral/blob/main/LICENSE.md">
         <img alt="PyPI - License" src="https://img.shields.io/pypi/l/corral" />
     </a>
-    <a href='https://lamalab-org.github.io/mat-agent-bench/'>
-        <img src="https://github.com/lamalab-org/mat-agent-bench/actions/workflows/docs.yaml/badge.svg" alt='Documentation Status' />
+    <a href='https://lamalab-org.github.io/corral/'>
+        <img src="https://github.com/lamalab-org/corral/actions/workflows/docs.yaml/badge.svg" alt='Documentation Status' />
     </a>
-    <a href="https://github.com/lamalab-org/mat-agent-bench/blob/main/CODE_OF_CONDUCT.md">
+    <a href="https://github.com/lamalab-org/corral/blob/main/CODE_OF_CONDUCT.md">
         <img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Contributor Covenant"/>
     </a>
 </p>
@@ -39,8 +39,8 @@ A comprehensive benchmarking framework for evaluating AI agents on science tasks
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/lamalab-org/mat-agent-bench.git
-   cd mat-agent-bench
+   git clone https://github.com/lamalab-org/corral.git
+   cd corral
    ```
 
 2. **Install the framework**
@@ -139,11 +139,11 @@ The framework includes several pre-built environments:
 | Environment | Description |
 |-------------|-------------|
 | `samplemath` | Basic mathematical operations |
-| `spectra_elu_easy` | Spectroscopy data analysis |
-| `md_simulations` | Molecular dynamics setup |
-| `catalyst` | Catalysis research tasks |
-| `afm` | Atomic force microscopy |
-| `md_tutorials` | MD tutorial completion |
+| `spectra_elucidation` | Spectroscopy/NMR spectra elucidation tasks |
+| `corral_md` | LAMMPS molecular dynamics simulation setup |
+| `catalyst` | Catalysis research and material design tasks |
+| `afm` | Atomic force microscopy image analysis |
+| `ml` | Machine learning model training and evaluation |
 
 ## 🤖 Available Agents
 
@@ -185,6 +185,28 @@ Uses hierarchical planning with high-level planning and low-level execution dele
 from corral.agents import LLMPlanner
 
 agent = LLMPlanner(model="gpt-4o", temperature=0.1, max_iterations=5)
+```
+
+### ReflexionAgent
+
+Implements the Reflexion architecture ([paper](https://arxiv.org/abs/2303.11366)) which adds self-reflection and learning from mistakes.
+
+```python
+from corral.agents import ReActAgent, ReflexionAgent, ToolCallingAgent
+
+# Create base agent (the "Actor")
+base_agent = ToolCallingAgent(model="gpt-4o", max_iterations=10, temperature=0.1)
+
+# Wrap with Reflexion capabilities
+reflexion_agent = ReflexionAgent(
+    actor=base_agent,
+    reflection_model="gpt-4o",  # Model for generating reflections
+    reflection_temperature=0.0,  # Deterministic reflections
+)
+
+# Use like any other agent
+runner = CorralRunner(interface, reflexion_agent)
+result = runner.bench(task_ids=["task_1"], trials_per_task=5)
 ```
 
 ## 💾 Checkpoint System
@@ -366,21 +388,89 @@ def calculate_molecular_weight(formula: str) -> float:
 
 #### [Modal](https://modal.com) Tools (Cloud Execution)
 
+Modal allows you to run computationally intensive tasks in the cloud. See [Modal docs](https://modal.com/docs) for setup.
+
 ```python
 from corral.utils.modal import modal_tool, MODAL_TOOL_REGISTRY
-from modal import Image
+from modal import App, Image
+
+app = App("my-corral-tools")
 
 
 @modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
 def complex_calculation(data: str) -> str:
     """Run computationally intensive task in the cloud."""
-    # This runs in Modal's cloud environment
-    pass
+    from rdkit import Chem
+
+    mol = Chem.MolFromSmiles(data)
+    return f"Molecule has {mol.GetNumAtoms()} atoms"
 
 
 # Access the tool
 tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]
 ```
+
+For Corral-specific usage, see the [Modal App Documentation](tasks/corral_md/modal_app/README.md).
+
+### MCP (Model Context Protocol) Integration
+
+Corral tools can be easily converted to MCP format for use with MCP-compatible clients like Claude Desktop:
+
+```python
+from corral.backend.tool import tool
+from corral.router.verbosity import ToolVerbosity
+
+
+@tool
+def my_scientific_tool(param: str) -> str:
+    """Scientific tool description.
+
+    Args:
+        param: Parameter description
+
+    Returns:
+        Result description
+    """
+    return f"Result: {param}"
+
+
+# Convert to MCP format
+mcp_definition = my_scientific_tool.to_mcp()
+
+# With specific verbosity level
+mcp_brief = my_scientific_tool.to_mcp(verbosity=ToolVerbosity.BRIEF)
+```
+
+Create a custom MCP server:
+
+```python
+from mcp.server import Server
+from mcp.types import Tool as MCPTool
+import importlib
+import inspect
+from corral.backend.tool import Tool
+
+# Load tools from a module
+module = importlib.import_module("my_domain.tools")
+tools = {name: obj for name, obj in inspect.getmembers(module) if isinstance(obj, Tool)}
+
+# Create MCP server
+server = Server("my-corral-tools")
+
+
+@server.list_tools()
+async def list_tools():
+    return [MCPTool(**tool.to_mcp()) for tool in tools.values()]
+
+
+@server.call_tool()
+async def call_tool(name: str, arguments: dict):
+    tool = tools[name]
+    # Execute and return results
+    ...
+```
+
+For more details on creating tools and MCP integration, see the [Tools Documentation](docs/TOOLS_README.md).
 
 ### Environment Configuration
 
@@ -411,8 +501,8 @@ for task_id, task_result in result.task_results.items():
 
 ## 🤝 Community
 
-- **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/lamalab-org/mat-agent-bench/issues)
-- **Discussions**: Join conversations on [GitHub Discussions](https://github.com/lamalab-org/mat-agent-bench/discussions)
+- **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/lamalab-org/corral/issues)
+- **Discussions**: Join conversations on [GitHub Discussions](https://github.com/lamalab-org/corral/discussions)
 - **Contributing**: See our [Contributing Guide](CONTRIBUTING.md)
 
 ## 📄 License
