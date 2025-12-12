@@ -269,11 +269,6 @@ def generate_summary_plots(files_to_label, annotated, annotators_per_env):
 
     plt.tight_layout()
 
-    # Save the plot
-    plot_path = OUTPUT_DIR / "annotation_progress_by_environment.png"
-    plt.savefig(plot_path, dpi=150, bbox_inches="tight")
-    logger.info("Saved plot to %s", plot_path)
-
     plot_path_pdf = OUTPUT_DIR / "annotation_progress_by_environment.pdf"
     plt.savefig(plot_path_pdf, bbox_inches="tight")
     logger.info("Saved plot to %s", plot_path_pdf)

@@ -320,18 +320,6 @@ def main():
     data_dir = output_dir / "data"
     data_dir.mkdir(exist_ok=True)
 
-    # Save detailed stats
-    detailed_output = output_dir / "message_stats_detailed.json"
-    with detailed_output.open("w") as f:
-        json.dump(all_stats, f, indent=2)
-    logger.info(f"Detailed stats saved to: {detailed_output}")
-
-    # Save summary
-    summary_output = output_dir / "message_stats_summary.json"
-    with summary_output.open("w") as f:
-        json.dump(summary, f, indent=2)
-    logger.info(f"Summary saved to: {summary_output}")
-
     # Also save to data directory
     detailed_data_output = data_dir / "message_stats_detailed.json"
     with detailed_data_output.open("w") as f:

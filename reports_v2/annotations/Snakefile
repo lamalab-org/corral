@@ -1,0 +1,144 @@
+# Snakefile for running annotation pipeline
+
+# Output directory
+DATA_DIR = "data"
+PLOTS_DIR = "plots"
+
+# Default rule - runs all analyses
+rule all:
+    input:
+        f"{DATA_DIR}/main_results_table.tex",
+        f"{DATA_DIR}/main_results_subtasks_table.tex",
+        f"missing_val/annotation_progress_by_environment.pdf",
+        f"{DATA_DIR}/annotation_main_results.json",
+        ".plot_annotations_vs_length.done",
+        ".plot_marker_counts.done"
+
+# Rule 1: Retrieve info - dumps data from MongoDB
+rule retrieve_info:
+    cache: True
+    output: f"{DATA_DIR}/corral_dump.json"
+    log:
+        "logs/retrieve_info.log"
+    script: "retrieve_info.py"
+
+# Rule 2: Get files to label - maps accepted questions to report files
+# The questions to label were already taken, so this just processes existing data
+rule get_files2_label:
+    cache: True
+    output: f"{DATA_DIR}/all_files2_label.json"
+    log:
+        "logs/get_files2_label.log"
+    script: "get_files2_label.py"
+
+# Rule 3: Clean annotation data - processes raw dump to parquet
+rule clean_annotation_data:
+    input:
+        f"{DATA_DIR}/corral_dump.json",
+        f"{DATA_DIR}/all_files2_label.json"
+    output:
+        f"{DATA_DIR}/cleaned_corral_annotations.parquet",
+        f"{DATA_DIR}/example_entry.json"
+    log:
+        "logs/clean_annotation_data.log"
+    script: "clean_annotation_data.py"
+
+# Rule 4: Collect all tasks info - aggregates task results from reports
+rule collect_all_tasks_info:
+    output:
+        f"{DATA_DIR}/all_tasks_info.json",
+        f"{DATA_DIR}/main_results.json"
+    log:
+        "logs/collect_all_tasks_info.log"
+    script: "collect_all_tasks_info.py"
+
+# Rule 5: Compute message statistics
+rule compute_message_stats:
+    input:
+        f"{DATA_DIR}/all_files2_label.json"
+    output:
+        f"{DATA_DIR}/message_stats_detailed.json",
+        f"{DATA_DIR}/message_stats_summary.json"
+    log:
+        "logs/compute_message_stats.log"
+    script: "compute_message_stats.py"
+
+# Rule 6: Generate overleaf table - creates LaTeX tables for paper
+# This assumes that the Q&A data has already been collected
+rule generate_overleaf_table:
+    input:
+        f"{DATA_DIR}/main_results.json",
+        f"{DATA_DIR}/message_stats_detailed.json"
+    output:
+        f"{DATA_DIR}/main_results_table.tex",
+        f"{DATA_DIR}/main_results_subtasks_table.tex"
+    log:
+        "logs/generate_overleaf_table.log"
+    script: "generate_overleaf_table.py"
+
+# Rule 7: Missing val - identifies missing annotations
+rule missing_val:
+    input:
+        f"{DATA_DIR}/cleaned_corral_annotations.parquet"
+    output:
+        f"missing_val/annotation_progress_by_environment.pdf"
+    log:
+        "logs/missing_val.log"
+    script: "missing_val.py"
+
+# Rule 8: Plot annotations - creates annotation plots
+rule plot_annotations:
+    input:
+        f"{DATA_DIR}/all_tasks_info.json",
+        f"{DATA_DIR}/main_results.json",
+        f"{DATA_DIR}/cleaned_corral_annotations.parquet"
+    output:
+        f"{DATA_DIR}/annotation_main_results.json",
+        f"{PLOTS_DIR}/sentiment_counts_per_environment.pdf",
+        f"{PLOTS_DIR}/average_markers_per_environment.pdf"
+    log:
+        "logs/plot_annotations.log"
+    script: "plot_annotations.py"
+
+# Rule 9: Plot annotations vs length - plots marker counts vs trace length
+rule plot_annotations_vs_length:
+    input:
+        f"{DATA_DIR}/cleaned_corral_annotations.parquet"
+    output:
+        touch(".plot_annotations_vs_length.done")
+    log:
+        "logs/plot_annotations_vs_length.log"
+    script: "plot_annotations_vs_length.py"
+
+# Rule 10: Plot marker counts per annotator environment
+rule plot_marker_counts:
+    input:
+        f"{DATA_DIR}/cleaned_corral_annotations.parquet"
+    output:
+        touch(".plot_marker_counts.done")
+    log:
+        "logs/plot_marker_counts.log"
+    script: "plot_marker_counts_per_annotator_environment.py"
+
+# Clean rule to remove generated files
+rule clean:
+    shell:
+        """
+        rm -f .plot_annotations_vs_length.done
+        rm -f .plot_marker_counts.done
+        rm -f {DATA_DIR}/corral_dump.json
+        rm -f {DATA_DIR}/all_files2_label.json
+        rm -f {DATA_DIR}/cleaned_corral_annotations.parquet
+        rm -f {DATA_DIR}/example_entry.json
+        rm -f {DATA_DIR}/all_tasks_info.json
+        rm -f {DATA_DIR}/main_results.json
+        rm -f {DATA_DIR}/message_stats_detailed.json
+        rm -f {DATA_DIR}/message_stats_summary.json
+        rm -f {DATA_DIR}/main_results_table.tex
+        rm -f {DATA_DIR}/main_results_subtasks_table.tex
+        rm -f {DATA_DIR}/annotation_main_results.json
+        rm -f missing_val/annotation_progress_by_environment.pdf
+        rm -f {PLOTS_DIR}/sentiment_counts_per_environment.pdf
+        rm -f {PLOTS_DIR}/average_markers_per_environment.pdf
+        rm -rf logs/
+        """
