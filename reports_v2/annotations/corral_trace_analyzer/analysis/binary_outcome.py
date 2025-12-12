@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import shap
 from loguru import logger
 from pycm import ConfusionMatrix
 from scipy import stats
@@ -167,6 +168,153 @@ class BinaryOutcomeAnalyzer:
         logger.info(f"  Total features after encoding: {len(encoded_feature_names)}")
 
         return encoded_feature_names
+
+    def compute_shap_values(
+        self,
+        model,
+        X_train: np.ndarray,
+        X_test: np.ndarray,
+        feature_names: list[str],
+        model_type: str = "tree",
+        output_dir: Path | None = None,
+        model_name: str = "model",
+    ) -> dict[str, Any]:
+        """
+        Compute SHAP values for feature importance with signed contributions
+
+        Args:
+            model: Trained model
+            X_train: Training data (for background)
+            X_test: Test data (for SHAP values)
+            feature_names: List of feature names
+            model_type: "tree" for tree-based models, "linear" for linear models
+            output_dir: Directory to save SHAP plots
+            model_name: Name of model for file naming
+
+        Returns:
+            dict with SHAP values, importance rankings, and plot paths
+        """
+        logger.info(f"  Computing SHAP values for {model_name}...")
+
+        try:
+            # Create explainer based on model type
+            if model_type == "tree":
+                explainer = shap.TreeExplainer(model)
+                shap_values = explainer.shap_values(X_test)
+
+                # For binary classification, TreeExplainer returns values for class 1
+                if isinstance(shap_values, list):
+                    shap_values = shap_values[1]
+
+            elif model_type == "linear":
+                explainer = shap.LinearExplainer(model, X_train)
+                shap_values = explainer.shap_values(X_test)
+            else:
+                # Kernel explainer (model-agnostic, slower)
+                # Use a sample of training data as background
+                background = shap.sample(X_train, min(100, len(X_train)))
+                explainer = shap.KernelExplainer(model.predict_proba, background)
+                shap_values = explainer.shap_values(X_test)
+                if isinstance(shap_values, list):
+                    shap_values = shap_values[1]
+
+            # Calculate mean absolute SHAP values (for ranking importance)
+            mean_abs_shap = np.abs(shap_values).mean(axis=0)
+
+            # Calculate mean signed SHAP values (for direction)
+            mean_shap = shap_values.mean(axis=0)
+
+            # Create importance dataframe with signed values
+            shap_importance = pd.DataFrame(
+                {
+                    "feature": feature_names,
+                    "mean_abs_shap": mean_abs_shap,
+                    "mean_shap": mean_shap,  # Signed: positive = increases prediction
+                    "abs_mean_shap": np.abs(mean_shap),
+                }
+            ).sort_values("mean_abs_shap", ascending=False)
+
+            results = {
+                "shap_values": shap_values,
+                "shap_importance": shap_importance,
+                "feature_names": feature_names,
+            }
+
+            # Generate and save plots if output directory specified
+            if output_dir:
+                output_dir = Path(output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+
+                import matplotlib.pyplot as plt
+
+                # Summary plot (bar) - shows mean absolute SHAP
+                plt.figure(figsize=(10, 8))
+                shap.summary_plot(
+                    shap_values,
+                    X_test,
+                    feature_names=feature_names,
+                    plot_type="bar",
+                    show=False,
+                    max_display=20,
+                )
+                bar_plot_path = output_dir / f"{model_name}_shap_bar.png"
+                plt.tight_layout()
+                plt.savefig(bar_plot_path, dpi=300, bbox_inches="tight")
+                plt.close()
+                logger.info(f"    ✓ Saved SHAP bar plot to: {bar_plot_path}")
+                results["bar_plot_path"] = str(bar_plot_path)
+
+                # Summary plot (beeswarm) - shows distribution and direction
+                plt.figure(figsize=(10, 8))
+                shap.summary_plot(
+                    shap_values,
+                    X_test,
+                    feature_names=feature_names,
+                    show=False,
+                    max_display=20,
+                )
+                beeswarm_plot_path = output_dir / f"{model_name}_shap_beeswarm.png"
+                plt.tight_layout()
+                plt.savefig(beeswarm_plot_path, dpi=300, bbox_inches="tight")
+                plt.close()
+                logger.info(f"    ✓ Saved SHAP beeswarm plot to: {beeswarm_plot_path}")
+                results["beeswarm_plot_path"] = str(beeswarm_plot_path)
+
+                # Waterfall plot for first test instance (example)
+                if len(shap_values) > 0:
+                    plt.figure(figsize=(10, 8))
+                    shap.plots.waterfall(
+                        shap.Explanation(
+                            values=shap_values[0],
+                            base_values=explainer.expected_value
+                            if hasattr(explainer, "expected_value")
+                            else 0,
+                            data=X_test[0],
+                            feature_names=feature_names,
+                        ),
+                        show=False,
+                        max_display=15,
+                    )
+                    waterfall_plot_path = (
+                        output_dir / f"{model_name}_shap_waterfall_example.png"
+                    )
+                    plt.tight_layout()
+                    plt.savefig(waterfall_plot_path, dpi=300, bbox_inches="tight")
+                    plt.close()
+                    logger.info(
+                        f"    ✓ Saved SHAP waterfall plot to: {waterfall_plot_path}"
+                    )
+                    results["waterfall_plot_path"] = str(waterfall_plot_path)
+
+            logger.info(f"  ✓ SHAP analysis complete for {model_name}")
+            return results
+
+        except Exception as e:
+            logger.warning(f"  ✗ SHAP analysis failed for {model_name}: {e}")
+            return {
+                "error": str(e),
+                "shap_importance": pd.DataFrame(),
+            }
 
     def point_biserial_correlation(
         self, feature_cols: list[str] | None = None
@@ -329,6 +477,7 @@ class BinaryOutcomeAnalyzer:
         test_size: float = 0.2,
         cv_folds: int = 5,
         save_html: bool = True,
+        compute_shap: bool = True,
         output_dir: Path | None = None,
     ) -> dict[str, Any]:
         """
@@ -342,6 +491,7 @@ class BinaryOutcomeAnalyzer:
             test_size: Proportion of data for test set (default: 0.2)
             cv_folds: Number of cross-validation folds (default: 5)
             save_html: Whether to save PyCM HTML report (default: True)
+            compute_shap: Whether to compute SHAP values (default: True)
             output_dir: Directory to save HTML reports (default: current directory)
 
         Returns:
@@ -487,6 +637,19 @@ class BinaryOutcomeAnalyzer:
             except Exception as e:
                 logger.info(f"  ✗ Failed to generate PyCM report: {e}")
 
+        # SHAP analysis
+        shap_results = {}
+        if compute_shap:
+            shap_results = self.compute_shap_values(
+                model=model,
+                X_train=X_train,
+                X_test=X_test,
+                feature_names=encoded_feature_names,
+                model_type="linear",
+                output_dir=output_dir,
+                model_name="logistic_regression",
+            )
+
         return {
             "model": model,
             "preprocessor": preprocessor,
@@ -496,6 +659,8 @@ class BinaryOutcomeAnalyzer:
             if include_categorical
             else [],
             "feature_importance": feature_importance,
+            "shap_importance": shap_results.get("shap_importance", pd.DataFrame()),
+            "shap_values": shap_results.get("shap_values"),
             # Cross-validation
             "cv_scores": cv_scores,
             "cv_mean": cv_scores.mean(),
@@ -627,6 +792,7 @@ class BinaryOutcomeAnalyzer:
         cv_folds: int = 5,
         n_estimators: int = 100,
         save_html: bool = True,
+        compute_shap: bool = True,
         output_dir: Path | None = None,
     ) -> dict[str, Any]:
         """
@@ -641,6 +807,7 @@ class BinaryOutcomeAnalyzer:
             cv_folds: Number of cross-validation folds
             n_estimators: Number of trees in the forest
             save_html: Whether to save PyCM HTML report
+            compute_shap: Whether to compute SHAP values (default: True)
             output_dir: Directory to save HTML reports
 
         Returns:
@@ -789,6 +956,19 @@ class BinaryOutcomeAnalyzer:
             except Exception as e:
                 logger.info(f"  ✗ Failed to generate PyCM report: {e}")
 
+        # SHAP analysis
+        shap_results = {}
+        if compute_shap:
+            shap_results = self.compute_shap_values(
+                model=model,
+                X_train=X_train,
+                X_test=X_test,
+                feature_names=encoded_feature_names,
+                model_type="tree",
+                output_dir=output_dir,
+                model_name="random_forest",
+            )
+
         return {
             "model": model,
             "preprocessor": preprocessor,
@@ -798,6 +978,8 @@ class BinaryOutcomeAnalyzer:
             if include_categorical
             else [],
             "feature_importance": feature_importance,
+            "shap_importance": shap_results.get("shap_importance", pd.DataFrame()),
+            "shap_values": shap_results.get("shap_values"),
             "cv_scores": cv_scores,
             "cv_mean": cv_scores.mean(),
             "cv_std": cv_scores.std(),
@@ -834,6 +1016,7 @@ class BinaryOutcomeAnalyzer:
         test_size: float = 0.2,
         cv_folds: int = 5,
         save_html: bool = True,
+        compute_shap: bool = True,
         output_dir: Path | None = None,
     ) -> dict[str, Any]:
         """
@@ -847,6 +1030,7 @@ class BinaryOutcomeAnalyzer:
             test_size: Proportion of data for test set
             cv_folds: Number of cross-validation folds
             save_html: Whether to save PyCM HTML report
+            compute_shap: Whether to compute SHAP values (default: True)
             output_dir: Directory to save HTML reports
 
         Returns:
@@ -998,6 +1182,19 @@ class BinaryOutcomeAnalyzer:
             except Exception as e:
                 logger.info(f"  ✗ Failed to generate PyCM report: {e}")
 
+        # SHAP analysis
+        shap_results = {}
+        if compute_shap:
+            shap_results = self.compute_shap_values(
+                model=model,
+                X_train=X_train,
+                X_test=X_test,
+                feature_names=encoded_feature_names,
+                model_type="tree",
+                output_dir=output_dir,
+                model_name="xgboost",
+            )
+
         return {
             "model": model,
             "preprocessor": preprocessor,
@@ -1007,6 +1204,8 @@ class BinaryOutcomeAnalyzer:
             if include_categorical
             else [],
             "feature_importance": feature_importance,
+            "shap_importance": shap_results.get("shap_importance", pd.DataFrame()),
+            "shap_values": shap_results.get("shap_values"),
             "cv_scores": cv_scores,
             "cv_mean": cv_scores.mean(),
             "cv_std": cv_scores.std(),
