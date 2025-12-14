@@ -1,7 +1,44 @@
-# Corral: Scientific Agent Benchmark
+# Corral
 
 
-A comprehensive benchmarking framework for evaluating AI agents on science tasks. The system provides standardized environments, tools, and evaluation metrics to test agent performance across diverse materials science challenges.
+A platform for development, deployment and evaluation of environments and agents.
+
+
+
+Corral is built and maintained with the following foundational principles in mind:
+
+
+
+
+
+
+- Reproducibility: Facilitating consistent and repeatable research outcomes.
+
+- Control: Providing precise control over all environmental and agent variables.
+
+- Observability: Ensuring consistent monitoring and recording of all system changes.
+
+- Efficiency and Scalability: Designed to be lightweight while capable of scaling to complex demands.
+
+- Simplicity and Usability: Engineered for ease of understanding and straightforward application.
+
+- Flexibility: Avoiding implementation constraints to empower diverse approaches.
+
+
+
+<!--
+1. Framework of environment and agents should be compatible for active research, ie it should be reproducible, should allow control of anything that is a variables and should be able to monitor and record any change in the entire system with consistency.
+2. It should be light-weight and scalable at the same time.
+3. It should be easy to grasp and straightforward to apply.
+4. It doesn’t impose implementation constraints.  -->
+
+
+
+
+Corral has value for researchers, engineers, managers and teachers looking to use
+
+
+
 
 ## 🚀 Getting Started
 
