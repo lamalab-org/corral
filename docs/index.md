@@ -1,5 +1,11 @@
 # Corral
 
+<figure markdown>
+![corral](_static/corral_logo_final.png){ title="corral" alt="corral logo"  }
+</figure>
+
+
+
 Corral is a platform for development, deployment and evaluation of environments and agents.
 
 
@@ -27,9 +33,9 @@ Corral has value for researchers, engineers, managers and teachers looking to us
 
 # Environments 🌍
 
-The `Environment` is the "world" with which an agent or human interacts. In real world for a chemist doing synthesis, environment would be chemistry lab and for a computational scientist their PC/ HPC with softwares and internet.
+:  The `Environment` is the "world" with which an agent or human interacts. In real world for a chemist doing synthesis, environment would be chemistry lab and for a computational scientist their PC/ HPC with softwares and internet.
 
-`Environment` define the task space (Task and the different ways to solve them) that include use of tools. Good environment by construction gives feedback for the agent to observe allowing it to make its next move.
+:  `Environment` define the task space (Task and the different ways to solve them) that include use of tools. Good environment by construction gives feedback for the agent to observe allowing it to make its next move.
 
 
 
@@ -58,7 +64,7 @@ The platform includes several pre-built environments:
 
 # Agents 🤖
 
-`Agent` is the entity responsible for perception (observing the environment) and decision-making (deciding what actions/steps to take) to solve the task.
+:  `Agent` is the entity responsible for perception (observing the environment) and decision-making (deciding what actions/steps to take) to solve the task.
 Agents are made with AI models in many fancy ways (commonly called scaffolds).
 
 `Corral` treats agents as modular components, emphasizing the agent's internal architecture and learning/inference mechanisms. This modularity allows researchers to develop, train, and evaluate diverse agent designs independently of the specific environmental configurations.
@@ -75,7 +81,7 @@ The platform includes several built-in agent types:
 
 # Task 📝
 
-A `Task` defines the problem an Agent is intended to solve within a particular Environment. It specifies the criteria for successful completion, and often includes a reward structure or performance metrics used for evaluating the agent's efficacy and efficiency.
+:  A `Task` defines the problem an Agent is intended to solve within a particular Environment. It specifies the criteria for successful completion, and often includes a reward structure or performance metrics used for evaluating the agent's efficacy and efficiency.
 
 
 In `Corral`, a task typically encompasses the core objective and can optionally include constraints that the agent must adhere to during its execution (e.g., allowed tools). Furthermore, tasks often integrate a scoring function (or callback) that quantifies the agent's performance, allowing for automated evaluation.
@@ -89,21 +95,33 @@ The platform includes several built-in tasks:
 
 
 
-# Corral architecture TL;DR
+# Corral architecture TL;DR 🏗️
 
 Corral is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform comprises two primary services:
 
-`corral_server`: This dedicated microservice is responsible for hosting and managing environments and providing the interface for interaction.
+`CorralServer`: This dedicated microservice is responsible for hosting and managing environments and providing the interface for interaction (`CorralRouter`).
 
-`corral_runner`: This service is tasked with executing agents. It orchestrates the agent's lifecycle, feeding it observations, and relaying its chosen actions.
+`CorralRunner`: This service is tasked with executing agents. It orchestrates the agent's lifecycle, feeding it observations, and relaying its chosen actions.
 
 
 The interaction between an agent (running within corral_runner) and its environment (hosted by corral_server) occurs through REST API communication.
 
 
 
+
+
+
+
+
 /// info
     open: True
+
+<figure markdown>
+![corral_architecture](_static/corral_arch_simple.png){ title="corral arch" alt="corral architecture" }
+<figcaption>Corral Architecture Overview</figcaption>
+</figure>
+
+
 Agents within Corral are designed to interact with their environments primarily using natural language.
 ///
 
