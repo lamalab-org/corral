@@ -72,3 +72,46 @@ result = runner.bench(
 # Evaluate with different k values for pass@k metrics
 result = runner.bench(trials_per_task=5, k_values=[1, 2, 3, 4, 5])
 ```
+
+
+
+
+# Tool Creation
+
+#### Standard Tools
+
+```python
+from corral.backend.tool import tool
+
+
+@tool
+def calculate_molecular_weight(formula: str) -> float:
+    """Calculate molecular weight from chemical formula.
+
+    Args:
+        formula: Chemical formula (e.g., 'H2O', 'CH4')
+
+    Returns:
+        Molecular weight in g/mol
+    """
+    # Implementation here
+    pass
+```
+
+#### [Modal](https://modal.com) Tools (Cloud Execution)
+
+```python
+from corral.utils.modal import modal_tool, MODAL_TOOL_REGISTRY
+from modal import Image
+
+
+@modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
+def complex_calculation(data: str) -> str:
+    """Run computationally intensive task in the cloud."""
+    # This runs in Modal's cloud environment
+    pass
+
+
+# Access the tool
+tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]
+```

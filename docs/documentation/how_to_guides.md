@@ -1,10 +1,22 @@
-# Add a New Environment
+1. Write how to create an environment
+2. How to create tools in environment
+3. How to create tasks (take input from json) in environment
+4. How to create scoring functions for the task
+5. How to benchmark existing agent in this environment
+
+
+6. How to create a new agent with some scaffolds
+7. How to create a multi agent scaffold
+8. How to run this new agent in existing environment or tasks
+
+
+# Add a new Environment
 
 1. **Create environment directory**
 
    ```bash
-   mkdir -p tasks/my_new_env/my_new_env
-   cd tasks/my_new_env
+   mkdir my_new_env
+   cd my_new_env
    ```
 
 2. **Create pyproject.toml**
@@ -22,7 +34,7 @@
 3. **Create tools**
 
    ```python
-   # tasks/my_new_env/my_new_env/tools.py
+   # my_new_env/tools.py
    from corral.backend.tool import tool
 
 
@@ -45,7 +57,7 @@
 4. **Implement environment class**
 
    ```python
-   # tasks/my_new_env/my_new_env/env.py
+   # my_new_env/env.py
    from corral.backend import Environment
    from corral.backend.server import create_benchmark_server
 
@@ -82,7 +94,7 @@
        uvicorn.run(app, host="0.0.0.0", port=8000)
    ```
 
-# Adding a New Agent
+# Add a new Agent
 
 1. **Create agent file**
 
@@ -128,47 +140,3 @@
 
    result = runner.bench()
    ```
-
-
-
-## 📋 Advanced Usage
-
-# Tool Creation
-
-#### Standard Tools
-
-```python
-from corral.backend.tool import tool
-
-
-@tool
-def calculate_molecular_weight(formula: str) -> float:
-    """Calculate molecular weight from chemical formula.
-
-    Args:
-        formula: Chemical formula (e.g., 'H2O', 'CH4')
-
-    Returns:
-        Molecular weight in g/mol
-    """
-    # Implementation here
-    pass
-```
-
-#### [Modal](https://modal.com) Tools (Cloud Execution)
-
-```python
-from corral.utils.modal import modal_tool, MODAL_TOOL_REGISTRY
-from modal import Image
-
-
-@modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
-def complex_calculation(data: str) -> str:
-    """Run computationally intensive task in the cloud."""
-    # This runs in Modal's cloud environment
-    pass
-
-
-# Access the tool
-tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]
-```
