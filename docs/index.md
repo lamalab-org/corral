@@ -1,11 +1,10 @@
 # Corral
 
+Corral is a platform for development, deployment and evaluation of environments and agents.
 
-A platform for development, deployment and evaluation of environments and agents.
 
 
 Corral is built and maintained with the following foundational principles in mind:
-
 
 - Reproducibility: Facilitating consistent and repeatable research outcomes.
 
@@ -90,49 +89,28 @@ The platform includes several built-in tasks:
 
 
 
+# Corral architecture TL;DR
+
+Corral is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform comprises two primary services:
+
+`corral_server`: This dedicated microservice is responsible for hosting and managing environments and providing the interface for interaction.
+
+`corral_runner`: This service is tasked with executing agents. It orchestrates the agent's lifecycle, feeding it observations, and relaying its chosen actions.
 
 
-### Development Setup
-
-1. **Install development dependencies**
-
-   ```bash
-   uv pip install -e .
-   ```
-
-2. **Install pre-commit hooks with commitizen commits**
-
-   ```bash
-   pre-commit install --hook-type commit-msg --hook-type pre-push
-   ```
+The interaction between an agent (running within corral_runner) and its environment (hosted by corral_server) occurs through REST API communication.
 
 
-### Environment Configuration
 
-For environments requiring file I/O:
+/// info
+    open: True
+Agents within Corral are designed to interact with their environments primarily using natural language.
+///
 
-```bash
-export CORRAL_FS_PROTOCOL=local
-export BASE_IO_PATH=/path/to/work/directory
-```
 
-### Evaluation Metrics
 
-The framework provides comprehensive evaluation metrics:
 
-```python
-result = runner.bench(trials_per_task=10, k_values=[1, 3, 5])
 
-# Access detailed results
-print(f"Total score: {result.total_score}")
-print(f"Pass@1: {result.pass_at_k[1]}")
-print(f"Pass@3: {result.pass_at_k[3]}")
-print(f"Average trials: {result.average_trials}")
-
-# Per-task analysis
-for task_id, task_result in result.task_results.items():
-    print(f"Task {task_id}: {task_result.success_rate:.2f} success rate")
-```
 
 ## 🤝 Community
 

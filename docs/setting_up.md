@@ -2,7 +2,7 @@
 
 ### Prerequisites
 
-- Python 3.10 or higher
+- Python 3.12 or higher
 - `uv` (recommended) or `pip` for package management
 
 ### Installation
