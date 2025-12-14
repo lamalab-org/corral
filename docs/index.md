@@ -8,10 +8,6 @@ A platform for development, deployment and evaluation of environments and agents
 Corral is built and maintained with the following foundational principles in mind:
 
 
-
-
-
-
 - Reproducibility: Facilitating consistent and repeatable research outcomes.
 
 - Control: Providing precise control over all environmental and agent variables.
@@ -27,37 +23,42 @@ Corral is built and maintained with the following foundational principles in min
 
 
 <!--
-1. Framework of environment and agents should be compatible for active research, ie it should be reproducible, should allow control of anything that is a variables and should be able to monitor and record any change in the entire system with consistency.
-2. It should be light-weight and scalable at the same time.
-3. It should be easy to grasp and straightforward to apply.
-4. It doesn’t impose implementation constraints.  -->
-
-
-
-
 Corral has value for researchers, engineers, managers and teachers looking to use
 
+ -->
+
+# Environments 🌍
+
+The Environment is the operational context or "world" with which an agent or human interacts. In real world for a chemist doing synthesis environment would be chemistry lab and for a computational scientist their PC/ HPC.
+
+Environment define the task space (Task and the different ways to solve them) that include use of tools. Good environment by construction gives feedback for the agent to observe allowing it to make its next move.
 
 
 
+In Corral, all resources and capabilities that an agent might leverage – such as specific APIs, code interpreters, or specialized data stores – are considered intrinsic components of the environment itself. This architectural choice ensures that environment design is explicit about available tools, facilitating rigorous control, strict reproducibility, and clear separation between the agent's decision-making logic and its interactive substrate.
 
+<!-- Not sure if we should define the components of environment in detail as well. (action space, terminal condition etc) -->
 
-
-# 🏗️ Available Environments
 
 The framework includes several pre-built environments:
 
 | Environment | Description |
 |-------------|-------------|
-| `samplemath` | Basic mathematical operations |
-| `spectra_elu_easy` | Spectroscopy data analysis |
-| `md_simulations` | Molecular dynamics setup |
-| `catalyst` | Catalysis research tasks |
-| `afm` | Atomic force microscopy |
-| `md_tutorials` | MD tutorial completion |
+| `corral_samplemath` | Basic mathematical operations |
+| `corral_spectra` | Spectroscopy data analysis |
+| `corrl_molecular_dynamics` | Molecular dynamics setup |
+| `corral_open_catalyst` | Catalysis research tasks |
+| `corral_afm` | Atomic force microscopy |
+| `corral_retrosynthesis` | Plan synthesis|
+| `corral_resistor` | Infer circuit topology|
+| `corral_wet_lab`| Virtual lab for ion analysis |
+| `corral_simple_ml`| Basic ML modeling |
 
 
-# 🤖 Available Agents
+
+
+
+# Agents 🤖
 
 The framework includes several built-in agent types:
 
