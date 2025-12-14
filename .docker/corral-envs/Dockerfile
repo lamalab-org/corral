@@ -72,7 +72,38 @@ export CORRAL_WORK_DIR="${CORRAL_WORK_DIR:-/workspace}"
 
 mkdir -p "${CORRAL_WORK_DIR}"
 
-exec uv run python -m ${ENV_MODULE} "$@"
+# Build command arguments starting with port
+ARGS="--port ${CORRAL_PORT}"
+
+# Parse CORRAL_ENV_ARGS JSON and convert to CLI arguments
+if [ -n "$CORRAL_ENV_ARGS" ]; then
+    EXTRA_ARGS=$(python3 -c "
+import json
+import os
+import sys
+
+try:
+    args = json.loads(os.environ.get('CORRAL_ENV_ARGS', '{}'))
+    parts = []
+    for key, value in args.items():
+        # Convert Python booleans to lowercase strings
+        if isinstance(value, bool):
+            value = str(value).lower()
+        parts.append(f'--{key}')
+        parts.append(str(value))
+    print(' '.join(parts))
+except json.JSONDecodeError as e:
+    print(f'ERROR: Invalid JSON in CORRAL_ENV_ARGS: {e}', file=sys.stderr)
+    sys.exit(1)
+")
+    if [ $? -ne 0 ]; then
+        echo "Failed to parse CORRAL_ENV_ARGS"
+        exit 1
+    fi
+    ARGS="$ARGS $EXTRA_ARGS"
+fi
+
+exec uv run python -m ${ENV_MODULE} $ARGS "$@"
 EOF
 
 RUN chmod +x /usr/local/bin/entrypoint.sh

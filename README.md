@@ -65,6 +65,10 @@ A comprehensive benchmarking framework for evaluating AI agents on science tasks
 # Run a full benchmark (starts Docker environment + runs agent)
 corral bench run --image ghcr.io/lamalab-org/corral-materials:latest
 
+# Run with environment-specific arguments
+corral bench run --image ghcr.io/lamalab-org/corral-materials:latest \
+    --env-args '{"dir": "/workspace", "subtask_level": true}'
+
 # Or run environment and agent separately
 corral bench env --image ghcr.io/lamalab-org/corral-materials:latest --port 8000 --detach
 corral bench agent --base-url http://localhost:8000 --agent ReActAgent --model claude-sonnet-4-5-20250929
@@ -102,8 +106,25 @@ corral bench stop
 | `--verbose` | `-v` | `false` | Enable verbose output |
 | `--agent-kwargs` | - | - | JSON string or `@file.yaml` with extra agent params |
 | `--runner-kwargs` | - | - | JSON string or `@file.yaml` with extra runner params |
+| `--env-args` | - | - | JSON string or `@file.yaml` with environment-specific arguments |
 
 Use `corral --help` to see all available commands and options.
+
+**Environment-Specific Arguments:**
+
+Some environments require custom arguments (e.g., working directory, feature flags). Use `--env-args` to pass these as a JSON object:
+
+```bash
+# Pass environment-specific arguments
+corral bench run \
+    --image ghcr.io/lamalab-org/corral-materials:latest \
+    --env-args '{"dir": "/workspace", "subtask_level": true}'
+
+# Or use a YAML file
+corral bench run --env-args @env_config.yaml
+```
+
+The JSON key-value pairs are converted to CLI arguments for the environment container (e.g., `{"dir": "/workspace"}` becomes `--dir /workspace`).
 
 **Example with config file:**
 

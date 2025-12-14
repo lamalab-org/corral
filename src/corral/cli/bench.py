@@ -172,6 +172,12 @@ def run_benchmark(
         "--runner-kwargs",
         help="JSON string or @file.yaml with extra runner parameters",
     ),
+    env_args: str | None = typer.Option(
+        None,
+        "--env-args",
+        help="JSON string or @file.yaml with environment-specific arguments. "
+        "These are passed to the environment container and converted to CLI args.",
+    ),
 ):
     """Run agent benchmarks against a Corral environment."""
     # This must be imported here to avoid circular imports
@@ -201,12 +207,15 @@ def run_benchmark(
     # Parse extra kwargs
     extra_agent_kwargs = parse_json_or_file(agent_kwargs) or {}
     extra_runner_kwargs = parse_json_or_file(runner_kwargs) or {}
+    extra_env_args = parse_json_or_file(env_args) or {}
 
     # Merge agent_kwargs from config file too
     if "agent_kwargs" in file_config:
         extra_agent_kwargs = {**file_config["agent_kwargs"], **extra_agent_kwargs}
     if "runner_kwargs" in file_config:
         extra_runner_kwargs = {**file_config["runner_kwargs"], **extra_runner_kwargs}
+    if "env_args" in file_config:
+        extra_env_args = {**file_config["env_args"], **extra_env_args}
 
     # Display final configuration
     _show_config(settings, extra_agent_kwargs, extra_runner_kwargs)
@@ -229,6 +238,7 @@ def run_benchmark(
             agent_kwargs=extra_agent_kwargs,
             runner_kwargs=extra_runner_kwargs,
             agent_image=settings["agent_image"],
+            env_args=extra_env_args if extra_env_args else None,
         )
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
@@ -266,13 +276,25 @@ def run_environment_only(
         "-d",
         help="Run in detached mode (background)",
     ),
+    env_args: str | None = typer.Option(
+        None,
+        "--env-args",
+        help="JSON string or @file.yaml with environment-specific arguments. "
+        "These are passed to the environment container and converted to CLI args.",
+    ),
 ):
     """Run ONLY the environment container (no agent)."""
     # Avoid circular imports
     from corral.cli.docker_runner import DockerBenchmarkRunner
 
+    # Parse env_args
+    extra_env_args = parse_json_or_file(env_args)
+
     console.print(f"[bold]Starting environment only:[/bold] {image}")
-    console.print(f"[dim]Exposed on port {port}[/dim]\n")
+    console.print(f"[dim]Exposed on port {port}[/dim]")
+    if extra_env_args:
+        console.print(f"[dim]Environment args: {extra_env_args}[/dim]")
+    console.print()
 
     runner = DockerBenchmarkRunner()
 
@@ -281,6 +303,7 @@ def run_environment_only(
             env_image=image,
             port=port,
             detach=detach,
+            env_args=extra_env_args,
         )
 
         if detach:

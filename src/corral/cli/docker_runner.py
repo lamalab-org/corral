@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,31 @@ if TYPE_CHECKING:
     from docker.models.containers import Container
 
 console = Console()
+
+
+def find_available_port(start_port: int = 8000, max_attempts: int = 100) -> int:
+    """Find an available port starting from start_port.
+
+    Args:
+        start_port: The preferred port to start searching from.
+        max_attempts: Maximum number of ports to try.
+
+    Returns:
+        An available port number.
+
+    Raises:
+        RuntimeError: If no available port is found within max_attempts.
+    """
+    for port in range(start_port, start_port + max_attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("localhost", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError(
+        f"Could not find an available port in range {start_port}-{start_port + max_attempts}"
+    )
 
 
 # Default GHCR images
@@ -49,6 +75,7 @@ class DockerBenchmarkRunner:
         agent_kwargs: dict[str, Any] | None = None,
         runner_kwargs: dict[str, Any] | None = None,
         agent_image: str | None = None,
+        env_args: dict[str, Any] | None = None,
     ):
         """Run benchmark with two-container architecture.
 
@@ -67,6 +94,8 @@ class DockerBenchmarkRunner:
             runner_kwargs: Extra runner parameters.
             agent_image: Docker image for the agent runner. Defaults to GHCR image.
                         Use 'local' to use a locally built image named 'corral-agent-runner:latest'.
+            env_args: Environment-specific arguments passed as JSON to the container.
+                     These are converted to CLI arguments by the entrypoint script.
         """
         with Progress(
             SpinnerColumn(),
@@ -80,14 +109,19 @@ class DockerBenchmarkRunner:
 
             # 2. Start environment container
             task = progress.add_task("Starting environment container...", total=None)
-            env_container = self._start_environment(env_image)
-            progress.update(task, description="[green]✓[/green] Environment started")
+            env_container, env_port = self._start_environment(
+                env_image, env_args=env_args
+            )
+            progress.update(
+                task,
+                description=f"[green]✓[/green] Environment started on port {env_port}",
+            )
 
             # 3. Wait for environment to be healthy
             task = progress.add_task(
                 "Waiting for environment to be ready...", total=None
             )
-            self._wait_for_healthy(env_container)
+            self._wait_for_healthy(env_container, port=env_port)
             progress.update(task, description="[green]✓[/green] Environment healthy")
 
             # 4. Resolve agent image
@@ -166,8 +200,25 @@ class DockerBenchmarkRunner:
         except NotFound:
             self.client.networks.create(self.NETWORK_NAME, driver="bridge")
 
-    def _start_environment(self, image: str, port: int = 8000) -> Container:
-        """Start the environment container."""
+    def _start_environment(
+        self,
+        image: str,
+        port: int = 8000,
+        auto_find_port: bool = True,
+        env_args: dict[str, Any] | None = None,
+    ) -> tuple[Container, int]:
+        """Start the environment container.
+
+        Args:
+            image: Docker image for the environment.
+            port: Preferred port to use.
+            auto_find_port: If True, automatically find an available port if the
+                preferred port is busy.
+
+        Returns:
+            A tuple of (container, actual_port) where actual_port is the port
+            the environment is running on.
+        """
         # Stop existing container if running
         try:
             old = self.client.containers.get(self.ENV_CONTAINER_NAME)
@@ -176,17 +227,37 @@ class DockerBenchmarkRunner:
         except NotFound:
             pass
 
-        return self.client.containers.run(
+        # Find available port if requested
+        actual_port = port
+        if auto_find_port:
+            actual_port = find_available_port(port)
+            if actual_port != port:
+                console.print(
+                    f"[yellow]Port {port} is busy, using port {actual_port} instead[/yellow]"
+                )
+
+        # Store the port for agent connection
+        self._env_port = actual_port
+
+        # Build environment variables
+        environment = {
+            "CORRAL_HOST": "0.0.0.0",
+            "CORRAL_PORT": str(actual_port),
+        }
+
+        # Add environment-specific args as JSON
+        if env_args:
+            environment["CORRAL_ENV_ARGS"] = json.dumps(env_args)
+
+        container = self.client.containers.run(
             image,
             name=self.ENV_CONTAINER_NAME,
             network=self.NETWORK_NAME,
-            environment={
-                "CORRAL_HOST": "0.0.0.0",
-                "CORRAL_PORT": str(port),
-            },
-            ports={f"{port}/tcp": port},
+            environment=environment,
+            ports={f"{actual_port}/tcp": actual_port},
             detach=True,
         )
+        return container, actual_port
 
     def _start_agent(
         self,
@@ -216,7 +287,7 @@ class DockerBenchmarkRunner:
             pass
 
         env = {
-            "BASE_URL": f"http://{self.ENV_CONTAINER_NAME}:8000",
+            "BASE_URL": f"http://{self.ENV_CONTAINER_NAME}:{getattr(self, '_env_port', 8000)}",
             "AGENT_CLASS": agent_class,
             "MODEL": model,
             "TRIALS_PER_TASK": str(trials_per_task),
@@ -252,10 +323,17 @@ class DockerBenchmarkRunner:
         env_image: str,
         port: int = 8000,
         detach: bool = False,
+        env_args: dict[str, Any] | None = None,
     ):
         """Run only the environment container (no agent).
 
         Useful for development - run env in Docker, agent locally.
+
+        Args:
+            env_image: Docker image for the environment.
+            port: Port to expose the environment on.
+            detach: Run in detached mode.
+            env_args: Environment-specific arguments passed as JSON to the container.
         """
         with Progress(
             SpinnerColumn(),
@@ -267,17 +345,22 @@ class DockerBenchmarkRunner:
             progress.update(task, description="[green]✓[/green] Network ready")
 
             task = progress.add_task("Starting environment container...", total=None)
-            env_container = self._start_environment(env_image, port=port)
-            progress.update(task, description="[green]✓[/green] Environment started")
+            env_container, actual_port = self._start_environment(
+                env_image, port=port, env_args=env_args
+            )
+            progress.update(
+                task,
+                description=f"[green]✓[/green] Environment started on port {actual_port}",
+            )
 
             task = progress.add_task(
                 "Waiting for environment to be ready...", total=None
             )
-            self._wait_for_healthy(env_container, port=port)
+            self._wait_for_healthy(env_container, port=actual_port)
             progress.update(task, description="[green]✓[/green] Environment healthy")
 
         console.print(
-            f"\n[bold green]Environment running at http://localhost:{port}[/bold green]\n"
+            f"\n[bold green]Environment running at http://localhost:{actual_port}[/bold green]\n"
         )
 
         if not detach:
