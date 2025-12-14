@@ -4,7 +4,6 @@
 A platform for development, deployment and evaluation of environments and agents.
 
 
-
 Corral is built and maintained with the following foundational principles in mind:
 
 
@@ -29,18 +28,18 @@ Corral has value for researchers, engineers, managers and teachers looking to us
 
 # Environments 🌍
 
-The Environment is the operational context or "world" with which an agent or human interacts. In real world for a chemist doing synthesis environment would be chemistry lab and for a computational scientist their PC/ HPC.
+The `Environment` is the "world" with which an agent or human interacts. In real world for a chemist doing synthesis, environment would be chemistry lab and for a computational scientist their PC/ HPC with softwares and internet.
 
-Environment define the task space (Task and the different ways to solve them) that include use of tools. Good environment by construction gives feedback for the agent to observe allowing it to make its next move.
+`Environment` define the task space (Task and the different ways to solve them) that include use of tools. Good environment by construction gives feedback for the agent to observe allowing it to make its next move.
 
 
 
-In Corral, all resources and capabilities that an agent might leverage – such as specific APIs, code interpreters, or specialized data stores – are considered intrinsic components of the environment itself. This architectural choice ensures that environment design is explicit about available tools, facilitating rigorous control, strict reproducibility, and clear separation between the agent's decision-making logic and its interactive substrate.
+In `Corral`, all resources and capabilities that an agent might leverage – such as specific APIs, code interpreters, or specialized data stores – are considered intrinsic components of the environment itself. This architectural choice ensures that environment design is explicit about available tools, facilitating rigorous control, strict reproducibility, and clear separation between the agent's decision-making logic and its interactive substrate.
 
 <!-- Not sure if we should define the components of environment in detail as well. (action space, terminal condition etc) -->
 
 
-The framework includes several pre-built environments:
+The platform includes several pre-built environments:
 
 | Environment | Description |
 |-------------|-------------|
@@ -60,54 +59,36 @@ The framework includes several pre-built environments:
 
 # Agents 🤖
 
-The framework includes several built-in agent types:
+`Agent` is the entity responsible for perception (observing the environment) and decision-making (deciding what actions/steps to take) to solve the task.
+Agents are made with AI models in many fancy ways (commonly called scaffolds).
 
-### ReActAgent
+`Corral` treats agents as modular components, emphasizing the agent's internal architecture and learning/inference mechanisms. This modularity allows researchers to develop, train, and evaluate diverse agent designs independently of the specific environmental configurations.
 
-Uses the ReAct (Reasoning and Acting) framework for step-by-step problem solving.
+The platform includes several built-in agent types:
 
-```python
-from corral.agents import ReActAgent
-
-agent = ReActAgent(
-    model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model litellm supports
-    temperature=0.1,
-    max_iterations=10,
-)
-```
-
-### ToolCallingAgent
-
-Uses native function calling from LLM providers to solve tasks by leveraging built-in tool/function calling capabilities.
-
-```python
-from corral.agents import ToolCallingAgent
-
-agent = ToolCallingAgent(
-    model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model LiteLLM supports
-    temperature=0.0,
-    max_iterations=10,
-)
-```
-
-### LLMPlanner
-
-Uses hierarchical planning with high-level planning and low-level execution delegation to other agents.
-
-```python
-from corral.agents import LLMPlanner
-
-agent = LLMPlanner(model="gpt-4o", temperature=0.1, max_iterations=5)
-```
+| Agent | Description |
+|-------|-------------|
+| `ReAct` | Uses the ReAct (Reasoning and Acting) framework for step-by-step problem solving. |
+| `ToolCalling` | Uses native function calling from LLM providers to solve tasks by leveraging built-in tool/function calling capabilities. |
+| `LLMPlanner` | Uses hierarchical planning with high-level planning and low-level execution delegation to other agents. |
+| `Reflection` | Empowers agents to self-evaluate their past actions and reasoning, learn from errors, and refine future strategies or plans. |
 
 
-## 💾 Checkpoint System
+# Task 📝
 
-The framework automatically saves checkpoints during benchmark runs.
+A `Task` defines the problem an Agent is intended to solve within a particular Environment. It specifies the criteria for successful completion, and often includes a reward structure or performance metrics used for evaluating the agent's efficacy and efficiency.
 
-Checkpoints are automatically searched and loaded when resuming interrupted runs.
 
-## 🔧 Contributing
+In `Corral`, a task typically encompasses the core objective and can optionally include constraints that the agent must adhere to during its execution (e.g., allowed tools). Furthermore, tasks often integrate a scoring function (or callback) that quantifies the agent's performance, allowing for automated evaluation.
+
+`Corral` also introduces the concept of `TaskGroups`, which are sequences of individual tasks chained together. These `TaskGroups` are solved in a predefined order, with the output or state from one task potentially serving as input or context for the subsequent tasks. This powerful capability allows for the construction of arbitrarily complex, multi-stage research challenges that mirror real-world problem-solving processes.
+
+Through this formalism, `Corral` provides a flexible and robust framework for defining and evaluating intricate agent behaviors across a wide spectrum of research problems.
+
+
+The platform includes several built-in tasks:
+
+
 
 
 
