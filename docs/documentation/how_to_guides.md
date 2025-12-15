@@ -1,11 +1,17 @@
-*1. Write how to create an environment*
-2. How to create tools in environment
-3. How to create tasks (take input from json) in environment
-4. How to create scoring functions for the task
-5. How to benchmark existing agent in this environment
+~~1. Write how to create an environment~~
+
+~~2. How to create a new agent with some scaffolds~~
+
+~~3. How to create tasks (take input from json) in environment~~
+
+4. How to create tools in environment
+
+5.  How to create scoring functions for the task
+
+7.  How to benchmark existing agent in this environment
 
 
-6. How to create a new agent with some scaffolds
+
 7. How to create a multi agent scaffold
 8. How to run this new agent in existing environment or tasks
 
@@ -160,7 +166,10 @@ Here `task_1` is the task id which is unique to the task. `Problem 1`, `Answer 1
 
 `create_benchmark_server` sets up and runs the `corral_server` with your newly defined environments, making them accessible via `http://localhost:8000.`
 
+---
+
 # 2. How to create a custom `Agent` in `Corral`
+
 
 By extending the `BaseAgent` class in corral, you can implement unique reasoning processes, interaction patterns to create different agent scaffolds. This abstract class provides essential functionalities and a standardized interface, handling:
 - Calls to Large Language Models (LLMs) via `LiteLLM`
@@ -206,10 +215,12 @@ Now, create your agent's main Python file (e.g., agent.py) and start defining yo
            # Get task information
            task_guide = interface.get_task_guide(task_id)
 
-           self.messages = create_prompt(
-               user_prompt=self.user_prompt,
-               task_guide=task_guide,
-           )
+           # prepare the prompt for the agent now that ypu have task info
+
+           #    self.messages = create_prompt(
+           #        user_prompt=self.user_prompt,
+           #        task_guide=task_guide,
+           #    )
 
            # Your agent logic here
            # Use interface.execute_tool() to call tools
@@ -222,7 +233,7 @@ Now, create your agent's main Python file (e.g., agent.py) and start defining yo
    ```
 The `__init()__` initialize the BaseAgent with common parameters.
 
-The `.run()` is an abstract method in BaseAgent and must be implemented. Crucially, it sets prompts.
+The `.run()` is an abstract method in BaseAgent and must be implemented.
 
 `CorralRouter` (is the interface agent has with the environment). Use it to,
 
@@ -236,3 +247,185 @@ The `.run()` is an abstract method in BaseAgent and must be implemented. Crucial
 
 
 `self.get_llm_response()`, calls the LLM with the current self.messages and potentially available tools.
+
+---
+
+
+# 3. How to prepare tasks and scoring function for the environment (Material Science example)
+
+This section demonstrates how to define a task and implementing reward function, using a material science scenario.
+Our example task will involve an agent retrieving a material structure from the `Materials Project` database and then attempting to create a specific crystal slab from it. The scoring function will use `pymatgen` to verify the generated slab.
+
+
+**`1. Prepare Task Json`**
+
+Create a `material_tasks.json` file. This file will define the parameters for each material science task.
+
+```json
+{
+  "silicon_slab_task": {
+    "input_params" : {"mp_id": "mp-149",
+    "miller_index": [1, 0, 0],
+    "min_slab_size": 10.0,
+    "vacuum_size": 10.0,
+    "num_layers": 3},
+    "problem_description": "Retrieve the structure for Silicon (mp-149) from Materials Project. Create a (100) slab with at least 3 layers and a 10 Å vacuum layer. Submit the CIF string of the slab."
+  },
+  "diamond_slab_task": {
+    "input_params" : {"mp_id": "mp-66",
+    "miller_index": [1, 1, 1],
+    "min_slab_size": 8.0,
+    "vacuum_size": 12.0,
+    "num_layers": 4,}
+    "problem_description": "Retrieve the structure for Diamond (mp-66). Create a (111) slab with at least 4 layers and a 12 Å vacuum layer. Submit the CIF string of the slab."
+  }
+}
+
+```
+
+- Each key (e.g., "silicon_slab_task") is a unique ID for a task.
+- The values are dictionaries containing task-specific parameters (`mp_id`, `miller_index`,`min_slab_size`, `vacuum_size`, `num_layers`,`problem_description`)
+
+**`2. Write scoring functions`**
+
+```python
+from mp_api.client import MPRester
+from pymatgen.core import Structure
+from pymatgen.core.surface import SlabGenerator
+from pymatgen.analysis.structure_matcher import StructureMatcher
+
+
+def pymatgen_score(submitted_slab_cif: str, metadata: dict) -> float:
+    """
+    Scores the agent's submitted slab using pymatgen to verify its valids.
+    """
+    if submitted_slab_cif is None:
+        return 0.0  # No slab submitted
+
+    try:
+        agent_slab = Structure.from_str(submitted_slab_cif, fmt="cif")
+    except Exception as e:
+        logger.info(f"Scoring error: Agent submitted invalid CIF string: {e}")
+        return 0.0  # Invalid CIF submitted
+
+    # --- Generate the target reference slab for comparison ---
+    try:
+        with MPRester() as mpr:
+            bulk_structure = mpr.get_structure_by_material_id(metadata["mp_id"])
+
+        slab_gen = SlabGenerator(
+            initial_structure=bulk_structure,
+            miller_index=metadata["miller_index"],
+            min_slab_size=metadata["min_slab_size"],
+            vacuum_size=metadata["vacuum_size"],
+        )
+        reference_slab = slab_gen.get_slab()
+    except Exception as e:
+        logger.info(f"Scoring error: Could not generate reference slab: {e}")
+        return 0.0
+
+    score_value = 0.0
+    matcher = StructureMatcher(ltol=0.1, stol=0.1, angle_tol=5)  # Default tolerances
+
+    # 1. Structural similarity (comparing primitive cell of slabs)
+    if matcher.fit(
+        agent_slab.get_primitive_structure(), reference_slab.get_primitive_structure()
+    ):
+        logger.info("Scoring: Primitive structures match. (+0.4)")
+        score_value += 0.5
+
+    # 2. Check vacuum layer thickness
+    if (
+        abs(agent_slab.get_vacuum_thickness() - metadata["vacuum_size"]) < 0.5
+    ):  # 0.5 Angstrom tolerance
+        logger.info(
+            f"Scoring: Vacuum thickness matches (Agent: {agent_slab.get_vacuum_thickness():.2f}Å, Ref: {metadata['vacuum_size']:.2f}Å). (+0.3)"
+        )
+        score_value += 0.5
+    else:
+        logger.info(
+            f"Scoring: Vacuum thickness mismatch (Agent: {agent_slab.get_vacuum_thickness():.2f}Å, Ref: {metadata['vacuum_size']:.2f}Å)."
+        )
+
+    # Final score based on accumulated points
+    return round(score_value, 2)
+```
+The scoring function here takes as input the answer submitted by the agent and a dict with metadata for creating ground truth, it then compares and returns a reward. User can write any such complex, binary or floating scoring functions.
+
+
+**`3. Task and Scoring in environment`**
+
+Let us also see how an environment can be defined for such task and scoring use case.
+
+```python
+class SimpleMaterialSlabEnvironment(Environment):
+    def __init__(
+        self,
+        task_id: str,
+        input_params: Dict[str, Any],  # This now holds all the specific task parameters
+        problem_description: str,
+    ):
+        self.input_params = input_params
+        self.problem_description = problem_description
+
+        super().__init__(task_id)
+
+        # Add your custom material science tools
+        self.add_tool(get_mp_structure)
+        self.add_tool(generate_slab)
+
+    def get_task_prompt(self) -> str:
+        """
+        Returns the initial prompt for the agent, using the problem_description from JSON.
+        """
+        return (
+            f"{self.problem_description}\n"
+            "Use the tool to retrieve the bulk structure, "
+            "then use a tool to create the slab with the specified parameters. "
+            "Finally, submit final answer with the CIF string of the generated slab,"
+            "in the format FINAL_ANSWER: cif_string"
+        )
+
+    def score(self) -> float:
+        """
+        Calls the standalone custom_slab_scoring_function with the agent's output
+        and the task's metadata (input_params).
+        """
+        return pymatgen_score(
+            submitted_slab_cif=self.self.state.submitted_answer,
+            metadata=self.input_params,  # Pass all input_params as metadata for ground truth
+        )
+```
+
+Now lets load our task into corral server.
+
+```python
+def load_environments_from_json(file_path: str) -> Dict[str, Environment]:
+    """Loads environment instances from a JSON task definition file."""
+    environments = {}
+    with open(file_path, "r") as f:
+        tasks_data = json.load(f)
+
+    for task_id, params in tasks_data.items():
+        environments[task_id] = SimpleMaterialSlabEnvironment(
+            task_id=task_id,
+            input_params=params["input_params"],  # Pass the entire 'input_params' dict
+            problem_description=params["problem_description"],
+        )
+    return environments
+
+
+# Load environments for all defined tasks
+all_material_environments = load_environments_from_json("material_tasks.json")
+
+
+# Create the corral server
+if __name__ == "__main__":
+    app = create_benchmark_server(all_material_environments)
+
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+This implementation provides a clear and robust way to manage tasks and integrate external scoring functions within a straightforward Environment class structure.
