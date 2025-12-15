@@ -102,7 +102,7 @@ The platform includes several built-in tasks:
 
 # Corral architecture TL;DR 🏗️
 
-Corral is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform comprises two primary services:
+Corral is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform follows a client-server design and comprises two primary services:
 
 `CorralServer`: This dedicated microservice is responsible for hosting and managing environments and providing the interface for interaction (`CorralRouter`).
 

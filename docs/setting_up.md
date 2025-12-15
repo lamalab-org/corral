@@ -5,25 +5,42 @@
 - Python 3.12 or higher
 - `uv` (recommended) or `pip` for package management
 
-### Installation
+///info
 
-1. **Clone the repository**
+   Installing `uv`
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+///
+
+
+# Installation from GitHub
+
+**1. Clone the repository**
 
    ```bash
-   git clone https://github.com/lamalab-org/mat-agent-bench.git
-   cd mat-agent-bench
+   git clone https://github.com/lamalab-org/corral
+   cd corral
    ```
 
-2. **Install the framework**
+**2. Install the framework**
+
+Create a virtual environment
 
    ```bash
-   uv pip install -e .
+   uv venv
    ```
 
-3. **Install specific environment dependencies**
+install the package
 
    ```bash
-   # create task environments
-   cd tasks/samplemath && uv venv && uv pip install -e .  # create an env for running sample math
-   # ... repeat for other tasks as needed
+   uv sync
+   ```
+
+**3. Install specific environment dependencies**
+
+Each of the folder in task is a standalone repository
+
+   ```bash
+   cd tasks/samplemath && uv venv && uv sync
    ```
