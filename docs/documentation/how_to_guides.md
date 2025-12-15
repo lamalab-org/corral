@@ -1,21 +1,3 @@
-~~1. Write how to create an environment~~
-
-~~2. How to create a new agent with some scaffolds~~
-
-~~3. How to create tasks (take input from json) in environment~~
-
-4. How to create tools in environment
-
-5.  How to create scoring functions for the task
-
-7.  How to benchmark existing agent in this environment
-
-
-
-7. How to create a multi agent scaffold
-8. How to run this new agent in existing environment or tasks
-
-
 # 1. How to create a custom `Environment` in `Corral`
 
 Every Corral environment is treated as a Python package. It would have standalone dependency and can be pip installed. Let us start by creating a python repository for an example environment.
@@ -251,7 +233,7 @@ The `.run()` is an abstract method in BaseAgent and must be implemented.
 ---
 
 
-# 3. How to prepare tasks and scoring function for the environment (Material Science example)
+# 3. How to prepare tasks and scoring function (Material Science example)
 
 This section demonstrates how to define a task and implementing reward function, using a material science scenario.
 Our example task will involve an agent retrieving a material structure from the `Materials Project` database and then attempting to create a specific crystal slab from it. The scoring function will use `pymatgen` to verify the generated slab.
