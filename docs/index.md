@@ -95,6 +95,11 @@ The platform includes several built-in tasks:
 
 
 
+# Tools
+
+: Tools are functionalities that can be executed by the agent to do something in the environment.
+
+
 # Corral architecture TL;DR 🏗️
 
 Corral is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform comprises two primary services:
