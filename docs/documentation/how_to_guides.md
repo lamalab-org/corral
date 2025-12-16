@@ -89,7 +89,7 @@ The `@tool` decorator registers the function as an `Corral-tool` for agents.
 /// info
     open: True
 
-  Docstring Format: The docstring is critical! It must clearly describe what the tool does, its Args (parameters), and what it Returns. This information is used by Corral to automatically generate tool descriptions that agents (especially LLM-based agents) can understand and use.
+  Docstring Format: The docstring is critical because it is used by Corral to automatically generate tool descriptions that agents (especially LLM-based agents) can understand and use. It must clearly describe what the tool does, its Args (parameters), and what it Returns.
 ///
 
 
