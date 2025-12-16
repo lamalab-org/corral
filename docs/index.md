@@ -65,7 +65,7 @@ The platform includes several pre-built environments:
 # Agents 🤖
 
 :  `Agent` is the entity responsible for perception (observing the environment) and decision-making (deciding what actions/steps to take) to solve the task.
-Agents are made with AI models in many fancy ways (commonly called scaffolds).
+Agents are made with LLMs in many fancy ways (commonly called scaffolds).
 
 `Corral` treats agents as modular components, emphasizing the agent's internal architecture and learning/inference mechanisms. This modularity allows researchers to develop, train, and evaluate diverse agent designs independently of the specific environmental configurations.
 
