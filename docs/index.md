@@ -108,7 +108,7 @@ Corral is built upon a microservice architecture to ensure flexibility, scalabil
 `CorralRunner`: This service is tasked with executing agents. It orchestrates the agent's lifecycle, feeding it observations, and relaying its chosen actions.
 
 
-The interaction between an agent (running within corral_runner) and its environment (hosted by corral_server) occurs through REST API communication.
+The interaction between an agent (running within `CorralRunner`) and its environment (hosted by `CorralServer`) occurs through REST API communication.
 
 
 
