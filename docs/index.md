@@ -50,7 +50,7 @@ The platform includes several pre-built environments:
 |-------------|-------------|
 | `corral_samplemath` | Basic mathematical operations |
 | `corral_spectra` | Spectroscopy data analysis |
-| `corrl_molecular_dynamics` | Molecular dynamics setup |
+| `corral_molecular_dynamics` | Molecular dynamics setup |
 | `corral_open_catalyst` | Catalysis research tasks |
 | `corral_afm` | Atomic force microscopy |
 | `corral_retrosynthesis` | Plan synthesis|
