@@ -225,7 +225,7 @@ The `.run()` is an abstract method in BaseAgent and must be implemented.
 
   - `interface.execute_tool(task_id, tool_name, arguments)`: Call a tool in the environment and get its result.
 
-`create_prompt()` helper function from `BaseAgent` assembles the initial prompt, including system prompt, user prompt, task guide, and examples. obviously the user can have their own implementation of this method if required.
+`create_prompt()` helper function from `BaseAgent` assembles the initial prompt, including system prompt, user prompt, task guide, and examples. Users can provide their own implementation of this method if needed.
 
 
 `self.get_llm_response()`, calls the LLM with the current self.messages and potentially available tools.
