@@ -38,7 +38,7 @@ Corral has value for researchers, engineers, managers and teachers looking to us
 
 :  The `Environment` is the "world" with which an agent or human interacts. In real world for a chemist doing synthesis, environment would be chemistry lab and for a computational scientist their PC/ HPC with softwares and internet.
 
-:  `Environment` define the task space (Task and the different ways to solve them) that include use of tools. Good environment by construction gives feedback for the agent to observe allowing it to make its next move.
+:  `Environment`s define the task space (Task and the different ways to solve them) that include use of tools. Good environments give observable feedback for the agent, allowing it to make its next move.
 
 
 
@@ -53,7 +53,7 @@ The platform includes several pre-built environments:
 |-------------|-------------|
 | `corral_samplemath` | Basic mathematical operations |
 | `corral_spectra` | Spectroscopy data analysis |
-| `corrl_molecular_dynamics` | Molecular dynamics setup |
+| `corral_molecular_dynamics` | Molecular dynamics setup |
 | `corral_open_catalyst` | Catalysis research tasks |
 | `corral_afm` | Atomic force microscopy |
 | `corral_retrosynthesis` | Plan synthesis|
@@ -68,7 +68,7 @@ The platform includes several pre-built environments:
 # Agents 🤖
 
 :  `Agent` is the entity responsible for perception (observing the environment) and decision-making (deciding what actions/steps to take) to solve the task.
-Agents are made with AI models in many fancy ways (commonly called scaffolds).
+Agents are made with LLMs in many fancy ways (commonly called scaffolds).
 
 `Corral` treats agents as modular components, emphasizing the agent's internal architecture and learning/inference mechanisms. This modularity allows researchers to develop, train, and evaluate diverse agent designs independently of the specific environmental configurations.
 
@@ -94,7 +94,6 @@ In `Corral`, a task typically encompasses the core objective and can optionally 
 Through this formalism, `Corral` provides a flexible and robust framework for defining and evaluating intricate agent behaviors across a wide spectrum of research problems.
 
 
-The platform includes several built-in tasks:
 
 
 
@@ -112,7 +111,7 @@ Corral is built upon a microservice architecture to ensure flexibility, scalabil
 `CorralRunner`: This service is tasked with executing agents. It orchestrates the agent's lifecycle, feeding it observations, and relaying its chosen actions.
 
 
-The interaction between an agent (running within corral_runner) and its environment (hosted by corral_server) occurs through REST API communication.
+The interaction between an agent (running within `CorralRunner`) and its environment (hosted by `CorralServer`) occurs through REST API communication.
 
 
 

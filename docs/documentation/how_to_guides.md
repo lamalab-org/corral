@@ -89,7 +89,7 @@ The `@tool` decorator registers the function as an `Corral-tool` for agents.
 /// info
     open: True
 
-  Docstring Format: The docstring is critical! It must clearly describe what the tool does, its Args (parameters), and what it Returns. This information is used by Corral to automatically generate tool descriptions that agents (especially LLM-based agents) can understand and use.
+  Docstring Format: The docstring is critical because it is used by Corral to automatically generate tool descriptions that agents (especially LLM-based agents) can understand and use. It must clearly describe what the tool does, its Args (parameters), and what it Returns.
 ///
 
 
@@ -197,7 +197,7 @@ Now, create your agent's main Python file (e.g., agent.py) and start defining yo
            # Get task information
            task_guide = interface.get_task_guide(task_id)
 
-           # prepare the prompt for the agent now that ypu have task info
+           # prepare the prompt for the agent now that you have task info
 
            #    self.messages = create_prompt(
            #        user_prompt=self.user_prompt,
@@ -225,7 +225,7 @@ The `.run()` is an abstract method in BaseAgent and must be implemented.
 
   - `interface.execute_tool(task_id, tool_name, arguments)`: Call a tool in the environment and get its result.
 
-`create_prompt()` helper function from `BaseAgent` assembles the initial prompt, including system prompt, user prompt, task guide, and examples. obviously the user can have their own implementation of this method if required.
+`create_prompt()` helper function from `BaseAgent` assembles the initial prompt, including system prompt, user prompt, task guide, and examples. Users can provide their own implementation of this method if needed.
 
 
 `self.get_llm_response()`, calls the LLM with the current self.messages and potentially available tools.
@@ -279,7 +279,7 @@ from pymatgen.analysis.structure_matcher import StructureMatcher
 
 def pymatgen_score(submitted_slab_cif: str, metadata: dict) -> float:
     """
-    Scores the agent's submitted slab using pymatgen to verify its valids.
+    Scores the agent's submitted slab using pymatgen to verify its validity.
     """
     if submitted_slab_cif is None:
         return 0.0  # No slab submitted
