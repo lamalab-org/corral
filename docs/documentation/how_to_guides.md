@@ -197,7 +197,7 @@ Now, create your agent's main Python file (e.g., agent.py) and start defining yo
            # Get task information
            task_guide = interface.get_task_guide(task_id)
 
-           # prepare the prompt for the agent now that ypu have task info
+           # prepare the prompt for the agent now that you have task info
 
            #    self.messages = create_prompt(
            #        user_prompt=self.user_prompt,
