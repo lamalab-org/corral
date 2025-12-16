@@ -279,7 +279,7 @@ from pymatgen.analysis.structure_matcher import StructureMatcher
 
 def pymatgen_score(submitted_slab_cif: str, metadata: dict) -> float:
     """
-    Scores the agent's submitted slab using pymatgen to verify its valids.
+    Scores the agent's submitted slab using pymatgen to verify its validity.
     """
     if submitted_slab_cif is None:
         return 0.0  # No slab submitted
