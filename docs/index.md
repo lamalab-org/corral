@@ -6,25 +6,28 @@
 
 
 
-Corral is a platform for development, deployment and evaluation of environments and agents.
+==Corral: The unified framework for the science of agents and agents for science.==
 
+This dual focus means Corral provides extensive utilities that not only facilitate research into agent methodologies but also simplify the creation and deployment of scientific agents and scientific environments.
 
 
 Corral is built and maintained with the following foundational principles in mind:
+
+- Research Facilitation (Science of Agents): Ensuring comprehensive monitoring and control of all system changes, crucial for enabling detailed scientific studies, ablations, and a deeper understanding of agent behavior
+
+- Enablement (Science of Agents): Streamlining the practical development, deployment, and evaluation of agents tailored for scientific research and applications.
 
 - Reproducibility: Facilitating consistent and repeatable research outcomes.
 
 - Control: Providing precise control over all environmental and agent variables.
 
-- Observability: Ensuring consistent monitoring and recording of all system changes.
-
-- Efficiency and Scalability: Designed to be lightweight while capable of scaling to complex demands.
+- Efficiency: Designed to be lightweight and portable.
 
 - Simplicity and Usability: Engineered for ease of understanding and straightforward application.
 
-- Flexibility: Avoiding implementation constraints to empower diverse approaches.
+- Flexibility: Empowering diverse approaches through extensibility, free from rigid constraints.
 
-
+- Decoupled Design: We decouple agents from the environment.
 
 <!--
 Corral has value for researchers, engineers, managers and teachers looking to use
@@ -73,10 +76,10 @@ The platform includes several built-in agent types:
 
 | Agent | Description |
 |-------|-------------|
-| `ReAct` | Uses the ReAct (Reasoning and Acting) framework for step-by-step problem solving. |
-| `ToolCalling` | Uses native function calling from LLM providers to solve tasks by leveraging built-in tool/function calling capabilities. |
-| `LLMPlanner` | Uses hierarchical planning with high-level planning and low-level execution delegation to other agents. |
-| `Reflection` | Empowers agents to self-evaluate their past actions and reasoning, learn from errors, and refine future strategies or plans. |
+| [`ReAct`](https://arxiv.org/abs/2210.03629) | Uses the ReAct (Reasoning and Acting) framework for step-by-step problem solving. |
+| [`ToolCalling`](https://platform.openai.com/docs/guides/function-calling) | Uses native function calling from LLM providers to solve tasks by leveraging built-in tool/function calling capabilities. |
+| [`LLMPlanner`](https://arxiv.org/abs/2212.04088) | Uses hierarchical planning with high-level planning and low-level execution delegation to other agents. |
+| [`Reflection`](https://arxiv.org/abs/2303.11366) | Empowers agents to self-evaluate their past actions and reasoning, learn from errors, and refine future strategies or plans. |
 
 
 # Task 📝
@@ -138,9 +141,8 @@ Agents within Corral are designed to interact with their environments primarily 
 ## 🤝 Community
 
 - **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/lamalab-org/mat-agent-bench/issues)
-- **Discussions**: Join conversations on [GitHub Discussions](https://github.com/lamalab-org/mat-agent-bench/discussions)
 - **Contributing**: See our [Contributing Guide](CONTRIBUTING.md)
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE.md) file for details.
+This project is licensed under the MIT License - see the [[LICENSE](LICENSE.md) ](https://github.com/lamalab-org/corral/blob/main/LICENSE.md)file for details.
