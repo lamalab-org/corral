@@ -91,7 +91,6 @@ In `Corral`, a task typically encompasses the core objective and can optionally 
 Through this formalism, `Corral` provides a flexible and robust framework for defining and evaluating intricate agent behaviors across a wide spectrum of research problems.
 
 
-The platform includes several built-in tasks:
 
 
 
