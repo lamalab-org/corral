@@ -1,4 +1,4 @@
-## Tutorial 1: Your First Corral Benchmark
+# Tutorial 1: Your First Corral Benchmark
 
 **What you'll learn**: By the end of this tutorial, you'll have created a simple environment, connected an agent, and run your first benchmark.
 
@@ -167,7 +167,7 @@ Try modifying the environment to use different numbers or add more tasks.
 
 ---
 
-## Tutorial 2: Building a Multi-Tool Environment
+# Tutorial 2: Building a Multi-Tool Environment
 
 **What you'll learn**: Create an environment with multiple tools and see how agents use them together.
 
@@ -303,7 +303,7 @@ Watch the agent's reasoning process. You'll see it call `multiply` first, then `
 
 ---
 
-## Tutorial 3: Creating a Custom Agent
+# Tutorial 3: Creating a Custom Agent
 
 **What you'll learn**: Build a simple custom agent that works with Corral environments.
 
