@@ -1,9 +1,10 @@
 """Tests for the prompt_utils module."""
 
 import pytest
+from promptstore import Prompt
 
 from corral.agents.prompt_utils import (
-    StringPrompt,
+    ValidatedPrompt,
     build_user_content,
     create_prompt,
     get_prompt,
@@ -11,60 +12,56 @@ from corral.agents.prompt_utils import (
 from corral.agents.utils import LiteLLMMessage
 
 
-class TestStringPrompt:
-    """Test cases for the StringPrompt class."""
+class TestValidatedPrompt:
+    """Test cases for the ValidatedPrompt class."""
 
     def test_init(self):
-        """Test StringPrompt initialization."""
-        content = "Hello {name}!"
-        prompt = StringPrompt(content)
-        assert prompt.content == content
+        """Test ValidatedPrompt initialization."""
+        content = "Hello {{name}}!"
+        base_prompt = Prompt(content=content, version=1, uuid="test/test_init")
+        prompt = ValidatedPrompt(base_prompt)
+        assert prompt._prompt == base_prompt
 
     def test_fill_single_replacement(self):
         """Test filling a prompt with a single replacement."""
-        prompt = StringPrompt("Hello {name}!")
+        base_prompt = Prompt(content="Hello {{name}}!", version=1, uuid="test/single")
+        prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({"name": "Alice"})
         assert result == "Hello Alice!"
 
     def test_fill_multiple_replacements(self):
         """Test filling a prompt with multiple replacements."""
-        prompt = StringPrompt("Hello {name}, you are {age} years old!")
+        base_prompt = Prompt(
+            content="Hello {{name}}, you are {{age}} years old!",
+            version=1,
+            uuid="test/multiple",
+        )
+        prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({"name": "Bob", "age": 30})
         assert result == "Hello Bob, you are 30 years old!"
 
     def test_fill_empty_replacements(self):
         """Test filling a prompt with empty replacements."""
-        prompt = StringPrompt("Hello world!")
+        base_prompt = Prompt(content="Hello world!", version=1, uuid="test/empty")
+        prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({})
         assert result == "Hello world!"
 
     def test_fill_with_non_string_values(self):
         """Test filling a prompt with non-string values (should be converted to string)."""
-        prompt = StringPrompt("Count: {count}, Price: {price}")
+        base_prompt = Prompt(
+            content="Count: {{count}}, Price: {{price}}",
+            version=1,
+            uuid="test/non_string",
+        )
+        prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({"count": 5, "price": 19.99})
         assert result == "Count: 5, Price: 19.99"
 
-    def test_fill_missing_placeholder(self):
-        """Test filling a prompt where not all placeholders are provided."""
-        prompt = StringPrompt("Hello {name}, you are {age} years old!")
-        with pytest.raises(KeyError, match="Missing values for placeholders"):
-            prompt.fill({"name": "Charlie"})
-
-    def test_fill_missing_numeric_placeholder(self):
-        """Test filling a prompt with numeric placeholders that are missing."""
-        prompt = StringPrompt("Item {0} costs ${1}")
-        with pytest.raises(KeyError, match="Missing values for placeholders"):
-            prompt.fill({"0": "Apple"})  # Missing "1"
-
-    def test_fill_empty_placeholder_name(self):
-        """Test that empty placeholder names are handled correctly."""
-        prompt = StringPrompt("Hello {} world!")
-        with pytest.raises(KeyError, match="Missing values for placeholders"):
-            prompt.fill({})
-
     def test_fill_extra_replacements(self):
         """Test filling a prompt with extra replacements that don't match placeholders."""
-        prompt = StringPrompt("Hello {name}!")
+        base_prompt = Prompt(content="Hello {{name}}!", version=1, uuid="test/extra")
+        prompt = ValidatedPrompt(base_prompt)
         with pytest.raises(
             KeyError, match="Extra keys provided that don't match any placeholders"
         ):
@@ -72,19 +69,32 @@ class TestStringPrompt:
 
     def test_fill_extra_replacements_with_underscore_prefix(self):
         """Test that framework keys with underscore prefix are allowed as extra replacements."""
-        prompt = StringPrompt("Hello {name}!")
+        base_prompt = Prompt(
+            content="Hello {{name}}!", version=1, uuid="test/underscore"
+        )
+        prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({"name": "David", "_internal_key": "framework_value"})
         assert result == "Hello David!"
 
     def test_fill_legitimate_extra_field(self):
         """Test filling a prompt where 'extra' is a legitimate placeholder."""
-        prompt = StringPrompt("Hello {name}, here's {extra} info!")
+        base_prompt = Prompt(
+            content="Hello {{name}}, here's {{extra}} info!",
+            version=1,
+            uuid="test/legitimate",
+        )
+        prompt = ValidatedPrompt(base_prompt)
         result = prompt.fill({"name": "Alice", "extra": "bonus"})
         assert result == "Hello Alice, here's bonus info!"
 
     def test_fill_typo_in_extra_field_caught(self):
         """Test that typos in field names are now caught."""
-        prompt = StringPrompt("Hello {name}, here's {extra} info!")
+        base_prompt = Prompt(
+            content="Hello {{name}}, here's {{extra}} info!",
+            version=1,
+            uuid="test/typo",
+        )
+        prompt = ValidatedPrompt(base_prompt)
         with pytest.raises(
             KeyError, match="Extra keys provided that don't match any placeholders"
         ):
@@ -124,10 +134,10 @@ class TestGetPrompt:
             get_prompt(self.mock_store, None, None)
 
     def test_get_prompt_with_string_input(self, mock_store):
-        """Test getting prompt with string input creates StringPrompt."""
+        """Test getting prompt with string input creates ValidatedPrompt."""
         result = get_prompt(mock_store, "test content", "unused-uuid")
-        assert isinstance(result, StringPrompt)
-        assert result.content == "test content"
+        assert isinstance(result, ValidatedPrompt)
+        assert result._prompt.content == "test content"
         mock_store.get.assert_not_called()
 
     def test_get_prompt_with_existing_prompt_object(self, mock_store, mocker):
@@ -208,6 +218,7 @@ class TestCreatePrompt:
         expected_call_args = {
             "task_guide": "test task guide",
             "extra_param": "test value",
+            "surrender_instructions": "",
         }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
@@ -248,6 +259,7 @@ class TestBuildUserContent:
             "task_guide": "test task guide",
             "param1": "value1",
             "param2": "value2",
+            "surrender_instructions": "",
         }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
@@ -271,6 +283,7 @@ class TestBuildUserContent:
         expected_call_args = {
             "task_guide": "The task is to correctly answer the question with an image specified below.",
             "param1": "value1",
+            "surrender_instructions": "",
         }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
@@ -307,7 +320,10 @@ class TestBuildUserContent:
         result = build_user_content(mock_user_prompt, "test task guide")
 
         assert result == "filled content"
-        expected_call_args = {"task_guide": "test task guide"}
+        expected_call_args = {
+            "task_guide": "test task guide",
+            "surrender_instructions": "",
+        }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
 
     def test_build_user_content_empty_list_task_guide(self, mock_user_prompt):
