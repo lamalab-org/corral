@@ -16,9 +16,10 @@ cd corral-tutorial
 Create a virtual environment and install Corral:
 
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install corral
+uv init
+uv venv
+source .venv/bin/activate
+uv add https://github.com/lamalab-org/corral
 ```
 
 You should see installation messages. When complete, verify the installation:
@@ -36,6 +37,9 @@ Create a file called `simple_env.py`:
 ```python
 from corral.backend.env import Environment
 from corral.backend.tool import tool
+import os
+
+BASE_WORK_DIR = os.getenv("CORRAL_WORK_DIR")
 
 
 @tool
@@ -46,10 +50,10 @@ def add_numbers(a: float, b: float) -> float:
 
 class SimpleEnvironment(Environment):
     def __init__(self, task_id: str, num1: float, num2: float, answer: float):
-        super().__init__(task_id)
         self.num1 = num1
         self.num2 = num2
         self.answer = answer
+        super().__init__(task_id, base_work_dir)
         self.add_tool(add_numbers)
 
     def get_task_prompt(self) -> str:
