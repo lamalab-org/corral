@@ -126,7 +126,7 @@ class MyEnvironment(Environment):
         return 1.0 if self.state.submitted_answer == self.correct_answer else 0.0
 ```
 
-Now define a task to this environment,
+Now define a task for this environment,
 
 ```python
 # Define your tasks
