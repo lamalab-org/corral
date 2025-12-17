@@ -6,7 +6,6 @@ calculating agreement metrics and exporting results to JSON files.
 """
 
 import json
-import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -34,13 +33,11 @@ class MajorityVotingAnalyzer:
             "nodes_with_majority": 0,
             "nodes_with_absolute_agreement": 0,
             "nodes_with_disagreement": 0,
-            "nodes_excluded_due_to_conflict": 0,
             "nodes_with_partial_majority": 0,
             "nodes_with_any_agreement": 0,
             "percentage_majority": 0.0,
             "percentage_absolute_agreement": 0.0,
             "percentage_disagreement": 0.0,
-            "percentage_excluded": 0.0,
             "percentage_partial_majority": 0.0,
             "percentage_any_agreement": 0.0,
         }
@@ -52,54 +49,6 @@ class MajorityVotingAnalyzer:
         self.marker_selection_stats = defaultdict(
             lambda: defaultdict(lambda: {"accepted": 0, "discarded": 0})
         )
-
-    def _extract_env_and_level(self, file_id: str) -> tuple[str, str]:
-        """
-        Extract environment (task type) and level from fileId.
-
-        Handles patterns like:
-        - afm_experiment_level_1_20251107_001126.json -> ("afm_experiment", "1")
-        - aluminum_surface_energy_1_20251107_101632.json -> ("aluminum_surface_energy", "1")
-        - make_1_lvl1_20251113_123456.json -> ("make_1", "1")
-
-        Args:
-            file_id: The file identifier
-
-        Returns:
-            Tuple of (env, level) strings
-        """
-        # Remove .json extension
-        base = file_id.replace(".json", "")
-
-        # Try pattern with "level_X" first (e.g., afm_experiment_level_1_...)
-        level_match = re.search(r"_level_(\d+)_", base)
-        if level_match:
-            level = level_match.group(1)
-            env = base[: level_match.start()]
-            return (env, level)
-
-        # Try pattern with "lvlX" (e.g., make_1_lvl1_...)
-        lvl_match = re.search(r"_lvl(\d+)_", base)
-        if lvl_match:
-            level = lvl_match.group(1)
-            env = base[: lvl_match.start()]
-            return (env, level)
-
-        # Try pattern with task_X_Y or task_name_X_timestamp
-        # e.g., aluminum_surface_energy_1_20251107_101632 -> ("aluminum_surface_energy", "1")
-        # Split by underscore and look for a number followed by timestamp
-        parts = base.split("_")
-        for i in range(len(parts) - 1, -1, -1):
-            if parts[i].isdigit() and len(parts[i]) <= 2:  # Level number (1-2 digits)
-                # Check if next parts look like a timestamp (8 digits + 6 digits)
-                remaining = "_".join(parts[i + 1 :])
-                if re.match(r"\d{8}_\d{6}$", remaining) or i == len(parts) - 1:
-                    env = "_".join(parts[:i])
-                    level = parts[i]
-                    return (env, level)
-
-        # Fallback: return the whole base as env with "unknown" level
-        return (base, "unknown")
 
     def load_data(self) -> pd.DataFrame:
         """Load the parquet file"""
@@ -158,9 +107,6 @@ class MajorityVotingAnalyzer:
             ) * 100
             self.results["percentage_disagreement"] = (
                 self.results["nodes_with_disagreement"] / total
-            ) * 100
-            self.results["percentage_excluded"] = (
-                self.results["nodes_excluded_due_to_conflict"] / total
             ) * 100
             self.results["percentage_partial_majority"] = (
                 self.results["nodes_with_partial_majority"] / total
@@ -345,7 +291,6 @@ class MajorityVotingAnalyzer:
         else:
             # Disagreement - no clear majority
             self.results["nodes_with_disagreement"] += 1
-            self.results["nodes_excluded_due_to_conflict"] += 1
 
             # For disagreements, all markers are considered discarded
             # (no consensus, so none are selected)
@@ -409,18 +354,17 @@ class MajorityVotingAnalyzer:
             if vote_count > majority_threshold:
                 majority_markers.append(marker)
 
-        # Only count as partial majority if:
-        # 1. There are some markers with majority
-        # 2. This wasn't already counted as absolute agreement or full majority
-        if majority_markers:
-            # Check if this is already a full majority (all markers agree)
-            # by checking if we already added it to majority_annotations
-            is_already_full_majority = any(
-                ann["fileId"] == file_id and ann["nodeId"] == node_id
-                for ann in self.majority_annotations
-            )
+        # Check if this is already a full majority (all markers agree)
+        # by checking if we already added it to majority_annotations
+        is_already_full_majority = any(
+            ann["fileId"] == file_id and ann["nodeId"] == node_id
+            for ann in self.majority_annotations
+        )
 
-            if not is_already_full_majority:
+        # Only process if this wasn't already counted as absolute agreement or full majority
+        if not is_already_full_majority:
+            if majority_markers:
+                # Case 1: Some markers have majority support (partial majority)
                 self.results["nodes_with_partial_majority"] += 1
 
                 # Track marker selection for partial majority
@@ -448,6 +392,21 @@ class MajorityVotingAnalyzer:
                         "marker_vote_details": marker_vote_details,
                     }
                 )
+            else:
+                # Case 2: No markers have majority support - all markers discarded
+                # This should be treated as disagreement (no agreement on any marker)
+                # Only count if there were actually some markers to begin with
+                if marker_votes:
+                    # Don't increment disagreement counter again if already counted in _vote_on_node
+                    # Just track the marker selection: all markers seen are discarded
+                    all_markers_seen = set(marker_votes.keys())
+
+                    self._track_marker_selection(
+                        environment,
+                        level,
+                        accepted_markers=[],
+                        discarded_markers=list(all_markers_seen),
+                    )
 
     def print_summary(self) -> None:
         """Print a summary of the analysis results"""
@@ -504,20 +463,10 @@ class MajorityVotingAnalyzer:
             f"({self.results['percentage_disagreement']:.2f}%)"
         )
 
-        logger.info(
-            f"\nNodes excluded due to conflict: {self.results['nodes_excluded_due_to_conflict']} "
-            f"({self.results['percentage_excluded']:.2f}%)"
-        )
-
         logger.info("\n" + "=" * 70)
         logger.info(
             f"\nNodes with disagreement: {self.results['nodes_with_disagreement']} "
             f"({self.results['percentage_disagreement']:.2f}%)"
-        )
-
-        logger.info(
-            f"\nNodes excluded due to conflict: {self.results['nodes_excluded_due_to_conflict']} "
-            f"({self.results['percentage_excluded']:.2f}%)"
         )
 
         logger.info("\n" + "=" * 70)
