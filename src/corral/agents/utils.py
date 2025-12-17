@@ -6,7 +6,7 @@ from typing import Any, TypedDict
 
 import litellm
 import openai
-from litellm.exceptions import BudgetExceededError
+from litellm.exceptions import BudgetExceededError, RateLimitError
 from litellm.types.utils import Message
 from loguru import logger
 from tenacity import (
@@ -31,6 +31,15 @@ RETRY_EXCEPTIONS = (
 STOP_BENCHMARK_EXCEPTIONS = (
     BudgetExceededError,  # litellm budget exceeded
     openai.AuthenticationError,  # Invalid API key
+)
+
+# Keywords in error messages that indicate quota/credits exhausted (not a temporary rate limit)
+QUOTA_EXHAUSTED_KEYWORDS = (
+    "insufficient_quota",
+    "exceeded your current quota",
+    "billing",
+    "spending limit",
+    "budget",
 )
 
 
@@ -138,6 +147,17 @@ def llm_call(
         raise BudgetExhaustedError(
             f"Benchmark stopped: {type(e).__name__} - {e}"
         ) from e
+
+    except RateLimitError as e:
+        # Check if this is a quota exhaustion (not a temporary rate limit)
+        error_str = str(e).lower()
+        if any(keyword in error_str for keyword in QUOTA_EXHAUSTED_KEYWORDS):
+            logger.error(f"API quota/credits exhausted: {e}")
+            raise BudgetExhaustedError(
+                f"Benchmark stopped - quota exhausted: {e}"
+            ) from e
+        # Otherwise, it's a temporary rate limit - re-raise to let retry handle it
+        raise
 
     except Exception as e:
         raise e
