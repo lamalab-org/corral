@@ -10,8 +10,258 @@ import os
 from pathlib import Path
 
 import modal
+from loguru import logger
 
 from corral.backend.tool import tool
+
+
+@tool
+def get_nth_run_log(
+    path: str,
+    n: int = 0,
+    save: str | None = None,
+    index: int | None = None,
+) -> str:
+    """[BRIEF] Retrieves and processes the nth run log from a LAMMPS log file. It returns the list of thermodynamic variables present in the run and the total steps of the simulations. Optionally, it can save the nth run in a CSV where each column corresponds to a thermodynamic property, and optionally it can return the thermodynamic property at the particular index.[/BRIEF]
+    [DETAILED] This tool extracts the nth run log from a LAMMPS log file, providing insights into the thermodynamic properties recorded during that simulation run. It can save the extracted data to a CSV file for further analysis and can also return specific thermodynamic data at a given index. This is useful for analyzing simulation outputs or doing automated analysis using external tools or data anlysis pipeline. [/DETAILED]
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to extract and analyze the nth run log from a LAMMPS log file without reading the entire log file.
+    - Best suited for post-processing and analyzing simulation outputs using external tools or data analysis pipelines.
+    - Recommended for automating the extraction of thermodynamic data from LAMMPS simulations.
+    [/PROCEDURAL]
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Ensure you have a valid LAMMPS log file generated from a simulation. [/PREREQUISITE]
+    2. [CURRENT] Use this tool to extract the nth run log and optionally save it to a CSV file. [/CURRENT]
+    3. [FOLLOW_UP] Utilize the extracted data for analysis, visualization, or further processing in your materials science workflow. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+    [CONTEXTUAL] How this tool works:
+    - Reads the LAMMPS log file and identifies the nth run section.
+    - Extracts thermodynamic data and organises it into a python dataframe, where each column corresponds to a thermodynamic property.
+    - Optionally saves the data to a CSV file and retrieves specific data at a given index. [/CONTEXTUAL]
+    [SYNTACTICAL] Usage examples:
+    [
+        `get_nth_run_log("/path/to/log.lammps", 0, "run0_thermo.csv")`,
+        `get_nth_run_log("log.lammps", 1, None)`,
+        `get_nth_run_log("/data/simulations/log.lammps", 2, "run2_thermo.csv", 10)`,
+        `get_nth_run_log("sim_log.lammps", 0, "run0_thermo.csv", 5)`,
+        `get_nth_run_log("/workspace/log.lammps", 3, None, 20)`,
+    ]
+    [/SYNTACTICAL]
+    Args:
+        path: [ARGS_BRIEF] ABsolute path to the LAMMPS log file. [/ARGS_BRIEF]
+              [ARGS_DETAILED] Complete file path to the LAMMPS log file containing simulation output. [/ARGS_DETAILED]
+              [ARGS_SYNTACTICAL] Format: "Valid file path to LAMMPS log file" [/ARGS_SYNTACTICAL]
+              [ARGS_EXAMPLES] Examples: "/path/to/log.lammps", "simulations/log.lammps" [/ARGS_EXAMPLES]
+        n: [ARGS_BRIEF] Index of the run log to extract (0-based). Defaults to 0. [/ARGS_BRIEF]
+              [ARGS_DETAILED] The zero-based index of the run log to extract from the LAMMPS log file. [/ARGS_DETAILED]
+              [ARGS_SYNTACTICAL] Format: "Non-negative integer" [/ARGS_SYNTACTICAL]
+              [ARGS_EXAMPLES] Examples: 0, 1, 2 [/ARGS_EXAMPLES]
+        save: [ARGS_BRIEF] Optional path to save the extracted run log as a CSV file. [/ARGS_BRIEF]
+                [ARGS_DETAILED] If provided, the extracted run log will be saved to this path in CSV format. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Format: "Valid file path to save CSV file" [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] Examples: "run0_thermo.csv", "/data/run1_thermo.csv" [/ARGS_EXAMPLES]
+        index: [ARGS_BRIEF] Optional index to retrieve specific thermodynamic data from the run log. [/ARGS_BRIEF]
+                 [ARGS_DETAILED] If provided, the tool will return the thermodynamic data at this index from the extracted run log. [/ARGS_DETAILED]
+                 [ARGS_SYNTACTICAL] Format: "Non-negative integer" [/ARGS_SYNTACTICAL]
+                 [ARGS_EXAMPLES] Examples: 0, 5, 10 [/ARGS_EXAMPLES]
+    Returns:
+        str: [ARGS_BRIEF] Summary of the extracted run log and optional data at the specified index. [/ARGS_BRIEF]
+             [ARGS_DETAILED] A string summarizing the columns present in the extracted run log, total number of rows, and optionally the thermodynamic data at the specified index. [/ARGS_DETAILED]
+             [ARGS_EXAMPLES] Examples: "the thermo data has been saved successfully at run0_thermo.csv. The thermo columns are: ['Step', 'Temp', 'Press']. There are total 1000 rows. Data at index 10: {'Step': 100, 'Temp': 300, 'Press': 1.0}", "The thermo columns are: ['Step', 'Temp', 'Press']. There are total 500 rows." [/ARGS_EXAMPLES]
+    [RAISES] Exceptions:
+        Exception:
+            [ERROR_WHEN] If there is an error reading the log file or extracting the run log. [/ERROR_WHEN]
+            [ERROR_DETAILS] Raised when the log file cannot be read or the specified run log cannot be extracted. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the log file path and ensure the run index is valid. [/ERROR_RECOVERY]
+    [/RAISES]
+    [LIMITATIONS] Known limitations:
+    - Only supports LAMMPS log files with standard formatting.
+    - May not handle corrupted or non-standard log files gracefully.
+    [/LIMITATIONS]
+
+    """
+
+    try:
+        func = modal.Function.from_name("simagent", "get_nth_run_log")
+        return func.remote(path=path, n=n, save=save, index=index)
+    except Exception as e:
+        # Handle unexpected errors
+        raise Exception(
+            f"An unexpected error occurred while parsing the log: {e!s}"
+        ) from e
+
+
+@tool
+def keyword_log_extractor(path: str, keyword: str) -> str:
+    """[BRIEF] Extracts sections of a LAMMPS log file that start with a specified keyword. [/BRIEF]
+    [DETAILED] This tool scans a LAMMPS log file for sections that begin with a given keyword and extracts those sections for analysis. It is useful for retrieving specific information such as fixes, computes, or other logged data from simulation runs. [/DETAILED]
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to extract specific sections of a LAMMPS log file based on keywords.
+    - Best suited for targeted analysis of simulation outputs.
+    - Recommended for retrieving logged data for further processing or visualization.
+    [/PROCEDURAL]
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Ensure you have a valid LAMMPS log file generated from a simulation. [/PREREQUISITE]
+    2. [CURRENT] Use this tool to extract sections of the log file that start with the specified keyword. [/CURRENT]
+    3. [FOLLOW_UP] Utilize the extracted data for analysis, visualization, or further processing in your materials science workflow. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+    [CONTEXTUAL] How this tool works:
+    - Reads the LAMMPS log file line by line.
+    - Identifies sections that start with the specified keyword.
+    - Extracts and returns those sections as a structured dictionary. [/CONTEXTUAL]
+    [SYNTACTICAL] Usage examples:
+    [
+        `keyword_log_extractor("/path/to/log.lammps", "fix")`,
+        `keyword_log_extractor("log.lammps", "BULK ENERGY")`,
+        `keyword_log_extractor("/data/simulations/log.lammps", "thermo")`,
+        `keyword_log_extractor("sim_log.lammps", "dump")`,
+        `keyword_log_extractor("/workspace/log.lammps", "velocity")`,
+    ]
+    [/SYNTACTICAL]
+    Args:
+        path: [ARGS_BRIEF] Path to the LAMMPS log file. [/ARGS_BRIEF]
+                [ARGS_DETAILED] Complete file path to the LAMMPS log file containing simulation output. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Format: "Valid file path to LAMMPS log file" [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] Examples: "/path/to/log.lammps", "simulations/log.lammps" [/ARGS_EXAMPLES]
+        keyword: [ARGS_BRIEF] Keyword to search for in the log file. [/ARGS_BRIEF]
+                  [ARGS_DETAILED] The specific keyword that marks the beginning of sections to extract from the log file. [/ARGS_DETAILED]
+                  [ARGS_SYNTACTICAL] Format: "Non-empty string" [/ARGS_SYNTACTICAL]
+                  [ARGS_EXAMPLES] Examples: "fix", "compute", "thermo" [/ARGS_EXAMPLES]
+    Returns:
+        str: [ARGS_BRIEF] Extracted sections as a structured dictionary in string format. [/ARGS_BRIEF]
+             [ARGS_DETAILED] A string representation of a dictionary containing the extracted sections that start with the specified keyword. [/ARGS_DETAILED]
+             [ARGS_EXAMPLES] "{'fix': [...]}", "{'compute': [...]}" [/ARGS_EXAMPLES]
+    [RAISES] Exceptions:
+        Exception:
+            [ERROR_WHEN] If there is an error reading the log file or extracting sections. [/ERROR_WHEN]
+            [ERROR_DETAILS] Raised when the log file cannot be read or the keyword is not found. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the log file path and ensure the keyword is valid. [/ERROR_RECOVERY]
+    [/RAISES]
+    [LIMITATIONS] Known limitations:
+    - Only supports LAMMPS log files with standard formatting.
+    - May not handle corrupted or non-standard log files gracefully.
+    [/LIMITATIONS]
+    """
+    try:
+        func = modal.Function.from_name("simagent", "keyword_log_extractor")
+        return func.remote(path=path, keyword=keyword)
+    except Exception as e:
+        # Handle unexpected errors
+        raise Exception(
+            f"An unexpected error occurred while extracting keyword from log: {e!s}"
+        ) from e
+
+
+@tool
+def execute_python_script(
+    script_path: str,
+    args: list | None = None,
+    timeout: int = 600,
+    working_dir: str | None = None,
+) -> str:
+    """[BRIEF] Execute a Python script file with arguments in a controlled environment. [/BRIEF]
+
+    [DETAILED] This tool executes existing Python script files with command-line arguments, providing a controlled environment for running complex analysis workflows, data processing pipelines, or computational simulations.
+    It captures all output streams and provides comprehensive execution monitoring with timeout protection.
+    This is essential for integrating existing Python scripts into automated workflows and materials analysis pipelines. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to execute existing Python scripts with specific arguments. You can also use io tool to write a script and then execute it.
+    - Best suited for running complex analysis workflows or simulations
+    - Essential for integrating external Python tools into automated pipelines
+    - Recommended for batch processing and computational workflows
+    - Avoid for simple code execution
+    [/PROCEDURAL]
+
+    [CONTEXTUAL] How this tool works:
+    - Validates script file existence and accessibility
+    - Constructs command with script path and provided arguments
+    - Executes script in subprocess with timeout protection
+    - Captures standard output, error streams, and return codes
+    - Provides comprehensive execution monitoring and error reporting
+    - Supports custom working directory for script execution
+    [/CONTEXTUAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration example:
+    1. [PREREQUISITE] Ensure script file exists and is executable with proper dependencies [/PREREQUISITE]
+    2. [CURRENT] Execute script with appropriate arguments and timeout [/CURRENT]
+    3. [FOLLOW_UP] Process script output and results for further analysis. Can be used to process json script as required [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [SYNTACTICAL] Usage examples:
+    `execute_python_script("analysis.py", ["--input", "data.json", "--output", "results.json"], 300)`,
+    `execute_python_script("simulation.py", ["--steps", "1000", "--temp", "300"], 1800, "/path/to/workdir")`,
+    `execute_python_script("processing.py", None, 600, None)`,
+    [/SYNTACTICAL]
+
+    Args:
+        script_path: [ARGS_BRIEF] Path to the Python script file to execute. [/ARGS_BRIEF]
+                    [ARGS_DETAILED] Complete file path to the Python script that should be executed.
+                    The script must exist and be readable.
+                    The path can be relative to the current working directory or absolute.
+                    The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/ARGS_DETAILED]
+                    [ARGS_SYNTACTICAL] "Valid file path to Python script" [/ARGS_SYNTACTICAL]
+                    [ARGS_EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/ARGS_EXAMPLES]
+        args: [ARGS_BRIEF] Optional list of command-line arguments for the script. [/ARGS_BRIEF]
+             [ARGS_DETAILED] A list of strings representing command-line arguments to pass to the script.
+             These arguments will be passed to the script in the order provided.
+             Common arguments include input files, output paths, configuration parameters, and processing options.
+             If None, the script will be executed without arguments. [/ARGS_DETAILED]
+             [ARGS_SYNTACTICAL] ["arg1", "arg2", "arg3", ...] or None [/ARGS_SYNTACTICAL]
+             [ARGS_EXAMPLES] ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/ARGS_EXAMPLES]
+        timeout: [ARGS_BRIEF] Maximum execution time in seconds. Defaults to 600. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The maximum time in seconds the script is allowed to run before being terminated.
+                This prevents runaway processes and ensures resource management.
+                Choose appropriate values based on expected script execution time.
+                For computational simulations, longer timeouts may be necessary. [/ARGS_DETAILED]
+                [ARGS_SYNTACTIC] positive integer representing seconds [/ARGS_SYNTACTIC]
+                [ARGS_EXAMPLES] 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/ARGS_EXAMPLES]
+        working_dir: [ARGS_BRIEF] Optional working directory for script execution. [/ARGS_BRIEF]
+                    [ARGS_DETAILED] The directory from which the script should be executed.
+                    This affects relative path resolution and file I/O operations within the script.
+                    If None, the current working directory will be used.
+                    This is useful when scripts expect to run from specific directories or access relative files. [/ARGS_DETAILED]
+                    [ARGS_SYNTACTICAL] Valid directory path or None [/ARGS_SYNTACTICAL]
+                    [ARGS_EXAMPLES] "/path/to/project", "data/analysis", None [/ARGS_EXAMPLES]
+
+    Returns:
+        str: [ARGS_BRIEF] JSON string with comprehensive execution results and monitoring data. [/ARGS_BRIEF]
+             [ARGSDETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.
+             This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/ARGS_DETAILED]
+             [ARGS_EXAMPLES] "{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}" [/ARGS_EXAMPLES]
+
+    [RAISES] Exceptions:
+        FileNotFoundError: [ERROR_WHEN] When the specified script file doesn't exist [/ERROR_WHEN]
+                          [ERROR_DETAILS] Script path is invalid or file is not accessible [/ERROR_DETAILS]
+                          [ERROR_RECOVERY] Verify script path exists and is readable [/ERROR_RECOVERY]
+        TimeoutExpired: [ERROR_WHEN] When script execution exceeds the specified timeout [/ERROR_WHEN]
+                       [ERROR_DETAILS] Script terminated due to timeout limit [/ERROR_DETAILS]
+                       [ERROR_RECOVERY] Increase timeout value or optimize script performance [/ERROR_RECOVERY]
+        PermissionError: [ERROR_WHEN] When script file lacks execute permissions [/ERROR_WHEN]
+                        [ERROR_DETAILS] Insufficient permissions to execute the script [/ERROR_DETAILS]
+                        [ERROR_RECOVERY] Check file permissions and ensure script is executable [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+    - Cannot modify script execution environment beyond working directory
+    - Limited to Python scripts and available system Python installation
+    - No real-time output streaming during execution
+    - Cannot interact with scripts requiring user input
+    [/LIMITATIONS]
+    """
+    try:
+        logger.info(f"script path {script_path}")
+        execute_code_script = modal.Function.from_name(
+            "simagent", "execute_python_script"
+        )
+        return execute_code_script.remote(
+            script_path=script_path, args=args, timeout=timeout, working_dir=working_dir
+        )
+    except Exception as e:
+        # Handle unexpected errors
+        raise Exception(
+            f"An unexpected error occurred while executing the code: {e!s}"
+        ) from e
 
 
 @tool
@@ -58,16 +308,16 @@ def get_potential_metadata(file_path: str) -> str:
 
     Args:
         file_path:
-            [BRIEF] Absolute path to the potential file. [/BRIEF]
-            [DETAILED] This is the absolute path to a LAMMPS-compatible potential file (e.g., ReaxFF or EAM formats). The file name is used to determine metadata, so it must match one of the known patterns. [/DETAILED]
-            [SYNTACTICAL] Format: "string ending in a recognized potential filename". [/SYNTACTICAL]
-            [EXAMPLES] Examples: "/path/to/file/ffield.reax", "ffield_UTA1.ITT" [/EXAMPLES]
+            [ARGS_BRIEF] Absolute path to the potential file. [/ARGS_BRIEF]
+            [ARGS_DETAILED] This is the absolute path to a LAMMPS-compatible potential file (e.g., ReaxFF or EAM formats). The file name is used to determine metadata, so it must match one of the known patterns. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: "string ending in a recognized potential filename". [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples: "/path/to/file/ffield.reax", "ffield_UTA1.ITT" [/ARGS_EXAMPLES]
 
     Returns:
         str :
-            [BRIEF] Structured metadata string describing the potential file. [/BRIEF]
-            [DETAILED] The returned string includes the type of interatomic potential and a list of chemical elements that it supports. This helps in choosing suitable potentials for simulations involving specific atoms. [/DETAILED]
-            [EXAMPLES] Example outputs: "{potential type : reax, elements supported : Carbon (C), Hydrogen (H), Oxygen (O), Calcium (Ca), Silicon (Si), pair_style : reaxff}" [/EXAMPLES]
+            [ARGS_BRIEF] Structured metadata string describing the potential file. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The returned string includes the type of interatomic potential and a list of chemical elements that it supports. This helps in choosing suitable potentials for simulations involving specific atoms. [/ARGS_DETAILED]
+            [ARGS_EXAMPLES] Example outputs: "{potential type : reax, elements supported : Carbon (C), Hydrogen (H), Oxygen (O), Calcium (Ca), Silicon (Si), pair_style : reaxff}" [/ARGS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -87,11 +337,11 @@ def get_potential_metadata(file_path: str) -> str:
         raise ValueError("File path must not be None or empty.")
 
     potential_name = file_path.split("/")[-1]
-    if potential_name == "ffield.reax":
-        return (
-            "{potential type : reax, elements supported : "
-            "Carbon (C), Hydrogen (H), Oxygen (O), Calcium (Ca), Silicon (Si), pair_style : reaxff}"
-        )
+
+    if potential_name == "Si.sw":
+        return "{potential type : Stillinger Weber (SW), elements supported : Si (Silicon), pair_style : sw}"
+    elif potential_name == "2007_SiO.tersoff":
+        return "{potential type : tersoff, elements supported : Si (Silicon), Oxygen (O), pair_style : tersoff}"
     elif potential_name == "Al99.eam.alloy":
         return "{potential type : EAM, elements supported : Al (Aluminum), pair_style : eam/alloy}"
     elif potential_name == "Cu_Zhou04.eam.alloy":
@@ -145,24 +395,24 @@ def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:
 
     Args:
         mp_id (str):
-            [BRIEF] Materials Project ID of the material. [/BRIEF]
-            [DETAILED] A unique identifier used by the Materials Project database to reference a material. The ID typically starts with "mp-" followed by digits. It must correspond to an existing entry. [/DETAILED]
-            [SYNTACTIC] Format: '"mp-XXXX" where X is a digit'. [/SYNTACTIC]
-            [EXAMPLES] Examples: "mp-149", "mp-13", "mp-1234567" [/EXAMPLES]
+            [ARGS_BRIEF] Materials Project ID of the material. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A unique identifier used by the Materials Project database to reference a material. The ID typically starts with "mp-" followed by digits. It must correspond to an existing entry. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: '"mp-XXXX" where X is a digit'. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples: "mp-149", "mp-13", "mp-1234567" [/ARGS_EXAMPLES]
         file_path (str):
-            [BRIEF] Destination path for saving the CIF file. [/BRIEF]
-            [DETAILED] Absolute path to the file where the CIF content will be written. [/DETAILED]
-            [SYNTACTIC] Format: 'string path ending in ".cif" corresponding to the path of the CIF file'. [/SYNTACTIC]
-            [EXAMPLES] Examples: "/tmp/output.cif", "structure_files/Al.cif" [/EXAMPLES]
+            [ARGS_BRIEF] Destination path for saving the CIF file. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Absolute path to the file where the CIF content will be written. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: 'string path ending in ".cif" corresponding to the path of the CIF file'. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples: "/tmp/output.cif", "structure_files/Al.cif" [/ARGS_EXAMPLES]
 
     Returns:
         str :
-            [BRIEF] Status message indicating successful structure retrieval and saving at required path. [/BRIEF]
-            [DETAILED] If successful, the tool retrieves the conventional crystallographic structure for the given Materials Project ID, converts it into CIF format, saves it at the specified path, and returns a confirmation message.
-            If any step fails, a descriptive error message is returned instead. [/DETAILED]
-            [EXAMPLES]
+            [ARGS_BRIEF] Status message indicating successful structure retrieval and saving at required path. [/ARGS_BRIEF]
+            [ARGS_DETAILED] If successful, the tool retrieves the conventional crystallographic structure for the given Materials Project ID, converts it into CIF format, saves it at the specified path, and returns a confirmation message.
+            If any step fails, a descriptive error message is returned instead. [/ARGS_DETAILED]
+            [ARGS_EXAMPLES]
                 - "Structure saved successfully at /workspace/data/structure.cif"
-                - "Failed to retrieve or save structure: Invalid Materials Project ID" [/EXAMPLES]
+                - "Failed to retrieve or save structure: Invalid Materials Project ID" [/ARGS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -192,7 +442,7 @@ def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:
         structure = sga.get_conventional_standard_structure()
         structure_cif = structure.to(fmt="cif")
 
-        write_file_sim = modal.Function.lookup("simagent", "write_file")
+        write_file_sim = modal.Function.from_name("simagent", "write_file")
         write_file_sim.remote(file_path, structure_cif)
 
         return f"Structure saved successfully at {file_path}"
@@ -243,38 +493,38 @@ def convert_structure_to_lammps_data(
 
     Args:
         structure_path (str):
-            [BRIEF] Path to the CIF-format structure file. [/BRIEF]
-            [DETAILED] Path to the file containing the crystallographic structure.
-            This file is read and converted into a pymatgen `Structure` object internally before being serialized to LAMMPS data format. [/DETAILED]
-            [SYNTACTIC] Format: 'string ending in ".cif" correspoding to the path of the CIF file.' [/SYNTACTIC]
-            [EXAMPLES] Examples: "/workspace/graphene.cif", "./data/SiO2.cif" [/EXAMPLES]
+            [ARGS_BRIEF] Path to the CIF-format structure file. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Path to the file containing the crystallographic structure.
+            This file is read and converted into a pymatgen `Structure` object internally before being serialized to LAMMPS data format. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: 'string ending in ".cif" correspoding to the path of the CIF file.' [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples: "/workspace/graphene.cif", "./data/SiO2.cif" [/ARGS_EXAMPLES]
         output_file (str):
-            [BRIEF] Path where the LAMMPS data file will be saved. [/BRIEF]
-            [DETAILED] This is the destination file path where the generated LAMMPS-compatible data file will be written.
-            The output file will contain the atomic positions, types, and other necessary information formatted for LAMMPS simulations. [/DETAILED]
-            [SYNTACTIC] Format: 'valid string representing a writable `.data` file path'. [/SYNTACTIC]
-            [EXAMPLES] Examples:
+            [ARGS_BRIEF] Path where the LAMMPS data file will be saved. [/ARGS_BRIEF]
+            [ARGS_DETAILED] This is the destination file path where the generated LAMMPS-compatible data file will be written.
+            The output file will contain the atomic positions, types, and other necessary information formatted for LAMMPS simulations. [/ARGS_DETAILED]
+            [ARGS_SYNTACTIC] Format: 'valid string representing a writable `.data` file path'. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples:
                 - "/workspace/output/graphene.data",
-                -"./converted_data/SiO2.data" [/EXAMPLES]
+                -"./converted_data/SiO2.data" [/ARGS_EXAMPLES]
         atom_style (str):
-            [BRIEF] Atom style to be used in the LAMMPS data file, defaults to "charge". [/BRIEF]
-            [DETAILED] Specifies the LAMMPS atom style to use when formatting the data file.
+            [ARGS_BRIEF] Atom style to be used in the LAMMPS data file, defaults to "charge". [/ARGS_BRIEF]
+            [ARGS_DETAILED] Specifies the LAMMPS atom style to use when formatting the data file.
             Common values include:
                 - "atomic": Includes atomic positions and mass, no charges.
                 - "charge": Includes atomic charges in addition to position and mass.
             The choice of style should match the `atom_style` directive in the LAMMPS input script.
             Defaults to "charge" if nothing provided.
-            Valid values: "real", "metal", "si", "cgs", "electron", "micro", "nano", "full", "". [/DETAILED]
-            [SYNTACTIC] Format: "one of the predefined LAMMPS atom styles as a lowercase string". [/SYNTACTIC]
-            [EXAMPLES] Examples: "real", "metal". [/EXAMPLES]
+            Valid values: "real", "metal", "si", "cgs", "electron", "micro", "nano", "full", "". [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: "one of the predefined LAMMPS atom styles as a lowercase string". [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples: "real", "metal". [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] Status message indicating successful LAMMPS data file generation. [/BRIEF]
-            [DETAILED] If the conversion is successful, returns a confirmation message specifying the path where the LAMMPS data file has been saved. This message can be used for logging or downstream validation in automated simulation workflows. [/DETAILED]
-            [EXAMPLES] Example outputs:
+            [ARGS_BRIEF] Status message indicating successful LAMMPS data file generation. [/ARGS_BRIEF]
+            [ARGS_DETAILED] If the conversion is successful, returns a confirmation message specifying the path where the LAMMPS data file has been saved. This message can be used for logging or downstream validation in automated simulation workflows. [/ARGS_DETAILED]
+            [ARGS_EXAMPLES] Example outputs:
                 - "LAMMPS data file successfully written to: /workspace/output/graphene.data"
-                - "LAMMPS data file successfully written to: ./converted_data/SiO2.data" [/EXAMPLES]
+                - "LAMMPS data file successfully written to: ./converted_data/SiO2.data" [/ARGS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -296,7 +546,7 @@ def convert_structure_to_lammps_data(
     [/LIMITATIONS]
     """
     try:
-        convert_structure_to_lammps_data_sim = modal.Function.lookup(
+        convert_structure_to_lammps_data_sim = modal.Function.from_name(
             "simagent", "convert_structure_to_lammps_data"
         )
         convert_structure_to_lammps_data_sim.remote(
@@ -348,21 +598,21 @@ def run_lammps(input_file: str) -> str:
 
     Args:
         input_file (str):
-            [BRIEF] Path to the LAMMPS input script file. [/BRIEF]
-            [DETAILED] This parameter specifies the absolute or relative path to the input script used by LAMMPS. The script typically contains simulation settings such as atom style, force field parameters, boundary conditions, and compute directives. The file must be in LAMMPS-compatible format (`.in` extension is conventional but not required) and should not require interactive input during execution. [/DETAILED]
-            [SYNTACTIC] Format: string representing a file path; must be readable by the backend LAMMPS engine. [/SYNTACTIC]
-            [EXAMPLES] Examples:
+            [ARGS_BRIEF] Path to the LAMMPS input script file. [/ARGS_BRIEF]
+            [ARGS_DETAILED] This parameter specifies the absolute or relative path to the input script used by LAMMPS. The script typically contains simulation settings such as atom style, force field parameters, boundary conditions, and compute directives. The file must be in LAMMPS-compatible format (`.in` extension is conventional but not required) and should not require interactive input during execution. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: string representing a file path; must be readable by the backend LAMMPS engine. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples:
                 - "/workspace/lammps_inputs/graphene_sim.in"
                 - "./simulations/liquid_water.in"
-                - "minimize_bulk_sio2.in" [/EXAMPLES]
+                - "minimize_bulk_sio2.in" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] Message indicating simulation completion with log file location. [/BRIEF]
-            [DETAILED] On success, returns a message confirming the simulation run, the path to the latest input script used, and the corresponding log file. The log file contains detailed runtime diagnostics and output for verification. [/DETAILED]
-            [EXAMPLES]
+            [ARGS_BRIEF] Message indicating simulation completion with log file location. [/ARGS_BRIEF]
+            [ARGS_DETAILED] On success, returns a message confirming the simulation run, the path to the latest input script used, and the corresponding log file. The log file contains detailed runtime diagnostics and output for verification. [/ARGS_DETAILED]
+            [ARGS_EXAMPLES]
                 - "Simulation ran successfully using input: simulations/run_graphene.in, log saved at: run_graphene.log"
-                - "Simulation ran successfully using input: ./jobs/job123.lmp, log saved at: job123.log" [/EXAMPLES]
+                - "Simulation ran successfully using input: ./jobs/job123.lmp, log saved at: job123.log" [/ARGS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -394,7 +644,7 @@ def run_lammps(input_file: str) -> str:
     try:
         file_name_without_extension = Path(input_file).stem
         log_file = f"{file_name_without_extension}.log"
-        run_lammps_sim = modal.Function.lookup("simagent", "run_lammps")
+        run_lammps_sim = modal.Function.from_name("simagent", "run_lammps")
         run_lammps_sim.remote(input_file, log_file)
         return f"Simulation ran successfully using input: {input_file}, log saved at: {log_file}"
 
@@ -402,9 +652,9 @@ def run_lammps(input_file: str) -> str:
         # Raise a ValueError with more context about the failure
         raise ValueError(
             f"The LAMMPS simulation failed with a ValueError: {e!s}"
-        ) from e
+        ) from None
     except Exception as e:
         # Handle unexpected errors
         raise Exception(
             f"An unexpected error occurred while running the LAMMPS simulation: {e!s}"
-        ) from e
+        ) from None

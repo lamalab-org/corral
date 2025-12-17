@@ -12,6 +12,7 @@ The figures will be saved in the 'figures' directory.
 from pathlib import Path
 
 import lama_aesthetics
+import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 import numpy as np
 from lama_aesthetics.plotutils import range_frame
@@ -308,8 +309,6 @@ def plot_all_tasks_combined(verbosity):
     plt.title(f"All Tasks Combined - Tools and Tasks Embeddings ({verbosity})")
 
     # Create custom legend
-    import matplotlib.lines as mlines
-
     legend_elements = []
 
     # Add tool and task type legends

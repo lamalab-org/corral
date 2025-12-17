@@ -59,16 +59,16 @@ def get_formula_from_smiles(smiles: str) -> str:
 
     Args:
         smiles (str):
-            [BRIEF] SMILES representation of a molecule [/BRIEF]
-            [DETAILED] The SMILES string representing the chemical structure of the molecule. It should be a valid SMILES notation that RDKit can parse. [/DETAILED]
-            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
-            [EXAMPLES] "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
+            [ARGS_BRIEF] SMILES representation of a molecule [/ARGS_BRIEF]
+            [ARGS_DETAILED] The SMILES string representing the chemical structure of the molecule. It should be a valid SMILES notation that RDKit can parse. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMILES string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] The chemical formula in Hill notation (C, H, then alphabetical) [/BRIEF]
-            [DETAILED] The chemical formula of the molecule represented by the SMILES string, formatted in Hill notation. If the SMILES string is invalid or cannot be parsed, it returns an error message. [/DETAILED]
-            [EXAMPLES] '"C2H6O" for ethanol, "C6H6" for benzene, "C2H5NO" for acetic acid amide, "C7H6O3" for salicylic acid' [/EXAMPLES]
+            [ARGS_BRIEF] The chemical formula in Hill notation (C, H, then alphabetical) [/ARGS_BRIEF]
+            [ARGS_DETAILED] The chemical formula of the molecule represented by the SMILES string, formatted in Hill notation. If the SMILES string is invalid or cannot be parsed, it returns an error message. [/ARGS_DETAILED]
+            [ARGS_EXAMPLES] '"C2H6O" for ethanol, "C6H6" for benzene, "C2H5NO" for acetic acid amide, "C7H6O3" for salicylic acid' [/ARGS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -129,22 +129,22 @@ def search_by_smiles(smiles: str, top_k: int = 10) -> list[dict[str, Any]]:
 
     Args:
         smiles (str):
-            [BRIEF] The SMILES representation of the compound to search for in the NMRShift database [/BRIEF]
-            [DETAILED] The SMILES string representing the chemical structure of the molecule to search for in the NMRShift database. It should be a valid SMILES notation that can be processed by the vector database search. [/DETAILED]
-            [SYNTACTICAL] Valid SMILES string [/SYNTACTICAL]
-            [EXAMPLES] "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
+            [ARGS_BRIEF] The SMILES representation of the compound to search for in the NMRShift database [/ARGS_BRIEF]
+            [ARGS_DETAILED] The SMILES string representing the chemical structure of the molecule to search for in the NMRShift database. It should be a valid SMILES notation that can be processed by the vector database search. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid SMILES string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/ARGS_EXAMPLES]
 
         top_k (int, optional):
-            [BRIEF] The maximum number of results to return. Defaults to 10 [/BRIEF]
-            [DETAILED] The maximum number of search results to return from the NMRShift database. It should be a positive integer. [/DETAILED]
-            [SYNTACTICAL] Any positive integer (e.g., 10, 20, 50) [/SYNTACTICAL]
-            [EXAMPLES] 10, 20, 50 [/EXAMPLES]
+            [ARGS_BRIEF] The maximum number of results to return. Defaults to 10 [/ARGS_BRIEF]
+            [ARGS_DETAILED] The maximum number of search results to return from the NMRShift database. It should be a positive integer. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Any positive integer (e.g., 10, 20, 50) [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] 10, 20, 50 [/ARGS_EXAMPLES]
 
     Returns:
         list[dict[str, Any]]:
-            [BRIEF] A list of dictionaries containing the most relevant entries from the NMRShift database [/BRIEF]
-            [DETAILED] Each dictionary contains relevant information about the compound, such as its SMILES, chemical shifts, and other properties. The results are sorted by similarity score in descending order. [/DETAILED]
-            [EXAMPLES] "[{"entry_id": "nmrshiftdb2:234", "compound_name": "Benzene", "smiles": "c1ccccc1", "spectrum": {"nucleus": "13C",...]" [/EXAMPLES]
+            [RETURNS_BRIEF] A list of dictionaries containing the most relevant entries from the NMRShift database [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Each dictionary contains relevant information about the compound, such as its SMILES, chemical shifts, and other properties. The results are sorted by similarity score in descending order. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "[{"entry_id": "nmrshiftdb2:234", "compound_name": "Benzene", "smiles": "c1ccccc1", "spectrum": {"nucleus": "13C",...]" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -210,9 +210,9 @@ def retrieve_protons_shifts() -> str:
 
     Returns:
         str:
-            [BRIEF] A list of dictionaries as an string containing the proton chemical shifts ranges for hydrocarbons [/BRIEF]
-            [DETAILED] Each dictionary (as string) contains the type of proton and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various types of protons in hydrocarbons. [/DETAILED]
-            [EXAMPLES] "[{"Proton": "Aldehyde", "delta / ppm": "9.5 - 10.5"}, {"Proton": "Aromatic", "delta / ppm": "6.5 - 8.2"}, ...]" [/EXAMPLES]
+            [RETURNS_BRIEF] A list of dictionaries as an string containing the proton chemical shifts ranges for hydrocarbons [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Each dictionary (as string) contains the type of proton and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various types of protons in hydrocarbons. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "[{"Proton": "Aldehyde", "delta / ppm": "9.5 - 10.5"}, {"Proton": "Aromatic", "delta / ppm": "6.5 - 8.2"}, ...]" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -285,9 +285,9 @@ def retrieve_aromatic_protons_shifts() -> str:
 
     Returns:
         str:
-            [BRIEF] A list of dictionaries as a string, containing the substituent effects on proton chemical shifts in aromatic rings [/BRIEF]
-            [DETAILED] Each dictionary contains the substituent name and its corresponding chemical shift changes (in ppm) for ortho, meta, and para positions. The shifts are based on typical values observed in NMR spectroscopy for various substituents on aromatic rings. [/DETAILED]
-            [EXAMPLES] "[{"Substituent": "NO2", "Ortho": 0.95, "Meta": 0.17, "Para": 0.33}, {"Substituent": "CHO", "Ortho": 0.58, "Meta": 0.21, "Para": 0.27}, ...]" [/EXAMPLES]
+            [RETURNS_BRIEF] A list of dictionaries as a string, containing the substituent effects on proton chemical shifts in aromatic rings [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Each dictionary contains the substituent name and its corresponding chemical shift changes (in ppm) for ortho, meta, and para positions. The shifts are based on typical values observed in NMR spectroscopy for various substituents on aromatic rings. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "[{"Substituent": "NO2", "Ortho": 0.95, "Meta": 0.17, "Para": 0.33}, {"Substituent": "CHO", "Ortho": 0.58, "Meta": 0.21, "Para": 0.27}, ...]" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -371,9 +371,9 @@ def retrieve_carbon_shifts() -> str:
 
     Returns:
         str:
-            [BRIEF] A list of dictionaries as string containing the carbon chemical shifts ranges for various functional groups in organic compounds [/BRIEF]
-            [DETAILED] Each dictionary contains the functional group and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various functional groups in organic compounds. [/DETAILED]
-            [EXAMPLES] "[{"Group": "CH3-", "Shift (ppm)": "10-30 ppm"}, {"Group": "R3C-, R₂CH, RCH₂", "Shift (ppm)": "25-50 ppm"}, ...]" [/EXAMPLES]
+            [RETURNS_BRIEF] A list of dictionaries as string containing the carbon chemical shifts ranges for various functional groups in organic compounds [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Each dictionary contains the functional group and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various functional groups in organic compounds. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "[{"Group": "CH3-", "Shift (ppm)": "10-30 ppm"}, {"Group": "R3C-, R₂CH, RCH₂", "Shift (ppm)": "25-50 ppm"}, ...]" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -446,9 +446,9 @@ def carbon_nmr_spectra(h_smiles: str) -> str:
 
     Returns:
         str:
-            [BRIEF] The 13C NMR spectra for the molecule in the sample at hand. [/BRIEF]
-            [DETAILED] The function returns the 13C NMR spectra as a string. If some error occurs during the NMR spectra generation process, it returns an error message. [/DETAILED]
-            [EXAMPLES] "13C NMR spectra: δC 10.0, 20.0, 30.0 ppm" [/EXAMPLES]
+            [RETURNS_BRIEF] The 13C NMR spectra for the molecule in the sample at hand. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns the 13C NMR spectra as a string. If some error occurs during the NMR spectra generation process, it returns an error message. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "13C NMR spectra: δC 10.0, 20.0, 30.0 ppm" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -500,9 +500,9 @@ def proton_nmr_spectra(h_smiles: str) -> str:
 
     Returns:
         str:
-            [BRIEF] The 1H NMR spectra for the molecule in the sample at hand. [/BRIEF]
-            [DETAILED] The function returns the 1H NMR spectra as a string, following the conventions of NMR spectra notation. If some error occurs during the NMR spectra generation process, it returns an error message. [/DETAILED]
-            [EXAMPLES] "Predicted 1H NMR spectra: δH 7.40 (d, J = 7.9 Hz, 4H), 7.24 (s, 1H), 7.18 (dd, J = 8.0, 1.8 Hz, 4H), 7.03 (d, J = 1.4 Hz, 4H), 2.46 (s, 4H), 1.62 (s, 12H), 1.21 (s, 36H)" [/EXAMPLES]
+            [RETURNS_BRIEF] The 1H NMR spectra for the molecule in the sample at hand. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns the 1H NMR spectra as a string, following the conventions of NMR spectra notation. If some error occurs during the NMR spectra generation process, it returns an error message. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "Predicted 1H NMR spectra: δH 7.40 (d, J = 7.9 Hz, 4H), 7.24 (s, 1H), 7.18 (dd, J = 8.0, 1.8 Hz, 4H), 7.03 (d, J = 1.4 Hz, 4H), 2.46 (s, 4H), 1.62 (s, 12H), 1.21 (s, 36H)" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -554,9 +554,9 @@ def ir_spectra(h_smiles: str) -> str:
 
     Returns:
         str:
-            [BRIEF] The IR spectra for the molecule in the sample at hand. [/BRIEF]
-            [DETAILED] The function returns the IR spectra as a string, following the conventions of IR spectra notation. If some error occurs during the IR spectra measurement process, it returns an error message. [/DETAILED]
-            [EXAMPLES] "Predicted IR spectra: 3400 cm-1 (O-H stretch), 1700 cm-1 (C=O stretch), 1600 cm-1 (C=C stretch)" [/EXAMPLES]
+            [RETURNS_BRIEF] The IR spectra for the molecule in the sample at hand. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns the IR spectra as a string, following the conventions of IR spectra notation. If some error occurs during the IR spectra measurement process, it returns an error message. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "Predicted IR spectra: 3400 cm-1 (O-H stretch), 1700 cm-1 (C=O stretch), 1600 cm-1 (C=C stretch)" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -683,9 +683,9 @@ def hsqc_nmr_spectra(h_smiles: str) -> str:
 
     Returns:
         str:
-            [BRIEF] The HSQC NMR spectra for the molecule in the sample at hand. [/BRIEF]
-            [DETAILED] The function returns the HSQC NMR spectra as a string, formatted in standard NMR notation. If some error occurs during the measurement, it returns an appropriate message. [/DETAILED]
-            [EXAMPLES] "HSQC: delta H/delta C 7.40/128.0 (2H), 7.24/128.5 (2H), 7.18/129.0 (2H), 7.03/130.0 (2H), 2.46/20.0 (3H), 1.62/15.0 (6H), 1.21/10.0 (9H)." [/EXAMPLES]
+            [RETURNS_BRIEF] The HSQC NMR spectra for the molecule in the sample at hand. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns the HSQC NMR spectra as a string, formatted in standard NMR notation. If some error occurs during the measurement, it returns an appropriate message. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "HSQC: delta H/delta C 7.40/128.0 (2H), 7.24/128.5 (2H), 7.18/129.0 (2H), 7.03/130.0 (2H), 2.46/20.0 (3H), 1.62/15.0 (6H), 1.21/10.0 (9H)." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -774,9 +774,9 @@ def mass_spectrometry_spectra(h_smiles: str) -> str:
 
     Returns:
         str:
-            [BRIEF] The mass spectrometry spectra for the molecule in the sample at hand. [/BRIEF]
-            [DETAILED] The function returns the mass spectrometry spectra as a string in the format "m/z 100.1 (intensity 500), 101.2 (intensity 450), ...". If there is some error during the measurement, it returns an appropriate message. [/DETAILED]
-            [EXAMPLES] "m/z 100.1 (intensity 500), 101.2 (intensity 450), 102.3 (intensity 400), ..." [/EXAMPLES]
+            [RETURNS_BRIEF] The mass spectrometry spectra for the molecule in the sample at hand. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns the mass spectrometry spectra as a string in the format "m/z 100.1 (intensity 500), 101.2 (intensity 450), ...". If there is some error during the measurement, it returns an appropriate message. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "m/z 100.1 (intensity 500), 101.2 (intensity 450), 102.3 (intensity 400), ..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -834,9 +834,9 @@ def retrieve_isotope_distribution() -> str:
 
     Returns:
         str:
-            [BRIEF] A string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry. [/BRIEF]
-            [DETAILED] The function returns a string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry, including their isotopes, natural abundance, m/z values, and m/z peaks. [/DETAILED]
-            [EXAMPLES] "{"Carbon": {"isotopes": {"12C": {"abundance": 98.89, "m/z": 12},"13C": {"abundance": 1.11, "m/z": 13}<more elements...}}}" [/EXAMPLES]
+            [RETURNS_BRIEF] A string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns a string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry, including their isotopes, natural abundance, m/z values, and m/z peaks. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "{"Carbon": {"isotopes": {"12C": {"abundance": 98.89, "m/z": 12},"13C": {"abundance": 1.11, "m/z": 13}<more elements...}}}" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -949,9 +949,9 @@ def retrieve_dbe_formula() -> str:
 
     Returns:
         str:
-            [BRIEF] A string containing the formula for calculating the Double Bond Equivalent (DBE). [/BRIEF]
-            [DETAILED] The function returns a string containing the formula for calculating the Double Bond Equivalent (DBE), along with an interpretation of the DBE values and examples of calculations for common organic compounds. [/DETAILED]
-            [EXAMPLES] "Double Bond Equivalent (DBE) = <more details>." [/EXAMPLES]
+            [RETURNS_BRIEF] A string containing the formula for calculating the Double Bond Equivalent (DBE). [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns a string containing the formula for calculating the Double Bond Equivalent (DBE), along with an interpretation of the DBE values and examples of calculations for common organic compounds. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "Double Bond Equivalent (DBE) = <more details>." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -1037,16 +1037,16 @@ def obtain_isomers_from_molecular_formula(molecular_formula: str) -> list[str]:
 
     Args:
         molecular_formula (str):
-            [BRIEF] The molecular formula of the compound for which to retrieve isomers. [/BRIEF]
-            [DETAILED] The molecular formula representing the chemical composition of the compound for which to retrieve isomers. It should be a valid molecular formula notation that can be processed by the isomer retrieval function. [/DETAILED]
-            [SYNTACTICAL] Valid molecular formula string [/SYNTACTICAL]
-            [EXAMPLES] "C2H6O", "C6H6", "C6H12", "C6H10O", "C6H10Cl2" [/EXAMPLES]
+            [ARGS_BRIEF] The molecular formula of the compound for which to retrieve isomers. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The molecular formula representing the chemical composition of the compound for which to retrieve isomers. It should be a valid molecular formula notation that can be processed by the isomer retrieval function. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Valid molecular formula string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "C2H6O", "C6H6", "C6H12", "C6H10O", "C6H10Cl2" [/ARGS_EXAMPLES]
 
     Returns:
         list[str]:
-            [BRIEF] A list of SMILES strings representing the isomers of the input compound. [/BRIEF]
-            [DETAILED] The function returns a list of SMILES strings representing the isomers of the input compound. If no isomers are found, it returns an empty list. [/DETAILED]
-            [EXAMPLES] `["CCO", "C1=CC=CC=C1"]` [/EXAMPLES]
+            [RETURNS_BRIEF] A list of SMILES strings representing the isomers of the input compound. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns a list of SMILES strings representing the isomers of the input compound. If no isomers are found, it returns an empty list. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] `["CCO", "C1=CC=CC=C1"]` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -1097,16 +1097,16 @@ def validate_smiles(smiles: str) -> bool:
 
     Args:
         smiles (str):
-            [BRIEF] The SMILES representation to validate [/BRIEF]
-            [DETAILED] The SMILES string representing the chemical structure of the molecule to validate. It should be a valid SMILES notation that can be processed by the validation function. [/DETAILED]
-            [SYNTACTICAL] "valid SMILES string" [/SYNTACTICAL]
-            [EXAMPLES] "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/EXAMPLES]
+            [ARGS_BRIEF] The SMILES representation to validate [/ARGS_BRIEF]
+            [ARGS_DETAILED] The SMILES string representing the chemical structure of the molecule to validate. It should be a valid SMILES notation that can be processed by the validation function. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] "valid SMILES string" [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/ARGS_EXAMPLES]
 
     Returns:
         bool:
-            [BRIEF] True if the SMILES string is valid, False otherwise. [/BRIEF]
-            [DETAILED] The function returns True if the SMILES string can be converted into a valid chemical structure, otherwise it returns False. [/DETAILED]
-            [EXAMPLES] `True`, `False` [/EXAMPLES]
+            [RETURNS_BRIEF] True if the SMILES string is valid, False otherwise. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The function returns True if the SMILES string can be converted into a valid chemical structure, otherwise it returns False. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] `True`, `False` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
@@ -1320,9 +1320,9 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
 
     Returns:
         list[str]:
-            [BRIEF] A list of unique fragment SMILES strings. [/BRIEF]
-            [DETAILED] This list contains all the unique SMILES representations of the fragments found by database lookup. [/DETAILED]
-            [EXAMPLES] Example SMILES strings: ["C1=CC=CC=C1", "C1=CC=CC=C1O", ...] [/EXAMPLES]
+            [RETURNS_BRIEF] A list of unique fragment SMILES strings. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] This list contains all the unique SMILES representations of the fragments found by database lookup. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] Example SMILES strings: ["C1=CC=CC=C1", "C1=CC=CC=C1O", ...] [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         None
