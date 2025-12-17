@@ -24,3 +24,7 @@ class InsufficientTrialsError(BenchmarkError):
 
 class NoResultsError(BenchmarkError):
     """Raised when trying to calculate metrics without results"""
+
+
+class BudgetExhaustedError(BenchmarkError):
+    """Raised when API credits/budget are exhausted. Stops the benchmark immediately."""
