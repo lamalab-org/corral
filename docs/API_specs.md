@@ -98,9 +98,37 @@ def percentage_calculator(value: float, percentage: float = 100.0) -> float:
         float: The calculated result
     """
     return (value * percentage) / 100.0
+```
 
 
+## Modal Tools API
 
+For running computationally intensive tasks in the cloud, use Modal. See [Modal docs](https://modal.com/docs) and the [Modal App Documentation](../tasks/corral_md/modal_app/README.md).
+
+### Using modal_tool Decorator in Corral
+
+```python
+from corral.utils.modal import modal_tool, MODAL_TOOL_REGISTRY
+from modal import App, Image
+
+app = App("my-tools")
+
+
+@modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
+def molecular_analysis(smiles: str) -> dict:
+    """Analyze molecular structure in the cloud."""
+    from rdkit import Chem
+    from rdkit.Chem import Descriptors
+
+    mol = Chem.MolFromSmiles(smiles)
+    return {
+        "molecular_weight": Descriptors.MolWt(mol),
+        "logp": Descriptors.MolLogP(mol),
+    }
+
+
+# Tool is automatically registered
+tool = MODAL_TOOL_REGISTRY["molecular_analysis"]
 ```
 
 
