@@ -17,7 +17,7 @@ from corral.backend.tool import Tool, tool
 from corral.utils.modal import remote_call
 from corral.utils.rag import vector_database_search
 
-get_isomers = modal.Function.lookup("chemenv", "get_compound_isomers_pubchem")
+get_isomers = modal.Function.from_name("chemenv", "get_compound_isomers_pubchem")
 
 
 @tool
