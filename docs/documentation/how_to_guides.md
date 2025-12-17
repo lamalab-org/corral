@@ -83,7 +83,7 @@ To help the agent solve the task in this `Environment` we can also add tools to 
    ```
 
 
-The `@tool` decorator registers the function as an `Corral-tool` for agents.
+The `@tool` decorator registers the function as a Corral tool for agents.
 
 
 /// info
@@ -213,7 +213,7 @@ Now, create your agent's main Python file (e.g., agent.py) and start defining yo
 
            return "Your final answer"
    ```
-The `__init()__` initialize the BaseAgent with common parameters.
+The `__init__()` method initializes the BaseAgent with common parameters.
 
 The `.run()` is an abstract method in BaseAgent and must be implemented.
 
@@ -402,7 +402,7 @@ class SimpleMaterialSlabEnvironment(Environment):
         )
 ```
 
-Now lets load our task into corral server.
+Now let's load our task into the Corral server.
 
 ```python
 def load_environments_from_json(file_path: str) -> Dict[str, Environment]:

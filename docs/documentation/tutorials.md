@@ -65,7 +65,7 @@ class SimpleEnvironment(Environment):
         try:
             result = float(self.state.submitted_answer)
             return 1.0 if abs(result - self.answer) < 0.001 else 0.0
-        except:
+        except (TypeError, ValueError):
             return 0.0
 ```
 
@@ -227,7 +227,7 @@ class CalculatorEnvironment(Environment):
         try:
             result = float(self.state.submitted_answer)
             return 1.0 if abs(result - self.answer) < 0.001 else 0.0
-        except:
+        except (ValueError, TypeError):
             return 0.0
 ```
 

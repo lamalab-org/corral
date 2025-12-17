@@ -144,4 +144,4 @@ Agents within Corral are designed to interact with their environments primarily 
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [[LICENSE](LICENSE.md) ](https://github.com/lamalab-org/corral/blob/main/LICENSE.md)file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE.md) file for details.
