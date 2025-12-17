@@ -16,6 +16,7 @@ from corral.agents.utils import (
     save_agent_messages,
 )
 from corral.router.routes import CorralRouter
+from corral.types import BudgetExhaustedError
 
 
 class BaseAgent(ABC):
@@ -263,6 +264,9 @@ class BaseAgent(ABC):
                 logger.error(f"Error in agent response: {final_answer}")
                 return final_answer, self.get_total_token_usage()
 
+        except BudgetExhaustedError:
+            # Re-raise to stop the benchmark immediately
+            raise
         except Exception as e:
             logger.error(f"Error running agent: {e}")
             return f"Error running agent: {e}", self.get_total_token_usage()

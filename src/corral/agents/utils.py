@@ -6,6 +6,7 @@ from typing import Any, TypedDict
 
 import litellm
 import openai
+from litellm.exceptions import BudgetExceededError
 from litellm.types.utils import Message
 from loguru import logger
 from tenacity import (
@@ -16,12 +17,20 @@ from tenacity import (
     wait_fixed,
 )
 
+from corral.types import BudgetExhaustedError
+
 RETRY_EXCEPTIONS = (
     openai.APITimeoutError,
     openai.APIConnectionError,
     openai.APIError,
     openai.APIStatusError,
     openai.InternalServerError,
+)
+
+# Exceptions that should stop the benchmark immediately (not retry or continue)
+STOP_BENCHMARK_EXCEPTIONS = (
+    BudgetExceededError,  # litellm budget exceeded
+    openai.AuthenticationError,  # Invalid API key
 )
 
 
@@ -122,6 +131,13 @@ def llm_call(
             return message, usage_info
 
         return message
+
+    except STOP_BENCHMARK_EXCEPTIONS as e:
+        # Re-raise as BudgetExhaustedError to stop benchmark immediately
+        logger.error(f"Budget/credits exhausted or authentication failed: {e}")
+        raise BudgetExhaustedError(
+            f"Benchmark stopped: {type(e).__name__} - {e}"
+        ) from e
 
     except Exception as e:
         raise e

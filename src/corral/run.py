@@ -17,6 +17,7 @@ from corral.report import (
     TaskTrialResults,
 )
 from corral.router import CorralRouter
+from corral.types import BudgetExhaustedError
 
 
 def create_session_id() -> str:
@@ -110,7 +111,11 @@ def execute_single_trial(
     configure_timeout: float | None = None,
     enable_surrender: bool = False,
 ) -> TaskTrialResult:
-    """Execute a single trial - pure function"""
+    """Execute a single trial - pure function
+
+    Raises:
+        BudgetExhaustedError: When API credits/budget are exhausted. This stops the benchmark.
+    """
     try:
         status = interface.configure_additional_apps(task_id, timeout=configure_timeout)
         logger.info(f"Task {task_id} additional apps/services configured: {status}")
@@ -154,6 +159,9 @@ def execute_single_trial(
                 error_type="Submission Error",
                 token_usage=token_usage,
             )
+    except BudgetExhaustedError:
+        # Re-raise to stop the benchmark immediately
+        raise
     except Exception as agent_error:
         return exception_trial_result(
             task_id=task_id,
