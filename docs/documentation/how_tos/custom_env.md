@@ -1,5 +1,10 @@
 # How to create a custom `Environment` in `Corral`
 
+
+**Goal**: Set up a new Corral environment for your specific use case.
+
+**When to use this**: You have a task domain and want agents to solve problems in it.
+
 Every `Corral` environment is treated as a Python package. It would have standalone dependency and can be pip installed. Let us start by creating a python repository for an example environment.
 
 
@@ -148,4 +153,5 @@ Here `task_1` is the task id which is unique to the task. `Problem 1`, `Answer 1
 
 `create_benchmark_server` sets up and runs the `corral_server` with your newly defined environments, making them accessible via `http://localhost:8000.`
 
+**Done**: Your environment is ready. Start the server and connect agents to it.
 ---
