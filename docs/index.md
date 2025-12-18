@@ -6,7 +6,7 @@
 
 
 
-*`Corral`: The unified framework for the science of agents and agents for science.*
+*`Corral`: The unified framework for the **science of agents** and **agents for science**.*
 
 This dual focus means `Corral` provides extensive utilities that not only facilitate research into agent methodologies but also simplify the creation and deployment of scientific agents and scientific environments.
 
