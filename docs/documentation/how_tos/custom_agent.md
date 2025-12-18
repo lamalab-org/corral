@@ -1,6 +1,12 @@
 # How to create a custom `Agent` in `Corral`
 
 
+**Goal**: Create tools that provide different levels of documentation detail for ablation studies.
+
+**When to use this**: You want to study how tool documentation affects agent performance.
+
+
+
 By extending the `BaseAgent` class in `Corral`, you can implement unique reasoning processes, interaction patterns to create different agent scaffolds. This abstract class provides essential functionalities and a standardized interface, handling:
 - Calls to Large Language Models (LLMs) via `LiteLLM`
 - Standardizes the loading and filling of various prompt types using `PromptStore`

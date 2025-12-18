@@ -26,6 +26,8 @@ Corral lets you tag different *types* of information in tool docstrings. For exa
 
 ## 2. Example of tool with different verbostiy
 
+This is an example of docstring for a tool, where all the information are tagged with different tags. Writing  docstring for a tool in such detail would help us to later control the level of information we will show to the agent
+
 ```python
 from corral.backend.tool import tool
 
@@ -107,6 +109,7 @@ Also note that for Argument description also one should write multiple level of 
 
 ## 3.  Different verbosity levels available
 
+Following are the recognized tags. The verbosity increases as we go down (meaning, `full` verbosity would show all information. `workflow` on the other hand would show all information tagged with all other tags up unitl `workflow` tag, i.e. `brief`, `detailed`, `procedural`, `contextual`)
 
 ```python
 from corral.router.verbosity import ToolVerbosity
@@ -126,6 +129,8 @@ ToolVerbosity.FULL  # Complete original docstring
 
 
 ## 4. Test different verbosity levels
+
+`CorralRunner.bench()` method can set the verbosity level with which benchmarking would happen.
 
 ```python
 from corral.run import CorralRunner

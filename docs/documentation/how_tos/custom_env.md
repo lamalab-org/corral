@@ -111,13 +111,18 @@ Now we'll define the core logic of your environment, including how tasks are set
 # my_new_env/env.py
 from corral.backend import Environment
 from corral.backend.server import create_benchmark_server
+import os
+
+BASE_WORK_DIR = os.getenv("CORRAL_WORK_DIR")
 
 
 class MyEnvironment(Environment):
-    def __init__(self, task_id: str, problem: str, answer: str):
+    def __init__(
+        self, task_id: str, problem: str, answer: str, base_workdir=BASE_WORK_DIR
+    ):
         self.problem = problem
         self.correct_answer = answer
-        super().__init__(task_id)
+        super().__init__(task_id, base_workdir)
 
         # Add your tools
         self.add_tool(my_custom_tool)
