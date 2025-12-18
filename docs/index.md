@@ -6,12 +6,12 @@
 
 
 
-==Corral: The unified framework for the science of agents and agents for science.==
+*`Corral`: The unified framework for the **science of agents** and **agents for science**.*
 
-This dual focus means Corral provides extensive utilities that not only facilitate research into agent methodologies but also simplify the creation and deployment of scientific agents and scientific environments.
+This dual focus means `Corral` provides extensive utilities that not only facilitate research into agent methodologies but also simplify the creation and deployment of scientific agents and scientific environments.
 
 
-Corral is built and maintained with the following foundational principles in mind:
+`Corral` is built and maintained with the following foundational principles in mind:
 
 - Research Facilitation (Science of Agents): Ensuring comprehensive monitoring and control of all system changes, crucial for enabling detailed scientific studies, ablations, and a deeper understanding of agent behavior
 
@@ -29,10 +29,6 @@ Corral is built and maintained with the following foundational principles in min
 
 - Decoupled Design: We decouple agents from the environment.
 
-<!--
-Corral has value for researchers, engineers, managers and teachers looking to use
-
- -->
 
 # Environments 🌍
 
@@ -88,8 +84,63 @@ The platform includes several built-in agent types:
 
 
 In `Corral`, a task typically encompasses the core objective and can optionally include constraints that the agent must adhere to during its execution (e.g., allowed tools). Furthermore, tasks often integrate a scoring function (or callback) that quantifies the agent's performance, allowing for automated evaluation.
+In `Corral` we have defined a container called `TaskDefinition` that could be used to represent a `Task`, while it is present it is not necessary to use it
+
+///info
+An example of defining  a task using `TaskDefintion`
+
+```python
+from corral.backend.task import TaskGroup
+
+task1 = TaskDefinition(
+    name="retrieve_data",
+    description="Retrieve molecular structure",
+    tools=["database_query"],  # you can pass a list of tools
+    scoring_fn=data_score,  # this is a python callable function
+    submission_format={"structure": "string"},
+    initial_input={"molecule_id": "mp-149"},
+)
+```
+///
 
 `Corral` also introduces the concept of `TaskGroups`, which are sequences of individual tasks chained together. These `TaskGroups` are solved in a predefined order, with the output or state from one task potentially serving as input or context for the subsequent tasks. This powerful capability allows for the construction of arbitrarily complex, multi-stage research challenges that mirror real-world problem-solving processes.
+
+///info
+An example of defining a `TaskGroup`
+
+```python
+from corral.backend.task import TaskGroup, TaskDefinition
+
+# Define tasks with dependencies
+task1 = TaskDefinition(
+    name="retrieve_data",
+    description="Retrieve molecular structure",
+    tools=["database_query"],
+    scoring_fn=data_score,
+    submission_format={"structure": "string"},
+    initial_input={"molecule_id": "mp-149"},
+)
+
+task2 = TaskDefinition(
+    name="analyze_structure",
+    description="Analyze the retrieved structure",
+    tools=["structure_analyzer"],
+    scoring_fn=analysis_score,
+    submission_format={"result": "dict"},
+    input_from_tasks=["retrieve_data"],  # Depends on task1
+)
+
+# Create task group
+task_group = TaskGroup(
+    group_id="molecular_workflow",
+    tasks={"retrieve_data": task1, "analyze_structure": task2},
+    chained_tasks=True,  # Auto-detected from dependencies
+)
+
+# Access input from previous task
+task_input = task_group.get_task_input("analyze_structure")
+```
+///
 
 Through this formalism, `Corral` provides a flexible and robust framework for defining and evaluating intricate agent behaviors across a wide spectrum of research problems.
 
@@ -102,9 +153,9 @@ Through this formalism, `Corral` provides a flexible and robust framework for de
 : Tools are functionalities that can be executed by the agent to do something in the environment.
 
 
-# Corral architecture TL;DR 🏗️
+# `Corral` architecture TL;DR 🏗️
 
-Corral is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform follows a client-server design and comprises two primary services:
+`Corral` is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform follows a client-server design and comprises two primary services:
 
 `CorralServer`: This dedicated microservice is responsible for hosting and managing environments and providing the interface for interaction (`CorralRouter`).
 
@@ -129,7 +180,7 @@ The interaction between an agent (running within `CorralRunner`) and its environ
 </figure>
 
 
-Agents within Corral are designed to interact with their environments primarily using natural language.
+Agents within `Corral` are designed to interact with their environments primarily using natural language.
 ///
 
 
