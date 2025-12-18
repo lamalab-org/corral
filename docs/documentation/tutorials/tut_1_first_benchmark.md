@@ -44,12 +44,24 @@ BASE_WORK_DIR = os.getenv("CORRAL_WORK_DIR")
 
 @tool
 def add_numbers(a: float, b: float) -> float:
-    """Add two numbers together."""
+    """Add two numbers together.
+
+    Args:
+        a: first number
+        b: second number
+    """
     return a + b
 
 
 class SimpleEnvironment(Environment):
-    def __init__(self, task_id: str, num1: float, num2: float, answer: float):
+    def __init__(
+        self,
+        task_id: str,
+        num1: float,
+        num2: float,
+        answer: float,
+        base_work_dir=BASE_WORK_DIR,
+    ):
         self.num1 = num1
         self.num2 = num2
         self.answer = answer
@@ -72,6 +84,8 @@ class SimpleEnvironment(Environment):
 Notice that we created a tool using the `@tool` decorator and an environment that extends `Environment`.
 
 ## Step 3: Start the server
+
+`CORRAL_WORK_DIR` set this environment variable. This is where all the files will be written by the agents if there is any writing required for the task.
 
 Add this code to the bottom of `simple_env.py`:
 
@@ -150,6 +164,10 @@ You should see the agent working through the tasks. The output will show LLM cal
 Results:
 Average Score: 1.00
 Pass@1: 1.00
+```
+`generate_report` would save a comprehensive report of the run
+```python
+result.generate_report("results.json")
 ```
 
 Congratulations! You've run your first `Corral` benchmark.

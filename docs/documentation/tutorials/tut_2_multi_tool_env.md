@@ -14,20 +14,35 @@ from corral.backend.tool import tool
 
 
 @tool
-def add(a: float, b: float) -> float:
-    """Add two numbers."""
+def add_numbers(a: float, b: float) -> float:
+    """Add two numbers together.
+
+    Args:
+        a: first number
+        b: second number
+    """
     return a + b
 
 
 @tool
-def multiply(a: float, b: float) -> float:
-    """Multiply two numbers."""
+def multiply_numbers(a: float, b: float) -> float:
+    """Multiply two numbers.
+
+    Args:
+       a: first number
+       b: second number
+    """
     return a * b
 
 
 @tool
-def subtract(a: float, b: float) -> float:
-    """Subtract b from a."""
+def subtract_numbers(a: float, b: float) -> float:
+    """Subtract b from a.
+
+    Args:
+       a: first number
+       b: second number
+    """
     return a - b
 ```
 
@@ -39,11 +54,18 @@ Add to `calculator_env.py`:
 
 ```python
 class CalculatorEnvironment(Environment):
-    def __init__(self, task_id: str, problem: str, answer: float):
-        super().__init__(task_id)
+    def __init__(
+        self,
+        task_id: str,
+        num1: float,
+        num2: float,
+        answer: float,
+        base_work_dir=BASE_WORK_DIR,
+    ):
+
         self.problem = problem
         self.answer = answer
-
+        super().__init__(task_id, base_work_dir)
         # Add all three tools
         self.add_tool(add)
         self.add_tool(multiply)
