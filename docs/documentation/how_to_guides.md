@@ -1,6 +1,6 @@
 # 1. How to create a custom `Environment` in `Corral`
 
-Every Corral environment is treated as a Python package. It would have standalone dependency and can be pip installed. Let us start by creating a python repository for an example environment.
+Every `Corral` environment is treated as a Python package. It would have standalone dependency and can be pip installed. Let us start by creating a python repository for an example environment.
 
 
 
@@ -17,7 +17,7 @@ All the files related to the `Environment`  would be inside this directory.
 `2.  Initialize a python project`
 
 
-You need a pyproject.toml file to define your environment's name, version, and its dependencies. Make sure to include corral as a dependency. We will use `uv` to manage our python dependency and project.
+You need a pyproject.toml file to define your environment's name, version, and its dependencies. Make sure to include `Corral` as a dependency. We will use `uv` to manage our python dependency and project.
 
 
    ```bash
@@ -40,9 +40,9 @@ This command would initialize a project by creating a `pyproject.toml` file
 
 **name:** This should be a unique identifier for your environment.
 
-**dependencies:** Lists the required Python packages. corral is essential, and you'll add any other libraries your tools or environment logic might use here.
+**dependencies:** Lists the required Python packages. `Corral` is essential, and you'll add any other libraries your tools or environment logic might use here.
 
-Also remember to create a virtual environment for this project (corral environment)
+Also remember to create a virtual environment for this project (`Corral` environment)
 
    ```bash
    uv venv
@@ -56,7 +56,7 @@ Activate the virtual env with: `source .venv/bin/activate`
    ```bash
    uv add corral
    ```
-This command would add corral to your dependency and install it in your virtual environment.
+This command would add `Corral` to your dependency and install it in your virtual environment.
 
 
 `4. Create tools for the Environment`
@@ -83,13 +83,13 @@ To help the agent solve the task in this `Environment` we can also add tools to 
    ```
 
 
-The `@tool` decorator registers the function as a Corral tool for agents.
+The `@tool` decorator registers the function as a `Corral` tool for agents.
 
 
 /// info
     open: True
 
-  Docstring Format: The docstring is critical because it is used by Corral to automatically generate tool descriptions that agents (especially LLM-based agents) can understand and use. It must clearly describe what the tool does, its Args (parameters), and what it Returns.
+  Docstring Format: The docstring is critical because it is used by `Corral` to automatically generate tool descriptions that agents (especially LLM-based agents) can understand and use. It must clearly describe what the tool does, its Args (parameters), and what it Returns.
 ///
 
 
@@ -97,9 +97,9 @@ The `@tool` decorator registers the function as a Corral tool for agents.
 `5. Implement environment class`
 
 
-Corral has an `Environment` abstraction which takes care of all the internal logic related to execution of tools upon calling management of the state of environment etc. User can build their environment on top of this.
+`Corral` has an `Environment` abstraction which takes care of all the internal logic related to execution of tools upon calling management of the state of environment etc. User can build their environment on top of this.
 
-Now we'll define the core logic of your environment, including how tasks are set up. Corral allows you to define tasks directly in your env.py or load them dynamically, for example, from a JSON file. Loading from JSON is highly recommended for managing multiple tasks.
+Now we'll define the core logic of your environment, including how tasks are set up. `Corral` allows you to define tasks directly in your env.py or load them dynamically, for example, from a JSON file. Loading from JSON is highly recommended for managing multiple tasks.
 
 
 ```python
@@ -153,7 +153,7 @@ Here `task_1` is the task id which is unique to the task. `Problem 1`, `Answer 1
 # 2. How to create a custom `Agent` in `Corral`
 
 
-By extending the `BaseAgent` class in corral, you can implement unique reasoning processes, interaction patterns to create different agent scaffolds. This abstract class provides essential functionalities and a standardized interface, handling:
+By extending the `BaseAgent` class in `Corral`, you can implement unique reasoning processes, interaction patterns to create different agent scaffolds. This abstract class provides essential functionalities and a standardized interface, handling:
 - Calls to Large Language Models (LLMs) via `LiteLLM`
 - Standardizes the loading and filling of various prompt types using `PromptStore`
 - Provides a mechanism to inject custom logic at various points in the agent's lifecycle using `Hooks`
@@ -402,7 +402,7 @@ class SimpleMaterialSlabEnvironment(Environment):
         )
 ```
 
-Now let's load our task into the Corral server.
+Now let's load our task into the `Corral` server.
 
 ```python
 def load_environments_from_json(file_path: str) -> Dict[str, Environment]:
@@ -424,7 +424,7 @@ def load_environments_from_json(file_path: str) -> Dict[str, Environment]:
 all_material_environments = load_environments_from_json("material_tasks.json")
 
 
-# Create the corral server
+# Create the Corral server
 if __name__ == "__main__":
     app = create_benchmark_server(all_material_environments)
 

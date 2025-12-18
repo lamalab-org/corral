@@ -6,12 +6,12 @@
 
 
 
-*Corral: The unified framework for the science of agents and agents for science.*
+*`Corral`: The unified framework for the science of agents and agents for science.*
 
-This dual focus means Corral provides extensive utilities that not only facilitate research into agent methodologies but also simplify the creation and deployment of scientific agents and scientific environments.
+This dual focus means `Corral` provides extensive utilities that not only facilitate research into agent methodologies but also simplify the creation and deployment of scientific agents and scientific environments.
 
 
-Corral is built and maintained with the following foundational principles in mind:
+`Corral` is built and maintained with the following foundational principles in mind:
 
 - Research Facilitation (Science of Agents): Ensuring comprehensive monitoring and control of all system changes, crucial for enabling detailed scientific studies, ablations, and a deeper understanding of agent behavior
 
@@ -29,10 +29,6 @@ Corral is built and maintained with the following foundational principles in min
 
 - Decoupled Design: We decouple agents from the environment.
 
-<!--
-Corral has value for researchers, engineers, managers and teachers looking to use
-
- -->
 
 # Environments 🌍
 
@@ -102,9 +98,9 @@ Through this formalism, `Corral` provides a flexible and robust framework for de
 : Tools are functionalities that can be executed by the agent to do something in the environment.
 
 
-# Corral architecture TL;DR 🏗️
+# `Corral` architecture TL;DR 🏗️
 
-Corral is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform follows a client-server design and comprises two primary services:
+`Corral` is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform follows a client-server design and comprises two primary services:
 
 `CorralServer`: This dedicated microservice is responsible for hosting and managing environments and providing the interface for interaction (`CorralRouter`).
 
@@ -129,7 +125,7 @@ The interaction between an agent (running within `CorralRunner`) and its environ
 </figure>
 
 
-Agents within Corral are designed to interact with their environments primarily using natural language.
+Agents within `Corral` are designed to interact with their environments primarily using natural language.
 ///
 
 

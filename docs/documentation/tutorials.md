@@ -1,4 +1,4 @@
-# Tutorial 1: Your First Corral Benchmark
+# Tutorial 1: Your First `Corral` Benchmark
 
 **What you'll learn**: By the end of this tutorial, you'll have created a simple environment, connected an agent, and run your first benchmark.
 
@@ -13,7 +13,7 @@ mkdir corral-tutorial
 cd corral-tutorial
 ```
 
-Create a virtual environment and install Corral:
+Create a virtual environment and install `Corral`:
 
 ```bash
 uv init
@@ -152,12 +152,12 @@ Average Score: 1.00
 Pass@1: 1.00
 ```
 
-Congratulations! You've run your first Corral benchmark.
+Congratulations! You've run your first `Corral` benchmark.
 
 ### What you accomplished
 
 - ✅ Created a simple environment with a tool
-- ✅ Started a Corral server
+- ✅ Started a `Corral` server
 - ✅ Connected an agent to the server
 - ✅ Ran a benchmark and saw results
 
@@ -305,7 +305,7 @@ Watch the agent's reasoning process. You'll see it call `multiply` first, then `
 
 # Tutorial 3: Creating a Custom Agent
 
-**What you'll learn**: Build a simple custom agent that works with Corral environments.
+**What you'll learn**: Build a simple custom agent that works with `Corral` environments.
 
 **Prerequisites**: Complete Tutorials 1 and 2
 
@@ -434,7 +434,7 @@ You'll see your agent's iteration-by-iteration thinking process.
 
 - ✅ Created a custom agent from scratch
 - ✅ Implemented the main reasoning loop
-- ✅ Connected your agent to Corral environments
+- ✅ Connected your agent to `Corral` environments
 - ✅ Saw your agent solve tasks
 
 ### Experiment

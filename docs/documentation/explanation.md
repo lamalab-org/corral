@@ -1,9 +1,9 @@
 
-These explanations help you understand the "why" behind Corral's design.
+These explanations help you understand the "why" behind `Corral`'s design.
 
 ## Why Microservice Architecture?
 
-Corral separates the environment (server) and agent (runner) into distinct services. This design choice stems from several important considerations.
+`Corral` separates the environment (server) and agent (runner) into distinct services. This design choice stems from several important considerations.
 
 ### Isolation and Safety
 
@@ -23,7 +23,7 @@ The microservice design enables:
 
 **Parallel Benchmarking**: Multiple agents can evaluate against the same environment server simultaneously. This accelerates research comparing different agent architectures.
 
-**Language Flexibility**: While Corral is Python-based, the REST API allows implementing agents in any language. Researchers can leverage the ecosystem best suited for their agent design.
+**Language Flexibility**: While `Corral` is Python-based, the REST API allows implementing agents in any language. Researchers can leverage the ecosystem best suited for their agent design.
 
 ### Reproducibility
 
@@ -47,15 +47,15 @@ Separation enables:
 
 ### The Trade-off
 
-The microservice approach adds complexity - you must run two processes, manage network communication, and handle distributed failure modes. Corral accepts this trade-off because the benefits (isolation, scalability, reproducibility) are fundamental to reliable agent research.
+The microservice approach adds complexity - you must run two processes, manage network communication, and handle distributed failure modes. `Corral` accepts this trade-off because the benefits (isolation, scalability, reproducibility) are fundamental to reliable agent research.
 
-For simple cases, you might prefer a monolithic design where agent and environment run in the same process. Corral prioritizes the needs of serious research over convenience for simple cases.
+For simple cases, you might prefer a monolithic design where agent and environment run in the same process. `Corral` prioritizes the needs of serious research over convenience for simple cases.
 
 ---
 
 ## Understanding the Verbosity System
 
-The verbosity system in Corral allows controlling how much detail tool descriptions provide. This addresses a fundamental question in agent research: *How much does documentation context affect agent performance?*
+The verbosity system in `Corral` allows controlling how much detail tool descriptions provide. This addresses a fundamental question in agent research: *How much does documentation context affect agent performance?*
 
 ### The Research Question
 
@@ -70,7 +70,7 @@ These questions matter because token limits and context management are real cons
 
 ### The Solution: Structured Verbosity
 
-Rather than forcing one documentation style, Corral lets you tag different *types* of information in tool docstrings:
+Rather than forcing one documentation style, `Corral` lets you tag different *types* of information in tool docstrings:
 
 ```
 [BRIEF] - What the tool does (1-2 sentences)
@@ -108,7 +108,7 @@ The system follows several principles:
 
 ## The Philosophy Behind Hooks
 
-Hooks in Corral allow injecting custom code at specific points in agent execution.
+Hooks in `Corral` allow injecting custom code at specific points in agent execution.
 
 ### The Core Problem
 
@@ -158,7 +158,7 @@ The agent doesn't know about your hook. It just exposes hook points and executes
 
 ### Hook Point Selection
 
-Corral provides four hook points, chosen to cover common needs without overwhelming users:
+`Corral` provides four hook points, chosen to cover common needs without overwhelming users:
 
 **BEFORE_TASK**: For setup, intervention injection, initialization
 **AFTER_TASK**: For cleanup, final metrics, result processing
@@ -204,7 +204,7 @@ This demonstrates hook composability - interventions are just another type of ho
 
 Hooks add complexity - there's more API surface, more concepts to learn. For simple use cases, they're overkill.
 
-Corral accepts this because the target use case is *research*, where you'll run many variations and need flexibility. The hook system pays for itself when you need to:
+`Corral` accepts this because the target use case is *research*, where you'll run many variations and need flexibility. The hook system pays for itself when you need to:
 
 - Run the same agent with and without interventions
 - Compare different logging strategies
@@ -217,7 +217,7 @@ If you're just running one agent on one task once, hooks are unnecessary. But re
 
 ## Task Chaining vs. Independent Tasks
 
-Corral supports two task execution modes: independent tasks and chained tasks. Understanding when to use each requires understanding what they represent.
+`Corral` supports two task execution modes: independent tasks and chained tasks. Understanding when to use each requires understanding what they represent.
 
 ### Independent Tasks
 
@@ -236,7 +236,7 @@ In independent mode, each task is self-contained. An agent's solution to task_1 
 
 These are unrelated. Success on one doesn't help with others.
 
-**Execution Model**: The runner completes all trials of task_1, then all trials of task_2. Tasks can even run in parallel (though Corral currently runs sequentially).
+**Execution Model**: The runner completes all trials of task_1, then all trials of task_2. Tasks can even run in parallel (though `Corral` currently runs sequentially).
 
 ### Chained Tasks
 
@@ -305,11 +305,11 @@ Environments share a `TaskGroup` that coordinates state passing.
 - Partial workflow completion (got through 2 of 3 tasks)
 - End-to-end success (all tasks solved)
 
-Corral tracks both individual task scores and full workflow completion.
+`Corral` tracks both individual task scores and full workflow completion.
 
 ### Design Philosophy
 
-Corral doesn't force one model. It provides primitives for both because they serve different research needs.
+`Corral` doesn't force one model. It provides primitives for both because they serve different research needs.
 
 If you're evaluating general agent capabilities across diverse tasks, use independent tasks.
 
@@ -317,13 +317,13 @@ If you're evaluating agent performance on complex, structured problems requiring
 
 You can even mix them - some tasks independent, some chained - by creating separate `TaskGroup` instances.
 
-The key insight: *task independence vs. chaining is a property of the research question, not the implementation*. Corral's architecture lets you model both.
+The key insight: *task independence vs. chaining is a property of the research question, not the implementation*. `Corral`'s architecture lets you model both.
 
 ---
 
 ## Scoring Function Design Principles
 
-Scoring functions in Corral evaluate agent solutions, typically returning values between 0.0 (failure) and 1.0 (success). Designing good scoring functions requires careful thought.
+Scoring functions in `Corral` evaluate agent solutions, typically returning values between 0.0 (failure) and 1.0 (success). Designing good scoring functions requires careful thought.
 
 ### Binary vs. Continuous Scores
 
@@ -452,7 +452,7 @@ def score(self):
 - But may reward inefficient approaches
 - Requires defining what counts as "correct process"
 
-Corral doesn't prescribe a philosophy - you design scoring to match your research question.
+`Corral` doesn't prescribe a philosophy - you design scoring to match your research question.
 
 ### Scoring in Chained Tasks
 
@@ -514,7 +514,7 @@ Consider an agent given a task: "Find the molecular structure of unobtanium." If
 
 ### Design Philosophy
 
-Corral makes surrender explicit and trackable:
+`Corral` makes surrender explicit and trackable:
 
 - Agents must deliberately return "GIVE UP"
 - Results mark `surrendered=True`
