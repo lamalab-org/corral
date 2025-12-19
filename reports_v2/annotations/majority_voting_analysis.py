@@ -49,6 +49,9 @@ class MajorityVotingAnalyzer:
         self.marker_selection_stats = defaultdict(
             lambda: defaultdict(lambda: {"accepted": 0, "discarded": 0})
         )
+        # Track nodes with absolute agreement per file for parquet export
+        # Structure: {fileId: set of node_ids with absolute agreement}
+        self.absolute_agreement_nodes = defaultdict(set)
 
     def load_data(self) -> pd.DataFrame:
         """Load the parquet file"""
@@ -229,6 +232,9 @@ class MajorityVotingAnalyzer:
         if len(marker_counts) == 1:
             self.results["nodes_with_absolute_agreement"] += 1
             self.results["nodes_with_majority"] += 1
+
+            # Track this node as having absolute agreement
+            self.absolute_agreement_nodes[file_id].add(node_id)
 
             # Store the agreed annotation
             agreed_markers = (
@@ -473,7 +479,7 @@ class MajorityVotingAnalyzer:
 
     def save_results(
         self, output_dir: str | None = None
-    ) -> tuple[Path, Path, Path, Path, Path]:
+    ) -> tuple[Path, Path, Path, Path, Path, Path]:
         """
         Save analysis results to JSON files
 
@@ -481,7 +487,7 @@ class MajorityVotingAnalyzer:
             output_dir: Directory to save results (default: same as parquet file)
 
         Returns:
-            Tuple of paths to the saved files (summary, majority, disagreement, partial_majority, marker_selection)
+            Tuple of paths to the saved files (summary, majority, disagreement, partial_majority, marker_selection, absolute_agreement_parquet)
         """
         if output_dir is None:
             output_dir = self.parquet_path.parent
@@ -566,13 +572,108 @@ class MajorityVotingAnalyzer:
             f"{len(env_overall_stats)} environment overalls, and 1 fully overall to {marker_selection_path}"
         )
 
+        # Save absolute agreement data to parquet
+        absolute_agreement_parquet_path = self._save_absolute_agreement_parquet(
+            output_dir
+        )
+
         return (
             summary_path,
             majority_path,
             disagreement_path,
             partial_majority_path,
             marker_selection_path,
+            absolute_agreement_parquet_path,
         )
+
+    def _save_absolute_agreement_parquet(self, output_dir: Path) -> Path:
+        """
+        Save entries with absolute agreement nodes to a parquet file.
+
+        This method filters the original data to:
+        1. Only include nodes with absolute agreement (for annotatable nodes)
+        2. Keep non-annotatable nodes as-is
+        3. Remove entries that have no annotatable nodes with absolute agreement
+
+        Args:
+            output_dir: Directory to save the parquet file
+
+        Returns:
+            Path to the saved parquet file
+        """
+        if self.df is None:
+            raise ValueError("Data not loaded. Call analyze() first.")
+
+        filtered_rows = []
+
+        for file_id, agreed_node_ids in self.absolute_agreement_nodes.items():
+            # Get the first row for this fileId to use as template
+            # (all annotators have the same structure, we pick one as representative)
+            file_rows = self.df[self.df["fileId"] == file_id]
+            if file_rows.empty:
+                continue
+
+            # Use the first annotator's data as the base
+            base_row = file_rows.iloc[0].copy()
+
+            # Parse fileNodes
+            file_nodes = self._parse_json_if_needed(base_row["fileNodes"])
+
+            # Filter nodes: keep non-annotatable nodes and annotatable nodes with agreement
+            filtered_nodes = []
+            has_annotatable_with_agreement = False
+
+            for node in file_nodes:
+                node_id = node.get("id")
+                annotatable = node.get("annotatable", False)
+
+                if not annotatable:
+                    # Keep non-annotatable nodes as-is
+                    filtered_nodes.append(node)
+                elif node_id in agreed_node_ids:
+                    # This annotatable node has absolute agreement
+                    # Get the agreed markers from majority_annotations
+                    agreed_annotation = next(
+                        (
+                            ann
+                            for ann in self.majority_annotations
+                            if ann["fileId"] == file_id
+                            and ann["nodeId"] == node_id
+                            and ann["vote_type"] == "absolute_agreement"
+                        ),
+                        None,
+                    )
+                    if agreed_annotation:
+                        # Update the node with agreed markers
+                        node_copy = node.copy()
+                        node_copy["markers"] = agreed_annotation["markers"]
+                        filtered_nodes.append(node_copy)
+                        has_annotatable_with_agreement = True
+                # Skip annotatable nodes without absolute agreement
+
+            # Only include entries that have at least one annotatable node with agreement
+            if has_annotatable_with_agreement:
+                # Create a new row with filtered nodes
+                new_row = base_row.to_dict()
+                new_row["fileNodes"] = json.dumps(filtered_nodes)
+                filtered_rows.append(new_row)
+
+        # Create DataFrame from filtered rows
+        if filtered_rows:
+            filtered_df = pd.DataFrame(filtered_rows)
+        else:
+            # Create empty DataFrame with same columns
+            filtered_df = pd.DataFrame(columns=self.df.columns)
+
+        # Save to parquet
+        output_path = output_dir / "absolute_agreement_annotations.parquet"
+        filtered_df.to_parquet(output_path, index=False)
+
+        logger.info(
+            f"Saved {len(filtered_df)} entries with absolute agreement to {output_path}"
+        )
+
+        return output_path
 
 
 def main():
@@ -601,6 +702,7 @@ def main():
         disagreement_path,
         partial_majority_path,
         marker_selection_path,
+        absolute_agreement_parquet_path,
     ) = analyzer.save_results(str(output_dir))
 
     logger.info("\nResults saved to:")
@@ -609,6 +711,7 @@ def main():
     logger.info(f"  - Disagreement annotations: {disagreement_path}")
     logger.info(f"  - Partial majority annotations: {partial_majority_path}")
     logger.info(f"  - Marker selection stats: {marker_selection_path}")
+    logger.info(f"  - Absolute agreement parquet: {absolute_agreement_parquet_path}")
 
 
 if __name__ == "__main__":
