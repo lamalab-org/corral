@@ -2,7 +2,6 @@
 import gc
 import json
 import math
-import os
 import re
 from pathlib import Path
 
@@ -97,12 +96,12 @@ def check_roughness_function(tolerance: float, final_params):
                     try:
                         rms = float(data[rough_key])
                     except ValueError:
-                        logger.warning(f"⚠️ Invalid RMS value for entry {i}")
+                        logger.warning(f"Invalid RMS value for entry {i}")
                         all_passed = False
                         continue
 
                     path = data[path_key]
-                    logger.info(f"🔹 Entry {i}: RMS={rms}, Path={path}")
+                    logger.info(f"Entry {i}: RMS={rms}, Path={path}")
 
                     # Run user-defined check function
                     check_output = check_roughness(path)
@@ -114,31 +113,29 @@ def check_roughness_function(tolerance: float, final_params):
 
                     # Check if the measured value is within tolerance
                     if not (rms - abs_tol <= check_output <= rms + abs_tol):
-                        logger.error(f"❌ Entry {i} failed tolerance check.")
+                        logger.warning(f"Entry {i} failed tolerance check.")
                         all_passed = False
 
-            # ✅ Additional condition: check_params(final_params) must be 1
+            # Additional condition: check_params(final_params) must be 1
             if check_params(final_params) != 1:
-                logger.error("❌ check_params(final_params) != 1")
-                logger.error(check_params(final_params))
+                logger.warning("check_params(final_params) != 1")
+                logger.info(check_params(final_params))
                 all_passed = False
 
             return 1 if all_passed else 0
 
         except json.JSONDecodeError:
-            logger.error(
-                "❌ Could not parse JSON — please check the submission format."
-            )
+            logger.warning("Could not parse JSON — please check the submission format.")
             return 0
         except Exception as e:
-            logger.warning(f"⚠️ Error: {e}")
+            logger.warning(f"Error: {e}")
             return 0
 
     return score_fn
 
 
 def check_params_function(final_params):
-    def score_fn(result: str) -> float:  # noqa: ARG001
+    def score_fn(_result: str) -> float:
         try:
             logger.info(f"Checking params with final_params: {final_params}")
             score = check_params(
@@ -212,21 +209,22 @@ def check_indentation(target: str):
 
 
 def check_nid_file_exists(path):
-    if Path(path).is_dir():
-        # path is a directory → check for any .nid files inside it
-        for filename in Path(path).iterdir():
-            if filename.suffix == ".nid":  # Use .suffix for Path objects
-                logger.info(f"NID file found in directory: {filename}")
+    p = Path(path)
+    if p.is_dir():
+        # Path is a directory → check for any .nid files inside it
+        for filepath in p.iterdir():
+            if filepath.suffix == ".nid":
+                logger.info(f"NID file found in directory: {filepath.name}")
                 return 1
         logger.info(f"No .nid files found in the specified directory: {path}")
         return 0
-    elif Path(path).is_file():
+    elif p.is_file():
         # Path is a file → check if it ends with .nid
-        if path.endswith(".nid"):
-            logger.info(f"NID file found: {Path(path).name}")
+        if p.suffix == ".nid":
+            logger.info(f"NID file found: {p.name}")
             return 1
         else:
-            logger.info(f"File exists but is not a .nid file: {Path(path).name}")
+            logger.info(f"File exists but is not a .nid file: {p.name}")
             return 0
     else:
         logger.info(f"Path does not exist: {path}")
@@ -235,6 +233,38 @@ def check_nid_file_exists(path):
 
 def get_params():
     pythoncom.CoInitialize()
+    _tip_guid_map = {
+        "AN2_200": "{BD61D124-8350-4464-BFE4-1D8A156E4913}",
+        "GLA_1": "{9E2BA28D-D843-41bf-8F62-05502B3EDB18}",
+        "ACL_A": "{ABB75273-9543-431a-B681-C79B533DD9E6}",
+        "ANSCM": "{40AEA787-942C-4d48-A389-DA81571F009C}",
+        "SICON_A": "{F7A339A7-E29F-42a9-B7AA-D69C54363B76}",
+        "XYNCHR": "{DD3DFE39-455E-40a1-801E-5D5B14CE4080}",
+        "XYCONTR": "{12ADC816-C7B1-48f8-8B9E-5E579151CF50}",
+        "ContAl_G": "{ED5A15E6-D3B0-4e64-8C50-809335D3E143}",
+        "Multi75E_G": "{9593403B-A476-49a9-AA1F-9C3AEDAC0178}",
+        "Multi75M_G": "{03D0715C-A520-4976-A5E2-4FC3078E3821}",
+        "Multi75Al_G": "{443A2EDC-5C9C-4d60-843F-C6688BEA1DEA}",
+        "Tap190Al_G": "{041FB80E-A179-4170-B5A4-A4EA1CC0A965}",
+        "Tap150Al_G": "{E0F31C86-6BB8-496b-AC7E-F55C62EAB635}",
+        "USC_F1_2_k7_3": "{19AEEE43-478F-4D16-BDB7-2EE256EAF4A4}",
+        "USC_F0_3_k0_3": "{16FAEEB6-A887-46F6-A418-81A9EBBCB6C3}",
+        "Dyn190Al": "{E9CE0D2D-F59E-4B44-A74F-B78C11575E9F}",
+        "Stat0_2LAuD": "{A4A16538-CCD1-4BB1-B048-7B4F0F1B31BD}",
+        "CONTR": "{89E92173-96FB-4ff9-94D8-42296D00D980}",
+        "CONTSCR": "{5A687B3E-A75A-4b22-BD70-40ABB931F00E}",
+        "CONTSCPt": "{1E95D12B-1DDB-4ace-B3AF-BE9C0D52D4FC}",
+        "EFMR": "{986305AC-64B5-462e-B37E-6BD5AE447BE3}",
+        "LFMR": "{C61FCA2C-6D5D-4105-9FDE-640D263E229F}",
+        "MFMR": "{9499F49F-920F-47ec-80B6-883F683FF056}",
+        "NCLR": "{62633FD4-0555-4cee-A8B4-B82F4CEFBB48}",
+        "PPP_FMR": "{EBA2B75C-AA94-4451-AD36-1388CDABF5E8}",
+        "pq_SCONT": "{8D28AE10-E1DD-49E0-8CC6-ABD7CEDF57B0}",
+        "qp_CONT": "{0996E3AC-ABF6-4A22-B320-4BF749288156}",
+        "qp_fast_CB1": "{3F3DD96B-F838-45B6-AA8C-B54F66ED9571}",
+        "qp_fast_CB2": "{964280C3-70F7-4E22-AA60-734E672D7A02}",
+        "qp_fast_CB3": "{CCF4B65D-F3D8-4A40-9108-53468ECBA1B4}",
+    }
     spm = nanosurf.SPM()
     application = spm.application
     scan = application.Scan
@@ -242,6 +272,12 @@ def get_params():
     zcontrol = application.ZController
     head = application.ScanHead
     tip = head.CantileverByGUID
+    # tip = None
+    # # Reverse lookup: find key (tip name) for current GUID
+    # for tip_name, guid in tip_guid_map.items():
+    #     if guid.lower() == current_guid.lower():  # Case-insensitive match
+    #         tip = tip_name
+
     params = {
         "pgain": zcontrol.PGain,
         "igain": zcontrol.IGain,
@@ -295,7 +331,10 @@ def check_params(gt_params, rel_tol=1e-4, abs_tol=1e-9):
 def check_gain():
     spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()
     application = spm.application
+    _scan = application.Scan
+    _opmode = application.OperatingMode
     zcontrol = application.ZController
+    _head = application.ScanHead
     return [zcontrol.PGain, zcontrol.IGain, zcontrol.DGain]
 
 
@@ -306,6 +345,9 @@ def check_image_size():
 
     # all variables
     scan = application.Scan
+    _opmode = application.OperatingMode
+    _zcontrol = application.ZController
+    _head = application.ScanHead
     return [scan.ImageHeight * 1e9, scan.ImageWidth * 1e9]
 
 
@@ -321,6 +363,9 @@ def check_tip():
     application = spm.application
 
     # all variables
+    _scan = application.Scan
+    _opmode = application.OperatingMode
+    _zcontrol = application.ZController
     head = application.ScanHead
     return head.CantileverByGUID
 
@@ -353,28 +398,29 @@ def check_roughness(path):
     """
 
     # Normalize path
-    path = Path(path).resolve()
+    p = Path(path).resolve()
 
     # Case 1: If path is a directory
-    if path.is_dir():
-        nid_files = list(path.glob("*.nid"))
+    if p.is_dir():
+        nid_files = list(p.glob("*.nid"))
         if not nid_files:
-            raise FileNotFoundError(f"No .nid files found in directory: {path}")
-        path = max(nid_files, key=os.path.getmtime)
+            raise FileNotFoundError(f"No .nid files found in directory: {p}")
+        p = max(nid_files, key=lambda x: x.stat().st_mtime)
 
     # Case 2: If path is a file
-    elif path.is_file():
-        if not path.lower().endswith(".nid"):
-            raise ValueError(f"The specified file is not a .nid file: {path}")
+    elif p.is_file():
+        if p.suffix.lower() != ".nid":
+            raise ValueError(f"The specified file is not a .nid file: {p}")
     else:
         # Path exists neither as a file nor a directory
-        raise FileNotFoundError(f"The specified path is not valid: {path}")
+        raise FileNotFoundError(f"The specified path is not valid: {p}")
 
-    # At this point, `path` is a valid .nid file
-    afm = read(path)
+    # At this point, `p` is a valid .nid file
+    afm = read(str(p))
 
     # Extract data and parameters
     data = afm.data
+    _param = afm.param
 
     try:
         z = data["Image"]["Forward"]["Z-Axis"]
