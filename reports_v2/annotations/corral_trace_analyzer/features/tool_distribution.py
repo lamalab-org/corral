@@ -66,10 +66,9 @@ class ToolDistributionFeatures(BaseFeatureExtractor):
         n = len(sorted_counts)
         index = np.arange(1, n + 1)
 
-        gini = (2 * np.sum(index * sorted_counts)) / (n * np.sum(sorted_counts)) - (
+        return (2 * np.sum(index * sorted_counts)) / (n * np.sum(sorted_counts)) - (
             n + 1
         ) / n
-        return gini
 
     def _calculate_switching_rate(self, tool_sequence: list[str]) -> float:
         """
