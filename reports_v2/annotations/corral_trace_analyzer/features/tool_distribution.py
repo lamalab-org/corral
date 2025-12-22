@@ -9,6 +9,7 @@ These features capture how tools are distributed across a trace:
 
 import numpy as np
 import pandas as pd
+from loguru import logger
 
 from .base import BaseFeatureExtractor
 
@@ -183,6 +184,7 @@ class ToolDistributionFeatures(BaseFeatureExtractor):
             DataFrame with tool distribution features (indexed by trace_id)
         """
         # Filter by node type if specified
+        logger.info(steps_df.head)
         filtered_tools_df = self.filter_steps_by_node_type(tools_df)
 
         results = []
@@ -203,7 +205,7 @@ class ToolDistributionFeatures(BaseFeatureExtractor):
                 ].tolist()
 
                 # Get tool counts
-                tool_counts = trace_tools["tool_name"].value_counts().values
+                tool_counts = trace_tools["tool_name"].value_counts().to_numpy()
 
                 # Calculate requested features
                 if "tool_gini_coefficient" in self.features_to_extract:
