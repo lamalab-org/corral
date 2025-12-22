@@ -205,8 +205,8 @@ FG_SMARTS = {
     "ether oxygens": "[#6;!$(C=[O,S,N])][OX2H0;!$([O;r3])][#6;!$(C=[O,S,N])]",  # excludes epoxides
     "epoxides": "O1CC1",
     "aziridines": "N1CC1",
-    "four-membered rings": "[*]1[*][*][*]1",
-    "five-membered rings": "[*]1[*][*][*][*]1",
+    "four-membered rings": "[*]1~[*]~[*]~[*]1",
+    "five-membered rings": "[*]1~[*]~[*]~[*]~[*]1",
     "trifluoromethyl": "[CX4H0](F)(F)F",
     "primary amines": "[#6;!$(C=[O,S,N])][NX3H2]",  # excludes amides
     "secondary amines": "[NX3H1;!$(NC=[O,S,N]);!$([N;r3])]([#6])[#6]",  # excludes amides and aziridines
