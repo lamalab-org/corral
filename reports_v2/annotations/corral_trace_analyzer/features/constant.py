@@ -64,6 +64,12 @@ ALL_TEXT = [
     "total_message_length",
     "uncertainty_marker_count",
     "uncertainty_marker_ratio",
+    "confidence_marker_count",
+    "confidence_marker_ratio",
+    "verification_marker_count",
+    "verification_marker_ratio",
+    "self_correction_marker_count",
+    "self_correction_marker_ratio",
     "has_thought_tags",
     "thought_count",
     "avg_thought_length",
@@ -91,4 +97,12 @@ ALL_TOOL = [
     "most_used_tool",
     "most_used_tool_count",
     "most_used_tool_ratio",
+]
+
+ALL_TOOL_DISTRIBUTION = [
+    "tool_gini_coefficient",
+    "tool_switching_rate",
+    "max_tool_burst_length",
+    "top3_tool_concentration",
+    "rare_tool_ratio",
 ]
