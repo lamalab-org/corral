@@ -101,10 +101,7 @@ def load_all_feature_importance(environments: list) -> pd.DataFrame:
                 imp_df = pd.read_csv(importance_file)
 
                 # Get importance column
-                if model_name == "logreg":
-                    imp_col = "abs_coefficient"
-                else:
-                    imp_col = "importance"
+                imp_col = "abs_coefficient" if model_name == "logreg" else "importance"
 
                 # Add metadata
                 imp_df["environment"] = env
@@ -155,7 +152,7 @@ def plot_category_importance(imp_df: pd.DataFrame, output_dir: Path):
 
     # Plot 1: Average importance by category
     ax = axes[0]
-    pivot_mean = category_stats.pivot(
+    pivot_mean = category_stats.pivot_table(
         index="category", columns="model", values="mean_importance"
     )
     pivot_mean.plot(kind="barh", ax=ax, width=0.8)
@@ -168,7 +165,7 @@ def plot_category_importance(imp_df: pd.DataFrame, output_dir: Path):
 
     # Plot 2: Feature count by category
     ax = axes[1]
-    pivot_count = category_stats.pivot(
+    pivot_count = category_stats.pivot_table(
         index="category", columns="model", values="count"
     )
     pivot_count.plot(kind="barh", ax=ax, width=0.8)
@@ -184,7 +181,7 @@ def plot_category_importance(imp_df: pd.DataFrame, output_dir: Path):
         output_dir / "category_importance_by_model.png", dpi=300, bbox_inches="tight"
     )
     plt.close()
-    logger.info(f"  ✓ Saved category_importance_by_model.png")
+    logger.info("  ✓ Saved category_importance_by_model.png")
 
     # Save stats
     category_stats.to_csv(output_dir / "category_importance_stats.csv", index=False)
@@ -209,7 +206,7 @@ def plot_category_by_environment(imp_df: pd.DataFrame, output_dir: Path):
     )
 
     # Pivot for heatmap
-    pivot = category_env_counts.pivot(
+    pivot = category_env_counts.pivot_table(
         index="category", columns="environment", values="count"
     ).fillna(0)
 
@@ -239,7 +236,7 @@ def plot_category_by_environment(imp_df: pd.DataFrame, output_dir: Path):
         output_dir / "category_by_environment_heatmap.png", dpi=300, bbox_inches="tight"
     )
     plt.close()
-    logger.info(f"  ✓ Saved category_by_environment_heatmap.png")
+    logger.info("  ✓ Saved category_by_environment_heatmap.png")
 
 
 def plot_top_features_by_category(imp_df: pd.DataFrame, output_dir: Path):
@@ -280,7 +277,7 @@ def plot_top_features_by_category(imp_df: pd.DataFrame, output_dir: Path):
         )
         plt.close()
 
-    logger.info(f"  ✓ Saved top features plots for all categories")
+    logger.info("  ✓ Saved top features plots for all categories")
 
 
 def analyze_category_consistency(imp_df: pd.DataFrame, output_dir: Path):
@@ -291,7 +288,7 @@ def analyze_category_consistency(imp_df: pd.DataFrame, output_dir: Path):
     consistency_data = []
 
     for category in imp_df["category"].unique():
-        category_data = imp_df[imp_df["category"] == category]
+        _category_data = imp_df[imp_df["category"] == category]
 
         # Count appearances in top 20 per model-environment combo
         appearances = 0
@@ -305,7 +302,7 @@ def analyze_category_consistency(imp_df: pd.DataFrame, output_dir: Path):
                 top_20 = combo_data.nlargest(20, "importance_value")
 
                 total_combos += 1
-                if category in top_20["category"].values:
+                if category in top_20["category"].to_numpy():
                     appearances += 1
 
         consistency_data.append(
@@ -332,7 +329,7 @@ def analyze_category_consistency(imp_df: pd.DataFrame, output_dir: Path):
 
     # Color by consistency
     colors = plt.cm.RdYlGn(consistency_df["consistency_pct"] / 100)
-    for bar, color in zip(bars, colors):
+    for bar, color in zip(bars, colors, strict=False):
         bar.set_color(color)
 
     ax.set_yticks(range(len(consistency_df)))
@@ -346,7 +343,7 @@ def analyze_category_consistency(imp_df: pd.DataFrame, output_dir: Path):
     ax.grid(True, alpha=0.3, axis="x")
 
     # Add percentage labels
-    for i, (idx, row) in enumerate(consistency_df.iterrows()):
+    for i, (_idx, row) in enumerate(consistency_df.iterrows()):
         ax.text(
             row["consistency_pct"] + 1,
             i,
@@ -361,8 +358,8 @@ def analyze_category_consistency(imp_df: pd.DataFrame, output_dir: Path):
 
     # Save table
     consistency_df.to_csv(output_dir / "category_consistency_analysis.csv", index=False)
-    logger.info(f"  ✓ Saved category_consistency.png")
-    logger.info(f"  ✓ Saved category_consistency_analysis.csv")
+    logger.info("  ✓ Saved category_consistency.png")
+    logger.info("  ✓ Saved category_consistency_analysis.csv")
 
 
 def generate_category_report(imp_df: pd.DataFrame, output_dir: Path):
@@ -433,10 +430,10 @@ def generate_category_report(imp_df: pd.DataFrame, output_dir: Path):
 
     # Save report
     report_path = output_dir / "feature_category_report.md"
-    with open(report_path, "w") as f:
+    with Path(report_path).open("w") as f:
         f.write("\n".join(report))
 
-    logger.info(f"  ✓ Saved feature_category_report.md")
+    logger.info("  ✓ Saved feature_category_report.md")
 
 
 def main():
