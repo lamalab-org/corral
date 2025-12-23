@@ -5,6 +5,7 @@ import io
 import json
 import os
 import threading
+import time
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,7 +41,7 @@ _matplotlib_lock = threading.Lock()
 def _get_persistent_output_dir() -> Path:
     """Get or create persistent output directory for plots and results."""
     # Use the task directory's parent to ensure persistence across runs
-    output_dir = Path(__file__).parent.parent.parent / "persistent_outputs"
+    output_dir = Path("persistent_outputs_results_no_occams")
     output_dir.mkdir(exist_ok=True)
     return output_dir
 
@@ -650,8 +651,6 @@ def fit_reaction_network(
         }
 
         # Save to timestamped file
-        import time
-
         timestamp = int(time.time())
         param_file = persistent_dir / f"fit_params_{timestamp}.json"
         with open(param_file, "w") as f:
@@ -828,6 +827,7 @@ def _create_fit_plot(
             fontsize=13,
             fontweight="bold",
         )
+
         ax1.legend(fontsize=11, frameon=True, shadow=True)
         ax1.grid(alpha=0.3, linestyle="--")
 
@@ -871,7 +871,7 @@ def _create_fit_plot(
 def _create_phenomenological_plots(
     trends,
     trends_original,
-    output_path="persistent_outputs/phenomenological_trends.png",
+    output_path="phenomenological_trends.png",
 ):
     """
     Creates and saves plots comparing model-predicted trends with original experimental trends.
@@ -942,9 +942,11 @@ def _create_phenomenological_plots(
         ax.grid(True, which="both", linestyle="--", linewidth=0.5)
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(output_path)
-    plt.close()  # Close the figure to free up memory
-
+    plt.savefig(_get_persistent_output_dir() / Path(output_path))
+    plt.savefig(
+        _get_persistent_output_dir() / Path(output_path + f".{int(time.time())}")
+    )
+    plt.close()
     return f"\nPhenomenological trend plots saved to '{output_path}'"
 
 
@@ -1114,7 +1116,7 @@ def fit_single_experiment(
             network,
             exp_data["metadata"],
         )
-
+        # import pdb; pdb.set_trace()
         if not result.get("success", False):
             failure_reason = result.get(
                 "failure_reason", result.get("error", "Unknown error")
@@ -1189,9 +1191,92 @@ def fit_single_experiment(
         return f"Error fitting experiment: {e}"
 
 
+def fit_reaction_network_global(
+    data: Dict[str, Any],
+    reaction_network: dict,
+    maxiter: int = 100,
+) -> dict:
+    """
+    Helper function to find a single set of parameters that best fits all
+    provided experiments simultaneously (Global Fit).
+    """
+    ode_func, species_list, species_idx = create_ode_system(reaction_network, {})
+
+    reactions = [Reaction.from_dict(r) for r in reaction_network["reactions"]]
+    bounds = []
+    param_names = []
+    for i, rxn in enumerate(reactions):
+        if rxn.type == "light":
+            bounds.append(rxn.quantum_yield or (0.0, 1.0))
+            param_names.append(f"qy_{i}")
+        else:
+            k_range = rxn.k_range or (1e-3, 1e10)
+            bounds.append((np.log10(k_range[0]), np.log10(k_range[1])))
+            param_names.append(f"k_{i}")
+
+    def global_objective(params_log: np.ndarray) -> float:
+        params_dict = {}
+        for name, val in zip(param_names, params_log):
+            if name.startswith("qy_"):
+                params_dict[name] = val
+            else:
+                params_dict[name] = 10**val
+
+        total_rss = 0
+        for exp_name, exp_data in data.items():
+            meta = exp_data["metadata"]
+            time_exp = np.array(exp_data["time"])
+            oxygen_exp = np.array(exp_data["oxygen"])
+
+            y0 = np.zeros(len(species_list))
+            if "RuII" in species_idx:
+                y0[species_idx["RuII"]] = meta.get("c_Ru", 10)
+            if "S2O8" in species_idx:
+                y0[species_idx["S2O8"]] = meta.get("c_S2O8", 6000)
+
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    y_pred = odeint(
+                        ode_func,
+                        y0,
+                        time_exp,
+                        args=(params_dict, meta),
+                        rtol=1e-6,
+                        atol=1e-8,
+                    )
+                o2_pred = (
+                    y_pred[:, species_idx["O2"]]
+                    if "O2" in species_idx
+                    else np.zeros_like(time_exp)
+                )
+
+                # Penalty for non-physical (zero/flat) solutions
+                if np.max(o2_pred) < 0.01 * np.max(oxygen_exp):
+                    total_rss += 1e12
+                else:
+                    total_rss += np.sum((oxygen_exp - o2_pred) ** 2)
+            except Exception:
+                total_rss += 1e15
+        return total_rss
+
+    result = differential_evolution(
+        global_objective, bounds, maxiter=maxiter, popsize=12, seed=42, disp=False
+    )
+
+    best_params = {}
+    for name, val in zip(param_names, result.x):
+        if name.startswith("qy_"):
+            best_params[name] = val
+        else:
+            best_params[name] = 10**val
+
+    return {"params": best_params, "success": result.success, "total_rss": result.fun}
+
+
 @tool
 def fit_all_experiments(data_path: str, network_path: str, results_path: str) -> str:
-    """Fit current reaction network to all experiments.
+    """Fit current reaction network globally to all experiments.
 
     Args:
         data_path: Path to experimental data HDF5 file
@@ -1200,103 +1285,81 @@ def fit_all_experiments(data_path: str, network_path: str, results_path: str) ->
     """
     try:
         data = load_experimental_data(data_path)
-        try:
-            network = load_reaction_network(network_path)
-        except FileNotFoundError:
-            # Create default network if it doesn't exist
-            network = initialize_default_network()
-            save_reaction_network(network_path, network)
+        network = load_reaction_network(network_path)
 
-        all_results = {"experiments": {}}
-        successful = 0
+        # Perform global fit (one model for all)
+        print(f"Starting global fit for {len(data)} experiments...")
+        global_result = fit_reaction_network_global(data, network, maxiter=150)
+
+        if not global_result["success"]:
+            return "Global optimization failed to converge."
+
+        global_params = global_result["params"]
+        ode_func, species_list, species_idx = create_ode_system(network, {})
+
+        all_results = {"experiments": {}, "global_params": global_params}
         total_rss = 0.0
         plots_saved = []
 
-        for i, (exp_name, exp_data) in enumerate(data.items()):
-            result = fit_reaction_network(
-                np.array(exp_data["time"]),
-                np.array(exp_data["oxygen"]),
-                network,
-                exp_data["metadata"],
+        # Generate predictions for each experiment using the global parameters
+        for exp_name, exp_data in data.items():
+            meta = exp_data["metadata"]
+            time_exp = np.array(exp_data["time"])
+            oxygen_exp = np.array(exp_data["oxygen"])
+
+            y0 = np.zeros(len(species_list))
+            if "RuII" in species_idx:
+                y0[species_idx["RuII"]] = meta.get("c_Ru", 10)
+            if "S2O8" in species_idx:
+                y0[species_idx["S2O8"]] = meta.get("c_S2O8", 6000)
+
+            y_pred_full = odeint(ode_func, y0, time_exp, args=(global_params, meta))
+            o2_pred = (
+                y_pred_full[:, species_idx["O2"]]
+                if "O2" in species_idx
+                else np.zeros_like(time_exp)
             )
 
+            rss = np.sum((oxygen_exp - o2_pred) ** 2)
+            r2 = 1 - rss / np.sum((oxygen_exp - np.mean(oxygen_exp)) ** 2)
+
             all_results["experiments"][exp_name] = {
-                "rss": result["rss"],
-                "r2": result["r2"],
-                "success": result.get("success", False),
-                "params": result.get("params", {}),
-                "y_pred": result.get("y_pred", []),
+                "rss": rss,
+                "r2": r2,
+                "success": True,
+                "params": global_params,
+                "y_pred": o2_pred.tolist(),
             }
 
-            # Save plots for all successful experiments
-            if (
-                result.get("success", False)
-                and all_results["experiments"][exp_name]["r2"] is not None
-            ):
-                persistent_dir = _get_persistent_output_dir()
-                plot_filename = persistent_dir / f"fit_plot_{exp_name}.png"
-                _create_fit_plot(
-                    np.array(exp_data["time"]),
-                    np.array(exp_data["oxygen"]),
-                    np.array(result["y_pred"]),
-                    exp_name,
-                    exp_data["metadata"],
-                    save_path=str(plot_filename),
-                )
-                plots_saved.append(str(plot_filename))
-
-            if result.get("success", False):
-                successful += 1
-                total_rss += result["rss"]
-
-        avg_rss = total_rss / successful if successful > 0 else 1e10
+            # Save individual fit plots
+            persistent_dir = _get_persistent_output_dir()
+            plot_filename = persistent_dir / f"fit_plot_{exp_name}.png"
+            _create_fit_plot(
+                time_exp,
+                oxygen_exp,
+                o2_pred,
+                exp_name,
+                meta,
+                save_path=str(plot_filename),
+            )
+            plots_saved.append(str(plot_filename))
+            total_rss += rss
 
         all_results["summary"] = {
             "total_experiments": len(data),
-            "successful_fits": successful,
             "total_rss": total_rss,
-            "avg_rss": avg_rss,
+            "avg_rss": total_rss / len(data),
         }
 
-        # Save results both to workspace and persistent directory
         with open(results_path, "w") as f:
             json.dump(all_results, f, indent=2)
 
-        # Also save to persistent directory
-        persistent_dir = _get_persistent_output_dir()
-        persistent_results_path = persistent_dir / "fit_results.json"
-        with open(persistent_results_path, "w") as f:
-            json.dump(all_results, f, indent=2)
-
-        # Save a comprehensive parameter summary for debugging
-        param_summary = {
-            "network_used": network,
-            "summary_stats": all_results["summary"],
-            "successful_experiments": {},
-            "failed_experiments": {},
-            "timestamp": int(time.time()),
-        }
-
-        for exp_name, exp_result in all_results["experiments"].items():
-            if exp_result.get("success", False):
-                param_summary["successful_experiments"][exp_name] = exp_result
-            else:
-                param_summary["failed_experiments"][exp_name] = exp_result
-
-        param_summary_file = persistent_dir / "parameter_summary.json"
-        with open(param_summary_file, "w") as f:
-            json.dump(param_summary, f, indent=2, default=str)
-
-        plot_info = f"\n  Plots saved: {', '.join(plots_saved)}" if plots_saved else ""
-
         return (
-            f"Fitted all experiments:\n"
-            f"  Successful: {successful}/{len(data)}\n"
+            f"Fitted all experiments globally (one model for all):\n"
+            f"  Global Parameters: {global_params}\n"
             f"  Total RSS: {total_rss:.2f}\n"
-            f"  Average RSS: {avg_rss:.2f}\n"
-            f"  All plots and results saved to: {persistent_dir}\n"
-            f"  Parameter summary saved to: {param_summary_file}"
-            f"{plot_info}"
+            f"  Average RSS: {all_results['summary']['avg_rss']:.2f}\n"
+            f"  Plots and results saved to: {persistent_dir}"
         )
 
     except Exception as e:
@@ -1307,59 +1370,62 @@ def fit_all_experiments(data_path: str, network_path: str, results_path: str) ->
 def evaluate_phenomenological_trends(
     data_path: str, network_path: str, results_path: str
 ) -> str:
-    """Evaluate how well model reproduces experimental trends.
+    """Evaluate how well a single global model reproduces experimental trends.
 
     Args:
         data_path: Path to experimental data HDF5 file
         network_path: Path to reaction network JSON file
         results_path: Path to results JSON file (updated with trend scores)
     """
-
     try:
         data = load_experimental_data(data_path)
+        reaction_network = load_reaction_network(network_path)
 
-        # If there are more than 5 experiments, randomly sample 5 of them
-        # all_exp_names = list(data.keys())
-        # if len(all_exp_names) > 5:
-        #     sampled_exp_names = random.sample(all_exp_names, 20)
-        #     data = {name: data[name] for name in sampled_exp_names}
+        # 1. Perform Global Fit to find the best single model for the whole dataset
+        print("Performing global fit for trend evaluation...")
+        global_result = fit_reaction_network_global(data, reaction_network, maxiter=150)
+        global_params = global_result["params"]
 
+        ode_func, species_list, species_idx = create_ode_system(reaction_network, {})
+
+        # 2. Calculate Trends using the consistent global model
         trends = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}, "pH": {}}
         trends_original = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}, "pH": {}}
 
-        reaction_network = load_reaction_network(network_path)
-
-        for exp_name, exp_data in list(data.items()):
+        for exp_name, exp_data in data.items():
             meta = exp_data["metadata"]
             oxygen = np.array(exp_data["oxygen"])
             time = np.array(exp_data["time"])
-            predictions = fit_reaction_network(
-                time, oxygen, reaction_network, meta, maxiter=300
+
+            y0 = np.zeros(len(species_list))
+            if "RuII" in species_idx:
+                y0[species_idx["RuII"]] = meta.get("c_Ru", 10)
+            if "S2O8" in species_idx:
+                y0[species_idx["S2O8"]] = meta.get("c_S2O8", 6000)
+
+            y_pred_full = odeint(ode_func, y0, time, args=(global_params, meta))
+            y_pred = (
+                y_pred_full[:, species_idx["O2"]]
+                if "O2" in species_idx
+                else np.zeros_like(time)
             )
 
-            y_pred = predictions["y_pred"]
-
-            # Calculate maximum rate from predictions
+            # Calculate maximum rates for trend analysis
             rates = np.gradient(y_pred, time)
             max_rate = np.max(rates)
-            # Calculate the same for the original data to see how well trends match
+
             rates_original = np.gradient(oxygen, time)
             max_rate_original = np.max(rates_original)
 
             for param in ["c_Ru", "c_S2O8", "irradiance", "pH"]:
                 param_val = meta.get(param)
                 if param_val is not None:
-                    if param_val not in trends[param]:
-                        trends[param][param_val] = []
-                    trends[param][param_val].append(max_rate)
+                    trends[param].setdefault(param_val, []).append(max_rate)
+                    trends_original[param].setdefault(param_val, []).append(
+                        max_rate_original
+                    )
 
-            for param in ["c_Ru", "c_S2O8", "irradiance", "pH"]:
-                param_val = meta.get(param)
-                if param_val is not None:
-                    if param_val not in trends_original[param]:
-                        trends_original[param][param_val] = []
-                    trends_original[param][param_val].append(max_rate_original)
-
+        # 3. Scoring and Plotting
         ru_score = _score_ru_trend(trends["c_Ru"])
         s2o8_score = _score_s2o8_trend(trends["c_S2O8"])
         irr_score = _score_irradiance_trend(trends["irradiance"])
@@ -1369,12 +1435,7 @@ def evaluate_phenomenological_trends(
             0.3 * ru_score + 0.25 * s2o8_score + 0.25 * irr_score + 0.2 * ph_score
         )
 
-        ru_score_original = _score_ru_trend(trends_original["c_Ru"])
-        s2o8_score_original = _score_s2o8_trend(trends_original["c_S2O8"])
-        irr_score_original = _score_irradiance_trend(trends_original["irradiance"])
-        ph_score_original = _score_ph_trend(trends_original["pH"])
-
-        # Load existing results and update with trend scores
+        # Update results file
         try:
             with open(results_path) as f:
                 all_results = json.load(f)
@@ -1387,37 +1448,23 @@ def evaluate_phenomenological_trends(
             "irradiance_score": irr_score,
             "pH_score": ph_score,
             "overall_score": overall_score,
+            "global_params": global_params,
         }
 
-        # Update best score
-        if "best_phenomenological_score" not in all_results:
-            all_results["best_phenomenological_score"] = 0.0
-
-        if overall_score > all_results["best_phenomenological_score"]:
+        if overall_score > all_results.get("best_phenomenological_score", 0.0):
             all_results["best_phenomenological_score"] = overall_score
 
-        # Save updated results
         with open(results_path, "w") as f:
             json.dump(all_results, f, indent=2)
 
-        # --- Start of modification ---
-        # Create phenomenological trend plots using the calculated trends
         plot_info = _create_phenomenological_plots(trends, trends_original)
-        # --- End of modification ---
 
         return (
-            f"Phenomenological trend scores:\n"
-            f"  Ru concentration trend: {ru_score:.3f}\n"
-            f"  S2O8 concentration trend: {s2o8_score:.3f}\n"
-            f"  Irradiance trend: {irr_score:.3f}\n"
-            f"  pH trend: {ph_score:.3f}\n"
+            f"Phenomenological trend scores (Global Model):\n"
             f"  Overall score: {overall_score:.3f}\n"
-            f"  Best score so far: {all_results['best_phenomenological_score']:.3f}\n\n"
-            f"  Trend fitting MAE between the fitted data, and the original data: "
-            f"  Ru concentration trend error: {np.sum(np.abs(ru_score - ru_score_original))}"
-            f"  S2O8 concentration trend error: {np.sum(np.abs(s2o8_score - s2o8_score_original))}"
-            f"  Irradiance trend error: {np.sum(np.abs(irr_score - irr_score_original))}"
-            f"  pH trend error: {np.sum(np.abs(ph_score - ph_score_original))}"
+            f"  Ru trend: {ru_score:.3f} | S2O8 trend: {s2o8_score:.3f}\n"
+            f"  Irr trend: {irr_score:.3f} | pH trend: {ph_score:.3f}\n"
+            f"  Global Params used: {global_params}\n"
             f"{plot_info}"
         )
 
@@ -1972,14 +2019,8 @@ def initialize_default_network() -> Dict[str, Any]:
             {
                 "equation": "RuIII + RuIII -> Ru_Dimer",
                 "type": "dark",
-                "k_range": [0.001, 0.1],
+                "k_range": [0.01, 0.2],
                 "description": "Dimer formation (k\u2083)",
-            },
-            {
-                "equation": "RuIII + RuIII + Ru_Dimer -> Ru_Dimer + Ru_Dimer",
-                "type": "dark",
-                "k_range": [0.001, 0.1],
-                "description": "Autocatalytic dimer formation (k\u2084)",
             },
             {
                 "equation": "H2O2 -> O2",
@@ -1987,16 +2028,10 @@ def initialize_default_network() -> Dict[str, Any]:
                 "k_range": [0.001, 0.5],
                 "description": "H2O2 decomposition to O2 (k\u2085)",
             },
-            {
-                "equation": "RuIII -> Inactive",
-                "type": "dark",
-                "k_range": [0.001, 0.5],
-                "description": "Catalyst deactivation (k\u2086)",
-            },
         ],
         "metadata": {
             "created_by": "reaction_network_conversion",
-            "description": "8-reaction network for Ru-catalyzed photochemical water oxidation with dimer formation",
+            "description": "Reaction network for Ru-catalyzed photochemical water oxidation with dimer formation",
             "version": "2.0",
         },
     }
@@ -2004,7 +2039,7 @@ def initialize_default_network() -> Dict[str, Any]:
 
 def setup_working_directory(work_dir: str, data_path: str) -> None:
     """Set up working directory with default files."""
-    work_path = Path(work_dir)
+    work_path = Path(_get_persistent_output_dir())
     work_path.mkdir(parents=True, exist_ok=True)
 
     # Create default network if it doesn't exist
@@ -2014,7 +2049,7 @@ def setup_working_directory(work_dir: str, data_path: str) -> None:
         save_reaction_network(str(network_path), default_network)
 
     # Create empty results file if it doesn't exist
-    results_path = work_path / "fit_results.json"
+    results_path = work_path / Path("fit_results.json" + f".{int(time.time())!s}")
     if not results_path.exists():
         with open(results_path, "w") as f:
             json.dump({"experiments": {}, "best_phenomenological_score": 0.0}, f)
