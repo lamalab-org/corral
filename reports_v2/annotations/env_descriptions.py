@@ -163,16 +163,32 @@ def parse_file(path):
                     "function": node.name,
                     "args": info["args"],
                     "returns": info["returns"],
+                    "doc": doc,  # <-- add this
                 }
             )
     return out
 
 
 def render_tools_table_from_results(results):
+    def extract_detailed(doc: str):
+        if not doc:
+            return "Not available."
+        m = re.search(
+            r"\[\s*DETAILED\s*\](.*?)\[\s*/\s*DETAILED\s*\]",
+            doc,
+            re.S | re.I,
+        )
+        if not m:
+            return "Not available."
+        text = m.group(1).strip()
+        # collapse multi-line into nice latex-friendly sentence
+        return " ".join(line.strip() for line in text.splitlines())
+
     def render_single_tool(entry):
         name = entry["function"]
         args = entry["args"]
         returns = entry["returns"] or "Not specified."
+        detailed = extract_detailed(entry.get("doc", ""))
 
         args_lines = (
             "\n".join(
@@ -184,17 +200,19 @@ def render_tools_table_from_results(results):
         )
 
         return rf"""
-\textbf{{\texttt{{\detokenize{{{name}}}}}}} \\
-\begin{{description}}
-  \item[\textbf{{Arguments:}}]
-  \begin{{description}}
-{args_lines}
-  \end{{description}}
+    \textbf{{\texttt{{\detokenize{{{name}}}}}}} \\\\[2pt]
+    \begin{{description}}
+    \item[\textbf{{Description:}}] {latex_escape(detailed)}
 
-  \item[\textbf{{Return/Behavior:}}] {latex_escape(returns)}
-\end{{description}}
-\\\midrule
-"""
+    \item[\textbf{{Arguments:}}]
+    \begin{{description}}
+    {args_lines}
+    \end{{description}}
+
+    \item[\textbf{{Return/Behavior:}}] {latex_escape(returns)}
+    \end{{description}}
+    \\\midrule
+    """
 
     tools_body = "\n".join(render_single_tool(r) for r in results)
 
