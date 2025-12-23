@@ -116,7 +116,7 @@ def extract_args_and_returns(doc: str):
 
         # capture each param block
         for m in re.finditer(
-            r"\n\s*([A-Za-z0-9_]+)\s*:\s([\s\S]*?)(?=\n\s*[A-Za-z0-9_]+\s*:|\nReturns:|\[RAISES|\Z)",
+            r"\n\s*([A-Za-z0-9_]+)\s*(?:\([^)]*\))?\s*:\s([\s\S]*?)(?=\n\s*[A-Za-z0-9_]+\s*(?:\([^)]*\))?\s*:|\nReturns:|\[RAISES|\Z)",
             block,
             re.S,
         ):
