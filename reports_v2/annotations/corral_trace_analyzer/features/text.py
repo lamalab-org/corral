@@ -8,7 +8,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from corral_trace_analyzer.config import UNCERTAINTY_MARKERS
+from corral_trace_analyzer.config import (
+    CONFIDENCE_MARKERS,
+    SELF_CORRECTION_MARKERS,
+    UNCERTAINTY_MARKERS,
+    VERIFICATION_MARKERS,
+)
 
 from .base import BaseFeatureExtractor
 from .constant import ALL_TEXT
@@ -84,6 +89,12 @@ class TextFeatures(BaseFeatureExtractor):
                     "total_message_length": 0,
                     "uncertainty_marker_count": 0,
                     "uncertainty_marker_ratio": 0.0,
+                    "confidence_marker_count": 0,
+                    "confidence_marker_ratio": 0.0,
+                    "verification_marker_count": 0,
+                    "verification_marker_ratio": 0.0,
+                    "self_correction_marker_count": 0,
+                    "self_correction_marker_ratio": 0.0,
                     "has_thought_tags": False,
                     "thought_count": 0,
                     "avg_thought_length": 0.0,
@@ -121,6 +132,34 @@ class TextFeatures(BaseFeatureExtractor):
             else 0.0
         )
 
+        # Confidence markers
+        features["confidence_marker_count"] = self._count_confidence_markers(steps_df)
+        features["confidence_marker_ratio"] = (
+            features["confidence_marker_count"] / len(assistant_steps)
+            if len(assistant_steps) > 0
+            else 0.0
+        )
+
+        # Verification markers
+        features["verification_marker_count"] = self._count_verification_markers(
+            steps_df
+        )
+        features["verification_marker_ratio"] = (
+            features["verification_marker_count"] / len(assistant_steps)
+            if len(assistant_steps) > 0
+            else 0.0
+        )
+
+        # Self-correction markers
+        features["self_correction_marker_count"] = self._count_self_correction_markers(
+            steps_df
+        )
+        features["self_correction_marker_ratio"] = (
+            features["self_correction_marker_count"] / len(assistant_steps)
+            if len(assistant_steps) > 0
+            else 0.0
+        )
+
         # Thought tags analysis (for ReAct-style agents)
         thought_info = self._analyze_thoughts_and_actions(assistant_steps)
         features["has_thought_tags"] = thought_info["has_thoughts"]
@@ -153,6 +192,48 @@ class TextFeatures(BaseFeatureExtractor):
 
             message_lower = message.lower()
             for marker in UNCERTAINTY_MARKERS:
+                count += message_lower.count(marker.lower())
+
+        return count
+
+    def _count_confidence_markers(self, steps_df: pd.DataFrame) -> int:
+        """Count confidence markers in messages"""
+        count = 0
+
+        for message in steps_df["message"]:
+            if not isinstance(message, str):
+                continue
+
+            message_lower = message.lower()
+            for marker in CONFIDENCE_MARKERS:
+                count += message_lower.count(marker.lower())
+
+        return count
+
+    def _count_verification_markers(self, steps_df: pd.DataFrame) -> int:
+        """Count verification/checking markers in messages"""
+        count = 0
+
+        for message in steps_df["message"]:
+            if not isinstance(message, str):
+                continue
+
+            message_lower = message.lower()
+            for marker in VERIFICATION_MARKERS:
+                count += message_lower.count(marker.lower())
+
+        return count
+
+    def _count_self_correction_markers(self, steps_df: pd.DataFrame) -> int:
+        """Count self-correction markers in messages"""
+        count = 0
+
+        for message in steps_df["message"]:
+            if not isinstance(message, str):
+                continue
+
+            message_lower = message.lower()
+            for marker in SELF_CORRECTION_MARKERS:
                 count += message_lower.count(marker.lower())
 
         return count

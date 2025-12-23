@@ -73,6 +73,7 @@ class FeatureExtractor:
         from .markers import MarkerFeatures
         from .temporal import TemporalFeatures
         from .text import TextFeatures
+        from .tool_distribution import ToolDistributionFeatures
         from .tool_quality import ToolQualityFeatures
 
         self.extractors = []
@@ -82,6 +83,7 @@ class FeatureExtractor:
             "tool_quality": ToolQualityFeatures,
             "markers": MarkerFeatures,
             "text": TextFeatures,
+            "tool_distribution": ToolDistributionFeatures,
         }
 
         for name, klass in extractor_map.items():

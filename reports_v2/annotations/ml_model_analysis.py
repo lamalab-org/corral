@@ -439,7 +439,7 @@ def main():
 
     # Load data
     logger.info("STEP 1: LOADING DATA & EXTRACTING FEATURES")
-    data_path = "data/cleaned_corral_annotations.parquet"
+    data_path = "data/absolute_agreement_annotations.parquet"
 
     if not Path(data_path).exists():
         logger.info(f"Error: Data file not found at {data_path}")
@@ -481,11 +481,13 @@ def main():
             all_results[env] = results
 
     all_features_df.to_parquet(
-        "output_all/data/features_all_environments.parquet", index=False
+        "output_all/data/absolute_agreement_annotations.parquet", index=False
     )
-    all_features_df.to_csv("output_all/data/features_all_environments.csv", index=False)
+    all_features_df.to_csv(
+        "output_all/data/absolute_agreement_annotations.csv", index=False
+    )
     logger.info(
-        f"  ✓ Saved features_all_environments.parquet ({len(all_features_df)} traces)"
+        f"  ✓ Saved absolute_agreement_annotations.parquet ({len(all_features_df)} traces)"
     )
 
     # Create master summary

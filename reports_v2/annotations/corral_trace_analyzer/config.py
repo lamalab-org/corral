@@ -46,7 +46,8 @@ NODE_TYPES = None  # ["system", "user", "assistant", "tool"]
 # Error types
 ERROR_TYPES = ["invalid_tool", "invalid_args", "execution_error"]
 
-# Uncertainty markers for text analysis
+# Text markers for analysis
+# Uncertainty markers
 UNCERTAINTY_MARKERS = [
     "maybe",
     "perhaps",
@@ -59,6 +60,67 @@ UNCERTAINTY_MARKERS = [
     "uncertain",
     "unclear",
     "I dont know",
+]
+
+# Confidence markers (high certainty)
+CONFIDENCE_MARKERS = [
+    "definitely",
+    "certainly",
+    "obviously",
+    "clearly",
+    "sure that",
+    "confident",
+    "know that",
+    "must be",
+    "will",
+    "without doubt",
+    "absolutely",
+    "undoubtedly",
+    "guaranteed",
+    "for sure",
+    "no question",
+    "indeed",
+]
+
+# Verification/checking markers
+VERIFICATION_MARKERS = [
+    "let me check",
+    "verify",
+    "confirm",
+    "validate",
+    "double-check",
+    "make sure",
+    "ensure",
+    "test whether",
+    "check if",
+    "let me see",
+    "need to verify",
+    "checking",
+    "examine",
+    "inspect",
+    "review",
+    "cross-check",
+]
+
+# Self-correction markers
+SELF_CORRECTION_MARKERS = [
+    "wait",
+    "actually",
+    "correction",
+    "mistake",
+    "oops",
+    "wrong",
+    "error",
+    "my bad",
+    "apologies",
+    "sorry",
+    "let me fix",
+    "let me correct",
+    "instead",
+    "rather",
+    "on second thought",
+    "let me try again",
+    "re-do",
 ]
 
 # Window sizes for temporal analysis
@@ -191,6 +253,12 @@ FEATURES = {
         "total_message_length",
         "uncertainty_marker_count",
         "uncertainty_marker_ratio",
+        "confidence_marker_count",
+        "confidence_marker_ratio",
+        "verification_marker_count",
+        "verification_marker_ratio",
+        "self_correction_marker_count",
+        "self_correction_marker_ratio",
         "has_thought_tags",
         "thought_count",
         "avg_thought_length",
@@ -217,5 +285,12 @@ FEATURES = {
         "most_used_tool",
         "most_used_tool_count",
         "most_used_tool_ratio",
+    ],
+    "tool_distribution": [
+        "tool_gini_coefficient",
+        "tool_switching_rate",
+        "max_tool_burst_length",
+        "top3_tool_concentration",
+        "rare_tool_ratio",
     ],
 }
