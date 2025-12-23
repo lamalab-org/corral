@@ -22,6 +22,7 @@ def latex_escape(s: str) -> str:
         .replace("%", r"\%")
         .replace("_", r"\_")
         .replace("Å", r"\AA{}")
+        .replace("g/cm^3", "g/cm$^3$")
     )
 
 
@@ -175,7 +176,7 @@ def render_tools_table_from_results(results):
 
         args_lines = (
             "\n".join(
-                rf"        \item \texttt{{{k}}}: {latex_escape(v)}"
+                rf"        \item \texttt{{\detokenize{{{k}}}}}: {latex_escape(v)}"
                 for k, v in args.items()
             )
             if args
@@ -183,7 +184,7 @@ def render_tools_table_from_results(results):
         )
 
         return rf"""
-\textbf{{\texttt{{{name}}}}} \\
+\textbf{{\texttt{{\detokenize{{{name}}}}}}} \\
 \begin{{description}}
   \item[\textbf{{Arguments:}}]
   \begin{{description}}
@@ -238,42 +239,66 @@ environments = [
     "spectra_elucidation",
 ]
 
-tasks = ["surface_energy", "melting", "quenching"]
-levels = ["level_1", "level_2", "level_3"]
+TARGET_PATH.mkdir(parents=True, exist_ok=True)
 
 all_latex = []
 
-for level in levels:
-    all_latex.append(level_heading(level))
-
-    for env in environments:
-        if env != "corral_md":
-            continue
-
+for env in environments:
+    if env == "corral_md":
         env_path = TASKS_PATH / env / "environments"
-
+        tasks = ["surface_energy", "melting", "quenching"]
         for task_name in tasks:
-            level_path = env_path / task_name / level
-            task_dir = level_path / "tasks"
-            subtask_dir = level_path / "subtasks"
+            for level in ["level_1", "level_2", "level_3"]:
+                all_latex.append(level_heading(level))
+                level_path = env_path / task_name / level
+                task_dir = level_path / "tasks"
+                subtask_dir = level_path / "subtasks"
+                if not task_dir.exists():
+                    continue
+                task_file = next(task_dir.glob("*.json"))
+                subtask_file = next(subtask_dir.glob("*.json"))
+                latex_block = generate_level_latex(task_file, subtask_file)
+                all_latex.append(latex_block)
+    else:
+        continue
+    tool_file = TASKS_PATH / env / "src" / env / "tools.py"
+    results = parse_file(tool_file)
+    all_latex.append(render_tools_table_from_results(results))
+    output_file = TARGET_PATH / f"{env}.tex"
+    output_file.write_text("\n\n".join(all_latex))
 
-            if not task_dir.exists():
-                continue
 
-            task_file = next(task_dir.glob("*.json"))
-            subtask_file = next(subtask_dir.glob("*.json"))
+# for level in levels:
+#     all_latex.append(level_heading(level))
 
-            latex_block = generate_level_latex(task_file, subtask_file)
-            all_latex.append(latex_block)
+#     for env in environments:
+#         if env != "corral_md":
+#             continue
 
-        # ==== TOOLS (OPTIONAL) ====
-        tool_file = TASKS_PATH / "corral_md" / "src" / "corral_md" / "tools.py"
+#         env_path = TASKS_PATH / env / "environments"
 
-        results = parse_file(tool_file)
-        all_latex.append(render_tools_table_from_results(results))
+#         for task_name in tasks:
+#             level_path = env_path / task_name / level
+#             task_dir = level_path / "tasks"
+#             subtask_dir = level_path / "subtasks"
+
+#             if not task_dir.exists():
+#                 continue
+
+#             task_file = next(task_dir.glob("*.json"))
+#             subtask_file = next(subtask_dir.glob("*.json"))
+
+#             latex_block = generate_level_latex(task_file, subtask_file)
+#             all_latex.append(latex_block)
+
+#         # ==== TOOLS (OPTIONAL) ====
+#         tool_file = TASKS_PATH / "corral_md" / "src" / "corral_md" / "tools.py"
+
+#         results = parse_file(tool_file)
+#         all_latex.append(render_tools_table_from_results(results))
 
 
-# ================= WRITE OUTPUT =================
-TARGET_PATH.mkdir(parents=True, exist_ok=True)
-output_file = TARGET_PATH / "md.tex"
-output_file.write_text("\n\n".join(all_latex))
+# # ================= WRITE OUTPUT =================
+# TARGET_PATH.mkdir(parents=True, exist_ok=True)
+# output_file = TARGET_PATH / "md.tex"
+# output_file.write_text("\n\n".join(all_latex))
