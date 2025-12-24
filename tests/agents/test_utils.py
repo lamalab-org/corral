@@ -28,6 +28,9 @@ from .conftest import MockFunction, MockToolCall
 class MockLiteLLMMessage:
     """Mock message class for LiteLLM responses."""
 
+    def __init__(self, content="Test response"):
+        self.content = content
+
 
 class MockLiteLLMChoice:
     """Mock choice class for LiteLLM responses."""
