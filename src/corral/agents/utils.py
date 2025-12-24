@@ -49,6 +49,42 @@ class LiteLLMMessage(TypedDict, total=False):
     name: str | None
 
 
+def extract_message_content(message: Message) -> str:
+    """
+    Extract content from a LiteLLM message, handling both regular content
+    and reasoning model responses.
+
+    Some models (like o1, o3, GPT-OSS) return content in 'reasoning' or
+    'reasoning_content' fields when 'content' is null.
+
+    Args:
+        message (Message): The message object from LiteLLM response
+
+    Returns:
+        str: The extracted content, or empty string if none found
+    """
+    # First try regular content field
+    if message.content is not None:
+        return message.content
+
+    # Fall back to reasoning fields for reasoning models
+    if hasattr(message, "reasoning") and message.reasoning is not None:
+        logger.debug(
+            "Extracted content from 'reasoning' field (reasoning model response)"
+        )
+        return message.reasoning
+
+    if hasattr(message, "reasoning_content") and message.reasoning_content is not None:
+        logger.debug(
+            "Extracted content from 'reasoning_content' field (reasoning model response)"
+        )
+        return message.reasoning_content
+
+    # Last resort: return empty string
+    logger.warning("Message has null content and no reasoning fields available")
+    return ""
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_chain(wait_fixed(30), wait_fixed(60), wait_fixed(90)),
@@ -105,6 +141,14 @@ def llm_call(
             response = litellm.completion(**params)
 
         message = response.choices[0].message
+
+        # Normalize message content for reasoning models
+        # If content is null but reasoning fields exist, copy them to content
+        if message.content is None:
+            extracted_content = extract_message_content(message)
+            if extracted_content:
+                # Create a new message dict with normalized content
+                message.content = extracted_content
 
         if return_usage:
             # Extract usage information from the response
