@@ -463,7 +463,7 @@ def print_statistics(conn: psycopg2.extensions.connection):
     logger.info("STAGING TABLE STATISTICS")
     logger.info("=" * 70)
     logger.info(f"Total rows in staging:     {total:,}")
-    logger.info()
+    logger.info(" ")
     logger.info("Rows by dataset:")
     for dataset, count in by_dataset:
         logger.info(f"  {dataset or '(null)':30s} {count:,}")

@@ -8,6 +8,8 @@ This module provides functions to extract:
 Replace the placeholder implementations with your actual code.
 """
 
+from collections import Counter
+
 from loguru import logger
 from rdkit import Chem
 from rxnutils.chem.reaction import ChemicalReaction
@@ -195,7 +197,7 @@ FG_SMARTS = {
     "C-C triple bonds": "[C]#[C]",
     "imine": "[#6,#1][CX3]([#6,#1])=[NX2][#6,#1]",
     "cyclopropane": "C1CC1",
-    "ketones": "[#6][CX3](=O)[#6]",
+    "ketones": "[#6][C](=O)[#6]",
     "carboxylic esters": "[#6,#1][CX3](=O)[OX2H0][#6;!$(C=[O,S,N])]",  # excludes carbonats, carbamates, and anhydrides
     "carbonate": "[#6;!$(C=[O,S,N])][OX2H0][CX3](=O)[OX2H0][#6;!$(C=[O,S,N])]",
     "carbamate": "[#6;!$(C=[O,S,N])][OX2H0][CX3](=O)[NX3]",
@@ -252,19 +254,25 @@ def detect_functional_groups_in_molecule(smiles: str) -> list[str]:
     Detect functional groups in a single molecule.
 
     Args:
-        smiles (str): SMILES string
+        smiles (str): SMILES string (can be atom-mapped)
 
     Returns:
-        list[str]: List of functional group names detected
+        list[str]: List of functional group names detected (with duplicates
+                   if multiple instances of the same FG are present)
     """
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return []
 
-    detected = set()
+    # Remove atom map numbers to ensure SMARTS patterns match correctly
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(0)
+
+    detected = []
     for name, patt in FG_PATTERNS.items():
-        if mol.HasSubstructMatch(patt):
-            detected.add(name)
+        matches = mol.GetSubstructMatches(patt)
+        # Add the functional group name once for each match
+        detected.extend([name] * len(matches))
 
     return sorted(detected)
 
@@ -273,13 +281,16 @@ def get_functional_groups(mapped_rxn: str) -> dict[str, list[str]]:
     """
     Detect functional groups formed and broken in reaction.
 
+    Tracks counts of each functional group type, so if a molecule has
+    two instances of the same FG and one is removed, that change is detected.
+
     Args:
         mapped_rxn (str): Atom-mapped reaction SMILES
 
     Returns:
         dict[str, list[str]]: Dict with keys:
-        - 'formed': List of FG names formed in products
-        - 'broken': List of FG names broken from reactants
+        - 'formed': List of FG names formed in products (with duplicates for multiple instances)
+        - 'broken': List of FG names broken from reactants (with duplicates for multiple instances)
     """
     try:
         # Split reaction
@@ -291,21 +302,43 @@ def get_functional_groups(mapped_rxn: str) -> dict[str, list[str]]:
         reactants_str = parts[0]
         products_str = parts[1]
 
-        # Detect FGs in all reactants
-        reactant_fgs = set()
+        # Detect FGs in all reactants (as list to preserve counts)
+        reactant_fgs = []
         for r_smiles in reactants_str.split("."):
-            reactant_fgs.update(detect_functional_groups_in_molecule(r_smiles))
+            # Strip only outer parentheses if present (some reaction formats wrap molecules)
+            r_smiles = r_smiles.strip()
+            if r_smiles.startswith("(") and r_smiles.endswith(")"):
+                r_smiles = r_smiles[1:-1]
+            reactant_fgs.extend(detect_functional_groups_in_molecule(r_smiles))
 
-        # Detect FGs in all products
-        product_fgs = set()
+        # Detect FGs in all products (as list to preserve counts)
+        product_fgs = []
         for p_smiles in products_str.split("."):
-            product_fgs.update(detect_functional_groups_in_molecule(p_smiles))
+            # Strip only outer parentheses if present
+            p_smiles = p_smiles.strip()
+            if p_smiles.startswith("(") and p_smiles.endswith(")"):
+                p_smiles = p_smiles[1:-1]
+            product_fgs.extend(detect_functional_groups_in_molecule(p_smiles))
 
-        # Compute differences
-        formed = sorted(product_fgs - reactant_fgs)
-        broken = sorted(reactant_fgs - product_fgs)
+        # Use Counter to compute differences with counts
+        reactant_counts = Counter(reactant_fgs)
+        product_counts = Counter(product_fgs)
 
-        return {"formed": formed, "broken": broken}
+        # Formed: FGs that appear more in products than reactants
+        formed = []
+        for fg, count in product_counts.items():
+            diff = count - reactant_counts.get(fg, 0)
+            if diff > 0:
+                formed.extend([fg] * diff)
+
+        # Broken: FGs that appear more in reactants than products
+        broken = []
+        for fg, count in reactant_counts.items():
+            diff = count - product_counts.get(fg, 0)
+            if diff > 0:
+                broken.extend([fg] * diff)
+
+        return {"formed": sorted(formed), "broken": sorted(broken)}
 
     except Exception as e:
         logger.warning(f"FG detection failed for {mapped_rxn[:50]}...: {e}")

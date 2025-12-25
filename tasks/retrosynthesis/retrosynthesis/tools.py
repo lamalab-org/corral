@@ -1,5 +1,6 @@
 import json
-from pathlib import Path
+import re
+from time import sleep
 from typing import Any
 
 from rdkit import Chem
@@ -18,7 +19,6 @@ from retrosynthesis.retrosynthesis_utils import (
     species_match,
     validate_molecule,
 )
-from retrosynthesis.types import FunctionalGroup
 from rxnmapper import RXNMapper
 
 from corral.backend.tool import Tool, tool
@@ -36,7 +36,7 @@ def search_template_catalog_by_criteria(
     bonds_order_changed: list[str] | None = None,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
-    """[BRIEF] Searches the retrosynthetic template database based on specified criteria. [/BRIEF]
+    """[BRIEF] Searches the retrosynthetic template database based on specified criteria. The search criteria refer to the forward reaction. [/BRIEF]
 
     [DETAILED] This function allows users to search a retrosynthetic template database using various chemical criteria, including functional groups that are broken or formed, as well as specific bonds that are formed, broken, or have their order changed.
     This changes refer to the forward reaction, meaning that if you are looking for a retrosynthetic template that breaks the alcohol in the current molecule to form an alkene, you should specify "alcohol" in `functional_groups_formed` and "alkene" in `functional_groups_broken`.
@@ -133,6 +133,16 @@ def search_template_catalog_by_criteria(
             [ERROR_RECOVERY] Ensure that all parameters expecting lists are provided with list types, even if they contain only a single string. [/ERROR_RECOVERY]
 
         ValueError:
+            [ERROR_WHEN] Raised when invalid functional groups are provided. [/ERROR_WHEN]
+            [ERROR_DETAILS] This occurs if any functional group in `functional_groups_broken` or `functional_groups_formed` is not in the list of available functional groups. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Use the tool `get_available_functional_groups` to see the list of valid functional groups and ensure all provided functional groups are in that list. [/ERROR_RECOVERY]
+
+        ValueError:
+            [ERROR_WHEN] Raised when bonds are provided in an invalid format. [/ERROR_WHEN]
+            [ERROR_DETAILS] This occurs if bonds in `bonds_formed` or `bonds_broken` don't follow the format "X-Y" (e.g., "6-6", "6-8"), or if bonds in `bonds_order_changed` don't follow the format "X-Y (A->B)" (e.g., "6-6 (1.0->2.0)"). [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Ensure bonds follow the expected format: "X-Y" for bonds_formed/bonds_broken, or "X-Y (A->B)" for bonds_order_changed. [/ERROR_RECOVERY]
+
+        ValueError:
             [ERROR_WHEN] Raised when the provided SMILES string is invalid. [/ERROR_WHEN]
             [ERROR_DETAILS] This occurs if the SMILES string cannot be parsed into a valid molecular structure. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Check the SMILES string for correctness and try again. [/ERROR_RECOVERY]
@@ -166,11 +176,59 @@ def search_template_catalog_by_criteria(
                 f"Received: {param_value!r}. "
                 f"Example: If you want to search for 'alcohol', use [{param_value!r}] instead of {param_value!r}"
             )
+        if param_value is not None and param_value and len(param_value) == 0:
+            raise ValueError(
+                f"Parameter '{param_name}' cannot be empty. "
+                f"Please provide at least one value or set it to None."
+            )
 
-    if all(list_params.values()) is None:
+    if all(value is None for value in list_params.values()):
         raise ValueError(
             "At least one of the criteria parameters must be provided as a list of strings."
         )
+
+    # Validate functional groups
+    for fg_param_name, fg_param_value in [
+        ("functional_groups_broken", functional_groups_broken),
+        ("functional_groups_formed", functional_groups_formed),
+    ]:
+        if fg_param_value is not None:
+            invalid_groups = [
+                fg for fg in fg_param_value if fg not in FUNCTIONAL_GROUPS
+            ]
+            if invalid_groups:
+                raise ValueError(
+                    f"Invalid functional group(s) in '{fg_param_name}': {invalid_groups}. "
+                    f"Valid functional groups are: {FUNCTIONAL_GROUPS}. "
+                    f"Use the tool 'get_available_functional_groups' to see the list of available functional groups."
+                )
+
+    # Validate bond format
+    bond_pattern = re.compile(r"^\d+-\d+$")  # e.g., "6-6", "6-8"
+    bond_order_pattern = re.compile(
+        r"^\d+-\d+ \(\d+\.\d+->\d+\.\d+\)$"
+    )  # e.g., "6-6 (1.0->2.0)"
+
+    for bond_param_name, bond_param_value, pattern in [
+        ("bonds_formed", bonds_formed, bond_pattern),
+        ("bonds_broken", bonds_broken, bond_pattern),
+        ("bonds_order_changed", bonds_order_changed, bond_order_pattern),
+    ]:
+        if bond_param_value is not None:
+            invalid_bonds = [
+                bond for bond in bond_param_value if not pattern.match(bond)
+            ]
+            if invalid_bonds:
+                if bond_param_name == "bonds_order_changed":
+                    expected_format = (
+                        'e.g., "6-6 (1.0->2.0)", "6-8 (2.0->3.0)"'
+                    )
+                else:
+                    expected_format = 'e.g., "6-6", "6-8"'
+                raise ValueError(
+                    f"Invalid bond format in '{bond_param_name}': {invalid_bonds}. "
+                    f"Expected format: {expected_format}"
+                )
 
     mol = Chem.MolFromSmiles(molecule_smiles)
     if mol is None:
@@ -617,6 +675,7 @@ def search_catalog_by_smiles(
     - If the catalog service is down or unreachable, the function will not be able to return results.
     [/LIMITATIONS]
     """
+    sleep(60)
     chemicals = check_price(smiles_list, limit)
     return chemicals if chemicals else "No results found"
 
@@ -682,78 +741,8 @@ def is_buyable(smiles_list: list[str]) -> list[bool]:
     - If the availability service is down or unreachable, the function will not be able to return results.
     [/LIMITATIONS]
     """
+    sleep(60)
     return _is_buyable(smiles_list)
-
-
-@tool
-def suggest_protecting_groups(functional_group: FunctionalGroup) -> list[str]:
-    """
-    [BRIEF] Suggests protecting groups for a given functional group.[/BRIEF]
-
-    [DETAILED] This function provides a list of suitable protecting groups for a specified functional group. Protecting groups are used in synthetic chemistry to temporarily mask reactive sites on molecules during multi-step synthesis processes. [/DETAILED]
-
-    [PROCEDURAL] When to use this tool:
-    - When planning a synthetic route and needing to protect a functional group from unwanted reactions.
-    - When selecting appropriate protecting groups based on the functional group present in the target molecule. [/PROCEDURAL]
-
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Identify the functional group in your target molecule. You can use the tool `detect_functional_groups` to identify functional groups in a molecule. [/PREREQUISITE]
-    2. [CURRENT] Use `suggest_protecting_groups` to get a list of suitable protecting groups for the identified functional group. [/CURRENT]
-    3. [FOLLOW_UP] Evaluate the suggested protecting groups and select the most appropriate one for your synthesis plan. Consider factors such as ease of installation and removal, stability under reaction conditions, and compatibility with other functional groups in the molecule. [/FOLLOW_UP]
-    [/WORKFLOW_INTEGRATION]
-
-    [CONTEXTUAL] How this tool works:
-    - The function takes a functional group as input, which is an enumeration representing common functional groups in organic chemistry (e.g., alcohol, amine, carboxylic acid).
-    - It looks up a predefined mapping of functional groups to their corresponding protecting groups.
-    - The function returns a list of protecting groups that are suitable for the specified functional group. [/CONTEXTUAL]
-
-    [SYNTACTICAL] Usage examples:
-    [
-        `suggest_protecting_groups('1,2-Aminoalcohol')`,
-        `suggest_protecting_groups('Aldehyde, Ketone')`,
-        `suggest_protecting_groups('Amine')`,
-        `suggest_protecting_groups('Carboxylic acid')`,
-        `suggest_protecting_groups('Phenol')`,
-    ]
-    [/SYNTACTICAL]
-
-    Args:
-        functional_group (FunctionalGroup):
-            [ARGS_BRIEF] The functional group for which to suggest protecting groups. It must be one of the following: '1,2-Aminoalcohol', '1,2-Diol', '1,3-Diol', 'Acetylene', 'Alcohol', 'Aldehyde, Ketone', 'Amide, Carbamate', 'Amine', 'Carboxylic acid', 'Indole', 'Phenol', 'Sulfonamide'. [/ARGS_BRIEF]
-            [ARGS_DETAILED] An enumeration value representing a common functional group in organic chemistry. The functional group should be selected from the predefined list to ensure accurate suggestions. [/ARGS_DETAILED]
-            [ARGS_SYNTACTICAL] One of the predefined FunctionalGroup enum values. [/ARGS_SYNTACTICAL]
-            [ARGS_EXAMPLES] "Sulfonamide", "Amine", "Alcohol" [/ARGS_EXAMPLES]
-
-    Returns:
-        list[str]:
-            [RETURNS_BRIEF] List of protecting groups suitable for the given functional group and the reactions and conditions to protect and deprotect with them. [/RETURNS_BRIEF]
-            [RETURNS_DETAILED] A list of strings, each representing a protecting group that can be used to protect the specified functional group during synthesis. The list may include common protecting groups as well as their abbreviations. [/RETURNS_DETAILED]
-            [RETURNS_SYNTACTICAL] List of strings [/RETURNS_SYNTACTICAL]
-            [RETURNS_EXAMPLES] '[{"reagents": "CuSO₄", "solvents": "Acetone", "temperature": "RT", "time": "36 h", "yield": "83%"},...,]', '[] [/RETURNS_EXAMPLES]
-
-    [RAISES] Exceptions:
-        ValueError:
-            [ERROR_WHEN] Raised when the provided functional group is not recognized. [/ERROR_WHEN]
-            [ERROR_DETAILS] This occurs if the functional group does not match any of the predefined enumeration values. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] Ensure the functional group is one of the recognized types. [/ERROR_RECOVERY]
-    [/RAISES]
-
-    [LIMITATIONS] Known limitations:
-    - The function relies on a predefined mapping of functional groups to protecting groups, which may not cover all possible scenarios or the latest developments in synthetic chemistry.
-    - The suitability of a protecting group may depend on specific reaction conditions and the overall synthetic route, which are not considered in this function.
-    - The function does not provide information on the installation or removal procedures for the suggested protecting groups.
-    - The function may not account for steric or electronic effects that could influence the choice of protecting group in complex molecules.
-    [/LIMITATIONS]
-    """
-    _path = Path(__file__).parent / "protecting_groups.json"
-    with _path.open("r") as f:
-        protecting_groups_map = json.load(f)
-
-    return [
-        pg
-        for pg in protecting_groups_map
-        if pg.get("functional_group") == functional_group
-    ]
 
 
 @tool
@@ -1118,7 +1107,7 @@ def detect_functional_groups(smiles: str) -> list[str]:
     [WORKFLOW_INTEGRATION] Typical workflow integration:
     1. [PREREQUISITE] Obtain the SMILES string of the molecule you want to analyze. [/PREREQUISITE]
     2. [CURRENT] Use `detect_functional_groups` to identify functional groups in the molecule. [/CURRENT]
-    3. [FOLLOW_UP] Use the information about functional groups for synthesis planning, modification of the molecule, or further analysis. You can also use the tool `suggest_protecting_groups` to find suitable protecting groups for the identified functional groups. [/FOLLOW_UP]
+    3. [FOLLOW_UP] Use the information about functional groups for synthesis planning, modification of the molecule, or further analysis. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
@@ -1339,7 +1328,6 @@ def create_tools() -> dict[str, Tool]:
         "verify_route": verify_route,
         "search_catalog_by_smiles": search_catalog_by_smiles,
         "is_buyable": is_buyable,
-        "suggest_protecting_groups": suggest_protecting_groups,
         "deprotect_molecule": deprotect_molecule,
         "detect_protection_groups": detect_protection_groups,
         "detect_functional_groups": detect_functional_groups,
