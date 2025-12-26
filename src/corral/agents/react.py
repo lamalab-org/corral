@@ -170,7 +170,8 @@ class ReActAgent(BaseAgent):
             # Execute BEFORE_ITERATION hooks
             self._execute_hooks(HookPoint.BEFORE_ITERATION, interface, task_id)
             # Create prompt and get LLM response
-            llm_response = self.get_llm_response().content
+            full_llm_response = self.get_llm_response()
+            llm_response = full_llm_response.content
 
             self.messages.append(LiteLLMMessage(role="assistant", content=llm_response))
 
@@ -217,6 +218,14 @@ class ReActAgent(BaseAgent):
                             name=action.tool_name,
                         )
                     )
+
+            self._execute_hooks(
+                HookPoint.AFTER_ITERATION,
+                interface,
+                task_id,
+                llm_response=full_llm_response,
+            )
+
             if final_answer_match:
                 return final_answer_match.group(1).strip()
 

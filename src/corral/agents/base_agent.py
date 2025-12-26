@@ -341,6 +341,6 @@ class BaseAgent(ABC):
             interface=interface,
             messages=self.messages,
             iteration=self._current_iteration,
-            **extra_context,
+            iteration_data=extra_context,
         )
         return self.hooks.execute(hook_point, context)

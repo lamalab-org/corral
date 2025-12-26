@@ -144,6 +144,9 @@ def llm_call(
             response = litellm.completion(**params)
 
         message = response.choices[0].message
+        message.logprobs = response.choices[0].logprobs
+        message.id = response.id
+        # save this logprobs with unique ids
 
         # Normalize message content for reasoning models
         # If content is null but reasoning fields exist, copy them to content
@@ -151,7 +154,8 @@ def llm_call(
             extracted_content = extract_message_content(message)
             if extracted_content:
                 # Set content from reasoning fields
-                message.content = extracted_content
+                # message.content = extracted_content
+                response.choices[0].message.content = extracted_content
 
         if return_usage:
             # Extract usage information from the response
@@ -187,7 +191,8 @@ def format_examples(examples: list[str] | None) -> str:
         return ""
     else:
         example_prompt = f"To help you in understanding this task, the next {
-            len(examples)} examples are provided:\n\n"
+            len(examples)
+        } examples are provided:\n\n"
         return example_prompt + "\n\n".join(examples)
 
 
