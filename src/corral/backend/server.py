@@ -70,8 +70,6 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
         env = environments[task_id]
-        # Ensure the trial has started when agent requests task prompt
-        env.state.ensure_started()
         return {"prompt": env.get_task_prompt()}
 
     @app.get("/tasks/{task_id}/guide")
@@ -88,8 +86,6 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
-        # Ensure the trial has started when agent requests environment guide
-        env.state.ensure_started()
         task_prompt = env.get_task_prompt()
         tools_guide = get_tools_guide_with_verbosity(env, verbosity)
 
@@ -109,8 +105,6 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
-        # Ensure the trial has started when agent requests tools guide
-        env.state.ensure_started()
         tools_guide = get_tools_guide_with_verbosity(env, verbosity)
 
         return {"prompt": tools_guide}
@@ -135,8 +129,6 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(status_code=404, detail="Task not found")
 
         env = environments[task_id]
-        # Ensure the trial has started when agent requests available tools
-        env.state.ensure_started()
         tools_info = []
 
         for tool in env.tools.values():

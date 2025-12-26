@@ -158,7 +158,9 @@ def execute_single_trial(
     configure_timeout: float | None = None,
     enable_surrender: bool = False,
 ) -> TaskTrialResult:
-    """Execute a single trial - pure function"""
+    """Execute a single trial - pure function."""
+    trial_start_time = datetime.now(tz=timezone.utc)
+
     try:
         status = interface.configure_additional_apps(task_id, timeout=configure_timeout)
         logger.info(f"Task {task_id} additional apps/services configured: {status}")
@@ -178,9 +180,12 @@ def execute_single_trial(
                 result = interface.surrender_task(task_id)
                 result.token_usage = token_usage
                 result.messages = messages
+                trial_end_time = datetime.now(tz=timezone.utc)
+                result.duration = (trial_end_time - trial_start_time).total_seconds()
                 return result
             except Exception as surrender_error:
-                return exception_trial_result(
+                trial_end_time = datetime.now(tz=timezone.utc)
+                result = exception_trial_result(
                     task_id=task_id,
                     trial_index=trial_index,
                     interface=interface,
@@ -190,15 +195,20 @@ def execute_single_trial(
                     surrendered=True,
                     messages=messages,
                 )
+                result.duration = (trial_end_time - trial_start_time).total_seconds()
+                return result
 
         # Submit answer
         try:
             result = interface.submit_answer(task_id, answer)
             result.token_usage = token_usage
             result.messages = messages
+            trial_end_time = datetime.now(tz=timezone.utc)
+            result.duration = (trial_end_time - trial_start_time).total_seconds()
             return result
         except Exception as submit_error:
-            return exception_trial_result(
+            trial_end_time = datetime.now(tz=timezone.utc)
+            result = exception_trial_result(
                 task_id=task_id,
                 trial_index=trial_index,
                 interface=interface,
@@ -207,8 +217,11 @@ def execute_single_trial(
                 token_usage=token_usage,
                 messages=messages,
             )
+            result.duration = (trial_end_time - trial_start_time).total_seconds()
+            return result
     except Exception as agent_error:
-        return exception_trial_result(
+        trial_end_time = datetime.now(tz=timezone.utc)
+        result = exception_trial_result(
             task_id=task_id,
             trial_index=trial_index,
             interface=interface,
@@ -216,6 +229,8 @@ def execute_single_trial(
             error_type="Agent Error",
             token_usage=agent.get_total_token_usage(),
         )
+        result.duration = (trial_end_time - trial_start_time).total_seconds()
+        return result
 
 
 def run_independent_trials(

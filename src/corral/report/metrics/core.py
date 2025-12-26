@@ -198,6 +198,30 @@ class TaskAverageDurationMetric(TaskMetric):
         return mean(durations) if durations else None
 
 
+class TaskTotalDurationMetric(TaskMetric):
+    """Total duration across all trials for a task."""
+
+    @property
+    def metadata(self) -> MetricMetadata:
+        return MetricMetadata(
+            name="task_total_duration",
+            display_name="Task Total Duration",
+            description="Total duration across all trials for each task (seconds)",
+        )
+
+    def calculate_for_task(self, context: MetricContext, task_id: str) -> float | None:
+        """Calculate total duration for a specific task."""
+        task_trials = context.get_task_trials(task_id)
+        if not task_trials:
+            raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
+
+        durations = [
+            trial.duration for trial in task_trials.trials if trial.duration is not None
+        ]
+
+        return sum(durations) if durations else None
+
+
 class TotalTokenUsageMetric(Metric):
     """Total token usage across all trials."""
 

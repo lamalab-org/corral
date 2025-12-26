@@ -61,7 +61,7 @@ def test_wandb_logger_with_default_metrics():
     logger.run = MagicMock()
 
     # Log final results (should not raise any errors)
-    logger.log_final_results(benchmark, k_values=[1])
+    logger.log_final_results(benchmark)
 
     # Verify that log was called
     assert logger.run.log.called
@@ -85,7 +85,7 @@ def test_wandb_logger_with_custom_metrics():
     logger.run = MagicMock()
 
     # Log final results
-    logger.log_final_results(benchmark, k_values=[1])
+    logger.log_final_results(benchmark)
 
     # Verify that log was called
     assert logger.run.log.called
@@ -116,7 +116,7 @@ def test_wandb_logger_with_no_metrics():
 
     # Log final results (should handle gracefully without errors)
     # When there are no metrics and no trial table data, nothing is logged
-    logger.log_final_results(benchmark, k_values=[1])
+    logger.log_final_results(benchmark)
 
     # With no metrics and no trial table populated, log should not be called
     # This is expected behavior - nothing to log means no wandb.log() calls
@@ -140,7 +140,7 @@ def test_wandb_logger_respects_registered_metrics():
     logger.run = MagicMock()
 
     # Log final results
-    logger.log_final_results(benchmark, k_values=[1])
+    logger.log_final_results(benchmark)
 
     # Verify that log was called
     assert logger.run.log.called

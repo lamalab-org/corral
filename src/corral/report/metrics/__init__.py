@@ -16,6 +16,7 @@ from corral.report.metrics.core import (
     TaskPassAtKMetric,
     TaskPassHatKMetric,
     TaskSuccessRateMetric,
+    TaskTotalDurationMetric,
     TaskTotalTokenUsageMetric,
     TotalDurationMetric,
     TotalSurrenderedTrialsMetric,
@@ -49,6 +50,7 @@ def _create_task_metrics() -> list[Metric]:
         TaskSuccessRateMetric(),
         TaskAverageScoreMetric(),
         TaskAverageDurationMetric(),
+        TaskTotalDurationMetric(),
         TaskTotalTokenUsageMetric(),
     ]
 
@@ -141,6 +143,7 @@ __all__ = [
     "TaskPassAtKMetric",
     "TaskPassHatKMetric",
     "TaskSuccessRateMetric",
+    "TaskTotalDurationMetric",
     "TaskTotalTokenUsageMetric",
     "TotalDurationMetric",
     "TotalSurrenderedTrialsMetric",
