@@ -2,39 +2,6 @@
 
 This guide explains how to create, register, and manage custom metrics in Corral.
 
-## Table of Contents
-
-- [Custom Metrics Guide](#custom-metrics-guide)
-  - [Table of Contents](#table-of-contents)
-  - [Introduction](#introduction)
-    - [Default Metrics](#default-metrics)
-    - [Viewing Active Metrics](#viewing-active-metrics)
-    - [The MetricContext Protocol](#the-metriccontext-protocol)
-    - [Parallel Metric Calculation](#parallel-metric-calculation)
-  - [Creating a Custom Metric](#creating-a-custom-metric)
-    - [Example: Creating an Overall Metric](#example-creating-an-overall-metric)
-    - [Example: Creating a Task Metric](#example-creating-a-task-metric)
-  - [Using Metrics with BenchmarkResult](#using-metrics-with-benchmarkresult)
-    - [Default Behavior](#default-behavior)
-    - [Configuring k Values for Pass@k and Pass^k Metrics](#configuring-k-values-for-passk-and-passk-metrics)
-    - [Explicit Metrics Configuration](#explicit-metrics-configuration)
-    - [Combining Default and Custom Metrics](#combining-default-and-custom-metrics)
-  - [Listing Available Metrics](#listing-available-metrics)
-    - [List All Metrics](#list-all-metrics)
-    - [Print Metrics Table](#print-metrics-table)
-    - [Filter by Type](#filter-by-type)
-  - [Using Metrics with CorralRunner](#using-metrics-with-corralrunner)
-    - [Default Behavior (Backward Compatible)](#default-behavior-backward-compatible)
-    - [Inspect Metrics Before Running](#inspect-metrics-before-running)
-    - [Explicit Metrics at Initialization](#explicit-metrics-at-initialization)
-    - [Register/Unregister Metrics Dynamically](#registerunregister-metrics-dynamically)
-    - [Reset or Clear Metrics](#reset-or-clear-metrics)
-    - [Accessing the Registry Directly](#accessing-the-registry-directly)
-    - [Benefits of CorralRunner Metrics Integration](#benefits-of-corralrunner-metrics-integration)
-  - [Advanced Examples](#advanced-examples)
-    - [Metric with Parameters](#metric-with-parameters)
-    - [Sharing Metrics Between Benchmarks](#sharing-metrics-between-benchmarks)
-
 ## Introduction
 
 Corral provides a flexible metrics system that allows you to:
@@ -71,6 +38,19 @@ Corral provides the following default metrics:
 - `task_pass_hat_k`: Pass^k for each individual task (for each k value)
 
 The `k` values for pass@k and pass^k metrics default to `[1]` but can be configured when creating a `BenchmarkResult`.
+
+## Understanding BenchmarkResult
+
+`BenchmarkResult` is the core data structure that holds all your benchmark results and computed metrics. It's automatically created when you run a benchmark using `CorralRunner.bench()` or can be created manually from task results.
+
+**What is it?**
+
+A `BenchmarkResult` instance contains:
+
+- All task trial results (successes, failures, scores, etc.)
+- Configuration for metrics (like k values for pass@k)
+- Timing information (total duration, per-trial durations)
+- Tool usage statistics (token counts, tool calls, etc.)
 
 ### Viewing Active Metrics
 
@@ -128,7 +108,7 @@ for m in metrics_info:
 
 ### The MetricContext Protocol
 
-Metrics work with any object that satisfies the `MetricContext` protocol. This makes the metrics system portable and testable without tight coupling to `BenchmarkResult`.
+Metrics work with any object that satisfies the `MetricContext` protocol.
 
 A `MetricContext` must provide:
 
@@ -141,16 +121,62 @@ This protocol-based design allows you to:
 - Create mock objects for testing
 - Integrate with custom test harnesses
 
+**Example: Custom Object Satisfying the Protocol**
+
+Any object with these properties automatically satisfies the protocol:
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class MockTaskData:
+    """Simple container for task trial data."""
+
+    task_id: str
+    trials: list
+
+
+@dataclass
+class CustomBenchmark:
+    """Custom benchmark system that satisfies MetricContext protocol."""
+
+    task_data: dict[str, MockTaskData]
+
+    @property
+    def all_task_ids(self) -> set[str]:
+        """Required by MetricContext protocol."""
+        return set(self.task_data.keys())
+
+    def get_task_trials(self, task_id: str) -> MockTaskData | None:
+        """Required by MetricContext protocol."""
+        return self.task_data.get(task_id)
+
+
+# Now you can use CustomBenchmark with any metric
+from corral.report.metrics import AverageScoreMetric
+
+benchmark = CustomBenchmark(
+    task_data={
+        "task1": MockTaskData("task1", [trial1, trial2]),
+        "task2": MockTaskData("task2", [trial3]),
+    }
+)
+
+metric = AverageScoreMetric()
+result = metric.calculate(benchmark)  # ✅ Works!
+```
+
 ### Parallel Metric Calculation
 
-The registry supports parallel calculation of metrics for improved performance:
+The registry supports parallel calculation of metrics using **thread-based parallelization** (`ThreadPoolExecutor`).
 
 ```python
 from corral.report.metrics import get_metrics_registry
 
 registry = get_metrics_registry()
 
-# Calculate all metrics in parallel
+# Calculate all metrics in parallel using threads
 results = registry.calculate_all(
     benchmark_result, parallel=True, max_workers=8  # Optional: control thread pool size
 )
@@ -161,7 +187,8 @@ results = registry.calculate_all(
 )
 ```
 
-Parallel calculation is beneficial when you have many independent metrics to compute.
+!!! note "When to use parallel calculation"
+    Parallel calculation is most beneficial when you have many independent metrics to compute. For a small number of metrics (< 5), sequential calculation may be faster due to threading overhead.
 
 ## Creating a Custom Metric
 
