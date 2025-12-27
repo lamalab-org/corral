@@ -436,6 +436,11 @@ def get_context_window(model: str) -> int:
     Returns:
         int: The max input tokens for the model, or None if unknown.
     """
+    if (
+        model
+        == "openai/1 - GPT-OSS-120b - an open model released by OpenAI in August 2025"
+    ):
+        return 131072
     return litellm.model_cost.get(model, {}).get("max_input_tokens", None)
 
 
