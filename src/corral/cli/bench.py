@@ -81,6 +81,7 @@ DEFAULTS = {
     "temperature": 1.0,
     "tasks": None,
     "output": None,
+    "output_dir": None,  # Defaults to ./corral-results in cwd
     "detach": False,
     "verbose": True,
 }
@@ -149,6 +150,11 @@ def run_benchmark(
         "-o",
         help="Output file for results",
     ),
+    output_dir: str | None = typer.Option(
+        None,
+        "--output-dir",
+        help="Directory to save results. Defaults to ./corral-results in current directory.",
+    ),
     detach: bool = typer.Option(
         False,
         "--detach",
@@ -197,6 +203,7 @@ def run_benchmark(
         "max_iterations": max_iterations,
         "temperature": temperature,
         "output": output,
+        "output_dir": output_dir,
         "detach": detach,
         "verbose": verbose,
     }
@@ -233,6 +240,7 @@ def run_benchmark(
             max_iterations=settings["max_iterations"],
             temperature=settings["temperature"],
             output_file=settings["output"],
+            output_dir=settings["output_dir"],
             detach=settings["detach"],
             verbose=settings["verbose"],
             agent_kwargs=extra_agent_kwargs,

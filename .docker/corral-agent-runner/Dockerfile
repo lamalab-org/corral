@@ -40,6 +40,7 @@ configuration of model, agent, temperature, k values, base url and more.
 """
 import os
 import argparse
+import subprocess
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -52,6 +53,30 @@ from pathlib import Path
 
 from corral import CorralRouter, CorralRunner
 from corral.report import CorralWandbLogger
+
+# Results directory - can be overridden via environment variable
+RESULTS_DIR = os.getenv("RESULTS_DIR", "/opt/corral-workspace/results")
+
+
+def check_volume_mounted():
+    """Warn if results directory is not a mounted volume."""
+    results_path = Path(RESULTS_DIR)
+    results_path.mkdir(parents=True, exist_ok=True)
+
+    # Check if path is a mount point (simple heuristic)
+    try:
+        result = subprocess.run(
+            ["mountpoint", "-q", str(results_path)],
+            capture_output=True
+        )
+        if result.returncode != 0:
+            logger.warning(
+                f"⚠️  Results directory '{RESULTS_DIR}' is not a mounted volume. "
+                "Results will be lost when the container exits! "
+                "Use -v $(pwd)/results:/opt/corral-workspace/results to persist results."
+            )
+    except Exception:
+        pass  # mountpoint command not available, skip check
 
 
 def setup_litellm():
@@ -113,7 +138,7 @@ def run_benchmark(
     agent_kwargs: dict | None = None,
     api_endpoint: str | None = None,
     default_verbosity: str = "brief",
-    checkpoint_dir: str = "./benchmark_checkpoints",
+    checkpoint_dir: str | None = None,
     checkpoint_name: str | None = None,
     session_id: str | None = None,
     configure_timeout: float | None = None,
@@ -125,6 +150,13 @@ def run_benchmark(
     verbose: bool = False,
     tool_verbosity: str = "brief",
 ):
+    # Ensure results directory exists
+    Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
+
+    # Use RESULTS_DIR for checkpoints if not specified
+    if checkpoint_dir is None:
+        checkpoint_dir = os.path.join(RESULTS_DIR, "benchmark_checkpoints")
+
     interface = CorralRouter(base_url, default_verbosity=default_verbosity)
     # configure wandb logger if api key is present, otherwise fallback to simple logger
     wandb_logger = None
@@ -169,7 +201,8 @@ def run_benchmark(
         tool_verbosity=tool_verbosity,
         configure_timeout=configure_timeout,
     )
-    out_path = f"{run_name}.json"
+    # Save report to RESULTS_DIR
+    out_path = os.path.join(RESULTS_DIR, f"{run_name}.json")
     result.generate_report(out_path)
     logger.info(f"Benchmark completed — report saved to {out_path}")
 
@@ -177,6 +210,9 @@ def run_benchmark(
 def main():
     load_dotenv()
     setup_litellm()
+
+    # Check if results directory is mounted (warn if not)
+    check_volume_mounted()
 
     parser = argparse.ArgumentParser()
     # Agent params
@@ -198,7 +234,7 @@ def main():
     parser.add_argument("--tool-verbosity", default=os.getenv("TOOL_VERBOSITY", "brief"))
     parser.add_argument("--verbose", type=lambda x: x.lower() == "true", default=os.getenv("VERBOSE", "false"))
     parser.add_argument("--task-ids", default=os.getenv("TASK_IDS", None), help="Comma-separated task ids")
-    parser.add_argument("--checkpoint-dir", default=os.getenv("CHECKPOINT_DIR", "./benchmark_checkpoints"))
+    parser.add_argument("--checkpoint-dir", default=os.getenv("CHECKPOINT_DIR", None))
     parser.add_argument("--checkpoint-name", default=os.getenv("CHECKPOINT_NAME", None))
     parser.add_argument("--session-id", default=os.getenv("SESSION_ID", None))
     parser.add_argument("--configure-timeout", type=float, default=float(os.getenv("CONFIGURE_TIMEOUT", "60.0")) if os.getenv("CONFIGURE_TIMEOUT") else None)

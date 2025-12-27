@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import docker
@@ -56,6 +57,7 @@ class DockerBenchmarkRunner:
     NETWORK_NAME = "corral-network"
     ENV_CONTAINER_NAME = "corral-env"
     AGENT_CONTAINER_NAME = "corral-agent"
+    DEFAULT_RESULTS_DIR = "/opt/corral-workspace/results"
 
     def __init__(self):
         self.client = docker.from_env()
@@ -70,6 +72,7 @@ class DockerBenchmarkRunner:
         max_iterations: int = 10,
         temperature: float = 0.0,
         output_file: str | None = None,
+        output_dir: str | None = None,
         detach: bool = False,
         verbose: bool = False,
         agent_kwargs: dict[str, Any] | None = None,
@@ -88,6 +91,8 @@ class DockerBenchmarkRunner:
             max_iterations: Maximum iterations per trial.
             temperature: LLM temperature.
             output_file: Output file for results.
+            output_dir: Directory to save results. Defaults to current working directory.
+                       This directory will be mounted into the container.
             detach: Run in detached mode.
             verbose: Enable verbose output.
             agent_kwargs: Extra agent parameters.
@@ -97,6 +102,12 @@ class DockerBenchmarkRunner:
             env_args: Environment-specific arguments passed as JSON to the container.
                      These are converted to CLI arguments by the entrypoint script.
         """
+        # Resolve output directory (default to cwd)
+        results_host_path = Path(output_dir or Path.cwd()) / "corral-results"
+        results_host_path.mkdir(parents=True, exist_ok=True)
+
+        console.print(f"[cyan]Results will be saved to:[/cyan] {results_host_path}")
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -143,6 +154,7 @@ class DockerBenchmarkRunner:
                 agent_kwargs=agent_kwargs,
                 runner_kwargs=runner_kwargs,
                 agent_image=resolved_agent_image,
+                results_host_path=results_host_path,
             )
             progress.update(task, description="[green]✓[/green] Agent started")
 
@@ -272,11 +284,13 @@ class DockerBenchmarkRunner:
         agent_kwargs: dict[str, Any] | None = None,
         runner_kwargs: dict[str, Any] | None = None,
         agent_image: str = DEFAULT_AGENT_IMAGE,
+        results_host_path: Path | None = None,
     ) -> Container:
         """Start the agent runner container.
 
         Args:
             agent_image: Docker image to use for the agent runner.
+            results_host_path: Host path to mount for results persistence.
         """
         # Stop existing container if running
         try:
@@ -294,6 +308,7 @@ class DockerBenchmarkRunner:
             "MAX_ITERATIONS": str(max_iterations),
             "TEMPERATURE": str(temperature),
             "VERBOSE": str(verbose).lower(),
+            "RESULTS_DIR": self.DEFAULT_RESULTS_DIR,
         }
 
         # Pass through any LiteLLM-supported API keys from environment
@@ -310,11 +325,20 @@ class DockerBenchmarkRunner:
         if runner_kwargs:
             env["RUNNER_KWARGS"] = json.dumps(runner_kwargs)
 
+        # Configure volumes for results persistence
+        volumes = {}
+        if results_host_path:
+            volumes[str(results_host_path.absolute())] = {
+                "bind": self.DEFAULT_RESULTS_DIR,
+                "mode": "rw",
+            }
+
         return self.client.containers.run(
             agent_image,
             name=self.AGENT_CONTAINER_NAME,
             network=self.NETWORK_NAME,
             environment=env,
+            volumes=volumes if volumes else None,
             detach=True,
         )
 
