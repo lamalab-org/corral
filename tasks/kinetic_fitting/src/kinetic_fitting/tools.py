@@ -41,7 +41,7 @@ _matplotlib_lock = threading.Lock()
 def _get_persistent_output_dir() -> Path:
     """Get or create persistent output directory for plots and results."""
     # Use the task directory's parent to ensure persistence across runs
-    output_dir = Path("persistent_outputs_results_no_occams")
+    output_dir = Path("persistent_outputs_results_occams_optimized_prompt")
     output_dir.mkdir(exist_ok=True)
     return output_dir
 
@@ -345,12 +345,23 @@ def load_reaction_network(network_path: str) -> Dict[str, Any]:
 
 def save_reaction_network(network_path: str, network: Dict[str, Any]) -> None:
     """Save reaction network to JSON file."""
+
+    time_stamp = str(int(time.time()))
+
     with open(network_path, "w") as f:
         json.dump(network, f, indent=2)
 
     # Also save to persistent directory
     persistent_dir = _get_persistent_output_dir()
     persistent_network_path = persistent_dir / "current_network.json"
+
+    persistent_network_path = persistent_dir / f"current_network_{time_stamp}.json"
+
+    with open(persistent_network_path, "w") as f:
+        json.dump(network, f, indent=2)
+
+    persistent_network_path = persistent_dir / "current_network.json"
+
     with open(persistent_network_path, "w") as f:
         json.dump(network, f, indent=2)
 
@@ -559,7 +570,7 @@ def fit_reaction_network(
         )
 
         params_dict = {}
-        for name, val in zip(param_names, result.x):
+        for name, val in zip(param_names, result.x, strict=False):
             if name.startswith("qy_"):
                 params_dict[name] = val
             else:
@@ -680,7 +691,7 @@ def fit_reaction_network(
             "success": False,
             "species_list": species_list,
             "error": str(e),
-            "failure_reason": f"Exception during fitting: {str(e)}",
+            "failure_reason": f"Exception during fitting: {e!s}",
             "o2_range": 0.0,
             "o2_max": 0.0,
         }
@@ -736,7 +747,7 @@ def _score_irradiance_trend(rates_vs_irradiance: dict) -> float:
     rates = np.array([np.mean(rates_vs_irradiance[c]) for c in concentrations])
 
     _, _, r_value, _, _ = linregress(concentrations, rates)
-    return max(0, r_value**2)
+    return max(0, r_value**2)  # pyright: ignore[reportOperatorIssue]
 
 
 def _score_ph_trend(rates_vs_ph: dict) -> float:
@@ -784,7 +795,7 @@ def _create_fit_plot(
     y_pred: np.ndarray,
     exp_name: str,
     metadata: dict,
-    save_path: str = None,
+    save_path: str | None = None,
 ) -> str:
     """Create fit visualization and return as base64 string.
 
@@ -798,10 +809,10 @@ def _create_fit_plot(
     """
     with _matplotlib_lock:
         # Ensure matplotlib works properly in threads by forcing backend
-        import matplotlib
+        import matplotlib as mpl  # noqa: PLC0415
+        import matplotlib.pyplot as plt  # noqa: PLC0415
 
-        matplotlib.use("Agg", force=True)
-        import matplotlib.pyplot as plt
+        mpl.use("Agg", force=True)
 
         plt.ioff()
 
@@ -844,7 +855,7 @@ def _create_fit_plot(
             transform=ax1.transAxes,
             fontsize=9,
             verticalalignment="top",
-            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+            bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.8},
         )
 
         ax2.scatter(time, residuals, alpha=0.6, s=20, color="#d62728", zorder=3)
@@ -941,13 +952,13 @@ def _create_phenomenological_plots(
         ax.legend()
         ax.grid(True, which="both", linestyle="--", linewidth=0.5)
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(_get_persistent_output_dir() / Path(output_path))
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # type: ignore
+    timestamp = int(time.time())
     plt.savefig(
-        _get_persistent_output_dir() / Path(output_path + f".{int(time.time())}")
+        _get_persistent_output_dir() / Path(f"phenomenological_trends_{timestamp}.png")
     )
     plt.close()
-    return f"\nPhenomenological trend plots saved to '{output_path}'"
+    return f"\nPhenomenological trend plots saved to: '{_get_persistent_output_dir() / Path(f'phenomenological_trends_{timestamp}.png')}'"
 
 
 def _diagnose_network_issues(network: dict, sample_conditions: dict) -> str:
@@ -970,7 +981,7 @@ def _diagnose_network_issues(network: dict, sample_conditions: dict) -> str:
             all_species.update(reaction_obj.stoichiometry.keys())
             reactants_consumed.update(reaction_obj.reactants)
             products_formed.update(reaction_obj.products)
-        except Exception as e:
+        except Exception:
             issues.append(f"Invalid reaction: {rxn.get('equation', 'unknown')}")
 
     # Check if O2 can be formed
@@ -1139,7 +1150,7 @@ def fit_single_experiment(
 
         # Load existing results or create new
         try:
-            with open(results_path) as f:
+            with open(results_path) as f:  # noqa: PTH123
                 all_results = json.load(f)
         except FileNotFoundError:
             all_results = {"experiments": {}}
@@ -1164,14 +1175,17 @@ def fit_single_experiment(
         )
 
         # Save results both to workspace and persistent directory
-        with open(results_path, "w") as f:
-            json.dump(all_results, f, indent=2)
+        # with open(results_path, "w") as f:
+        #     json.dump(all_results, f, indent=2)
+        import time  # noqa: PLC0415
 
         # Also save to persistent directory
         persistent_results_path = persistent_dir / "fit_results.json"
         with open(persistent_results_path, "w") as f:
             json.dump(all_results, f, indent=2)
 
+        with open(persistent_dir / f"fit_results.json.{int(time.time())}", "w") as f:
+            json.dump(all_results, f, indent=2)
         # Report parameter file location
         param_file = result.get("param_file", "N/A")
 
@@ -1192,7 +1206,7 @@ def fit_single_experiment(
 
 
 def fit_reaction_network_global(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     reaction_network: dict,
     maxiter: int = 100,
 ) -> dict:
@@ -1216,7 +1230,7 @@ def fit_reaction_network_global(
 
     def global_objective(params_log: np.ndarray) -> float:
         params_dict = {}
-        for name, val in zip(param_names, params_log):
+        for name, val in zip(param_names, params_log, strict=False):
             if name.startswith("qy_"):
                 params_dict[name] = val
             else:
@@ -1253,7 +1267,7 @@ def fit_reaction_network_global(
 
                 # Penalty for non-physical (zero/flat) solutions
                 if np.max(o2_pred) < 0.01 * np.max(oxygen_exp):
-                    total_rss += 1e12
+                    total_rss += 1e7
                 else:
                     total_rss += np.sum((oxygen_exp - o2_pred) ** 2)
             except Exception:
@@ -1261,11 +1275,11 @@ def fit_reaction_network_global(
         return total_rss
 
     result = differential_evolution(
-        global_objective, bounds, maxiter=maxiter, popsize=12, seed=42, disp=False
+        global_objective, bounds, maxiter=maxiter, popsize=15, seed=42, disp=True
     )
 
     best_params = {}
-    for name, val in zip(param_names, result.x):
+    for name, val in zip(param_names, result.x, strict=False):
         if name.startswith("qy_"):
             best_params[name] = val
         else:
@@ -1354,16 +1368,83 @@ def fit_all_experiments(data_path: str, network_path: str, results_path: str) ->
         with open(results_path, "w") as f:
             json.dump(all_results, f, indent=2)
 
+        with open(results_path + "." + str(int(time.time())), "w") as f:
+            json.dump(all_results, f, indent=2)
+
+        time_stamp = str(int(time.time()))
+        output_file = (
+            _get_persistent_output_dir() / f"{Path(results_path).stem}.{time_stamp}"
+        )
+        with open(output_file, "w") as f:
+            json.dump(all_results, f, indent=2)
+
         return (
             f"Fitted all experiments globally (one model for all):\n"
             f"  Global Parameters: {global_params}\n"
             f"  Total RSS: {total_rss:.2f}\n"
             f"  Average RSS: {all_results['summary']['avg_rss']:.2f}\n"
-            f"  Plots and results saved to: {persistent_dir}"
+            f"  Plots and results saved to: {output_file}"
         )
-
     except Exception as e:
         return f"Error fitting experiments: {e}"
+
+
+def _calculate_mae(
+    pred_dict: Dict[float, List[float]], exp_dict: Dict[float, List[float]]
+) -> Optional[float]:
+    """Calculates the Mean Absolute Error between predicted and experimental trend means."""
+    errors = []
+    # We iterate over parameter values present in both datasets
+    for val in exp_dict:  # noqa: PLC0206
+        if val in pred_dict and len(exp_dict[val]) > 0 and len(pred_dict[val]) > 0:
+            avg_exp = np.mean(exp_dict[val])
+            avg_pred = np.mean(pred_dict[val])
+            errors.append(abs(avg_exp - avg_pred))
+
+    return np.mean(errors) if errors else None  # pyright: ignore[reportReturnType]
+
+
+def _calculate_magnitude_score(
+    pred_dict: Dict[float, List[float]],
+    exp_dict: Dict[float, List[float]],
+    threshold: float = 0.1,
+) -> float:
+    """
+    Calculates a score (0.0 to 1.0) based on how well the magnitude matches.
+    If model prediction is < 10% of experiment (flat line), score is 0.
+    """
+    model_means = []
+    exp_means = []
+
+    # Align keys to ensure we compare apples to apples
+    for key in exp_dict:  # noqa: PLC0206
+        if key in pred_dict and exp_dict[key] and pred_dict[key]:
+            model_means.append(np.mean(pred_dict[key]))
+            exp_means.append(np.mean(exp_dict[key]))
+
+    if not model_means or not exp_means:
+        return 0.0
+
+    avg_model = np.mean(model_means)
+    avg_exp = np.mean(exp_means)
+
+    if avg_exp == 0:
+        return 0.0
+
+    ratio = avg_model / avg_exp
+
+    # PENALTY CLIFF:
+    # If the model predicts less than 10% of the signal, it's a failure.
+    if ratio < threshold:
+        return 0.0
+
+    # If it's within range, score based on log-distance (to handle orders of magnitude)
+    # or simple ratio. Simple ratio is better for linear plots.
+    # We cap at 1.0. If model over-predicts, we penalize inversely.
+    if ratio <= 1.0:
+        return ratio
+    else:
+        return 1.0 / ratio
 
 
 @tool
@@ -1379,16 +1460,18 @@ def evaluate_phenomenological_trends(
     """
     try:
         data = load_experimental_data(data_path)
-        reaction_network = load_reaction_network(network_path)
+        reaction_network = load_reaction_network(
+            _get_persistent_output_dir() / "current_network.json"
+        )
 
-        # 1. Perform Global Fit to find the best single model for the whole dataset
+        # 1. Perform Global Fit
         print("Performing global fit for trend evaluation...")
-        global_result = fit_reaction_network_global(data, reaction_network, maxiter=150)
+        global_result = fit_reaction_network_global(data, reaction_network, maxiter=100)
         global_params = global_result["params"]
 
         ode_func, species_list, species_idx = create_ode_system(reaction_network, {})
 
-        # 2. Calculate Trends using the consistent global model
+        # 2. Calculate Trends
         trends = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}, "pH": {}}
         trends_original = {"c_Ru": {}, "c_S2O8": {}, "irradiance": {}, "pH": {}}
 
@@ -1410,7 +1493,7 @@ def evaluate_phenomenological_trends(
                 else np.zeros_like(time)
             )
 
-            # Calculate maximum rates for trend analysis
+            # Calculate maximum rates
             rates = np.gradient(y_pred, time)
             max_rate = np.max(rates)
 
@@ -1425,14 +1508,42 @@ def evaluate_phenomenological_trends(
                         max_rate_original
                     )
 
-        # 3. Scoring and Plotting
-        ru_score = _score_ru_trend(trends["c_Ru"])
-        s2o8_score = _score_s2o8_trend(trends["c_S2O8"])
-        irr_score = _score_irradiance_trend(trends["irradiance"])
-        ph_score = _score_ph_trend(trends["pH"])
+        # 3. Scoring with MAGNITUDE PENALTY
+        # Calculate shape scores (qualitative)
+        ru_shape = _score_ru_trend(trends["c_Ru"])
+        s2o8_shape = _score_s2o8_trend(trends["c_S2O8"])
+        irr_shape = _score_irradiance_trend(trends["irradiance"])
+        ph_shape = _score_ph_trend(trends["pH"])
+
+        # Calculate magnitude scores (quantitative)
+        ru_mag = _calculate_magnitude_score(trends["c_Ru"], trends_original["c_Ru"])
+        s2o8_mag = _calculate_magnitude_score(
+            trends["c_S2O8"], trends_original["c_S2O8"]
+        )
+        irr_mag = _calculate_magnitude_score(
+            trends["irradiance"], trends_original["irradiance"]
+        )
+        ph_mag = _calculate_magnitude_score(trends["pH"], trends_original["pH"])
+
+        # Combine scores: Shape * Magnitude
+        # If magnitude is 0 (flat line), the total score becomes 0.
+        ru_score = ru_shape * ru_mag
+        s2o8_score = s2o8_shape * s2o8_mag
+        irr_score = irr_shape * irr_mag
+        ph_score = ph_shape * ph_mag
 
         overall_score = (
             0.3 * ru_score + 0.25 * s2o8_score + 0.25 * irr_score + 0.2 * ph_score
+        )
+
+        maes = {p: _calculate_mae(trends[p], trends_original[p]) for p in trends}
+        mae_report = "\n".join(
+            [
+                f"  - {p} MAE: {val:.4f} µM/s"
+                if val is not None
+                else f"  - {p} MAE: N/A"
+                for p, val in maes.items()
+            ]
         )
 
         # Update results file
@@ -1449,12 +1560,27 @@ def evaluate_phenomenological_trends(
             "pH_score": ph_score,
             "overall_score": overall_score,
             "global_params": global_params,
+            "components": {
+                "ru_shape": ru_shape,
+                "ru_mag": ru_mag,
+                "s2o8_shape": s2o8_shape,
+                "s2o8_mag": s2o8_mag,
+            },
         }
 
         if overall_score > all_results.get("best_phenomenological_score", 0.0):
             all_results["best_phenomenological_score"] = overall_score
 
-        with open(results_path, "w") as f:
+        # with open(results_path, "w") as f:
+        #     json.dump(all_results, f, indent=2)
+
+        import time as timer
+
+        with open(
+            f"{_get_persistent_output_dir().as_posix()}/phenomenologic_result.json."
+            + str(int(timer.time())),
+            "w",
+        ) as f:
             json.dump(all_results, f, indent=2)
 
         plot_info = _create_phenomenological_plots(trends, trends_original)
@@ -1462,8 +1588,11 @@ def evaluate_phenomenological_trends(
         return (
             f"Phenomenological trend scores (Global Model):\n"
             f"  Overall score: {overall_score:.3f}\n"
-            f"  Ru trend: {ru_score:.3f} | S2O8 trend: {s2o8_score:.3f}\n"
-            f"  Irr trend: {irr_score:.3f} | pH trend: {ph_score:.3f}\n"
+            f"  Ru trend: {ru_score:.3f} (Shape: {ru_shape:.2f}, Mag: {ru_mag:.2f})\n"
+            f"  S2O8 trend: {s2o8_score:.3f} (Shape: {s2o8_shape:.2f}, Mag: {s2o8_mag:.2f})\n"
+            f"  Irr trend: {irr_score:.3f} (Shape: {irr_shape:.2f}, Mag: {irr_mag:.2f})\n"
+            f"  pH trend: {ph_score:.3f} (Shape: {ph_shape:.2f}, Mag: {ph_mag:.2f})\n"
+            f"Mean Absolute Errors (MAE) in Max Rate:\n{mae_report}\n\n"
             f"  Global Params used: {global_params}\n"
             f"{plot_info}"
         )
@@ -1602,6 +1731,7 @@ def analyze_fit_with_vision(
         exp_name: Name of experiment to analyze
         model: Vision model to use
     """
+
     try:
         data = load_experimental_data(data_path)
         if exp_name not in data:
@@ -2049,13 +2179,13 @@ def setup_working_directory(work_dir: str, data_path: str) -> None:
         save_reaction_network(str(network_path), default_network)
 
     # Create empty results file if it doesn't exist
-    results_path = work_path / Path("fit_results.json" + f".{int(time.time())!s}")
-    if not results_path.exists():
-        with open(results_path, "w") as f:
-            json.dump({"experiments": {}, "best_phenomenological_score": 0.0}, f)
+    # results_path = work_path / Path("fit_results.json")
+    # if not results_path.exists():
+    #     with open(results_path, "w") as f:
+    #         json.dump({"experiments": {}, "best_phenomenological_score": 0.0}, f)
 
 
-def create_tools() -> Dict[str, Tool]:
+def create_tools() -> dict[str, Tool]:
     """Create and return all available tools."""
     return {
         "describe_experimental_data": describe_experimental_data,
@@ -2065,4 +2195,4 @@ def create_tools() -> Dict[str, Tool]:
         "evaluate_phenomenological_trends": evaluate_phenomenological_trends,
         "modify_reaction_network": modify_reaction_network,
         "analyze_fit_with_vision": analyze_fit_with_vision,
-    }
+    }  # type: ignore
