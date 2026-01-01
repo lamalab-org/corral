@@ -41,13 +41,6 @@ def _run_lammps(
     """
     Runs a LAMMPS simulation using a specified input file and writes the log output to a given log file.
 
-    Args:
-        input_file (str): Path to the LAMMPS input script file.
-        log_file (str): Path where the log file output will be stored.
-
-    Returns:
-        dict: A dictionary containing the log file content and input file content.
-
     Raises:
         ValueError: If the LAMMPS simulation fails.
     """
@@ -56,8 +49,10 @@ def _run_lammps(
 
     lmp_command = "/root/lammps/build/lmp"
     original_cwd = Path.cwd()
+
     if directory_path:
         os.chdir(directory_path)
+
     try:
         command = [
             "mpirun",
@@ -74,21 +69,34 @@ def _run_lammps(
             "-log",
             log_file,
         ]
-        subprocess.run(command, shell=False, check=True, capture_output=True, text=True)
-        # log_file = Path(log_file)
-        with Path(log_file).open("rb") as log_f:
-            log_content = log_f.read()
-        text = log_content.decode("utf-8", errors="ignore")
-        with Path(log_file).open("w", encoding="utf-8") as dst:
-            dst.write(text)
-    except subprocess.CalledProcessError:
-        import log_lammps_reader
 
+        # Don't force UTF-8 decoding of stdout/stderr
+        subprocess.run(command, shell=False, check=True, capture_output=True)
+
+        # Normalize log to UTF-8 on successful runs
+        with Path(log_file).open("rb") as f:
+            text = f.read().decode("utf-8", errors="ignore")
+        with Path(log_file).open("w", encoding="utf-8") as f:
+            f.write(text)
+
+    except subprocess.CalledProcessError:
+        # ---- FIX: normalize the log BEFORE using log_lammps_reader ----
+        try:
+            with Path(log_file).open("rb") as f:
+                text = f.read().decode("utf-8", errors="ignore")
+            with Path(log_file).open("w", encoding="utf-8") as f:
+                f.write(text)
+        except Exception:
+            # log may not exist if mpirun crashes early — ignore silently
+            pass
+
+        import log_lammps_reader
         error_log = log_lammps_reader.log_starts_with(log_file, "ERROR")
-        # Raise ValueError without chaining the original exception
+
         raise ValueError(f"LAMMPS simulation failed: {error_log}") from None
+
     finally:
-        os.chdir(original_cwd)  # Restore original directory
+        os.chdir(original_cwd)
 
 
 def ensure_directory_exists(file_path: str) -> None:
