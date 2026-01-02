@@ -209,7 +209,7 @@ class BaseAgent(ABC):
         verbose: bool = False,
         tool_verbosity: str = "brief",
         enable_surrender: bool = False,
-    ) -> tuple[str, dict[str, int]]:
+    ) -> tuple[str, list[dict[str, Any]], dict[str, int]]:
         """Run the agent to solve a task
 
         This method is a wrapper around run to provide a consistent interface
@@ -225,7 +225,10 @@ class BaseAgent(ABC):
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
 
         Returns:
-            str: The final answer from the agent
+            tuple[str, list[dict[str, Any]], dict[str, int]]: A tuple containing:
+                - The final answer from the agent
+                - The list of messages exchanged during the task
+                - A dictionary with total token usage information
         """
         self.reset_token_usage()
 
@@ -245,7 +248,7 @@ class BaseAgent(ABC):
             # Check if agent decided to surrender
             if final_answer == "GIVE UP":
                 logger.info(f"Agent surrender from task {task_id}")
-                return "GIVE UP", self.get_total_token_usage()
+                return "GIVE UP", self.messages, self.get_total_token_usage()
 
             if verbose:
                 # Check if agent has stored tools information
@@ -261,11 +264,15 @@ class BaseAgent(ABC):
 
             if "Error" in final_answer:
                 logger.error(f"Error in agent response: {final_answer}")
-                return final_answer, self.get_total_token_usage()
+                return final_answer, self.messages, self.get_total_token_usage()
 
         except Exception as e:
             logger.error(f"Error running agent: {e}")
-            return f"Error running agent: {e}", self.get_total_token_usage()
+            return (
+                f"Error running agent: {e}",
+                self.messages,
+                self.get_total_token_usage(),
+            )
 
         message = "The task is to:\n" + self.messages[0]["content"]
         if self.messages[0]["role"] == "system":
@@ -288,11 +295,11 @@ class BaseAgent(ABC):
                 **self.kwargs,
             )
 
-            return answer.content, self.get_total_token_usage()
+            return answer.content, self.messages, self.get_total_token_usage()
 
         except Exception as e:
             logger.error(f"Error extracting final answer: {e}")
-            return final_answer, self.get_total_token_usage()
+            return final_answer, self.messages, self.get_total_token_usage()
 
     def get_total_token_usage(self) -> dict[str, int]:
         """Calculate total token usage across all LLM calls

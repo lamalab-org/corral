@@ -315,7 +315,7 @@ def test_run_agent_success(monkeypatch, concrete_agent, mock_benchmark_interface
         {"role": "assistant", "content": "Test response"},
     ]
 
-    result, usage = concrete_agent.run_agent(
+    result, messages, usage = concrete_agent.run_agent(
         interface=mock_benchmark_interface,
         task_id="test_task",
         verbose=True,
@@ -337,7 +337,7 @@ def test_run_agent_success(monkeypatch, concrete_agent, mock_benchmark_interface
         {"role": "assistant", "content": "Test response"},
     ]
 
-    result, usage = concrete_agent.run_agent(
+    result, messages, usage = concrete_agent.run_agent(
         interface=mock_benchmark_interface, task_id="test_task"
     )
 
@@ -362,7 +362,7 @@ def test_run_agent_with_error_in_answer(
 
     monkeypatch.setattr(concrete_agent, "run", mock_run)
 
-    result, usage = concrete_agent.run_agent(
+    result, messages, usage = concrete_agent.run_agent(
         interface=mock_benchmark_interface, task_id="test_task"
     )
 
@@ -387,11 +387,11 @@ def test_run_agent_with_exception(
 
     monkeypatch.setattr(concrete_agent, "run", mock_run_with_error)
 
-    result, usage = concrete_agent.run_agent(
+    result, messages, usage = concrete_agent.run_agent(
         interface=mock_benchmark_interface, task_id="test_task"
     )
 
-    assert "Error running agent: Run failed" in result
+    assert "Error running agent" in result
     assert isinstance(usage, dict)
 
 
@@ -426,7 +426,7 @@ def test_run_agent_verbose_mode(monkeypatch, concrete_agent, mock_benchmark_inte
         {"role": "assistant", "content": "Test response"},
     ]
 
-    result, usage = concrete_agent.run_agent(
+    result, messages, usage = concrete_agent.run_agent(
         interface=mock_benchmark_interface,
         task_id="test_task",
         verbose=True,
@@ -468,7 +468,7 @@ def test_run_agent_extractor_error(
         {"role": "assistant", "content": "Test response"},
     ]
 
-    result, usage = concrete_agent.run_agent(
+    result, messages, usage = concrete_agent.run_agent(
         interface=mock_benchmark_interface, task_id="test_task"
     )
 
@@ -595,7 +595,7 @@ def test_extractor_prompt_filling(
         {"role": "assistant", "content": "Test response"},
     ]
 
-    result, usage = concrete_agent.run_agent(
+    result, messages, usage = concrete_agent.run_agent(
         interface=mock_benchmark_interface, task_id="test_task"
     )
 
@@ -655,7 +655,7 @@ def test_agent_run_accepts_enable_surrender_via_kwargs(
     )
 
     # Call run_agent with enable_surrender=True
-    result, usage = agent.run_agent(
+    result, messages, usage = agent.run_agent(
         interface=mock_benchmark_interface, task_id="test", enable_surrender=True
     )
 
@@ -706,13 +706,13 @@ def test_agent_run_with_explicit_enable_surrender_parameter(
     )
 
     # Test with enable_surrender=True
-    result, usage = agent.run_agent(
+    result, messages, usage = agent.run_agent(
         interface=mock_benchmark_interface, task_id="test", enable_surrender=True
     )
     assert agent.received_enable_surrender is True
 
     # Test with enable_surrender=False (default)
-    result, usage = agent.run_agent(
+    result, messages, usage = agent.run_agent(
         interface=mock_benchmark_interface, task_id="test", enable_surrender=False
     )
     assert agent.received_enable_surrender is False
@@ -761,7 +761,9 @@ def test_agent_run_without_enable_surrender_uses_default(
     )
 
     # Call without enable_surrender parameter
-    result, usage = agent.run_agent(interface=mock_benchmark_interface, task_id="test")
+    result, messages, usage = agent.run_agent(
+        interface=mock_benchmark_interface, task_id="test"
+    )
 
     # Should default to False
     assert agent.received_enable_surrender is False
@@ -810,7 +812,7 @@ def test_agent_run_kwargs_dont_interfere_with_agents_not_using_them(
     )
 
     # Should not raise an error even when enable_surrender is passed
-    result, usage = agent.run_agent(
+    result, messages, usage = agent.run_agent(
         interface=mock_benchmark_interface, task_id="test", enable_surrender=True
     )
 

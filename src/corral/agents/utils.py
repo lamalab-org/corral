@@ -106,6 +106,13 @@ def llm_call(
 
         message = response.choices[0].message
 
+        # If message content is None, try to get reasoning_content
+        if message.content is None:
+            reasoning_content = getattr(message, "reasoning_content", None)
+            if reasoning_content is not None:
+                # Ensure reasoning_content is a string
+                message.content = str(reasoning_content) if reasoning_content else None
+
         if return_usage:
             # Extract usage information from the response
             usage_info = {
@@ -139,8 +146,9 @@ def format_examples(examples: list[str] | None) -> str:
     if examples is None:
         return ""
     else:
-        example_prompt = f"To help you in understanding this task, the next {
-            len(examples)} examples are provided:\n\n"
+        example_prompt = f"""To help you in understanding this task, the next {
+            len(examples)
+        } examples are provided:\n\n"""
         return example_prompt + "\n\n".join(examples)
 
 
@@ -428,6 +436,11 @@ def get_context_window(model: str) -> int:
     Returns:
         int: The max input tokens for the model, or None if unknown.
     """
+    if (
+        model
+        == "openai/1 - GPT-OSS-120b - an open model released by OpenAI in August 2025"
+    ):
+        return 131072
     return litellm.model_cost.get(model, {}).get("max_input_tokens", None)
 
 

@@ -16,6 +16,9 @@ from corral.report import (
     TaskTrialResult,
     TaskTrialResults,
 )
+from corral.report.metrics import Metric, get_default_metrics
+from corral.report.metrics.base import TaskMetric
+from corral.report.metrics.registry import MetricRegistry
 from corral.router import CorralRouter
 
 
@@ -24,17 +27,59 @@ def create_session_id() -> str:
     return f"session_{datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
 
 
+def sanitize_model_name(model_name: str, max_length: int = 50) -> str:
+    """Sanitize model name for use in filenames.
+
+    Replaces invalid filesystem characters with underscores and limits length.
+
+    Args:
+        model_name: The raw model name to sanitize
+        max_length: Maximum length for the sanitized name (default: 50)
+
+    Returns:
+        Sanitized model name safe for use in filenames
+    """
+    # Replace invalid filesystem characters with underscores
+    invalid_chars = r"[/\\:*?\"<>|\s\-]+"
+    sanitized = re.sub(invalid_chars, "_", model_name)
+
+    # Remove leading/trailing underscores
+    sanitized = sanitized.strip("_")
+
+    # Limit length
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length].rstrip("_")
+
+    # Ensure we have a valid name
+    if not sanitized:
+        sanitized = "unknown_model"
+
+    return sanitized
+
+
 def validate_k_values(
     k_values: int | list[int] | None, trials_per_task: int
 ) -> list[int]:
-    """Validate and normalize k_values"""
+    """Validate and normalize k_values."""
     if k_values is None:
-        return list(range(1, trials_per_task + 1))
+        # Default to range 1 to min(5, trials_per_task)
+        max_k = min(5, trials_per_task)
+        return list(range(1, max_k + 1))
     elif isinstance(k_values, int):
-        return [k_values]
-    elif isinstance(k_values, list) and max(k_values) > trials_per_task:
-        raise ValueError("k value is greater than the number of trials")
-    return k_values
+        # Single int means max k, generate range 1 to k
+        if k_values > trials_per_task:
+            raise ValueError(
+                f"k value ({k_values}) is greater than the number of trials ({trials_per_task})"
+            )
+        return list(range(1, k_values + 1))
+    else:
+        # List of k values - validate all are within bounds
+        max_k = max(k_values)
+        if max_k > trials_per_task:
+            raise ValueError(
+                f"k value ({max_k}) is greater than the number of trials ({trials_per_task})"
+            )
+        return sorted(k_values)
 
 
 def initialize_task_results(task_ids: list[str]) -> dict[str, TaskTrialResults]:
@@ -71,6 +116,7 @@ def exception_trial_result(
     error_type: str,
     token_usage: dict[str, Any],
     surrendered: bool = False,
+    messages: list[dict[str, Any]] | None = None,
 ) -> TaskTrialResult:
     """Create a TaskTrialResult when there is an exception during trial execution. Benchmark continues.
 
@@ -82,6 +128,7 @@ def exception_trial_result(
         error_type: Type of error (e.g., "Surrender Error", "Submission Error", "Agent Error")
         token_usage: Token usage statistics
         surrendered: Whether this was a surrender operation
+        messages: Optional agent messages
 
     Returns:
         TaskTrialResult with score retrieved from state or 0.0 if unavailable
@@ -93,6 +140,7 @@ def exception_trial_result(
         score=score,
         state={"error": str(error), "attempt": trial_index + 1},
         tool_statistics={"error": str(error)},
+        messages=messages,
         duration=None,
         token_usage=token_usage,
         error_message=f"{error_type}: {error}",
@@ -110,12 +158,15 @@ def execute_single_trial(
     configure_timeout: float | None = None,
     enable_surrender: bool = False,
 ) -> TaskTrialResult:
-    """Execute a single trial - pure function"""
+    """Execute a single trial - pure function."""
+    trial_start_time = datetime.now(tz=timezone.utc)
+
     try:
         status = interface.configure_additional_apps(task_id, timeout=configure_timeout)
         logger.info(f"Task {task_id} additional apps/services configured: {status}")
 
-        answer, token_usage = agent.run_agent(
+        # Agent always returns (answer, messages, token_usage)
+        answer, messages, token_usage = agent.run_agent(
             interface,
             task_id,
             verbose=verbose,
@@ -128,9 +179,13 @@ def execute_single_trial(
             try:
                 result = interface.surrender_task(task_id)
                 result.token_usage = token_usage
+                result.messages = messages
+                trial_end_time = datetime.now(tz=timezone.utc)
+                result.duration = (trial_end_time - trial_start_time).total_seconds()
                 return result
             except Exception as surrender_error:
-                return exception_trial_result(
+                trial_end_time = datetime.now(tz=timezone.utc)
+                result = exception_trial_result(
                     task_id=task_id,
                     trial_index=trial_index,
                     interface=interface,
@@ -138,24 +193,35 @@ def execute_single_trial(
                     error_type="Surrender Error",
                     token_usage=token_usage,
                     surrendered=True,
+                    messages=messages,
                 )
+                result.duration = (trial_end_time - trial_start_time).total_seconds()
+                return result
 
         # Submit answer
         try:
             result = interface.submit_answer(task_id, answer)
             result.token_usage = token_usage
+            result.messages = messages
+            trial_end_time = datetime.now(tz=timezone.utc)
+            result.duration = (trial_end_time - trial_start_time).total_seconds()
             return result
         except Exception as submit_error:
-            return exception_trial_result(
+            trial_end_time = datetime.now(tz=timezone.utc)
+            result = exception_trial_result(
                 task_id=task_id,
                 trial_index=trial_index,
                 interface=interface,
                 error=submit_error,
                 error_type="Submission Error",
                 token_usage=token_usage,
+                messages=messages,
             )
+            result.duration = (trial_end_time - trial_start_time).total_seconds()
+            return result
     except Exception as agent_error:
-        return exception_trial_result(
+        trial_end_time = datetime.now(tz=timezone.utc)
+        result = exception_trial_result(
             task_id=task_id,
             trial_index=trial_index,
             interface=interface,
@@ -163,6 +229,8 @@ def execute_single_trial(
             error_type="Agent Error",
             token_usage=agent.get_total_token_usage(),
         )
+        result.duration = (trial_end_time - trial_start_time).total_seconds()
+        return result
 
 
 def run_independent_trials(
@@ -238,7 +306,7 @@ def create_wandb_config(agent: BaseAgent, session_id: str, **kwargs) -> dict[str
 
 
 class CorralRunner:
-    """Simplified benchmark runner with functional approach"""
+    """Simplified benchmark runner with functional approach."""
 
     def __init__(
         self,
@@ -248,6 +316,7 @@ class CorralRunner:
         checkpoint_name: str | None = None,
         logger: CorralWandbLogger | None = None,
         enable_surrender: bool = False,
+        metrics: list[Metric] | None = None,
     ):
         self.interface = interface
         self.agent = agent
@@ -259,6 +328,148 @@ class CorralRunner:
         self.logger = logger
         self.enable_surrender = enable_surrender
 
+        # Initialize metric registry
+        self._metric_registry = MetricRegistry()
+        self._default_k_values: list[int] = [5]  # Match BenchmarkResult default
+
+        # Register initial metrics
+        if metrics is not None:
+            for metric in metrics:
+                self._metric_registry.register(metric)
+        # If no metrics provided, registry stays empty until bench() is called
+        # This allows lazy initialization with proper k_values
+
+    @property
+    def metric_registry(self) -> MetricRegistry:
+        """Access the internal metric registry.
+
+        This allows advanced users to directly interact with the registry
+        for operations like parallel calculation.
+
+        Returns:
+            The MetricRegistry instance used by this runner.
+        """
+        return self._metric_registry
+
+    # Metric Introspection Methods
+    def list_metrics(self, k_values: list[int] | None = None) -> list[dict[str, str]]:
+        """List all metrics that will be used for benchmarking.
+
+        Args:
+            k_values: k values for pass@k metrics. Used only if no metrics
+                      have been explicitly configured. If None, uses [1].
+
+        Returns:
+            List of dicts with 'name', 'display_name', 'description', and 'type'
+        """
+        # If registry is empty and no explicit metrics, show defaults
+        if len(self._metric_registry.list_all()) == 0:
+            metrics = get_default_metrics(k_values or [1])
+        else:
+            metrics = self._metric_registry.list_all()
+
+        return [
+            {
+                "name": m.metadata.name,
+                "display_name": m.metadata.display_name,
+                "description": m.metadata.description,
+                "type": "task" if isinstance(m, TaskMetric) else "overall",
+            }
+            for m in metrics
+        ]
+
+    def print_metrics(self, k_values: list[int] | None = None) -> None:
+        """Print a formatted table of metrics that will be used.
+
+        Args:
+            k_values: k values for pass@k metrics. Used only if no metrics
+                      have been explicitly configured. If None, uses [1].
+        """
+        metrics = self.list_metrics(k_values)
+        logger.info(f"\n{'=' * 70}")
+        logger.info(f"Configured Metrics ({len(metrics)} total)")
+        logger.info(f"{'=' * 70}")
+        for m in sorted(metrics, key=lambda x: (x["type"], x["name"])):
+            logger.info(f"  [{m['type']:7}] {m['name']}: {m['description']}")
+        logger.info(f"{'=' * 70}\n")
+
+    # Metric Registration Methods
+    def register_metric(self, metric: Metric) -> None:
+        """Register a new metric.
+
+        If no metrics have been explicitly registered yet, this will first
+        populate the registry with default metrics before adding the new one.
+
+        Args:
+            metric: The metric instance to register.
+
+        Raises:
+            ValueError: If a metric with the same name already exists.
+        """
+        # Initialize with defaults if registry is empty
+        if len(self._metric_registry.list_all()) == 0:
+            for default_metric in get_default_metrics(self._default_k_values):
+                self._metric_registry.register(default_metric)
+
+        self._metric_registry.register(metric)
+
+    def unregister_metric(self, metric_name: str) -> Metric | None:
+        """Unregister a metric by name.
+
+        If no metrics have been explicitly registered yet, this will first
+        populate the registry with default metrics before removing.
+
+        Args:
+            metric_name: The name of the metric to remove.
+
+        Returns:
+            The removed metric instance, or None if not found.
+        """
+        # Initialize with defaults if registry is empty
+        if len(self._metric_registry.list_all()) == 0:
+            for default_metric in get_default_metrics(self._default_k_values):
+                self._metric_registry.register(default_metric)
+
+        try:
+            metric = self._metric_registry.get(metric_name)
+            self._metric_registry.unregister(metric_name)
+            return metric
+        except KeyError:
+            return None
+
+    def clear_metrics(self) -> None:
+        """Remove all registered metrics."""
+        # Create a fresh empty registry
+        self._metric_registry = MetricRegistry()
+
+    def reset_metrics(self, k_values: list[int] | None = None) -> None:
+        """Reset metrics to the default set.
+
+        Args:
+            k_values: k values for pass@k metrics. If None, uses [1].
+        """
+        k_vals = k_values or [1]
+        self._default_k_values = k_vals
+        self._metric_registry = MetricRegistry()
+        for metric in get_default_metrics(k_vals):
+            self._metric_registry.register(metric)
+
+    def _get_metrics_for_benchmark(self) -> list[Metric] | None:
+        """Get the metrics list for creating a BenchmarkResult.
+
+        If the registry is empty (no explicit configuration), returns None
+        to let BenchmarkResult use its default behavior with k_values.
+        Otherwise, returns the explicitly configured metrics.
+
+        Returns:
+            List of metrics if explicitly configured, or None for defaults.
+        """
+        registered = self._metric_registry.list_all()
+        if len(registered) == 0:
+            return None  # Let BenchmarkResult use defaults with k_values
+        return registered
+
+    # Run Benchmark Method
     def bench(
         self,
         task_ids: list[str] | None = None,
@@ -269,8 +480,24 @@ class CorralRunner:
         tool_verbosity: str | None = None,
         configure_timeout: float | None = None,
         hooks: AgentHooks | None = None,
+        run_name: str | None = None,
     ) -> BenchmarkResult:
-        """Run benchmark with functional approach"""
+        """Run benchmark with functional approach
+
+        Args:
+            task_ids: List of task IDs to benchmark. If None, uses all available tasks.
+            trials_per_task: Number of trials to run per task.
+            k_values: k values for pass@k metrics.
+            verbose: Whether to enable verbose logging.
+            session_id: Session identifier. Auto-generated if None.
+            tool_verbosity: Verbosity level for tools.
+            configure_timeout: Timeout for configuring additional apps.
+            run_name: Name for the benchmark run (used in report filename).
+                     If None, defaults to "unknown_env".
+
+        Returns:
+            BenchmarkResult containing all trial results and metrics.
+        """
 
         # Setup
         if tool_verbosity:
@@ -355,7 +582,9 @@ class CorralRunner:
                 task_results=task_results,
                 k=k_values,
                 verbosity=self.interface.current_verbosity,
+                verbose=verbose,
                 total_duration=total_duration,
+                metrics=self._get_metrics_for_benchmark(),
             )
 
             # Log final results
@@ -365,6 +594,9 @@ class CorralRunner:
             # Save final checkpoint with finished suffix and remove original
             self._save_finished_checkpoint(session_id, task_results)
             self._remove_original_checkpoint(session_id)
+
+            # Generate and save report
+            self._save_benchmark_report(result, run_name, tool_verbosity)
 
             return result
 
@@ -582,3 +814,42 @@ class CorralRunner:
                 logger.info(f"Original checkpoint removed for session {session_id}")
         except Exception as e:
             logger.warning(f"Failed to remove original checkpoint: {e}")
+
+    def _save_benchmark_report(
+        self, result: BenchmarkResult, run_name: str | None, tool_verbosity: str | None
+    ) -> None:
+        """
+        Save benchmark report to a JSON file.
+
+        If no run name is provided, generates a filename in the format:
+        {model}-{agent}-{env}-{verbosity}-{timestamp}.json
+
+        Args:
+            result: The BenchmarkResult to save
+            run_name: Name for the benchmark run. If None, uses "unknown_env"
+            tool_verbosity: The verbosity level used (or None)
+        """
+        if run_name is not None:
+            filename = run_name if run_name.endswith(".json") else f"{run_name}.json"
+        else:
+            # Extract components for filename
+            model_name = getattr(self.agent, "model", "unknown_model")
+            # Sanitize model name for filesystem safety
+            model_name = sanitize_model_name(model_name)
+
+            agent_name = self.agent.__class__.__name__
+
+            verbosity_str = tool_verbosity if tool_verbosity else "None"
+
+            # Add timestamp
+            timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+            # Construct filename
+            filename = f"{model_name}-{agent_name}-{verbosity_str}-{timestamp}.json"
+
+        # Save the report
+        try:
+            result.generate_report(filename)
+            logger.info(f"Benchmark report saved to: {filename}")
+        except Exception as e:
+            logger.error(f"Failed to save benchmark report: {e}")
