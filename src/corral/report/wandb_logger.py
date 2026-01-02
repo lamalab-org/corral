@@ -4,6 +4,7 @@ from typing import Any
 import wandb
 from loguru import logger
 
+from corral.report.metrics.base import Metric, TaskMetric
 from corral.report.results import (
     BenchmarkResult,
     TaskTrialResult,
@@ -184,15 +185,23 @@ class CorralWandbLogger:
         # Iterate through calculated metrics and categorize them
         for metric_name, metric_value in calculated_metrics.items():
             try:
-                # Check if this is a task-level metric (returns dict with task_ids as keys)
-                if isinstance(metric_value, dict) and any(
-                    task_id in metric_value for task_id in result.all_task_ids
-                ):
+                # Get the metric instance from the registry to check its type
+                metric_instance = result.metric_registry.get(metric_name)
+
+                # Verify metric inherits from base Metric class
+                if not isinstance(metric_instance, Metric):
+                    raise TypeError(
+                        f"Metric '{metric_name}' must inherit from Metric base class, "
+                        f"got {type(metric_instance).__name__}"
+                    )
+
+                # Check if this is a task-level metric by type
+                if isinstance(metric_instance, TaskMetric):
                     # This is a task-level breakdown metric
                     # Store it for task-level logging
                     task_level_metrics[metric_name] = metric_value
                 else:
-                    # This is an overall metric
+                    # This is an overall metric (Metric but not TaskMetric)
                     # Use metric name (not display name) for WandB consistency
                     overall_metrics[f"overall/{metric_name}"] = metric_value
 

@@ -305,80 +305,12 @@ class TotalToolCallsMetric(Metric):
         return total_calls
 
 
-class PassAtKMetric(Metric):
-    """Pass@K metric - probability at least one of K trials succeeds.
+class TaskPassAtKMetric(TaskMetric):
+    """Pass@K metric calculated per task.
 
     pass@k is defined as: P(pass@k) = 1 - (1 - p)^k
     where p is the probability of a single trial succeeding.
     """
-
-    def __init__(self, k: int):
-        """Initialize with k value.
-
-        Args:
-            k: The number of trials to consider
-        """
-        self.k = k
-
-    @property
-    def metadata(self) -> MetricMetadata:
-        return MetricMetadata(
-            name=f"pass_at_{self.k}",
-            display_name=f"Pass@{self.k}",
-            description=f"Probability that at least 1 of {self.k} trials succeeds",
-        )
-
-    def calculate(self, context: MetricContext) -> float:
-        """Calculate overall pass@k across all tasks.
-
-        For each task, calculates pass@k, then averages across all tasks.
-        """
-        task_pass_at_k = []
-        for task_id in context.all_task_ids:
-            task_value = self._calculate_for_task(context, task_id)
-            task_pass_at_k.append(task_value)
-
-        return mean(task_pass_at_k) if task_pass_at_k else 0.0
-
-    def _calculate_for_task(self, context: MetricContext, task_id: str) -> float:
-        """Calculate pass@k for a specific task.
-
-        Estimation formula:
-        - If c (correct) == n (total), pass@k = 1.0
-        - Otherwise, pass@k = 1 - (1 - c/n)^k
-
-        Args:
-            context: The metric context
-            task_id: The task ID
-
-        Returns:
-            The pass@k score
-
-        Raises:
-            TaskNotFoundError: If the task ID is not found
-            InsufficientTrialsError: If there are fewer trials than k
-        """
-
-        task_trials = context.get_task_trials(task_id)
-        if not task_trials:
-            raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
-
-        trials = task_trials.trials
-
-        if len(trials) < self.k:
-            raise InsufficientTrialsError(
-                f"Number of trials ({len(trials)}) is less than k ({self.k}) for task ID '{task_id}'."
-            )
-
-        c = sum(1 if trial.success else 0 for trial in trials)
-        n = len(trials)
-
-        # Calculate pass@k
-        return 1.0 if c == n else 1.0 - (1.0 - c / n) ** self.k
-
-
-class TaskPassAtKMetric(TaskMetric):
-    """Pass@K metric calculated per task."""
 
     def __init__(self, k: int):
         """Initialize with k value.
@@ -402,8 +334,11 @@ class TaskPassAtKMetric(TaskMetric):
         Estimation formula:
         - If c (correct) == n (total), pass@k = 1.0
         - Otherwise, pass@k = 1 - (1 - c/n)^k
-        """
 
+        Raises:
+            TaskNotFoundError: If the task ID is not found
+            InsufficientTrialsError: If there are fewer trials than k
+        """
         task_trials = context.get_task_trials(task_id)
         if not task_trials:
             raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
@@ -418,15 +353,13 @@ class TaskPassAtKMetric(TaskMetric):
         c = sum(1 if trial.success else 0 for trial in trials)
         n = len(trials)
 
-        # Calculate pass@k
         return 1.0 if c == n else 1.0 - (1.0 - c / n) ** self.k
 
 
-class PassHatKMetric(Metric):
-    """Pass^K metric - probability all K trials succeed.
+class PassAtKMetric(Metric):
+    """Pass@K metric - probability at least one of K trials succeeds.
 
-    pass^k is defined as: P(pass^k) = p^k
-    where p is the probability of a single trial succeeding.
+    Aggregates TaskPassAtKMetric results across all tasks.
     """
 
     def __init__(self, k: int):
@@ -436,62 +369,31 @@ class PassHatKMetric(Metric):
             k: The number of trials to consider
         """
         self.k = k
+        self._task_metric = TaskPassAtKMetric(k)
 
     @property
     def metadata(self) -> MetricMetadata:
         return MetricMetadata(
-            name=f"pass_hat_{self.k}",
-            display_name=f"Pass^{self.k}",
-            description=f"Probability that all {self.k} trials succeed",
+            name=f"pass_at_{self.k}",
+            display_name=f"Pass@{self.k}",
+            description=f"Probability that at least 1 of {self.k} trials succeeds",
         )
 
     def calculate(self, context: MetricContext) -> float:
-        """Calculate overall pass^k across all tasks.
+        """Calculate overall pass@k across all tasks.
 
-        For each task, calculates pass^k, then averages across all tasks.
+        For each task, calculates pass@k, then averages across all tasks.
         """
-        task_pass_hat_k = []
-        for task_id in context.all_task_ids:
-            task_value = self._calculate_for_task(context, task_id)
-            task_pass_hat_k.append(task_value)
-
-        return mean(task_pass_hat_k) if task_pass_hat_k else 0.0
-
-    def _calculate_for_task(self, context: MetricContext, task_id: str) -> float:
-        """Calculate pass^k for a specific task.
-
-        Estimation formula: pass^k = (c/n)^k
-        where c is the number of correct/successful trials and n is total trials.
-
-        Args:
-            context: The metric context
-            task_id: The task ID
-
-        Returns:
-            The pass^k score
-
-        Raises:
-            TaskNotFoundError: If the task ID is not found
-            NoResultsError: If there are no trials for the task
-        """
-
-        task_trials = context.get_task_trials(task_id)
-        if not task_trials:
-            raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
-
-        trials = task_trials.trials
-        if not trials:
-            raise NoResultsError(f"No trials available for task ID '{task_id}'.")
-
-        c = sum(1 if trial.success else 0 for trial in trials)
-        n = len(trials)
-
-        # Calculate pass^k
-        return (c / n) ** self.k
+        task_results = self._task_metric.calculate(context)
+        return mean(task_results.values()) if task_results else 0.0
 
 
 class TaskPassHatKMetric(TaskMetric):
-    """Pass^K metric calculated per task."""
+    """Pass^K metric calculated per task.
+
+    pass^k is defined as: P(pass^k) = p^k
+    where p is the probability of a single trial succeeding.
+    """
 
     def __init__(self, k: int):
         """Initialize with k value.
@@ -514,8 +416,11 @@ class TaskPassHatKMetric(TaskMetric):
 
         Estimation formula: pass^k = (c/n)^k
         where c is the number of correct/successful trials and n is total trials.
-        """
 
+        Raises:
+            TaskNotFoundError: If the task ID is not found
+            NoResultsError: If there are no trials for the task
+        """
         task_trials = context.get_task_trials(task_id)
         if not task_trials:
             raise TaskNotFoundError(f"Task ID '{task_id}' not found.")
@@ -527,8 +432,39 @@ class TaskPassHatKMetric(TaskMetric):
         c = sum(1 if trial.success else 0 for trial in trials)
         n = len(trials)
 
-        # Calculate pass^k
         return (c / n) ** self.k
+
+
+class PassHatKMetric(Metric):
+    """Pass^K metric - probability all K trials succeed.
+
+    Aggregates TaskPassHatKMetric results across all tasks.
+    """
+
+    def __init__(self, k: int):
+        """Initialize with k value.
+
+        Args:
+            k: The number of trials to consider
+        """
+        self.k = k
+        self._task_metric = TaskPassHatKMetric(k)
+
+    @property
+    def metadata(self) -> MetricMetadata:
+        return MetricMetadata(
+            name=f"pass_hat_{self.k}",
+            display_name=f"Pass^{self.k}",
+            description=f"Probability that all {self.k} trials succeed",
+        )
+
+    def calculate(self, context: MetricContext) -> float:
+        """Calculate overall pass^k across all tasks.
+
+        For each task, calculates pass^k, then averages across all tasks.
+        """
+        task_results = self._task_metric.calculate(context)
+        return mean(task_results.values()) if task_results else 0.0
 
 
 class TaskSuccessRateMetric(TaskMetric):

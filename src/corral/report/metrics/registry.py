@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -7,6 +7,25 @@ from .base import Metric
 
 if TYPE_CHECKING:
     from corral.report.results import BenchmarkResult
+
+
+def _calculate_single_metric(args: tuple) -> tuple[str, Any]:
+    """Helper function to calculate a single metric (module-level for pickling).
+
+    Args:
+        args: Tuple of (metric, benchmark_result)
+
+    Returns:
+        Tuple of (metric_name, calculated_value or None if error)
+    """
+    metric, benchmark_result = args
+    name = metric.metadata.name
+    try:
+        value = metric.calculate(benchmark_result)
+        return (name, value)
+    except Exception as e:
+        logger.error(f"Error calculating metric '{name}': {e}")
+        return (name, None)
 
 
 class MetricRegistry:
@@ -119,10 +138,10 @@ class MetricRegistry:
             benchmark_result: The benchmark result to calculate metrics from
             enabled_only: Optional list of metric names to calculate.
                          If None, all metrics are calculated.
-            parallel: If True, calculate metrics in parallel using ThreadPoolExecutor.
+            parallel: If True, calculate metrics in parallel using ProcessPoolExecutor.
                      Default is False for backward compatibility.
-            max_workers: Maximum number of threads for parallel execution.
-                        If None, defaults to min(32, (cpu_count or 1) + 4).
+            max_workers: Maximum number of processes for parallel execution.
+                        If None, defaults to the number of CPUs on the machine.
                         Only used when parallel=True.
 
         Returns:
@@ -172,35 +191,31 @@ class MetricRegistry:
         metrics: list[Metric],
         max_workers: int | None = None,
     ) -> dict[str, Any]:
-        """Calculate metrics in parallel using ThreadPoolExecutor.
+        """Calculate metrics in parallel using ProcessPoolExecutor.
 
         This method is useful when calculating many independent metrics,
-        as it can significantly reduce total computation time.
+        as it can significantly reduce total computation time by utilizing
+        multiple CPU cores.
 
         Args:
             benchmark_result: The benchmark result to calculate metrics from
             metrics: List of metric instances to calculate
-            max_workers: Maximum number of threads. If None, uses default.
+            max_workers: Maximum number of processes. If None, uses default
+                        (number of CPUs on the machine).
 
         Returns:
             Dictionary mapping metric names to their calculated values
         """
         results = {}
 
-        def calculate_metric(metric: Metric) -> tuple[str, Any]:
-            """Helper function to calculate a single metric."""
-            name = metric.metadata.name
-            try:
-                value = metric.calculate(benchmark_result)
-                return (name, value)
-            except Exception as e:
-                logger.error(f"Error calculating metric '{name}': {e}")
-                return (name, None)
+        # Prepare arguments for the module-level helper function
+        args_list = [(metric, benchmark_result) for metric in metrics]
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit all metric calculations
             future_to_metric = {
-                executor.submit(calculate_metric, metric): metric for metric in metrics
+                executor.submit(_calculate_single_metric, args): args[0]
+                for args in args_list
             }
 
             # Collect results as they complete
