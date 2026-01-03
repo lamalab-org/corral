@@ -84,6 +84,7 @@ DEFAULTS = {
     "output_dir": None,  # Defaults to ./corral-results in cwd
     "detach": False,
     "verbose": True,
+    "metrics_file": None,  # Custom metrics file path
 }
 
 
@@ -184,6 +185,13 @@ def run_benchmark(
         help="JSON string or @file.yaml with environment-specific arguments. "
         "These are passed to the environment container and converted to CLI args.",
     ),
+    metrics_file: str | None = typer.Option(
+        None,
+        "--metrics-file",
+        help="Path to Python file containing custom metrics. "
+        "The file should export a METRICS list with Metric instances. "
+        "If not provided, default metrics will be used.",
+    ),
 ):
     """Run agent benchmarks against a Corral environment."""
     # This must be imported here to avoid circular imports
@@ -206,6 +214,7 @@ def run_benchmark(
         "output_dir": output_dir,
         "detach": detach,
         "verbose": verbose,
+        "metrics_file": metrics_file,
     }
 
     # Merge with precedence: CLI > Config > Defaults
@@ -247,6 +256,7 @@ def run_benchmark(
             runner_kwargs=extra_runner_kwargs,
             agent_image=settings["agent_image"],
             env_args=extra_env_args if extra_env_args else None,
+            metrics_file=settings.get("metrics_file"),
         )
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")

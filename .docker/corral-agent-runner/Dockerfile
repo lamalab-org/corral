@@ -37,6 +37,8 @@ RUN cat <<'EOF' > /opt/corral-workspace/run_agent.py
 
 This script mirrors the flow in `reports/afm/run_ReActAgent _claude.py` but allows
 configuration of model, agent, temperature, k values, base url and more.
+
+Supports custom metrics via --metrics-file argument or METRICS_FILE environment variable.
 """
 import os
 import argparse
@@ -53,9 +55,12 @@ from pathlib import Path
 
 from corral import CorralRouter, CorralRunner
 from corral.report import CorralWandbLogger
+from corral.report.metrics import get_default_metrics, load_metrics_from_file
 
 # Results directory - can be overridden via environment variable
 RESULTS_DIR = os.getenv("RESULTS_DIR", "/opt/corral-workspace/results")
+# Default path for mounted metrics file
+METRICS_MOUNT_PATH = "/opt/corral-workspace/custom_metrics.py"
 
 
 def check_volume_mounted():
@@ -126,6 +131,39 @@ def parse_json_or_file(value: str | None) -> dict | None:
         raise ValueError(f"Failed to parse JSON or file for agent params: {exc}") from exc
 
 
+def load_custom_metrics(metrics_file: str | None, k_values: list) -> list | None:
+    """Load custom metrics from file or return None for defaults.
+
+    Args:
+        metrics_file: Path to custom metrics Python file, or None.
+        k_values: k values for default pass@k metrics.
+
+    Returns:
+        List of Metric instances, or None to use defaults.
+    """
+    if not metrics_file:
+        logger.info("No custom metrics file specified, using default metrics")
+        return None
+
+    metrics_path = Path(metrics_file)
+    if not metrics_path.exists():
+        logger.warning(f"Metrics file not found: {metrics_file}, using default metrics")
+        return None
+
+    try:
+        custom_metrics = load_metrics_from_file(metrics_path)
+        logger.info(f"Loaded {len(custom_metrics)} custom metrics from {metrics_file}")
+
+        # Optionally combine with defaults if user wants
+        # For now, custom metrics replace defaults entirely
+        # Users can include get_default_metrics() in their file if they want both
+        return custom_metrics
+    except Exception as e:
+        logger.error(f"Failed to load custom metrics from {metrics_file}: {e}")
+        logger.warning("Falling back to default metrics")
+        return None
+
+
 def run_benchmark(
     model: str,
     base_url: str,
@@ -149,6 +187,7 @@ def run_benchmark(
     task_ids: list | None = None,
     verbose: bool = False,
     tool_verbosity: str = "brief",
+    metrics_file: str | None = None,
 ):
     # Ensure results directory exists
     Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
@@ -156,6 +195,9 @@ def run_benchmark(
     # Use RESULTS_DIR for checkpoints if not specified
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(RESULTS_DIR, "benchmark_checkpoints")
+
+    # Load custom metrics if specified
+    metrics = load_custom_metrics(metrics_file, k_values)
 
     interface = CorralRouter(base_url, default_verbosity=default_verbosity)
     # configure wandb logger if api key is present, otherwise fallback to simple logger
@@ -189,7 +231,11 @@ def run_benchmark(
         checkpoint_name=checkpoint_name,
         logger=wandb_logger,
         enable_surrender=enable_surrender,
+        metrics=metrics,
     )
+
+    # Show configured metrics
+    runner.print_metrics(k_values)
 
     logger.info(f"Starting benchmark with model: {model}, base_url: {base_url}")
     result = runner.bench(
@@ -239,6 +285,9 @@ def main():
     parser.add_argument("--session-id", default=os.getenv("SESSION_ID", None))
     parser.add_argument("--configure-timeout", type=float, default=float(os.getenv("CONFIGURE_TIMEOUT", "60.0")) if os.getenv("CONFIGURE_TIMEOUT") else None)
     parser.add_argument("--enable-surrender", type=lambda x: x.lower() == "true", default=os.getenv("ENABLE_SURRENDER", "false"))
+    # Custom metrics
+    parser.add_argument("--metrics-file", default=os.getenv("METRICS_FILE", None),
+                        help="Path to Python file containing custom metrics (must export METRICS list)")
     # WandB logger params
     parser.add_argument("--wandb-project", default=os.getenv("WANDB_PROJECT", "corral"))
     parser.add_argument("--wandb-entity", default=os.getenv("WANDB_ENTITY", None))
@@ -289,6 +338,7 @@ def main():
         task_ids=task_ids,
         verbose=args.verbose,
         tool_verbosity=args.tool_verbosity,
+        metrics_file=args.metrics_file,
     )
 
 

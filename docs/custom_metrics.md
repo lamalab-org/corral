@@ -732,3 +732,176 @@ result2 = BenchmarkResult(task_results=results_run_2, metric_registry=shared_reg
 result1.print_metrics()
 result2.print_metrics()
 ```
+
+## Using Custom Metrics with CLI and Docker
+
+Custom metrics can be used with the Corral CLI and Docker runner by providing a metrics file.
+
+### Creating a Metrics File
+
+Create a Python file that exports a `METRICS` list containing your metric instances:
+
+```python
+# my_metrics.py
+from corral.report.metrics import (
+    Metric,
+    MetricMetadata,
+    TaskMetric,
+    get_default_metrics,
+)
+
+
+class MyCustomMetric(Metric):
+    """A custom metric example."""
+
+    @property
+    def metadata(self):
+        return MetricMetadata(
+            name="my_custom_metric",
+            display_name="My Custom Metric",
+            description="A custom metric that counts trials",
+        )
+
+    def calculate(self, context):
+        total = 0
+        for task_id in context.all_task_ids:
+            task_trials = context.get_task_trials(task_id)
+            if task_trials:
+                total += len(task_trials.trials)
+        return total
+
+
+# METRICS list is required - this is what gets loaded
+METRICS = get_default_metrics(k_values=[1, 3]) + [MyCustomMetric()]
+```
+
+### Using with the CLI
+
+Use the `--metrics-file` option to load custom metrics:
+
+```bash
+# Run benchmark with custom metrics
+corral bench run \
+    --image ghcr.io/lamalab-org/corral-materials:latest \
+    --metrics-file ./my_metrics.py \
+    --trials 5
+
+# Or use a config file
+corral bench run --config benchmark_config.yaml
+```
+
+In your config file, add:
+
+```yaml
+# benchmark_config.yaml
+image: ghcr.io/lamalab-org/corral-materials:latest
+agent: ReActAgent
+model: claude-sonnet-4-5-20250929
+trials: 5
+metrics_file: ./my_metrics.py  # Path to custom metrics
+```
+
+### How It Works with Docker
+
+When you specify `--metrics-file`, Corral:
+
+1. **Validates** the metrics file exists and is a valid Python file
+2. **Mounts** the file into the Docker container at `/opt/corral-workspace/custom_metrics.py`
+3. **Sets** the `METRICS_FILE` environment variable in the container
+4. **Loads** the metrics dynamically using `load_metrics_from_file()`
+
+This means:
+
+- Your custom metrics file must be self-contained or only import from `corral`
+- The file is mounted read-only for security
+- If the file is invalid, the benchmark falls back to default metrics
+
+### Loading Metrics Programmatically
+
+You can also use the metrics loader directly in your code:
+
+```python
+from corral.report.metrics import load_metrics_from_file, validate_metrics_file
+
+# Validate a metrics file before using it
+result = validate_metrics_file("./my_metrics.py")
+if result["valid"]:
+    print(f"Found {result['metrics_count']} metrics: {result['metric_names']}")
+else:
+    print(f"Errors: {result['errors']}")
+
+# Load metrics from file
+metrics = load_metrics_from_file("./my_metrics.py")
+
+# Use with CorralRunner
+from corral import CorralRunner
+
+runner = CorralRunner(interface, agent, metrics=metrics)
+result = runner.bench(trials_per_task=5)
+```
+
+### Example: Minimal Custom Metrics File
+
+```python
+# minimal_metrics.py
+from corral.report.metrics import Metric, MetricMetadata
+
+
+class TrialCountMetric(Metric):
+    @property
+    def metadata(self):
+        return MetricMetadata(
+            name="trial_count",
+            display_name="Trial Count",
+            description="Total number of trials",
+        )
+
+    def calculate(self, context):
+        return sum(
+            len(context.get_task_trials(tid).trials or [])
+            for tid in context.all_task_ids
+            if context.get_task_trials(tid)
+        )
+
+
+# Export the metrics list
+METRICS = [TrialCountMetric()]
+```
+
+### Example: Combining Defaults with Custom
+
+```python
+# combined_metrics.py
+from corral.report.metrics import (
+    get_default_metrics,
+    Metric,
+    MetricMetadata,
+)
+
+
+class PerfectScoreRate(Metric):
+    @property
+    def metadata(self):
+        return MetricMetadata(
+            name="perfect_score_rate",
+            display_name="Perfect Score Rate",
+            description="Percentage of trials with score >= 1.0",
+        )
+
+    def calculate(self, context):
+        total, perfect = 0, 0
+        for task_id in context.all_task_ids:
+            trials = context.get_task_trials(task_id)
+            if trials:
+                for t in trials.trials:
+                    total += 1
+                    if t.score >= 1.0:
+                        perfect += 1
+        return (perfect / total * 100) if total > 0 else 0.0
+
+
+# Get all defaults for k=1,3,5 and add custom metric
+METRICS = get_default_metrics(k_values=[1, 3, 5]) + [PerfectScoreRate()]
+```
+
+See [`examples/custom_metrics.py`](../examples/custom_metrics.py) for a complete example with multiple metric types.

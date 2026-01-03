@@ -79,6 +79,7 @@ class DockerBenchmarkRunner:
         runner_kwargs: dict[str, Any] | None = None,
         agent_image: str | None = None,
         env_args: dict[str, Any] | None = None,
+        metrics_file: str | None = None,
     ):
         """Run benchmark with two-container architecture.
 
@@ -101,6 +102,8 @@ class DockerBenchmarkRunner:
                         Use 'local' to use a locally built image named 'corral-agent-runner:latest'.
             env_args: Environment-specific arguments passed as JSON to the container.
                      These are converted to CLI arguments by the entrypoint script.
+            metrics_file: Path to Python file containing custom metrics.
+                         Will be mounted into the container.
         """
         # Resolve output directory (default to cwd)
         results_host_path = Path(output_dir or Path.cwd()) / "corral-results"
@@ -155,6 +158,7 @@ class DockerBenchmarkRunner:
                 runner_kwargs=runner_kwargs,
                 agent_image=resolved_agent_image,
                 results_host_path=results_host_path,
+                metrics_file=metrics_file,
             )
             progress.update(task, description="[green]✓[/green] Agent started")
 
@@ -285,12 +289,14 @@ class DockerBenchmarkRunner:
         runner_kwargs: dict[str, Any] | None = None,
         agent_image: str = DEFAULT_AGENT_IMAGE,
         results_host_path: Path | None = None,
+        metrics_file: str | None = None,
     ) -> Container:
         """Start the agent runner container.
 
         Args:
             agent_image: Docker image to use for the agent runner.
             results_host_path: Host path to mount for results persistence.
+            metrics_file: Path to Python file containing custom metrics.
         """
         # Stop existing container if running
         try:
@@ -332,6 +338,19 @@ class DockerBenchmarkRunner:
                 "bind": self.DEFAULT_RESULTS_DIR,
                 "mode": "rw",
             }
+
+        # Mount custom metrics file if provided
+        container_metrics_path = "/opt/corral-workspace/custom_metrics.py"
+        if metrics_file:
+            metrics_path = Path(metrics_file).resolve()
+            if not metrics_path.exists():
+                raise FileNotFoundError(f"Metrics file not found: {metrics_file}")
+            volumes[str(metrics_path)] = {
+                "bind": container_metrics_path,
+                "mode": "ro",
+            }
+            env["METRICS_FILE"] = container_metrics_path
+            console.print(f"[cyan]Custom metrics file:[/cyan] {metrics_path}")
 
         return self.client.containers.run(
             agent_image,

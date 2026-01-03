@@ -25,6 +25,13 @@ from corral.report.metrics.core import (
     TotalToolCallsMetric,
     TotalToolExecutionDurationMetric,
 )
+
+# Import loader utilities for dynamic metrics loading
+from corral.report.metrics.loader import (
+    load_metrics_from_file,
+    load_metrics_from_module,
+    validate_metrics_file,
+)
 from corral.report.metrics.registry import MetricRegistry, get_metrics_registry
 
 
