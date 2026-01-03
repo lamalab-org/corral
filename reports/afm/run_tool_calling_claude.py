@@ -14,10 +14,10 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "claude-3-5-sonnet-20241022",
+    model: str = "claude-sonnet-4-5-20250929",
     task_ids: list | None = None,
     temperature: float = 0.0,
-    run_name: str = "corral_benchmark_run_ml_toolcalling",
+    run_name: str = "corral_benchmark_run_afm_toolcalling",
     verbose: str = "brief",
 ):
     """Run the benchmark with specified model and tasks"""
@@ -28,7 +28,7 @@ def run_benchmark(
         group="tool_description_ablation",
         name=run_name,
     )
-    agent = ToolCallingAgent(model=model, max_iterations=20, temperature=temperature)
+    agent = ToolCallingAgent(model=model, max_iterations=10, temperature=temperature)
     runner = CorralRunner(interface, agent, logger=wandblogger)
 
     # Run benchmark
@@ -49,16 +49,16 @@ if __name__ == "__main__":
     setup_litellm()
 
     verboses = [
-        # "brief",
-        # "workflow",
+        "brief",
+        "workflow",
         "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
-            model = "claude-3-5-sonnet-20241022"
-            run_name = f"claude-3-5-sonnet-20241022_Tool_calling-test_afm-{verbose}_verbosity"
-            run_benchmark(model=model, run_name=run_name, verbose=verbose)
+            model = "claude-sonnet-4-5-20250929"
+            run_name = f"claude-sonnet-4-5-Tool_calling-subtasks_2-{verbose}_verbosity"
+            run_benchmark(model=model, run_name=run_name, verbose=verbose, temperature=0)
 
         except Exception as e:
             logger.error(f"Benchmark failed: {e!s}")

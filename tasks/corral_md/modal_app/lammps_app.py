@@ -8,7 +8,7 @@ from pathlib import Path
 
 import fsspec
 import modal
-from envs_tools.lammps import _run_lammps, lammps_image
+from envs_tools.lammps import lammps_image
 from loguru import logger
 from modal import App
 
@@ -23,7 +23,7 @@ volume_sim = modal.Volume.from_name("simulations", create_if_missing=True)
 volume_struct = modal.Volume.from_name("structures", create_if_missing=True)
 volume_test_files = modal.Volume.from_name("test_files", create_if_missing=True)
 
-CPUS = 1
+CPUS = 2
 
 # with volume_potential.batch_upload() as batch:
 #     batch.put_directory("./potentials/", "/")
@@ -33,6 +33,62 @@ CPUS = 1
 
 # with volume_test_files.batch_upload() as batch:
 #     batch.put_directory("./test_files/", "/")
+
+
+def _run_lammps(
+    input_file: str, log_file: str, directory_path: str | None = None, CPUS: int = 1
+) -> None:
+    """
+    Runs a LAMMPS simulation using a specified input file and writes the log output to a given log file.
+
+    Args:
+        input_file (str): Path to the LAMMPS input script file.
+        log_file (str): Path where the log file output will be stored.
+
+    Returns:
+        dict: A dictionary containing the log file content and input file content.
+
+    Raises:
+        ValueError: If the LAMMPS simulation fails.
+    """
+    import os
+    import subprocess
+
+    lmp_command = "/root/lammps/build/lmp"
+    original_cwd = Path.cwd()
+    if directory_path:
+        os.chdir(directory_path)
+    try:
+        command = [
+            "mpirun",
+            "--allow-run-as-root",
+            "--bind-to",
+            "core",
+            "--map-by",
+            "core",
+            "-np",
+            str(CPUS),
+            lmp_command,
+            "-in",
+            input_file,
+            "-log",
+            log_file,
+        ]
+        subprocess.run(command, shell=False, check=True, capture_output=True, text=True)
+        # log_file = Path(log_file)
+        with Path(log_file).open("rb") as log_f:
+            log_content = log_f.read()
+        text = log_content.decode("utf-8", errors="ignore")
+        with Path(log_file).open("w", encoding="utf-8") as dst:
+            dst.write(text)
+    except subprocess.CalledProcessError:
+        import log_lammps_reader
+
+        error_log = log_lammps_reader.log_starts_with(log_file, "ERROR")
+        # Raise ValueError without chaining the original exception
+        raise ValueError(f"LAMMPS simulation failed: {error_log}") from None
+    finally:
+        os.chdir(original_cwd)  # Restore original directory
 
 
 def ensure_directory_exists(file_path: str) -> None:
@@ -212,12 +268,77 @@ def parse_execution_output(stdout: str) -> tuple[dict, list[str]]:
 
 @app.function(
     image=lammps_image,
-    cpu=CPUS,
+    cpu=1,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
+        "/test_files": volume_test_files,
+    },
+)
+def get_nth_run_log(
+    path: str, n: int = 0, save: str | None = None, index: int | None = None
+) -> str:
+    import log_lammps_reader
+
+    volume_sim.reload()
+    try:
+        final_string = ""
+        log_data = log_lammps_reader.parse(path, n)
+        final_string += f"{log_data.head()}\n"
+        if save:
+            log_data.write_csv(save)
+            final_string += f"Thermo data for run {n} saved to {save}.\n"
+        if index is not None:
+            if 0 <= index < log_data.height:
+                row = log_data.row(index)
+                final_string += f"Data at index {index}: {row}\n"
+            else:
+                final_string += f"Index {index} is out of bounds for data with {log_data.height} rows.\n"
+        return final_string
+    except Exception as e:
+        return f"Failed to parse thermo data for run {n}: {e}"
+    finally:
+        volume_sim.commit()
+
+
+@app.function(
+    image=lammps_image,
+    cpu=1,
+    memory=5120,
+    volumes={
+        "/potentials": volume_potential.read_only(),
+        "/results": volume_sim,
+        "/structures": volume_struct.read_only(),
+        "/test_files": volume_test_files,
+    },
+)
+def keyword_log_extractor(path: str, keyword: str) -> dict:
+    import log_lammps_reader
+
+    result = {}
+    volume_sim.reload()
+    try:
+        fixes = log_lammps_reader.log_starts_with(path, keyword)
+        if not fixes:
+            raise ValueError(f"Keyword '{keyword}' not found in log.")
+        result[keyword] = fixes
+        return result
+    except Exception as e:
+        return {"error": f"Error processing keyword '{keyword}': {e}"}
+    finally:
+        volume_sim.commit()
+
+
+@app.function(
+    image=lammps_image,
+    cpu=1,
+    memory=5120,
+    volumes={
+        "/potentials": volume_potential.read_only(),
+        "/results": volume_sim,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -276,12 +397,12 @@ def execute_python_script(
 
 @app.function(
     image=lammps_image,
-    cpu=CPUS,
+    cpu=1,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -399,9 +520,9 @@ def execute_python_code(
     timeout=3600,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -434,9 +555,9 @@ def run_lammps(input_file: str, log_file: str) -> None:
     cpu=1.0,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -503,9 +624,9 @@ def convert_structure_to_lammps_data(
     cpu=1.0,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -549,9 +670,9 @@ def run_bash_command(
     cpu=1.0,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -570,9 +691,9 @@ def list_files(path: str, recursive: bool = False) -> list[str]:
     cpu=1.0,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -592,9 +713,9 @@ def read_file(path: str) -> str:
     cpu=1.0,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -616,9 +737,9 @@ def read_large_file(path: str, start: int, length: int, encoding: str) -> str:
     cpu=1.0,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -638,9 +759,9 @@ def write_file(path: str, content: str) -> None:
     cpu=1.0,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -659,9 +780,9 @@ def file_info(path: str) -> dict:
     cpu=1.0,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -680,9 +801,9 @@ def copy_file(source: str, destination: str) -> None:
     cpu=1.0,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -703,9 +824,9 @@ def move_file(source: str, destination: str) -> None:
     cpu=1.0,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )
@@ -729,9 +850,9 @@ def mkdir(path: str, create_parents: bool = False) -> None:
     cpu=1.0,
     memory=5120,
     volumes={
-        "/potentials": volume_potential,
+        "/potentials": volume_potential.read_only(),
         "/results": volume_sim,
-        "/structures": volume_struct,
+        "/structures": volume_struct.read_only(),
         "/test_files": volume_test_files,
     },
 )

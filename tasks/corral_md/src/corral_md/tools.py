@@ -16,6 +16,143 @@ from corral.backend.tool import tool
 
 
 @tool
+def get_nth_run_log(
+    path: str,
+    n: int = 0,
+    save: str | None = None,
+    index: int | None = None,
+) -> str:
+    """[BRIEF] Retrieves and processes the nth run log from a LAMMPS log file. It returns the list of thermodynamic variables present in the run and the total steps of the simulations. Optionally, it can save the nth run in a CSV where each column corresponds to a thermodynamic property, and optionally it can return the thermodynamic property at the particular index.[/BRIEF]
+    [DETAILED] This tool extracts the nth run log from a LAMMPS log file, providing insights into the thermodynamic properties recorded during that simulation run. It can save the extracted data to a CSV file for further analysis and can also return specific thermodynamic data at a given index. This is useful for analyzing simulation outputs or doing automated analysis using external tools or data anlysis pipeline. [/DETAILED]
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to extract and analyze the nth run log from a LAMMPS log file without reading the entire log file.
+    - Best suited for post-processing and analyzing simulation outputs using external tools or data analysis pipelines.
+    - Recommended for automating the extraction of thermodynamic data from LAMMPS simulations.
+    [/PROCEDURAL]
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Ensure you have a valid LAMMPS log file generated from a simulation. [/PREREQUISITE]
+    2. [CURRENT] Use this tool to extract the nth run log and optionally save it to a CSV file. [/CURRENT]
+    3. [FOLLOW_UP] Utilize the extracted data for analysis, visualization, or further processing in your materials science workflow. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+    [CONTEXTUAL] How this tool works:
+    - Reads the LAMMPS log file and identifies the nth run section.
+    - Extracts thermodynamic data and organises it into a python dataframe, where each column corresponds to a thermodynamic property.
+    - Optionally saves the data to a CSV file and retrieves specific data at a given index. [/CONTEXTUAL]
+    [SYNTACTICAL] Usage examples:
+    [
+        `get_nth_run_log("/path/to/log.lammps", 0, "run0_thermo.csv")`,
+        `get_nth_run_log("log.lammps", 1, None)`,
+        `get_nth_run_log("/data/simulations/log.lammps", 2, "run2_thermo.csv", 10)`,
+        `get_nth_run_log("sim_log.lammps", 0, "run0_thermo.csv", 5)`,
+        `get_nth_run_log("/workspace/log.lammps", 3, None, 20)`,
+    ]
+    [/SYNTACTICAL]
+    Args:
+        path: [ARGS_BRIEF] ABsolute path to the LAMMPS log file. [/ARGS_BRIEF]
+              [ARGS_DETAILED] Complete file path to the LAMMPS log file containing simulation output. [/ARGS_DETAILED]
+              [ARGS_SYNTACTICAL] Format: "Valid file path to LAMMPS log file" [/ARGS_SYNTACTICAL]
+              [ARGS_EXAMPLES] Examples: "/path/to/log.lammps", "simulations/log.lammps" [/ARGS_EXAMPLES]
+        n: [ARGS_BRIEF] Index of the run log to extract (0-based). Defaults to 0. [/ARGS_BRIEF]
+              [ARGS_DETAILED] The zero-based index of the run log to extract from the LAMMPS log file. [/ARGS_DETAILED]
+              [ARGS_SYNTACTICAL] Format: "Non-negative integer" [/ARGS_SYNTACTICAL]
+              [ARGS_EXAMPLES] Examples: 0, 1, 2 [/ARGS_EXAMPLES]
+        save: [ARGS_BRIEF] Optional path to save the extracted run log as a CSV file. [/ARGS_BRIEF]
+                [ARGS_DETAILED] If provided, the extracted run log will be saved to this path in CSV format. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Format: "Valid file path to save CSV file" [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] Examples: "run0_thermo.csv", "/data/run1_thermo.csv" [/ARGS_EXAMPLES]
+        index: [ARGS_BRIEF] Optional index to retrieve specific thermodynamic data from the run log. [/ARGS_BRIEF]
+                 [ARGS_DETAILED] If provided, the tool will return the thermodynamic data at this index from the extracted run log. [/ARGS_DETAILED]
+                 [ARGS_SYNTACTICAL] Format: "Non-negative integer" [/ARGS_SYNTACTICAL]
+                 [ARGS_EXAMPLES] Examples: 0, 5, 10 [/ARGS_EXAMPLES]
+    Returns:
+        str: [ARGS_BRIEF] Summary of the extracted run log and optional data at the specified index. [/ARGS_BRIEF]
+             [ARGS_DETAILED] A string summarizing the columns present in the extracted run log, total number of rows, and optionally the thermodynamic data at the specified index. [/ARGS_DETAILED]
+             [ARGS_EXAMPLES] Examples: "the thermo data has been saved successfully at run0_thermo.csv. The thermo columns are: ['Step', 'Temp', 'Press']. There are total 1000 rows. Data at index 10: {'Step': 100, 'Temp': 300, 'Press': 1.0}", "The thermo columns are: ['Step', 'Temp', 'Press']. There are total 500 rows." [/ARGS_EXAMPLES]
+    [RAISES] Exceptions:
+        Exception:
+            [ERROR_WHEN] If there is an error reading the log file or extracting the run log. [/ERROR_WHEN]
+            [ERROR_DETAILS] Raised when the log file cannot be read or the specified run log cannot be extracted. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the log file path and ensure the run index is valid. [/ERROR_RECOVERY]
+    [/RAISES]
+    [LIMITATIONS] Known limitations:
+    - Only supports LAMMPS log files with standard formatting.
+    - May not handle corrupted or non-standard log files gracefully.
+    [/LIMITATIONS]
+
+    """
+
+    try:
+        func = modal.Function.from_name("simagent", "get_nth_run_log")
+        return func.remote(path=path, n=n, save=save, index=index)
+    except Exception as e:
+        # Handle unexpected errors
+        raise Exception(
+            f"An unexpected error occurred while parsing the log: {e!s}"
+        ) from e
+
+
+@tool
+def keyword_log_extractor(path: str, keyword: str) -> str:
+    """[BRIEF] Extracts sections of a LAMMPS log file that start with a specified keyword. [/BRIEF]
+    [DETAILED] This tool scans a LAMMPS log file for sections that begin with a given keyword and extracts those sections for analysis. It is useful for retrieving specific information such as fixes, computes, or other logged data from simulation runs. [/DETAILED]
+    [PROCEDURAL] When to use this tool:
+    - Use when you need to extract specific sections of a LAMMPS log file based on keywords.
+    - Best suited for targeted analysis of simulation outputs.
+    - Recommended for retrieving logged data for further processing or visualization.
+    [/PROCEDURAL]
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Ensure you have a valid LAMMPS log file generated from a simulation. [/PREREQUISITE]
+    2. [CURRENT] Use this tool to extract sections of the log file that start with the specified keyword. [/CURRENT]
+    3. [FOLLOW_UP] Utilize the extracted data for analysis, visualization, or further processing in your materials science workflow. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+    [CONTEXTUAL] How this tool works:
+    - Reads the LAMMPS log file line by line.
+    - Identifies sections that start with the specified keyword.
+    - Extracts and returns those sections as a structured dictionary. [/CONTEXTUAL]
+    [SYNTACTICAL] Usage examples:
+    [
+        `keyword_log_extractor("/path/to/log.lammps", "fix")`,
+        `keyword_log_extractor("log.lammps", "BULK ENERGY")`,
+        `keyword_log_extractor("/data/simulations/log.lammps", "thermo")`,
+        `keyword_log_extractor("sim_log.lammps", "dump")`,
+        `keyword_log_extractor("/workspace/log.lammps", "velocity")`,
+    ]
+    [/SYNTACTICAL]
+    Args:
+        path: [ARGS_BRIEF] Path to the LAMMPS log file. [/ARGS_BRIEF]
+                [ARGS_DETAILED] Complete file path to the LAMMPS log file containing simulation output. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Format: "Valid file path to LAMMPS log file" [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] Examples: "/path/to/log.lammps", "simulations/log.lammps" [/ARGS_EXAMPLES]
+        keyword: [ARGS_BRIEF] Keyword to search for in the log file. [/ARGS_BRIEF]
+                  [ARGS_DETAILED] The specific keyword that marks the beginning of sections to extract from the log file. [/ARGS_DETAILED]
+                  [ARGS_SYNTACTICAL] Format: "Non-empty string" [/ARGS_SYNTACTICAL]
+                  [ARGS_EXAMPLES] Examples: "fix", "compute", "thermo" [/ARGS_EXAMPLES]
+    Returns:
+        str: [ARGS_BRIEF] Extracted sections as a structured dictionary in string format. [/ARGS_BRIEF]
+             [ARGS_DETAILED] A string representation of a dictionary containing the extracted sections that start with the specified keyword. [/ARGS_DETAILED]
+             [ARGS_EXAMPLES] "{'fix': [...]}", "{'compute': [...]}" [/ARGS_EXAMPLES]
+    [RAISES] Exceptions:
+        Exception:
+            [ERROR_WHEN] If there is an error reading the log file or extracting sections. [/ERROR_WHEN]
+            [ERROR_DETAILS] Raised when the log file cannot be read or the keyword is not found. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the log file path and ensure the keyword is valid. [/ERROR_RECOVERY]
+    [/RAISES]
+    [LIMITATIONS] Known limitations:
+    - Only supports LAMMPS log files with standard formatting.
+    - May not handle corrupted or non-standard log files gracefully.
+    [/LIMITATIONS]
+    """
+    try:
+        func = modal.Function.from_name("simagent", "keyword_log_extractor")
+        return func.remote(path=path, keyword=keyword)
+    except Exception as e:
+        # Handle unexpected errors
+        raise Exception(
+            f"An unexpected error occurred while extracting keyword from log: {e!s}"
+        ) from e
+
+
+@tool
 def execute_python_script(
     script_path: str,
     args: list | None = None,
@@ -515,9 +652,9 @@ def run_lammps(input_file: str) -> str:
         # Raise a ValueError with more context about the failure
         raise ValueError(
             f"The LAMMPS simulation failed with a ValueError: {e!s}"
-        ) from e
+        ) from None
     except Exception as e:
         # Handle unexpected errors
         raise Exception(
             f"An unexpected error occurred while running the LAMMPS simulation: {e!s}"
-        ) from e
+        ) from None

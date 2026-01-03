@@ -31,6 +31,7 @@ def _parse_trial_completion(task_id: str, response_data: dict) -> TaskTrialResul
         state=completion.state,
         tool_statistics=completion.state["tool_statistics"],
         surrendered=completion.surrendered,
+        duration=completion.state.get("duration"),
     )
 
 
@@ -137,6 +138,12 @@ class CorralRouter:
     def get_task_status(self, task_id: str) -> dict[str, Any]:
         """Get current status of a task"""
         response = requests.get(f"{self.base_url}/tasks/{task_id}/status")
+        response.raise_for_status()
+        return response.json()
+
+    def get_last_score(self, task_id: str) -> dict[str, Any]:
+        """Get the score from the most recent trial submission"""
+        response = requests.get(f"{self.base_url}/tasks/{task_id}/last_score")
         response.raise_for_status()
         return response.json()
 

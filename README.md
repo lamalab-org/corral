@@ -264,6 +264,28 @@ from corral.agents import LLMPlanner
 agent = LLMPlanner(model="gpt-4o", temperature=0.1, max_iterations=5)
 ```
 
+### ReflexionAgent
+
+Implements the Reflexion architecture ([paper](https://arxiv.org/abs/2303.11366)) which adds self-reflection and learning from mistakes.
+
+```python
+from corral.agents import ReActAgent, ReflexionAgent, ToolCallingAgent
+
+# Create base agent (the "Actor")
+base_agent = ToolCallingAgent(model="gpt-4o", max_iterations=10, temperature=0.1)
+
+# Wrap with Reflexion capabilities
+reflexion_agent = ReflexionAgent(
+    actor=base_agent,
+    reflection_model="gpt-4o",  # Model for generating reflections
+    reflection_temperature=0.0,  # Deterministic reflections
+)
+
+# Use like any other agent
+runner = CorralRunner(interface, reflexion_agent)
+result = runner.bench(task_ids=["task_1"], trials_per_task=5)
+```
+
 ## 💾 Checkpoint System
 
 The framework automatically saves checkpoints during benchmark runs.
@@ -466,6 +488,66 @@ tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]
 ```
 
 For Corral-specific usage, see the [Modal App Documentation](tasks/corral_md/modal_app/README.md).
+
+### MCP (Model Context Protocol) Integration
+
+Corral tools can be easily converted to MCP format for use with MCP-compatible clients like Claude Desktop:
+
+```python
+from corral.backend.tool import tool
+from corral.router.verbosity import ToolVerbosity
+
+
+@tool
+def my_scientific_tool(param: str) -> str:
+    """Scientific tool description.
+
+    Args:
+        param: Parameter description
+
+    Returns:
+        Result description
+    """
+    return f"Result: {param}"
+
+
+# Convert to MCP format
+mcp_definition = my_scientific_tool.to_mcp()
+
+# With specific verbosity level
+mcp_brief = my_scientific_tool.to_mcp(verbosity=ToolVerbosity.BRIEF)
+```
+
+Create a custom MCP server:
+
+```python
+from mcp.server import Server
+from mcp.types import Tool as MCPTool
+import importlib
+import inspect
+from corral.backend.tool import Tool
+
+# Load tools from a module
+module = importlib.import_module("my_domain.tools")
+tools = {name: obj for name, obj in inspect.getmembers(module) if isinstance(obj, Tool)}
+
+# Create MCP server
+server = Server("my-corral-tools")
+
+
+@server.list_tools()
+async def list_tools():
+    return [MCPTool(**tool.to_mcp()) for tool in tools.values()]
+
+
+@server.call_tool()
+async def call_tool(name: str, arguments: dict):
+    tool = tools[name]
+    # Execute and return results
+    ...
+```
+
+For more details on creating tools and MCP integration, see the [Tools Documentation](docs/TOOLS_README.md).
 
 ### Environment Configuration
 

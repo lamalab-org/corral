@@ -70,7 +70,8 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         """Get the task prompt for the agent"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
-        return {"prompt": environments[task_id].get_task_prompt()}
+        env = environments[task_id]
+        return {"prompt": env.get_task_prompt()}
 
     @app.get("/tasks/{task_id}/guide")
     def get_environment_guide(
@@ -229,6 +230,31 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             "score": env.state.score,
             "submitted_answer": env.state.submitted_answer,
             "tool_statistics": env.state.get_tool_statistics(),
+        }
+
+    @app.get("/tasks/{task_id}/last_score")
+    def get_last_score(task_id: str):
+        """Get the score from the most recent trial submission"""
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        env = environments[task_id]
+        # Get the most recent completed trial
+        if not env.trial_states:
+            raise HTTPException(status_code=404, detail="No trials completed yet")
+
+        # Get the most recent trial_id
+        trial_ids = sorted(env.trial_states.keys(), key=int)
+        if not trial_ids:
+            raise HTTPException(status_code=404, detail="No trials completed yet")
+
+        latest_trial_id = trial_ids[-1]
+        latest_trial = env.trial_states[latest_trial_id]
+
+        return {
+            "task_id": task_id,
+            "trial_id": latest_trial_id,
+            "score": latest_trial.score,
         }
 
     @app.get("/tasks/{task_id}/trials")

@@ -137,6 +137,7 @@ Required submission format:
 
     def score(self) -> float:
         """Score the submitted answer"""
+        logger.info(f"🔥 SCORE METHOD CALLED FOR {self.task_id}")
         if not self.state.submitted_answer:
             logger.warning(f"No submission found for task {self.task_id}")
             return 0.0
@@ -145,7 +146,15 @@ Required submission format:
             # Get and log the raw submission
             answer_value = self.state.submitted_answer.strip()
             logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
-            resolved_answer = smart_resolve_path(answer_value)
+
+            # Detect if it's JSON and skip path resolution
+            if answer_value.startswith("{") and answer_value.endswith("}"):
+                logger.info("Detected JSON submission, skipping path resolution")
+                resolved_answer = answer_value  # Use as-is
+            else:
+                logger.info("Non-JSON submission, using path resolution")
+                resolved_answer = smart_resolve_path(answer_value)
+
             logger.info(f"Resolved answer for {self.task_id}: {resolved_answer!r}")
             # Call the scoring function with the raw answer
             score = self.current_task.scoring_fn(resolved_answer)
