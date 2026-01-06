@@ -122,15 +122,16 @@ def copy_questions():
         # "md",
         # "ml",
         # "resistor",
-        # "retrosynthesis",
-        "afm"
+        "retrosynthesis",
+        # "afm"
+        # "spectra"
     ]
     all_accepted_tasks: list[Path] = []
     for env in envs:
         accepted_tasks = take_questions(env)
         all_accepted_tasks.extend(accepted_tasks)
 
-        root_path = Path(__file__).parent
+        root_path = Path(__file__).parent.parent.parent
         reports_v2_path = root_path / "reports_v2"
         dest_base_path = root_path / "accepted_questions"
 
@@ -196,20 +197,20 @@ def main():
     if accepted_tasks:
         logger.info("Copied accepted tasks.")
 
-        # Query MongoDB for annotations on the accepted files
-        annotator_file_map = get_annotator_file_map(accepted_tasks)
+    #     # Query MongoDB for annotations on the accepted files
+    #     annotator_file_map = get_annotator_file_map(accepted_tasks)
 
-        if not annotator_file_map:
-            logger.info("No annotations found in MongoDB for accepted files.")
-        else:
-            logger.info("Annotations per annotator for accepted files:")
-            for annotator, paths in annotator_file_map.items():
-                logger.info(f"Annotator '{annotator}' labeled {len(paths)} file(s):")
-                for p in paths:
-                    parts = p.parts[-6:]  # Show last 5 parts for brevity
-                    logger.info(f"  - {'/'.join(parts)}")
-    else:
-        logger.info("No accepted tasks found.")
+    #     if not annotator_file_map:
+    #         logger.info("No annotations found in MongoDB for accepted files.")
+    #     else:
+    #         logger.info("Annotations per annotator for accepted files:")
+    #         for annotator, paths in annotator_file_map.items():
+    #             logger.info(f"Annotator '{annotator}' labeled {len(paths)} file(s):")
+    #             for p in paths:
+    #                 parts = p.parts[-6:]  # Show last 5 parts for brevity
+    #                 logger.info(f"  - {'/'.join(parts)}")
+    # else:
+    #     logger.info("No accepted tasks found.")
 
 
 if __name__ == "__main__":
