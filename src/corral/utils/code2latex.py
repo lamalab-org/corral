@@ -57,25 +57,21 @@ class Code2Latex:
         metadata: CacheMetadata,
         output_dir: str,
         task_id: str | None = None,
-        input_from_tasks: list[str] | None = None,
-        is_subtask: bool = False,
         subtask_index: int | None = None,
         cache_dir: str | None = None,
     ) -> str:
         """
         Generate LaTeX colorbox documentation for a task.
 
-        Workflow:
-        1. Check cache for matching metadata (env_name + level)
-        2. If match found:
-           - Load existing data
-           - Merge with new task data (add as subtask or update main)
-           - Generate complete LaTeX with all tasks
-        3. If no match:
-           - Create new cache entry
-           - Generate LaTeX with only the provided data
-        4. Always save to cache
-        5. Always generate .tex file
+        Workflow based on cache state:
+        1. If NO cache exists → this is the main task:
+           - Save task to cache as main_task
+           - Do NOT generate .tex file yet (wait for subtasks)
+        2. If cache EXISTS → this is a subtask:
+           - Add task to cache as subtask (nested inside main task)
+           - Generate complete .tex file with main task + all subtasks
+
+        The is_subtask parameter is ignored - cache presence determines behavior.
 
         Args:
             name: Task name
@@ -85,13 +81,11 @@ class Code2Latex:
             metadata: Metadata for cache matching
             output_dir: Directory for .tex output
             task_id: Optional task identifier (defaults to name)
-            input_from_tasks: List of task IDs this task depends on
-            is_subtask: Whether this is a subtask of a larger task
             subtask_index: Optional index for ordering subtasks
             cache_dir: Optional custom cache directory
 
         Returns:
-            Path to generated .tex file
+            Path to generated .tex file (empty string for main task until subtasks added)
         """
         cache_path = cls._get_cache_path(
             metadata, Path(cache_dir) if cache_dir else Path(cls.DEFAULT_CACHE_DIR)
@@ -106,36 +100,37 @@ class Code2Latex:
             "scoring_function": scoring_fn.__name__
             if hasattr(scoring_fn, "__name__")
             else str(scoring_fn),
-            "input_from_tasks": input_from_tasks or [],
-            "is_subtask": is_subtask,
             "subtask_index": subtask_index,
         }
 
-        # Load existing cache or create new
+        # Check if cache exists to determine if this is main task or subtask
         existing_cache = cls._load_cache(cache_path)
 
-        if existing_cache:
-            # Merge new task data with existing
-            cache_data = cls._merge_task_data(existing_cache, task_dict)
-            logger.info(f"Merged task data into existing cache: {cache_path}")
-        else:
-            # Create new cache entry
+        if existing_cache is None:
+            # No cache → this is the main task
             cache_data = cls._create_cache_entry(metadata, task_dict)
-            logger.info(f"Created new cache entry: {cache_path}")
+            cls._save_cache(cache_path, cache_data)
+            logger.info(f"Saved main task to cache: {cache_path}")
+            # Return empty string - .tex will be generated when subtasks are added
+            return ""
+        else:
+            # Cache exists → this is a subtask, add it inside the main task
+            cache_data = cls._merge_task_data(existing_cache, task_dict)
+            logger.info(f"Added subtask to cache: {task_dict.get('task_id')}")
 
-        # Save updated cache
-        cls._save_cache(cache_path, cache_data)
+            # Save updated cache (in case more subtasks follow)
+            cls._save_cache(cache_path, cache_data)
 
-        # Generate output file
-        output_path = (
-            Path(output_dir) / f"{metadata.env_name}_level_{metadata.level}.tex"
-        )
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+            # Generate output file
+            output_path = (
+                Path(output_dir) / f"{metadata.env_name}_level_{metadata.level}.tex"
+            )
+            output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        generated_path = cls._render_latex(cache_data, output_path)
-        logger.info(f"Generated LaTeX file: {generated_path}")
+            generated_path = cls._render_latex(cache_data, output_path)
+            logger.info(f"Generated LaTeX file: {generated_path}")
 
-        return generated_path
+            return generated_path
 
     @classmethod
     def _get_cache_path(cls, metadata: CacheMetadata, cache_dir: Path) -> Path:
@@ -172,58 +167,98 @@ class Code2Latex:
     def _create_cache_entry(
         cls, metadata: CacheMetadata, task_dict: dict[str, Any]
     ) -> dict[str, Any]:
-        """Create a new cache entry from metadata and task data."""
-        entry = {
+        """Create a new cache entry from metadata and task data as main task."""
+        return {
             "metadata": asdict(metadata),
-            "main_task": None,
+            "main_task": task_dict,
             "subtasks": [],
         }
 
-        if task_dict.get("is_subtask"):
-            entry["subtasks"].append(task_dict)
-        else:
-            entry["main_task"] = task_dict
+    @classmethod
+    def finalize_colorbox(
+        cls,
+        metadata: CacheMetadata,
+        output_dir: str,
+        cache_dir: str | None = None,
+    ) -> str:
+        """
+        Finalize colorbox generation: generate .tex file and remove cache.
 
-        return entry
+        Call this after all subtasks have been added to generate the final
+        .tex file and clean up the cache.
+
+        Args:
+            metadata: Metadata for cache matching
+            output_dir: Directory for .tex output
+            cache_dir: Optional custom cache directory
+
+        Returns:
+            Path to generated .tex file
+        """
+        cache_path = cls._get_cache_path(
+            metadata, Path(cache_dir) if cache_dir else Path(cls.DEFAULT_CACHE_DIR)
+        )
+
+        existing_cache = cls._load_cache(cache_path)
+
+        if not existing_cache:
+            raise ValueError(
+                f"Cache not found. Main task must be cached first. "
+                f"Expected cache at: {cache_path}"
+            )
+
+        # Generate output file
+        output_path = (
+            Path(output_dir) / f"{metadata.env_name}_level_{metadata.level}.tex"
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        generated_path = cls._render_latex(existing_cache, output_path)
+        logger.info(f"Generated LaTeX file: {generated_path}")
+
+        # Clean up cache after generating final output
+        cls._remove_cache(cache_path)
+        logger.info(f"Removed cache file: {cache_path}")
+
+        return generated_path
+
+    @classmethod
+    def _remove_cache(cls, cache_path: Path) -> None:
+        """Remove cache file if it exists."""
+        if cache_path.exists():
+            cache_path.unlink()
+            logger.debug(f"Deleted cache file: {cache_path}")
 
     @classmethod
     def _merge_task_data(
         cls, existing: dict[str, Any], new_task_dict: dict[str, Any]
     ) -> dict[str, Any]:
         """
-        Merge new task data into existing cache entry.
+        Merge new task data into existing cache entry as a subtask.
 
-        - If new_task is a subtask: append to subtasks list (or update if same task_id)
-        - If not: set as main_task (or update if same task_id)
+        When cache exists, all new tasks are added as subtasks inside the main task.
+        If a subtask with the same task_id exists, it is updated.
         """
         result = existing.copy()
 
-        if new_task_dict.get("is_subtask"):
-            # Check if this subtask already exists (by task_id)
-            subtasks = result.get("subtasks", [])
-            existing_idx = None
-            for i, subtask in enumerate(subtasks):
-                if subtask.get("task_id") == new_task_dict.get("task_id"):
-                    existing_idx = i
-                    break
+        # Always add as subtask when merging (cache exists = subtask)
+        subtasks = result.get("subtasks", [])
+        existing_idx = None
+        for i, subtask in enumerate(subtasks):
+            if subtask.get("task_id") == new_task_dict.get("task_id"):
+                existing_idx = i
+                break
 
-            if existing_idx is not None:
-                # Update existing subtask
-                subtasks[existing_idx] = new_task_dict
-                logger.debug(
-                    f"Updated existing subtask: {new_task_dict.get('task_id')}"
-                )
-            else:
-                # Add new subtask
-                subtasks.append(new_task_dict)
-                logger.debug(f"Added new subtask: {new_task_dict.get('task_id')}")
-
-            result["subtasks"] = subtasks
+        if existing_idx is not None:
+            # Update existing subtask
+            subtasks[existing_idx] = new_task_dict
+            logger.debug(f"Updated existing subtask: {new_task_dict.get('task_id')}")
         else:
-            # Set or update main task
-            result["main_task"] = new_task_dict
-            logger.debug(f"Set main task: {new_task_dict.get('task_id')}")
+            # Add new subtask
+            subtasks.append(new_task_dict)
+            logger.debug(f"Added new subtask: {new_task_dict.get('task_id')}")
 
+        result["subtasks"] = subtasks
         return result
 
     @classmethod
@@ -254,13 +289,9 @@ class Code2Latex:
             lines.append(cls._generate_task_colorbox(main_task, is_main=True))
 
             # Add subtasks nested inside main task (before closing the main box)
+            # Subtasks are rendered in the order they were added (execution order)
             if subtasks:
-                # Sort subtasks by subtask_index if available
-                sorted_subtasks = sorted(
-                    subtasks,
-                    key=lambda x: (x.get("subtask_index") or 999, x.get("task_id", "")),
-                )
-                for i, subtask in enumerate(sorted_subtasks, 1):
+                for i, subtask in enumerate(subtasks, 1):
                     lines.append("")
                     lines.append(f"% Subtask {i}")
                     lines.append(
@@ -273,12 +304,8 @@ class Code2Latex:
             lines.append("")
             lines.append(r"\end{tcolorbox}")
         elif subtasks:
-            # No main task, just render subtasks
-            sorted_subtasks = sorted(
-                subtasks,
-                key=lambda x: (x.get("subtask_index") or 999, x.get("task_id", "")),
-            )
-            for i, subtask in enumerate(sorted_subtasks, 1):
+            # No main task, just render subtasks in the order they were added
+            for i, subtask in enumerate(subtasks, 1):
                 if i > 1:
                     lines.append("")
                 lines.append(f"% Subtask {i}")
@@ -321,40 +348,32 @@ class Code2Latex:
         )
         lines.append("")
 
-        # Add dependencies if this is a subtask with input_from_tasks
-        input_from_tasks = task.get("input_from_tasks", [])
-        if input_from_tasks:
-            deps_formatted = ", ".join(
-                rf"\texttt{{{cls._escape_latex(t)}}}" for t in input_from_tasks
-            )
-            lines.append(rf"\textbf{{Depends on:}} {deps_formatted}")
-            lines.append("")
-            lines.append(r"\medskip")
-
         # Add description
         description = task.get("description", "")
         if description:
             lines.append(cls._escape_latex(description))
             lines.append("")
 
-        # Add tools
-        tools = task.get("tools", [])
-        if tools:
-            lines.append(r"\medskip")
-            tools_formatted = ", ".join(
-                rf"\texttt{{{cls._escape_latex(t)}}}" for t in tools
-            )
-            lines.append(rf"\textbf{{Tools:}} {tools_formatted}")
-            lines.append("")
+        # Only show Tools and Scoring Function for main task
+        if is_main:
+            # Add tools
+            tools = task.get("tools", [])
+            if tools:
+                lines.append(r"\medskip")
+                tools_formatted = ", ".join(
+                    rf"\texttt{{{cls._escape_latex(t)}}}" for t in tools
+                )
+                lines.append(rf"\textbf{{Tools:}} {tools_formatted}")
+                lines.append("")
 
-        # Add scoring function
-        scoring_fn = task.get("scoring_function", "")
-        if scoring_fn:
-            lines.append(r"\medskip")
-            lines.append(
-                rf"\textbf{{Scoring Function:}} \texttt{{{cls._escape_latex(scoring_fn)}}}"
-            )
-            lines.append("")
+            # Add scoring function
+            scoring_fn = task.get("scoring_function", "")
+            if scoring_fn:
+                lines.append(r"\medskip")
+                lines.append(
+                    rf"\textbf{{Scoring Function:}} \texttt{{{cls._escape_latex(scoring_fn)}}}"
+                )
+                lines.append("")
 
         # Close box for subtasks or standalone
         if not is_main or standalone:

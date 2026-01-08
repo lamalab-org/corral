@@ -5,7 +5,12 @@ from fastapi import FastAPI, HTTPException, Query
 from loguru import logger
 
 from corral.backend.env import Environment
-from corral.backend.schema import ToLatexRequest, ToolRequest, TrialCompletionResponse
+from corral.backend.schema import (
+    ClearLatexCacheRequest,
+    ToLatexRequest,
+    ToolRequest,
+    TrialCompletionResponse,
+)
 from corral.router.verbosity import (
     ToolVerbosity,
     VerbosityConfig,
@@ -328,6 +333,36 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         except Exception as e:
             raise HTTPException(
                 status_code=500, detail=f"Failed to generate LaTeX: {e!s}"
+            ) from e
+
+    @app.post("/latex/clear-cache")
+    def clear_latex_cache(request: ClearLatexCacheRequest):
+        """Clear LaTeX cache files for a specific environment and level.
+
+        Args:
+            request: Cache clear parameters including:
+                - env_name: Environment name (e.g., "afm", "catalyst")
+                - level: Task level identifier
+                - cache_dir: Optional custom cache directory
+
+        Returns:
+            Number of cache files deleted
+        """
+        from corral.utils.code2latex import Code2Latex
+
+        try:
+            deleted_count = Code2Latex.clear_cache(
+                env_name=request.env_name,
+                level=request.level,
+                cache_dir=request.cache_dir,
+            )
+            return {
+                "status": "success",
+                "deleted_count": deleted_count,
+            }
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to clear LaTeX cache: {e!s}"
             ) from e
 
     return app

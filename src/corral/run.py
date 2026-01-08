@@ -458,11 +458,16 @@ class CorralRunner:
         self,
         task_ids: list[str],
         output_dir: str,
-        level: int,
+        level: int | str,
         env_name: str | None = None,
         cache_dir: str | None = None,
     ) -> None:
         """Generate LaTeX documentation for all tasks before benchmarking.
+
+        The colorbox generation workflow:
+        1. First task (main task, no input_from_tasks): saves to cache only
+        2. Subsequent tasks (subtasks, have input_from_tasks): add to cache and generate .tex
+        3. After all tasks: clear the cache
 
         Args:
             task_ids: List of task IDs to generate LaTeX for.
@@ -489,6 +494,17 @@ class CorralRunner:
                 )
             except Exception as e:
                 logger.warning(f"Failed to generate LaTeX for task {task_id}: {e}")
+
+        # Clean up cache after all tasks are processed
+        try:
+            self.interface.clear_latex_cache(
+                env_name=env_name or "unknown",
+                level=level,
+                cache_dir=cache_dir,
+            )
+            logger.debug("LaTeX cache cleared after generation")
+        except Exception as e:
+            logger.warning(f"Failed to clear LaTeX cache: {e}")
 
         logger.info("LaTeX documentation generation complete.")
 
@@ -552,6 +568,13 @@ class CorralRunner:
         # Setup
         if tool_verbosity:
             self.interface.set_verbosity(tool_verbosity)
+
+        # Validate: generate_latex requires explicit task_ids
+        if generate_latex and task_ids is None:
+            raise ValueError(
+                "task_ids must be explicitly provided when generate_latex=True. "
+                "LaTeX generation requires knowing which tasks to document."
+            )
 
         task_ids = task_ids or self.interface.get_available_tasks()
         session_id = session_id or create_session_id()

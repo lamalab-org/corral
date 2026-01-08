@@ -209,3 +209,31 @@ class CorralRouter:
         )
         response.raise_for_status()
         return response.json()
+
+    def clear_latex_cache(
+        self,
+        env_name: str,
+        level: int | str,
+        cache_dir: str | None = None,
+    ) -> dict[str, Any]:
+        """Clear LaTeX cache files for a specific environment and level.
+
+        Args:
+            env_name: Environment name (e.g., "afm", "catalyst").
+            level: Task level identifier.
+            cache_dir: Optional custom cache directory.
+
+        Returns:
+            Dictionary with 'deleted_count'.
+        """
+        payload = {
+            "env_name": env_name,
+            "level": level,
+            "cache_dir": cache_dir,
+        }
+        response = requests.post(
+            f"{self.base_url}/latex/clear-cache",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()

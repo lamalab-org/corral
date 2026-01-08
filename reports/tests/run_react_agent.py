@@ -22,7 +22,7 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = CorralRouter(base_url="http://localhost:1111")
+    interface = CorralRouter(base_url="http://localhost:5555")
     agent = ReActAgent(
         model=model,
         max_iterations=20,
@@ -35,6 +35,19 @@ def run_benchmark(
     logger.info(f"Starting benchmark with model: {model}")
     result = runner.bench(
         task_ids,
+        # task_ids=[
+        #     "10_15227_orgsyn_096_0245_subtask_1",
+        #     "10_15227_orgsyn_096_0245_subtask_2",
+        #     "10_15227_orgsyn_096_0245_subtask_3",
+        #     "10_15227_orgsyn_096_0245_subtask_4",
+        #     "10_15227_orgsyn_096_0245_subtask_5",
+        #     "10_15227_orgsyn_096_0245_subtask_6",
+        #     "10_15227_orgsyn_096_0245_subtask_7",
+        #     "10_15227_orgsyn_096_0245_subtask_8",
+        #     "10_15227_orgsyn_096_0245_subtask_9",
+        #     "10_15227_orgsyn_096_0245_subtask_10",
+        # ],
+        # task_ids=['10_15227_orgsyn_096_0245'],
         trials_per_task=5,
         k_values=[1, 2, 3, 4, 5],
         verbose=True,
