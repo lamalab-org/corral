@@ -71,8 +71,6 @@ class Code2Latex:
            - Add task to cache as subtask (nested inside main task)
            - Generate complete .tex file with main task + all subtasks
 
-        The is_subtask parameter is ignored - cache presence determines behavior.
-
         Args:
             name: Task name
             description: Task description
@@ -173,54 +171,6 @@ class Code2Latex:
             "main_task": task_dict,
             "subtasks": [],
         }
-
-    @classmethod
-    def finalize_colorbox(
-        cls,
-        metadata: CacheMetadata,
-        output_dir: str,
-        cache_dir: str | None = None,
-    ) -> str:
-        """
-        Finalize colorbox generation: generate .tex file and remove cache.
-
-        Call this after all subtasks have been added to generate the final
-        .tex file and clean up the cache.
-
-        Args:
-            metadata: Metadata for cache matching
-            output_dir: Directory for .tex output
-            cache_dir: Optional custom cache directory
-
-        Returns:
-            Path to generated .tex file
-        """
-        cache_path = cls._get_cache_path(
-            metadata, Path(cache_dir) if cache_dir else Path(cls.DEFAULT_CACHE_DIR)
-        )
-
-        existing_cache = cls._load_cache(cache_path)
-
-        if not existing_cache:
-            raise ValueError(
-                f"Cache not found. Main task must be cached first. "
-                f"Expected cache at: {cache_path}"
-            )
-
-        # Generate output file
-        output_path = (
-            Path(output_dir) / f"{metadata.env_name}_level_{metadata.level}.tex"
-        )
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        generated_path = cls._render_latex(existing_cache, output_path)
-        logger.info(f"Generated LaTeX file: {generated_path}")
-
-        # Clean up cache after generating final output
-        cls._remove_cache(cache_path)
-        logger.info(f"Removed cache file: {cache_path}")
-
-        return generated_path
 
     @classmethod
     def _remove_cache(cls, cache_path: Path) -> None:
@@ -663,14 +613,18 @@ class Code2Latex:
         deleted_count = 0
 
         if env_name and level is not None:
-            # Delete specific cache file
-            target = cache_path / f"{env_name}_level_{level}.json"
-            if target.exists():
-                target.unlink()
-                deleted_count = 1
-                logger.info(f"Deleted cache file: {target}")
+            # Delete specific cache files (both main and tools)
+            targets = [
+                cache_path / f"{env_name}_level_{level}.json",
+                cache_path / f"{env_name}_level_{level}_tools.json",
+            ]
+            for target in targets:
+                if target.exists():
+                    target.unlink()
+                    deleted_count += 1
+                    logger.info(f"Deleted cache file: {target}")
         elif env_name:
-            # Delete all cache files for an environment
+            # Delete all cache files for an environment (both main and tools)
             for cache_file in cache_path.glob(f"{env_name}_level_*.json"):
                 cache_file.unlink()
                 deleted_count += 1
