@@ -337,25 +337,53 @@ def generate_latex_table(main_results: list, subtask: bool = False) -> str:
     Returns:
         LaTeX table string
     """
-    # Table header (exactly as provided by user, with Q&A added at the end, without Thoughts)
+    # Table header using longtable format
     caption = (
         "Performance comparison of agents across different subtasks"
         if subtask
         else "Performance comparison of agents across different tasks"
     )
     label = "tab:subtask-results" if subtask else "tab:main-results"
-    table = rf"""\begin{{table}}[!ht]
-    \centering
-    \caption{{{caption}}}
-    \label{{{label}}}
-    \resizebox{{\textwidth}}{{!}}{{%
-    \begin{{tabular}}{{lllcccccccc}}
-        \toprule
-        \multirow{{2}}{{*}}{{\begin{{tabular}}[c]{{@{{}}l@{{}}}}Task/\\Env\end{{tabular}}}} & \multirow{{2}}{{*}}{{Agent}} & \multirow{{2}}{{*}}{{Model}} & \multicolumn{{3}}{{c}}{{Scores}} & \multirow{{2}}{{*}}{{\begin{{tabular}}[c]{{@{{}}c@{{}}}}Num\\msgs\end{{tabular}}}} & \multirow{{2}}{{*}}{{\begin{{tabular}}[c]{{@{{}}c@{{}}}}Exec\\time\end{{tabular}}}} & \multicolumn{{2}}{{c}}{{Tool calls}} & \multirow{{2}}{{*}}{{Q\&A}} \\
-        \cline{{4-6}} \cline{{9-10}}
-        & & & Overall & pass@5 & pass\textasciicircum{{}}5 & & & Total & Failed & \\
-        \midrule
-        \midrule
+    table = rf"""\begin{{longtable}}{{lllcccccccc}}
+\caption{{{caption}}}\label{{{label}}}\\
+\toprule
+\multirow{{2}}{{*}}{{\begin{{tabular}}[c]{{@{{}}l@{{}}}}Task/\\Env\end{{tabular}}}} &
+\multirow{{2}}{{*}}{{Agent}} &
+\multirow{{2}}{{*}}{{Model}} &
+\multicolumn{{3}}{{c}}{{Scores}} &
+\multirow{{2}}{{*}}{{\begin{{tabular}}[c]{{@{{}}c@{{}}}}Num\\msgs\end{{tabular}}}} &
+\multirow{{2}}{{*}}{{\begin{{tabular}}[c]{{@{{}}c@{{}}}}Exec\\time\end{{tabular}}}} &
+\multicolumn{{2}}{{c}}{{Tool calls}} &
+\multirow{{2}}{{*}}{{Q\&A}} \\
+\cline{{4-6}}\cline{{9-10}}
+& & & Overall & pass@5 & pass\textasciicircum5 & & & Total & Failed & \\
+\midrule
+\endfirsthead
+
+% Header for subsequent pages
+\toprule
+\multirow{{2}}{{*}}{{\begin{{tabular}}[c]{{@{{}}l@{{}}}}Task/\\Env\end{{tabular}}}} &
+\multirow{{2}}{{*}}{{Agent}} &
+\multirow{{2}}{{*}}{{Model}} &
+\multicolumn{{3}}{{c}}{{Scores}} &
+\multirow{{2}}{{*}}{{\begin{{tabular}}[c]{{@{{}}c@{{}}}}Num\\msgs\end{{tabular}}}} &
+\multirow{{2}}{{*}}{{\begin{{tabular}}[c]{{@{{}}c@{{}}}}Exec\\time\end{{tabular}}}} &
+\multicolumn{{2}}{{c}}{{Tool calls}} &
+\multirow{{2}}{{*}}{{Q\&A}} \\
+\cline{{4-6}}\cline{{9-10}}
+& & & Overall & pass@5 & pass\textasciicircum5 & & & Total & Failed & \\
+\midrule
+\endhead
+
+% Footer for all but last page
+\midrule
+\multicolumn{{11}}{{r}}{{\emph{{Continued on next page}}}}\\
+\endfoot
+
+% Footer for last page
+\bottomrule
+\endlastfoot
+
 """
 
     # Average entries with same (environment, level, agent_type, verbosity, model)
@@ -438,16 +466,14 @@ def generate_latex_table(main_results: list, subtask: bool = False) -> str:
 
         # Add row
         row = (
-            f"        {env_display} & {agent_display} & {model_display} & "
+            f"{env_display} & {agent_display} & {model_display} & "
             f"{overall_str} & {pass_at_5_str} & {pass_exp_5_str} & {num_msgs} & "
             f"{exec_time_str} & {total_tool_calls_str} & {failed_tool_calls_str} & {qa_str} \\\\\n"
         )
         table += row
 
     # Table footer
-    table += r"""        \bottomrule
-    \end{tabular}}
-\end{table}
+    table += r"""\end{longtable}
 """
 
     return table
