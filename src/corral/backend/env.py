@@ -503,20 +503,14 @@ class Environment(ABC):
             )
 
         # Check if this is a TaskGroupEnvironment with current_task
-        input_from_tasks: list[str] = []
-        is_subtask = False
         scoring_fn = self.score
-
-        if hasattr(self, "current_task") and self.current_task is not None:
-            # Use current_task's input_from_tasks for dependencies
-            input_from_tasks = getattr(self.current_task, "input_from_tasks", []) or []
-            is_subtask = len(input_from_tasks) > 0
-            # Use current_task's scoring_fn if available
-            if (
-                hasattr(self.current_task, "scoring_fn")
-                and self.current_task.scoring_fn is not None
-            ):
-                scoring_fn = self.current_task.scoring_fn
+        if (
+            hasattr(self, "current_task")
+            and self.current_task is not None
+            and hasattr(self.current_task, "scoring_fn")
+            and self.current_task.scoring_fn is not None
+        ):
+            scoring_fn = self.current_task.scoring_fn
 
         # Try to get env_name from task_group if not provided
         if env_name is None:
@@ -537,11 +531,9 @@ class Environment(ABC):
             description=description,
             tools=tools,
             scoring_fn=scoring_fn,
-            input_from_tasks=input_from_tasks,
             metadata=metadata,
             output_dir=output_dir,
             task_id=self.task_id,
-            is_subtask=is_subtask,
             subtask_index=subtask_index,
             cache_dir=cache_dir,
         )
