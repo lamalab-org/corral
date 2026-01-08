@@ -170,3 +170,42 @@ class CorralRouter:
             )
         response.raise_for_status()
         return response.json()
+
+    def generate_latex(
+        self,
+        task_id: str,
+        output_dir: str,
+        level: int | str,
+        env_name: str | None = None,
+        task_name: str | None = None,
+        subtask_index: int | None = None,
+        cache_dir: str | None = None,
+    ) -> dict[str, str]:
+        """Generate LaTeX documentation for a task.
+
+        Args:
+            task_id: The task identifier.
+            output_dir: Directory for output .tex files.
+            level: Task level identifier (e.g., 1, 2, "advanced").
+            env_name: Environment name (e.g., "afm", "catalyst").
+            task_name: Optional custom name for the task.
+            subtask_index: Optional index for ordering subtasks.
+            cache_dir: Optional custom cache directory.
+
+        Returns:
+            Dictionary with 'output_path' (task .tex) and 'tools_output_path' (tools .tex).
+        """
+        payload = {
+            "output_dir": output_dir,
+            "level": level,
+            "env_name": env_name,
+            "task_name": task_name,
+            "subtask_index": subtask_index,
+            "cache_dir": cache_dir,
+        }
+        response = requests.post(
+            f"{self.base_url}/tasks/{task_id}/latex",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()

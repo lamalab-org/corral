@@ -410,3 +410,148 @@ class Environment(ABC):
         # This can be overridden by subclasses to set up external dependencies
 
         return "No external app/service configuration needed for this trial."
+
+    def to_latex(
+        self,
+        output_dir: str,
+        level: int | str,
+        env_name: str | None = None,
+        task_name: str | None = None,
+        subtask_index: int | None = None,
+        cache_dir: str | None = None,
+    ) -> tuple[str, str]:
+        """
+        Generate LaTeX documentation for this task.
+
+        This method creates a TaskDefinition from the environment's task data
+        and delegates to Code2Latex.colorbox() for generating formatted LaTeX files
+        and Code2Latex.longtable() for generating tools documentation.
+
+        If the environment has a `current_task` attribute (e.g., TaskGroupEnvironment),
+        it will automatically detect:
+        - Whether this is a subtask (based on input_from_tasks)
+        - Dependencies on other tasks
+        - env_name from task_group.group_id if not provided
+
+        Args:
+            output_dir: Directory for output .tex files
+            level: Task level identifier (e.g., 1, 2, "advanced")
+            env_name: Environment name (e.g., "afm", "catalyst"). If not provided,
+                     will try to get from task_group.group_id
+            task_name: Optional custom name for the task (defaults to task_id)
+            subtask_index: Optional index for ordering subtasks
+            cache_dir: Optional custom cache directory
+
+        Returns:
+            Tuple of (task_tex_path, tools_tex_path) - paths to the generated .tex files
+        """
+        from corral.router.verbosity import ToolVerbosity, VerbosityConfig
+        from corral.utils.code2latex import CacheMetadata, Code2Latex
+
+        # Get task description from prompt
+        description = str(self.get_task_prompt())
+
+        # Get list of tool names
+        tools = list(self.tools.keys())
+
+        # Get detailed tool information for longtable with DETAILED verbosity parsing
+        # This parses the descriptions similarly to server.py, using the Detailed level
+        tools_details = []
+        verbosity = ToolVerbosity.DETAILED
+
+        for tool in self.tools.values():
+            filtered_description = VerbosityConfig.filter_tool_description(
+                tool.description, verbosity
+            )
+
+            # Extract RETURNS section from the original description and filter it
+            sections = VerbosityConfig.extract_all_sections(tool.description)
+            returns_parts = [
+                sections.get("RETURNS_BRIEF", ""),
+                sections.get("RETURNS_DETAILED", ""),
+            ]
+            returns_raw = "\n\n".join(part for part in returns_parts if part)
+            returns_info = (
+                VerbosityConfig.filter_argument_description(returns_raw, verbosity)
+                if returns_raw
+                else ""
+            )
+
+            structured_args = []
+            for arg in tool.arguments:
+                filtered_arg_desc = VerbosityConfig.filter_argument_description(
+                    arg.description, verbosity
+                )
+                structured_args.append(
+                    {
+                        "name": arg.name,
+                        "type": arg.type,
+                        "description": filtered_arg_desc,
+                        "required": arg.required,
+                        "default": arg.default,
+                        "choices": arg.choices,
+                    }
+                )
+
+            tools_details.append(
+                {
+                    "name": tool.name,
+                    "description": filtered_description,
+                    "arguments": structured_args,
+                    "returns": returns_info,
+                }
+            )
+
+        # Check if this is a TaskGroupEnvironment with current_task
+        input_from_tasks: list[str] = []
+        is_subtask = False
+        scoring_fn = self.score
+
+        if hasattr(self, "current_task") and self.current_task is not None:
+            # Use current_task's input_from_tasks for dependencies
+            input_from_tasks = getattr(self.current_task, "input_from_tasks", []) or []
+            is_subtask = len(input_from_tasks) > 0
+            # Use current_task's scoring_fn if available
+            if (
+                hasattr(self.current_task, "scoring_fn")
+                and self.current_task.scoring_fn is not None
+            ):
+                scoring_fn = self.current_task.scoring_fn
+
+        # Try to get env_name from task_group if not provided
+        if env_name is None:
+            if hasattr(self, "task_group") and self.task_group is not None:
+                env_name = self.task_group.group_id
+            else:
+                env_name = "unknown"
+
+        # Create CacheMetadata
+        metadata = CacheMetadata(
+            env_name=env_name,
+            level=level,
+        )
+
+        # Generate LaTeX via Code2Latex.colorbox for tasks
+        task_tex_path = Code2Latex.colorbox(
+            name=task_name or self.task_id,
+            description=description,
+            tools=tools,
+            scoring_fn=scoring_fn,
+            input_from_tasks=input_from_tasks,
+            metadata=metadata,
+            output_dir=output_dir,
+            task_id=self.task_id,
+            is_subtask=is_subtask,
+            subtask_index=subtask_index,
+            cache_dir=cache_dir,
+        )
+
+        # Generate LaTeX via Code2Latex.longtable for tools
+        tools_tex_path = Code2Latex.longtable(
+            tools=tools_details,
+            metadata=metadata,
+            output_dir=output_dir,
+            cache_dir=cache_dir,
+        )
+
+        return task_tex_path, tools_tex_path

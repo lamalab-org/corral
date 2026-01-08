@@ -56,3 +56,14 @@ class TrialCompletionResponse(BaseModel):
     state: dict[str, Any]
     trial_id: str
     surrendered: bool = False
+
+
+class ToLatexRequest(BaseModel):
+    """Request to generate LaTeX documentation for a task"""
+
+    output_dir: str
+    level: int | str
+    env_name: str | None = None
+    task_name: str | None = None
+    subtask_index: int | None = None
+    cache_dir: str | None = None

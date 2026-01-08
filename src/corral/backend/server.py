@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, Query
 from loguru import logger
 
 from corral.backend.env import Environment
-from corral.backend.schema import ToolRequest, TrialCompletionResponse
+from corral.backend.schema import ToLatexRequest, ToolRequest, TrialCompletionResponse
 from corral.router.verbosity import (
     ToolVerbosity,
     VerbosityConfig,
@@ -287,6 +287,48 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             "task_id": task_id,
             "trial_id": env.state.trial_id,
         }
+
+    @app.post("/tasks/{task_id}/latex")
+    def generate_latex(task_id: str, request: ToLatexRequest):
+        """Generate LaTeX documentation for this task
+
+        Args:
+            task_id: The task identifier
+            request: LaTeX generation parameters including:
+                - output_dir: Directory for output .tex files
+                - level: Task level identifier (e.g., 1, 2, "advanced")
+                - env_name: Optional environment name (e.g., "afm", "catalyst")
+                - task_name: Optional custom name for the task
+                - subtask_index: Optional index for ordering subtasks
+                - cache_dir: Optional custom cache directory
+
+        Returns:
+            Paths to the generated .tex files (task_path and tools_path)
+        """
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        env = environments[task_id]
+
+        try:
+            task_path, tools_path = env.to_latex(
+                output_dir=request.output_dir,
+                level=request.level,
+                env_name=request.env_name,
+                task_name=request.task_name,
+                subtask_index=request.subtask_index,
+                cache_dir=request.cache_dir,
+            )
+            return {
+                "status": "success",
+                "task_id": task_id,
+                "output_path": task_path,
+                "tools_output_path": tools_path,
+            }
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to generate LaTeX: {e!s}"
+            ) from e
 
     return app
 
