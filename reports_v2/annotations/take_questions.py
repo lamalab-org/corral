@@ -46,6 +46,7 @@ def take_questions(env) -> list[Path]:
         if model.is_dir():
             env_path = model / env
             if not env_path.exists():
+                logger.warning(f"Environment path does not exist: {env_path}")
                 continue
 
             # Dictionary to store task_id -> list of file paths for this model
@@ -122,9 +123,10 @@ def copy_questions():
         # "md",
         # "ml",
         # "resistor",
-        "retrosynthesis",
+        # "retrosynthesis",
         # "afm"
         # "spectra"
+        "wetlab"
     ]
     all_accepted_tasks: list[Path] = []
     for env in envs:
