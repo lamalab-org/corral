@@ -319,7 +319,7 @@ def perform_flame_test(compositions, label: str) -> str:
     colors = []
     total_copper = 0
     for sp, conc in test.composition.items():
-        if 'Cu' in sp:
+        if 'Cu' in sp:  # copper is the only flame-active element that exists as multiple species and not just "Cu+2", therefore, all copper-containing species are summed
             total_copper += conc
         elif (sp in FLAME_COLORS) and (conc > 5e-4):
             colors.append(FLAME_COLORS[sp])
@@ -530,7 +530,7 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
     [CONTEXTUAL] How this tool works:
     - It receives a mixture of up to 3 color names and their fractions as a list of tuples.
     - Each tuple must be formatted as (color_name, fraction).
-    - The fractions must be all positive and sum to 1.0. They will be rounded to one decimal place before performing the prediction, so there is no point in having more than one decimal points.
+    - The fractions must be all positive and sum to 1.0. They will be rounded to two decimal places before performing the prediction, so there is no point in having more precision.
     - The colors will be mixed and the name of the closest matching color will be reported. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
@@ -562,6 +562,10 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
                     [ERROR_DETAILS] The first element of one of the tuples is not a valid color name [/ERROR_DETAILS]
                     [ERROR_RECOVERY] Make sure you only use color names that correspond to pure precipitates as listed by the `lookup_precipitate_colors` tool [/ERROR_RECOVERY]
         
+        ValueError: [ERROR_WHEN] When the mixture has more than 3 components [/ERROR_WHEN]
+                    [ERROR_DETAILS] The list of color mixtures has 4 or more tuples [/ERROR_DETAILS]
+                    [ERROR_RECOVERY] Ensure that you are mixing at most 3 colors [/ERROR_RECOVERY]
+
         AssertionError: [ERROR_WHEN] When there is a numerical problem with the fractions [/ERROR_WHEN]
                         [ERROR_DETAILS] There is a non-positive fraction or the fractions do not sum to 1.0 [/ERROR_DETAILS]
                         [ERROR_RECOVERY] Ensure that all fractions are positive values between 0 and 1 and they all sum to 1.0 [/ERROR_RECOVERY]
@@ -570,14 +574,18 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
     [LIMITATIONS] Known Limitations:
         - This simulation only works for the color of precipitates. It is not intended to be used to predict solution color.
         - Only a maximum of three (3) colors can be mixed.
+        - The fractions will be rounded to two decimal places before the simulation.
         - The returned color name is an approximate close match to the actual color of the mixture and might not be an exact match.
     [/LIMITATIONS]
     """
+    if len(mixture) > 3:
+        raise ValueError(f"Attempted to mix {len(mixture)} colors. Up to 3 colors can be mixed.")
+    
     try:
         hex_mixture = []
         for name, frac in mixture:
             hex = PALETTE[name]
-            hex_mixture.append((hex, frac))
+            hex_mixture.append((hex, round(frac, 2)))
     except KeyError:
         raise ValueError(f"Undefined color name: {name}")
     
@@ -639,7 +647,7 @@ def get_available_reagents(compositions) -> str:
         return note + '\n'.join(reagent_descriptions)
 
 @tool(hidden_args=['compositions'])
-def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vol: int, sol2_label: str,  sol2_vol: int) -> str:
+def mix_two_solutions(compositions, test_label: str, sol1_label: str, sol1_vol: int, sol2_label: str,  sol2_vol: int) -> str:
     """[BRIEF] Mixes two solutions with the given volumes an returns observations about precipitation and color of the resulting solution [/BRIEF]
     
     [DETAILED] Mixes the two solutions (which must not contain any precipitates) with the given volumes (in mL) and reports observations about color change or precipitate formation. It also adds the resulting solution to the Inventory and labels it `test_label` [/DETAILED]
@@ -783,7 +791,7 @@ def mix_two_solutions(compositions, *, test_label: str, sol1_label: str, sol1_vo
 
 
 @tool(hidden_args=['compositions'])
-def add_a_solution(compositions, *, test_label: str, sol1_label: str, sol2_label: str,  sol2_vol: int) -> str:
+def add_a_solution(compositions, test_label: str, sol1_label: str, sol2_label: str,  sol2_vol: int) -> str:
     """[BRIEF] Adds a specific volume of `sol2_label` to all of `sol1_label` and returns observations about the changes of solution color and precipitation amount and color. [/BRIEF]
     
     [DETAILED] Add the given volumes (in mL) of `sol2_label` (which must not contain any precipitates) to the remaining volume of `sol1_label` (which can have precipitates) and reports observations about color change or precipitate formation/dissolution. It also adds the resulting solution to the Inventory and labels it `test_label`. [/DETAILED]
@@ -1076,7 +1084,7 @@ def filter_solution(compositions, label: str) -> str:
 
 
 @tool(hidden_args=['compositions'])
-def add_precipitate_to_solution(compositions, *, test_label: str, prec_label: str, sol_label: str,  sol_vol: int) -> str:
+def add_precipitate_to_solution(compositions, test_label: str, prec_label: str, sol_label: str,  sol_vol: int) -> str:
     """[BRIEF] Adds a precipitate to a specific volume of a solution and returns observations about the changes in the amount/color of the added precipitate or the solution color. [/BRIEF]
     
     [DETAILED] Draws `sol_vol` mL of `sol_label` (which must not contain any precipitates), adds to it all of the precipitate `prec_label` and reports observations about any changes in the color or the amount of the added precipitate and any color changes in the solution. It also adds the resulting solution to the Inventory and labels it `test_label`. [/DETAILED]

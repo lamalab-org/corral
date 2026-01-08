@@ -51,9 +51,9 @@ if __name__ == "__main__":
     setup_litellm()
 
     verbosities = [
-        "brief",
+        #"brief",
         #"workflow",
-        #"comprehensive",
+        "comprehensive",
     ]
 
     model = "gpt-4o-2024-08-06"

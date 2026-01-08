@@ -52,8 +52,8 @@ if __name__ == "__main__":
 
     verbosities = [
         #"brief",
-        "workflow",
-        #"comprehensive",
+        #"workflow",
+        "comprehensive",
     ]
 
     model = "claude-sonnet-4-5-20250929"
@@ -61,7 +61,7 @@ if __name__ == "__main__":
         logger.info(f"Running benchmark with verbosity: {verbosity}")
         try: 
             model_name = "claude_sonnet_45"
-            run_name = f"{model_name}-ReAct-WetLab_Level_1-{verbosity}"
+            run_name = f"{model_name}-ReAct-WetLab_Level_2-{verbosity}"
             run_benchmark(model=model, run_name=run_name, verbose=verbosity)
 
         except Exception as e:

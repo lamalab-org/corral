@@ -41,6 +41,7 @@ def run_benchmark(
         k_values=[1, 2, 3, 4, 5],
         verbose=True,
         tool_verbosity=verbose,
+        session_id="session_20251203_123037_766879",
     )
     result.generate_report(f"{run_name}.json")
     logger.info("Benchmark completed")

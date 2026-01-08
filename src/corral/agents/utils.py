@@ -139,8 +139,7 @@ def format_examples(examples: list[str] | None) -> str:
     if examples is None:
         return ""
     else:
-        example_prompt = f"To help you in understanding this task, the next {
-            len(examples)} examples are provided:\n\n"
+        example_prompt = f"To help you in understanding this task, the next {len(examples)} examples are provided:\n\n"
         return example_prompt + "\n\n".join(examples)
 
 
@@ -168,6 +167,19 @@ def convert_dict_arg(arg: dict) -> dict:
         prop["description"] += (
             ' - Provide as an array of strings, e.g., ["item1", "item2"]'
         )
+    elif arg_type == ("list[tuple[str, float]]"):
+        prop["type"] = "array"
+        prop["items"] = {
+            "type": "array",
+            "items": {
+                "anyOf": [
+                    {"type": "string"},
+                    {"type": "number"}
+                ]
+            }
+        }
+
+                             
     else:
         json_type = TYPE_MAPPING.get(arg_type)
         if not json_type:

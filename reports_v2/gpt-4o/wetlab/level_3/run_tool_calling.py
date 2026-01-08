@@ -30,7 +30,7 @@ def run_benchmark(
     #     group="tool_description_ablation",
     #     name=run_name,
     # )
-    agent = ToolCallingAgent(model=model, max_iterations=40, temperature=temperature)
+    agent = ToolCallingAgent(model=model, max_iterations=50, temperature=temperature)
     runner = CorralRunner(interface, agent) #, logger=wandblogger)
 
     # Run benchmark
@@ -52,8 +52,8 @@ if __name__ == "__main__":
 
     verbosities = [
         #"brief",
-        "workflow",
-        #"comprehensive",
+        #"workflow",
+        "comprehensive",
     ]
 
     model = "gpt-4o-2024-08-06"
@@ -61,7 +61,7 @@ if __name__ == "__main__":
         logger.info(f"Running benchmark with verbosity: {verbosity}")
         try: 
             model_name = "gpt_4o"
-            run_name = f"{model_name}-Tool_Calling-WetLab_Level_1-{verbosity}"
+            run_name = f"{model_name}-Tool_Calling-WetLab_Level_3-{verbosity}"
             run_benchmark(model=model, run_name=run_name, verbose=verbosity)
 
         except Exception as e:

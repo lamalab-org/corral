@@ -306,7 +306,7 @@ def mix_colors(mixture: list[tuple[str, float]], blend: float=0.15) -> str:
     """
     fracs = [fraction for _,fraction in mixture]
 
-    assert (round(sum(fracs),3) == 1) and all(frac > 0 for frac in fracs), "All fractions must be positive and sum to one!"
+    assert (0.99 <= round(sum(fracs),2) <= 1) and all(frac > 0 for frac in fracs), "All fractions must be positive and sum to one!"
     if (blend < 0) or (blend > 1):
         raise ValueError("blend must be within [0, 1]")
 

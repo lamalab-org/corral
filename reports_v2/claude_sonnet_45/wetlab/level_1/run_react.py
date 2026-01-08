@@ -52,8 +52,8 @@ if __name__ == "__main__":
 
     verbosities = [
         #"brief",
-        "workflow",
-        #"comprehensive",
+        #"workflow",
+        "comprehensive",
     ]
 
     model = "claude-sonnet-4-5-20250929"

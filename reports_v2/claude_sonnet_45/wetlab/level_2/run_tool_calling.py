@@ -19,6 +19,7 @@ def run_benchmark(
     temperature: float = 0.0,
     run_name: str = "corral_benchmark_run",
     verbose: str = "workflow",
+    session_id: str | None = None,
 ):
     """Run the benchmark with specified model and tasks"""
 
@@ -41,6 +42,7 @@ def run_benchmark(
         k_values=[1, 2, 3, 4, 5],
         verbose=True,
         tool_verbosity=verbose,
+        session_id=session_id,
     )
     result.generate_report(f"{run_name}.json")
     logger.info("Benchmark completed")
@@ -52,8 +54,8 @@ if __name__ == "__main__":
 
     verbosities = [
         #"brief",
-        "workflow",
-        #"comprehensive",
+        #"workflow",
+        "comprehensive",
     ]
 
     model = "claude-sonnet-4-5-20250929"
@@ -61,8 +63,12 @@ if __name__ == "__main__":
         logger.info(f"Running benchmark with verbosity: {verbosity}")
         try: 
             model_name = "claude_sonnet_45"
-            run_name = f"{model_name}-Tool_Calling-WetLab_Level_1-{verbosity}"
-            run_benchmark(model=model, run_name=run_name, verbose=verbosity)
+            run_name = f"{model_name}-Tool_Calling-WetLab_Level_2-{verbosity}"
+            run_benchmark(
+                session_id="session_20251207_012612_870849",
+                model=model,
+                run_name=run_name,
+                verbose=verbosity)
 
         except Exception as e:
             logger.error(f"Benchmark failed: {e!s}")
