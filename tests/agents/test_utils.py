@@ -41,6 +41,7 @@ class MockLiteLLMChoice:
 
     def __init__(self):
         self.message = MockLiteLLMMessage()
+        self.logprobs = None
 
 
 class MockLiteLLMResponse:
@@ -48,6 +49,7 @@ class MockLiteLLMResponse:
 
     def __init__(self, include_usage=False):
         self.choices = [MockLiteLLMChoice()]
+        self.id = "mock_response_id"
         if include_usage:
             self.usage = MockLiteLLMUsage()
 
