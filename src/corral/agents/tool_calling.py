@@ -140,10 +140,9 @@ class ToolCallingAgent(BaseAgent):
 
             # Execute BEFORE_ITERATION hooks
             self._execute_hooks(HookPoint.BEFORE_ITERATION, interface, task_id)
-            full_llm_response = self.get_llm_response()
-            llm_response = full_llm_response.content
             try:
-                llm_response = self.get_llm_response(tools)
+                full_llm_response = self.get_llm_response(tools)
+                llm_response = full_llm_response
 
                 content = llm_response.content
                 if content:
