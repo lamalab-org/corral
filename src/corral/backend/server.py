@@ -6,7 +6,6 @@ from loguru import logger
 
 from corral.backend.env import Environment
 from corral.backend.schema import (
-    ClearLatexCacheRequest,
     ToLatexRequest,
     ToolRequest,
     TrialCompletionResponse,
@@ -304,8 +303,6 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
                 - level: Task level identifier (e.g., 1, 2, "advanced")
                 - env_name: Optional environment name (e.g., "afm", "catalyst")
                 - task_name: Optional custom name for the task
-                - subtask_index: Optional index for ordering subtasks
-                - cache_dir: Optional custom cache directory
 
         Returns:
             Paths to the generated .tex files (task_path and tools_path)
@@ -321,8 +318,6 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
                 level=request.level,
                 env_name=request.env_name,
                 task_name=request.task_name,
-                subtask_index=request.subtask_index,
-                cache_dir=request.cache_dir,
             )
             return {
                 "status": "success",
@@ -333,36 +328,6 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         except Exception as e:
             raise HTTPException(
                 status_code=500, detail=f"Failed to generate LaTeX: {e!s}"
-            ) from e
-
-    @app.post("/latex/clear-cache")
-    def clear_latex_cache(request: ClearLatexCacheRequest):
-        """Clear LaTeX cache files for a specific environment and level.
-
-        Args:
-            request: Cache clear parameters including:
-                - env_name: Environment name (e.g., "afm", "catalyst")
-                - level: Task level identifier
-                - cache_dir: Optional custom cache directory
-
-        Returns:
-            Number of cache files deleted
-        """
-        from corral.utils.code2latex import Code2Latex
-
-        try:
-            deleted_count = Code2Latex.clear_cache(
-                env_name=request.env_name,
-                level=request.level,
-                cache_dir=request.cache_dir,
-            )
-            return {
-                "status": "success",
-                "deleted_count": deleted_count,
-            }
-        except Exception as e:
-            raise HTTPException(
-                status_code=500, detail=f"Failed to clear LaTeX cache: {e!s}"
             ) from e
 
     return app

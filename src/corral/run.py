@@ -460,7 +460,6 @@ class CorralRunner:
         output_dir: str,
         level: int | str,
         env_name: str | None = None,
-        cache_dir: str | None = None,
     ) -> None:
         """Generate LaTeX documentation for all tasks before benchmarking.
 
@@ -474,19 +473,16 @@ class CorralRunner:
             output_dir: Directory for output .tex files.
             level: Task level identifier (e.g., 1, 2,...).
             env_name: Environment name (e.g., "afm", "catalyst").
-            cache_dir: Optional cache directory for LaTeX generation.
         """
         logger.info(f"Generating LaTeX documentation for {len(task_ids)} tasks...")
 
-        for idx, task_id in enumerate(task_ids):
+        for _idx, task_id in enumerate(task_ids):
             try:
                 result = self.interface.generate_latex(
                     task_id=task_id,
                     output_dir=output_dir,
                     level=level,
                     env_name=env_name,
-                    subtask_index=idx,
-                    cache_dir=cache_dir,
                 )
                 logger.debug(
                     f"Generated LaTeX for task {task_id}: "
@@ -494,17 +490,6 @@ class CorralRunner:
                 )
             except Exception as e:
                 logger.warning(f"Failed to generate LaTeX for task {task_id}: {e}")
-
-        # Clean up cache after all tasks are processed
-        try:
-            self.interface.clear_latex_cache(
-                env_name=env_name or "unknown",
-                level=level,
-                cache_dir=cache_dir,
-            )
-            logger.debug("LaTeX cache cleared after generation")
-        except Exception as e:
-            logger.warning(f"Failed to clear LaTeX cache: {e}")
 
         logger.info("LaTeX documentation generation complete.")
 
@@ -539,7 +524,6 @@ class CorralRunner:
         latex_output_dir: str | None = None,
         level: int | str = 1,
         env_name: str | None = None,
-        latex_cache_dir: str | None = None,
     ) -> BenchmarkResult:
         """Run benchmark with functional approach
 
@@ -559,7 +543,6 @@ class CorralRunner:
                             "tex_files" in the current working directory.
             level: Task level identifier for LaTeX generation (default: 1).
             env_name: Environment name for LaTeX generation (e.g., "afm", "catalyst").
-            latex_cache_dir: Optional cache directory for LaTeX generation.
 
         Returns:
             BenchmarkResult containing all trial results and metrics.
@@ -591,7 +574,6 @@ class CorralRunner:
                 output_dir=output_dir,
                 level=level,
                 env_name=env_name,
-                cache_dir=latex_cache_dir,
             )
 
         # Set agent hooks if provided
@@ -673,7 +655,7 @@ class CorralRunner:
 
             # Log final results
             if self.logger:
-                self.logger.log_final_results(result, k_values)
+                self.logger.log_final_results(result)
 
             # Save final checkpoint with finished suffix and remove original
             self._save_finished_checkpoint(session_id, task_results)

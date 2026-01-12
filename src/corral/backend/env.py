@@ -417,8 +417,6 @@ class Environment(ABC):
         level: int | str,
         env_name: str | None = None,
         task_name: str | None = None,
-        subtask_index: int | None = None,
-        cache_dir: str | None = None,
     ) -> tuple[str, str]:
         """
         Generate LaTeX documentation for this task.
@@ -439,8 +437,6 @@ class Environment(ABC):
             env_name: Environment name (e.g., "afm", "catalyst"). If not provided,
                      will try to get from task_group.group_id
             task_name: Optional custom name for the task (defaults to task_id)
-            subtask_index: Optional index for ordering subtasks
-            cache_dir: Optional custom cache directory
 
         Returns:
             Tuple of (task_tex_path, tools_tex_path) - paths to the generated .tex files
@@ -533,9 +529,6 @@ class Environment(ABC):
             scoring_fn=scoring_fn,
             metadata=metadata,
             output_dir=output_dir,
-            task_id=self.task_id,
-            subtask_index=subtask_index,
-            cache_dir=cache_dir,
         )
 
         # Generate LaTeX via Code2Latex.longtable for tools
@@ -543,7 +536,6 @@ class Environment(ABC):
             tools=tools_details,
             metadata=metadata,
             output_dir=output_dir,
-            cache_dir=cache_dir,
         )
 
         return task_tex_path, tools_tex_path

@@ -178,8 +178,6 @@ class CorralRouter:
         level: int | str,
         env_name: str | None = None,
         task_name: str | None = None,
-        subtask_index: int | None = None,
-        cache_dir: str | None = None,
     ) -> dict[str, str]:
         """Generate LaTeX documentation for a task.
 
@@ -189,8 +187,6 @@ class CorralRouter:
             level: Task level identifier (e.g., 1, 2, "advanced").
             env_name: Environment name (e.g., "afm", "catalyst").
             task_name: Optional custom name for the task.
-            subtask_index: Optional index for ordering subtasks.
-            cache_dir: Optional custom cache directory.
 
         Returns:
             Dictionary with 'output_path' (task .tex) and 'tools_output_path' (tools .tex).
@@ -200,39 +196,9 @@ class CorralRouter:
             "level": level,
             "env_name": env_name,
             "task_name": task_name,
-            "subtask_index": subtask_index,
-            "cache_dir": cache_dir,
         }
         response = requests.post(
             f"{self.base_url}/tasks/{task_id}/latex",
-            json=payload,
-        )
-        response.raise_for_status()
-        return response.json()
-
-    def clear_latex_cache(
-        self,
-        env_name: str,
-        level: int | str,
-        cache_dir: str | None = None,
-    ) -> dict[str, Any]:
-        """Clear LaTeX cache files for a specific environment and level.
-
-        Args:
-            env_name: Environment name (e.g., "afm", "catalyst").
-            level: Task level identifier.
-            cache_dir: Optional custom cache directory.
-
-        Returns:
-            Dictionary with 'deleted_count'.
-        """
-        payload = {
-            "env_name": env_name,
-            "level": level,
-            "cache_dir": cache_dir,
-        }
-        response = requests.post(
-            f"{self.base_url}/latex/clear-cache",
             json=payload,
         )
         response.raise_for_status()
