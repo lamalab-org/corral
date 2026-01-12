@@ -105,6 +105,8 @@ def llm_call(
             response = litellm.completion(**params)
 
         message = response.choices[0].message
+        message.logprobs = response.choices[0].logprobs
+        message.id = response.id
 
         # If message content is None, try to get reasoning_content
         if message.content is None:

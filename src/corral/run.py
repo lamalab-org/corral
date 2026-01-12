@@ -589,7 +589,7 @@ class CorralRunner:
 
             # Log final results
             if self.logger:
-                self.logger.log_final_results(result, k_values)
+                self.logger.log_final_results(result)
 
             # Save final checkpoint with finished suffix and remove original
             self._save_finished_checkpoint(session_id, task_results)

@@ -31,6 +31,10 @@ def _default_intervention(context: HookContext, intervention: str, execute_tools
 def _react_intervention(context: HookContext, intervention: str, execute_tools: bool):
     """ReAct-specific intervention with optional tool execution.
 
+    When execute_tools=True, executes in interleaved mode: each thought-action pair
+    is added as an assistant message, the tool is executed, and the observation is
+    appended before moving to the next segment.
+
     Raises:
         CriticalHookError: If execute_tools=True and tool execution fails
     """
@@ -43,21 +47,33 @@ def _react_intervention(context: HookContext, intervention: str, execute_tools: 
             flags=re.DOTALL,
         ).strip()
 
-    # Wrap in thought tags
-    if not intervention.startswith("<thought>"):
-        intervention = f"<thought>{intervention}</thought>"
+        # Wrap in thought tags
+        if not intervention.startswith("<thought>"):
+            intervention = f"<thought>{intervention}</thought>"
 
-    context.messages.append(LiteLLMMessage(role="assistant", content=intervention))
+        context.messages.append(LiteLLMMessage(role="assistant", content=intervention))
+        return
 
-    # Execute tools if requested
-    if execute_tools:
-        actions = _parse_react_actions(intervention)
+    # Interleaved execution: split intervention into thought-action segments
+    # Split on <thought> tags to get individual reasoning steps
+    segments = re.split(r"(?=<thought>)", intervention)
+
+    for _segment in segments:
+        segment = _segment.strip()
+        if not segment:
+            continue
+
+        # Append this thought-action segment as assistant message
+        context.messages.append(LiteLLMMessage(role="assistant", content=segment))
+
+        # Execute any tools in this segment
+        actions = _parse_react_actions(segment)
 
         # Check if actions were intended but couldn't be parsed
-        if not actions and "<action>" in intervention:
+        if not actions and "<action>" in segment:
             raise CriticalHookError(
                 "Failed to parse intervention actions despite execute_tools=True. "
-                "Intervention contains <action> tags but parsing failed."
+                f"Segment contains <action> tags but parsing failed: {segment[:200]}"
             )
 
         for action in actions:
