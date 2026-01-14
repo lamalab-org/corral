@@ -189,7 +189,8 @@ class CorralRouter:
             task_name: Optional custom name for the task.
 
         Returns:
-            Dictionary with 'output_path' (task .tex) and 'tools_output_path' (tools .tex).
+            Dictionary with 'output_path' (task .tex), 'tools_output_path' (tools .tex),
+            and 'scoring_output_path' (scoring functions .tex, may be None).
         """
         payload = {
             "output_dir": output_dir,

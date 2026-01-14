@@ -486,7 +486,9 @@ class CorralRunner:
                 )
                 logger.debug(
                     f"Generated LaTeX for task {task_id}: "
-                    f"task={result.get('output_path')}, tools={result.get('tools_output_path')}"
+                    f"task={result.get('output_path')}, "
+                    f"tools={result.get('tools_output_path')}, "
+                    f"scoring={result.get('scoring_output_path')}"
                 )
             except Exception as e:
                 logger.warning(f"Failed to generate LaTeX for task {task_id}: {e}")

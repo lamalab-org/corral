@@ -1,3 +1,4 @@
+import inspect
 import time
 from abc import ABC, abstractmethod
 from copy import deepcopy
@@ -411,13 +412,113 @@ class Environment(ABC):
 
         return "No external app/service configuration needed for this trial."
 
+    def _extract_scoring_fn_details(self, fn: Any) -> dict[str, Any]:
+        """
+        Extract details from a scoring function for LaTeX documentation.
+
+        Args:
+            fn: The scoring function to extract details from
+
+        Returns:
+            Dictionary with name, description, arguments, and returns info
+        """
+        fn_name = fn.__name__ if hasattr(fn, "__name__") else str(fn)
+        docstring = fn.__doc__ or ""
+
+        # Parse docstring to extract description, args, and returns
+        description = ""
+        args_section = ""
+        returns_section = ""
+
+        if docstring:
+            lines = docstring.strip().split("\n")
+            current_section = "description"
+            description_lines = []
+            args_lines = []
+            returns_lines = []
+
+            for line in lines:
+                stripped = line.strip()
+                if stripped.lower().startswith("args:"):
+                    current_section = "args"
+                    continue
+                if stripped.lower().startswith("returns:"):
+                    current_section = "returns"
+                    continue
+                if stripped.lower().startswith("raises:"):
+                    current_section = "raises"
+                    continue
+
+                if current_section == "description":
+                    description_lines.append(line)
+                elif current_section == "args":
+                    args_lines.append(line)
+                elif current_section == "returns":
+                    returns_lines.append(line)
+
+            description = "\n".join(description_lines).strip()
+            args_section = "\n".join(args_lines).strip()
+            returns_section = "\n".join(returns_lines).strip()
+
+        # Extract arguments from signature
+        structured_args = []
+        try:
+            sig = inspect.signature(fn)
+            for param_name, param in sig.parameters.items():
+                arg_type = ""
+                if param.annotation != inspect.Parameter.empty:
+                    arg_type = (
+                        param.annotation.__name__
+                        if hasattr(param.annotation, "__name__")
+                        else str(param.annotation)
+                    )
+
+                required = param.default == inspect.Parameter.empty
+                default = (
+                    None if param.default == inspect.Parameter.empty else param.default
+                )
+
+                # Try to find description in docstring args section
+                arg_description = ""
+                if args_section:
+                    # Look for pattern like "param_name (type): description" or "param_name: description"
+                    for raw_arg_line in args_section.split("\n"):
+                        stripped_arg_line = raw_arg_line.strip()
+                        if stripped_arg_line.startswith(param_name):
+                            # Extract description after the colon
+                            if ":" in stripped_arg_line:
+                                arg_description = stripped_arg_line.split(":", 1)[
+                                    1
+                                ].strip()
+                            break
+
+                structured_args.append(
+                    {
+                        "name": param_name,
+                        "type": arg_type,
+                        "description": arg_description,
+                        "required": required,
+                        "default": default,
+                    }
+                )
+        except (ValueError, TypeError):
+            # If we can't get signature, just use empty args
+            pass
+
+        return {
+            "name": fn_name,
+            "description": description,
+            "arguments": structured_args,
+            "returns": returns_section,
+        }
+
     def to_latex(
         self,
         output_dir: str,
         level: int | str,
         env_name: str | None = None,
         task_name: str | None = None,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, str | None]:
         """
         Generate LaTeX documentation for this task.
 
@@ -439,7 +540,7 @@ class Environment(ABC):
             task_name: Optional custom name for the task (defaults to task_id)
 
         Returns:
-            Tuple of (task_tex_path, tools_tex_path) - paths to the generated .tex files
+            Tuple of (task_tex_path, tools_tex_path, scoring_tex_path) - paths to the generated .tex files
         """
         from corral.router.verbosity import ToolVerbosity, VerbosityConfig
         from corral.utils.code2latex import CacheMetadata, Code2Latex
@@ -538,4 +639,40 @@ class Environment(ABC):
             output_dir=output_dir,
         )
 
-        return task_tex_path, tools_tex_path
+        # Collect scoring functions from all tasks in the task group
+        scoring_fns_details = []
+        seen_scoring_fns = set()  # Track by function name to deduplicate
+
+        if hasattr(self, "task_group") and self.task_group is not None:
+            for task in self.task_group.tasks.values():
+                if task.scoring_fn is not None:
+                    fn = task.scoring_fn
+                    fn_name = fn.__name__ if hasattr(fn, "__name__") else str(fn)
+
+                    # Skip if we've already processed this function
+                    if fn_name in seen_scoring_fns:
+                        continue
+                    seen_scoring_fns.add(fn_name)
+
+                    # Extract function details
+                    fn_details = self._extract_scoring_fn_details(fn)
+                    scoring_fns_details.append(fn_details)
+        else:
+            # Single task environment - use self.score method
+            if hasattr(self, "score") and callable(self.score):
+                fn = self.score
+                fn_name = fn.__name__ if hasattr(fn, "__name__") else "score"
+                if fn_name not in seen_scoring_fns:
+                    fn_details = self._extract_scoring_fn_details(fn)
+                    scoring_fns_details.append(fn_details)
+
+        # Generate LaTeX via Code2Latex.scoring_longtable for scoring functions
+        scoring_tex_path = None
+        if scoring_fns_details:
+            scoring_tex_path = Code2Latex.scoring_longtable(
+                scoring_functions=scoring_fns_details,
+                metadata=metadata,
+                output_dir=output_dir,
+            )
+
+        return task_tex_path, tools_tex_path, scoring_tex_path

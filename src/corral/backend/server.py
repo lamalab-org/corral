@@ -305,7 +305,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
                 - task_name: Optional custom name for the task
 
         Returns:
-            Paths to the generated .tex files (task_path and tools_path)
+            Paths to the generated .tex files (task_path, tools_path, and scoring_path)
         """
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -313,7 +313,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         env = environments[task_id]
 
         try:
-            task_path, tools_path = env.to_latex(
+            task_path, tools_path, scoring_path = env.to_latex(
                 output_dir=request.output_dir,
                 level=request.level,
                 env_name=request.env_name,
@@ -324,6 +324,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
                 "task_id": task_id,
                 "output_path": task_path,
                 "tools_output_path": tools_path,
+                "scoring_output_path": scoring_path,
             }
         except Exception as e:
             raise HTTPException(
