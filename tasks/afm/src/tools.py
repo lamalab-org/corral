@@ -406,7 +406,9 @@ def Image_optimizer(baseline: bool = False) -> str:
 
     finally:
         pass
-
+        if pythoncom:
+            pythoncom.CoUninitialize()
+    
     return f"Best solution found: \n[Pgain Igain Dgain] = {res.X}\n[Error] = {res.F}"
 
 
