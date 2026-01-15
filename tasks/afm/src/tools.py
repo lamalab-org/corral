@@ -11,11 +11,10 @@ import os
 import time
 from pathlib import Path
 from typing import Any
-
+import platform
 import matplotlib.pyplot as plt
 import nanosurf
 import numpy as np
-import pythoncom
 from loguru import logger
 from NSFopen.read import read
 from pymoo.algorithms.soo.nonconvex.ga import GA
@@ -25,6 +24,14 @@ from pymoo.termination import get_termination
 from aila_image_process import *  # noqa: F403
 from corral.backend.tool import tool
 from tool_utils import Document_Retriever, MyProblem
+
+# ----------------------------------------------------------
+# Safe pythoncom import (Windows only)
+# ----------------------------------------------------------
+if platform.system() == "Windows":
+    import pythoncom
+else:
+    pythoncom = None
 
 
 @tool
@@ -130,7 +137,8 @@ def visualize_grain_boxes(image_path: str) -> list:
     ax.set_title("Grains with Bounding Boxes")
 
     # Save to file
-    pythoncom.CoInitialize()
+    if pythoncom:
+            pythoncom.CoInitialize()
     spm = nanosurf.SPM()
     application = spm.application
     current_path = application.GetGalleryHistoryDirectoryPath
@@ -141,7 +149,8 @@ def visualize_grain_boxes(image_path: str) -> list:
     del application
     del spm
     gc.collect()
-    pythoncom.CoUninitialize()
+    if pythoncom:
+            pythoncom.CoInitialize()
 
     return box_coords
 
@@ -210,7 +219,8 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
     [/LIMITATIONS]
     """
 
-    pythoncom.CoInitialize()
+    if pythoncom:
+            pythoncom.CoInitialize()
 
     # Use absolute path as key for consistency
 
@@ -384,7 +394,8 @@ def Image_optimizer(baseline: bool = False) -> str:
         )
 
     try:
-        pythoncom.CoInitialize()
+        if pythoncom:
+            pythoncom.CoInitialize()
 
         problem = MyProblem(baseline=baseline)
 
@@ -480,7 +491,8 @@ def Code_Executor(code: str) -> int:
     """
     try:
         # Execute the code
-        pythoncom.CoInitialize()
+        if pythoncom:
+            pythoncom.CoInitialize()
         exec(code)
         para = get_params()
         output = f"Code executed successfully with current AFM parameters: {para}"
@@ -665,7 +677,8 @@ def Image_Analyzer(
 
 
 def get_params():
-    pythoncom.CoInitialize()
+    if pythoncom:
+            pythoncom.CoInitialize()
     spm = nanosurf.SPM()
     application = spm.application
     scan = application.Scan
@@ -708,5 +721,6 @@ def get_params():
     del scan
     del application
     del spm
-    pythoncom.CoUninitialize()
+    if pythoncom:
+            pythoncom.CoInitialize()
     return params
