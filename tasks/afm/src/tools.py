@@ -150,7 +150,7 @@ def visualize_grain_boxes(image_path: str) -> list:
     del spm
     gc.collect()
     if pythoncom:
-            pythoncom.CoInitialize()
+            pythoncom.CoUninitialize()
 
     return box_coords
 

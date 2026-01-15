@@ -249,7 +249,7 @@ class AFMEnvironment(Environment):
         del spm
         gc.collect()
         if pythoncom:
-            pythoncom.CoInitialize()
+            pythoncom.CoUninitialize()
 
     def reset_state(self) -> str:
         """Reset state and update file tools for new workspace"""

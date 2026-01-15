@@ -308,7 +308,7 @@ def get_params():
     del spm
     gc.collect()
     if pythoncom:
-            pythoncom.CoInitialize()
+            pythoncom.CoUninitialize()
     return params
 
 
