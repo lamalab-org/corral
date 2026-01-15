@@ -221,48 +221,50 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
 
     if pythoncom:
             pythoncom.CoInitialize()
+    try:
+        # Use absolute path as key for consistency
 
-    # Use absolute path as key for consistency
+        # Query current scan parameters from the SPM
+        spm = nanosurf.SPM()
+        application = spm.application
+        current_working_directory = application.GetGalleryHistoryDirectoryPath
+        scan = application.Scan
+        current_size = (scan.ImageWidth * 1e9, scan.ImageHeight * 1e9)
+        current_center = (scan.CenterPosX * 1e9, scan.CenterPosY * 1e9)
 
-    # Query current scan parameters from the SPM
-    spm = nanosurf.SPM()
-    application = spm.application
-    current_working_directory = application.GetGalleryHistoryDirectoryPath
-    scan = application.Scan
-    current_size = (scan.ImageWidth * 1e9, scan.ImageHeight * 1e9)
-    current_center = (scan.CenterPosX * 1e9, scan.CenterPosY * 1e9)
+        # Process the image and compute subscan parameters
+        _boxes, extents, _Z_flat2, labeled = image_process(image_path)  # noqa: F405
 
-    # Process the image and compute subscan parameters
-    _boxes, extents, _Z_flat2, labeled = image_process(image_path)  # noqa: F405
+        params = get_subscan_parameters(  # noqa: F405
+            grain_id=grain_id,
+            labeled_mask=labeled,
+            extents=extents,
+            current_center=current_center,
+            current_size=current_size,
+        )
 
-    params = get_subscan_parameters(  # noqa: F405
-        grain_id=grain_id,
-        labeled_mask=labeled,
-        extents=extents,
-        current_center=current_center,
-        current_size=current_size,
-    )
+        # Update scan settings
+        scan.ImageWidth = params["width"] * 1e-9
+        scan.ImageHeight = params["height"] * 1e-9
+        scan.CenterPosX = params["center_x"] * 1e-9
+        scan.CenterPosY = params["center_y"] * 1e-9
+        scan.StartFrameUp()
 
-    # Update scan settings
-    scan.ImageWidth = params["width"] * 1e-9
-    scan.ImageHeight = params["height"] * 1e-9
-    scan.CenterPosX = params["center_x"] * 1e-9
-    scan.CenterPosY = params["center_y"] * 1e-9
-    scan.StartFrameUp()
+        # Wait while scanning is in progress
+        while scan.IsScanning:
+            logger.info("Scanning in progress...")
+            time.sleep(5)
 
-    # Wait while scanning is in progress
-    while scan.IsScanning:
-        logger.info("Scanning in progress...")
-        time.sleep(5)
+        nid_files = list(Path(current_working_directory).glob("*.nid"))
+        if not nid_files:
+            raise FileNotFoundError("No .nid files found after scan.")
+        latest_nid = max(nid_files, key=os.path.getmtime)
 
-    nid_files = list(Path(current_working_directory).glob("*.nid"))
-    if not nid_files:
-        raise FileNotFoundError("No .nid files found after scan.")
-    latest_nid = max(nid_files, key=os.path.getmtime)
-
-    logger.info(f"Scan complete. Latest saved .nid file: {latest_nid}")
-    return latest_nid
-
+        logger.info(f"Scan complete. Latest saved .nid file: {latest_nid}")
+        return latest_nid
+    finally:
+        if pythoncom:
+            pythoncom.CoUninitialize()
 
 @tool
 def Document_Retrieval(query: str) -> str:
@@ -502,6 +504,9 @@ def Code_Executor(code: str) -> int:
         return output
     except Exception as e:
         raise Exception(f"An error occurred during code execution: {e}") from e
+    finally:
+        if pythoncom:
+            pythoncom.CoUninitialize()
 
 
 @tool
