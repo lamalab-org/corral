@@ -1,9 +1,12 @@
 """Tools for kinetic model fitting and analysis."""
 
 import base64
+import copy
+import glob
 import io
 import json
 import os
+import re
 import threading
 import time
 import warnings
@@ -11,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from litellm import completion
 import h5py
 import matplotlib
 import matplotlib.pyplot as plt
@@ -22,6 +26,7 @@ from scipy.optimize import differential_evolution
 from scipy.stats import linregress
 
 from corral.backend.tool import Tool, tool
+from kinetic_fitting.phenomenological_trends import generate_full_qualitative_assessment
 
 # Set matplotlib backend environment variables before any matplotlib imports
 os.environ["MPLBACKEND"] = "Agg"
@@ -41,7 +46,7 @@ _matplotlib_lock = threading.Lock()
 def _get_persistent_output_dir() -> Path:
     """Get or create persistent output directory for plots and results."""
     # Use the task directory's parent to ensure persistence across runs
-    output_dir = Path("persistent_outputs_results_occams_optimized_prompt")
+    output_dir = Path(os.environ["DIRECTORY"])
     output_dir.mkdir(exist_ok=True)
     return output_dir
 
@@ -117,6 +122,7 @@ def load_experimental_data(data_path: str) -> Dict[str, Any]:
         buffer_concentration: float
         pH: float
         buffer_used: int
+        photon_flux: Optional[float] = None
         annotations: str = ""
         color: str = "#ce1480"
 
@@ -196,7 +202,14 @@ def load_experimental_data(data_path: str) -> Dict[str, Any]:
                         exp_metadata_dict = dict(
                             f[f"{exp_name}/experiment_metadata"].attrs
                         )
-                        experiment_metadata = ExperimentMetadata(**exp_metadata_dict)
+                        # Handle potential missing fields gracefully
+                        valid_fields = ExperimentMetadata.__annotations__.keys()
+                        filtered_metadata = {
+                            k: v
+                            for k, v in exp_metadata_dict.items()
+                            if k in valid_fields
+                        }
+                        experiment_metadata = ExperimentMetadata(**filtered_metadata)
 
                         analysis_metadata_dict = dict(
                             f[f"{exp_name}/analysis_metadata"].attrs
@@ -244,6 +257,10 @@ def load_experimental_data(data_path: str) -> Dict[str, Any]:
                         "power_output": row.get("Power output [W/m^2]", 1000),
                         "pH": row.get("pH [-]", 7.0),
                         "irradiance": row.get("Power output [W/m^2]", 1000),
+                        # Try to get photon_flux from overview or fallback to experiment metadata
+                        "photon_flux": row.get(
+                            "photon_flux", exp_data.experiment_metadata.photon_flux
+                        ),
                     }
                 else:
                     # Fallback to experimental metadata (but may have unit issues)
@@ -253,6 +270,7 @@ def load_experimental_data(data_path: str) -> Dict[str, Any]:
                         "power_output": exp_data.experiment_metadata.power_output,
                         "pH": exp_data.experiment_metadata.pH,
                         "irradiance": exp_data.experiment_metadata.power_output,
+                        "photon_flux": exp_data.experiment_metadata.photon_flux,
                     }
             else:
                 # Fallback to experimental metadata
@@ -262,6 +280,7 @@ def load_experimental_data(data_path: str) -> Dict[str, Any]:
                     "power_output": exp_data.experiment_metadata.power_output,
                     "pH": exp_data.experiment_metadata.pH,
                     "irradiance": exp_data.experiment_metadata.power_output,
+                    "photon_flux": exp_data.experiment_metadata.photon_flux,
                 }
 
             data[exp_name] = {
@@ -291,6 +310,7 @@ def load_experimental_data(data_path: str) -> Dict[str, Any]:
                             "power_output": row.get("Power output [W/m^2]", 1000),
                             "pH": row.get("pH [-]", 7.0),
                             "irradiance": row.get("Power output [W/m^2]", 1000),
+                            "photon_flux": row.get("photon_flux", None),
                         }
 
                         # Try to get real time-series data from the HDF5 file
@@ -370,7 +390,11 @@ def create_ode_system(
     reaction_network: dict,
     experimental_conditions: dict,
 ) -> Tuple[Any, List[str], Dict[str, int]]:
-    """Convert reaction network to ODE system for integration."""
+    """
+    Convert reaction network to ODE system for integration.
+    UPDATED: Matches 'Script 2' physics with competitive absorption (Lambert-Beer).
+    UPDATED: Uses photon_flux if available for correct scaling.
+    """
     reactions = [Reaction.from_dict(r) for r in reaction_network["reactions"]]
 
     all_species = set()
@@ -380,41 +404,119 @@ def create_ode_system(
     species_list = sorted(all_species)
     species_idx = {sp: i for i, sp in enumerate(species_list)}
 
+    # Constants from Script 2 / HTE setup
+    PATHLENGTH = 2.25  # cm
+    EPSILON_RU_II = 8500.0  # M^-1 cm^-1
+    EPSILON_RU_III = 540.0  # M^-1 cm^-1
+    AVOGADRO_NUMBER = 6.022e23
+    VOLUME_L = PATHLENGTH * 1e-3  # Assuming 1 cm^2 area
+
     def ode_func(y: np.ndarray, t: float, params: dict, conditions: dict) -> np.ndarray:
         dydt = np.zeros_like(y)
 
+        # 1. Calculate Photochemistry Physics (Lambert-Beer & Competition)
+        # Convert uM (y) to M for absorbance calculation
+        c_ru_ii_M = y[species_idx["RuII"]] * 1e-6 if "RuII" in species_idx else 0
+        c_ru_iii_M = y[species_idx["RuIII"]] * 1e-6 if "RuIII" in species_idx else 0
+
+        # Total Absorbance (A_tot)
+        absorbance_tot = (
+            (c_ru_ii_M * EPSILON_RU_II) + (c_ru_iii_M * EPSILON_RU_III)
+        ) * PATHLENGTH
+
+        # Prevent division by zero if solution is perfectly clear
+        if absorbance_tot < 1e-9:
+            absorptance_factor = 0
+            fraction_ru_ii = 0
+            fraction_ru_iii = 0
+        else:
+            # Fraction of incident light absorbed (1 - 10^-A)
+            absorptance_factor = 1 - 10 ** (-absorbance_tot)
+
+            # Apportion photons based on contribution to absorbance
+            fraction_ru_ii = (c_ru_ii_M * EPSILON_RU_II * PATHLENGTH) / absorbance_tot
+            fraction_ru_iii = (
+                c_ru_iii_M * EPSILON_RU_III * PATHLENGTH
+            ) / absorbance_tot
+
+        # Incident Photon Flux Calculation
+        # We need the Volumetric Photon Flux in uM/s to match the ODE units.
+
+        if conditions.get("photon_flux") is not None:
+            # Case 1: Use provided photon_flux (photons/s)
+            # Convert photons/s -> mol/s -> M/s -> uM/s
+            photon_flux_photons_s = conditions["photon_flux"]
+            photon_flux_mol_s = photon_flux_photons_s / AVOGADRO_NUMBER
+            incident_flux_M_s = photon_flux_mol_s / VOLUME_L
+            incident_flux_uM_s = incident_flux_M_s * 1e6
+            incident_flux = incident_flux_uM_s
+
+        else:
+            # Case 2: Fallback to Irradiance (W/m^2)
+            # Estimate photon flux assuming 450nm light
+            irradiance_W_m2 = conditions.get("irradiance", 1000)
+            irradiance_W_cm2 = irradiance_W_m2 * 1e-4
+
+            # Energy of one 450nm photon in Joules
+            # E = h*c/lambda = 6.626e-34 * 3e8 / 450e-9
+            E_photon_J = 4.41e-19
+
+            photon_flux_approx = irradiance_W_cm2 / E_photon_J  # photons/s/cm^2
+
+            # Convert to Volumetric Flux (Flux_vol = Flux_area / Pathlength)
+            # Note: This assumes the irradiance is incident on the face of the cuvette
+            photon_flux_vol_photons_s_cm3 = photon_flux_approx / PATHLENGTH
+
+            # Convert to uM/s
+            # photons/s/cm3 -> mol/s/cm3 -> mol/s/L -> M/s -> uM/s
+            photon_flux_vol_mol_s_cm3 = photon_flux_vol_photons_s_cm3 / AVOGADRO_NUMBER
+            photon_flux_vol_M_s = photon_flux_vol_mol_s_cm3 * 1000  # 1000 cm3 = 1 L
+            incident_flux_uM_s = photon_flux_vol_M_s * 1e6
+
+            incident_flux = incident_flux_uM_s
+
         for i, rxn in enumerate(reactions):
+            rate = 0.0
+
             if rxn.type == "light":
-                quantum_yield = params[f"qy_{i}"]
-                irradiance = conditions.get("irradiance", 1000)
-                photon_flux_factor = irradiance / 1000
+                # Light Reaction Rate = Flux * Absorptance * Fraction_Species * Quantum_Yield
 
-                absorber = None
-                for reactant in rxn.reactants:
-                    if reactant != "hv" and reactant in species_idx:
-                        absorber = reactant
-                        break
+                # Identify the absorber based on reactants
+                is_ru_ii_absorber = "RuII" in rxn.reactants
+                is_ru_iii_absorber = "RuIII" in rxn.reactants
 
-                rate = (
-                    quantum_yield * photon_flux_factor * y[species_idx[absorber]]
-                    if absorber
-                    else 0
+                absorbed_flux = 0.0
+                if is_ru_ii_absorber:
+                    absorbed_flux = incident_flux * absorptance_factor * fraction_ru_ii
+                elif is_ru_iii_absorber:
+                    absorbed_flux = incident_flux * absorptance_factor * fraction_ru_iii
+
+                # Get quantum yield (or fitting parameter)
+                qy = params.get(
+                    f"qy_{i}", rxn.quantum_yield[0] if rxn.quantum_yield else 0.1
                 )
 
+                rate = absorbed_flux * qy
+
             else:
+                # Dark reactions (standard mass action)
                 k = params[f"k_{i}"]
                 rate = k
 
                 for reactant in rxn.reactants:
                     if reactant in species_idx:
+                        # Handle stoichiometry: 2 A -> ... means rate propto [A]^2
+                        stoich_coeff = 0
+                        # Count occurrence in reactants list (handled by Reaction class,
+                        # but simple check here for "2 RuIII")
                         if rxn.equation.startswith(f"2 {reactant}"):
                             rate *= y[species_idx[reactant]] ** 2
                         else:
                             rate *= y[species_idx[reactant]]
                     elif reactant in ["H2O", "H+"]:
-                        # Water and H+ are in large excess, treat as constants
-                        rate *= 1.0  # No concentration dependence
+                        rate *= 1.0
 
+            # Apply rate to stoichiometry
             for species, coeff in rxn.stoichiometry.items():
                 if species in species_idx:
                     dydt[species_idx[species]] += coeff * rate
@@ -429,23 +531,32 @@ def fit_reaction_network(
     oxygen_exp: np.ndarray,
     reaction_network: dict,
     experimental_conditions: dict,
-    maxiter: int = 300,  # Increased for better optimization
-    reference_params: dict = None,  # Optional reference parameters to seed optimization
+    maxiter: int = 300,
+    reference_params: dict = None,
 ) -> dict:
-    """Fit reaction network parameters to experimental oxygen evolution data."""
+    """
+    Fit reaction network parameters.
+    UPDATED: Fits 'Reaction Rate' (derivative) rather than cumulative O2.
+    UPDATED: Fixes Excited State Decay (k ~ 1.5e6) automatically.
+    """
     ode_func, species_list, species_idx = create_ode_system(
         reaction_network, experimental_conditions
     )
 
+    # 1. Setup Initial Conditions
     y0 = np.zeros(len(species_list))
     if "RuII" in species_idx:
         y0[species_idx["RuII"]] = experimental_conditions.get("c_Ru", 10)
     if "S2O8" in species_idx:
         y0[species_idx["S2O8"]] = experimental_conditions.get("c_S2O8", 6000)
 
+    # 2. Setup Parameters & Fixed Physics
     bounds = []
     param_names = []
     reactions = [Reaction.from_dict(r) for r in reaction_network["reactions"]]
+
+    # Identify fixed parameters (Script 2 fixes k8 = 1/650ns)
+    fixed_params = {}
 
     for i, rxn in enumerate(reactions):
         if rxn.type == "light":
@@ -456,9 +567,25 @@ def fit_reaction_network(
             bounds.append((np.log10(k_range[0]), np.log10(k_range[1])))
             param_names.append(f"k_{i}")
 
+    # 3. Calculate Experimental Rate (Derivative Fitting)
+    # Calculate d[O2]/dt from experimental data
+    # Smoothing is often required for experimental derivatives, but we use gradient for now
+    from scipy.signal import savgol_filter
+
+    y_diff = np.diff(oxygen_exp) / np.diff(time_exp)
+    savgol_window_factor = 5
+    rate_exp = savgol_filter(
+        oxygen_exp,
+        window_length=int(len(y_diff) / savgol_window_factor),
+        polyorder=3,
+        delta=time_exp[1] - time_exp[0],
+    )
+
     def objective(params_log: np.ndarray) -> float:
-        params_dict = {}
-        for name, val in zip(param_names, params_log):
+        params_dict = fixed_params.copy()
+
+        # Unpack optimized parameters
+        for name, val in zip(param_names, params_log, strict=True):
             if name.startswith("qy_"):
                 params_dict[name] = val
             else:
@@ -476,60 +603,31 @@ def fit_reaction_network(
                     atol=1e-8,
                 )
 
+            # Get predicted O2
             o2_pred = (
                 y_pred[:, species_idx["O2"]]
                 if "O2" in species_idx
                 else np.zeros_like(time_exp)
             )
 
-            # Multiple checks for poor solutions
-            o2_range = np.max(o2_pred) - np.min(o2_pred)
-            o2_max = np.max(o2_pred)
-            o2_mean = np.mean(o2_pred)
-            exp_range = np.max(oxygen_exp) - np.min(oxygen_exp)
-            exp_max = np.max(oxygen_exp)
+            # CALCULATE PREDICTED RATE (Derivative)
+            rate_pred = np.gradient(o2_pred, time_exp)
 
-            # Very harsh penalties for different types of bad solutions
-            penalty_factor = 0
+            # RSS on RATES, not concentrations
+            # This prioritizes the "shape" and "burst" over the final yield
+            rss = np.sum((rate_exp - rate_pred) ** 2)
 
-            # Penalty 1: Essentially zero solutions (all values near zero)
-            if o2_max < 0.01 * exp_max or o2_max < 0.05:
-                penalty_factor += 1e10  # Massive penalty for zero solutions
-
-            # Penalty 2: Flat line solutions (no dynamics)
-            elif o2_range < 0.02 * exp_range or o2_range < 0.2:
-                penalty_factor += 1e9  # Huge penalty for flat solutions
-
-            # Penalty 3: Solutions that don't reach reasonable magnitude
-            elif o2_max < 0.1 * exp_max:
-                penalty_factor += 1e8  # Large penalty for too-small solutions
-
-            # Penalty 4: Solutions with wrong trend (decreasing when should increase)
-            if len(o2_pred) > 2:
-                if o2_pred[-1] < o2_pred[1]:  # Final < early value
-                    penalty_factor += 1e7
-
-            if penalty_factor > 0:
-                rss = penalty_factor
-            else:
-                # Normal RSS calculation only for reasonable solutions
-                rss = np.sum((oxygen_exp - o2_pred) ** 2)
-
-                # Add smaller penalties for fine-tuning
-                if np.any(y_pred < -1e-6):
-                    rss += 1e5  # Penalty for negative concentrations
-
-                # Bonus for solutions that show proper growth curves
-                if o2_pred[-1] > 2 * o2_pred[0] and o2_range > 0.5 * exp_range:
-                    rss *= 0.9  # Small bonus for good growth behavior
+            # Sanity penalties
+            if np.max(o2_pred) < 0.05:
+                rss += 1e10  # Dead reaction penalty
 
             return rss
 
         except Exception:
-            return 1e10
+            return 1e15
 
+    # Optimization Routine (Same as before, just using new objective)
     try:
-        # Optionally seed with reference parameters if provided
         init_population = None
         if reference_params is not None:
             # Convert reference parameters to optimization space and create seed
@@ -559,30 +657,31 @@ def fit_reaction_network(
             objective,
             bounds,
             maxiter=maxiter,
-            popsize=15,  # Increased population size
+            popsize=15,
             seed=42,
             workers=1,
             updating="deferred",
-            disp=True,
+            disp=False,  # cleaner output
             atol=1e-6,
-            tol=0.01,  # Tightened tolerances
-            init=init_population if reference_params is not None else "latinhypercube",
+            tol=0.01,
         )
 
-        params_dict = {}
+        # Reconstruct full params
+        final_params = fixed_params.copy()
         for name, val in zip(param_names, result.x, strict=False):
             if name.startswith("qy_"):
-                params_dict[name] = val
+                final_params[name] = val
             else:
-                params_dict[name] = 10**val
+                final_params[name] = 10**val
 
+        # Generate final curves for return
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             y_final = odeint(
                 ode_func,
                 y0,
                 time_exp,
-                args=(params_dict, experimental_conditions),
+                args=(final_params, experimental_conditions),
                 rtol=1e-6,
                 atol=1e-8,
             )
@@ -593,93 +692,24 @@ def fit_reaction_network(
             else np.zeros_like(time_exp)
         )
 
-        # Check if this is a reasonable solution before returning success
-        o2_range = np.max(o2_pred) - np.min(o2_pred)
-        o2_max = np.max(o2_pred)
-        exp_range = np.max(oxygen_exp) - np.min(oxygen_exp)
-        exp_max = np.max(oxygen_exp)
-
-        # Determine if solution is acceptable
-        solution_acceptable = True
-        failure_reason = ""
-
-        if o2_max < 0.01 * exp_max or o2_max < 0.05:
-            solution_acceptable = False
-            failure_reason = "Solution essentially zero"
-        elif o2_range < 0.02 * exp_range or o2_range < 0.2:
-            solution_acceptable = False
-            failure_reason = "Solution is flat line"
-        elif o2_max < 0.1 * exp_max:
-            solution_acceptable = False
-            failure_reason = "Solution magnitude too small"
-        elif result.fun > 1e7:  # If RSS is very high (penalty was applied)
-            solution_acceptable = False
-            failure_reason = "High RSS indicates penalty was applied"
-
-        # Calculate R² only for reasonable solutions
-        if solution_acceptable:
-            residuals = oxygen_exp - o2_pred
-            r2 = 1 - np.sum(residuals**2) / np.sum(
-                (oxygen_exp - np.mean(oxygen_exp)) ** 2
-            )
-
-            # Additional R² check
-            if r2 < -1.0:  # R² shouldn't be extremely negative
-                solution_acceptable = False
-                failure_reason = f"R² too negative: {r2:.3f}"
-        else:
-            r2 = -999.0  # Clearly bad R²
-
-        # Save detailed parameter information to persistent directory
-        persistent_dir = _get_persistent_output_dir()
-
-        # Add network diagnosis
-        network_diagnosis = _diagnose_network_issues(
-            reaction_network, experimental_conditions
-        )
-
-        param_info = {
-            "params": params_dict,
-            "rss": result.fun,
-            "r2": r2,
-            "success": result.success and solution_acceptable,
-            "failure_reason": failure_reason if not solution_acceptable else "",
-            "o2_range": o2_range,
-            "o2_max": o2_max,
-            "exp_conditions": experimental_conditions,
-            "species_list": species_list,
-            "species_idx": species_idx,
-            "optimization_result": {
-                "converged": result.success,
-                "nfev": getattr(result, "nfev", "N/A"),
-                "nit": getattr(result, "nit", "N/A"),
-                "message": getattr(result, "message", "N/A"),
-            },
-            "bounds_used": bounds,
-            "param_names": param_names,
-            "network_diagnosis": network_diagnosis,
-            "reaction_network": reaction_network,
-        }
-
-        # Save to timestamped file
-        timestamp = int(time.time())
-        param_file = persistent_dir / f"fit_params_{timestamp}.json"
-        with open(param_file, "w") as f:
-            json.dump(param_info, f, indent=2, default=str)
+        # Calculate R2 based on RATES, matching the optimization target
+        rate_pred = np.gradient(o2_pred, time_exp)
+        residuals = rate_exp - rate_pred
+        r2 = 1 - np.sum(residuals**2) / np.sum((rate_exp - np.mean(rate_exp)) ** 2)
 
         return {
-            "params": params_dict,
+            "params": final_params,
             "rss": result.fun,
             "r2": r2,
-            "y_pred": o2_pred.tolist(),
-            "success": result.success and solution_acceptable,
+            "y_pred": o2_pred.tolist(),  # Return conc for plotting
+            "rate_pred": rate_pred.tolist(),  # Optional: return rates
+            "success": result.success,
             "species_list": species_list,
             "full_solution": y_final.tolist(),
             "species_idx": species_idx,
-            "failure_reason": failure_reason if not solution_acceptable else "",
-            "o2_range": o2_range,
-            "o2_max": o2_max,
-            "param_file": str(param_file),
+            "failure_reason": "" if result.success else "Optimization failed",
+            "o2_range": np.max(o2_pred) - np.min(o2_pred),
+            "o2_max": np.max(o2_pred),
         }
 
     except Exception as e:
@@ -689,11 +719,7 @@ def fit_reaction_network(
             "r2": -999.0,
             "y_pred": np.zeros_like(time_exp).tolist(),
             "success": False,
-            "species_list": species_list,
             "error": str(e),
-            "failure_reason": f"Exception during fitting: {e!s}",
-            "o2_range": 0.0,
-            "o2_max": 0.0,
         }
 
 
@@ -722,20 +748,15 @@ def _score_ru_trend(rates_vs_ru: dict) -> float:
 def _score_s2o8_trend(rates_vs_s2o8: dict) -> float:
     """Score S2O8 trend (monotonic increase with saturation)."""
     if len(rates_vs_s2o8) < 3:
-        return 0.5
+        return 0.0
 
     concentrations = np.array(sorted(rates_vs_s2o8.keys()))
     rates = np.array([np.mean(rates_vs_s2o8[c]) for c in concentrations])
 
-    monotonic_score = float(np.all(np.diff(rates) >= 0))
-
-    if len(rates) >= 3:
-        slopes = np.diff(rates)
-        saturation_score = float(slopes[-1] < slopes[0])
-    else:
-        saturation_score = 0.5
-
-    return (monotonic_score + saturation_score) / 2
+    # Binary score: 1.0 if rate at highest concentration > rate at lowest concentration
+    if rates[-1] > rates[0]:
+        return 1.0
+    return 0.0
 
 
 def _score_irradiance_trend(rates_vs_irradiance: dict) -> float:
@@ -882,7 +903,6 @@ def _create_fit_plot(
 def _create_phenomenological_plots(
     trends,
     trends_original,
-    output_path="phenomenological_trends.png",
 ):
     """
     Creates and saves plots comparing model-predicted trends with original experimental trends.
@@ -890,7 +910,6 @@ def _create_phenomenological_plots(
     Args:
         trends (dict): Dictionary of trends calculated from model predictions.
         trends_original (dict): Dictionary of trends calculated from original data.
-        output_path (str): Path to save the output plot image.
 
     Returns:
         str: A message indicating that the plot has been saved.
@@ -958,7 +977,10 @@ def _create_phenomenological_plots(
         _get_persistent_output_dir() / Path(f"phenomenological_trends_{timestamp}.png")
     )
     plt.close()
-    return f"\nPhenomenological trend plots saved to: '{_get_persistent_output_dir() / Path(f'phenomenological_trends_{timestamp}.png')}'"
+    return (
+        f"\nPhenomenological trend plots saved to: '{_get_persistent_output_dir() / Path(f'phenomenological_trends_{timestamp}.png')}'",
+        Path(f"phenomenological_trends_{timestamp}.png"),
+    )
 
 
 def _diagnose_network_issues(network: dict, sample_conditions: dict) -> str:
@@ -1073,12 +1095,16 @@ def get_current_network(network_path: str) -> str:
     Args:
         network_path: Path to reaction network JSON file
     """
+
+    persistent_dir = _get_persistent_output_dir()
+    persistent_network_path = persistent_dir / "current_network.json"
+
     try:
-        network = load_reaction_network(network_path)
+        network = load_reaction_network(persistent_network_path)
     except FileNotFoundError:
         # Create default network if it doesn't exist
         network = initialize_default_network()
-        save_reaction_network(network_path, network)
+        save_reaction_network(persistent_network_path, network)
     except Exception as e:
         return f"Error loading network: {e}"
 
@@ -1096,28 +1122,28 @@ def get_current_network(network_path: str) -> str:
 
 
 @tool
-def fit_single_experiment(
-    data_path: str, network_path: str, results_path: str, exp_name: str
-) -> str:
+def fit_single_experiment(data_path: str, results_path: str, exp_name: str) -> str:
     """Fit current reaction network to a single experiment.
 
     Args:
         data_path: Path to experimental data HDF5 file
-        network_path: Path to reaction network JSON file
         results_path: Path to save fit results JSON file
         exp_name: Name of the experiment to fit
     """
+    persistent_dir = _get_persistent_output_dir()
+    persistent_network_path = persistent_dir / "current_network.json"
+
     try:
         data = load_experimental_data(data_path)
         if exp_name not in data:
             return f"Error: Experiment {exp_name} not found"
 
         try:
-            network = load_reaction_network(network_path)
+            network = load_reaction_network(persistent_network_path)
         except FileNotFoundError:
             # Create default network if it doesn't exist
             network = initialize_default_network()
-            save_reaction_network(network_path, network)
+            save_reaction_network(persistent_network_path, network)
 
         exp_data = data[exp_name]
 
@@ -1179,13 +1205,11 @@ def fit_single_experiment(
         #     json.dump(all_results, f, indent=2)
         import time  # noqa: PLC0415
 
-        # Also save to persistent directory
-        persistent_results_path = persistent_dir / "fit_results.json"
-        with open(persistent_results_path, "w") as f:
+        fit_results_file = persistent_dir / f"fit_results.json.{int(time.time())}"
+
+        with open(fit_results_file, "w") as f:
             json.dump(all_results, f, indent=2)
 
-        with open(persistent_dir / f"fit_results.json.{int(time.time())}", "w") as f:
-            json.dump(all_results, f, indent=2)
         # Report parameter file location
         param_file = result.get("param_file", "N/A")
 
@@ -1198,6 +1222,7 @@ def fit_single_experiment(
             f"  O₂ range: {result.get('o2_range', 'N/A'):.4f} µM\n"
             f"  Plot saved to: {plot_filename}\n"
             f"  Parameters saved to: {param_file}\n"
+            f"  Fit results saved to: {fit_results_file}\n"
             f"  Persistent directory: {persistent_dir}"
         )
 
@@ -1211,15 +1236,31 @@ def fit_reaction_network_global(
     maxiter: int = 100,
 ) -> dict:
     """
-    Helper function to find a single set of parameters that best fits all
-    provided experiments simultaneously (Global Fit).
+    Global fit using Rate-based loss function.
     """
-    ode_func, species_list, species_idx = create_ode_system(reaction_network, {})
+    # Use valid conditions for setup
+    sample_key = next(iter(data))
+    ode_func, species_list, species_idx = create_ode_system(
+        reaction_network, data[sample_key]["metadata"]
+    )
 
     reactions = [Reaction.from_dict(r) for r in reaction_network["reactions"]]
     bounds = []
     param_names = []
+    fixed_params = {}
+
     for i, rxn in enumerate(reactions):
+        # Fix Decay Constant again
+        if (
+            rxn.type == "dark"
+            and "RuII_ex" in rxn.reactants
+            and "RuII" in rxn.products
+            and len(rxn.reactants) == 1
+        ):
+            decay_k = 1.0 / (650e-9)
+            fixed_params[f"k_{i}"] = decay_k
+            continue
+
         if rxn.type == "light":
             bounds.append(rxn.quantum_yield or (0.0, 1.0))
             param_names.append(f"qy_{i}")
@@ -1229,7 +1270,7 @@ def fit_reaction_network_global(
             param_names.append(f"k_{i}")
 
     def global_objective(params_log: np.ndarray) -> float:
-        params_dict = {}
+        params_dict = fixed_params.copy()
         for name, val in zip(param_names, params_log, strict=False):
             if name.startswith("qy_"):
                 params_dict[name] = val
@@ -1241,6 +1282,9 @@ def fit_reaction_network_global(
             meta = exp_data["metadata"]
             time_exp = np.array(exp_data["time"])
             oxygen_exp = np.array(exp_data["oxygen"])
+
+            # Calculate experimental Rate
+            rate_exp = np.gradient(oxygen_exp, time_exp)
 
             y0 = np.zeros(len(species_list))
             if "RuII" in species_idx:
@@ -1265,11 +1309,12 @@ def fit_reaction_network_global(
                     else np.zeros_like(time_exp)
                 )
 
-                # Penalty for non-physical (zero/flat) solutions
-                if np.max(o2_pred) < 0.01 * np.max(oxygen_exp):
-                    total_rss += 1e7
-                else:
-                    total_rss += np.sum((oxygen_exp - o2_pred) ** 2)
+                # Calculate Predicted Rate
+                rate_pred = np.gradient(o2_pred, time_exp)
+
+                # Rate-based RSS
+                total_rss += np.sum((rate_exp - rate_pred) ** 2)
+
             except Exception:
                 total_rss += 1e15
         return total_rss
@@ -1278,7 +1323,7 @@ def fit_reaction_network_global(
         global_objective, bounds, maxiter=maxiter, popsize=15, seed=42, disp=True
     )
 
-    best_params = {}
+    best_params = fixed_params.copy()
     for name, val in zip(param_names, result.x, strict=False):
         if name.startswith("qy_"):
             best_params[name] = val
@@ -1289,17 +1334,19 @@ def fit_reaction_network_global(
 
 
 @tool
-def fit_all_experiments(data_path: str, network_path: str, results_path: str) -> str:
+def fit_all_experiments(data_path: str, results_path: str) -> str:
     """Fit current reaction network globally to all experiments.
 
     Args:
         data_path: Path to experimental data HDF5 file
-        network_path: Path to reaction network JSON file
         results_path: Path to save fit results JSON file
     """
+
+    persistent_dir = _get_persistent_output_dir()
+    persistent_network_path = persistent_dir / "current_network.json"
     try:
         data = load_experimental_data(data_path)
-        network = load_reaction_network(network_path)
+        network = load_reaction_network(persistent_network_path)
 
         # Perform global fit (one model for all)
         print(f"Starting global fit for {len(data)} experiments...")
@@ -1448,15 +1495,11 @@ def _calculate_magnitude_score(
 
 
 @tool
-def evaluate_phenomenological_trends(
-    data_path: str, network_path: str, results_path: str
-) -> str:
+def evaluate_phenomenological_trends(data_path: str) -> str:
     """Evaluate how well a single global model reproduces experimental trends.
 
     Args:
         data_path: Path to experimental data HDF5 file
-        network_path: Path to reaction network JSON file
-        results_path: Path to results JSON file (updated with trend scores)
     """
     try:
         data = load_experimental_data(data_path)
@@ -1466,7 +1509,7 @@ def evaluate_phenomenological_trends(
 
         # 1. Perform Global Fit
         print("Performing global fit for trend evaluation...")
-        global_result = fit_reaction_network_global(data, reaction_network, maxiter=100)
+        global_result = fit_reaction_network_global(data, reaction_network, maxiter=5)
         global_params = global_result["params"]
 
         ode_func, species_list, species_idx = create_ode_system(reaction_network, {})
@@ -1546,46 +1589,66 @@ def evaluate_phenomenological_trends(
             ]
         )
 
-        # Update results file
-        try:
-            with open(results_path) as f:
-                all_results = json.load(f)
-        except FileNotFoundError:
-            all_results = {}
+        # Get the best score from previous result files
+        best_previous_score = _get_best_previous_phenomenological_score()
 
-        all_results["phenomenological_trends"] = {
-            "ru_score": ru_score,
-            "s2o8_score": s2o8_score,
-            "irradiance_score": irr_score,
-            "pH_score": ph_score,
-            "overall_score": overall_score,
-            "global_params": global_params,
-            "components": {
-                "ru_shape": ru_shape,
-                "ru_mag": ru_mag,
-                "s2o8_shape": s2o8_shape,
-                "s2o8_mag": s2o8_mag,
+        # Determine the actual best score
+        if overall_score > best_previous_score:
+            best_phenomenological_score = overall_score
+            is_new_best = True
+        else:
+            best_phenomenological_score = best_previous_score
+            is_new_best = False
+
+        fitted_network = copy.deepcopy(reaction_network)
+        for i, rxn in enumerate(fitted_network["reactions"]):
+            if rxn.get("type") == "light":
+                param_key = f"qy_{i}"
+                if param_key in global_params:
+                    rxn["fitted_quantum_yield"] = global_params[param_key]
+            else:
+                param_key = f"k_{i}"
+                if param_key in global_params:
+                    rxn["fitted_k"] = global_params[param_key]
+
+        # Build results dict
+        all_results = {
+            "phenomenological_trends": {
+                "ru_score": ru_score,
+                "s2o8_score": s2o8_score,
+                "irradiance_score": irr_score,
+                "pH_score": ph_score,
+                "overall_score": overall_score,
+                "global_params": global_params,
+                "components": {
+                    "ru_shape": ru_shape,
+                    "ru_mag": ru_mag,
+                    "s2o8_shape": s2o8_shape,
+                    "s2o8_mag": s2o8_mag,
+                },
             },
+            "network": fitted_network,  # Now contains fitted_k and fitted_quantum_yield
+            "best_phenomenological_score": best_phenomenological_score,
         }
-
-        if overall_score > all_results.get("best_phenomenological_score", 0.0):
-            all_results["best_phenomenological_score"] = overall_score
-
-        # with open(results_path, "w") as f:
-        #     json.dump(all_results, f, indent=2)
 
         import time as timer
 
-        with open(
-            f"{_get_persistent_output_dir().as_posix()}/phenomenologic_result.json."
-            + str(int(timer.time())),
-            "w",
-        ) as f:
+        filename = f"{_get_persistent_output_dir().as_posix()}/phenomenologic_result.json.{int(timer.time())}"
+
+        with open(filename, "w") as f:
             json.dump(all_results, f, indent=2)
 
         plot_info = _create_phenomenological_plots(trends, trends_original)
 
+        best_score_status = (
+            "NEW BEST!" if is_new_best else "(best remains from previous run)"
+        )
+        qualitative_trend_evaluation = generate_full_qualitative_assessment(
+            trends, trends_original
+        )
+
         return (
+            f"Phenomenological trend scores saved at filename: {filename}\n"
             f"Phenomenological trend scores (Global Model):\n"
             f"  Overall score: {overall_score:.3f}\n"
             f"  Ru trend: {ru_score:.3f} (Shape: {ru_shape:.2f}, Mag: {ru_mag:.2f})\n"
@@ -1594,11 +1657,68 @@ def evaluate_phenomenological_trends(
             f"  pH trend: {ph_score:.3f} (Shape: {ph_shape:.2f}, Mag: {ph_mag:.2f})\n"
             f"Mean Absolute Errors (MAE) in Max Rate:\n{mae_report}\n\n"
             f"  Global Params used: {global_params}\n"
+            f"  *** Best Phenomenological Score: {best_phenomenological_score:.3f} {best_score_status} ***\n"
             f"{plot_info}"
+            f"{qualitative_trend_evaluation}"
         )
 
     except Exception as e:
         return f"Error evaluating trends: {e}"
+
+
+def _get_best_previous_phenomenological_score() -> float:
+    """Find the best phenomenological score from all previous result files.
+
+    Scans all phenomenologic_result.json.* files, extracts timestamps,
+    and returns the best score found across all files.
+
+    Returns:
+        The best phenomenological score found, or 0.0 if no files exist.
+    """
+    output_dir = _get_persistent_output_dir()
+    pattern = f"{output_dir.as_posix()}/phenomenologic_result.json.*"
+    result_files = glob.glob(pattern)
+
+    if not result_files:
+        return 0.0
+
+    best_score = 0.0
+
+    # Extract timestamps and sort files by timestamp (most recent last)
+    files_with_timestamps = []
+    for filepath in result_files:
+        # Extract timestamp from filename (e.g., phenomenologic_result.json.1234567890)
+        match = re.search(r"phenomenologic_result\.json\.(\d+)$", filepath)
+        if match:
+            timestamp = int(match.group(1))
+            files_with_timestamps.append((timestamp, filepath))
+
+    # Sort by timestamp
+    files_with_timestamps.sort(key=lambda x: x[0])
+
+    # Check all files to find the best score
+    for timestamp, filepath in files_with_timestamps:
+        try:
+            with open(filepath, "r") as f:
+                data = json.load(f)
+
+            # Check for best_phenomenological_score in the file
+            if "best_phenomenological_score" in data:
+                score = data["best_phenomenological_score"]
+                if score > best_score:
+                    best_score = score
+
+            # Also check the overall_score in phenomenological_trends
+            if "phenomenological_trends" in data:
+                overall = data["phenomenological_trends"].get("overall_score", 0.0)
+                if overall > best_score:
+                    best_score = overall
+
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Could not read {filepath}: {e}")
+            continue
+
+    return best_score
 
 
 @tool
@@ -1640,13 +1760,15 @@ def modify_reaction_network(
         modify_k_ranges: JSON string of dict {index: [new_min, new_max]}
         modify_quantum_yields: JSON string of dict {index: [new_min, new_max]}
     """
+    persistent_dir = _get_persistent_output_dir()
+    persistent_network_path = persistent_dir / "current_network.json"
     try:
         try:
-            network = load_reaction_network(network_path)
+            network = load_reaction_network(persistent_network_path)
         except FileNotFoundError:
             # Create default network if it doesn't exist
             network = initialize_default_network()
-            save_reaction_network(network_path, network)
+            save_reaction_network(persistent_network_path, network)
 
         changes = []
 
@@ -1704,7 +1826,7 @@ def modify_reaction_network(
                 changes.append(f"Added reaction: {rxn['equation']}")
 
         # Save modified network
-        save_reaction_network(network_path, network)
+        save_reaction_network(persistent_network_path, network)
 
         return (
             f"Modified reaction network:\n"
@@ -1719,7 +1841,6 @@ def modify_reaction_network(
 @tool
 def analyze_fit_with_vision(
     data_path: str,
-    network_path: str,
     exp_name: str,
     model: str = "claude-sonnet-4-5",
 ) -> str:
@@ -1727,22 +1848,23 @@ def analyze_fit_with_vision(
 
     Args:
         data_path: Path to experimental data HDF5 file
-        network_path: Path to current reaction network JSON
         exp_name: Name of experiment to analyze
         model: Vision model to use
     """
 
+    persistent_dir = _get_persistent_output_dir()
+    persistent_network_path = persistent_dir / "current_network.json"
     try:
         data = load_experimental_data(data_path)
         if exp_name not in data:
             return f"Error: Experiment {exp_name} not found"
 
         try:
-            network = load_reaction_network(network_path)
+            network = load_reaction_network(persistent_network_path)
         except FileNotFoundError:
             # Create default network if it doesn't exist
             network = initialize_default_network()
-            save_reaction_network(network_path, network)
+            save_reaction_network(persistent_network_path, network)
 
         exp_data = data[exp_name]
 
@@ -2126,37 +2248,49 @@ def initialize_default_network() -> Dict[str, Any]:
                 "equation": "RuII + hv -> RuII_ex",
                 "type": "light",
                 "quantum_yield": [0.1, 1.0],
-                "description": "Photoexcitation of Ru catalyst (\u03a6\u2081)",
+                "description": "Photoexcitation of Ru catalyst (k1)",
             },
             {
                 "equation": "RuII_ex -> RuII",
                 "type": "dark",
-                "k_range": [1538461.4384615384, 1538461.7384615385],
-                "description": "Excited state decay (k\u2088 = 1/650ns)",
+                "k_range": [1538461.5384615384, 1538461.5384615385],
+                "description": "Excited state decay (k8= 1/650ns)",
             },
             {
                 "equation": "RuII_ex + S2O8 -> RuIII + SO4",
                 "type": "dark",
                 "k_range": [1.0, 60.0],
-                "description": "Oxidative quenching (k\u2087)",
+                "description": "Oxidative quenching (k7)",
             },
             {
                 "equation": "RuIII + H2O + hv -> H2O2 + RuII + H+",
                 "type": "light",
                 "quantum_yield": [0.1, 1.0],
-                "description": "Light-driven water oxidation (\u03a6\u2082)",
+                "description": "Light-driven water oxidation (k2)",
             },
             {
                 "equation": "RuIII + RuIII -> Ru_Dimer",
                 "type": "dark",
-                "k_range": [0.01, 0.2],
-                "description": "Dimer formation (k\u2083)",
+                "k_range": [0.001, 0.1],
+                "description": "Dimer formation (k3)",
             },
             {
                 "equation": "H2O2 -> O2",
                 "type": "dark",
                 "k_range": [0.001, 0.5],
-                "description": "H2O2 decomposition to O2 (k\u2085)",
+                "description": "H2O2 decomposition to O2 (k5)",
+            },
+            {
+                "equation": "RuIII -> Inactive",
+                "type": "dark",
+                "k_range": [0.001, 0.5],
+                "description": "RuIII deactivation (k6)",
+            },
+            {
+                "equation": "RuIII + RuIII + Ru_Dimer -> Ru_Dimer + Ru_Dimer",
+                "type": "dark",
+                "k_range": [0.001, 0.1],
+                "description": "Autocatalytic dimer formation (k4)",
             },
         ],
         "metadata": {
@@ -2185,6 +2319,89 @@ def setup_working_directory(work_dir: str, data_path: str) -> None:
     #         json.dump({"experiments": {}, "best_phenomenological_score": 0.0}, f)
 
 
+def _find_latest_phenomenological_plot() -> Optional[Path]:
+    """Find the most recent phenomenological trends plot in the output directory."""
+    output_dir = _get_persistent_output_dir()
+    pattern = f"{output_dir.as_posix()}/phenomenological_trends_*.png"
+    plot_files = glob.glob(pattern)
+
+    if not plot_files:
+        return None
+
+    files_with_timestamps = []
+    for filepath in plot_files:
+        match = re.search(r"phenomenological_trends_(\d+)\.png$", filepath)
+        if match:
+            timestamp = int(match.group(1))
+            files_with_timestamps.append((timestamp, Path(filepath)))
+
+    if not files_with_timestamps:
+        return None
+
+    files_with_timestamps.sort(key=lambda x: x[0], reverse=True)
+    return files_with_timestamps[0][1]
+
+
+@tool
+def analyse_last_phenomenological_trends_image_with_vision(
+    model: str = "gpt-4o",
+) -> str:
+    """Analyze the latest phenomenological trends plot using a vision model.
+
+    Args:
+        model: Vision model to use for analysis
+    """
+    try:
+        latest_plot = _find_latest_phenomenological_plot()
+
+        with open(latest_plot, "rb") as f:
+            plot_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        prompt = """Analyze this 4-panel comparison of model (red dashed) vs experiment (blue solid).
+
+        Top-left (Ru concentration):
+        - Does the model show a maximum? At what concentration?
+        - Does the model capture inhibition at high [Ru]?
+
+        Top-right (S2O8 concentration):
+        - Does the model saturate or keep increasing?
+        - Where does saturation begin vs experiment?
+
+        Bottom-left (Irradiance):
+        - Is the relationship linear for both?
+        - Does the slope match?
+
+        Bottom-right (pH):
+        - Where is the experimental optimum pH?
+        - Does the model show pH dependence at all?
+
+        General:
+        - Which parameter shows the worst agreement?
+        - Is there a systematic offset (model always below/above)?
+        - At what parameter ranges do the largest deviations occur (low, mid, high)?"""
+
+        response = completion(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{plot_b64}"},
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+        )
+
+        return f"Plot: {latest_plot.name}\n\n{response.choices[0].message.content}"
+
+    except Exception as e:
+        return f"Vision analysis failed: {e}"
+
+
 def create_tools() -> dict[str, Tool]:
     """Create and return all available tools."""
     return {
@@ -2195,4 +2412,5 @@ def create_tools() -> dict[str, Tool]:
         "evaluate_phenomenological_trends": evaluate_phenomenological_trends,
         "modify_reaction_network": modify_reaction_network,
         "analyze_fit_with_vision": analyze_fit_with_vision,
+        "analyse_last_phenomenological_trends_image_with_vision": analyse_last_phenomenological_trends_image_with_vision,
     }  # type: ignore
