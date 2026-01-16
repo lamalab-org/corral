@@ -409,6 +409,8 @@ def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
         else:
             message_dict = {"role": msg.role, "content": msg.content}
 
+            if hasattr(msg, "id") and msg.id:
+                message_dict["id"] = msg.id
             if hasattr(msg, "tool_call_id") and msg.tool_call_id:
                 message_dict["tool_call_id"] = msg.tool_call_id
             if hasattr(msg, "name") and msg.name:

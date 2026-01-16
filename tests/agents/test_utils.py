@@ -51,8 +51,8 @@ class MockLiteLLMResponse:
     def __init__(self, include_usage=False):
         self.choices = [MockLiteLLMChoice()]
         self.id = "mock_response_id"
-        if include_usage:
-            self.usage = MockLiteLLMUsage()
+        # Always have usage attribute, but set to None if not included
+        self.usage = MockLiteLLMUsage() if include_usage else None
 
 
 class MockLiteLLMUsage:
@@ -818,7 +818,7 @@ def test_serialize_messages_with_tool_calls():
 def test_serialize_messages_with_id():
     """Test serializing messages with id field."""
     mock_message = MockSerializableMessage(
-        role="assistant", content="Hi there", id="msg_12345"
+        role="assistant", content="Hi there", msg_id="msg_12345"
     )
 
     result = serialize_messages([mock_message])
