@@ -154,7 +154,11 @@ class ToolCallingAgent(BaseAgent):
                         if surrender_match:
                             logger.info(f"Agent retiring from task {task_id}")
                             self.messages.append(
-                                LiteLLMMessage(role="assistant", content=content)
+                                LiteLLMMessage(
+                                    role="assistant",
+                                    content=content,
+                                    id=full_llm_response.id,
+                                )
                             )
                             return "GIVE UP"
 
@@ -169,13 +173,18 @@ class ToolCallingAgent(BaseAgent):
                     )
                     if final_answer_match:
                         self.messages.append(
-                            LiteLLMMessage(role="assistant", content=content)
+                            LiteLLMMessage(
+                                role="assistant", content=content, id=full_llm_response.id
+                            )
                         )
                         return final_answer_match.group(1).strip()
 
                 tool_calls = llm_response.tool_calls
                 if tool_calls:
-                    self.messages.append(llm_response)
+                    # Append the underlying message object with id from metadata
+                    message_with_id = llm_response.message
+                    message_with_id.id = full_llm_response.id
+                    self.messages.append(message_with_id)
 
                     for called_tool in tool_calls:
                         # Initialize variables for error handling
@@ -222,7 +231,11 @@ class ToolCallingAgent(BaseAgent):
                         )
                 else:
                     self.messages.append(
-                        LiteLLMMessage(role="assistant", content=llm_response.content)
+                        LiteLLMMessage(
+                            role="assistant",
+                            content=llm_response.content,
+                            id=full_llm_response.id,
+                        )
                     )
             except Exception as e:
                 # Append error message but continue with the next iteration

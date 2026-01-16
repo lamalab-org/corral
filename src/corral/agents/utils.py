@@ -35,18 +35,86 @@ TYPE_MAPPING = {
     "dict": "object",
 }
 
-
 def before_sleep_loguru(retry_state):
     logger.info(
         f"Retrying: {retry_state.attempt_number}, wait: {retry_state.next_action.sleep} seconds"
     )
 
 
+class LLMResponseMetadata(TypedDict, total=False):
+    """Metadata for LLM responses"""
+
+    id: str | None
+    logprobs: Any | None
+    usage: dict[str, int] | None
+
+
+
+class LLMResponse:
+    """
+    Wrapper for LLM responses with optional metadata.
+
+    This class wraps the raw LLM message response and includes optional metadata
+    like logprobs, message ID, and token usage.
+
+    Args:
+        message (Message): The raw LLM message response
+        metadata (LLMResponseMetadata | None): Optional metadata including logprobs, id, and usage
+
+    Properties:
+        content: Access message content
+        role: Access message role
+        tool_calls: Access tool calls (if any)
+        logprobs: Access logprobs from metadata
+        id: Access message ID from metadata
+        usage: Access token usage from metadata
+    """
+
+    def __init__(
+        self, message: Message, metadata: LLMResponseMetadata | None = None
+    ) -> None:
+        self.message = message
+        self.metadata = metadata or LLMResponseMetadata()
+
+    @property
+    def content(self) -> str | None:
+        """Get the message content"""
+        return self.message.content
+
+    @property
+    def role(self) -> str:
+        """Get the message role"""
+        return self.message.role
+
+    @property
+    def tool_calls(self) -> Any:
+        """Get tool calls from the message"""
+        return getattr(self.message, "tool_calls", None)
+
+    # Access to metadata
+    @property
+    def logprobs(self) -> Any:
+        """Get logprobs from metadata"""
+        return self.metadata.get("logprobs")
+
+    @property
+    def id(self) -> str | None:
+        """Get message ID from metadata"""
+        return self.metadata.get("id")
+
+    @property
+    def usage(self) -> dict[str, int] | None:
+        """Get token usage from metadata"""
+        return self.metadata.get("usage")
+    
+    
+
 class LiteLLMMessage(TypedDict, total=False):
     role: str
     content: str | list
     tool_call_id: str | None
     name: str | None
+    id: str | None 
 
 
 @retry(
@@ -62,9 +130,9 @@ def llm_call(
     temperature: float,
     tools: list[dict[str, Any]] | None = None,
     api_endpoint: str | None = None,
-    return_usage: bool = False,
+    return_usage: bool = True,
     **kwargs,
-) -> Message | tuple[Message, dict[str, Any]]:
+) -> LLMResponse:
     """
     Call LiteLLM API with or without tools based on parameters
 
@@ -74,11 +142,12 @@ def llm_call(
         temperature (float): The temperature to use.
         tools (dict[str, Any], optional): The tools to use. If provided, will use tool calling.
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
-        return_usage (bool, optional): If True, returns tuple of (message, usage_info). Defaults to False.
+        return_usage (bool, optional): If True, includes token usage in metadata. Defaults to True.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
+            If 'logprobs' is True in kwargs, logprobs will be included in response metadata.
 
     Returns:
-        Message | tuple[Message, dict]: The response from the LiteLLM API, optionally with usage info.
+        LLMResponse: Wrapper containing the message and optional metadata (id, logprobs if requested, usage).
     """
     try:
         params = {
@@ -105,8 +174,6 @@ def llm_call(
             response = litellm.completion(**params)
 
         message = response.choices[0].message
-        message.logprobs = response.choices[0].logprobs
-        message.id = response.id
 
         # If message content is None, try to get reasoning_content
         if message.content is None:
@@ -115,9 +182,16 @@ def llm_call(
                 # Ensure reasoning_content is a string
                 message.content = str(reasoning_content) if reasoning_content else None
 
+        metadata = LLMResponseMetadata()
+        metadata["id"] = response.id
+
+        # Include logprobs if requested via kwargs
+        if kwargs.get("logprobs"):
+            metadata["logprobs"] = response.choices[0].logprobs
+
+        # Include usage info if requested
         if return_usage:
-            # Extract usage information from the response
-            usage_info = {
+            metadata["usage"] = {
                 "prompt_tokens": getattr(response.usage, "prompt_tokens", 0)
                 if response.usage
                 else 0,
@@ -128,9 +202,8 @@ def llm_call(
                 if response.usage
                 else 0,
             }
-            return message, usage_info
 
-        return message
+        return LLMResponse(message, metadata)
 
     except Exception as e:
         raise e
