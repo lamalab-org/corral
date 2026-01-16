@@ -174,7 +174,9 @@ class ToolCallingAgent(BaseAgent):
                     if final_answer_match:
                         self.messages.append(
                             LiteLLMMessage(
-                                role="assistant", content=content, id=full_llm_response.id
+                                role="assistant",
+                                content=content,
+                                id=full_llm_response.id,
                             )
                         )
                         return final_answer_match.group(1).strip()

@@ -150,7 +150,10 @@ class LLMPlanner(BaseAgent):
 
             self.messages.append(
                 LiteLLMMessage(
-                    role="assistant", content=plan, name="high-level-planner", id=response.id
+                    role="assistant",
+                    content=plan,
+                    name="high-level-planner",
+                    id=response.id,
                 )
             )
             if plan is None:

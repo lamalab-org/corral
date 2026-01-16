@@ -35,6 +35,7 @@ TYPE_MAPPING = {
     "dict": "object",
 }
 
+
 def before_sleep_loguru(retry_state):
     logger.info(
         f"Retrying: {retry_state.attempt_number}, wait: {retry_state.next_action.sleep} seconds"
@@ -47,7 +48,6 @@ class LLMResponseMetadata(TypedDict, total=False):
     id: str | None
     logprobs: Any | None
     usage: dict[str, int] | None
-
 
 
 class LLMResponse:
@@ -106,15 +106,14 @@ class LLMResponse:
     def usage(self) -> dict[str, int] | None:
         """Get token usage from metadata"""
         return self.metadata.get("usage")
-    
-    
+
 
 class LiteLLMMessage(TypedDict, total=False):
     role: str
     content: str | list
     tool_call_id: str | None
     name: str | None
-    id: str | None 
+    id: str | None
 
 
 @retry(
