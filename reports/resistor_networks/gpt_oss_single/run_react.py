@@ -45,6 +45,7 @@ def logprobs_hook(context: HookContext) -> None:
     lp_data = {
         "id": llm_response.id,
         "task_id": context.task_id,
+        "content": llm_response.content,
         "iteration": context.iteration,
         "logprobs": lp_dict,
     }
@@ -160,7 +161,7 @@ def setup_litellm():
 def run_benchmark(
     model: str = "claude-3-5-sonnet-20241022",
     _task_ids: list | None = None,
-    temperature: float = 0.7,
+    temperature: float = 0,
     run_name: str = "corral_benchmark_run",
     verbose: str = "brief",
     hooks=None,
@@ -176,7 +177,7 @@ def run_benchmark(
     agent = ReActAgent(
         model=model,
         logprobs=True,
-        top_logprobs=2,
+        top_logprobs=20,
         max_iterations=20,
         temperature=temperature,
         api_endpoint="https://api.helmholtz-blablador.fz-juelich.de/v1",
@@ -190,13 +191,8 @@ def run_benchmark(
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
     result = runner.bench(
-        trials_per_task=3,
-        task_ids=["task_0"],
-        k_values=[
-            1,
-            2,
-            3,
-        ],
+        trials_per_task=5,
+        k_values=[1, 2, 3, 4, 5],
         verbose=True,
         tool_verbosity=verbose,
         hooks=hooks,
@@ -205,15 +201,30 @@ def run_benchmark(
     logger.info("Benchmark completed")
 
 
+def rename_output_dirs(verbosity: str, agent: str):
+    for dir_name in ["logprobs", "metrics"]:
+        src_dir = Path(dir_name)
+        if src_dir.exists() and src_dir.is_dir():
+            dest_dir = Path(f"{dir_name}_{verbosity}_{agent}")
+            src_dir.rename(dest_dir)
+            logger.info(f"Renamed {src_dir} to {dest_dir}")
+
+
 if __name__ == "__main__":
     load_dotenv()
     setup_litellm()
     os.environ["OPENAI_API_KEY"] = os.getenv("BLABLADOR_API_KEY_TEST", "")
-    verbose = "workflow"
-    hooks = AgentHooks()
-    hooks.register(HookPoint.AFTER_ITERATION, logprobs_hook)
-    hooks.register(HookPoint.AFTER_ITERATION, metrics_hook)
+    agent_type = "react"
+    verbosities = ["brief", "workflow", "comprehensive"]
+    for verbose in verbosities:
+        hooks = AgentHooks()
+        hooks.register(HookPoint.AFTER_ITERATION, logprobs_hook)
+        hooks.register(HookPoint.AFTER_ITERATION, metrics_hook)
 
-    run_name = f"gpt_oss_120-react-resistor-{verbose}_verbosity-single"
-    model = "openai/1 - GPT-OSS-120b - an open model released by OpenAI in August 2025"
-    run_benchmark(model=model, run_name=run_name, verbose=verbose, hooks=hooks)
+        run_name = f"gpt_oss_120-{agent_type}-resistor-{verbose}_verbosity-single"
+        model = (
+            "openai/1 - GPT-OSS-120b - an open model released by OpenAI in August 2025"
+        )
+        run_benchmark(model=model, run_name=run_name, verbose=verbose, hooks=hooks)
+        # utility function that would rename directory logprobs and metrics to include verbosity level
+        rename_output_dirs(verbose, agent_type)
