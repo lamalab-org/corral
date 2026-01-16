@@ -227,7 +227,8 @@ class ReflectionModule:
                 **self.kwargs,
             )
 
-            reflection_text = response.content.strip()
+            content = response.content or ""
+            reflection_text = content.strip()
             logger.debug(f"Generated reflection: {reflection_text}")
 
             # Extract usage from metadata
