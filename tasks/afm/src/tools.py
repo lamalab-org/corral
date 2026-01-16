@@ -8,10 +8,11 @@ and code execution for AFM operations.
 
 import gc
 import os
+import platform
 import time
 from pathlib import Path
 from typing import Any
-import platform
+
 import matplotlib.pyplot as plt
 import nanosurf
 import numpy as np
@@ -138,7 +139,7 @@ def visualize_grain_boxes(image_path: str) -> list:
 
     # Save to file
     if pythoncom:
-            pythoncom.CoInitialize()
+        pythoncom.CoInitialize()
     spm = nanosurf.SPM()
     application = spm.application
     current_path = application.GetGalleryHistoryDirectoryPath
@@ -150,7 +151,7 @@ def visualize_grain_boxes(image_path: str) -> list:
     del spm
     gc.collect()
     if pythoncom:
-            pythoncom.CoUninitialize()
+        pythoncom.CoUninitialize()
 
     return box_coords
 
@@ -220,7 +221,7 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
     """
 
     if pythoncom:
-            pythoncom.CoInitialize()
+        pythoncom.CoInitialize()
     try:
         # Use absolute path as key for consistency
 
@@ -265,6 +266,7 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
     finally:
         if pythoncom:
             pythoncom.CoUninitialize()
+
 
 @tool
 def Document_Retrieval(query: str) -> str:
@@ -407,10 +409,9 @@ def Image_optimizer(baseline: bool = False) -> str:
         res = minimize(problem, algorithm, termination, seed=1, verbose=True)
 
     finally:
-        pass
         if pythoncom:
             pythoncom.CoUninitialize()
-    
+
     return f"Best solution found: \n[Pgain Igain Dgain] = {res.X}\n[Error] = {res.F}"
 
 
@@ -685,7 +686,7 @@ def Image_Analyzer(
 
 def get_params():
     if pythoncom:
-            pythoncom.CoInitialize()
+        pythoncom.CoInitialize()
     spm = nanosurf.SPM()
     application = spm.application
     scan = application.Scan
@@ -729,5 +730,5 @@ def get_params():
     del application
     del spm
     if pythoncom:
-            pythoncom.CoInitialize()
+        pythoncom.CoInitialize()
     return params

@@ -2,11 +2,12 @@
 import gc
 import json
 import math
+import platform
 import re
 from pathlib import Path
+
 import nanosurf
 import numpy as np
-import platform
 from loguru import logger
 from NSFopen.read import read
 from scipy.optimize import curve_fit
@@ -240,7 +241,7 @@ def check_nid_file_exists(path):
 
 def get_params():
     if pythoncom:
-            pythoncom.CoInitialize()
+        pythoncom.CoInitialize()
     _tip_guid_map = {
         "AN2_200": "{BD61D124-8350-4464-BFE4-1D8A156E4913}",
         "GLA_1": "{9E2BA28D-D843-41bf-8F62-05502B3EDB18}",
@@ -308,7 +309,7 @@ def get_params():
     del spm
     gc.collect()
     if pythoncom:
-            pythoncom.CoUninitialize()
+        pythoncom.CoUninitialize()
     return params
 
 

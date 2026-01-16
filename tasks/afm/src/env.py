@@ -2,9 +2,10 @@
 import gc
 import json
 import os
+import platform
 from collections.abc import Callable
 from pathlib import Path
-import platform
+
 import nanosurf
 from loguru import logger
 
