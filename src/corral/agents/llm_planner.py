@@ -145,11 +145,15 @@ class LLMPlanner(BaseAgent):
             )
 
         for _i in range(self.max_iterations):
-            plan = self.get_llm_response().content
+            response = self.get_llm_response()
+            plan = response.content
 
             self.messages.append(
                 LiteLLMMessage(
-                    role="assistant", content=plan, name="high-level-planner"
+                    role="assistant",
+                    content=plan,
+                    name="high-level-planner",
+                    id=response.id,
                 )
             )
             if plan is None:
