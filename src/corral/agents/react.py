@@ -173,7 +173,11 @@ class ReActAgent(BaseAgent):
             full_llm_response = self.get_llm_response()
             llm_response = full_llm_response.content
 
-            self.messages.append(LiteLLMMessage(role="assistant", content=llm_response))
+            self.messages.append(
+                LiteLLMMessage(
+                    role="assistant", content=llm_response, id=full_llm_response.id
+                )
+            )
 
             # Parse response
             thoughts, actions = self.parse_llm_response(llm_response)
