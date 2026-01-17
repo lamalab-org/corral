@@ -28,12 +28,20 @@ from .conftest import MockFunction, MockToolCall
 class MockLiteLLMMessage:
     """Mock message class for LiteLLM responses."""
 
+    def __init__(self):
+        self.role = "assistant"
+        self.content = "This is a response"
+        self.tool_call_id = None
+        self.name = None
+        self.reasoning_content = None
+
 
 class MockLiteLLMChoice:
     """Mock choice class for LiteLLM responses."""
 
     def __init__(self):
         self.message = MockLiteLLMMessage()
+        self.logprobs = None
 
 
 class MockLiteLLMResponse:
@@ -41,6 +49,7 @@ class MockLiteLLMResponse:
 
     def __init__(self, include_usage=False):
         self.choices = [MockLiteLLMChoice()]
+        self.id = "mock_response_id"
         if include_usage:
             self.usage = MockLiteLLMUsage()
 

@@ -22,11 +22,7 @@ from pymoo.algorithms.soo.nonconvex.ga import GA
 from pymoo.optimize import minimize
 from pymoo.termination import get_termination
 
-from aila_image_process import (
-    get_subscan_parameters,
-    image_process,
-    patches,
-)
+from aila_image_process import *  # noqa: F403
 from corral.backend.tool import tool
 from tool_utils import Document_Retriever, MyProblem
 
@@ -92,7 +88,7 @@ def visualize_grain_boxes(image_path: str) -> list:
 
     plt.use("Agg")  # Use non-GUI backend for saving
 
-    indexed_boxes, extents, Z_flat2, labeled = image_process(image_path)
+    indexed_boxes, extents, Z_flat2, labeled = image_process(image_path)  # noqa: F405
 
     fig, ax = plt.subplots()
     ax.imshow(Z_flat2, cmap="afmhot", origin="lower", extent=extents)
@@ -101,7 +97,7 @@ def visualize_grain_boxes(image_path: str) -> list:
     box_coords = []
 
     for index, x, y, w, h in indexed_boxes:
-        rect = patches.Rectangle(
+        rect = patches.Rectangle(  # noqa: F405
             (x, y), w, h, linewidth=1, edgecolor="cyan", facecolor="none"
         )
         ax.add_patch(rect)
@@ -227,9 +223,9 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
     current_center = (scan.CenterPosX * 1e9, scan.CenterPosY * 1e9)
 
     # Process the image and compute subscan parameters
-    _boxes, extents, _Z_flat2, labeled = image_process(image_path)
+    _boxes, extents, _Z_flat2, labeled = image_process(image_path)  # noqa: F405
 
-    params = get_subscan_parameters(
+    params = get_subscan_parameters(  # noqa: F405
         grain_id=grain_id,
         labeled_mask=labeled,
         extents=extents,
@@ -450,9 +446,6 @@ def Code_Executor(code: str) -> int:
                 zcontrol.PGain = 100
                 zcontrol.IGain = 6000
                 zcontrol.DGain = 10
-
-                scan.StartFrameUp()
-
                 del spm)`
     ]
     [/SYNTACTICAL]

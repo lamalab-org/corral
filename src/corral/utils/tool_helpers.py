@@ -184,7 +184,7 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
                 batch_embeddings = embed_text(batch, model=model, chemical=chemical)
                 all_embeddings.extend(batch_embeddings)
             except Exception as e:
-                logger.error(f"Error in batch {i//BATCH_SIZE + 1}: {e!s}")
+                logger.error(f"Error in batch {i // BATCH_SIZE + 1}: {e!s}")
                 raise
 
         logger.info(

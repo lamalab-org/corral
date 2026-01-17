@@ -1,0 +1,60 @@
+import litellm
+from dotenv import load_dotenv
+from loguru import logger
+
+from corral import CorralRouter, CorralRunner
+from corral.agents import ReActAgent
+from corral.report import CorralWandbLogger
+
+
+def setup_litellm():
+    """Setup LiteLLM with appropriate configuration"""
+    litellm.set_verbose = True
+
+
+def run_benchmark(
+    model: str = "none",
+    task_ids: list | None = None,
+    temperature: float = 0.0,
+    run_name: str = "catalyst_react_claude_run",
+    verbose: str = "brief",
+):
+    """Run the benchmark with specified model and tasks"""
+
+    interface = CorralRouter(base_url="http://localhost:8000")
+    wandblogger = CorralWandbLogger(
+        project="corral_ml",
+        group="tool_description_ablation",
+        name=run_name,
+    )
+    agent = ReActAgent(model=model, max_iterations=20, temperature=temperature)
+    runner = CorralRunner(interface, agent, logger=wandblogger)
+
+    # Run benchmark
+    logger.info(f"Starting benchmark with model: {model}")
+    result = runner.bench(
+        task_ids,
+        trials_per_task=5,
+        k_values=[1, 2, 3, 4, 5],
+        verbose=True,
+        tool_verbosity=verbose,
+    )
+    result.generate_report(f"{run_name}.json")
+    logger.info("Benchmark completed")
+
+
+if __name__ == "__main__":
+    load_dotenv()
+    setup_litellm()
+
+    verboses = ["brief", "workflow", "comprehensive"]
+    for verbose in verboses:
+        logger.info(f"Running benchmark with verbosity: {verbose}")
+        try:
+            model = "claude-sonnet-4-5-20250929"
+            run_name = f"claude-react-catalyst-{verbose}_verbosity_single"
+            run_benchmark(model=model, run_name=run_name, verbose=verbose)
+
+        except Exception as e:
+            logger.error(f"Benchmark failed: {e!s}")
+            raise

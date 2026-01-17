@@ -141,7 +141,8 @@ class ToolCallingAgent(BaseAgent):
             # Execute BEFORE_ITERATION hooks
             self._execute_hooks(HookPoint.BEFORE_ITERATION, interface, task_id)
             try:
-                llm_response = self.get_llm_response(tools)
+                full_llm_response = self.get_llm_response(tools)
+                llm_response = full_llm_response
 
                 content = llm_response.content
                 if content:
@@ -159,6 +160,12 @@ class ToolCallingAgent(BaseAgent):
 
                     final_answer_match = re.search(
                         r"Final Answer:\s*(.*)", content, re.IGNORECASE
+                    )
+                    self._execute_hooks(
+                        HookPoint.AFTER_ITERATION,
+                        interface,
+                        task_id,
+                        llm_response=full_llm_response,
                     )
                     if final_answer_match:
                         self.messages.append(
