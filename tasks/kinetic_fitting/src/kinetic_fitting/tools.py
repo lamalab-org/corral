@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from litellm import completion
 import h5py
 import matplotlib
 import matplotlib.pyplot as plt
@@ -532,13 +531,12 @@ def fit_reaction_network(
     reaction_network: dict,
     experimental_conditions: dict,
     maxiter: int = 300,
-    reference_params: dict = None,
+    reference_params: Optional[dict] = None,
 ) -> dict:
     """
     Fit reaction network parameters.
-    UPDATED: Fits 'Reaction Rate' (derivative) rather than cumulative O2.
-    UPDATED: Fixes Excited State Decay (k ~ 1.5e6) automatically.
     """
+
     ode_func, species_list, species_idx = create_ode_system(
         reaction_network, experimental_conditions
     )
@@ -553,12 +551,24 @@ def fit_reaction_network(
     # 2. Setup Parameters & Fixed Physics
     bounds = []
     param_names = []
-    reactions = [Reaction.from_dict(r) for r in reaction_network["reactions"]]
-
-    # Identify fixed parameters (Script 2 fixes k8 = 1/650ns)
     fixed_params = {}
 
+    reactions = [Reaction.from_dict(r) for r in reaction_network["reactions"]]
+
+    # Fix excited state decay constant (k8 = 1/650ns from reference)
+    DECAY_RATE_CONSTANT = 1.0 / (650e-9)  # ~1.54e6 s^-1
+
     for i, rxn in enumerate(reactions):
+        # Identify and fix excited state decay: RuII_ex -> RuII
+        if (
+            rxn.type == "dark"
+            and len(rxn.reactants) == 1
+            and "RuII_ex" in rxn.reactants
+            and "RuII" in rxn.products
+        ):
+            fixed_params[f"k_{i}"] = DECAY_RATE_CONSTANT
+            continue
+
         if rxn.type == "light":
             bounds.append(rxn.quantum_yield or (0.0, 1.0))
             param_names.append(f"qy_{i}")
@@ -567,19 +577,10 @@ def fit_reaction_network(
             bounds.append((np.log10(k_range[0]), np.log10(k_range[1])))
             param_names.append(f"k_{i}")
 
-    # 3. Calculate Experimental Rate (Derivative Fitting)
-    # Calculate d[O2]/dt from experimental data
-    # Smoothing is often required for experimental derivatives, but we use gradient for now
-    from scipy.signal import savgol_filter
-
-    y_diff = np.diff(oxygen_exp) / np.diff(time_exp)
-    savgol_window_factor = 5
-    rate_exp = savgol_filter(
-        oxygen_exp,
-        window_length=int(len(y_diff) / savgol_window_factor),
-        polyorder=3,
-        delta=time_exp[1] - time_exp[0],
-    )
+    # 3. Calculate Experimental Rate - using np.diff (length n-1)
+    # This matches reference: model_data_ydiff = np.diff(model_data) / np.diff(times)
+    dt_exp = np.diff(time_exp)  # Length n-1
+    rate_exp = np.diff(oxygen_exp) / dt_exp  # Length n-1
 
     def objective(params_log: np.ndarray) -> float:
         params_dict = fixed_params.copy()
@@ -603,18 +604,18 @@ def fit_reaction_network(
                     atol=1e-8,
                 )
 
-            # Get predicted O2
+            # Get predicted O2 concentration (length n)
             o2_pred = (
                 y_pred[:, species_idx["O2"]]
                 if "O2" in species_idx
                 else np.zeros_like(time_exp)
             )
 
-            # CALCULATE PREDICTED RATE (Derivative)
-            rate_pred = np.gradient(o2_pred, time_exp)
+            # Calculate predicted rate using np.diff (length n-1)
+            # MUST use same dt_exp to ensure same length as rate_exp
+            rate_pred = np.diff(o2_pred) / dt_exp  # Length n-1
 
-            # RSS on RATES, not concentrations
-            # This prioritizes the "shape" and "burst" over the final yield
+            # RSS on RATES - both arrays are now length n-1
             rss = np.sum((rate_exp - rate_pred) ** 2)
 
             # Sanity penalties
@@ -626,11 +627,10 @@ def fit_reaction_network(
         except Exception:
             return 1e15
 
-    # Optimization Routine (Same as before, just using new objective)
+    # 4. Optimization
     try:
         init_population = None
         if reference_params is not None:
-            # Convert reference parameters to optimization space and create seed
             seed_point = []
             for name in param_names:
                 if name in reference_params:
@@ -639,17 +639,14 @@ def fit_reaction_network(
                     else:
                         seed_point.append(np.log10(reference_params[name]))
                 else:
-                    # Use middle of bounds for unknown parameters
                     idx = param_names.index(name)
                     mid_val = (bounds[idx][0] + bounds[idx][1]) / 2
                     seed_point.append(mid_val)
 
-            # Create population with seeded first individual
             init_population = np.random.random((15, len(bounds)))
             for i, (low, high) in enumerate(bounds):
                 init_population[:, i] = low + init_population[:, i] * (high - low)
 
-            # Replace first individual with seed if valid
             if len(seed_point) == len(bounds):
                 init_population[0] = seed_point
 
@@ -661,12 +658,13 @@ def fit_reaction_network(
             seed=42,
             workers=1,
             updating="deferred",
-            disp=False,  # cleaner output
+            disp=False,
             atol=1e-6,
             tol=0.01,
+            init=init_population if init_population is not None else "latinhypercube",
         )
 
-        # Reconstruct full params
+        # 5. Reconstruct final params and generate predictions
         final_params = fixed_params.copy()
         for name, val in zip(param_names, result.x, strict=False):
             if name.startswith("qy_"):
@@ -674,7 +672,7 @@ def fit_reaction_network(
             else:
                 final_params[name] = 10**val
 
-        # Generate final curves for return
+        # Generate final concentration curve
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             y_final = odeint(
@@ -686,30 +684,33 @@ def fit_reaction_network(
                 atol=1e-8,
             )
 
+        # O2 concentration (length n) - this is what we return for plotting
         o2_pred = (
             y_final[:, species_idx["O2"]]
             if "O2" in species_idx
             else np.zeros_like(time_exp)
         )
 
-        # Calculate R2 based on RATES, matching the optimization target
-        rate_pred = np.gradient(o2_pred, time_exp)
+        # Calculate R² on RATES (matching optimization target)
+        rate_pred = np.diff(o2_pred) / dt_exp  # Length n-1, same as rate_exp
         residuals = rate_exp - rate_pred
-        r2 = 1 - np.sum(residuals**2) / np.sum((rate_exp - np.mean(rate_exp)) ** 2)
+        ss_res = np.sum(residuals**2)
+        ss_tot = np.sum((rate_exp - np.mean(rate_exp)) ** 2)
+        r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
         return {
             "params": final_params,
             "rss": result.fun,
             "r2": r2,
-            "y_pred": o2_pred.tolist(),  # Return conc for plotting
-            "rate_pred": rate_pred.tolist(),  # Optional: return rates
+            "y_pred": o2_pred.tolist(),  # Concentration, length n (for plotting)
+            "rate_pred": rate_pred.tolist(),  # Rate, length n-1
             "success": result.success,
             "species_list": species_list,
             "full_solution": y_final.tolist(),
             "species_idx": species_idx,
             "failure_reason": "" if result.success else "Optimization failed",
-            "o2_range": np.max(o2_pred) - np.min(o2_pred),
-            "o2_max": np.max(o2_pred),
+            "o2_range": float(np.max(o2_pred) - np.min(o2_pred)),
+            "o2_max": float(np.max(o2_pred)),
         }
 
     except Exception as e:
@@ -719,7 +720,10 @@ def fit_reaction_network(
             "r2": -999.0,
             "y_pred": np.zeros_like(time_exp).tolist(),
             "success": False,
+            "failure_reason": str(e),
             "error": str(e),
+            "o2_range": 0.0,
+            "o2_max": 0.0,
         }
 
 
@@ -1576,7 +1580,7 @@ def evaluate_phenomenological_trends(data_path: str) -> str:
         ph_score = ph_shape * ph_mag
 
         overall_score = (
-            0.3 * ru_score + 0.25 * s2o8_score + 0.25 * irr_score + 0.2 * ph_score
+            0.4 * ru_score + 0.2 * s2o8_score + 0.2 * irr_score + 0.2 * ph_score
         )
 
         maes = {p: _calculate_mae(trends[p], trends_original[p]) for p in trends}
@@ -1659,7 +1663,7 @@ def evaluate_phenomenological_trends(data_path: str) -> str:
             f"  Global Params used: {global_params}\n"
             f"  *** Best Phenomenological Score: {best_phenomenological_score:.3f} {best_score_status} ***\n"
             f"{plot_info}"
-            f"{qualitative_trend_evaluation}"
+            # f"{qualitative_trend_evaluation}"
         )
 
     except Exception as e:
@@ -2280,18 +2284,6 @@ def initialize_default_network() -> Dict[str, Any]:
                 "k_range": [0.001, 0.5],
                 "description": "H2O2 decomposition to O2 (k5)",
             },
-            {
-                "equation": "RuIII -> Inactive",
-                "type": "dark",
-                "k_range": [0.001, 0.5],
-                "description": "RuIII deactivation (k6)",
-            },
-            {
-                "equation": "RuIII + RuIII + Ru_Dimer -> Ru_Dimer + Ru_Dimer",
-                "type": "dark",
-                "k_range": [0.001, 0.1],
-                "description": "Autocatalytic dimer formation (k4)",
-            },
         ],
         "metadata": {
             "created_by": "reaction_network_conversion",
@@ -2347,6 +2339,7 @@ def analyse_last_phenomenological_trends_image_with_vision(
     model: str = "gpt-4o",
 ) -> str:
     """Analyze the latest phenomenological trends plot using a vision model.
+    The model will return feedback on the match between experimental and predicted phenomenological trends.
 
     Args:
         model: Vision model to use for analysis

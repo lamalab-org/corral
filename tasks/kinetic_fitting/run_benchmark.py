@@ -13,9 +13,9 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from corral.agents import ReActAgent
+from corral.report import CorralWandbLogger
 from corral.router.routes import CorralRouter
 from corral.run import CorralRunner
-from corral.report import CorralWandbLogger
 
 
 def main():
@@ -23,23 +23,27 @@ def main():
     load_dotenv()
 
     # Configuration
-    model = "claude-sonnet-4-5"
-    max_iterations = 20
+    model = "gpt-4o"
+    max_iterations = 100
     temperature = 0.0
-    trials_per_task = 5
-    port = 8004
+    trials_per_task = 1
+    port = int(os.environ["PORT"])
+
+    # Get task list
+    task_ids = [os.environ["DIRECTORY"]]
 
     # Setup
     litellm.set_verbose = True
 
     # Setup work directory
-    work_dir = Path(__file__).parent / "benchmark_workspace"
+    work_dir = Path(__file__).parent / os.environ["DIRECTORY_BENCH_WORKSPACE"]
     work_dir.mkdir(exist_ok=True)
     os.environ["CORRAL_WORK_DIR"] = str(work_dir)
 
     logger.info("🧪 Running kinetic fitting benchmark")
     logger.info(f"Model: {model}")
     logger.info(f"Max iterations: {max_iterations}, Temperature: {temperature}")
+    logger.info(f"Tasks: {task_ids}")
     logger.info("=" * 60)
 
     try:
@@ -48,11 +52,14 @@ def main():
         interface = CorralRouter(base_url=f"http://localhost:{port}")
 
         # Verify connection
-        tasks = interface.get_available_tasks()
-        logger.info(f"Connected! Available tasks: {tasks}")
+        available_tasks = interface.get_available_tasks()
+        logger.info(f"Connected! Available tasks: {available_tasks}")
 
-        if "kinetic_fitting" not in tasks:
-            logger.error(f"Task 'kinetic_fitting' not found. Available: {tasks}")
+        # Check that all required tasks are available
+        missing_tasks = [t for t in task_ids if t not in available_tasks]
+        if missing_tasks:
+            logger.error(f"Missing tasks: {missing_tasks}")
+            logger.error(f"Available: {available_tasks}")
             return False
 
     except Exception as e:
@@ -63,7 +70,9 @@ def main():
 
     # Create agent
     agent = ReActAgent(
-        model=model, max_iterations=max_iterations, temperature=temperature
+        model=model,
+        max_iterations=max_iterations,
+        temperature=temperature,
     )
     logger.info(f"Created ReActAgent with {model}")
 
@@ -90,7 +99,7 @@ def main():
     logger.info("Starting benchmark...")
     try:
         result = runner.bench(
-            task_ids=["kinetic_fitting"],
+            task_ids=task_ids,
             trials_per_task=trials_per_task,
             verbose=True,
             tool_verbosity="comprehensive",
