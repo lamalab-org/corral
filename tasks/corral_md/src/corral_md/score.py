@@ -229,7 +229,7 @@ def check_numerical(target: float, tolerance: float) -> Callable[[Any], float]:
     return score_fn
 
 
-def check_structure(target, atom_style):
+def check_structure(target: str, atom_style: str) -> Callable[[str], float]:
     """
     Create a scoring function that compares a predicted atomic structure
     against a target structure using pymatgen's StructureMatcher.
