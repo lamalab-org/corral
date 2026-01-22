@@ -191,7 +191,7 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = CorralRouter(base_url="http://localhost:2222")
+    interface = CorralRouter(base_url="http://localhost:1414")
     wandblogger = CorralWandbLogger(
         project="corral_resistor_oss",
         group="gpt_oss",
@@ -237,11 +237,7 @@ if __name__ == "__main__":
     load_dotenv()
     setup_litellm()
     os.environ["OPENAI_API_KEY"] = os.getenv("BLABLADOR_API_KEY_TEST", "")
-    verbosities = [
-        "brief",
-        # "workflow",
-        # "comprehensive"
-    ]
+    verbosities = ["brief", "workflow", "comprehensive"]
     for verbose in verbosities:
         hooks = AgentHooks()
         hooks.register(HookPoint.AFTER_ITERATION, logprobs_hook)
@@ -253,4 +249,4 @@ if __name__ == "__main__":
         )
         run_benchmark(model=model, run_name=run_name, verbose=verbose, hooks=hooks)
         # utility function that would rename directory logprobs and metrics to include verbosity level
-        # rename_output_dirs(verbose, "toolcalling")
+        rename_output_dirs(verbose, "toolcalling")

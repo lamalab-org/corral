@@ -249,4 +249,4 @@ if __name__ == "__main__":
         )
         run_benchmark(model=model, run_name=run_name, verbose=verbose, hooks=hooks)
         # utility function that would rename directory logprobs and metrics to include verbosity level
-        # rename_output_dirs(verbose, "react")
+        rename_output_dirs(verbose, "react")
