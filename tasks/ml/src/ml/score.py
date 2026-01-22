@@ -1,14 +1,19 @@
 import json
 import os
+import secrets
+import string
 from pathlib import Path
 
 import joblib
 from loguru import logger
 from pymatgen.core import Structure
 
-if "CORRAL_WORK_DIR" not in os.environ:
-    raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
-BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+# Generate a random 4-letter unique identifier
+uid = "".join(secrets.choice(string.ascii_lowercase) for _ in range(6))
+
+# Set the path. If CORRAL_WORK_DIR is missing, it uses the relative path with the UID.
+BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", f"../CORRAL_WORK_DIR/ml_{uid}")
+os.environ["CORRAL_WORK_DIR"] = BASE_WORK_DIR
 
 
 def resolve_path(path_or_str: str) -> str:
