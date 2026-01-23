@@ -149,7 +149,7 @@ def neutralize_charges(mol):
         return mol
 
 
-def score_molecule_fragments(prediction: list[str], ground_truth: str) -> float:
+def score_molecule_fragments(prediction: list[str] | str, ground_truth: str) -> float:
     """Score the prediction based on whether fragments are substructures of the ground truth molecule.
 
     This function handles charged fragments by neutralizing them before substructure matching.
@@ -259,8 +259,17 @@ def validate_molecular_formula(prediction, ground_truth):
     return pred_counts == actual_counts
 
 
-def score_formula_match(prediction, ground_truth):
-    """Binary score: 1.0 if match, 0.0 if not"""
+def score_formula_match(prediction: str, ground_truth: str) -> float:
+    """
+    Scoring function that checks if the predicted molecular formula matches the ground truth molecule.
+
+    Args:
+        prediction (str): Predicted molecular formula (e.g., "C6H6")
+        ground_truth (str): SMILES string of the ground truth molecule
+
+    Returns:
+        float: 1.0 if the formulas match, 0.0 otherwise
+    """
     # prediction: SMILES, ground_truth: formula
     return 1.0 if validate_molecular_formula(prediction, ground_truth) else 0.0
 
@@ -333,7 +342,7 @@ def calculate_dbe(mol):
     return C - (H / 2) + (N / 2) + 1
 
 
-def validate_dbe_consistency(prediction, ground_truth):
+def validate_dbe_consistency(prediction: int | str, ground_truth: str) -> float:
     """
     Validate that the predicted DBE value (integer) matches the DBE calculated from the ground truth SMILES string within a tolerance.
 
@@ -342,7 +351,7 @@ def validate_dbe_consistency(prediction, ground_truth):
         ground_truth (str): SMILES string of the ground truth molecule.
 
     Returns:
-        bool: True if the absolute difference between prediction and calculated DBE is within tolerance, False otherwise.
+        float: 1.0 if the absolute difference between prediction and calculated DBE is within tolerance, 0.0 otherwise.
     """
     try:
         prediction = int(prediction)
@@ -358,12 +367,26 @@ def validate_dbe_consistency(prediction, ground_truth):
     return float(prediction == expected_dbe)
 
 
-def score_isotopic_distribution(prediction, ground_truth):
+def score_isotopic_distribution(prediction: list[str] | str, ground_truth: str) -> float:
     """
     Score the isotopic distribution of a molecule based on the provided prediction and ground truth.
-    prediction: list of element symbols (e.g. ["C", "H", "O"])
-    ground_truth: SMILES string
+
+    Args:
+        prediction: list of element symbols (e.g. ["C", "H", "O"]) or a string representation of such a list
+        ground_truth: SMILES string
+
+    Returns:
+        float: 1.0 if the predicted elements for the isotopic distribution match the ground truth, 0.0 otherwise
     """
+    if isinstance(prediction, list):
+        seq = prediction
+    elif isinstance(prediction, str):
+        try:
+            seq = ast.literal_eval(prediction)
+        except Exception:
+            return 0.0  # signal bad input
+    else:
+        return 0.0
     mol = Chem.MolFromSmiles(ground_truth)
     if mol is None:
         logger.error("Invalid ground truth SMILES string.")
@@ -382,8 +405,17 @@ def score_isotopic_distribution(prediction, ground_truth):
         return 0.0
 
 
-def score_num_hydrogen_symmetry_classes(prediction, ground_truth):
-    """Count unique hydrogen environments using canonical ranking"""
+def score_num_hydrogen_symmetry_classes(prediction: int | str, ground_truth: str) -> float:
+    """Count unique hydrogen environments using canonical ranking. Stereochemistry is ignored.
+    Then compare to predicted number and score consequently.
+    
+    Args:
+        prediction (int | str): Predicted number of hydrogen symmetry classes
+        ground_truth (str): SMILES string of the ground truth molecule
+        
+    Returns:
+        float: 1.0 if the predicted number matches the actual number, 0.0 otherwise
+    """
     try:
         prediction = int(prediction)
     except ValueError:
@@ -404,8 +436,17 @@ def score_num_hydrogen_symmetry_classes(prediction, ground_truth):
     return float(len(h_classes) == prediction)
 
 
-def score_num_carbon_symmetry_classes(prediction, ground_truth):
-    """Count unique carbon environments using canonical ranking"""
+def score_num_carbon_symmetry_classes(prediction: int | str, ground_truth: str) -> float:
+    """Count unique carbon environments using canonical ranking. Stereochemistry is ignored.
+    Then compare to predicted number and score consequently.
+    
+    Args:
+        prediction (int | str): Predicted number of carbon symmetry classes
+        ground_truth (str): SMILES string of the ground truth molecule
+
+    Returns:
+        float: 1.0 if the predicted number matches the actual number, 0.0 otherwise
+    """
     try:
         prediction = int(prediction)
     except ValueError:
@@ -427,10 +468,19 @@ def score_num_carbon_symmetry_classes(prediction, ground_truth):
     return float(len(c_classes) == prediction)
 
 
-def score_num_aromatic_carbons(prediction, ground_truth):
+def score_num_aromatic_carbons(prediction: int | str, ground_truth: str) -> float:
     """Count aromatic carbons in the molecule, this is centers on cyclic,
     planar molecules with a specific number of delocalized pi electrons,
-    exhibiting enhanced stability due to resonance."""
+    exhibiting enhanced stability due to resonance. 
+    Then compare to predicted number and score consequently.
+
+    Args:
+        prediction (int | str): Predicted number of aromatic carbons
+        ground_truth (str): SMILES string of the ground truth molecule
+
+    Returns:
+        float: 1.0 if the predicted number matches the actual number, 0.
+    """
     try:
         prediction = int(prediction)
     except ValueError:
@@ -450,8 +500,16 @@ def score_num_aromatic_carbons(prediction, ground_truth):
     return float(aromatic_carbons == prediction)
 
 
-def score_num_ch3_groups(prediction, ground_truth):
-    """Count CH3 groups in the molecule"""
+def score_num_ch3_groups(prediction: int | str, ground_truth: str) -> float:
+    """Count CH3 groups in the molecule and compare to predicted number.
+    
+    Args:
+        prediction (int | str): Predicted number of CH3 groups
+        ground_truth (str): SMILES string of the ground truth molecule
+        
+    Returns:
+        float: 1.0 if the predicted number matches the actual number, 0.0 otherwise
+    """
     try:
         prediction = int(prediction)
     except ValueError:
@@ -470,8 +528,17 @@ def score_num_ch3_groups(prediction, ground_truth):
     return float(ch3_groups == prediction)
 
 
-def score_num_carbonyl_groups(prediction, ground_truth):
-    """Count carbonyl groups (C=O) in the molecule, handling tautomers"""
+def score_num_carbonyl_groups(prediction: int | str, ground_truth: str) -> float:
+    """Count carbonyl groups (C=O) in the molecule, handling tautomers. 
+    Then compare to predicted number and score consequently.
+    
+    Args:
+        prediction (int | str): Predicted number of carbonyl groups
+        ground_truth (str): SMILES string of the ground truth molecule
+        
+    Returns:
+        float: 1.0 if the predicted number matches the actual number, 0.0 otherwise
+    """
     try:
         prediction = int(prediction)
     except ValueError:
