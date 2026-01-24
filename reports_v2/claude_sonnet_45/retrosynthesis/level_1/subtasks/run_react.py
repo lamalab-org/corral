@@ -21,7 +21,7 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = CorralRouter()
+    interface = CorralRouter(base_url="http://localhost:1111")
     wandblogger = CorralWandbLogger(
         project="corral",
         group="tool_description_ablation",
@@ -49,14 +49,14 @@ if __name__ == "__main__":
 
     verboses = [
         # "brief",
-        "workflow",
-        # "comprehensive",
+        # "workflow",
+        "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
             model = "claude-sonnet-4-5-20250929"
-            run_name = f"claude_45_sonnet-react-retro_lvl1_sub_env-{verbose}_verbosity"
+            run_name = f"claude_45_sonnet-react-retro_sub_lvl1_env-{verbose}_verbosity"
             run_benchmark(model=model, run_name=run_name, verbose=verbose)
 
         except Exception as e:

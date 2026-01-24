@@ -21,7 +21,7 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = CorralRouter()
+    interface = CorralRouter(base_url="http://localhost:1222")
     wandblogger = CorralWandbLogger(
         project="corral",
         group="tool_description_ablation",
@@ -48,8 +48,8 @@ if __name__ == "__main__":
     setup_litellm()
 
     verboses = [
-        # "brief",
-        # "workflow",
+        "brief",
+        "workflow",
         "comprehensive",
     ]
     for verbose in verboses:
