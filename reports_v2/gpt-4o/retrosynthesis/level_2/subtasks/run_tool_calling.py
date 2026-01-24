@@ -13,7 +13,7 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "gpt-4o-2024-08-06",
+    model: str = "claude-3-5-sonnet-20241022",
     task_ids: list | None = None,
     temperature: float = 0.0,
     run_name: str = "corral_benchmark_tests",
@@ -21,13 +21,13 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = CorralRouter()
+    interface = CorralRouter(base_url="http://localhost:3333")
     wandblogger = CorralWandbLogger(
         project="corral",
         group="tool_description_ablation",
         name=run_name,
     )
-    agent = ToolCallingAgent(model=model, max_iterations=20, temperature=temperature)
+    agent = ToolCallingAgent(model=model, max_iterations=40, temperature=temperature)
     runner = CorralRunner(interface, agent, logger=wandblogger)
 
     # Run benchmark
@@ -48,15 +48,15 @@ if __name__ == "__main__":
     setup_litellm()
 
     verboses = [
-        # "brief",
-        # "workflow",
+        "brief",
+        "workflow",
         "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
             model = "gpt-4o-2024-08-06"
-            run_name = f"gpt_4o-tool_calling-retro_lvl2_env-{verbose}_verbosity"
+            run_name = f"gpt_4o-tool_calling-retro_sub_lvl2_env-{verbose}_verbosity"
             run_benchmark(model=model, run_name=run_name, verbose=verbose)
 
         except Exception as e:

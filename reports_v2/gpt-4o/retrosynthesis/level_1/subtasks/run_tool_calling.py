@@ -21,7 +21,7 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = CorralRouter()
+    interface = CorralRouter(base_url="http://localhost:1114")
     wandblogger = CorralWandbLogger(
         project="corral",
         group="tool_description_ablation",
@@ -48,15 +48,15 @@ if __name__ == "__main__":
     setup_litellm()
 
     verboses = [
-        # "brief",
-        # "workflow",
+        "brief",
+        "workflow",
         "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
             model = "gpt-4o-2024-08-06"
-            run_name = f"gpt_4o-tool_calling-retro_lvl1_env-{verbose}_verbosity"
+            run_name = f"gpt_4o-tool_calling-retro_sub_lvl1_env-{verbose}_verbosity"
             run_benchmark(model=model, run_name=run_name, verbose=verbose)
 
         except Exception as e:

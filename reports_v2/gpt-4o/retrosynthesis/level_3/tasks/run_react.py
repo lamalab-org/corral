@@ -13,7 +13,7 @@ def setup_litellm():
 
 
 def run_benchmark(
-    model: str = "claude-3-5-sonnet-20241022",
+    model: str = "gpt-4o-2024-08-06",
     task_ids: list | None = None,
     temperature: float = 0.0,
     run_name: str = "corral_benchmark_tests",
@@ -21,13 +21,13 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = CorralRouter(base_url="http://localhost:8000")
+    interface = CorralRouter(base_url="http://localhost:3333")
     wandblogger = CorralWandbLogger(
         project="corral",
         group="tool_description_ablation",
         name=run_name,
     )
-    agent = ReActAgent(model=model, max_iterations=40, temperature=temperature)
+    agent = ReActAgent(model=model, max_iterations=30, temperature=temperature)
     runner = CorralRunner(interface, agent, logger=wandblogger)
 
     # Run benchmark
@@ -49,8 +49,8 @@ if __name__ == "__main__":
 
     verboses = [
         "brief",
-        # "workflow",
-        # "comprehensive",
+        "workflow",
+        "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")
