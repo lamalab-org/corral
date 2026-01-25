@@ -40,8 +40,10 @@ class TaskState:
     submitted_answer: str | None = None
     feedback: str | None = None
     surrendered: bool = False
-    start_time: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
-    end_time: datetime | None = None
+    env_start_time: datetime = field(
+        default_factory=lambda: datetime.now(tz=timezone.utc)
+    )
+    env_end_time: datetime | None = None
 
     def get_tool_statistics(self) -> dict[str, Any]:
         """Get statistics about tool usage"""
@@ -61,10 +63,10 @@ class TaskState:
             },
         }
 
-    def get_duration(self) -> float | None:
-        """Get trial duration in seconds"""
-        if self.end_time and self.start_time:
-            return (self.end_time - self.start_time).total_seconds()
+    def get_env_duration(self) -> float | None:
+        """Get how long the environment was active (not task duration)."""
+        if self.env_end_time and self.env_start_time:
+            return (self.env_end_time - self.env_start_time).total_seconds()
         return None
 
 
@@ -93,8 +95,8 @@ class Environment(ABC):
     def reset_state(self) -> str:
         """Reset the environment state with a new trial id and fresh TaskState and return finished trail id."""
         if hasattr(self, "state") and self.state is not None:
-            if self.state.is_attempted and self.state.end_time is None:
-                self.state.end_time = datetime.now(tz=timezone.utc)
+            if self.state.is_attempted and self.state.env_end_time is None:
+                self.state.env_end_time = datetime.now(tz=timezone.utc)
             archived_snapshot = self.save_current_state()
             self.trial_states[self.state.trial_id] = archived_snapshot
 
@@ -358,24 +360,16 @@ class Environment(ABC):
         score = self.score()  # Using existing abstract score method
         self.state.score = score
         self.state.is_attempted = True
-        if self.state.end_time is None:
-            self.state.end_time = datetime.now(tz=timezone.utc)
         return score
 
     def surrender(self) -> float:
         """Surrender from the current task without submitting an answer"""
         self.state.surrendered = True
         self.state.is_attempted = True
-        if self.state.end_time is None:
-            self.state.end_time = datetime.now(tz=timezone.utc)
         return 0.0 if self.state.score is None else self.state.score
 
     def get_completed_trial_data(self) -> dict:
         """Get all data for the completed trial"""
-        # Calculate duration
-        duration = None
-        if self.state.start_time and self.state.end_time:
-            duration = (self.state.end_time - self.state.start_time).total_seconds()
 
         # Build state dict with all needed data
         state_data = {
@@ -385,7 +379,6 @@ class Environment(ABC):
             "score": self.state.score,
             "submitted_answer": self.state.submitted_answer,
             "surrendered": self.state.surrendered,
-            "duration": duration,
             "tool_statistics": self._get_complete_tool_statistics(),
         }
 

@@ -119,7 +119,7 @@ def _tokenize_and_split_chunks(
 
             batch = chunks[batch_idx : batch_idx + batch_size]
             logger.debug(
-                f"Processing batch {batch_idx//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}"
+                f"Processing batch {batch_idx // batch_size + 1}/{(len(chunks) + batch_size - 1) // batch_size}"
             )
 
             batch_results = []
@@ -145,7 +145,7 @@ def _tokenize_and_split_chunks(
                     end_idx = min(start_idx + target_size, len(tokens))
 
                     logger.debug(
-                        f"Sub-chunk {sub_chunk_count+1}: Processing from token {start_idx} to {end_idx} ({end_idx-start_idx} tokens)"
+                        f"Sub-chunk {sub_chunk_count + 1}: Processing from token {start_idx} to {end_idx} ({end_idx - start_idx} tokens)"
                     )
 
                     sub_chunk = encoding.decode(tokens[start_idx:end_idx])

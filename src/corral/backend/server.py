@@ -69,7 +69,8 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         """Get the task prompt for the agent"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
-        return {"prompt": environments[task_id].get_task_prompt()}
+        env = environments[task_id]
+        return {"prompt": env.get_task_prompt()}
 
     @app.get("/tasks/{task_id}/guide")
     def get_environment_guide(
