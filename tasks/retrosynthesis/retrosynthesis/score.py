@@ -283,7 +283,6 @@ def check_reactants(prediction: dict, target: list) -> float:
         logger.warning(f"Exception during reactant checking: {e}")
         return 0.0
 
-
 def check_template(prediction: str, target: str) -> float:
     target = int(target)
     prediction = prediction.replace("```json", "").replace("```", "").strip()

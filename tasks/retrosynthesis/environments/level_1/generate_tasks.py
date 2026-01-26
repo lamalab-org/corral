@@ -72,7 +72,7 @@ def main():
                 "output": [
                     {
                         "type": "list",
-                        "target": [TARGETS[i]],
+                        "target": TARGETS[i],
                         "threshold": None,
                     }
                 ],
