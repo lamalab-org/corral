@@ -24,7 +24,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from datasets import Dataset, Features, Sequence, Value
 
@@ -38,21 +38,21 @@ def read_json(path: Path) -> Any:
         return json.load(f)
 
 
-def safe_float(x: Any) -> Optional[float]:
+def safe_float(x: Any) -> float | None:
     try:
         return float(x)
     except Exception:
         return None
 
 
-def logsumexp(logps: List[float]) -> float:
+def logsumexp(logps: list[float]) -> float:
     if not logps:
         return float("-inf")
     m = max(logps)
     return m + math.log(sum(math.exp(lp - m) for lp in logps))
 
 
-def entropy_from_top_logprobs(top_logprobs: List[Dict[str, Any]]) -> Optional[float]:
+def entropy_from_top_logprobs(top_logprobs: list[dict[str, Any]]) -> float | None:
     """
     top_logprobs: list of dicts like {"token": "...", "logprob": -0.12, ...}
     We compute entropy H = -sum_i p_i log p_i over the distribution implied by top_logprobs,
@@ -80,7 +80,7 @@ def entropy_from_top_logprobs(top_logprobs: List[Dict[str, Any]]) -> Optional[fl
 
 def infer_agent_and_verbosity_from_dir(
     dirname: str,
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """
     Examples:
       logprobs_brief_react -> verbosity=brief, agent_type=react
@@ -127,9 +127,9 @@ def infer_environment_from_path(p: Path) -> str:
 class TrialMessageRef:
     task: str
     trial: str
-    score: Optional[float]
+    score: float | None
     environment: str
-    level: Optional[int]  # Changed to int to match schema
+    level: int | None  # Changed to int to match schema
     verbosity: str
     agent_type: str
     message_number: int
@@ -137,14 +137,14 @@ class TrialMessageRef:
 
 
 def extract_trial_message_refs(
-    report_json: Dict[str, Any], environment: str, level: Optional[int]
-) -> List[TrialMessageRef]:
+    report_json: dict[str, Any], environment: str, level: int | None
+) -> list[TrialMessageRef]:
     """
     From your report example:
       task_results -> task -> trials -> trial -> messages -> assistant messages have "id"
     Report file name encodes verbosity+agent_type but we also read metrics.tool_verbosity.
     """
-    out: List[TrialMessageRef] = []
+    out: list[TrialMessageRef] = []
 
     metrics = report_json.get("metrics", {}) if isinstance(report_json, dict) else {}
     verbosity = metrics.get("tool_verbosity")  # "brief" etc.
@@ -201,7 +201,7 @@ def extract_trial_message_refs(
     return out
 
 
-def infer_agent_type_from_report_filename(name: str) -> Optional[str]:
+def infer_agent_type_from_report_filename(name: str) -> str | None:
     """
     Examples:
       gpt_oss_120-react-catalyst-brief_verbosity-single_try.json -> react
@@ -219,7 +219,7 @@ def infer_agent_type_from_report_filename(name: str) -> Optional[str]:
     return None
 
 
-def load_logprob_files(root: Path) -> Dict[str, Dict[str, Any]]:
+def load_logprob_files(root: Path) -> dict[str, dict[str, Any]]:
     """
     Return dict keyed by message_id ("chatcmpl-...") with:
       {
@@ -228,7 +228,7 @@ def load_logprob_files(root: Path) -> Dict[str, Dict[str, Any]]:
       }
     computed from logprobs.content tokens list.
     """
-    by_id: Dict[str, Dict[str, Any]] = {}
+    by_id: dict[str, dict[str, Any]] = {}
 
     for lp_path in root.rglob("logprobs_*/*.json"):
         try:
@@ -249,8 +249,8 @@ def load_logprob_files(root: Path) -> Dict[str, Dict[str, Any]]:
         if not isinstance(content, list):
             continue
 
-        token_logps: List[float] = []
-        token_ents: List[float] = []
+        token_logps: list[float] = []
+        token_ents: list[float] = []
 
         for tok in content:
             if not isinstance(tok, dict):
@@ -284,7 +284,7 @@ def load_logprob_files(root: Path) -> Dict[str, Dict[str, Any]]:
 
 
 def push_environment_to_hf(
-    rows: List[Dict[str, Any]],
+    rows: list[dict[str, Any]],
     dataset_name: str,
     environment_subset: str,
     private: bool = False,
@@ -338,7 +338,7 @@ def push_environment_to_hf(
     )
 
     # Normalize rows to match schema (ensure keys exist)
-    def normalize(r: Dict[str, Any]) -> Dict[str, Any]:
+    def normalize(r: dict[str, Any]) -> dict[str, Any]:
         out = {k: r.get(k) for k in features.keys()}
 
         # Ensure sequences are lists (or empty list). Avoid None for Sequence columns.
@@ -431,7 +431,7 @@ def main() -> None:
     levels = {1: ["level_1"], 2: ["level_2"]}
     task_types = ["tasks", "subtasks"]
 
-    all_rows: List[Dict[str, Any]] = []
+    all_rows: list[dict[str, Any]] = []
 
     for level_num, level_dirs in levels.items():
         for level_dir_name in level_dirs:
@@ -450,7 +450,7 @@ def main() -> None:
                 logprob_by_id = load_logprob_files(current_root)
 
                 # 2) Find report JSON files within the current root
-                report_paths: List[Path] = []
+                report_paths: list[Path] = []
                 for p in current_root.rglob("*.json"):
                     if "logprobs_" in str(p.parent):
                         continue
@@ -464,7 +464,7 @@ def main() -> None:
                     print(f"No report JSON files found in {current_root}. Skipping.")
                     continue
 
-                current_rows: List[Dict[str, Any]] = []
+                current_rows: list[dict[str, Any]] = []
 
                 for rp in sorted(report_paths):
                     try:
