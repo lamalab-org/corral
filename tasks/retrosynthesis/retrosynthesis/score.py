@@ -187,14 +187,17 @@ def score_final(prediction: dict, target: dict) -> float:
         return 0.0
 
 
-def score_final_without_price(prediction: dict, target: list) -> float:  # noqa: ARG001
+def score_final_without_price(prediction: dict, target: list) -> float:
     """
-    Function to score the retrosynthesis route based on the provided conditions.
+    Function to score the retrosynthesis route based on the conditions:
+        - All reactions must be valid.
+        - All starting materials must be valid SMILES.
+        - Leaf molecules must contain all target molecules.
     Returns 1.0 if all conditions are met, else returns 0.0.
 
     Args:
         prediction (dict): The retrosynthesis route in JSON format.
-        target (list): Target molecules for the route.
+        target (list): Target molecules (SMILES) that must be present in the leaf molecules.
 
     Returns:
         float: 1.0 if all conditions are met, 0.0 if any condition is violated.
@@ -215,6 +218,33 @@ def score_final_without_price(prediction: dict, target: list) -> float:  # noqa:
         # Step 3: Check if all starting materials are valid SMILES
         for smiles in leaf_molecules:
             if not valid_smiles(smiles):
+                return 0.0
+
+        # Step 4: Check that leaf molecules contain all target molecules
+        # Convert leaf molecules to canonical SMILES for comparison
+        leaf_mols_canonical = set()
+        for smiles in leaf_molecules:
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is not None:
+                # Remove atom mapping numbers
+                for atom in mol.GetAtoms():
+                    atom.SetAtomMapNum(0)
+                # Remove stereochemistry for comparison
+                Chem.RemoveStereochemistry(mol)
+                leaf_mols_canonical.add(Chem.MolToSmiles(mol))
+
+        # Convert target molecules to canonical SMILES
+        for target_smiles in target:
+            target_mol = Chem.MolFromSmiles(target_smiles)
+            if target_mol is None:
+                return 0.0
+            # Remove atom mapping numbers
+            for atom in target_mol.GetAtoms():
+                atom.SetAtomMapNum(0)
+            # Remove stereochemistry for comparison
+            Chem.RemoveStereochemistry(target_mol)
+            target_canonical = Chem.MolToSmiles(target_mol)
+            if target_canonical not in leaf_mols_canonical:
                 return 0.0
 
         return 1.0
