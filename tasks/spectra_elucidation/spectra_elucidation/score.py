@@ -5,22 +5,17 @@ from collections import Counter
 from loguru import logger
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
+from rdkit.Chem import rdmolfiles
 from rdkit.Chem.MolStandardize import rdMolStandardize
+from rdkit import Chem
+from rdkit.Chem.EnumerateStereoisomers import EnumerateStereoisomers, StereoEnumerationOptions
+from rdkit.Chem import rdmolfiles
 
 _ELEMENTS_WITH_ISOTOPIC_DISTRIBUTION = [
     "C",  # Carbon
-    "N",  # Nitrogen
-    "O",  # Oxygen
     "S",  # Sulfur
     "Cl",  # Chlorine
     "Br",  # Bromine
-    "Fe",  # Iron
-    "Cu",  # Copper
-    "Zn",  # Zinc
-    "Sn",  # Tin
-    "Pb",  # Lead
-    "Hg",  # Mercury
-    "Pt",  # Platinum
 ]
 
 
@@ -405,6 +400,34 @@ def score_isotopic_distribution(prediction: list[str] | str, ground_truth: str) 
         return 0.0
 
 
+def count_h_env(mol: Chem.Mol) -> int:
+    # Add explicit hydrogens so we can work with them
+    mol = Chem.AddHs(mol)
+
+    # Make sure stereo perception has run (won't invent E/Z if it's not specified/perceivable)
+    Chem.AssignStereochemistry(mol, force=True, cleanIt=True)
+
+    # Atoms whose hydrogens exchange with solvent (O-H, S-H, N-H)
+    exchangeable_atomic_nums = {7, 8, 16}  # N, O, S
+
+    # Build mapping: parent atom index -> first hydrogen atom attached to it
+    # Exclude hydrogens on O, S, N (exchangeable with solvent)
+    parent_to_h = {}
+    for a in mol.GetAtoms():
+        if a.GetAtomicNum() == 1:  # Hydrogen
+            parent = a.GetNeighbors()[0]
+            parent_idx = parent.GetIdx()
+            # Skip if parent is O, S, or N (exchangeable protons)
+            if parent.GetAtomicNum() in exchangeable_atomic_nums:
+                continue
+            if parent_idx not in parent_to_h:
+                parent_to_h[parent_idx] = a
+
+    # Keep only one hydrogen per parent atom
+    h_atoms = list(parent_to_h.values())
+    return len(h_atoms)
+
+
 def score_num_hydrogen_symmetry_classes(prediction: int | str, ground_truth: str) -> float:
     """Count unique hydrogen environments using canonical ranking. Stereochemistry is ignored.
     Then compare to predicted number and score consequently.
@@ -426,15 +449,58 @@ def score_num_hydrogen_symmetry_classes(prediction: int | str, ground_truth: str
     mol = Chem.MolFromSmiles(ground_truth)
     if mol is None:
         raise ValueError("Invalid ground truth SMILES string.")
-    mh = Chem.AddHs(mol)
-    orders = Chem.CanonicalRankAtoms(mh, breakTies=False)
-    h_classes = set()
-    for atom, sym_class in zip(mh.GetAtoms(), orders, strict=False):
-        if atom.GetAtomicNum() == 1:  # Hydrogen
-            h_classes.add(sym_class)
-    logger.debug(f"Found {len(h_classes)} hydrogen symmetry classes.")
-    return float(len(h_classes) == prediction)
 
+    num_h_envs = count_h_env(mol)
+    return float(num_h_envs == prediction)
+
+
+def carbon_envs_stereo(smiles: str, max_isomers: int = 512):
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError("Bad SMILES")
+
+    # Atom identity anchor (stable across generated stereoisomers):
+    for a in mol.GetAtoms():
+        a.SetAtomMapNum(a.GetIdx() + 1)
+
+    # Enumerate only *unassigned* stereo (E/Z, R/S, etc.)
+    opts = StereoEnumerationOptions(onlyUnassigned=True, unique=True, maxIsomers=max_isomers)
+    isomers = list(EnumerateStereoisomers(mol, options=opts))  # :contentReference[oaicite:2]{index=2}
+    if not isomers:
+        isomers = [mol]
+
+    # For each isomer, compute symmetry classes (equivalence classes)
+    per_iso_classes = []
+    for iso in isomers:
+        Chem.AssignStereochemistry(iso, force=True, cleanIt=True)  # stereo perception/assignment context :contentReference[oaicite:4]{index=4}
+        ranks = list(rdmolfiles.CanonicalRankAtoms(
+            iso,
+            breakTies=False,
+            includeChirality=True,
+            includeIsotopes=True,
+        ))
+        # mapNum -> rank
+        per_iso_classes.append({a.GetAtomMapNum(): ranks[a.GetIdx()] for a in iso.GetAtoms()})
+
+    # Build a "stereo-robust signature" for each carbon:
+    # signature(mapNum) = (rank in iso1, rank in iso2, ...)
+    carbon_mapnums = [a.GetAtomMapNum() for a in mol.GetAtoms() if a.GetAtomicNum() == 6]
+    signatures = {
+        mnum: tuple(cls[mnum] for cls in per_iso_classes)
+        for mnum in carbon_mapnums
+    }
+
+    # Environments = unique signatures
+    unique_envs = {sig: [] for sig in set(signatures.values())}
+    for mnum, sig in signatures.items():
+        unique_envs[sig].append(mnum)
+
+    return {
+        "n_isomers": len(isomers),
+        "n_carbon_envs": len(unique_envs),
+        "env_groups_atomMapNums": list(unique_envs.values()),  # each list is a carbon environment
+        "signatures_by_atomMapNum": signatures,
+    }
 
 def score_num_carbon_symmetry_classes(prediction: int | str, ground_truth: str) -> float:
     """Count unique carbon environments using canonical ranking. Stereochemistry is ignored.
@@ -457,21 +523,15 @@ def score_num_carbon_symmetry_classes(prediction: int | str, ground_truth: str) 
     mol = Chem.MolFromSmiles(ground_truth)
     if mol is None:
         raise ValueError("Invalid ground truth SMILES string.")
-    mc = Chem.AddHs(mol)
-    orders = Chem.CanonicalRankAtoms(mc, breakTies=False)
-    c_classes = set()
-    for atom, sym_class in zip(mc.GetAtoms(), orders, strict=False):
-        if atom.GetAtomicNum() == 6:  # Carbon
-            c_classes.add(sym_class)
-    logger.debug(f"Found {len(c_classes)} carbon symmetry classes.")
 
-    return float(len(c_classes) == prediction)
+    c_classes = carbon_envs_stereo(ground_truth)["n_carbon_envs"]
+    return float(c_classes == prediction)
 
 
 def score_num_aromatic_carbons(prediction: int | str, ground_truth: str) -> float:
     """Count aromatic carbons in the molecule, this is centers on cyclic,
     planar molecules with a specific number of delocalized pi electrons,
-    exhibiting enhanced stability due to resonance. 
+    exhibiting enhanced stability due to resonance.
     Then compare to predicted number and score consequently.
 
     Args:
