@@ -31,13 +31,14 @@ def score_molecule(prediction: str, ground_truth: str) -> float:
     """
     Compare predicted and ground truth SMILES strings and calculate similarity score.
     Stereochemistry is not considered in the comparison.
+    Molecules are first converted to canonical SMILES without stereochemistry. Then compared.
 
     Args:
         prediction (str): SMILES string of predicted molecule
         ground_truth (str): SMILES string of ground truth molecule
 
     Returns:
-        float: Score between 0.0 and 1.0 based on similarity
+        Score either 0.0 or 1.0 based on correctness of the prediction.
     """
     try:
         pred_mol = Chem.MolFromSmiles(prediction)
@@ -155,12 +156,12 @@ def score_molecule_fragments(prediction: list[str] | str, ground_truth: str) -> 
     are treated more leniently to account for fragmentation artifacts.
 
     Args:
-        prediction (list[str]): List of SMILES strings representing fragments.
-        ground_truth (str): SMILES string of the ground truth molecule.
+        prediction: List of SMILES strings representing fragments.
+        ground_truth: SMILES string of the ground truth molecule.
 
     Returns:
-        float: Score between 0.0 and 1.0 based on fragment matching.
-               Returns 1.0 if a high percentage of reasonable fragments match.
+        Score either 0.0 or 1.0 based on fragment matching.
+               Returns 1.0 if all the valid fragments match substructures of the ground truth molecule,
     """
     # If prediction is a string representation of a list, parse it
     if isinstance(prediction, list):
@@ -260,13 +261,15 @@ def validate_molecular_formula(prediction, ground_truth):
 def score_formula_match(prediction: str, ground_truth: str) -> float:
     """
     Scoring function that checks if the predicted molecular formula matches the ground truth molecule.
+    It decomposes both the predicted formula and the ground truth SMILES into element counts
+    and compares them for equality.
 
     Args:
-        prediction (str): Predicted molecular formula (e.g., "C6H6")
-        ground_truth (str): SMILES string of the ground truth molecule
+        prediction: Predicted molecular formula (e.g., "C6H6")
+        ground_truth: SMILES string of the ground truth molecule
 
     Returns:
-        float: 1.0 if the formulas match, 0.0 otherwise
+        Float 1.0 if the formulas match, 0.0 otherwise
     """
     # prediction: SMILES, ground_truth: formula
     return 1.0 if validate_molecular_formula(prediction, ground_truth) else 0.0
@@ -345,11 +348,11 @@ def validate_dbe_consistency(prediction: int | str, ground_truth: str) -> float:
     Validate that the predicted DBE value (integer) matches the DBE calculated from the ground truth SMILES string within a tolerance.
 
     Args:
-        prediction (int or str): Predicted DBE value (should be an integer or string representing an integer).
-        ground_truth (str): SMILES string of the ground truth molecule.
+        prediction: Predicted DBE value (should be an integer or string representing an integer).
+        ground_truth: SMILES string of the ground truth molecule.
 
     Returns:
-        float: 1.0 if the absolute difference between prediction and calculated DBE is within tolerance, 0.0 otherwise.
+        A float being 1.0 if the predicted DBE matches the calculated DBE, 0.0 otherwise.
     """
     try:
         prediction = int(prediction)
@@ -370,13 +373,15 @@ def score_isotopic_distribution(
 ) -> float:
     """
     Score the isotopic distribution of a molecule based on the provided prediction and ground truth.
+    Checks that all the elements with significant isotopic distributions (C, S, Cl, Br)
+    in the ground truth molecule are present in the predicted list of elements.
 
     Args:
         prediction: list of element symbols (e.g. ["C", "H", "O"]) or a string representation of such a list
-        ground_truth: SMILES string
+        ground_truth: SMILES string of the sample molecule
 
     Returns:
-        float: 1.0 if the predicted elements for the isotopic distribution match the ground truth, 0.0 otherwise
+        Float that will be 1.0 if the predicted elements for the isotopic distribution match the ground truth, 0.0 otherwise
     """
     if isinstance(prediction, list):
         seq = prediction
@@ -440,11 +445,11 @@ def score_num_hydrogen_symmetry_classes(
     Then compare to predicted number and score consequently. It avoids acidic hydrogens.
 
     Args:
-        prediction (int | str): Predicted number of hydrogen symmetry classes
-        ground_truth (str): SMILES string of the ground truth molecule
+        prediction: Predicted number of hydrogen symmetry classes
+        ground_truth: SMILES string of the ground truth molecule
 
     Returns:
-        float: 1.0 if the predicted number matches the actual number, 0.0 otherwise
+        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise
     """
     try:
         prediction = int(prediction)
@@ -530,11 +535,11 @@ def score_num_carbon_symmetry_classes(
     Then compare to predicted number and score consequently.
 
     Args:
-        prediction (int | str): Predicted number of carbon symmetry classes
-        ground_truth (str): SMILES string of the ground truth molecule
+        prediction: Predicted number of carbon symmetry classes
+        ground_truth: SMILES string of the ground truth molecule
 
     Returns:
-        float: 1.0 if the predicted number matches the actual number, 0.0 otherwise
+        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise
     """
     try:
         prediction = int(prediction)
@@ -558,11 +563,11 @@ def score_num_aromatic_carbons(prediction: int | str, ground_truth: str) -> floa
     Then compare to predicted number and score consequently.
 
     Args:
-        prediction (int | str): Predicted number of aromatic carbons
-        ground_truth (str): SMILES string of the ground truth molecule
+        prediction: Predicted number of aromatic carbons
+        ground_truth: SMILES string of the ground truth molecule
 
     Returns:
-        float: 1.0 if the predicted number matches the actual number, 0.
+        Float that will be 1.0 if the predicted number matches the actual number, 0.
     """
     try:
         prediction = int(prediction)
@@ -585,13 +590,15 @@ def score_num_aromatic_carbons(prediction: int | str, ground_truth: str) -> floa
 
 def score_num_ch3_groups(prediction: int | str, ground_truth: str) -> float:
     """Count CH3 groups in the molecule and compare to predicted number.
+    It works through identifying carbon atoms bonded to three hydrogen atoms and one other atom.
+    Then compare to predicted number and score consequently.
 
     Args:
-        prediction (int | str): Predicted number of CH3 groups
-        ground_truth (str): SMILES string of the ground truth molecule
+        prediction: Predicted number of CH3 groups
+        ground_truth: SMILES string of the ground truth molecule
 
     Returns:
-        float: 1.0 if the predicted number matches the actual number, 0.0 otherwise
+        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise
     """
     try:
         prediction = int(prediction)
@@ -613,14 +620,15 @@ def score_num_ch3_groups(prediction: int | str, ground_truth: str) -> float:
 
 def score_num_carbonyl_groups(prediction: int | str, ground_truth: str) -> float:
     """Count carbonyl groups (C=O) in the molecule, handling tautomers.
+    It works through identifying double bonds between carbon and oxygen atoms.
     Then compare to predicted number and score consequently.
 
     Args:
-        prediction (int | str): Predicted number of carbonyl groups
-        ground_truth (str): SMILES string of the ground truth molecule
+        prediction: Predicted number of carbonyl groups
+        ground_truth: SMILES string of the ground truth molecule
 
     Returns:
-        float: 1.0 if the predicted number matches the actual number, 0.0 otherwise
+        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise
     """
     try:
         prediction = int(prediction)
