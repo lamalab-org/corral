@@ -5,7 +5,7 @@ root_path = Path(__file__).parent
 
 
 for json_file in root_path.glob("*.json"):
-    if "claude" not in json_file.name:
+    if "gpt" not in json_file.name:
         continue
     final_data = {}
     if "lvl1" in json_file.name:
@@ -16,9 +16,7 @@ for json_file in root_path.glob("*.json"):
         level = "level_3"
     else:
         raise ValueError("Level not found in filename")
-    tool_path = (
-        Path(__file__).parent.parent / f"claude_sonnet_45/spectra/{level}/subtasks"
-    )
+    tool_path = Path(__file__).parent.parent / f"gpt-4o/spectra/{level}/subtasks"
     print(f"Processing {json_file.name}")
     with json_file.open("r") as f:
         tool_data = json.load(f)

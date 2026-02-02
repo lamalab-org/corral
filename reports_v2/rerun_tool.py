@@ -10,7 +10,7 @@ from corral import CorralRouter, CorralRunner
 from corral.agents import BaseAgent
 from corral.agents.utils import LiteLLMMessage
 
-subtask_path = "reports_v2/claude_sonnet_45/spectra/level_2/subtasks/agent_logs-ToolCallingAgent-claude-sonnet-4-5-20250929-comprehensive"
+subtask_path = "reports_v2/gpt-4o/spectra/level_2/subtasks/agent_logs-ToolCallingAgent-gpt-4o-2024-08-06-brief"
 
 root_path = Path(__file__).parent.parent.parent
 
@@ -177,15 +177,15 @@ if __name__ == "__main__":
     setup_litellm()
 
     verboses = [
-        # "brief",
+        "brief",
         # "workflow",
-        "comprehensive",
+        # "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
-            model = "claude-sonnet-4-5-20250929"
-            run_name = f"claude_45_sonnet-tool_calling-retro_lvl2_sub_env-{verbose}"
+            model = "gpt-4o-2024-08-06"
+            run_name = f"gpt_4o-tool_calling-spectra_sub_lvl2_env-{verbose}"
             run_benchmark(model=model, run_name=run_name, verbose=verbose)
 
         except Exception as e:
