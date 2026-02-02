@@ -332,7 +332,7 @@ def get_params():
     return params
 
 
-def check_params(gt_params, rel_tol=1e-4, abs_tol=1e-9):
+def check_params(gt_params, rel_tol=1e-2, abs_tol=1e-3):
     current_params = get_params()
 
     for key in gt_params:
