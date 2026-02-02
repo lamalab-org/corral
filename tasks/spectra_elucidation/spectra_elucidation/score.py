@@ -8,7 +8,10 @@ from rdkit.Chem import rdMolDescriptors
 from rdkit.Chem import rdmolfiles
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit import Chem
-from rdkit.Chem.EnumerateStereoisomers import EnumerateStereoisomers, StereoEnumerationOptions
+from rdkit.Chem.EnumerateStereoisomers import (
+    EnumerateStereoisomers,
+    StereoEnumerationOptions,
+)
 from rdkit.Chem import rdmolfiles
 
 _ELEMENTS_WITH_ISOTOPIC_DISTRIBUTION = [
@@ -280,7 +283,7 @@ def _expand_parentheses(formula: str) -> str:
         inner, mult = m.groups()
         mult = int(mult or 1)
         expanded = "".join(
-            f"{el}{int(cnt or 1)*mult}" for el, cnt in _ELEMENT_PAT.findall(inner)
+            f"{el}{int(cnt or 1) * mult}" for el, cnt in _ELEMENT_PAT.findall(inner)
         )
         formula = formula[: m.start()] + expanded + formula[m.end() :]
 
@@ -362,7 +365,9 @@ def validate_dbe_consistency(prediction: int | str, ground_truth: str) -> float:
     return float(prediction == expected_dbe)
 
 
-def score_isotopic_distribution(prediction: list[str] | str, ground_truth: str) -> float:
+def score_isotopic_distribution(
+    prediction: list[str] | str, ground_truth: str
+) -> float:
     """
     Score the isotopic distribution of a molecule based on the provided prediction and ground truth.
 
@@ -392,9 +397,9 @@ def score_isotopic_distribution(prediction: list[str] | str, ground_truth: str) 
         k: v for k, v in elems.items() if k in _ELEMENTS_WITH_ISOTOPIC_DISTRIBUTION
     }
 
-    if prediction is None and not elems:
+    if seq and seq is None and not elems:
         return 1.0
-    if set(prediction) == set(elems):
+    if set(seq) == set(elems):
         return 1.0
     else:
         return 0.0
@@ -428,14 +433,16 @@ def count_h_env(mol: Chem.Mol) -> int:
     return len(h_atoms)
 
 
-def score_num_hydrogen_symmetry_classes(prediction: int | str, ground_truth: str) -> float:
+def score_num_hydrogen_symmetry_classes(
+    prediction: int | str, ground_truth: str
+) -> float:
     """Count unique hydrogen environments using canonical ranking. Stereochemistry is ignored.
-    Then compare to predicted number and score consequently.
-    
+    Then compare to predicted number and score consequently. It avoids acidic hydrogens.
+
     Args:
         prediction (int | str): Predicted number of hydrogen symmetry classes
         ground_truth (str): SMILES string of the ground truth molecule
-        
+
     Returns:
         float: 1.0 if the predicted number matches the actual number, 0.0 otherwise
     """
@@ -464,30 +471,41 @@ def carbon_envs_stereo(smiles: str, max_isomers: int = 512):
         a.SetAtomMapNum(a.GetIdx() + 1)
 
     # Enumerate only *unassigned* stereo (E/Z, R/S, etc.)
-    opts = StereoEnumerationOptions(onlyUnassigned=True, unique=True, maxIsomers=max_isomers)
-    isomers = list(EnumerateStereoisomers(mol, options=opts))  # :contentReference[oaicite:2]{index=2}
+    opts = StereoEnumerationOptions(
+        onlyUnassigned=True, unique=True, maxIsomers=max_isomers
+    )
+    isomers = list(
+        EnumerateStereoisomers(mol, options=opts)
+    )  # :contentReference[oaicite:2]{index=2}
     if not isomers:
         isomers = [mol]
 
     # For each isomer, compute symmetry classes (equivalence classes)
     per_iso_classes = []
     for iso in isomers:
-        Chem.AssignStereochemistry(iso, force=True, cleanIt=True)  # stereo perception/assignment context :contentReference[oaicite:4]{index=4}
-        ranks = list(rdmolfiles.CanonicalRankAtoms(
-            iso,
-            breakTies=False,
-            includeChirality=True,
-            includeIsotopes=True,
-        ))
+        Chem.AssignStereochemistry(
+            iso, force=True, cleanIt=True
+        )  # stereo perception/assignment context :contentReference[oaicite:4]{index=4}
+        ranks = list(
+            rdmolfiles.CanonicalRankAtoms(
+                iso,
+                breakTies=False,
+                includeChirality=True,
+                includeIsotopes=True,
+            )
+        )
         # mapNum -> rank
-        per_iso_classes.append({a.GetAtomMapNum(): ranks[a.GetIdx()] for a in iso.GetAtoms()})
+        per_iso_classes.append(
+            {a.GetAtomMapNum(): ranks[a.GetIdx()] for a in iso.GetAtoms()}
+        )
 
     # Build a "stereo-robust signature" for each carbon:
     # signature(mapNum) = (rank in iso1, rank in iso2, ...)
-    carbon_mapnums = [a.GetAtomMapNum() for a in mol.GetAtoms() if a.GetAtomicNum() == 6]
+    carbon_mapnums = [
+        a.GetAtomMapNum() for a in mol.GetAtoms() if a.GetAtomicNum() == 6
+    ]
     signatures = {
-        mnum: tuple(cls[mnum] for cls in per_iso_classes)
-        for mnum in carbon_mapnums
+        mnum: tuple(cls[mnum] for cls in per_iso_classes) for mnum in carbon_mapnums
     }
 
     # Environments = unique signatures
@@ -498,14 +516,19 @@ def carbon_envs_stereo(smiles: str, max_isomers: int = 512):
     return {
         "n_isomers": len(isomers),
         "n_carbon_envs": len(unique_envs),
-        "env_groups_atomMapNums": list(unique_envs.values()),  # each list is a carbon environment
+        "env_groups_atomMapNums": list(
+            unique_envs.values()
+        ),  # each list is a carbon environment
         "signatures_by_atomMapNum": signatures,
     }
 
-def score_num_carbon_symmetry_classes(prediction: int | str, ground_truth: str) -> float:
+
+def score_num_carbon_symmetry_classes(
+    prediction: int | str, ground_truth: str
+) -> float:
     """Count unique carbon environments using canonical ranking. Stereochemistry is ignored.
     Then compare to predicted number and score consequently.
-    
+
     Args:
         prediction (int | str): Predicted number of carbon symmetry classes
         ground_truth (str): SMILES string of the ground truth molecule
@@ -562,11 +585,11 @@ def score_num_aromatic_carbons(prediction: int | str, ground_truth: str) -> floa
 
 def score_num_ch3_groups(prediction: int | str, ground_truth: str) -> float:
     """Count CH3 groups in the molecule and compare to predicted number.
-    
+
     Args:
         prediction (int | str): Predicted number of CH3 groups
         ground_truth (str): SMILES string of the ground truth molecule
-        
+
     Returns:
         float: 1.0 if the predicted number matches the actual number, 0.0 otherwise
     """
@@ -589,13 +612,13 @@ def score_num_ch3_groups(prediction: int | str, ground_truth: str) -> float:
 
 
 def score_num_carbonyl_groups(prediction: int | str, ground_truth: str) -> float:
-    """Count carbonyl groups (C=O) in the molecule, handling tautomers. 
+    """Count carbonyl groups (C=O) in the molecule, handling tautomers.
     Then compare to predicted number and score consequently.
-    
+
     Args:
         prediction (int | str): Predicted number of carbonyl groups
         ground_truth (str): SMILES string of the ground truth molecule
-        
+
     Returns:
         float: 1.0 if the predicted number matches the actual number, 0.0 otherwise
     """

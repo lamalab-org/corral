@@ -228,7 +228,7 @@ def create_spectra_elu_environments(
     ordered_tasks = task_group.get_ordered_tasks()
     logger.info("\nTask Execution Order:")
     for i, task_id in enumerate(ordered_tasks):
-        logger.info(f"{i+1}. {task_id}")
+        logger.info(f"{i + 1}. {task_id}")
 
     environments = {}
     for task_id in task_group.tasks:

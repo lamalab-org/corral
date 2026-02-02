@@ -31,7 +31,7 @@ def _expand_parentheses(formula: str) -> str:
         inner, mult = m.groups()
         mult = int(mult or 1)
         expanded = "".join(
-            f"{el}{int(cnt or 1)*mult}" for el, cnt in _ELEMENT_PAT.findall(inner)
+            f"{el}{int(cnt or 1) * mult}" for el, cnt in _ELEMENT_PAT.findall(inner)
         )
         formula = formula[: m.start()] + expanded + formula[m.end() :]
 
