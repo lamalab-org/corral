@@ -17,16 +17,15 @@ for json_file in root_path.glob("*.json"):
     else:
         raise ValueError("Level not found in filename")
     tool_path = (
-        Path(__file__).parent.parent
-        / f"claude_sonnet_45/retrosynthesis/{level}/subtasks"
+        Path(__file__).parent.parent / f"claude_sonnet_45/spectra/{level}/subtasks"
     )
     print(f"Processing {json_file.name}")
     with json_file.open("r") as f:
-        data = json.load(f)
+        tool_data = json.load(f)
 
     tool_path_d = tool_path / json_file.name
     with tool_path_d.open("r") as f:
-        tool_data = json.load(f)
+        data = json.load(f)
 
     final_data = data
 
@@ -46,42 +45,42 @@ for json_file in root_path.glob("*.json"):
     data["metrics"]["pass^5"] = tool_data["metrics"]["Pass^5"]
 
     for task_id, task_results in final_data["task_results"].items():
-        data["metrics"]["task_results"]["average_score"] = tool_data["metrics"][
-            "task_results"
+        data["task_results"][task_id]["average_score"] = tool_data["task_results"][
+            task_id
         ]["Task Average Score"]
-        data["metrics"]["task_results"]["success_rate"] = tool_data["metrics"][
-            "task_results"
+        data["task_results"][task_id]["success_rate"] = tool_data["task_results"][
+            task_id
         ]["Task Success Rate"]
-        data["metrics"]["task_results"]["pass@1"] = tool_data["metrics"][
-            "task_results"
-        ]["Pass@1"]
-        data["metrics"]["task_results"]["pass@2"] = tool_data["metrics"][
-            "task_results"
-        ]["Pass@2"]
-        data["metrics"]["task_results"]["pass@3"] = tool_data["metrics"][
-            "task_results"
-        ]["Pass@3"]
-        data["metrics"]["task_results"]["pass@4"] = tool_data["metrics"][
-            "task_results"
-        ]["Pass@4"]
-        data["metrics"]["task_results"]["pass@5"] = tool_data["metrics"][
-            "task_results"
-        ]["Pass@5"]
-        data["metrics"]["task_results"]["pass^1"] = tool_data["metrics"][
-            "task_results"
-        ]["Pass^1"]
-        data["metrics"]["task_results"]["pass^2"] = tool_data["metrics"][
-            "task_results"
-        ]["Pass^2"]
-        data["metrics"]["task_results"]["pass^3"] = tool_data["metrics"][
-            "task_results"
-        ]["Pass^3"]
-        data["metrics"]["task_results"]["pass^4"] = tool_data["metrics"][
-            "task_results"
-        ]["Pass^4"]
-        data["metrics"]["task_results"]["pass^5"] = tool_data["metrics"][
-            "task_results"
-        ]["Pass^5"]
+        data["task_results"][task_id]["pass@1"] = tool_data["task_results"][task_id][
+            "Task Pass@1"
+        ]
+        data["task_results"][task_id]["pass@2"] = tool_data["task_results"][task_id][
+            "Task Pass@2"
+        ]
+        data["task_results"][task_id]["pass@3"] = tool_data["task_results"][task_id][
+            "Task Pass@3"
+        ]
+        data["task_results"][task_id]["pass@4"] = tool_data["task_results"][task_id][
+            "Task Pass@4"
+        ]
+        data["task_results"][task_id]["pass@5"] = tool_data["task_results"][task_id][
+            "Task Pass@5"
+        ]
+        data["task_results"][task_id]["pass^1"] = tool_data["task_results"][task_id][
+            "Task Pass^1"
+        ]
+        data["task_results"][task_id]["pass^2"] = tool_data["task_results"][task_id][
+            "Task Pass^2"
+        ]
+        data["task_results"][task_id]["pass^3"] = tool_data["task_results"][task_id][
+            "Task Pass^3"
+        ]
+        data["task_results"][task_id]["pass^4"] = tool_data["task_results"][task_id][
+            "Task Pass^4"
+        ]
+        data["task_results"][task_id]["pass^5"] = tool_data["task_results"][task_id][
+            "Task Pass^5"
+        ]
 
         for i, trial in enumerate(task_results["trials"]):
             trial["score"] = tool_data["task_results"][task_id]["trials"][i]["score"]
@@ -92,6 +91,6 @@ for json_file in root_path.glob("*.json"):
                 "success"
             ]
 
-    final_path = root_path / "claude" / json_file.name
+    final_path = root_path.parent / json_file.name
     with final_path.open("w") as f:
         json.dump(final_data, f, indent=4)

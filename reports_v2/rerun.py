@@ -1,26 +1,35 @@
 import json
 import re
 from pathlib import Path
-from typing import Any
 
 import litellm
 from dotenv import load_dotenv
 from loguru import logger
-from promptstore import PromptStore
 
 from corral import CorralRouter, CorralRunner
 from corral.agents import BaseAgent
 from corral.agents.utils import LiteLLMMessage
 
-subtask_path = "claude_sonnet_45/retrosynthesis/level_1/subtasks/agent_logs-ReActAgent-claude-sonnet-4-5-20250929-brief"
+subtask_path = "reports_v2/claude_sonnet_45/spectra/level_2/subtasks/agent_logs-ReActAgent-claude-sonnet-4-5-20250929-comprehensive"
 
-root_path = Path(__file__).parent
+root_path = Path(__file__).parent.parent.parent
+
+
+def natural_sort_key(filename: str) -> list:
+    """Generate a key for natural sorting (numbers sorted numerically)."""
+    return [
+        int(part) if part.isdigit() else part.lower()
+        for part in re.split(r"(\d+)", filename)
+    ]
 
 
 def load_files() -> dict:
     data = {}
     file_path = root_path / subtask_path
-    for file in file_path.glob("*.json"):
+    sorted_files = sorted(
+        file_path.glob("*.json"), key=lambda f: natural_sort_key(f.name)
+    )
+    for file in sorted_files:
         with file.open("r") as f:
             r = json.load(f)
         name = file.name
@@ -35,17 +44,18 @@ class ReActAgent(BaseAgent):
         model: str = "openai/gpt-4o",
         max_iterations: int = 10,
         api_endpoint: str | None = None,
-        system_prompt: str | Any | None = None,
-        user_prompt: str | Any | None = None,
-        extractor_prompt: str | Any | None = None,
+        system_prompt: str | None = None,
+        user_prompt: str | None = None,
+        extractor_prompt: str | None = None,
+        surrender_prompt: str | None = None,
         temperature: float = 0.7,
-        prompt_store: PromptStore | None = None,
-        system_prompt_id: str = "400fcecf-f5f2-464b-aff5-8a4377c9685c",
-        user_prompt_id: str | None = "d880c4d3-fe60-4cf4-813b-2008076cd595",
-        extractor_prompt_id: str | None = "9d37e4a0-26c5-438a-ba1b-a273388fcded",
         **kwargs,
     ):
         """Initialize the agent"""
+        # Set default user prompt if not provided
+        if user_prompt is None:
+            user_prompt = "react/user_prompt"
+
         super().__init__(
             model=model,
             max_iterations=max_iterations,
@@ -53,11 +63,8 @@ class ReActAgent(BaseAgent):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             extractor_prompt=extractor_prompt,
+            surrender_prompt=surrender_prompt,
             temperature=temperature,
-            prompt_store=prompt_store,
-            system_prompt_id=system_prompt_id,
-            user_prompt_id=user_prompt_id,
-            extractor_prompt_id=extractor_prompt_id,
             **kwargs,
         )
         self.files = load_files()
@@ -69,6 +76,8 @@ class ReActAgent(BaseAgent):
         history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
+        enable_surrender: bool = False,
+        **kwargs,  # noqa: ARG002
     ) -> str:
         """Main ReAct loop implementation
 
@@ -86,6 +95,7 @@ class ReActAgent(BaseAgent):
         for file in self.files:
             if task_id in file:
                 file_id = file
+                break
 
         if not file_id:
             raise Exception(f"Could not find file for the task: {task_id}")
@@ -163,15 +173,15 @@ if __name__ == "__main__":
     setup_litellm()
 
     verboses = [
-        "brief",
+        # "brief",
         # "workflow",
-        # "comprehensive",
+        "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")
         try:
             model = "claude-sonnet-4-5-20250929"
-            run_name = f"claude_45_sonnet-react-retro_lvl1_sub_env-{verbose}_verbosity"
+            run_name = f"claude_45_sonnet-react-retro_lvl2_sub_env-{verbose}"
             run_benchmark(model=model, run_name=run_name, verbose=verbose)
 
         except Exception as e:
