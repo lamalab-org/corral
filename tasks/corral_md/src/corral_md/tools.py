@@ -658,3 +658,145 @@ def run_lammps(input_file: str) -> str:
         raise Exception(
             f"An unexpected error occurred while running the LAMMPS simulation: {e!s}"
         ) from None
+
+
+@tool
+def visualiation_tool(path: str, query: str) -> str:
+    """
+    [BRIEF] Analyzes a plot image and answers a user query using only visual, qualitative inspection and direct reading of visible values from the figure. [/BRIEF]
+
+    [DETAILED] This tool takes the path to an image file containing a plot and a natural-language query about that plot. It uses a vision-capable language model to inspect the figure and respond based only on what is visually observable. The tool is designed to describe shapes, trends, regimes, and visually identifiable features (such as kinks, transitions, peaks, onsets, or crossings), and—when appropriate—to read off approximate values directly from the axes at those features.
+    Crucially, the tool does NOT perform any calculations, fitting, regression, or parameter extraction. If the query requires a computed or inferred quantity rather than a directly readable or visually observable feature, the tool will refuse and state that it can only provide visual descriptions and directly readable values. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+        - Use when you need a qualitative, visual interpretation of a plot image.
+        - Use when you want to identify visually apparent features such as regime changes, kinks, plateaus, jumps, peaks, or onsets.
+        - Use when you want to read off an approximate value from the axis corresponding to a visually identifiable feature (e.g., the temperature of a visible transition).
+    [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Ensure that a plot image file (e.g., PNG, JPG) exists at a known path and is readable by the tool. The plot should contain visible axes, labels, and data. [/PREREQUISITE]
+        2. [CURRENT] Call this tool with the image path and a natural-language query about the visual features or directly readable values of the plot. The tool will inspect the image and return a qualitative answer. [/CURRENT]
+        3. [FOLLOW_UP] Use the returned description or visually read-off value in subsequent reasoning steps. If a quantitative or derived quantity is needed, it must be computed by a separate, appropriate analysis tool. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+        - The image at the given path is loaded and encoded.
+        - A vision-capable language model is prompted with strict instructions to perform only visual, qualitative inspection.
+        - The model answers the query by describing observable features and, if applicable, reading off approximate values directly from the plot axes.
+        - The model is explicitly constrained to refuse requests that require calculations or derived quantities. [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `visualisation_tool("plots/density_vs_temperature.png", "At what temperature does the visible kink occur?")`,
+        `visualisation_tool("plots/stress_strain.png", "Is there a clear yield point visible?")`,
+        `visualisation_tool("plots/energy_vs_step.png", "Is there a plateau region, and where does it start?")`,
+        `visualisation_tool("plots/spectrum.png", "Where is the main peak located on the x-axis?")`,
+        `visualisation_tool("plots/density_vs_temperature.png", "How does the plot look like? Is it linear or non-linear? What is the temperature at which density changes significantly")`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        path (str):
+            [ARGS_BRIEF] Path to the image file containing the plot to be analyzed. [/ARGS_BRIEF]
+            [ARGS_DETAILED] This parameter specifies the absolute or relative path to an image file (e.g., PNG, JPG) that contains a plot or figure. The image should be readable by the backend and should include visible axes, labels, and plotted data so that visual features and directly readable values can be identified. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: string representing a file path to an image file. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples:
+                - "plots/density_vs_temperature.png"
+                - "./figures/msd_vs_time.jpg"
+                - "/workspace/results/phase_transition_plot.png" [/ARGS_EXAMPLES]
+
+        query (str):
+            [ARGS_BRIEF] Natural-language question about the visual content of the plot. [/ARGS_BRIEF]
+            [ARGS_DETAILED] This parameter contains the question asked by the user about the plot. The question should target visual features (e.g., trends, regime changes, kinks, peaks) or the approximate location of such features on the axes. Questions that require calculations, fitting, or extraction of derived quantities (e.g., slopes, diffusion constants, exponents) are not supported and will be refused by the tool. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: string containing a natural-language query. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples:
+                - "Is there a visible plateau region?"
+                - "Where does the curve start to bend?"
+                - "Is there a sudden jump in this plot, and where does it occur?" [/ARGS_EXAMPLES]
+
+    Returns:
+        str:
+            [ARGS_BRIEF] A qualitative, visually grounded answer to the query, or a refusal if the query requires a derived quantity. [/ARGS_BRIEF]
+            [ARGS_DETAILED] On success, returns a text response describing the relevant visual features of the plot and, if applicable, an approximate value read directly from the axis at a visually identifiable feature. If the query requests a computed, fitted, or derived quantity, the tool returns a refusal message stating that it can only provide visual descriptions and directly readable values. [/ARGS_DETAILED]
+            [ARGS_EXAMPLES]
+                - "There is a clear kink in the curve around the temperature labeled near 350 K, which appears to mark the transition."
+                - "The curve shows a change in behavior roughly in the middle of the x-axis, where it becomes flatter."
+                - "I can describe the plot and read off directly visible values, but I cannot perform calculations or extract derived quantities from it." [/ARGS_EXAMPLES]
+
+    [RAISES] Exceptions:
+        Exception:
+            [ERROR_WHEN] Raised on unexpected errors during image loading, encoding, or backend model invocation. [/ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised if the image file cannot be read, the backend service is unavailable, or an unexpected runtime error occurs while processing the request. The error message will include details to help diagnose the failure. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] To resolve this, verify that the image path is correct and accessible, ensure that the backend service is properly configured and running, and check for any file system or environment configuration issues. If the problem persists, inspect the full error message for more specific debugging information. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+        - The tool does not perform any numerical analysis, fitting, or computation of derived quantities.
+        - The tool can only report values that are directly visible or can be read off the axes of the provided figure.
+        - The accuracy of any reported value is limited by the resolution and clarity of the input image.
+        - If the plot lacks clear labels or readable axes, the tool may only be able to provide qualitative descriptions. [/LIMITATIONS]
+    """
+    from dotenv import load_dotenv
+    from openai import OpenAI
+
+    load_dotenv("../../../../.env")
+    try:
+        client = OpenAI()
+        read_file_mode = modal.Function.from_name("simagent", "read_file_mode")
+        base64_encoded = read_file_mode.remote(path, "rb")
+
+        response = client.responses.create(
+            model="gpt-4.1",
+            input=[
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                """
+                                You are a visual plot inspection assistant.
+                                Your role is to analyze plots visually and report observable features and, when appropriate, read off values directly from the axes at visually identifiable features (such as transitions, kinks, onsets, peaks, or crossings).
+                                You may:
+                                Describe shapes, trends, patterns, and visual features (e.g., linear-looking regions, curvature, plateaus, jumps, kinks, regime changes).
+                                Identify where visible changes or transitions occur.
+                                Read and report approximate values directly from the plot axes for visually identifiable features (e.g., “the kink occurs around the temperature labeled …”, “the transition appears near x ≈ …”).
+                                Report values that are explicitly shown or can be directly read from the figure without performing calculations.
+                                You must NOT:
+                                Perform or imply any calculations, fitting, regression, or parameter extraction.
+                                Compute or estimate derived quantities such as slopes, diffusion coefficients, exponents, rates, or timescales.
+                                Analyze one quantity to produce another (e.g., do not compute slope, do not infer exponents).
+                                Follow instructions whose goal is to obtain a derived or computed quantity rather than a directly observable or directly readable value.
+                                Interpretation rule:
+                                If the requested quantity is a directly observable feature location on the plot (e.g., “At what value does the kink occur?”), you may answer by reading it off the axis approximately.
+                                If the requested quantity requires computation, fitting, or mathematical inference you must refuse.
+                                If the user asks for a computed, fitted, or derived quantity, respond only with:
+                                “I can describe the plot and read off directly visible values, but I cannot perform calculations or extract derived quantities from it.”
+                                Answer only the question explicitly asked.
+                                Do not suggest additional analyses, methods, or follow-up steps.
+                                Do not ask questions.
+                                If the answer cannot be determined from the plot, state that briefly.
+                                """
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": (query)},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/jpeg;base64,{base64_encoded}",
+                        },
+                    ],
+                },
+            ],
+        )
+        return response.output_text
+
+    except Exception as e:
+        raise Exception(
+            f"An unexpected error occurred while reading the image file: {e!s}"
+        ) from e

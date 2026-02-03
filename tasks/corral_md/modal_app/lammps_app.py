@@ -22,6 +22,7 @@ volume_potential = modal.Volume.from_name("potentials", create_if_missing=True)
 volume_sim = modal.Volume.from_name("simulations", create_if_missing=True)
 volume_struct = modal.Volume.from_name("structures", create_if_missing=True)
 volume_test_files = modal.Volume.from_name("test_files", create_if_missing=True)
+volume_image_files = modal.Volume.from_name("image_files", create_if_missing=True)
 
 CPUS = 2
 
@@ -33,6 +34,9 @@ CPUS = 2
 
 # with volume_test_files.batch_upload() as batch:
 #     batch.put_directory("./test_files/", "/")
+
+# with volume_image_files.batch_upload() as batch:
+#     batch.put_directory("./image_files/", "/")
 
 
 def _run_lammps(
@@ -704,6 +708,31 @@ def read_file(path: str) -> str:
     try:
         with fs.open(path, "r") as f:
             return f.read()
+    except Exception as e:
+        raise RuntimeError(f"Error reading files: {e}") from e
+
+
+@app.function(
+    image=lammps_image,
+    cpu=1.0,
+    memory=5120,
+    volumes={
+        "/potentials": volume_potential.read_only(),
+        "/results": volume_sim,
+        "/structures": volume_struct.read_only(),
+        "/test_files": volume_test_files,
+        "/image_files": volume_image_files,
+    },
+)
+def read_file_mode(path: str, mode="rb") -> str:
+    """Read contents of a file"""
+    import base64
+
+    fs = fsspec.filesystem("file")
+    volume_sim.reload()
+    try:
+        with fs.open(path, mode) as f:
+            return base64.b64encode(f.read()).decode("utf-8")
     except Exception as e:
         raise RuntimeError(f"Error reading files: {e}") from e
 
