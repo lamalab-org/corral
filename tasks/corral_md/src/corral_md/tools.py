@@ -681,10 +681,12 @@ def visualisation_tool(path: str, query: str) -> str:
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-        - The image at the given path is loaded and encoded.
-        - A vision-capable language model is prompted with strict instructions to perform only visual, qualitative inspection.
-        - The model answers the query by describing observable features and, if applicable, reading off approximate values directly from the plot axes.
-        - The model is explicitly constrained to refuse requests that require calculations or derived quantities. [/CONTEXTUAL]
+        - The image at the given path is loaded and analyzed by a vision-language model (VLM).
+        - The model performs visual inspection only: it looks at shapes, trends, patterns, and visibly identifiable features in the figure.
+        - The model may report approximate values only when they can be directly read from the axes at a clearly visible feature (e.g., a labeled tick near a visible transition).
+        - The model does not have access to the underlying data and does not perform any numerical computation, fitting, or measurement.
+        - Because this tool relies on visual perception of a rendered image, its answers are limited by image resolution, figure clarity, marker density, and plotting choices.
+    [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
     [
@@ -732,10 +734,14 @@ def visualisation_tool(path: str, query: str) -> str:
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
-        - The tool does not perform any numerical analysis, fitting, or computation of derived quantities.
-        - The tool can only report values that are directly visible or can be read off the axes of the provided figure.
-        - The accuracy of any reported value is limited by the resolution and clarity of the input image.
-        - If the plot lacks clear labels or readable axes, the tool may only be able to provide qualitative descriptions. [/LIMITATIONS]
+        - This tool is powered by a vision-language model and does not see the raw data—only the rendered image.
+        - If the plot is very dense, spans a very large range, or contains many overlapping points, fine details or the exact location of subtle changes may not be visually resolvable.
+        - In such cases, the tool may only be able to indicate a change as occurring “near the beginning”, “around the middle”, or “toward the end” of the axis, rather than at a precise location.
+        - The tool cannot compensate for poor resolution, overplotting, or compressed axes.
+        - If precise localization of a feature is required, the figure may need to be replotted with a smaller range, zoomed-in view, or reduced data density before using this tool.
+        - The tool does not perform calculations or extract derived quantities, even if they could be inferred from the plot by a human.
+        - Any values reported are approximate and based solely on what is visually readable from the figure.
+        [/LIMITATIONS]
     """
     from dotenv import load_dotenv
     from openai import OpenAI
