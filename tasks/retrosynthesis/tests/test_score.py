@@ -1,6 +1,7 @@
 """Tests for retrosynthesis scoring functions."""
 
 import json
+from unittest.mock import patch
 
 import pytest
 from retrosynthesis.score import (
@@ -504,16 +505,22 @@ class TestCheckTemplate:
 class TestCheckApplyTemplate:
     """Tests for check_apply_template function."""
 
-    def test_check_apply_template_valid(self):
+    @patch("retrosynthesis.score.apply_template_retro")
+    @patch("retrosynthesis.score.search_by_template")
+    def test_check_apply_template_valid(self, mock_search, mock_apply):
         """Test checking template application."""
+        mock_search.return_value = {"mapped_rxn": "test_rxn"}
+        mock_apply.return_value = ["C", "O"]
         prediction = {"template_id": "1", "mapped_rxn": "test_rxn"}
         target = "CCO"
         result = check_apply_template(prediction, target)
         assert isinstance(result, float)
         assert 0.0 <= result <= 1.0
 
-    def test_check_apply_template_missing_template_id(self):
+    @patch("retrosynthesis.score.search_by_template")
+    def test_check_apply_template_missing_template_id(self, mock_search):
         """Test with missing template_id."""
+        mock_search.return_value = None
         prediction = {"mapped_rxn": "test_rxn"}
         target = "CCO"
         # Missing template_id causes search_by_template to return None,
@@ -521,8 +528,12 @@ class TestCheckApplyTemplate:
         with pytest.raises(AttributeError):
             check_apply_template(prediction, target)
 
-    def test_check_apply_template_invalid_smiles(self):
+    @patch("retrosynthesis.score.apply_template_retro")
+    @patch("retrosynthesis.score.search_by_template")
+    def test_check_apply_template_invalid_smiles(self, mock_search, mock_apply):
         """Test with invalid target SMILES."""
+        mock_search.return_value = {"mapped_rxn": "test_rxn"}
+        mock_apply.return_value = None
         prediction = {"template_id": "1", "mapped_rxn": "test_rxn"}
         target = "invalid_smiles"
         result = check_apply_template(prediction, target)
