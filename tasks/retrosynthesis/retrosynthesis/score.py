@@ -114,14 +114,18 @@ def validate_reactions_with_products(node, expected_product=None):
 def score_final(prediction: dict, target: dict) -> float:
     """
     Function to score the retrosynthesis route based on the provided conditions.
+    These conditions include:
+        - All reactions must be valid.
+        - All starting materials must be buyable.
+        - Total price of starting materials must be within the budget.
     Returns 1.0 if all conditions are met, else returns 0.0.
 
     Args:
-        prediction (dict): The retrosynthesis route in JSON format.
-        target (dict): Target specifications for the route, including price and max steps.
+        prediction: The retrosynthesis route in JSON format.
+        target: Target specifications for the route, including price and max steps.
 
     Returns:
-        float: 1.0 if all conditions are met, 0.0 if any condition is violated.
+        float that will be 1.0 if all conditions are met, 0.0 if any condition is violated.
     """
     try:
         max_steps = int(target.get("max_steps"))
@@ -196,11 +200,11 @@ def score_final_without_price(prediction: dict, target: list) -> float:
     Returns 1.0 if all conditions are met, else returns 0.0.
 
     Args:
-        prediction (dict): The retrosynthesis route in JSON format.
-        target (list): Target molecules (SMILES) that must be present in the leaf molecules.
+        prediction: The retrosynthesis route in JSON format.
+        target: Target molecules (SMILES) that must be present in the leaf molecules.
 
     Returns:
-        float: 1.0 if all conditions are met, 0.0 if any condition is violated.
+        1.0 if all conditions are met, else 0.0.
     """
     prediction = prediction.replace("```json", "").replace("```", "").strip()
     prediction = json.loads(prediction)
@@ -258,13 +262,17 @@ def score_final_without_price(prediction: dict, target: list) -> float:
 def check_reactants(prediction: dict, target: list) -> float:
     """
     Scoring function to check if the retrosynthesis route is valid and meets the criteria.
+    The criteria are:
+        - All reactions must be valid.
+        - All starting materials must be valid SMILES.
+        - Leaf molecules must contain all target molecules.
 
     Args:
-        prediction (dict): The retrosynthesis route in JSON format.
-        target (list): A list containing the target molecule SMILES and the maximum allowed price.
+        prediction: The retrosynthesis route in JSON format.
+        target: A list containing the target molecule SMILES and the maximum allowed price.
 
     Returns:
-        float: 1.0 if all conditions are met, 0.0 if any condition is violated.
+        float that will be 1.0 if all conditions are met, 0.0 if any condition is violated.
     """
     prediction = prediction.replace("```json", "").replace("```", "").strip()
     try:
@@ -314,6 +322,18 @@ def check_reactants(prediction: dict, target: list) -> float:
         return 0.0
 
 def check_template(prediction: str, target: str) -> float:
+    """
+    Scoring function to check if the predicted template matches the target template.
+    It works by comparing the predicted template ID and the mapped reaction
+    with the ground truth template's mapped reaction.
+
+    Args:
+        prediction: A JSON string containing 'template_id' and 'mapped_rxn'.
+        target: The target template ID as a string.
+
+    Returns:
+        1.0 if the templates match, 0.0 otherwise.
+    """
     target = int(target)
     prediction = prediction.replace("```json", "").replace("```", "").strip()
     prediction = prediction.replace("'", '"')
@@ -366,13 +386,16 @@ def check_apply_template(prediction: dict, target: str) -> float:
 def check_list_molecules(prediction: list, target: list) -> float:
     """
     Scoring function to check if the predicted molecules match the target molecules.
+    It works by comparing the canonical SMILES of the predicted molecules with those of the target molecules.
+    The comparison ignores atom mapping numbers and stereochemistry.
+    For the comparison, both predicted and target molecules are converted to RDKit mol objects.
 
     Args:
-        prediction (list): A list containing the predicted molecules.
-        target (list): A list of target molecule SMILES strings.
+        prediction: A list containing the predicted molecules SMILES.
+        target: A list of target molecule SMILES strings.
 
     Returns:
-        float: 1.0 if all predicted molecules match the target molecules, 0.0 otherwise.
+        1.0 is all predicted molecules match the target molecules, 0.0 otherwise.
     """
     target = target[0]
     try:
