@@ -50,6 +50,187 @@ def check_potential_file(target: str):
     return score_fn
 
 
+def check_log(variable: str, target: float, tolerance: float, window: int):
+    """
+    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.
+
+    Behavior:
+      - Extracts the specified variable from the lammps log file.
+      - Computes the average of the last 'window' entries of that variable.
+      - Compares the average to the target value within the given tolerance.
+    """
+    import json
+
+    import numpy as np
+
+    def read_log_from_text(log_text: str, column: str):
+        steps = []
+        values = []
+
+        lines = log_text.splitlines()
+
+        header = None
+        col_index = None
+        step_index = None
+
+        for raw_line in lines:
+            line = raw_line.strip()
+
+            if line.startswith("Step"):
+                header = line.split()
+                if column not in header:
+                    raise ValueError(f"Column '{column}' not found in header: {header}")
+                col_index = header.index(column)
+                step_index = header.index("Step")
+                continue
+
+            if header and line:
+                tokens = line.split()
+                if len(tokens) != len(header):
+                    continue
+                try:
+                    step = int(tokens[step_index])
+                    value = float(tokens[col_index])
+                except ValueError:
+                    continue
+
+                steps.append(step)
+                values.append(value)
+
+        return np.array(steps), np.array(values)
+
+    def score_fn(result: str) -> float:
+        try:
+            # Read remote result file content
+            data = json.loads(result)
+            log_file_path = data["log_file"]
+            restart_file_path = data["restart_file"]
+            read_file = modal.Function.from_name("simagent", "read_file")
+            content = read_file.remote(log_file_path)
+            try:
+                info = modal.Function.from_name("simagent", "file_info").remote(
+                    restart_file_path
+                )
+                logger.info(f"Restart file info: {info}")
+            except RuntimeError as e:
+                logger.warning(f"Restart file existence check failed: {e}")
+                return 0.0
+            steps, values = read_log_from_text(content, variable)
+            if len(values) < window:
+                logger.warning(
+                    f"Not enough data points ({len(values)}) for the specified window ({window})."
+                )
+                return 0.0
+            recent_values = values[-window:]
+            avg_value = np.mean(recent_values)
+            tol = tolerance * abs(target)
+            if (target - tol) <= avg_value <= (target + tol):
+                return 1.0
+            else:
+                return 0.0
+
+        except Exception as e:
+            logger.warning(f"Error in check_log: {e}, result was: {result}")
+            return 0.0
+
+    return score_fn
+
+
+def check_msd():
+    """
+    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.
+
+    Behavior:
+      - Extracts the MSD value from the result log file.
+      - Compares the MSD to the target value within the given tolerance.
+    """
+    import numpy as np
+    from sklearn.metrics import r2_score
+
+    def read_msd_from_text(content: str):
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+
+        if not lines:
+            raise ValueError("Empty MSD file")
+
+        def is_float(s):
+            try:
+                float(s)
+                return True
+            except ValueError:
+                return False
+
+        # Detect header: if any token in first line is non-numeric
+        first_tokens = lines[0].split()
+        has_header = not all(is_float(tok) for tok in first_tokens)
+
+        data_lines = lines[1:] if has_header else lines
+
+        steps = []
+        msd = []
+
+        for line in data_lines:
+            tokens = line.split()
+            if len(tokens) < 2:
+                continue
+            try:
+                step = float(tokens[0])
+                val = float(tokens[1])
+            except ValueError:
+                continue
+
+            steps.append(step)
+            msd.append(val)
+
+        if len(msd) == 0:
+            raise ValueError("No numeric data found in MSD file")
+
+        return np.array(steps), np.array(msd), has_header
+
+    def score_fn(result: str) -> float:
+        try:
+            # Read remote result file content
+            read_file = modal.Function.from_name("simagent", "read_file")
+            content = read_file.remote(result)
+            steps, msd_values, has_header = read_msd_from_text(content)
+            # Convert to numpy arrays
+            time_ps = np.asarray(steps, dtype=float)
+            msd = np.asarray(msd_values, dtype=float)
+
+            # Basic sanity check
+            if len(time_ps) < 2:
+                return 0.0
+
+            # If you already have a mask logic, keep using it.
+            # Otherwise, fit everything:
+            mask = np.ones_like(time_ps, dtype=bool)
+
+            time_fit = time_ps[mask]
+            msd_fit = msd[mask]
+
+            # Need at least 2 points after masking
+            if len(time_fit) < 2:
+                return 0.0
+
+            # Linear fit
+            slope, intercept = np.polyfit(time_fit, msd_fit, 1)
+            msd_fit_line = slope * time_fit + intercept
+
+            # R^2 score
+            r2 = r2_score(msd_fit, msd_fit_line)
+
+            # Decision
+            if r2 > 0.9:
+                return 1.0
+            else:
+                return 0.0
+        except Exception as e:
+            logger.warning(f"Error in check_msd: {e}, result was: {result}")
+            return 0.0
+
+    return score_fn
+
+
 def check_numerical(target: float, tolerance: float):
     """
     Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.

@@ -661,7 +661,7 @@ def run_lammps(input_file: str) -> str:
 
 
 @tool
-def visualiation_tool(path: str, query: str) -> str:
+def visualisation_tool(path: str, query: str) -> str:
     """
     [BRIEF] Analyzes a plot image and answers a user query using only visual, qualitative inspection and direct reading of visible values from the figure. [/BRIEF]
 
