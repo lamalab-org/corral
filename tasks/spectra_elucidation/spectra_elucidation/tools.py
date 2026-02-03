@@ -1,26 +1,23 @@
 import random
-import re
 import traceback
-from collections import Counter
-from itertools import combinations
 from pathlib import Path
 from typing import Any
 
 import modal
-import requests
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
-from rdkit.Chem.rdMolDescriptors import CalcMolFormula
+from spectra_elucidation.spectra_utils import (
+    convert_ms_spectrum_to_string,
+    enumerate_fragments_from_smiles,
+    format_hsqc_spectrum,
+    make_api_call,
+)
 
 from corral.backend.tool import Tool, tool
 from corral.utils.modal import remote_call
 from corral.utils.rag import vector_database_search
 
-_ELEMENT_PAT = re.compile(r"([A-Z][a-z]?)(\d*)")
-_PAREN_PAT = re.compile(r"\(([^()]*)\)(\d*)")
-_DOT_PAT = re.compile(r"·|\.")
-
-get_isomers = modal.Function.lookup("chemenv", "get_compound_isomers_pubchem")
+get_isomers = modal.Function.from_name("chemenv", "get_compound_isomers_pubchem")
 
 
 @tool
@@ -576,80 +573,6 @@ def ir_spectra(h_smiles: str) -> str:
     )
 
 
-def make_api_call(url: str, payload: dict) -> dict:
-    """
-    Make a POST request to the specified URL with the given payload.
-
-    Args:
-        url (str): The URL to which the request is sent.
-        payload (dict): The data to be sent in the request body.
-
-    Returns:
-        dict: The JSON response from the server.
-    """
-    resp = requests.post(url, json=payload)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def format_hsqc_spectrum(zones_dict: dict) -> str:
-    """
-    Parse HSQC spectra data from dictionary format to standard NMR notation.
-
-    Args:
-        zones_dict (dict): Dictionary containing zones data with signals
-        frequency (str): NMR frequency (default: "600 MHz")
-        solvent (str): NMR solvent (default: "DMSO-d6")
-
-    Returns:
-        str: Formatted HSQC notation string
-    """
-    if "zones" not in zones_dict or "values" not in zones_dict["zones"]:
-        return "Invalid input format"
-
-    signals_data = []
-
-    # Extract signals from each zone
-    for zone in zones_dict["zones"]["values"]:
-        if "signals" in zone:
-            for signal in zone["signals"]:
-                # Extract chemical shifts
-                h_delta = signal["x"]["delta"]  # 1H chemical shift
-                c_delta = signal["y"]["delta"]  # 13C chemical shift
-
-                # Count hydrogen atoms from x.atoms (1H nuclei)
-                h_count = len(signal["x"]["atoms"]) if "atoms" in signal["x"] else 1
-
-                # Store the data for sorting
-                signals_data.append(
-                    {"h_delta": h_delta, "c_delta": c_delta, "h_count": h_count}
-                )
-
-    # Sort signals by 1H chemical shift (ascending order)
-    signals_data.sort(key=lambda x: x["h_delta"])
-
-    # Format each signal
-    formatted_signals = []
-    for signal in signals_data:
-        h_delta = signal["h_delta"]
-        c_delta = signal["c_delta"]
-        h_count = signal["h_count"]
-
-        # Format chemical shifts (remove trailing zeros)
-        h_str = f"{h_delta:.2f}".rstrip("0").rstrip(".")
-        c_str = f"{c_delta:.1f}".rstrip("0").rstrip(".")
-
-        # Create the signal string
-        signal_str = f"{h_str}/{c_str} ({h_count}H)"
-        formatted_signals.append(signal_str)
-
-    # Combine all signals
-    signals_part = ", ".join(formatted_signals)
-
-    # Create final HSQC string
-    return f"HSQC: delta H/delta C {signals_part}."
-
-
 @tool(hidden_args=["h_smiles"])
 def hsqc_nmr_spectra(h_smiles: str) -> str:
     """[BRIEF] Returns the HSQC (Heteronuclear Single Quantum Coherence) NMR spectra for the sample at hand. [/BRIEF]
@@ -713,30 +636,6 @@ def hsqc_nmr_spectra(h_smiles: str) -> str:
         if pulse_sequence == "hsqc":
             return format_hsqc_spectrum(spectrum)
     return "No HSQC spectrum found for the provided SMILES."
-
-
-def convert_ms_spectrum_to_string(spectrum_data):
-    """
-    Convert MS spectrum data from JSON format to string format.
-
-    Args:
-        spectrum_data (list): List of dictionaries with 'x' (m/z) and 'y' (intensity) keys
-
-    Returns:
-        str: Formatted string in the format "m/z 100.1 (intensity 500), 101.2 (intensity 450), ..."
-    """
-    if not spectrum_data:
-        return ""
-
-    # Convert each data point to the desired format
-    formatted_peaks = []
-    for peak in spectrum_data:
-        mz = peak["x"]
-        intensity = peak["y"]
-        formatted_peaks.append(f"{mz} (intensity {intensity})")
-
-    # Join all peaks with ", " and prepend "m/z "
-    return "m/z " + ", ".join(formatted_peaks)
 
 
 @tool(hidden_args=["h_smiles"])
@@ -1003,7 +902,9 @@ Example Calculations:
 
 
 @tool
-def obtain_isomers_from_molecular_formula(molecular_formula: str) -> list[str]:
+def obtain_isomers_from_molecular_formula(
+    molecular_formula: str, limit: int
+) -> list[str]:
     """[BRIEF] Obtain isomers for a given molecular formula. [/BRIEF]
 
     [DETAILED] This function retrieves isomers for a given molecular formula using the `get_isomers_from_molecular_formula` remote function. It returns a list of isomer SMILES strings. The list of isomers might not be accurate since it is based on the PubChem database. [/DETAILED]
@@ -1042,6 +943,12 @@ def obtain_isomers_from_molecular_formula(molecular_formula: str) -> list[str]:
             [ARGS_SYNTACTICAL] Valid molecular formula string [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "C2H6O", "C6H6", "C6H12", "C6H10O", "C6H10Cl2" [/ARGS_EXAMPLES]
 
+        limit (int):
+            [ARGS_BRIEF] The maximum number of isomers to retrieve. 0 means no limit. [/ARGS_BRIEF]
+            [ARGS_DETAILED] An integer specifying the maximum number of isomers to retrieve for the given molecular formula. This parameter helps to limit the number of results returned by the function. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Positive integer [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] 5, 10, 20 [/ARGS_EXAMPLES]
+
     Returns:
         list[str]:
             [RETURNS_BRIEF] A list of SMILES strings representing the isomers of the input compound. [/RETURNS_BRIEF]
@@ -1053,13 +960,14 @@ def obtain_isomers_from_molecular_formula(molecular_formula: str) -> list[str]:
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
+        - This tool can be really slow for molecular formulas with many isomers, if the limit is set too high.
         - The list of isomers may not be exhaustive or accurate, as it is based on the PubChem database.
         - The function may not find all possible isomers, especially for complex or unusual structures.
     [/LIMITATIONS]
     """
     return remote_call(
         function_name="get_compound_isomers_pubchem_by_formula", env_name="chemenv"
-    )(formula=molecular_formula)
+    )(formula=molecular_formula, limit=limit)
 
 
 @tool
@@ -1122,170 +1030,6 @@ def validate_smiles(smiles: str) -> bool:
     return mol is not None
 
 
-def differs_by_one_atom(parent_formula, fragment_formula):
-    """Check if fragment differs from parent by exactly one atom"""
-    total_diff = 0
-    all_elements = set(parent_formula.keys()) | set(fragment_formula.keys())
-
-    for element in all_elements:
-        parent_count = parent_formula.get(element, 0)
-        fragment_count = fragment_formula.get(element, 0)
-        diff = abs(parent_count - fragment_count)
-        total_diff += diff
-
-    # If total difference is exactly 1, it means one atom was added/removed
-    return total_diff == 1 or total_diff == 0
-
-
-def _parse_simple(formula: str) -> dict[str, int]:
-    """
-    Parse an already-expanded, dot-free formula into {element: count}.
-    """
-    counts = Counter()
-    for el, cnt in _ELEMENT_PAT.findall(formula):
-        counts[el] += int(cnt or 1)
-    return counts
-
-
-def _expand_parentheses(formula: str) -> str:
-    """
-    Recursively expand parentheses so that C6H5(CH3) becomes C6H5C1H3 etc.
-    """
-    while True:
-        m = _PAREN_PAT.search(formula)
-        if not m:
-            return formula
-        inner, mult = m.groups()
-        mult = int(mult or 1)
-        expanded = "".join(
-            f"{el}{int(cnt or 1)*mult}" for el, cnt in _ELEMENT_PAT.findall(inner)
-        )
-        formula = formula[: m.start()] + expanded + formula[m.end() :]
-
-
-def parse_molecular_formula(formula: str) -> dict[str, int]:
-    """
-    Parse molecular formula into an element-count mapping, handling
-    parentheses and dot adducts.
-    """
-    parts = _DOT_PAT.split(formula.replace(" ", ""))
-    total = Counter()
-    for part in parts:
-        expanded = _expand_parentheses(part)
-        total += _parse_simple(expanded)
-    return dict(total)
-
-
-def enumerate_fragments_from_smiles(
-    smi: str,
-    max_cuts: int = 2,
-    skip_ring_bonds: bool = True,
-    min_heavy_atoms: int = 2,
-    max_combos: int = 100000,
-):
-    """
-    Generate fragment SMILES by breaking up to `max_cuts` bonds.
-    Returns a sorted list of unique canonical SMILES of fragments.
-    Preserves ions by setting formal charges instead of adding hydrogens.
-    """
-    mol = Chem.MolFromSmiles(smi)
-    if mol is None:
-        raise ValueError("Invalid SMILES")
-
-    # Candidate bonds: heavy-atom bonds only; optionally skip ring bonds
-    cand_bond_idxs = []
-    for b in mol.GetBonds():
-        a1, a2 = b.GetBeginAtom(), b.GetEndAtom()
-        if a1.GetAtomicNum() == 1 or a2.GetAtomicNum() == 1:
-            continue
-        if skip_ring_bonds and b.IsInRing():
-            continue
-        cand_bond_idxs.append(b.GetIdx())
-
-    # Early exit: nothing to cut
-    if not cand_bond_idxs or max_cuts < 1:
-        return []
-
-    uniq = set()
-    tried = 0
-
-    for ncuts in range(1, min(max_cuts, len(cand_bond_idxs)) + 1):
-        for cutset in combinations(cand_bond_idxs, ncuts):
-            tried += 1
-            if tried > max_combos:
-                # Safety valve against combinatorial explosion
-                break
-
-            rw = Chem.RWMol(mol)
-            cut_atom_info = {}
-
-            # Count how many bonds each atom will lose
-            for bidx in cutset:
-                b = rw.GetBondWithIdx(bidx)
-                begin_idx = b.GetBeginAtomIdx()
-                end_idx = b.GetEndAtomIdx()
-
-                cut_atom_info[begin_idx] = cut_atom_info.get(begin_idx, 0) + 1
-                cut_atom_info[end_idx] = cut_atom_info.get(end_idx, 0) + 1
-
-            # Before removing bonds, adjust formal charges on cut atoms
-            for atom_idx, bonds_lost in cut_atom_info.items():
-                atom = rw.GetAtomWithIdx(atom_idx)
-                current_charge = atom.GetFormalCharge()
-
-                # Adjust charge based on bonds lost
-                new_charge = current_charge - bonds_lost
-                atom.SetFormalCharge(new_charge)
-
-            # Now remove the selected bonds
-            for bidx in sorted(
-                cutset, reverse=True
-            ):  # Remove in reverse order to maintain indices
-                b = rw.GetBondWithIdx(bidx)
-                rw.RemoveBond(b.GetBeginAtomIdx(), b.GetEndAtomIdx())
-
-            # Get connected components as fragments
-            try:
-                frags = Chem.rdmolops.GetMolFrags(
-                    rw.GetMol(), asMols=True, sanitizeFrags=False
-                )
-
-                for frag in frags:
-                    # Filter tiny pieces
-                    if (
-                        sum(1 for a in frag.GetAtoms() if a.GetAtomicNum() > 1)
-                        < min_heavy_atoms
-                    ):
-                        continue
-
-                    try:
-                        # Try to sanitize the fragment with ionic charges
-                        Chem.SanitizeMol(frag, catchErrors=False)
-                        smi_frag = Chem.MolToSmiles(
-                            frag, isomericSmiles=True, canonical=True
-                        )
-                        uniq.add(smi_frag)
-                    except Exception:
-                        # If sanitization fails with ionic charges, try without sanitization
-                        try:
-                            smi_frag = Chem.MolToSmiles(
-                                frag, isomericSmiles=True, canonical=True
-                            )
-                            uniq.add(smi_frag)
-                        except Exception:
-                            continue  # Skip this fragment if it can't be processed
-
-            except Exception:
-                # If fragmentation fails completely, skip this cut combination
-                continue
-
-        else:
-            continue
-        break  # broke due to max_combos
-
-    return sorted(uniq)
-
-
 @tool(hidden_args=["h_smiles"])
 def return_possible_fragments(h_smiles: str) -> list[str]:
     """[BRIEF] Return a list of fragments of the sample at hand by removing one or two atoms from the molecule. [/BRIEF]
@@ -1337,8 +1081,6 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
     if mol is None:
         raise ValueError("Invalid SMILES string provided.")
 
-    parent_formula = CalcMolFormula(mol)
-
     fragments = enumerate_fragments_from_smiles(h_smiles)
 
     final_fragments = []
@@ -1349,15 +1091,82 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
             continue
         if fragment_mol is None:
             continue
-        fragment_formula = CalcMolFormula(fragment_mol)
-        if not differs_by_one_atom(
-            parse_molecular_formula(parent_formula),
-            parse_molecular_formula(fragment_formula),
-        ):
-            final_fragments.append(fragment)
+        final_fragments.append(fragment)
 
     random.shuffle(final_fragments)
     return final_fragments
+
+
+@tool
+def simulate_spectra(smiles: str) -> dict[str, str]:
+    """[BRIEF] Simulate 1H NMR, 13C NMR, and IR spectra for a given molecule using its SMILES string, that allows validation of a proposed candidate. [/BRIEF]
+
+    [DETAILED] This function simulates the 1H NMR, 13C NMR, and IR spectra for a molecule represented by its SMILES string.
+    It uses a remote function to perform the simulation, which involves structure analysis, neural network prediction of chemical shifts, prediction of J-coupling constants, and quantum-mechanical simulation to generate realistic multiplet patterns and effects. [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+    - Use it to validate the chemical structure of a proposed molecule by simulating its spectra.
+    - When you want to validate some hypothetical molecule against the experimental data in the task description.
+    [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+    1. [PREREQUISITE] Run the spectra tools, and analyze the results thoroughly. Generate different candidate molecules and reason which ones could fit the spectra, until you have a good guess for the molecule in the sample at hand. [/PREREQUISITE]
+    2. [CURRENT] Apply this tool with the SMILES string of the proposed molecule to simulate its spectra and validate if can be the solution to the task. [/CURRENT]
+    3. [FOLLOW_UP] Submit the answer if the simulated spectra is similar to the experimental, or go back to step 1 and propose new candidate molecules. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+    - It uses a remote function `simulate_spectra` to perform the simulation.
+    - The simulation process involves:
+        1. Structure analysis using HOSE code descriptors to identify the chemical environment of atoms in the molecule.
+        2. Neural network prediction of chemical shifts based on experimental data.
+        3. Prediction of J-coupling constants for proton-proton interactions to simulate the splitting patterns in NMR spectra.
+        4. Quantum-mechanical simulation to generate realistic multiplet patterns and effects in the spectra.
+    - The function returns a dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.
+    If some of the spectra are not available, it will return None for those spectra.
+    [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `simulate_spectra("CCO")`,
+        `simulate_spectra("C1=CC=CC=C1")`,
+        `simulate_spectra("C(C(=O)O)N")`,
+        `simulate_spectra("C1=CC=C(C=C1)C(=O)O")`,
+        `simulate_spectra("C1=CC=C")`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        smiles (str):
+            [BRIEF] The SMILES representation of the compound to simulate spectra for [/BRIEF]
+            [DETAILED] The SMILES string representing the chemical structure of the molecule for which the spectra will be simulated.
+            It should be a valid SMILES notation that can be processed by the remote function. [/DETAILED]
+            [SYNTACTICAL] Format: "valid SMILES string" [/SYNTACTICAL]
+            [EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O"[/EXAMPLES]
+
+    Returns:
+        dict[str, str]:
+            [BRIEF] The simulated spectra of the compound [/BRIEF]
+            [DETAILED] A dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.
+            Each key corresponds to a type of spectrum, and the value is a string representation of the simulated spectrum.
+            If some spectra are not available, the value will be None for those keys. [/DETAILED]
+            [EXAMPLES] Examples: {"1H NMR": "simulated_1H_NMR_spectrum", "13C NMR": "simulated_13C_NMR_spectrum", "IR": "simulated_IR_spectrum"} [/EXAMPLES]
+
+    [RAISES] Exceptions:
+        Exception:
+            [ERROR_WHEN] If a network error occurs during the remote function call. [/ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an error in calling the remote function `simulate_spectra`, such as network issues. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] This tool is unavailable if the remote function cannot be called. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known Limitations:
+        - The SMILES string must be valid and represent a chemical structure that can be interpreted by the remote function.
+        - The remote function may not be able to simulate spectra for all compounds, especially if they are complex or not well-defined.
+        - The function relies on the availability of the remote service and its simulation capabilities, which may change over time.
+    [/LIMITATIONS]
+    """
+    return remote_call(function_name="simulate_spectra", env_name="chemenv")(
+        smiles=smiles
+    )
 
 
 def create_tools() -> dict[str, Tool]:
@@ -1378,4 +1187,5 @@ def create_tools() -> dict[str, Tool]:
         "obtain_isomers_from_molecular_formula": obtain_isomers_from_molecular_formula,
         "validate_smiles": validate_smiles,
         "return_possible_fragments": return_possible_fragments,
+        "simulate_spectra": simulate_spectra,
     }
