@@ -1,0 +1,461 @@
+{
+  "task_id": "make_6_lvl2-template_search-2",
+  "model": "openai/1 - GPT-OSS-120b - an open model released by OpenAI in August 2025",
+  "agent": "ToolCallingAgent",
+  "tool_verbosity": "workflow",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "check_smiles_reaction_template_matching",
+        "description": "Checks if the SMARTS of a reaction template matches any substructure in the given SMILES.\n\nThis function takes a SMILES string and a reaction template in SMARTS format as input.\nIt checks whether the reaction template SMARTS can be applied to the molecule represented by the SMILES string.\n\nWhen to use: When to use this tool:\n- When you need to verify if a specific reaction template is applicable to a molecule.\n\nHow this tool works:\n- The function converts the SMILES string into a molecular structure using RDKit to check if the SMILES is valid.\n- It retrieves the information relative to the reaction template using the provided template ID.\n- It checks if the reaction template SMARTS matches any substructure in the molecule.\n- The function returns True if a match is found, otherwise it returns False.\n\nWorkflow: Typical workflow integration:\n1.  Obtain the SMILES string of a molecule and the reaction template. You can use the `search_template_catalog_by_criteria` tool to find the appropriate template. \n2.  Use `check_smiles_reaction_template_matching` to check if the template matches the molecule. \n3.  Use the result to decide whether to apply the template using the `apply_template` tool or to search for alternative templates.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "smiles": {
+              "description": "SMILES string of the molecule to check.\nA valid SMILES string of the molecule that you want to check against the reaction template.",
+              "type": "string"
+            },
+            "template_id": {
+              "description": "ID of the reaction template to check.\nThe unique identifier of the reaction template you want to check against the molecule.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "smiles",
+            "template_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_template_catalog_by_criteria",
+        "description": "Searches the retrosynthetic template database based on specified criteria. The search criteria refer to the forward reaction.\n\nThis function allows users to search a retrosynthetic template database using various chemical criteria, including functional groups that are broken or formed, as well as specific bonds that are formed, broken, or have their order changed.\nThis changes refer to the forward reaction, meaning that if you are looking for a retrosynthetic template that breaks the alcohol in the current molecule to form an alkene, you should specify \"alcohol\" in `functional_groups_formed` and \"alkene\" in `functional_groups_broken`.\nIt returns a list of templates that match the given criteria, each represented as a dictionary containing relevant information, and ranked by Tanimoto similarity with respect the reference molecule.\n\nWhen to use: When to use this tool:\n- When you need to find retrosynthetic templates that involve specific functional group transformations.\n- When you want to explore templates based on bond changes in a target molecule.\n- When planning retrosynthetic routes and looking for applicable templates based on chemical features.\n\nHow this tool works:\n- The function takes a SMILES string representing the target molecule and optional criteria for functional groups and bonds.\n- It analyzes the molecule to identify its functional groups and bond structure.\n- It searches the retrosynthetic template database for templates that match the specified criteria.\n- It ranks the matching templates based on their Tanimoto similarity to the reference molecule.\n- It checks that all returned templates can be applied to the target molecule.\n- The search results are returned as a list of dictionaries, each containing details about a matching template.\n\nWorkflow: Typical workflow integration:\n1.  Identify the chemical features (functional groups, bonds) relevant to your retrosynthetic analysis. You can use the tool `get_available_functional_groups` to see the list of functional groups that can be used for searching. \n2.  Use `search_template_catalog_by_criteria` to find templates that match your specified criteria. \n3.  Review the returned templates and select those that are most relevant to your synthesis planning. You can then apply these templates using the `apply_template` tool or validate retrosynthetic steps with `verify_step`.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the target molecule.\nSMILES string of the molecule to be analyzed for retrosynthetic template matching. The SMILES string must be valid and represent a real chemical structure.",
+              "type": "string"
+            },
+            "functional_groups_broken": {
+              "description": "List of functional groups that are broken in the forward reaction. None will result in not filtering with this criterion.\nA list of functional groups (from a predefined set) that are expected to be broken during the forward reaction. This helps to filter templates that involve the cleavage of these groups.",
+              "type": "string"
+            },
+            "functional_groups_formed": {
+              "description": "List of functional groups that are formed in the forward reaction. None will result in not filtering with this criterion.\nA list of functional groups (from a predefined set) that are expected to be formed during the forward reaction. This helps to filter templates that involve the creation of these groups.",
+              "type": "string"
+            },
+            "bonds_formed": {
+              "description": "List of bonds that are formed in the forward reaction (e.g., \"6-6\", \"6-8\"). None will result in not filtering with this criterion.\nA list of bond types (e.g., \"6-6\", \"6-8\") that are expected to be formed during the forward reaction. This helps to filter templates that involve the formation of these bonds.",
+              "type": "string"
+            },
+            "bonds_broken": {
+              "description": "List of bonds that are broken in the forward reaction (e.g., \"6-6\", \"6-8\"). None will result in not filtering with this criterion.\nA list of bond types (e.g., \"6-6\", \"6-8\") that are expected to be broken during the forward reaction. This helps to filter templates that involve the cleavage of these bonds.",
+              "type": "string"
+            },
+            "bonds_order_changed": {
+              "description": "List of bonds whose order is changed in the forward reaction (e.g., \"6-6 (1.0->2.0)\"). None will result in not filtering with this criterion.\nA list of bond types (e.g., \"6-6 (3.0->2.0)\", \"6-8 (1.0->2.0)\") whose order is expected to change during the forward reaction. This helps to filter templates that involve changes in bond order.",
+              "type": "string"
+            },
+            "limit": {
+              "description": "Maximum number of templates to return. Default is 10.\nAn integer specifying the maximum number of retrosynthetic templates to return from the search results. This helps to limit the output to a manageable number of templates for review. If more templates are needed, one can call the tool with higher limit.",
+              "type": "integer",
+              "default": 10
+            }
+          },
+          "required": [
+            "molecule_smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_template",
+        "description": "Retrieves a retrosynthetic template and other information by its ID.\n\nThis function takes a template ID as input and returns the corresponding retrosynthetic template in SMARTS format.\nIf the template ID is not found, it raises a ValueError.\nIt also retrieves the canonical SMARTS template (template for the forward reaction), and an example reaction for that example reaction.\n\nWhen to use: When to use this tool:\n- When you need to retrieve a specific retrosynthetic template for analysis or application.\n- When you want to explore the details of a known retrosynthetic transformation.\n\nHow this tool works:\n- The function takes a string representing the template ID as input.\n- It looks up the template ID in a predefined database or dictionary of retrosynthetic templates.\n- If the template ID exists, it retrieves and returns the corresponding SMARTS string.\n- If the template ID does not exist, it raises a ValueError indicating that the template was not found.\n\nWorkflow: Typical workflow integration:\n1.  Identify the template ID you want to retrieve, you can search the template catalog with `search_template_catalog`. \n2.  Use `get_template` to obtain the SMARTS representation of the template. \n3.  Use the retrieved template with `apply_template` to explore possible precursors for target molecules or validate retrosynthetic steps with `verify_step`.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "template_id": {
+              "description": "Identifier of the retrosynthetic template to retrieve.\nThe template ID corresponds to a specific retrosynthetic transformation that can be applied to molecules. The templates ids can be found in the template catalog.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "template_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_available_functional_groups",
+        "description": "Returns a list of available functional groups for querying the database.\n\nThis function provides a list of predefined functional groups that can be used to filter molecules in the database.\nThese functional groups are based on common chemical motifs and can aid in the identification and selection of relevant compounds for synthesis or analysis.\n\nWhen to use: When to use this tool:\n- When you need to identify specific functional groups in a set of molecules.\n- When you want to filter molecules based on their functional group content.\n- When you are interested in exploring the chemical space around certain functional motifs.\n\nHow this tool works:\n- The function accesses a predefined list of functional groups stored in the retrosynthesis package.\n- It returns this list as a simple Python list of strings, each representing a functional group.\n- The functional groups are standardized and commonly used in cheminformatics for molecular characterization.\n\nWorkflow: Typical workflow integration:\n1.  Understand the functional groups relevant to your chemical analysis or synthesis planning. \n2.  Use `get_available_functional_groups` to retrieve the list of functional groups. \n3.  Use the retrieved functional groups to filter or search for molecules in the database using other tools or functions.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "deprotect_molecule",
+        "description": "Removes protecting groups from a molecule represented by a SMILES string.\n\nThis function takes a SMILES (Simplified Molecular Input Line Entry System) string representing a molecule with protecting groups and removes those protecting groups to yield the deprotected molecule.\nProtecting groups are commonly used in synthetic chemistry to temporarily mask reactive sites on molecules during multi-step synthesis processes.\n\nWhen to use: When to use this tool:\n- When you have a molecule with protecting groups and need to obtain the deprotected version of the molecule.\n- When analyzing a synthetic route and needing to understand the structure of the molecule without protecting groups.\n\nHow this tool works:\n- The function takes a SMILES string as input and uses RDKit's rdDeprotect module to identify and remove common protecting groups.\n- It processes the molecular structure to eliminate the protecting groups while preserving the core structure of the molecule.\n- The resulting deprotected molecule is then converted  back to a SMILES string and returned.\n\nWorkflow: Typical workflow integration:\n1.  Obtain the SMILES string of the molecule with protecting groups. You can use the tool `detect_protection_groups` to identify protecting groups in a molecule. \n2.  Use `deprotect_molecule` to remove the protecting groups and obtain the deprotected molecule. \n3.  Use the deprotected SMILES string for further chemical analysis, modeling, or synthesis planning. You can also use the tool `detect_functional_groups` to identify functional groups in the deprotected molecule.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the molecule with protecting groups.\nValid SMILES string of the molecule that contains the protective groups that you want to detect and remove. Ensure that is a valid SMILES, otherwise an exception will be raised.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "molecule_smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "detect_functional_groups",
+        "description": "Detects functional groups in a molecule represented by a SMILES string.\n\nThis function identifies functional groups present in a molecule represented by a SMILES (Simplified Molecular Input Line Entry System) string.\nIt returns a summary of the detected functional groups, including their names, and positions of the atoms within the molecule.\nFunctional groups are specific groups of atoms within molecules that have characteristic properties and reactivities.\n\nWhen to use: When to use this tool:\n- When you need to identify functional groups in a molecule for synthesis planning or analysis.\n- When you want to understand the reactive sites and properties of a molecule based on its functional groups.\n\nHow this tool works:\n- The function takes a SMILES string as input and converts it to a molecular structure using RDKit.\n- It uses a predefined set of SMARTS patterns to identify common functional groups within the molecule.\n- For each detected functional group, it records the name and the positions of the atoms within the molecule.\n- The results are compiled into a summary string that lists the detected functional groups and the positions of the atoms.\n\nWorkflow: Typical workflow integration:\n1.  Obtain the SMILES string of the molecule you want to analyze. \n2.  Use `detect_functional_groups` to identify functional groups in the molecule. \n3.  Use the information about functional groups for synthesis planning, modification of the molecule, or further analysis.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "smiles": {
+              "description": "SMILES string of the molecule to analyze.\nThe SMILES string of the molecule that you want to detect the functional groups from.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "detect_protection_groups",
+        "description": "Detects protecting groups in a molecule and their positions.\n\nThis function identifies protecting groups present in a molecule represented by a SMILES (Simplified Molecular Input Line Entry System) string.\nIt returns a list of detected protecting groups along with their abbreviations, full names, classes, and the positions of the atoms involved in each protecting group.\n\nWhen to use: When to use this tool:\n- When you need to identify protecting groups in a molecule for synthesis planning or analysis.\n- When you want to understand the locations of protecting groups within a molecular structure.\n\nHow this tool works:\n- The function takes a SMILES string as input and converts it to a molecular structure using RDKit.\n- It uses RDKit's rdDeprotect module to identify common protecting groups based on predefined reaction SMARTS patterns.\n- For each detected protecting group, it records the abbreviation, full name, class, and the positions of the atoms involved.\n- Uses other custom SMARTS patterns to enhance the detection process, searching also for those in the molecule.\n- The results are compiled into a structured dictionary that includes the input SMILES, a mapped SMILES for reference, and a list of detected protecting groups with their details.\n\nWorkflow: Typical workflow integration:\n1.  Obtain the SMILES string of the molecule you want to analyze. \n2.  Use `detect_protection_groups` to identify protecting groups and their positions in the molecule. \n3.  Use the information about protecting groups for synthesis planning, modification of the molecule, or further analysis. You can also use the tool `deprotect_molecule` to remove the identified protecting groups.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "smiles": {
+              "description": "SMILES string of the molecule to analyze.\nValid SMILES string of the molecule that contains the protective groups that you want to detect.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "apply_template",
+        "description": "Applies a retrosynthetic template to a molecule. If one template is applicable to different groups, all possible outcomes are returned.\n\nGiven a molecule in SMILES format and a template ID, this function applies the retrosynthetic template to the molecule and returns a list of precursor SMILES strings.\nIf the template cannot be applied, it returns an empty list.\nThis function is useful for retrosynthetic analysis in computational chemistry and drug discovery.\n\nWhen to use: When to use this tool:\n- When you have a target molecule and want to explore possible precursors using a specific retrosynthetic template.\n- When you need to generate a list of potential starting materials for a given molecule based on known reaction templates.\n\nHow this tool works:\n- The function takes a SMILES string representing the target molecule and a template ID as inputs.\n- It applies the retrosynthetic template associated with the given ID to the molecule using the `rxnutils` package.\n- If the template is successfully applied, it returns a list of SMILES strings representing the precursor molecules.\n- If the template cannot be applied (e.g., due to incompatibility with the molecule structure), it returns an empty list.\n\nWorkflow: Typical workflow integration:\n1.  Ensure you have the template of the reaction you want to apply, you can search the template catalog with `search_template_catalog`. \n2.  Use `apply_template` to get possible precursors for your target molecule. \n3.  Validate the proposed precursors using `verify_step` to ensure the retrosynthetic step is chemically valid. Use `is_buyable` to check if the proposed precursors are commercially available.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the target molecule.\nSMILES string of the molecule to which the template will be applied. Note that the SMILES string must be valid and represent a real chemical structure which can be processed by the retrosynthetic route used.",
+              "type": "string"
+            },
+            "template_id": {
+              "description": "Identifier of the retrosynthetic template to apply.\nThe template ID corresponds to a specific retrosynthetic transformation that can be applied to the target molecule. The templates ids can be found in the template catalog.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "molecule_smiles",
+            "template_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "verify_step",
+        "description": "Verifies if a retrosynthetic step is valid. This tool might fail for intramolecular reactions.\n\nThis function checks whether applying a given retrosynthetic template to a set of precursor molecules results in the target molecule.\nIt is used to validate retrosynthetic steps in a synthesis route.\n\nWhen to use: When to use this tool:\n- When you have a proposed retrosynthetic step and want to confirm its validity.\n- When validating a synthesis route to ensure each step correctly leads to the intended product.\n\nHow this tool works:\n- The function takes a target molecule in SMILES format, a retrosynthetic template, and a list of precursor SMILES strings.\n- It applies the retrosynthetic template to the precursors to generate a product.\n- It then compares the generated product to the target molecule to determine if they match.\n- If the generated product matches the target molecule, the function returns True, indicating a valid retrosynthetic step. Otherwise, it returns False.\n\nWorkflow: Typical workflow integration:\n1.  Identify the rethrosynthetic template to use and use `apply_template` to generate the precursors. \n2.  Use `verify_step` to check if the precursors lead to the target molecule when the template is applied. \n3.  If the step is valid, proceed with the next steps in the synthesis route. If invalid, reconsider the choice of precursors or template.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the target molecule.\nThe SMILES string representation of the target molecule. It must be the molecule that one already known in the retrosynthetic context.",
+              "type": "string"
+            },
+            "template_id": {
+              "description": "Retrosynthetic template in SMARTS format.\nThe retrosynthetic template is a SMARTS string that defines the transformation to be applied to the precursors. It should be one of the templates from the dataset.",
+              "type": "string"
+            },
+            "precursors": {
+              "description": "List of SMILES strings representing the precursor molecules.\nA list of SMILES strings, each representing a precursor molecule that, when combined and transformed by the template, should yield the target molecule. - Provide as an array of strings, e.g., [\"item1\", \"item2\"]",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "molecule_smiles",
+            "template_id",
+            "precursors"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "verify_route",
+        "description": "Verifies if a synthesis route follows the expected schema.\n\nThis function checks whether a given synthesis route, represented as a JSON string, adheres to a predefined hierarchical schema.\nThe schema defines the structure and required fields for molecules and reactions in the route.\n\nWhen to use: When to use this tool:\n- When you have a synthesis route and want to ensure it is correctly formatted before further processing.\n- When you need to validate a route before submitting it to a retrosynthesis planning system.\n\nHow this tool works:\n- The function takes a JSON string representing a synthesis route as input.\n- It parses the JSON and checks that it conforms to a hierarchical schema where:\n  - The root is a molecule with required fields \"type\" and \"smiles\".\n  - Molecules can have children that are either reactions or other molecules.\n  - Reactions must have required fields \"type\", \"template_id\", and \"children\".\n  - Each reaction must have at least two children (reactants).\n- The function recursively validates each node in the hierarchy to ensure all required fields are present and correctly typed.\n- If the route adheres to the schema, it returns (True, \"The route is valid\"). If not, it returns (False, error_message) with a description of the first encountered error.\n\nWorkflow: Typical workflow integration:\n1.  Construct or obtain a synthesis route in JSON format. \n2.  Use `verify_route` to validate the route structure. \n3.  If the route is valid, proceed with retrosynthesis planning, analysis or submit if the route is correct. You can check if the reactants are valid by checking if they are buyable using the tool `is_buyable`. If invalid, correct the structure based on the error message provided.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "description": "JSON string representing the synthesis route.\nA JSON-formatted string that encodes the hierarchical structure of a synthesis route, including molecules and reactions with their respective fields.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "route"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_catalog_by_smiles",
+        "description": "Searches a catalog for available precursors.\n\nThis function searches a chemical catalog using for a list of SMILES strings to find available precursor chemicals.\nIt returns a list of chemical information dictionaries if matches are found, or a message indicating no results were found.\n\nWhen to use: When to use this tool:\n- When you have a list of SMILES strings and want to find corresponding chemicals in the catalog.\n- When validating the availability of a chemical precursor for synthesis planning.\n\nHow this tool works:\n- The function takes a list of SMILES strings as input and queries some chemical catalogs for matching entries using the `chemprice` package.\n- It retrieves a list of chemicals that match the provided SMILES strings, each represented as a dictionary containing relevant chemical information.\n- If no matches are found, it returns a message indicating that no results were found.\n\nWorkflow: Typical workflow integration:\n1.  Obtain the SMILES strings of the chemicals you want to search for. \n2.  Use `search_catalog_by_smiles` to look up the SMILES strings in the catalog. \n3.  If matches are found, review the chemical information for potential use in synthesis. If no matches are found, consider alternative chemicals or suppliers. You can also check if the molecule is buyable using the tool `is_buyable`.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "smiles_list": {
+              "description": "List of SMILES strings representing the chemicals to search for.\nA list of SMILES representations of all the chemicals to be searched in the catalog. - Provide as an array of strings, e.g., [\"item1\", \"item2\"]",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "limit": {
+              "description": "Maximum number of results to return. Default is 5.\nAn integer specifying the maximum number of matching chemicals to return from the catalog search. This helps to limit the output size.",
+              "type": "integer",
+              "default": 5
+            }
+          },
+          "required": [
+            "smiles_list"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "is_buyable",
+        "description": "Checks if a list of molecules are commercially available.\n\nThis function determines whether some given molecules, represented by their SMILES notation, are commercially available for purchase.\nIt returns a list of boolean values indicating the availability of each molecule.\n\nWhen to use: When to use this tool:\n- When you need to verify the availability of a chemical precursor for synthesis planning.\n- When deciding whether to include a specific molecule in a synthesis route based on its commercial availability.\n\nHow this tool works:\n- The function takes a list of SMILES as input and queries some chemical database using the `chemprice` package to check the commercial availability of each molecule.\n- It checks if the molecule associated with the provided SMILES is listed as available for purchase.\n- If the molecule is found to be commercially available, the function returns True for such molecule. If it is not available, it returns False.\n\nWorkflow: Typical workflow integration:\n1.  Obtain the SMILES notation of the molecules you want to check. \n2.  Use `is_buyable` to check if the molecules are commercially available. \n3.  If a molecule is buyable, consider it for inclusion in your synthesis route. If not, look for alternative molecules, precursors or routes. You can use this tool for validation to check that all the reactants are buyable.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "smiles_list": {
+              "description": "List of SMILES strings representing the molecules to check.\nA list of SMILES representations of all the molecules whose commercial availability is to be checked. - Provide as an array of strings, e.g., [\"item1\", \"item2\"]",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "smiles_list"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "map_reaction_smiles",
+        "description": "Maps atoms in a reaction SMILES string using attention-guided atom mapping. Sometimes, the mapping may help to get the templates to work.\n\nThis function takes a reaction SMILES string as input and applies attention-guided atom mapping to assign atom map numbers to the atoms involved in the reaction.\nAtom mapping is useful for tracking the movement of atoms from reactants to products in a chemical reaction and it can help with the retrosynthesis template application.\n\nWhen to use: When to use this tool:\n- When you have a reaction SMILES string and need to assign atom map numbers to the atoms in the reaction.\n- When preparing reaction data for retrosynthesis analysis or template application.\n\nHow this tool works:\n- The function takes a reaction SMILES string as input and utilizes the RXNMapper library to perform attention-guided atom mapping.\n- The RXNMapper analyzes the reaction and assigns atom map numbers to the atoms in the reactants and products based on learned attention mechanisms.\n- The resulting mapped reaction SMILES string is returned, which includes the atom map numbers for each atom involved in the reaction.\n\nWorkflow: Typical workflow integration:\n1.  Some template is not working when being applied to the molecule at hand. Obtain the reaction SMILES string that you want to map. \n2.  Use `map_reaction_smiles(reaction_smiles)` to get the mapped SMILES string. \n3.  Use the mapped reaction SMILES for further retrosynthesis analysis or template application. You can also use the tool `apply_template` to apply retrosynthesis templates to molecules.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "reaction_smiles": {
+              "description": "Reaction SMILES string to be mapped.\nA valid reaction SMILES string representing the chemical reaction you want to map.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reaction_smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "smiles_to_cas",
+        "description": "Converts a SMILES string to a CAS number.\n\nThis function takes a SMILES (Simplified Molecular Input Line Entry System) string as input and converts it to the corresponding CAS (Chemical Abstracts Service) number. The CAS number is a unique numerical identifier assigned to every chemical substance described in the open scientific literature.\n\nWhen to use: When to use this tool:\n- When you have a SMILES representation of a molecule and need to find its CAS number.\n\nHow this tool works:\n- The function takes a SMILES string as input and queries a chemical database or service that maps SMILES strings to CAS numbers.\n- The function first validates the SMILES string to ensure it represents a valid molecular structure.\n- It retrieves the CAS number associated with the provided SMILES string.\n- If a matching CAS number is found, it is returned as a string. If no match is found, an appropriate message or exception may be raised.\n\nWorkflow: Typical workflow integration:\n1.  Obtain the SMILES string of the molecule you want to convert. \n2.  Use `smiles_to_cas` to convert the SMILES string to a CAS number. \n3.  Use the obtained CAS number for further chemical information lookup, procurement, or documentation. You can also use the tool `search_catalog_by_cas` to find available precursors or `is_buyable` to check if the molecule is commercially available.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the molecule to convert.\nA valid SMILES string of the molecule that you need the CAS number for.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "molecule_smiles"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "cas_to_smiles",
+        "description": "Converts a CAS number to an isomeric SMILES string.\n\nThis function takes a CAS (Chemical Abstracts Service) number as input and converts it to the corresponding isomeric SMILES (Simplified Molecular Input Line Entry System) string.\nThe isomeric SMILES representation includes stereochemical information, making it more specific than standard SMILES.\n\nWhen to use: When to use this tool:\n- When you have a CAS number and need to find the corresponding isomeric SMILES representation of the molecule.\n\nHow this tool works:\n- The function takes a CAS number as input and queries a chemical database or service that maps CAS numbers to isomeric SMILES strings.\n- It retrieves the isomeric SMILES representation associated with the provided CAS number.\n- If a matching isomeric SMILES string is found, it is returned as a string. If no match is found, an appropriate message or exception may be raised.\n\nWorkflow: Typical workflow integration:\n1.  Obtain the CAS number of the molecule you want to convert. You can obtain the CAS number for a chemical by using the tool `smiles_to_cas`. \n2.  Use `cas_to_smiles` to convert the CAS number to an isomeric SMILES string. \n3.  Use the obtained isomeric SMILES string for further chemical analysis, modeling, or synthesis planning. You can also use the tool `detect_functional_groups` to identify functional groups in the molecule.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "cas_number": {
+              "description": "CAS number of the molecule to convert.\nValid CAS number string that corresponds to a specific chemical substance that you want to convert to SMILES.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cas_number"
+          ]
+        }
+      }
+    }
+  ],
+  "timestamp": "20260126_212722",
+  "messages": [
+    {
+      "role": "system",
+      "content": "[CONTEXT_BUDGET]\nNote that the context budget is not exact since it is based on previous iterations.\nmodel: openai/1 - GPT-OSS-120b - an open model released by OpenAI in August 2025\nmax_context_tokens: 131072\nprompt_tokens_now: 19853\nreserve_for_output: 100\nremaining_budget: 111119\nactions_if_low_budget:\n  - avoid reading entire files\n  - prefer short answers (<= 150 tokens)\n  - summarize or drop thoughts if needed\n[/CONTEXT_BUDGET]\nYou are an autonomous agent that will only interact with the environment.\n\nTake into account that the measurements, simulations and other experiments are expensive. Try always to minimize costs and avoid unnecessary actions."
+    },
+    {
+      "role": "user",
+      "content": "Task Guide:\n\nTask make_6_lvl2-template_search-2:\nCan you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Friedel-Crafts acylation is a type of electrophilic aromatic substitution reaction that introduces an acyl group onto an aromatic ring. The reaction typically involves the use of an acyl chloride (RCOCl) in the presence of a Lewis acid catalyst, such as aluminum chloride (AlCl3) or ferric chloride (FeCl3). The Lewis acid activates the acylating agent, generating a more electrophilic species that can attack the aromatic ring, leading to the formation of a new carbon-carbon bond and breaking a carbon-chlorine bond. An 'halide' functional group is gone during the transformation.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.\n\nRequired submission format:\nReturn a dict with the `mapped_rxn` as a string and the `template_id` (the one used to search the database not the hash) as an integer in JSON format, e.g., {'mapped_rxn': 'Cc1ccccc1.Br>>Cc1ccccc1Br', 'template_id': 12345}.\n\n\nAvailable input data:\n- Input from 'make_6_lvl2-apply_template-1' with question: 'Can you return all possible precursors of applying the template as the result of the task make_6_lvl2-template_search-1 to the molecule below?' and answer: '[['COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1']]'\n\n\nYou must think what to do next. You can use some of the tools available in the system.\n\nWhen you think that the task is completed, you can submit the answer.\nFor that, answer with: \"Final Answer: <your answer>\". It is very important to follow this format.\n\n"
+    },
+    {
+      "role": "assistant",
+      "content": "We need to return mapped_rxn and template_id for a template that when applied to the given molecule reproduces Friedel-Crafts acylation (forward reaction). We have input from previous step: make_6_lvl2-apply_template-1 gave precursors list: [['COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1']]. That seems to be a product? Actually apply_template step: given molecule (target) and template, returns precursors. The answer is a list of SMILES strings of precursors. The list contains one SMILES: COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1. That is likely the product? Wait apply_template returns precursors for target molecule. So the target molecule is something else (maybe after Friedel-Crafts acylation). The precursor is the starting material before acylation? The precursor SMILES looks like a complex molecule with an amide etc. Not sure.\n\nWe need to find template that matches the transformation: Friedel-Crafts acylation, halide functional group is gone. So forward reaction: aromatic ring + acyl chloride -> acylated aromatic + halide (Cl). In retrosynthesis, we break the C-C bond between aromatic carbon and carbonyl carbon, and generate an acyl chloride (or acid chloride) and aromatic ring.\n\nWe need to search template catalog with criteria: functional_groups_broken includes \"halide\"? functional_groups_formed includes \"acyl\"? Actually forward reaction forms acyl group on aromatic, breaks halide. So broken functional group: halide. Formed functional group: carbonyl? The description says \"introduces an acyl group onto an aromatic ring\". So functional group formed: acyl (maybe \"ketone\" or \"acyl\"). Let's get list of functional groups.",
+      "id": "chatcmpl-9d8c4152f3b8dfc6",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8e7e9f029ecfc5ca",
+          "function": {
+            "name": "get_available_functional_groups",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "chatcmpl-tool-8e7e9f029ecfc5ca",
+      "content": "{'tool_name': 'get_available_functional_groups', 'arguments': {}, 'result': \"['azo', 'diazo', 'aryl diazonium', 'azide', 'nitrile', 'isonitrile', 'nitro', 'aldehydes', 'aliphatic hydroxyls', 'aromatic hydroxyls', 'aliphatic carboxylic acid', 'aromatic carboxylic acid', 'acyl chloride', 'six-membered aromatic rings', 'benzene rings', 'phenyl group', 'ortho di-substituted benzene', 'meta di-substituted benzene', 'para di-substituted benzene', 'pyrridine', 'pyridazine', 'pyrimidine', 'pyrazine', 'amide', 'imide', 'thioamide', 'amidine', 'guanidine', 'C-C double bonds', 'C-C triple bonds', 'imine', 'cyclopropane', 'ketones', 'carboxylic esters', 'carbonate', 'carbamate', 'anhydride', 'urea', 'thiourea', 'ether oxygens', 'epoxides', 'aziridines', 'four-membered rings', 'five-membered rings', 'trifluoromethyl', 'primary amines', 'secondary amines', 'tertiary amines', 't-butyl', 'thiol', 'thioethers', 'thioketones', 'sulfoxides', 'sulfones', 'sulfonic', 'sulfonamides', 'methoxy', 'ethoxy', 'isopropoxy', 'phenoxy', 'alkyl halide', 'aryl halide', 'halide', 'furan', 'thiophene', 'pyrrole', 'imidazole', 'oxazole', 'thiazole', 'cyanate', 'isocyanate', 'isothiocyanate', 'trimethylsilyl', 't-butyldimethylsilyl']\", 'status': 'success', 'error_message': None, 'duration': 1.3792014215141535e-05, 'timestamp': '2026-01-26T21:27:04.082454+00:00'}",
+      "name": "get_available_functional_groups"
+    },
+    {
+      "role": "assistant",
+      "content": "We need to find a template that when applied retrosynthetically to the given molecule (the precursor list from previous step) reproduces Friedel-Crafts acylation (forward). The given molecule from previous step is: 'COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1' (a complex molecule). The task: return mapped_rxn associated with the template that, when applied to the molecule, reproduces the reaction described (Friedel-Crafts acylation). So we need to search template catalog for a template that matches functional groups broken/formed: halide broken, acyl chloride formed? In forward reaction, acyl chloride (RCOCl) + aromatic -> acylated aromatic + HCl (halide broken). So retrosynthetic step: break carbonyl-aryl bond, generate acyl chloride and aromatic ring with halide? Actually retrosynthesis: target aromatic ketone (acylated aromatic) -> precursors: aromatic ring (with H) and acyl chloride (RCOCl). The template likely has functional_groups_broken: 'halide' (since halide is broken) and functional_groups_formed: 'acyl chloride' (since forward forms acyl chloride? Wait forward uses acyl chloride as reagent, so in forward reaction acyl chloride is consumed, not formed. The description: \"breaking a carbon-chlorine bond\". So forward reaction breaks C-Cl bond (acyl chloride). So in retrosynthesis, we need to form C-Cl bond (i.e., generate acyl chloride). So functional_groups_formed: 'acyl chloride', broken: 'halide' (maybe aromatic halide?). Actually the aromatic halide is not present; the halide is the chlorine on acyl chloride. So forward breaks C-Cl bond, so retrosynthesis forms C-Cl bond. So we search templates with functional_groups_formed: 'acyl chloride' and functional_groups_broken: 'halide'? Might be reversed. Let's try search_template_catalog_by_criteria with molecule SMILES = target molecule, functional_groups_formed='acyl chloride', functional_groups_broken='halide'.",
+      "id": "chatcmpl-893bc3685fbd10db",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8b4e7eefa3610576",
+          "function": {
+            "name": "search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1\", \"functional_groups_broken\": \"halide\", \"functional_groups_formed\": \"acyl chloride\", \"limit\": 5}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "chatcmpl-tool-8b4e7eefa3610576",
+      "content": "{'tool_name': 'search_template_catalog_by_criteria', 'arguments': {'molecule_smiles': 'COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1', 'functional_groups_broken': 'halide', 'functional_groups_formed': 'acyl chloride', 'limit': 5}, 'result': None, 'status': 'execution_error', 'error_message': \"Parameter 'functional_groups_broken' must be a list of strings, not a str. Received: 'halide'. Example: If you want to search for 'alcohol', use ['halide'] instead of 'halide'\", 'duration': 2.720800694078207e-05, 'timestamp': '2026-01-26T21:27:06.791875+00:00'}",
+      "name": "search_template_catalog_by_criteria"
+    },
+    {
+      "role": "assistant",
+      "content": "We need to find template that when applied retrosynthetically (i.e., reverse of forward Friedel-Crafts acylation) to the given molecule yields precursors: an aromatic ring with acyl chloride and aromatic halide? Actually forward: acyl chloride + aromatic ring -> acylated aromatic, breaking C-Cl bond (halide gone). So retrosynthetic step: break C-C bond between aromatic ring and carbonyl carbon, generating acyl chloride and aromatic halide? Wait typical Friedel-Crafts acylation: aromatic + acyl chloride -> aryl ketone (acyl group attached). So product is aryl ketone (aryl-CO-R). The broken bond is C-C bond between aromatic carbon and carbonyl carbon? Actually the C-C bond formed is between aromatic carbon and carbonyl carbon. The C-Cl bond broken is in acyl chloride. So retrosynthesis: from aryl ketone, we can disconnect to give aromatic halide (aryl-Cl) and acyl chloride (R-CO-Cl). But the description says \"halide functional group is gone during the transformation\". So in forward, halide is lost (C-Cl broken). So in retrosynthesis, we need to add halide to aromatic ring? Actually we need to find template that when applied to target molecule (the product) yields precursors: aromatic halide and acyl chloride. So functional_groups_broken: halide (since forward breaks halide). functional_groups_formed: acyl chloride (since forward forms acyl chloride? Wait forward forms acyl chloride? No forward uses acyl chloride as reagent, not formed. The description says \"breaking a carbon-chlorine bond\". The forward reaction: acyl chloride is consumed, not formed. So the template likely has functional_groups_broken: halide, functional_groups_formed: acyl chloride? Might be reversed. But we can search with broken: halide, formed: acyl chloride. Need to pass lists.\n\nLet's call search with lists.",
+      "id": "chatcmpl-9eba85f085ab900a",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bfaf6783d2cfe1d5",
+          "function": {
+            "name": "search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1\", \"functional_groups_broken\": [\"halide\"], \"functional_groups_formed\": [\"acyl chloride\"], \"limit\": 10}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "chatcmpl-tool-bfaf6783d2cfe1d5",
+      "content": "{'tool_name': 'search_template_catalog_by_criteria', 'arguments': {'molecule_smiles': 'COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1', 'functional_groups_broken': ['halide'], 'functional_groups_formed': ['acyl chloride'], 'limit': 10}, 'result': '[]', 'status': 'success', 'error_message': None, 'duration': 0.04055133298970759, 'timestamp': '2026-01-26T21:27:09.297930+00:00'}",
+      "name": "search_template_catalog_by_criteria"
+    },
+    {
+      "role": "assistant",
+      "content": "We need to return mapped_rxn and template_id for the template that when applied to the given molecule reproduces Friedel-Crafts acylation (forward: acyl chloride + aromatic -> acylated aromatic, breaking C-Cl bond). In retrosynthesis, we need to break the acyl group off the aromatic, generating acyl chloride precursor and aromatic ring.\n\nWe have a molecule: COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1\n\nThat's a complex molecule with many groups. The task: find template that matches this transformation (acyl chloride formed, halide broken). The search returned empty list. Maybe need to search with bonds broken/formed? Friedel-Crafts acylation involves breaking C-Cl bond (in acyl chloride) and forming C-C bond between carbonyl carbon and aromatic carbon, also forming C=O remains. In forward reaction, functional_groups_broken: halide, functional_groups_formed: acyl chloride? Wait forward: acyl chloride is reactant, aromatic product is product. In retrosynthesis, we want to break C-C bond and form acyl chloride. The hint says \"halide functional group is gone during the transformation\". So forward: halide is broken (C-Cl broken). The acyl chloride is formed? Actually acyl chloride is a reactant, not formed. The forward reaction consumes acyl chloride, so functional_groups_formed maybe none. But the template database expects forward reaction criteria. For Friedel-Crafts acylation, forward: acyl chloride (functional group present) reacts with aromatic to give acylated aromatic (new C-C bond) and halide (Cl-) leaves. So functional_groups_broken: halide, functional_groups_formed: acyl chloride? That seems odd. Maybe they consider acyl chloride formed as product? Not sure.\n\nSearch returned none. Could try different criteria: bonds formed: \"6-6\" (C-C bond between aromatic carbons). bonds broken: \"6-6 (1.0->0.0)\"? Not sure.\n\nAlternative: we can directly get template by searching for \"acyl chloride\" functional group broken? Let's try functional_groups_broken: [\"acyl chloride\"]? No.\n\nMaybe we need to search for templates that break a carbonyl carbon attached to Cl? Could search for \"acyl chloride\" as functional_groups_broken? Let's try.\n\n",
+      "id": "chatcmpl-a8e18850cf834ef5",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-ac0c21fecf9f9a64",
+          "function": {
+            "name": "search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1\", \"functional_groups_broken\": [\"acyl chloride\"], \"functional_groups_formed\": [], \"limit\": 10}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "chatcmpl-tool-ac0c21fecf9f9a64",
+      "content": "{'tool_name': 'search_template_catalog_by_criteria', 'arguments': {'molecule_smiles': 'COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1', 'functional_groups_broken': ['acyl chloride'], 'functional_groups_formed': [], 'limit': 10}, 'result': \"[{'reaction_id': 647549, 'template_hash': '8a4078a542ead677426aa977c1a169f2def99d54d9263df1dee31e17dd7d6d8b', 'retro_smarts_template': '[O;D1;H0:2]=[C;H0;D3;+0:1](-[NH;D2;+0:8]-[c:9])-[c:3]1:[#7;a:4]:[#7;a:5]:[#7;a:6]:[c:7]:1>>O-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]1:[#7;a:4]:[#7;a:5]:[#7;a:6]:[c:7]:1.[NH2;D1;+0:8]-[c:9]', 'canonical_smarts_template': 'O-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]1:[#7;a:4]:[#7;a:5]:[#7;a:6]:[c:7]:1.[NH2;D1;+0:8]-[c:9]>>[O;D1;H0:2]=[C;H0;D3;+0:1](-[NH;D2;+0:8]-[c:9])-[c:3]1:[#7;a:4]:[#7;a:5]:[#7;a:6]:[c:7]:1', 'mapped_rxn': '[CH3:1][N:2]1[N:3]=[N:4][CH:5]=[C:6]1[C:7](=[O:8])O.CN(C)C=O.O=C(Cl)C(=O)Cl.[NH2:9][C:10]1=[CH:31][CH:30]=[CH:29][C:12]([O:13][C:14]2=[N:15][N:16]3[CH:17]=[C:18]([NH:19][C:20](=[O:21])[CH:22]4[CH2:23][CH2:24]4)[N:25]=[C:26]3[CH:27]=[CH:28]2)=[CH:11]1.CC(=O)N(C)C.C1CCOC1>>[CH3:1][N:2]1[N:3]=[N:4][CH:5]=[C:6]1[C:7](=[O:8])[NH:9][C:10]1=[CH:11][C:12]([O:13][C:14]2=[N:15][N:16]3[CH:17]=[C:18]([NH:19][C:20](=[O:21])[CH:22]4[CH2:23][CH2:24]4)[N:25]=[C:26]3[CH:27]=[CH:28]2)=[CH:29][CH:30]=[CH:31]1', 'product_smiles': '[CH3:1][n:2]1[n:3][n:4][cH:5][c:6]1[C:7](=[O:8])[NH:9][c:10]1[cH:11][c:12]([O:13][c:14]2[n:15][n:16]3[cH:17][c:18]([NH:19][C:20](=[O:21])[CH:22]4[CH2:23][CH2:24]4)[n:25][c:26]3[cH:27][cH:28]2)[cH:29][cH:30][cH:31]1', 'reactant_smiles': 'O[C:7]([c:6]1[n:2]([CH3:1])[n:3][n:4][cH:5]1)=[O:8].[NH2:9][c:10]1[cH:11][c:12]([O:13][c:14]2[n:15][n:16]3[cH:17][c:18]([NH:19][C:20](=[O:21])[CH:22]4[CH2:23][CH2:24]4)[n:25][c:26]3[cH:27][cH:28]2)[cH:29][cH:30][cH:31]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08034812B2;1325;1119937', 'derive_version': 'v1', 'similarity': 0.5856423173803527}, {'reaction_id': 1838006, 'template_hash': 'fb6ae6f58e2d37fe48f36cbef9613ca57fbd9dd0ae1b1d3cd7dd5127271b428b', 'retro_smarts_template': '[O;D1;H0:4]=[C;H0;D3;+0:3](-[c:5])-[NH;D2;+0:1]-[c:2]>>C-C-C(=O)-[NH;D2;+0:1]-[c:2].Cl-[C;H0;D3;+0:3](=[O;D1;H0:4])-[c:5]', 'canonical_smarts_template': 'C-C-C(=O)-[NH;D2;+0:1]-[c:2].Cl-[C;H0;D3;+0:3](=[O;D1;H0:4])-[c:5]>>[O;D1;H0:4]=[C;H0;D3;+0:3](-[c:5])-[NH;D2;+0:1]-[c:2]', 'mapped_rxn': '[CH3:1][CH2:2][CH2:3][CH2:4][c:5]1[n:6][n:7](-[c:8]2[cH:9][c:10]([NH:11]C(=O)CC)[cH:20][cH:21][c:22]2[C:23]([F:24])([F:25])[F:26])[c:27](=[O:28])[n:29]1[CH2:30][c:31]1[cH:32][cH:33][c:34](-[c:35]2[cH:36][cH:37][cH:38][cH:39][c:40]2[S:41](=[O:42])(=[O:43])[NH:44][C:45](=[O:46])[O:47][C:48]([CH3:49])([CH3:50])[CH3:51])[cH:52][c:53]1[F:54].[O:13]=[C:12](Cl)[c:14]1[cH:15][cH:16][cH:17][cH:18][cH:19]1>>[CH3:1][CH2:2][CH2:3][CH2:4][c:5]1[n:6][n:7](-[c:8]2[cH:9][c:10]([NH:11][C:12](=[O:13])[c:14]3[cH:15][cH:16][cH:17][cH:18][cH:19]3)[cH:20][cH:21][c:22]2[C:23]([F:24])([F:25])[F:26])[c:27](=[O:28])[n:29]1[CH2:30][c:31]1[cH:32][cH:33][c:34](-[c:35]2[cH:36][cH:37][cH:38][cH:39][c:40]2[S:41](=[O:42])(=[O:43])[NH:44][C:45](=[O:46])[O:47][C:48]([CH3:49])([CH3:50])[CH3:51])[cH:52][c:53]1[F:54]', 'product_smiles': '[CH3:1][CH2:2][CH2:3][CH2:4][c:5]1[n:6][n:7](-[c:8]2[cH:9][c:10]([NH:11][C:12](=[O:13])[c:14]3[cH:15][cH:16][cH:17][cH:18][cH:19]3)[cH:20][cH:21][c:22]2[C:23]([F:24])([F:25])[F:26])[c:27](=[O:28])[n:29]1[CH2:30][c:31]1[cH:32][cH:33][c:34](-[c:35]2[cH:36][cH:37][cH:38][cH:39][c:40]2[S:41](=[O:42])(=[O:43])[NH:44][C:45](=[O:46])[O:47][C:48]([CH3:49])([CH3:50])[CH3:51])[cH:52][c:53]1[F:54]', 'reactant_smiles': 'CCC(=O)[NH:11][c:10]1[cH:9][c:8](-[n:7]2[n:6][c:5]([CH2:4][CH2:3][CH2:2][CH3:1])[n:29]([CH2:30][c:31]3[cH:32][cH:33][c:34](-[c:35]4[cH:36][cH:37][cH:38][cH:39][c:40]4[S:41](=[O:42])(=[O:43])[NH:44][C:45](=[O:46])[O:47][C:48]([CH3:49])([CH3:50])[CH3:51])[cH:52][c:53]3[F:54])[c:27]2=[O:28])[c:22]([C:23]([F:24])([F:25])[F:26])[cH:21][cH:20]1.Cl[C:12](=[O:13])[c:14]1[cH:15][cH:16][cH:17][cH:18][cH:19]1', 'dataset': 'Training data from https://doi.org/10.1039/C8SC04228D (5/10)', 'source_row_id': 'ord-fba1db8bd3384b588f6901e4e0f875e6', 'derive_version': 'v1', 'similarity': 0.5658324265505985}, {'reaction_id': 586417, 'template_hash': 'e8846067710afebac635e532d04a6d4afa3ea07a017e989fbbb3b2f303c5be9d', 'retro_smarts_template': '[O;D1;H0:2]=[C;H0;D3;+0:1](-[c:3])-[NH;D2;+0:4]-[c:5]>>Cl-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3].F-C(-F)(-F)-C(=O)-[NH;D2;+0:4]-[c:5]', 'canonical_smarts_template': 'Cl-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3].F-C(-F)(-F)-C(=O)-[NH;D2;+0:4]-[c:5]>>[O;D1;H0:2]=[C;H0;D3;+0:1](-[c:3])-[NH;D2;+0:4]-[c:5]', 'mapped_rxn': '[CH3:1][O:2][C:3]1=[C:4]([NH:5]C(=O)C(F)(F)F)[CH:16]=[C:17]([C:18]2=[N:19][N:20]3[CH:21]=[CH:22][CH:23]=[CH:24][C:25]3=[C:26]2[C:27]2=[N:28][C:29]([Cl:30])=[N:31][CH:32]=[CH:33]2)[CH:34]=[CH:35]1.[Li+].[OH-].[O:7]=[C:6](Cl)[C:8]1=[C:9]([F:10])[CH:11]=[CH:12][CH:13]=[C:14]1[F:15].NC(CO)(CO)CO.CN(C)C=O.O.C1CCOC1>>[CH3:1][O:2][C:3]1=[C:4]([NH:5][C:6](=[O:7])[C:8]2=[C:9]([F:10])[CH:11]=[CH:12][CH:13]=[C:14]2[F:15])[CH:16]=[C:17]([C:18]2=[N:19][N:20]3[CH:21]=[CH:22][CH:23]=[CH:24][C:25]3=[C:26]2[C:27]2=[N:28][C:29]([Cl:30])=[N:31][CH:32]=[CH:33]2)[CH:34]=[CH:35]1', 'product_smiles': '[CH3:1][O:2][c:3]1[c:4]([NH:5][C:6](=[O:7])[c:8]2[c:9]([F:10])[cH:11][cH:12][cH:13][c:14]2[F:15])[cH:16][c:17](-[c:18]2[n:19][n:20]3[cH:21][cH:22][cH:23][cH:24][c:25]3[c:26]2-[c:27]2[n:28][c:29]([Cl:30])[n:31][cH:32][cH:33]2)[cH:34][cH:35]1', 'reactant_smiles': 'Cl[C:6](=[O:7])[c:8]1[c:9]([F:10])[cH:11][cH:12][cH:13][c:14]1[F:15].O=C(C(F)(F)F)[NH:5][c:4]1[c:3]([O:2][CH3:1])[cH:35][cH:34][c:17](-[c:18]2[n:19][n:20]3[cH:21][cH:22][cH:23][cH:24][c:25]3[c:26]2-[c:27]2[n:28][c:29]([Cl:30])[n:31][cH:32][cH:33]2)[cH:16]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07812022B2;0877;1020964', 'derive_version': 'v1', 'similarity': 0.5563463819691578}, {'reaction_id': 153583, 'template_hash': '7444c18a359bf62fae76935e9436e06e5fa683d52fd22ef82c0d01b62a3eaaa5', 'retro_smarts_template': '[#7;a:5]:[#7;a:4]:[c:3]-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:6]-[c:7]>>O-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]:[#7;a:4]:[#7;a:5].[NH2;D1;+0:6]-[c:7]', 'canonical_smarts_template': 'O-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]:[#7;a:4]:[#7;a:5].[NH2;D1;+0:6]-[c:7]>>[#7;a:5]:[#7;a:4]:[c:3]-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:6]-[c:7]', 'mapped_rxn': '[CH3:1][CH2:2][CH2:3][CH2:4][C:5]1=[CH:6][C:7]([C:8](=[O:9])O)=[N:18][N:19]1[CH2:20][C:21]1=[CH:22][CH:23]=[C:24]([C:25]2=[C:26]([C:27]3=[N:28][N:29]=[N:30][NH:31]3)[CH:32]=[CH:33][CH:34]=[CH:35]2)[CH:36]=[CH:37]1.CCOP(=O)(C#N)OCC.[NH2:10][C:11]1=[CH:12][CH:13]=[C:14]([Cl:15])[CH:16]=[CH:17]1.Cl.CN(C)C=O.CCN(CC)CC>>[CH3:1][CH2:2][CH2:3][CH2:4][C:5]1=[CH:6][C:7]([C:8](=[O:9])[NH:10][C:11]2=[CH:12][CH:13]=[C:14]([Cl:15])[CH:16]=[CH:17]2)=[N:18][N:19]1[CH2:20][C:21]1=[CH:22][CH:23]=[C:24]([C:25]2=[C:26]([C:27]3=[N:28][N:29]=[N:30][NH:31]3)[CH:32]=[CH:33][CH:34]=[CH:35]2)[CH:36]=[CH:37]1', 'product_smiles': '[CH3:1][CH2:2][CH2:3][CH2:4][c:5]1[cH:6][c:7]([C:8](=[O:9])[NH:10][c:11]2[cH:12][cH:13][c:14]([Cl:15])[cH:16][cH:17]2)[n:18][n:19]1[CH2:20][c:21]1[cH:22][cH:23][c:24](-[c:25]2[c:26](-[c:27]3[n:28][n:29][n:30][nH:31]3)[cH:32][cH:33][cH:34][cH:35]2)[cH:36][cH:37]1', 'reactant_smiles': 'O[C:8]([c:7]1[cH:6][c:5]([CH2:4][CH2:3][CH2:2][CH3:1])[n:19]([CH2:20][c:21]2[cH:22][cH:23][c:24](-[c:25]3[c:26](-[c:27]4[n:28][n:29][n:30][nH:31]4)[cH:32][cH:33][cH:34][cH:35]3)[cH:36][cH:37]2)[n:18]1)=[O:9].[NH2:10][c:11]1[cH:12][cH:13][c:14]([Cl:15])[cH:16][cH:17]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US05183899;;265299', 'derive_version': 'v1', 'similarity': 0.5365239294710328}, {'reaction_id': 724639, 'template_hash': 'adae45816a9e8fa7e2ccecca86e58544ea2e8f4ed6a329722f58e03949f63dc5', 'retro_smarts_template': '[#7;a:5]:[#7;a:4]:[c:3]-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:6]-[c:7]>>Cl-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]:[#7;a:4]:[#7;a:5].O=[N+;H0;D3:6](-[O-])-[c:7]', 'canonical_smarts_template': 'Cl-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]:[#7;a:4]:[#7;a:5].O=[N+;H0;D3:6](-[O-])-[c:7]>>[#7;a:5]:[#7;a:4]:[c:3]-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:6]-[c:7]', 'mapped_rxn': '[O:21]=[C:20]([NH:19][C:18]1=[N:17][N:16]2[CH:15]=[C:14]([O:13][C:12]3=[CH:29][C:30]([F:31])=[CH:32][C:10]([N+:9](=O)[O-])=[CH:11]3)[CH:28]=[CH:27][C:26]2=[N:25]1)[CH:22]1[CH2:23][CH2:24]1.Cl.CCO.[CH3:1][C:2]1=[N:3][N:4]([CH3:5])[C:6]([C:7](=[O:8])Cl)=[CH:33]1.O=C([O-])O.[Na+].O>>[CH3:1][C:2]1=[N:3][N:4]([CH3:5])[C:6]([C:7](=[O:8])[NH:9][C:10]2=[CH:11][C:12]([O:13][C:14]3=[CH:15][N:16]4[N:17]=[C:18]([NH:19][C:20](=[O:21])[CH:22]5[CH2:23][CH2:24]5)[N:25]=[C:26]4[CH:27]=[CH:28]3)=[CH:29][C:30]([F:31])=[CH:32]2)=[CH:33]1', 'product_smiles': '[CH3:1][c:2]1[n:3][n:4]([CH3:5])[c:6]([C:7](=[O:8])[NH:9][c:10]2[cH:11][c:12]([O:13][c:14]3[cH:15][n:16]4[n:17][c:18]([NH:19][C:20](=[O:21])[CH:22]5[CH2:23][CH2:24]5)[n:25][c:26]4[cH:27][cH:28]3)[cH:29][c:30]([F:31])[cH:32]2)[cH:33]1', 'reactant_smiles': 'Cl[C:7]([c:6]1[n:4]([CH3:5])[n:3][c:2]([CH3:1])[cH:33]1)=[O:8].O=[N+:9]([O-])[c:10]1[cH:11][c:12]([O:13][c:14]2[cH:15][n:16]3[n:17][c:18]([NH:19][C:20](=[O:21])[CH:22]4[CH2:23][CH2:24]4)[n:25][c:26]3[cH:27][cH:28]2)[cH:29][c:30]([F:31])[cH:32]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08304557B2;1287;1247278', 'derive_version': 'v1', 'similarity': 0.5288461538461539}, {'reaction_id': 562938, 'template_hash': '2cbfb62f02afb6faee37ac1d7d459a26f1f705997d960cf1d63838f131bd3a08', 'retro_smarts_template': '[#7;a:5]:[#7;a:4]:[c:3](:[c:6]:[#7;a:7])-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:8]-[c:9]>>O-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3](:[#7;a:4]:[#7;a:5]):[c:6]:[#7;a:7].[NH2;D1;+0:8]-[c:9]', 'canonical_smarts_template': 'O-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3](:[#7;a:4]:[#7;a:5]):[c:6]:[#7;a:7].[NH2;D1;+0:8]-[c:9]>>[#7;a:5]:[#7;a:4]:[c:3](:[c:6]:[#7;a:7])-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:8]-[c:9]', 'mapped_rxn': '[CH3:1][O:2][C:3]1=[CH:4][CH:5]=[C:6]([CH2:7][N:8]([C:9]2=[CH:10][CH:11]=[CH:12][CH:13]=[CH:14]2)[C:15]2=[CH:16][C:17]([Cl:18])=[N:19][N:20]3[C:21]([C:22](=[O:23])O)=[CH:31][N:32]=[C:33]23)[CH:34]=[CH:35]1.CCN=C=NCCCN(C)C.ON1N=NC2=C1C=CC=C2.[NH2:24][C:25]1=[CH:26][CH:27]=[N:28][CH:29]=[CH:30]1.CC#N>>[CH3:1][O:2][C:3]1=[CH:4][CH:5]=[C:6]([CH2:7][N:8]([C:9]2=[CH:10][CH:11]=[CH:12][CH:13]=[CH:14]2)[C:15]2=[CH:16][C:17]([Cl:18])=[N:19][N:20]3[C:21]([C:22](=[O:23])[NH:24][C:25]4=[CH:26][CH:27]=[N:28][CH:29]=[CH:30]4)=[CH:31][N:32]=[C:33]23)[CH:34]=[CH:35]1', 'product_smiles': '[CH3:1][O:2][c:3]1[cH:4][cH:5][c:6]([CH2:7][N:8]([c:9]2[cH:10][cH:11][cH:12][cH:13][cH:14]2)[c:15]2[cH:16][c:17]([Cl:18])[n:19][n:20]3[c:21]([C:22](=[O:23])[NH:24][c:25]4[cH:26][cH:27][n:28][cH:29][cH:30]4)[cH:31][n:32][c:33]23)[cH:34][cH:35]1', 'reactant_smiles': 'O[C:22]([c:21]1[n:20]2[n:19][c:17]([Cl:18])[cH:16][c:15]([N:8]([CH2:7][c:6]3[cH:5][cH:4][c:3]([O:2][CH3:1])[cH:35][cH:34]3)[c:9]3[cH:10][cH:11][cH:12][cH:13][cH:14]3)[c:33]2[n:32][cH:31]1)=[O:23].[NH2:24][c:25]1[cH:26][cH:27][n:28][cH:29][cH:30]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07723336B2;0461;981781', 'derive_version': 'v1', 'similarity': 0.5287081339712919}, {'reaction_id': 586350, 'template_hash': '9c494d09e252bb3a3c8cd71aa3366149eaaef8d17bb6fed7773aabac08d691cc', 'retro_smarts_template': '[#7;a:5]:[#7;a:4]:[c:3]-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:6]-[c:7]>>Cl-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]:[#7;a:4]:[#7;a:5].Cl-c1:c:c:c(-F):c:c:1-C(=O)-[NH;D2;+0:6]-[c:7]', 'canonical_smarts_template': 'Cl-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]:[#7;a:4]:[#7;a:5].Cl-c1:c:c:c(-F):c:c:1-C(=O)-[NH;D2;+0:6]-[c:7]>>[#7;a:5]:[#7;a:4]:[c:3]-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:6]-[c:7]', 'mapped_rxn': 'O=C([NH:9][C:10]1=[CH:11][C:12]([C:13]2=[N:14][N:15]3[CH:16]=[CH:17][CH:18]=[CH:19][C:20]3=[C:21]2[C:22]2=[N:23][C:24]([NH:25][C:26]3=[CH:27][C:28]([F:29])=[CH:30][CH:31]=[CH:32]3)=[N:33][CH:34]=[CH:35]2)=[CH:36][CH:37]=[CH:38]1)C1=C(Cl)C=CC(F)=C1.[CH3:1][C:2]1=[N:3][N:4]([CH3:5])[C:6]([C:7](=[O:8])Cl)=[CH:39]1>>[CH3:1][C:2]1=[N:3][N:4]([CH3:5])[C:6]([C:7](=[O:8])[NH:9][C:10]2=[CH:11][C:12]([C:13]3=[N:14][N:15]4[CH:16]=[CH:17][CH:18]=[CH:19][C:20]4=[C:21]3[C:22]3=[N:23][C:24]([NH:25][C:26]4=[CH:27][C:28]([F:29])=[CH:30][CH:31]=[CH:32]4)=[N:33][CH:34]=[CH:35]3)=[CH:36][CH:37]=[CH:38]2)=[CH:39]1', 'product_smiles': '[CH3:1][c:2]1[n:3][n:4]([CH3:5])[c:6]([C:7](=[O:8])[NH:9][c:10]2[cH:11][c:12](-[c:13]3[n:14][n:15]4[cH:16][cH:17][cH:18][cH:19][c:20]4[c:21]3-[c:22]3[n:23][c:24]([NH:25][c:26]4[cH:27][c:28]([F:29])[cH:30][cH:31][cH:32]4)[n:33][cH:34][cH:35]3)[cH:36][cH:37][cH:38]2)[cH:39]1', 'reactant_smiles': 'Cl[C:7]([c:6]1[n:4]([CH3:5])[n:3][c:2]([CH3:1])[cH:39]1)=[O:8].O=C(c1cc(F)ccc1Cl)[NH:9][c:10]1[cH:11][c:12](-[c:13]2[n:14][n:15]3[cH:16][cH:17][cH:18][cH:19][c:20]3[c:21]2-[c:22]2[n:23][c:24]([NH:25][c:26]3[cH:27][c:28]([F:29])[cH:30][cH:31][cH:32]3)[n:33][cH:34][cH:35]2)[cH:36][cH:37][cH:38]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07812022B2;0492;1020892', 'derive_version': 'v1', 'similarity': 0.5273972602739726}, {'reaction_id': 969425, 'template_hash': '7355d6ca9185633c3c166f840579e1b21f3f40ab9446d0c31173a28dc026fd91', 'retro_smarts_template': '[#7;a:6]:[c:5](:[c:7]:[#7;a:8])-[C;H0;D3;+0:3](=[O;D1;H0:4])-[NH;D2;+0:1]-[c:2]>>C-[NH;D2;+0:1]-[c:2].O-[C;H0;D3;+0:3](=[O;D1;H0:4])-[c:5](:[#7;a:6]):[c:7]:[#7;a:8]', 'canonical_smarts_template': 'C-[NH;D2;+0:1]-[c:2].O-[C;H0;D3;+0:3](=[O;D1;H0:4])-[c:5](:[#7;a:6]):[c:7]:[#7;a:8]>>[#7;a:6]:[c:5](:[c:7]:[#7;a:8])-[C;H0;D3;+0:3](=[O;D1;H0:4])-[NH;D2;+0:1]-[c:2]', 'mapped_rxn': '[NH2:15][C:14](=[O:16])[C:13]1=[CH:17][N:18]2[C:7]([C:5](=[O:6])O)=[CH:8][N:9]=[C:10]2[CH:11]=[CH:12]1.O=C(Cl)C(=O)Cl.CN(C)C=O.C[NH:4][C:3]1=[C:2]([CH3:1])[CH:33]=[CH:32][C:20]([C:21]2=[N:22][O:23][C:24]([CH:25]3[CH2:26][C:27]([F:28])([F:29])[CH2:30]3)=[N:31]2)=[CH:19]1.ClCCl.C1=CC=NC=C1>>[CH3:1][C:2]1=[C:3]([NH:4][C:5](=[O:6])[C:7]2=[CH:8][N:9]=[C:10]3[CH:11]=[CH:12][C:13]([C:14]([NH2:15])=[O:16])=[CH:17][N:18]23)[CH:19]=[C:20]([C:21]2=[N:22][O:23][C:24]([CH:25]3[CH2:26][C:27]([F:28])([F:29])[CH2:30]3)=[N:31]2)[CH:32]=[CH:33]1', 'product_smiles': '[CH3:1][c:2]1[c:3]([NH:4][C:5](=[O:6])[c:7]2[cH:8][n:9][c:10]3[cH:11][cH:12][c:13]([C:14]([NH2:15])=[O:16])[cH:17][n:18]23)[cH:19][c:20](-[c:21]2[n:22][o:23][c:24]([CH:25]3[CH2:26][C:27]([F:28])([F:29])[CH2:30]3)[n:31]2)[cH:32][cH:33]1', 'reactant_smiles': 'C[NH:4][c:3]1[c:2]([CH3:1])[cH:33][cH:32][c:20](-[c:21]2[n:22][o:23][c:24]([CH:25]3[CH2:26][C:27]([F:28])([F:29])[CH2:30]3)[n:31]2)[cH:19]1.O[C:5](=[O:6])[c:7]1[cH:8][n:9][c:10]2[cH:11][cH:12][c:13]([C:14]([NH2:15])=[O:16])[cH:17][n:18]12', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US09199981B2;0608;1700499', 'derive_version': 'v1', 'similarity': 0.5187793427230047}, {'reaction_id': 367924, 'template_hash': 'df634157bdb0f183968823859bf5591c8ee9ecee54ec68e7529ad92bc697236f', 'retro_smarts_template': '[#7;a:5]:[#7;a:4]:[c:3]-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:6]-[c:7]>>Cl-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]:[#7;a:4]:[#7;a:5].[NH2;D1;+0:6]-[c:7]', 'canonical_smarts_template': 'Cl-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]:[#7;a:4]:[#7;a:5].[NH2;D1;+0:6]-[c:7]>>[#7;a:5]:[#7;a:4]:[c:3]-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:6]-[c:7]', 'mapped_rxn': '[O:12]=[C:11](Cl)[C:13]1=[N:14][N:15]2[C:16](=[CH:17]1)[N:18]=[C:19]([C:20]1=[CH:21][CH:22]=[C:23]([Cl:24])[CH:25]=[CH:26]1)[CH:27]=[C:28]2[C:29]([F:30])([F:31])[F:32].[CH3:1][S:2](=[O:3])(=[O:4])[C:5]1=[CH:6][CH:7]=[CH:8][C:9]([NH2:10])=[CH:33]1.C1=CC=NC=C1.CC#N.CCOC(C)=O>>[CH3:1][S:2](=[O:3])(=[O:4])[C:5]1=[CH:6][CH:7]=[CH:8][C:9]([NH:10][C:11](=[O:12])[C:13]2=[N:14][N:15]3[C:16](=[CH:17]2)[N:18]=[C:19]([C:20]2=[CH:21][CH:22]=[C:23]([Cl:24])[CH:25]=[CH:26]2)[CH:27]=[C:28]3[C:29]([F:30])([F:31])[F:32])=[CH:33]1', 'product_smiles': '[CH3:1][S:2](=[O:3])(=[O:4])[c:5]1[cH:6][cH:7][cH:8][c:9]([NH:10][C:11](=[O:12])[c:13]2[n:14][n:15]3[c:16]([cH:17]2)[n:18][c:19](-[c:20]2[cH:21][cH:22][c:23]([Cl:24])[cH:25][cH:26]2)[cH:27][c:28]3[C:29]([F:30])([F:31])[F:32])[cH:33]1', 'reactant_smiles': 'Cl[C:11](=[O:12])[c:13]1[n:14][n:15]2[c:16]([cH:17]1)[n:18][c:19](-[c:20]1[cH:21][cH:22][c:23]([Cl:24])[cH:25][cH:26]1)[cH:27][c:28]2[C:29]([F:30])([F:31])[F:32].[CH3:1][S:2](=[O:3])(=[O:4])[c:5]1[cH:6][cH:7][cH:8][c:9]([NH2:10])[cH:33]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US06833371B2;;669428', 'derive_version': 'v1', 'similarity': 0.5128205128205128}, {'reaction_id': 472093, 'template_hash': '28f0be7d5ee1e0f45200d4b692326d1cece6106dc34cb685ed0a95b15fa74463', 'retro_smarts_template': '[#7:5]-[C:4]-[c:3]1:[c:2]:[cH;D2;+0:1]:[c:8]:[c:7]:[c:6]:1>>F-[c;H0;D3;+0:1]1:[c:2]:[c:3](-[C:4]-[#7:5]):[c:6]:[c:7]:[c:8]:1', 'canonical_smarts_template': 'F-[c;H0;D3;+0:1]1:[c:2]:[c:3](-[C:4]-[#7:5]):[c:6]:[c:7]:[c:8]:1>>[#7:5]-[C:4]-[c:3]1:[c:2]:[cH;D2;+0:1]:[c:8]:[c:7]:[c:6]:1', 'mapped_rxn': '[CH3:1][C@H:2]1[C:3]2=[CH:4][C:5](F)=[CH:6][CH:7]=[C:8]2[C:9]2=[C:10]([CH:11]=[CH:12][CH:13]=[CH:14]2)[N:15]1[S:16](=[O:17])(=[O:18])[C:19]1=[CH:20][CH:21]=[C:22]([OH:23])[CH:24]=[CH:25]1.BrB(Br)Br.C1=CCCCC1>>[CH3:1][C@H:2]1[C:3]2=[CH:4][CH:5]=[CH:6][CH:7]=[C:8]2[C:9]2=[C:10]([CH:11]=[CH:12][CH:13]=[CH:14]2)[N:15]1[S:16](=[O:17])(=[O:18])[C:19]1=[CH:20][CH:21]=[C:22]([OH:23])[CH:24]=[CH:25]1', 'product_smiles': '[CH3:1][C@H:2]1[c:3]2[cH:4][cH:5][cH:6][cH:7][c:8]2-[c:9]2[c:10]([cH:11][cH:12][cH:13][cH:14]2)[N:15]1[S:16](=[O:17])(=[O:18])[c:19]1[cH:20][cH:21][c:22]([OH:23])[cH:24][cH:25]1', 'reactant_smiles': 'F[c:5]1[cH:4][c:3]2[c:8]([cH:7][cH:6]1)-[c:9]1[c:10]([cH:11][cH:12][cH:13][cH:14]1)[N:15]([S:16](=[O:17])(=[O:18])[c:19]1[cH:20][cH:21][c:22]([OH:23])[cH:24][cH:25]1)[C@H:2]2[CH3:1]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07378427B2;0175;839268', 'derive_version': 'v1', 'similarity': 0.49572649572649574}]\", 'status': 'success', 'error_message': None, 'duration': 0.7250099169905297, 'timestamp': '2026-01-26T21:27:12.753658+00:00'}",
+      "name": "search_template_catalog_by_criteria"
+    },
+    {
+      "role": "assistant",
+      "content": "We need to return mapped_rxn and template_id (integer) for the template that when applied to the given molecule reproduces the Friedel-Crafts acylation (electrophilic aromatic substitution) where halide is broken and acyl chloride formed? Actually forward reaction: acyl chloride + aromatic -> acylated aromatic + Cl- (halide broken). In retrosynthesis, we break the C-CO bond? The target molecule is given: from previous step, the precursors list from make_6_lvl2-apply_template-1 gave a single precursor SMILES: 'COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1'. That's the product of applying some template earlier. Now we need to find the template that when applied to this molecule reproduces the Friedel-Crafts acylation (i.e., the forward reaction is acylation). So we need a retrosynthetic template that breaks an acyl group attached to aromatic ring, generating an acyl chloride and the aromatic ring (with H). The functional groups broken: halide (Cl) is broken in forward, formed in retrosynthesis? Wait forward: acyl chloride (RCOCl) + aromatic -> acylated aromatic + Cl- (halide). So in forward, halide is formed (Cl-). In retrosynthesis, we break the C-CO bond and generate acyl chloride (functional group formed) and aromatic (with H). The hint says \"halide functional group is gone during the transformation.\" That is forward: halide is gone? Actually they say \"breaking a carbon-chlorine bond\". So halide is broken. So functional_groups_broken = halide, functional_groups_formed = acyl chloride. That's what we attempted earlier but got no templates. Maybe need to search for templates where functional_groups_broken includes \"aryl halide\" or \"alkyl halide\". The list includes \"aryl halide\", \"alkyl halide\", \"halide\". Use \"aryl halide\". Let's search.",
+      "id": "chatcmpl-922c005dec40abd5",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bdb7d43f1a4a7e49",
+          "function": {
+            "name": "search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1\", \"functional_groups_broken\": [\"aryl halide\"], \"functional_groups_formed\": [\"acyl chloride\"], \"limit\": 10}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "chatcmpl-tool-bdb7d43f1a4a7e49",
+      "content": "{'tool_name': 'search_template_catalog_by_criteria', 'arguments': {'molecule_smiles': 'COc1ccc(CNc2c(C(=O)Nc3cccc(OC)c3)nnn2Cc2ccc(CN3CC(F)C3)cc2)cc1', 'functional_groups_broken': ['aryl halide'], 'functional_groups_formed': ['acyl chloride'], 'limit': 10}, 'result': '[]', 'status': 'success', 'error_message': None, 'duration': 0.03247145900968462, 'timestamp': '2026-01-26T21:27:15.419070+00:00'}",
+      "name": "search_template_catalog_by_criteria"
+    },
+    {
+      "role": "assistant",
+      "content": "Final Answer: {'mapped_rxn': '[CH3:1][N:2]1[N:3]=[N:4][CH:5]=[C:6]1[C:7](=[O:8])O.CN(C)C=O.O=C(Cl)C(=O)Cl.[NH2:9][C:10]1=[CH:31][CH:30]=[CH:29][C:12]([O:13][C:14]2=[N:15][N:16]3[CH:17]=[C:18]([NH:19][C:20](=[O:21])[CH:22]4[CH2:23][CH2:24]4)[N:25]=[C:26]3[CH:27]=[CH:28]2)=[CH:11]1.CC(=O)N(C)C.C1CCOC1>>[CH3:1][N:2]1[N:3]=[N:4][CH:5]=[C:6]1[C:7](=[O:8])[NH:9][C:10]1=[CH:11][C:12]([O:13][C:14]2=[N:15][N:16]3[CH:17]=[C:18]([NH:19][C:20](=[O:21])[CH:22]4[CH2:23][CH2:24]4)[N:25]=[C:26]3[CH:27]=[CH:28]2)=[CH:29][CH:30]=[CH:31]1', 'template_id': 647549}",
+      "id": "chatcmpl-b679674a9394adb1"
+    }
+  ]
+}

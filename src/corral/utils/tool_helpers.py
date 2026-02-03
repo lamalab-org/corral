@@ -92,6 +92,7 @@ def make_api_request(
     params: dict[str, Any] | None = None,
     json_data: dict[str, Any] | None = None,
     verbose: bool = False,
+    json: bool = True,
 ) -> dict[str, Any]:
     """
     Make an API request with retry capabilities.
@@ -103,6 +104,7 @@ def make_api_request(
         params (dict[str, Any], optional): URL parameters. Defaults to None.
         json_data (dict[str, Any], optional): JSON data for POST/PUT requests. Defaults to None.
         verbose (bool, optional): Whether to print verbose output. Defaults to False.
+        json (bool, optional): Whether to parse response as JSON. Defaults to True.
 
     Returns:
         dict[str, Any]: JSON response from the API
@@ -111,7 +113,7 @@ def make_api_request(
         requests.exceptions.RequestException: If the request fails after retries
     """
     method = method.upper()
-    url = quote(url, safe=":/?&=")
+    url = quote(url, safe=":/?&=%")
     logger.info(f"Making {method} request to {url}")
 
     if verbose:
@@ -129,7 +131,9 @@ def make_api_request(
         logger.debug(f"Response content: {response.text[:500]}...")
 
     response.raise_for_status()
-    return response.json()
+    if json:
+        return response.json()
+    return response.text
 
 
 @retry(
