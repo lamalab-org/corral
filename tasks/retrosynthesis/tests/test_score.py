@@ -323,7 +323,7 @@ class TestScoreFinal:
         """Test scoring raises error when max_steps is not provided."""
         prediction = json.dumps({"type": "mol", "smiles": "CCO", "children": []})
         target = {"prize": 1000.0}
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ValueError):
             score_final(prediction, target)
 
     def test_score_final_invalid_json(self):
