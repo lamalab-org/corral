@@ -31,38 +31,51 @@
 
   "silicon_melting_3_subtask_melting": {
     "name": "Silicon NPT Melting - Level 3",
-    "description": "Given paths to LAMMPs compatible Silicon structure file and Stillinger–Weber potential file, simulate melting under NPT with the given simulation parameters. simulate melting under NPT with the given simulation parameters. Return the path to the trajectory file and the final density of the melt in g/cm^3.",
+    "description": "Given paths to LAMMPs compatible Silicon structure file and Stillinger–Weber potential file, perform NPT melting simulation of Silicon using LAMMPS. Replicate the system three times in each direction. Heat the system from 300K to 2500K at a rate of 2.2 K/ps under NPT ensemble at zero external pressure (0 bar). As a final output, return the simulation log file, and the restart file of the final melt.",
     "tools": ["get_potential_metadata", "run_lammps", "get_nth_run_log", "keyword_log_extractor"],
-    "scoring_function": "check_numerical",
-    "submission_format": "{\"density\": \"<numerical_value without units>\", \"trajectory_file\": \"<absolute_path>\"} e.g. {\"density\": \"56.00\", \"trajectory_file\": \"/results/melting/trajectory.lammpstrj\"}",
+    "scoring_function": "check_log",
+    "submission_format": "{\"log_file\": \"<absolute_path>\", \"restart_file\": \"<absolute_path>\"} e.g. {\"log_file\": \"/results/log.lammps\", \"restart_file\": \"/results/melting/melt.restart\"}",
     "input_from_tasks": [
       "silicon_melting_3_subtask_structure_retrieval",
       "silicon_melting_3_subtask_potential_file"
     ],
     "initial_input": {
-      "heating_rate" : "2.2 Kelvin/ps",
-      "npt heating initial temperature": 300,
-      "npt heating final temperature": 2500,
-      "npt heating pressure": 0.0,
-      "atom_style": "full"
+        "atom style" : "full",
+        "units" : "metal"
     },
     "scoring_params": {
-      "target": 2.4092,
-      "tolerance": 2e-2
+      "variable" : "Temp",
+      "target" : 2500.0,
+      "tolerance" : 0.03,
+      "window" : 20
     }
   },
 
   "silicon_melting_3_subtask_diffusivity": {
     "name": "Silicon Diffusivity Calculation - Level 3",
-    "description": "Given the path to the trajectory file from the melting simulation, compute the diffusion constant (self-diffusivity) in the molten state using the mean squared displacement (MSD) after the detected melting point, and report the average value in m²/s.",
-    "tools": [],
+    "description": "Given paths to LAMMPs restart file for liquid silicon at 2500K and Stillinger–Weber potential file, equilibrate the liquid silicon at using NPT ensemble 500 ps at zero external pressure (0 bar). Compute the mean squared displacement (MSD) of Si atoms over the trajectory. As a file output, return the final MSD data file, where first column is timestep, second column is msd data.",
+    "tools": ["get_potential_metadata", "run_lammps", "get_nth_run_log", "keyword_log_extractor"],
+    "scoring_function": "check_msd",
+    "submission_format": "absolute path to MSD data file (eg. /results/msd.dat)",
+    "input_from_tasks": ["silicon_melting_3_subtask_melting"],
+    "initial_input": {
+        "atom style" : "full",
+        "units" : "metal"
+    },
+    "scoring_params": {}
+  },
+
+    "silicon_melting_3_subtask_diffusion_coefficient": {
+    "name": "Silicon Diffusion Coefficient Calculation - Level 3",
+    "description": "Using the MSD data file from the equilibration of liquid silicon at 2500K, compute the average self diffusion coefficient using the Einstein relation. Report the diffusion coefficient in units of m²/s.",
+    "tools": ["visualisation_tool"],
     "scoring_function": "check_numerical",
     "submission_format": "numerical value without units (eg. 56.00)",
-    "input_from_tasks": ["silicon_melting_3_subtask_melting"],
+    "input_from_tasks": ["silicon_melting_3_subtask_diffusivity"],
     "initial_input": {},
     "scoring_params": {
-      "target": 1.77e-10,
-      "tolerance": 2e-1
+      "target": 1.74e-08,
+      "tolerance": 1e-1
     }
   }
 }
