@@ -353,6 +353,12 @@ def get_potential_metadata(file_path: str) -> str:
             "{potential type : EAM, elements supported : "
             "Fe (Iron), C (Carbon), pair_style : eam/fs}"
         )
+    elif potential_name == "pot.mod":
+        return (
+            "{potential type : Buckingham + Coulomb (BKS-type), elements supported : "
+            "Na (Sodium), Si (Silicon), O (Oxygen), "
+            "pair_style : hybrid/overlay buck/coul/long + kspace_style pppm}"
+        )
     else:
         raise ValueError(f"Unrecognized potential file: {potential_name}")
 

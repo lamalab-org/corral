@@ -521,7 +521,7 @@ def execute_python_code(
 @app.function(
     image=lammps_image,
     cpu=CPUS,
-    timeout=3600,
+    timeout=7200,
     memory=5120,
     volumes={
         "/potentials": volume_potential.read_only(),
