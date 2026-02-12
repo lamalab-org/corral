@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Collect benchmark trial + message + logprobs into a dataset.
 
@@ -15,8 +14,6 @@ Output schema (one row per assistant message):
 - per_token_logprob (list[float])
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import math
@@ -27,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset, Features, Sequence, Value
+from loguru import logger
 
 # -----------------------------
 # Helpers
@@ -74,8 +72,7 @@ def entropy_from_top_logprobs(top_logprobs: list[dict[str, Any]]) -> float | Non
     z = logsumexp(lps)
     # Normalize within the provided candidate set (approx entropy).
     ps = [math.exp(lp - z) for lp in lps]
-    H = -sum(p * math.log(p + 1e-300) for p in ps)
-    return H
+    return -sum(p * math.log(p + 1e-300) for p in ps)
 
 
 def infer_agent_and_verbosity_from_dir(
@@ -100,7 +97,7 @@ def infer_environment_from_path(p: Path) -> str:
     We infer it as the nearest ancestor that contains agent_logs-* OR logprobs_* folders.
     """
     cur = p.resolve()
-    for parent in [cur] + list(cur.parents):
+    for parent in [cur, *list(cur.parents)]:
         if any(
             (parent / x).is_dir()
             for x in [
@@ -155,7 +152,7 @@ def extract_trial_message_refs(
     if not isinstance(task_results, dict):
         return out
 
-    # Try to infer agent_type from the report filename later; here we’ll fill it as "unknown" and override.
+    # Try to infer agent_type from the report filename later
     for task_name, task_blob in task_results.items():
         if not isinstance(task_blob, dict):
             continue
@@ -261,10 +258,7 @@ def load_logprob_files(root: Path) -> dict[str, dict[str, Any]]:
             token_logps.append(lp)
 
             top = tok.get("top_logprobs")
-            if isinstance(top, list):
-                H = entropy_from_top_logprobs(top)
-            else:
-                H = None
+            H = entropy_from_top_logprobs(top) if isinstance(top, list) else None
             token_ents.append(H if H is not None else float("nan"))
 
         by_id[msg_id] = {
@@ -310,7 +304,7 @@ def push_environment_to_hf(
         e.g. "200MB", "500MB", "1GB"
     """
     if not rows:
-        print(f"Skipping push for {environment_subset}: no rows to push.")
+        logger.info(f"Skipping push for {environment_subset}: no rows to push.")
         return
 
     # Superset schema: keep it stable across environments.
@@ -339,7 +333,7 @@ def push_environment_to_hf(
 
     # Normalize rows to match schema (ensure keys exist)
     def normalize(r: dict[str, Any]) -> dict[str, Any]:
-        out = {k: r.get(k) for k in features.keys()}
+        out = {k: r.get(k) for k in features}
 
         # Ensure sequences are lists (or empty list). Avoid None for Sequence columns.
         out["per_token_entropy"] = out["per_token_entropy"] or []
@@ -379,7 +373,7 @@ def push_environment_to_hf(
         max_shard_size=max_shard_size,
     )
 
-    print(
+    logger.info(
         f"✅ Pushed {len(ds)} rows to {dataset_name} (subset/config='{environment_subset}')"
     )
 
@@ -439,10 +433,10 @@ def main() -> None:
                 current_root = base_root / level_dir_name / task_type
 
                 if not current_root.is_dir():
-                    print(f"Skipping {current_root}: Directory not found.")
+                    logger.info(f"Skipping {current_root}: Directory not found.")
                     continue
 
-                print(
+                logger.info(
                     f"Processing directory: {current_root} for level {level_num}, task type {task_type}"
                 )
 
@@ -461,7 +455,9 @@ def main() -> None:
                         report_paths.append(p)
 
                 if not report_paths:
-                    print(f"No report JSON files found in {current_root}. Skipping.")
+                    logger.info(
+                        f"No report JSON files found in {current_root}. Skipping."
+                    )
                     continue
 
                 current_rows: list[dict[str, Any]] = []
@@ -470,16 +466,16 @@ def main() -> None:
                     try:
                         report = read_json(rp)
                     except Exception:
-                        print(f"Failed to read report JSON: {rp}")
+                        logger.info(f"Failed to read report JSON: {rp}")
                         continue
                     if not isinstance(report, dict):
-                        print(f"Report JSON is not a dictionary: {rp}")
+                        logger.info(f"Report JSON is not a dictionary: {rp}")
                         continue
 
                     # The 'environment' here could be the parent of level_1/level_2, or just the current root name
                     # For clarity, let's use the parent of the current_root (e.g., 'spectra') as the environment
                     # And the specific 'level_1/tasks' as the subset name
-                    environment = (
+                    _environment = (
                         current_root.parent.parent.name
                     )  # This would be 'spectra'
                     agent_from_name = infer_agent_type_from_report_filename(rp.name)
@@ -495,7 +491,7 @@ def main() -> None:
                         lp = logprob_by_id.get(r.message_id)
                         if lp is None:
                             # no matching logprobs file found for this message_id
-                            # print(f"Warning: No logprobs found for message_id {r.message_id} in {rp}")
+                            # logger.info(f"Warning: No logprobs found for message_id {r.message_id} in {rp}")
                             continue
 
                         current_rows.append(
@@ -533,26 +529,28 @@ def main() -> None:
                         for row in current_rows:
                             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-                    print(f"Wrote {len(current_rows)} rows -> {out_path}")
+                    logger.info(f"Wrote {len(current_rows)} rows -> {out_path}")
 
                     # 4) Optional parquet for the current subset
                     if args.parquet:
                         try:
                             import pandas as pd  # type: ignore
 
-                            df = pd.DataFrame(current_rows)
+                            _df = pd.DataFrame(current_rows)
                             pq_path = Path(
                                 args.parquet.replace(
                                     ".parquet", f"_{subset_name}.parquet"
                                 )
                             )
                             pq_path.parent.mkdir(parents=True, exist_ok=True)
-                            df.to_parquet(pq_path, index=False)
-                            print(f"Wrote parquet -> {pq_path}")
+                            _df.to_parquet(pq_path, index=False)
+                            logger.info(f"Wrote parquet -> {pq_path}")
                         except ImportError:
-                            print("pandas/pyarrow not installed; skipping parquet.")
+                            logger.info(
+                                "pandas/pyarrow not installed; skipping parquet."
+                            )
                         except Exception as e:
-                            print(f"Failed parquet write for {subset_name}: {e}")
+                            logger.info(f"Failed parquet write for {subset_name}: {e}")
 
                     # 5) Optional push to HF for the current subset
                     if args.push_to_hub:
@@ -564,9 +562,9 @@ def main() -> None:
                             max_shard_size="1GB",
                         )
                 else:
-                    print(f"No data collected for {level_dir_name}/{task_type}.")
+                    logger.info(f"No data collected for {level_dir_name}/{task_type}.")
 
-    print("\nFinished processing all specified directories.")
+    logger.info("\nFinished processing all specified directories.")
 
 
 if __name__ == "__main__":
