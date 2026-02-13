@@ -406,8 +406,8 @@ class TestScoreNumHydrogenSymmetryClasses:
         assert score_num_hydrogen_symmetry_classes(prediction, ground_truth) == 1.0
 
     def test_phenol(self):
-        """Test with phenol (5 aromatic H, OH excluded as acidic)."""
-        prediction = 5  # 5 aromatic H atoms (OH excluded)
+        """Test with phenol (3 unique H environments: ortho, meta, para; OH excluded as acidic)."""
+        prediction = 3  # 3 symmetry classes: ortho, meta, para (OH excluded)
         ground_truth = "c1ccc(O)cc1"
         assert score_num_hydrogen_symmetry_classes(prediction, ground_truth) == 1.0
 
