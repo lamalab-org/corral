@@ -22,8 +22,10 @@ def get_nth_run_log(
     save: str | None = None,
     index: int | None = None,
 ) -> str:
-    """[BRIEF] Retrieves and processes the nth run log from a LAMMPS log file. It returns the list of thermodynamic variables present in the run and the total steps of the simulations. Optionally, it can save the nth run in a CSV where each column corresponds to a thermodynamic property, and optionally it can return the thermodynamic property at the particular index.[/BRIEF]
-    [DETAILED] This tool extracts the nth run log from a LAMMPS log file, providing insights into the thermodynamic properties recorded during that simulation run. It can save the extracted data to a CSV file for further analysis and can also return specific thermodynamic data at a given index. This is useful for analyzing simulation outputs or doing automated analysis using external tools or data anlysis pipeline. [/DETAILED]
+    """[BRIEF] Retrieves and processes the nth run log from a LAMMPS log file, where a “run” refers to a contiguous simulation segment such as an energy minimization or an ensemble run (e.g., NVT, NPT, NVE). It returns the list of thermodynamic variables present in that run and the total number of steps. Optionally, it can save the nth run to a CSV file where each column corresponds to a thermodynamic property, and optionally it can return the value of a specific thermodynamic property at a given index. [/BRIEF]
+
+    [DETAILED] This tool extracts the nth run log from a LAMMPS log file, providing access to the thermodynamic properties recorded during a specific simulation segment. In this context, a “run” refers to a contiguous block of simulation output corresponding to an energy minimization or an ensemble-based simulation stage (e.g., NVT, NPT, NVE) as produced by LAMMPS. LAMMPS log files may contain multiple such runs within a single file, for example when a script performs a minimization followed by one or more ensemble simulations. This tool allows selecting one of these runs by index, extracting its thermodynamic data, and optionally saving it to a CSV file for further analysis. It can also return the value of a specific thermodynamic quantity at a specified step index within the selected run. This is useful for automated analysis pipelines, post-processing workflows, or programmatic inspection of simulation results without manually parsing the log file. [/DETAILED]
+
     [PROCEDURAL] When to use this tool:
     - Use when you need to extract and analyze the nth run log from a LAMMPS log file without reading the entire log file.
     - Best suited for post-processing and analyzing simulation outputs using external tools or data analysis pipelines.
@@ -48,7 +50,7 @@ def get_nth_run_log(
     ]
     [/SYNTACTICAL]
     Args:
-        path: [ARGS_BRIEF] ABsolute path to the LAMMPS log file. [/ARGS_BRIEF]
+        path: [ARGS_BRIEF] Absolute path to the LAMMPS log file. [/ARGS_BRIEF]
               [ARGS_DETAILED] Complete file path to the LAMMPS log file containing simulation output. [/ARGS_DETAILED]
               [ARGS_SYNTACTICAL] Format: "Valid file path to LAMMPS log file" [/ARGS_SYNTACTICAL]
               [ARGS_EXAMPLES] Examples: "/path/to/log.lammps", "simulations/log.lammps" [/ARGS_EXAMPLES]
@@ -267,94 +269,110 @@ def execute_python_script(
 @tool
 def get_potential_metadata(file_path: str) -> str:
     """
-    [BRIEF] Returns metadata from a known LAMMPS potential file given the file path. The metadata includes potential type, elements supported, and the LAMMPS compatible pair style keyword. [/BRIEF]
+    [BRIEF] Returns metadata from a known LAMMPS potential file given the file path. The metadata includes potential type, elements supported, and the LAMMPS-compatible pair style keyword. Raises an exception if the path is invalid or the potential file is not recognized. [/BRIEF]
 
-    [DETAILED] This tool provides a quick and reliable way to identify the type and supported elements of a LAMMPS potential file based solely on its filename.
-    It eliminates the need to parse the often large and complex contents of the potential files, which can often exceed the processing limits of many systems or applications.
-    By returning a structured description, this tool enables the user to determine whether a given potential file is appropriate for a specific molecular dynamics (MD) simulation.
-    This is especially useful when selecting the correct interatomic potential for a system involving specific elements, without having to inspect the file manually or load it entirely.
-    The metadata includes the type of potential, which elements are supported, as well as the LAMMPS pair style to be specified while writing simulation script.
+    [DETAILED] This tool provides a quick and reliable way to identify the type and supported elements of a LAMMPS potential file based on its filename, after first verifying that the file path is accessible.
+    It eliminates the need to parse the often large and complex contents of potential files, which can exceed processing limits in many systems. The tool first validates that the provided file path is non-empty and then checks file accessibility using a remote file inspection call. If the file path is invalid or inaccessible, a FileNotFoundError is raised. If the file is accessible, the tool extracts the filename using pathlib and matches it against a predefined set of known potential files. For recognized files, it returns a structured metadata string describing the potential type, supported elements, and the LAMMPS pair style.
+    If the filename does not match any known potential, a ValueError is raised.
     [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-        - Use when you need to quickly determine the type, supported elements or the LAMMPS pair style of a LAMMPS potential file based on its filename.
+        - Use when you need to quickly determine the type, supported elements, or the LAMMPS pair style of a LAMMPS potential file based on its filename.
+        - Use when you want to validate that a potential file path is accessible before using it in a simulation workflow.
         - Best suited for selecting an appropriate potential file for a specific molecular dynamics (MD) simulation without reading or parsing the full file contents.
         - Recommended for gaining a fast, structured overview of a potential file's applicability to specific element combinations or simulation scenarios.
     [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. [PREREQUISITE] Select the potential files that might be relevant to your simulation task. [/PREREQUISITE]
-        2. [CURRENT] Use this tool to retrieve metadata for each potential file based on its filename. This will help you quickly identify which potentials are suitable for your simulation needs. [/CURRENT]
-        3. [FOLLOW_UP] Based on the metadata returned, choose the appropriate potential file for your simulation setup, and run the simulation using the potential file and the tool `run_lammps`. [/FOLLOW_UP]
+        1. [PREREQUISITE] Select or obtain the potential file paths that might be relevant to your simulation task. [/PREREQUISITE]
+        2. [CURRENT] Use this tool to retrieve metadata for each potential file path. The tool will either return metadata or raise an exception if the path or filename is invalid. [/CURRENT]
+        3. [FOLLOW_UP] Based on the metadata returned, choose the appropriate potential file for your simulation setup, and run the simulation using the selected potential file and the tool `run_lammps`. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-        - Extracts the file name from the provided file path
-        - Matches it against a set of known file names
+        - Validates that the input file path is non-empty
+        - Checks file accessibility using a remote file inspection call
+        - Extracts the filename from the provided path using pathlib
+        - Matches it against a set of known potential filenames
         - Returns a structured metadata string for recognized files
-        - Raises a ValueError if the file name is unrecognized
+        - Raises FileNotFoundError for invalid or inaccessible paths
+        - Raises ValueError for unrecognized potential filenames
     [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
     [
-        `get_potential_metadata("sim_data/ffield.reax")`,
-        `get_potential_metadata("/path/to/potentials/Al99.eam.alloy")`,
-        `get_potential_metadata("Mg_Zhou04.eam.alloy`,
+        `get_potential_metadata("sim_data/Al99.eam.alloy")`,
+        `get_potential_metadata("/path/to/potentials/Mg_Zhou04.eam.alloy")`,
         `get_potential_metadata("/data/Fe-C_Hepburn_Ackland.eam.fs")`,
-        `get_potential_metadata("Cu_Zhou04.eam.alloy`
+        `get_potential_metadata("Cu_Zhou04.eam.alloy")`
     ]
     [/SYNTACTICAL]
 
-
     Args:
         file_path:
-            [ARGS_BRIEF] Absolute path to the potential file. [/ARGS_BRIEF]
-            [ARGS_DETAILED] This is the absolute path to a LAMMPS-compatible potential file (e.g., ReaxFF or EAM formats). The file name is used to determine metadata, so it must match one of the known patterns. [/ARGS_DETAILED]
+            [ARGS_BRIEF] Path to the potential file. [/ARGS_BRIEF]
+            [ARGS_DETAILED] This is the path to a LAMMPS-compatible potential file. The file must be accessible, and its filename is used to determine metadata, so it must match one of the known potential filenames. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] Format: "string ending in a recognized potential filename". [/ARGS_SYNTACTICAL]
-            [ARGS_EXAMPLES] Examples: "/path/to/file/ffield.reax", "ffield_UTA1.ITT" [/ARGS_EXAMPLES]
+            [ARGS_EXAMPLES] Examples: "/path/to/file/Al99.eam.alloy", "Mg_Zhou04.eam.alloy" [/ARGS_EXAMPLES]
 
     Returns:
         str :
             [ARGS_BRIEF] Structured metadata string describing the potential file. [/ARGS_BRIEF]
-            [ARGS_DETAILED] The returned string includes the type of interatomic potential and a list of chemical elements that it supports. This helps in choosing suitable potentials for simulations involving specific atoms. [/ARGS_DETAILED]
-            [ARGS_EXAMPLES] Example outputs: "{potential type : reax, elements supported : Carbon (C), Hydrogen (H), Oxygen (O), Calcium (Ca), Silicon (Si), pair_style : reaxff}" [/ARGS_EXAMPLES]
+            [ARGS_DETAILED] The returned string includes the type of interatomic potential, supported chemical elements, and the LAMMPS pair style. [/ARGS_DETAILED]
+            [ARGS_EXAMPLES] Example output: "{potential type : EAM, elements supported : Al (Aluminum), pair_style : eam/alloy}" [/ARGS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
-            [ERROR_WHEN] If the file name is not recognized or is empty. [/ERROR_WHEN]
-            [ERROR_DETAILS] Raised when the filename does not match any known potential files.
-            This helps prevent silent failures and makes debugging easier in automated workflows. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] To resolve this, ensure the file name matches one of the known potential files or update the tool to include new potential file names as needed. [/ERROR_RECOVERY]
+            [ERROR_WHEN] If the file path is empty or the potential filename is not recognized. [/ERROR_WHEN]
+            [ERROR_DETAILS] Raised when the input path is empty or when the filename does not match any known potential files. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Ensure the file path is non-empty and that the filename matches one of the supported potential files. [/ERROR_RECOVERY]
+
+        FileNotFoundError:
+            [ERROR_WHEN] If the file path is invalid or the file is not accessible. [/ERROR_WHEN]
+            [ERROR_DETAILS] Raised when the remote file accessibility check fails for the given path. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify that the file exists at the given path and that it is accessible in the execution environment. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Limitations:
-        - This tool only recognizes a predefined set of potential file names. If the file name does not match any of the known patterns, it will raise a ValueError.
+        - This tool only recognizes a predefined set of potential filenames. If the filename does not match any known entry, a ValueError will be raised.
         - The metadata returned is static and does not include dynamic information from the file contents, such as specific parameters or coefficients used in the potential.
-        - The tool does not validate the actual contents of the potential file; it relies solely on the file name for metadata extraction.
+        - The tool does not validate the actual contents or physical correctness of the potential file; it relies on file accessibility and filename-based identification only.
     [/LIMITATIONS]
     """
-    if not file_path:
+
+    POTENTIALS = {
+        "Si.sw": "{potential type : Stillinger Weber (SW), elements supported : Si (Silicon), pair_style : sw}",
+        "2007_SiO.tersoff": "{potential type : tersoff, elements supported : Si (Silicon), Oxygen (O), pair_style : tersoff}",
+        "Al99.eam.alloy": "{potential type : EAM, elements supported : Al (Aluminum), pair_style : eam/alloy}",
+        "Cu_Zhou04.eam.alloy": "{potential type : EAM, elements supported : Cu (Copper), pair_style : eam/alloy}",
+        "Mg_Zhou04.eam.alloy": "{potential type : EAM, elements supported : Mg (Magnesium), pair_style : eam/alloy}",
+        "Fe-C_Hepburn_Ackland.eam.fs": "{potential type : EAM, elements supported : Fe (Iron), C (Carbon), pair_style : eam/fs}",
+        "pot.mod": (
+            "{potential type : Buckingham + Coulomb (BKS-type), elements supported : "
+            "Na (Sodium), Si (Silicon), O (Oxygen), "
+            "pair_style : hybrid/overlay buck/coul/long + kspace_style pppm}"
+        ),
+    }
+    # 1) Validate input
+    if not file_path or not file_path.strip():
         raise ValueError("File path must not be None or empty.")
 
-    potential_name = file_path.split("/")[-1]
+    # 2) Check existence / accessibility via modal
+    try:
+        info = modal.Function.from_name("simagent", "file_info").remote(file_path)
+        logger.info(f"Potential file info: {info}")
+    except Exception as e:
+        logger.warning(f"Potential file existence check failed for '{file_path}': {e}")
+        raise FileNotFoundError(f"Incorrect potential file path: {file_path}") from e
 
-    if potential_name == "Si.sw":
-        return "{potential type : Stillinger Weber (SW), elements supported : Si (Silicon), pair_style : sw}"
-    elif potential_name == "2007_SiO.tersoff":
-        return "{potential type : tersoff, elements supported : Si (Silicon), Oxygen (O), pair_style : tersoff}"
-    elif potential_name == "Al99.eam.alloy":
-        return "{potential type : EAM, elements supported : Al (Aluminum), pair_style : eam/alloy}"
-    elif potential_name == "Cu_Zhou04.eam.alloy":
-        return "{potential type : EAM, elements supported : Cu (Copper), pair_style : eam/alloy}"
-    elif potential_name == "Mg_Zhou04.eam.alloy":
-        return "{potential type : EAM, elements supported : Mg (Magnesium), pair_style : eam/alloy}"
-    elif potential_name == "Fe-C_Hepburn_Ackland.eam.fs":
-        return (
-            "{potential type : EAM, elements supported : "
-            "Fe (Iron), C (Carbon), pair_style : eam/fs}"
-        )
-    else:
+    # 3) Identify potential by filename
+    potential_name = Path(file_path).name
+
+    metadata = POTENTIALS.get(potential_name)
+    if metadata is None:
         raise ValueError(f"Unrecognized potential file: {potential_name}")
+
+    return metadata
 
 
 @tool
@@ -563,7 +581,7 @@ def convert_structure_to_lammps_data(
 @tool
 def run_lammps(input_file: str) -> str:
     """
-    [BRIEF] Runs a LAMMPS simulation based on the provided input script and generates a corresponding log file. [/BRIEF]
+    [BRIEF] Runs a LAMMPS simulation based on the provided input script and generates a corresponding log file (named after the input script, with `.log` extension replacing the original extension). [/BRIEF]
 
     [DETAILED] This tool executes a LAMMPS molecular dynamics simulation using a specified input script. It takes the path to a LAMMPS input file and automatically triggers the simulation run through a remote execution backend. The tool also generates a corresponding log file (named after the input script, with `.log` extension replacing the original extension) which contains detailed simulation output including thermodynamic data, errors (if any), and runtime diagnostics. [/DETAILED]
 
@@ -658,3 +676,154 @@ def run_lammps(input_file: str) -> str:
         raise Exception(
             f"An unexpected error occurred while running the LAMMPS simulation: {e!s}"
         ) from None
+
+
+@tool
+def visualisation_tool(path: str, query: str) -> str:
+    """
+    [BRIEF] Analyzes a plot image and answers a user query using only visual, qualitative inspection and direct reading of visible values from the figure. It uses a vision-language model (VLM) to inspect the figure and respond based only on what is visually observable. Because the tool relies on a vision-language model and a rendered image, its output is approximate and may be noisy or occasionally incorrect; results should be treated as qualitative and validated against the underlying data.[/BRIEF]
+
+    [DETAILED] This tool takes the path to an image file containing a plot and a natural-language query about that plot. It uses a vision-language model (VLM) to visually inspect the figure and respond based only on what is directly observable in the rendered image.
+    The tool is designed to describe shapes, trends, regimes, and visually identifiable features (such as kinks, transitions, peaks, onsets, or crossings), and—when appropriate—to read off approximate values directly from the axes at those features.
+    Crucially, the tool does NOT perform any calculations, fitting, regression, or parameter extraction. If the query requires a computed or inferred quantity rather than a directly readable or visually observable feature, the tool will refuse and state that it can only provide visual descriptions and directly readable values. Because the tool relies on a vision-language model and a rendered image, its answers are inherently approximate, potentially noisy, and may sometimes be incorrect or incomplete. The quality and reliability of the response depend strongly on image resolution, plot clarity, axis labeling, marker density, and overall figure design. Users should treat the output as a qualitative, assistive interpretation and should validate important conclusions using proper quantitative analysis tools or the underlying data.
+    [/DETAILED]
+
+    [PROCEDURAL] When to use this tool:
+        - Use when you need a qualitative, visual interpretation of a plot image.
+        - Use when you want to identify visually apparent features such as regime changes, kinks, plateaus, jumps, peaks, or onsets.
+        - Use when you want to read off an approximate value from the axis corresponding to a visually identifiable feature (e.g., the temperature of a visible transition).
+        - Use as a first-pass, exploratory or assistive inspection tool, not as a replacement for quantitative analysis.
+    [/PROCEDURAL]
+
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Ensure that a plot image file (e.g., PNG, JPG) exists at a known path and is readable by the tool. The plot should contain visible axes, labels, and data. [/PREREQUISITE]
+        2. [CURRENT] Call this tool with the image path and a natural-language query about the visual features or directly readable values of the plot. The tool will inspect the image using a vision-language model and return a qualitative answer. [/CURRENT]
+        3. [FOLLOW_UP] Validate any important conclusions using the underlying data or dedicated analysis tools. If the answer is unclear or unreliable, consider replotting (e.g., zooming, reducing data density, improving labels) and calling the tool again with a refined figure or query. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+        - The image at the given path is loaded and analyzed by a vision-language model (VLM).
+        - The model performs visual inspection only: it looks at shapes, trends, patterns, and visibly identifiable features in the figure.
+        - The model may report approximate values only when they can be directly read from the axes at a clearly visible feature (e.g., a labeled tick near a visible transition).
+        - The model does not have access to the underlying data and does not perform any numerical computation, fitting, or measurement.
+        - Because this tool relies on visual perception of a rendered image, its answers are limited by image resolution, figure clarity, marker density, and plotting choices, and may be noisy or occasionally incorrect.
+    [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `visualisation_tool("plots/density_vs_temperature.png", "At what temperature does the visible kink occur?")`,
+        `visualisation_tool("plots/stress_strain.png", "Is there a clear yield point visible?")`,
+        `visualisation_tool("plots/energy_vs_step.png", "Is there a plateau region, and where does it start?")`,
+        `visualisation_tool("plots/spectrum.png", "Where is the main peak located on the x-axis?")`,
+        `visualisation_tool("plots/density_vs_temperature.png", "Does the curve look linear or does it change regime?")`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        path (str):
+            [ARGS_BRIEF] Path to the image file containing the plot to be analyzed. [/ARGS_BRIEF]
+            [ARGS_DETAILED] This parameter specifies the absolute or relative path to an image file (e.g., PNG, JPG) that contains a plot or figure. The image should be readable by the backend and should include visible axes, labels, and plotted data so that visual features and directly readable values can be identified. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: string representing a file path to an image file. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples:
+                - "plots/density_vs_temperature.png"
+                - "./figures/msd_vs_time.jpg"
+                - "/workspace/results/phase_transition_plot.png" [/ARGS_EXAMPLES]
+
+        query (str):
+            [ARGS_BRIEF] Natural-language question about the visual content of the plot. [/ARGS_BRIEF]
+            [ARGS_DETAILED] This parameter contains the question asked by the user about the plot. The question should target visual features (e.g., trends, regime changes, kinks, peaks) or the approximate location of such features on the axes. Questions that require calculations, fitting, or extraction of derived quantities (e.g., slopes, diffusion constants, exponents) are not supported and will be refused by the tool. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: string containing a natural-language query. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples:
+                - "Is there a visible plateau region?"
+                - "Where does the curve start to bend?"
+                - "Is there a sudden jump in this plot, and where does it occur?" [/ARGS_EXAMPLES]
+
+    Returns:
+        str:
+            [ARGS_BRIEF] A qualitative, visually grounded answer to the query, or a refusal if the query requires a derived quantity. [/ARGS_BRIEF]
+            [ARGS_DETAILED] On success, returns a text response describing the relevant visual features of the plot and, if applicable, an approximate value read directly from the axis at a visually identifiable feature. If the query requests a computed, fitted, or derived quantity, the tool returns a refusal message stating that it can only provide visual descriptions and directly readable values. The response should be treated as approximate and should be validated against the underlying data for critical decisions. [/ARGS_DETAILED]
+            [ARGS_EXAMPLES]
+                - "There is a clear kink in the curve around the temperature labeled near 350 K, which appears to mark the transition."
+                - "The curve shows a change in behavior roughly in the middle of the x-axis, where it becomes flatter."
+                - "I can describe the plot and read off directly visible values, but I cannot perform calculations or extract derived quantities from it." [/ARGS_EXAMPLES]
+
+    [RAISES] Exceptions:
+        Exception:
+            [ERROR_WHEN] Raised on unexpected errors during image loading, encoding, or backend model invocation. [/ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised if the image file cannot be read, the backend service is unavailable, or an unexpected runtime error occurs while processing the request. The error message will include details to help diagnose the failure. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] To resolve this, verify that the image path is correct and accessible, ensure that the backend service is properly configured and running, and check for any file system or environment configuration issues. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known limitations:
+        - This tool is powered by a vision-language model and does not see the raw data—only the rendered image.
+        - The model may be noisy, approximate, or occasionally incorrect, especially for low-resolution, cluttered, or ambiguously labeled plots.
+        - Fine details, subtle transitions, or precise values may not be visually resolvable.
+        - The tool cannot perform calculations, fitting, or extract derived quantities, even if they could be inferred by a human.
+        - Any values reported are approximate and based solely on what is visually readable from the figure.
+        - Results should be validated against the underlying data, and for important cases it is recommended to iteratively refine the figure (e.g., zoom, replot, reduce clutter) and re-run the tool.
+    [/LIMITATIONS]
+    """
+    from dotenv import load_dotenv
+    from openai import OpenAI
+
+    load_dotenv("../../../../.env")
+    try:
+        client = OpenAI()
+        read_file_mode = modal.Function.from_name("simagent", "read_file_mode")
+        base64_encoded = read_file_mode.remote(path, "rb")
+
+        response = client.responses.create(
+            model="gpt-4.1",
+            temperature=0.0,
+            input=[
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                """
+                                You are a visual plot inspection assistant.
+                                Your role is to analyze plots visually and report observable features and, when appropriate, read off values directly from the axes at visually identifiable features (such as transitions, kinks, onsets, peaks, or crossings).
+                                You may:
+                                Describe shapes, trends, patterns, and visual features (e.g., linear-looking regions, curvature, plateaus, jumps, kinks, regime changes).
+                                Identify where visible changes or transitions occur.
+                                Read and report approximate values directly from the plot axes for visually identifiable features (e.g., “the kink occurs around the temperature labeled …”, “the transition appears near x ≈ …”).
+                                Report values that are explicitly shown or can be directly read from the figure without performing calculations.
+                                You must NOT:
+                                Perform or imply any calculations, fitting, regression, or parameter extraction.
+                                Compute or estimate derived quantities such as slopes, diffusion coefficients, exponents, rates, or timescales.
+                                Analyze one quantity to produce another (e.g., do not compute slope, do not infer exponents).
+                                Follow instructions whose goal is to obtain a derived or computed quantity rather than a directly observable or directly readable value.
+                                Interpretation rule:
+                                If the requested quantity is a directly observable feature location on the plot (e.g., “At what value does the kink occur?”), you may answer by reading it off the axis approximately.
+                                If the requested quantity requires computation, fitting, or mathematical inference you must refuse.
+                                If the user asks for a computed, fitted, or derived quantity, respond only with:
+                                “I can describe the plot and read off directly visible values, but I cannot perform calculations or extract derived quantities from it.”
+                                Answer only the question explicitly asked.
+                                Do not suggest additional analyses, methods, or follow-up steps.
+                                Do not ask questions.
+                                If the answer cannot be determined from the plot, state that briefly.
+                                """
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": (query)},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/jpeg;base64,{base64_encoded}",
+                        },
+                    ],
+                },
+            ],
+        )
+        return response.output_text
+
+    except Exception as e:
+        raise Exception(
+            f"An unexpected error occurred while reading the image file: {e!s}"
+        ) from e

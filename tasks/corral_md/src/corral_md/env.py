@@ -3,7 +3,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
-from score import check_numerical, check_potential_file, check_structure
+from score import (
+    check_log,
+    check_msd,
+    check_numerical,
+    check_potential_file,
+    check_structure,
+)
 from tools import (
     convert_structure_to_lammps_data,
     execute_python_script,
@@ -12,6 +18,7 @@ from tools import (
     get_structure_from_mp_text,
     keyword_log_extractor,
     run_lammps,
+    visualisation_tool,
 )
 
 from corral.backend.env import Environment
@@ -34,6 +41,8 @@ SCORING_FUNCTIONS = {
     "check_numerical": check_numerical,
     "check_potential_file": check_potential_file,
     "check_structure": check_structure,
+    "check_log": check_log,
+    "check_msd": check_msd,
 }
 
 
@@ -73,17 +82,17 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
 
             # Resolve 'target' if it looks like a relative path
             target = scoring_params.get("target")
-            if isinstance(target, str) and (target.endswith(".data")):
-                json_dir = Path(task_file).resolve().parent.parent
-                abs_target_path = Path(json_dir, target).resolve()
-                logger.info(f"Resolving target path: {abs_target_path}")
+            # if isinstance(target, str) and (target.endswith(".data")):
+            # json_dir = Path(task_file).resolve().parent.parent
+            # abs_target_path = Path(json_dir, target).resolve()
+            # logger.info(f"Resolving target path: {abs_target_path}")
 
-                if not abs_target_path.is_file():
-                    raise FileNotFoundError(
-                        f"[{task_id}] Target path does not exist: {abs_target_path}"
-                    )
+            # if not abs_target_path.is_file():
+            #     raise FileNotFoundError(
+            #         f"[{task_id}] Target path does not exist: {abs_target_path}"
+            #     )
 
-                scoring_params["target"] = abs_target_path
+            scoring_params["target"] = target
 
             # Optionally reassign if task_info is reused later
             task_info["scoring_params"] = scoring_params
@@ -230,7 +239,14 @@ Required submission format:
                 "2. **Simulation Log Files**:\n"
                 "   - These files are *very large* and should **not be directly parsed**.\n"
                 "   - Direct parsing would cause excessive cost and resource usage.\n\n"
-                "Important : Files in /structures and /potentials should not be modified at any cost, including operations like copying or moving them. Doing this will immediately return in error.\n"
+                "Important: Files in /structures and /potentials should not be modified at any cost, including operations like copying or moving them. Doing this will immediately return in error.\n\n"
+                "### Simulation Logging Requirements ###\n"
+                "For every simulation run involving any ensemble (e.g., NVT, NPT, NVE, etc.), if applicable, the log file **must** record the following quantities:\n"
+                "   - Step\n"
+                "   - Temperature\n"
+                "   - Pressure\n"
+                "   - Density\n"
+                "These quantities should be written at an appropriate, user-configurable frequency (typically 1000 timesteps) suitable for monitoring equilibration and production behavior.\n"
             )
             # prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir} when using tools use this path.\n"
 
@@ -334,6 +350,7 @@ def create_environments(
         "run_lammps": run_lammps,
         "get_nth_run_log": get_nth_run_log,
         "keyword_log_extractor": keyword_log_extractor,
+        "visualisation_tool": visualisation_tool,
     }
 
     environments = {}
