@@ -1,6 +1,6 @@
 import ast
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 
 from loguru import logger
 from rdkit import Chem
