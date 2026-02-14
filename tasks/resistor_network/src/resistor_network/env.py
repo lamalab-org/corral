@@ -1,12 +1,12 @@
 import json
 import os
 import sys
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
 from resistor_network.score import (
+    BASE_WORK_DIR,
     check_complete_circuit_solution,
     check_resistance_measurements,
     check_resistor_topology,
@@ -20,14 +20,7 @@ from corral.backend.task import TaskDefinition, TaskGroup
 from corral.backend.tool import Tool
 from corral.utils.task_group import TaskGroupEnvironment
 
-# Base working directory
-if "CORRAL_WORK_DIR" not in os.environ:
-    BASE_WORK_DIR = tempfile.mkdtemp(prefix="resistor_network_")
-    logger.info(f"CORRAL_WORK_DIR not set, using temporary directory: {BASE_WORK_DIR}")
-else:
-    BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
-
-
+logger.info(f"Using BASE_WORK_DIR: {BASE_WORK_DIR}")
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     # Resistor network scoring functions
@@ -165,11 +158,7 @@ if __name__ == "__main__":
         # First argument (sys.argv[1]) is the tasks file path
         tasks_json_path = sys.argv[1]
     else:
-        # Default: Try environment variable, then hardcoded path
-        tasks_json_path = os.environ.get(
-            "CORRAL_TASKS_PATH",
-            Path(__file__).parent / "tasks" / "catalysis_tasks.json",
-        )
+        logger.error("Path to tasks not provided")
 
     # Determine port number
     if len(sys.argv) > 2:
@@ -190,12 +179,6 @@ if __name__ == "__main__":
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)
 
-    # --- Environment Creation ---
-
-    # taskgroup_common_tools = {
-    #     "execute_python_code": execute_python_code,
-    #     "execute_python_script": execute_python_script,
-    # }
     taskgroup_common_tools = None
     environments = create_environments(
         task_json_path=tasks_json_path,

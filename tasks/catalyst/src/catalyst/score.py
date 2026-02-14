@@ -1,5 +1,7 @@
 import json
 import os
+import secrets
+import string
 from collections.abc import Callable
 from pathlib import Path
 
@@ -8,9 +10,12 @@ from pymatgen.core import Structure
 
 from corral.utils.tool_helpers import smart_resolve_path
 
-if "CORRAL_WORK_DIR" not in os.environ:
-    raise OSError("Environment variable 'CORRAL_WORK_DIR' is not set.")
-BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
+# Generate a random 4-letter unique identifier
+uid = "".join(secrets.choice(string.ascii_lowercase) for _ in range(6))
+
+# Set the path. If CORRAL_WORK_DIR is missing, it uses the relative path with the UID.
+BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", f"../CORRAL_WORK_DIR/catalyst_{uid}")
+os.environ["CORRAL_WORK_DIR"] = BASE_WORK_DIR
 
 
 def resolve_path(path_or_str: str) -> str:
