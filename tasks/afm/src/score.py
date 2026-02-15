@@ -145,10 +145,11 @@ def check_roughness_function(tolerance: float, final_params):
 
     return score_fn
 
+
 def auto_match_unit(rms_meters: float, llm_value: float) -> float:
     """
     Scale rms_meters to match the order-of-magnitude of llm_value.
-    
+
     """
     if llm_value == 0 or rms_meters == 0:
         return rms_meters
@@ -159,7 +160,8 @@ def auto_match_unit(rms_meters: float, llm_value: float) -> float:
     # safety (prevents absurd scaling)
     exponent = max(-15, min(15, exponent))
 
-    return rms_meters * (10 ** exponent)
+    return rms_meters * (10**exponent)
+
 
 def check_params_function(final_params):
     def score_fn(_result: str) -> float:
@@ -203,7 +205,7 @@ def check_image_quality(tolerance, final_params):
                 data = afm.data
                 im_file_fw = data["Image"]["Forward"]["Z-Axis"]
                 im_file_bw = data["Image"]["Backward"]["Z-Axis"]
-                similarity_index, diff = ssim(
+                similarity_index, _diff = ssim(
                     im_file_bw,
                     im_file_fw,
                     full=True,
