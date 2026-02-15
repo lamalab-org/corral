@@ -16,7 +16,7 @@ def convert_mcq_to_task_format(questions):
         for j, option_text in enumerate(option_keys, 1):
             options_text += f"{j}. {option_text}\n"
 
-        input_text = f"{question_text}\n\nOptions:\n{options_text.strip()}"
+        input_text = f"{question_text}"
 
         # Create target_scores dictionary mapping options to scores
         target_scores = dict(options.items())
