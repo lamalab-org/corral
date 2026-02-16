@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 import gc
 import json
 import math

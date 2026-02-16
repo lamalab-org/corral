@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 AFM Tools Module
 This module provides tools for operating an Atomic Force Microscope (AFM) using the Nanosurf API.
