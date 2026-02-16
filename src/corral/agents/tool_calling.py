@@ -163,7 +163,7 @@ class ToolCallingAgent(BaseAgent):
                             return "GIVE UP"
 
                     final_answer_match = re.search(
-                        r"Final Answer:\s*(.*)", content, re.IGNORECASE
+                        r"Final Answer: (.*)", content, re.DOTALL | re.IGNORECASE
                     )
                     self._execute_hooks(
                         HookPoint.AFTER_ITERATION,
