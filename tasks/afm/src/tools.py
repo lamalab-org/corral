@@ -8,6 +8,7 @@ and code execution for AFM operations.
 
 import gc
 import os
+import platform
 import time
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,6 @@ from typing import Any
 import matplotlib.pyplot as plt
 import nanosurf
 import numpy as np
-import pythoncom
 from loguru import logger
 from NSFopen.read import read
 from pymoo.algorithms.soo.nonconvex.ga import GA
@@ -25,6 +25,14 @@ from pymoo.termination import get_termination
 from aila_image_process import *  # noqa: F403
 from corral.backend.tool import tool
 from tool_utils import Document_Retriever, MyProblem
+
+# ----------------------------------------------------------
+# Safe pythoncom import (Windows only)
+# ----------------------------------------------------------
+if platform.system() == "Windows":
+    import pythoncom
+else:
+    pythoncom = None
 
 
 @tool
@@ -88,7 +96,7 @@ def visualize_grain_boxes(image_path: str) -> list:
 
     plt.use("Agg")  # Use non-GUI backend for saving
 
-    indexed_boxes, extents, Z_flat2, labeled = image_process(image_path)  # noqa: F405
+    indexed_boxes, extents, Z_flat2, _labeled = image_process(image_path)  # noqa: F405
 
     fig, ax = plt.subplots()
     ax.imshow(Z_flat2, cmap="afmhot", origin="lower", extent=extents)
@@ -130,7 +138,8 @@ def visualize_grain_boxes(image_path: str) -> list:
     ax.set_title("Grains with Bounding Boxes")
 
     # Save to file
-    pythoncom.CoInitialize()
+    if pythoncom:
+        pythoncom.CoInitialize()
     spm = nanosurf.SPM()
     application = spm.application
     current_path = application.GetGalleryHistoryDirectoryPath
@@ -141,7 +150,8 @@ def visualize_grain_boxes(image_path: str) -> list:
     del application
     del spm
     gc.collect()
-    pythoncom.CoUninitialize()
+    if pythoncom:
+        pythoncom.CoUninitialize()
 
     return box_coords
 
@@ -210,48 +220,52 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
     [/LIMITATIONS]
     """
 
-    pythoncom.CoInitialize()
+    if pythoncom:
+        pythoncom.CoInitialize()
+    try:
+        # Use absolute path as key for consistency
 
-    # Use absolute path as key for consistency
+        # Query current scan parameters from the SPM
+        spm = nanosurf.SPM()
+        application = spm.application
+        current_working_directory = application.GetGalleryHistoryDirectoryPath
+        scan = application.Scan
+        current_size = (scan.ImageWidth * 1e9, scan.ImageHeight * 1e9)
+        current_center = (scan.CenterPosX * 1e9, scan.CenterPosY * 1e9)
 
-    # Query current scan parameters from the SPM
-    spm = nanosurf.SPM()
-    application = spm.application
-    current_working_directory = application.GetGalleryHistoryDirectoryPath
-    scan = application.Scan
-    current_size = (scan.ImageWidth * 1e9, scan.ImageHeight * 1e9)
-    current_center = (scan.CenterPosX * 1e9, scan.CenterPosY * 1e9)
+        # Process the image and compute subscan parameters
+        _boxes, extents, _Z_flat2, labeled = image_process(image_path)  # noqa: F405
 
-    # Process the image and compute subscan parameters
-    _boxes, extents, _Z_flat2, labeled = image_process(image_path)  # noqa: F405
+        params = get_subscan_parameters(  # noqa: F405
+            grain_id=grain_id,
+            labeled_mask=labeled,
+            extents=extents,
+            current_center=current_center,
+            current_size=current_size,
+        )
 
-    params = get_subscan_parameters(  # noqa: F405
-        grain_id=grain_id,
-        labeled_mask=labeled,
-        extents=extents,
-        current_center=current_center,
-        current_size=current_size,
-    )
+        # Update scan settings
+        scan.ImageWidth = params["width"] * 1e-9
+        scan.ImageHeight = params["height"] * 1e-9
+        scan.CenterPosX = params["center_x"] * 1e-9
+        scan.CenterPosY = params["center_y"] * 1e-9
+        scan.StartFrameUp()
 
-    # Update scan settings
-    scan.ImageWidth = params["width"] * 1e-9
-    scan.ImageHeight = params["height"] * 1e-9
-    scan.CenterPosX = params["center_x"] * 1e-9
-    scan.CenterPosY = params["center_y"] * 1e-9
-    scan.StartFrameUp()
+        # Wait while scanning is in progress
+        while scan.IsScanning:
+            logger.info("Scanning in progress...")
+            time.sleep(5)
 
-    # Wait while scanning is in progress
-    while scan.IsScanning:
-        logger.info("Scanning in progress...")
-        time.sleep(5)
+        nid_files = list(Path(current_working_directory).glob("*.nid"))
+        if not nid_files:
+            raise FileNotFoundError("No .nid files found after scan.")
+        latest_nid = max(nid_files, key=os.path.getmtime)
 
-    nid_files = list(Path(current_working_directory).glob("*.nid"))
-    if not nid_files:
-        raise FileNotFoundError("No .nid files found after scan.")
-    latest_nid = max(nid_files, key=os.path.getmtime)
-
-    logger.info(f"Scan complete. Latest saved .nid file: {latest_nid}")
-    return latest_nid
+        logger.info(f"Scan complete. Latest saved .nid file: {latest_nid}")
+        return latest_nid
+    finally:
+        if pythoncom:
+            pythoncom.CoUninitialize()
 
 
 @tool
@@ -384,7 +398,8 @@ def Image_optimizer(baseline: bool = False) -> str:
         )
 
     try:
-        pythoncom.CoInitialize()
+        if pythoncom:
+            pythoncom.CoInitialize()
 
         problem = MyProblem(baseline=baseline)
 
@@ -394,7 +409,8 @@ def Image_optimizer(baseline: bool = False) -> str:
         res = minimize(problem, algorithm, termination, seed=1, verbose=True)
 
     finally:
-        pass
+        if pythoncom:
+            pythoncom.CoUninitialize()
 
     return f"Best solution found: \n[Pgain Igain Dgain] = {res.X}\n[Error] = {res.F}"
 
@@ -480,7 +496,8 @@ def Code_Executor(code: str) -> int:
     """
     try:
         # Execute the code
-        pythoncom.CoInitialize()
+        if pythoncom:
+            pythoncom.CoInitialize()
         exec(code)
         para = get_params()
         output = f"Code executed successfully with current AFM parameters: {para}"
@@ -488,6 +505,9 @@ def Code_Executor(code: str) -> int:
         return output
     except Exception as e:
         raise Exception(f"An error occurred during code execution: {e}") from e
+    finally:
+        if pythoncom:
+            pythoncom.CoUninitialize()
 
 
 @tool
@@ -665,7 +685,8 @@ def Image_Analyzer(
 
 
 def get_params():
-    pythoncom.CoInitialize()
+    if pythoncom:
+        pythoncom.CoInitialize()
     spm = nanosurf.SPM()
     application = spm.application
     scan = application.Scan
@@ -708,5 +729,6 @@ def get_params():
     del scan
     del application
     del spm
-    pythoncom.CoUninitialize()
+    if pythoncom:
+        pythoncom.CoInitialize()
     return params

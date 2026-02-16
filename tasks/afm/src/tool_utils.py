@@ -64,7 +64,7 @@ def scan_image(PGain, IGain, DGain, file):
     data = afm.data
     im_file_fw = data["Image"]["Forward"]["Z-Axis"]
     im_file_bw = data["Image"]["Backward"]["Z-Axis"]
-    similarity_index, diff = ssim(
+    similarity_index, _diff = ssim(
         im_file_bw,
         im_file_fw,
         full=True,
@@ -131,7 +131,7 @@ def scan_image_poly(PGain, IGain, DGain, file):
     data = afm.data
     im_file_fw = corrected_image(data["Image"]["Forward"]["Z-Axis"])
     im_file_bw = corrected_image(data["Image"]["Backward"]["Z-Axis"])
-    similarity_index, diff = ssim(
+    similarity_index, _diff = ssim(
         im_file_bw,
         im_file_fw,
         full=True,
