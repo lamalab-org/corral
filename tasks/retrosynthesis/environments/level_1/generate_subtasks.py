@@ -200,7 +200,7 @@ def main():
 
         final_targets = []
         for k in TARGETS[i]:
-            final_targets.extend(k)
+            final_targets = k
         task = {
             "id": f"make_{i+1}_lvl1-build_complete_route",
             "name": f"make_{i+1}_lvl1-build_complete_route",
