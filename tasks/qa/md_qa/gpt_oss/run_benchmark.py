@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+import litellm
 from dotenv import load_dotenv
 from litellm import completion
 from manege import ManegeBenchmark, ManegeModel, PrompterBuilder, PrompterPipeline
@@ -36,7 +37,11 @@ class GPT4o(ManegeModel):
                 logprobs=True,
                 top_logprobs=5,  # Get top 5 logprobs per token
             )
-            generations.append(generation.choices[0].message.content)
+            generations.append(
+                generation.choices[0].message.content
+            ) if generation.choices[0].message.content else generation.append(
+                generation.choices[0].message.reasoning_content
+            )
 
             # Extract logprobs data
             logprobs_info = self._extract_logprobs(generation, prompt_)
@@ -135,8 +140,10 @@ class GPT4o(ManegeModel):
 if __name__ == "__main__":
     enable_logging()
     enable_caching()
+    litellm.set_verbose = True
 
     os.environ["OPENAI_API_KEY"] = os.getenv("BLABLADOR_API_KEY_TEST", "")
+    os.environ["LITELLM_LOG"] = "DEBUG"
     llm = GPT4o()
     pipeline = PrompterPipeline()
     pipeline.add_arg("llm_extractor", True)
