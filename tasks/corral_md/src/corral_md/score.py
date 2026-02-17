@@ -8,12 +8,9 @@ analysis of simulation parameters.
 """
 
 # import modal
-import contextlib
 import json
 import re
-import tempfile
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import modal
@@ -22,59 +19,278 @@ from loguru import logger
 # from utils import extract_lattice_coordinates
 
 
-def check_potential_file(target: str) -> Callable[[str], float]:
+def check_potential_file(target: str):
     """
-    Create a scoring function that checks whether a given file path matches
-    a target filename and exists according to a remote Modal file check.
+    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.
 
-    The returned function compares the filename (not the full path) of its
-    input against the filename of `target`. If the filenames match, it then
-    attempts to verify the file's existence using the Modal `file_info`
-    function. A score of 1.0 is returned if both checks pass; otherwise 0.0.
+    Behavior :This is a higher-order function that returns `score_fn`, a callable which:
+        - Accepts a single argument `result` (str or None).
+        - Logs a warning and returns 0.0 if `result` is None.
+        - Otherwise, calls the remote Modal function "simagent/check_potential"
+        with `target` and `result`, and returns its float score.
 
     Args:
-        target (str): Path to the target file whose filename will be used
-            for comparison (e.g., "/data/files/Al.data").
+        target (str): The target identifier or path to evaluate results against.
 
     Returns:
-        Callable[[str], float]: A scoring function that takes a file path
-        (`result`) as input and returns 1.0 if the filename matches the
-        target and the file exists remotely, otherwise 0.0.
+        Callable[[str | None], float]: A function that takes a result string (or None)
+        and returns a floating-point score from the remote checker, or 0.0 if the
+        result is None.
     """
-    target_name = Path(target).name  # Just the filename (e.g., "Al.data")
 
-    def score_fn(result: str) -> float:
-        """
-        Score a potential file path against the target filename and existence.
+    def score_fn(result: str | None = None) -> float:
+        if result is None:
+            logger.warning("Received None as result in check_potential_file")
+            return 0.0
 
-        Args:
-            result (str): Path to a candidate file to be checked.
+        return modal.Function.from_name("simagent", "check_potential").remote(
+            target, result
+        )
 
-        Returns:
-            float: 1.0 if the filename matches the target filename and the
-            file exists according to the Modal file check; otherwise 0.0.
-        """
+    return score_fn
+
+
+def check_log(variable: str | list, target: float, tolerance: float, window: int):
+    """
+    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.
+
+    Behavior:
+      - If variable is a string:
+          * Extracts that variable from the LAMMPS log file.
+          * Computes the average of the last 'window' entries.
+          * Compares the average to the target value within tolerance.
+      - If variable is a list/tuple [var_to_check, var_must_exist]:
+          * Checks var_must_exist exists in the log header.
+          * Checks var_to_check numerically as above.
+          * If either fails, returns 0.0.
+    """
+    import json
+
+    import numpy as np
+
+    def read_log_from_text(log_text: str, column: str):
+        steps = []
+        values = []
+
+        lines = log_text.splitlines()
+
+        header = None
+        col_index = None
+        step_index = None
+
+        # Allow aliases for certain columns
+        column_aliases = {
+            "Temp": ["Temp", "Temperature"],
+            "Temperature": ["Temp", "Temperature"],
+        }
+
+        for raw_line in lines:
+            line = raw_line.strip()
+
+            if line.startswith("Step"):
+                header = line.split()
+
+                # Resolve column name (handle Temp / Temperature alias)
+                possible_names = column_aliases.get(column, [column])
+
+                found_col = None
+                for name in possible_names:
+                    if name in header:
+                        found_col = name
+                        break
+
+                if found_col is None:
+                    raise ValueError(f"Column '{column}' not found in header: {header}")
+
+                col_index = header.index(found_col)
+                step_index = header.index("Step")
+                continue
+
+            if header and line:
+                tokens = line.split()
+                if len(tokens) != len(header):
+                    continue
+                try:
+                    step = int(tokens[step_index])
+                    value = float(tokens[col_index])
+                except ValueError:
+                    continue
+
+                steps.append(step)
+                values.append(value)
+
+        return np.array(steps), np.array(values), header
+
+    def header_has_column(header, column: str) -> bool:
+        # Handle aliases here too
+        column_aliases = {
+            "Temp": ["Temp", "Temperature"],
+            "Temperature": ["Temp", "Temperature"],
+        }
+        possible_names = column_aliases.get(column, [column])
+
+        return any(name in header for name in possible_names)
+
+    def score_fn(result: str | None = None) -> float:
+        if result is None:
+            logger.warning("Received None as result in check_log")
+            return 0.0
         try:
-            result_path = Path(result)
-            result_name = result_path.name
+            data = json.loads(result)
+            log_file_path = data["log_file"]
 
-            # Check filename match
-            if result_name != target_name:
+            if "restart_file" in data:
+                restart_file_path = data["restart_file"]
+                try:
+                    info = modal.Function.from_name("simagent", "file_info").remote(
+                        restart_file_path
+                    )
+                    logger.info(f"Restart file info: {info}")
+                except RuntimeError as e:
+                    logger.warning(f"Restart file existence check failed: {e}")
+                    return 0.0
+
+            read_file = modal.Function.from_name("simagent", "read_file")
+            content = read_file.remote(log_file_path)
+
+            # Determine mode
+            if isinstance(variable, (list | tuple)):
+                var_to_check = variable[0]
+                var_must_exist = variable[1]
+            else:
+                var_to_check = variable
+                var_must_exist = None
+
+            steps, values, header = read_log_from_text(content, var_to_check)
+
+            # If second variable must exist, check header
+            if var_must_exist is not None and not header_has_column(
+                header, var_must_exist
+            ):
+                logger.warning(
+                    f"Required column '{var_must_exist}' not found in log header"
+                )
                 return 0.0
 
-            # Check file existence using Modal
-            try:
-                info = modal.Function.from_name("simagent", "file_info").remote(
-                    str(result_path)
+            if len(values) < window:
+                logger.warning(
+                    f"Not enough data points ({len(values)}) for the specified window ({window})."
                 )
-                logger.info(f"File info: {info}")
+                return 0.0
+
+            recent_values = values[-window:]
+            avg_value = np.mean(recent_values)
+
+            tol = tolerance * abs(target)
+            if (target - tol) <= avg_value <= (target + tol):
                 return 1.0
-            except RuntimeError as e:
-                logger.warning(f"File existence check failed: {e}")
+            else:
                 return 0.0
 
         except Exception as e:
-            logger.warning(f"Error in check_potential_file: {e}, result was: {result}")
+            logger.warning(f"Error in check_log: {e}, result was: {result}")
+            return 0.0
+
+    return score_fn
+
+
+def check_msd(target: float):
+    """
+    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.
+
+    Behavior:
+      - Extracts the MSD value from the result log file.
+      - Compares the MSD to the target value within the given tolerance.
+    """
+    import numpy as np
+    from sklearn.metrics import r2_score
+
+    def read_msd_from_text(content: str):
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+
+        if not lines:
+            raise ValueError("Empty MSD file")
+
+        def is_float(s):
+            try:
+                float(s)
+                return True
+            except ValueError:
+                return False
+
+        # Detect header: if any token in first line is non-numeric
+        first_tokens = lines[0].split()
+        has_header = not all(is_float(tok) for tok in first_tokens)
+
+        data_lines = lines[1:] if has_header else lines
+
+        steps = []
+        msd = []
+
+        for line in data_lines:
+            tokens = line.split()
+            if len(tokens) < 2:
+                continue
+            try:
+                step = float(tokens[0])
+                val = float(tokens[1])
+            except ValueError:
+                continue
+
+            steps.append(step)
+            msd.append(val)
+
+        if len(msd) == 0:
+            raise ValueError("No numeric data found in MSD file")
+
+        return np.array(steps), np.array(msd), has_header
+
+    def score_fn(result: str | None = None) -> float:
+        if result is None:
+            logger.warning("Received None as result in check_msd")
+            return 0.0
+        try:
+            # Read remote result file content
+            read_file = modal.Function.from_name("simagent", "read_file")
+            content = read_file.remote(result)
+            steps, msd_values, has_header = read_msd_from_text(content)
+            # Convert to numpy arrays
+            time_ps = np.asarray(steps, dtype=float)
+            msd = np.asarray(msd_values, dtype=float)
+
+            # Basic sanity check
+            if len(time_ps) < 2:
+                return 0.0
+
+            # If you already have a mask logic, keep using it.
+            # Otherwise, fit everything:
+            mask = np.ones_like(time_ps, dtype=bool)
+
+            time_fit = time_ps[mask]
+            msd_fit = msd[mask]
+
+            # Need at least 2 points after masking
+            if len(time_fit) < 2:
+                return 0.0
+
+            # Linear fit
+            slope, intercept = np.polyfit(time_fit, msd_fit, 1)
+            msd_fit_line = slope * time_fit + intercept
+
+            # R^2 score
+            r2 = r2_score(msd_fit, msd_fit_line)
+
+            logger.info(
+                f"MSD fit results: slope={slope}, intercept={intercept}, R^2={r2}"
+            )
+
+            # Decision
+            if r2 > float(target):
+                return 1.0
+            else:
+                return 0.0
+        except Exception as e:
+            logger.warning(f"Error in check_msd: {e}, result was: {result}")
             return 0.0
 
     return score_fn
@@ -229,74 +445,34 @@ def check_numerical(target: float, tolerance: float) -> Callable[[Any], float]:
     return score_fn
 
 
-def check_structure(target: str, atom_style: str) -> Callable[[str], float]:
+def check_structure(target, atom_style):
     """
-    Create a scoring function that compares a predicted atomic structure
-    against a target structure using pymatgen's StructureMatcher.
+    Create a scoring function that evaluates a structure result against a target
+    using a remote Modal function.
 
-    The returned function expects a remote file path to a LAMMPS data file.
-    It reads the file content remotely, writes it to a temporary local file,
-    loads both the target and predicted structures using pymatgen, and checks
-    structural equivalence.
-
-    A score of 1.0 is returned if the structures are considered equivalent by
-    `StructureMatcher.fit`; otherwise 0.0.
+    This is a higher-order function that returns `score_fn`, a callable which:
+    - Accepts a single argument `result` (str or None).
+    - Logs a warning and returns 0.0 if `result` is None.
+    - Otherwise, calls the remote Modal function "simagent/check_structure"
+      with `target`, `atom_style`, and `result`, and returns its float score.
 
     Args:
-        target (str): Local filesystem path to the reference LAMMPS data file
-            containing the target structure.
-        atom_style (str): LAMMPS atom style used to parse both the target and
-            predicted structure files (e.g., "atomic", "charge").
+        target: The target identifier or path used for structure validation.
+        atom_style: The atom style configuration passed to the remote checker.
 
     Returns:
-        Callable[[str], float]: A scoring function that takes a remote file path
-        to a predicted LAMMPS data file and returns:
-            - 1.0 if the predicted structure matches the target structure
-            - 0.0 otherwise or if any error occurs
+        Callable[[str | None], float]: A function that takes a result string (or None)
+        and returns a floating-point score from the remote checker, or 0.0 if the
+        result is None.
     """
 
-    def score_fn(result: str) -> float:
-        from pymatgen.analysis.structure_matcher import StructureMatcher
-        from pymatgen.io.lammps.data import LammpsData
-
+    def score_fn(result: str | None = None) -> float:
         if result is None:
             logger.warning("Received None as result in check_structure")
             return 0.0
 
-        tmp_path = None  # Predefine in case of early exception
-
-        try:
-            # Load target structure
-            ld1 = LammpsData.from_file(target, atom_style=atom_style)
-
-            # Read remote result file content
-            read_file = modal.Function.from_name("simagent", "read_file")
-            content = read_file.remote(result)
-
-            # Write content to a unique temp file
-            with tempfile.NamedTemporaryFile(
-                mode="w+", suffix=".data", delete=False
-            ) as tmp:
-                tmp.write(content)
-                tmp_path = tmp.name
-
-            # Load predicted structure
-            ld2 = LammpsData.from_file(tmp_path, atom_style=atom_style)
-
-            # Compare structures
-            matcher = StructureMatcher()
-            are_equal = matcher.fit(ld1.structure, ld2.structure)
-
-            return 1.0 if are_equal else 0.0
-
-        except Exception as e:
-            logger.warning(f"Error in check_structure: {e}")
-            return 0.0
-
-        finally:
-            # Clean up temp file
-            if tmp_path:
-                with contextlib.suppress(Exception):
-                    Path(tmp_path).unlink()
+        return modal.Function.from_name("simagent", "check_structure").remote(
+            target, atom_style, result
+        )
 
     return score_fn
