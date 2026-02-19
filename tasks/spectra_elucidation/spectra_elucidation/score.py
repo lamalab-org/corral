@@ -1,6 +1,6 @@
 import ast
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 
 from loguru import logger
 from rdkit import Chem
@@ -411,31 +411,84 @@ def score_isotopic_distribution(
 
 
 def count_h_env(mol: Chem.Mol) -> int:
-    # Add explicit hydrogens so we can work with them
-    mol = Chem.AddHs(mol)
+    """
+    Count unique (NMR-relevant) non-exchangeable proton environments.
 
-    # Make sure stereo perception has run (won't invent E/Z if it's not specified/perceivable)
+    This function identifies chemically equivalent hydrogens based on:
+    1. Canonical atom ranking (symmetry)
+    2. Diastereotopic relationships around double bonds
+
+    For groups attached to sp2 carbons (double bonds), hydrogens on different
+    substituents are diastereotopic and give different NMR signals even if
+    they appear equivalent by simple symmetry analysis.
+    """
+    mol = Chem.AddHs(mol)
     Chem.AssignStereochemistry(mol, force=True, cleanIt=True)
 
-    # Atoms whose hydrogens exchange with solvent (O-H, S-H, N-H)
     exchangeable_atomic_nums = {7, 8, 16}  # N, O, S
 
-    # Build mapping: parent atom index -> first hydrogen atom attached to it
-    # Exclude hydrogens on O, S, N (exchangeable with solvent)
-    parent_to_h = {}
-    for a in mol.GetAtoms():
-        if a.GetAtomicNum() == 1:  # Hydrogen
-            parent = a.GetNeighbors()[0]
-            parent_idx = parent.GetIdx()
-            # Skip if parent is O, S, or N (exchangeable protons)
-            if parent.GetAtomicNum() in exchangeable_atomic_nums:
-                continue
-            if parent_idx not in parent_to_h:
-                parent_to_h[parent_idx] = a
+    # Get canonical ranks for all atoms (with stereochemistry, without breaking ties)
+    ranks = list(
+        rdmolfiles.CanonicalRankAtoms(
+            mol, breakTies=False, includeChirality=True, includeIsotopes=True
+        )
+    )
 
-    # Keep only one hydrogen per parent atom
-    h_atoms = list(parent_to_h.values())
-    return len(h_atoms)
+    # Find non-exchangeable H indices and their parent carbons
+    h_data = []  # (h_idx, parent_idx, parent_rank)
+    for a in mol.GetAtoms():
+        if a.GetAtomicNum() != 1:
+            continue
+        parent = a.GetNeighbors()[0]
+        if parent.GetAtomicNum() in exchangeable_atomic_nums:
+            continue
+        h_data.append((a.GetIdx(), parent.GetIdx(), ranks[parent.GetIdx()]))
+
+    # Group hydrogens by their parent's canonical rank
+    rank_to_parents = defaultdict(set)
+    for h_idx, parent_idx, parent_rank in h_data:
+        rank_to_parents[parent_rank].add(parent_idx)
+
+    # Check which parent ranks have multiple distinct parent atoms
+    # (these are potentially diastereotopic groups around a double bond)
+    diastereotopic_parents = set()
+    for parent_rank, parent_indices in rank_to_parents.items():
+        if len(parent_indices) > 1:
+            # Multiple parents with same rank - check if attached to same sp2 carbon
+            for pidx in parent_indices:
+                parent_atom = mol.GetAtomWithIdx(pidx)
+                for neighbor in parent_atom.GetNeighbors():
+                    if neighbor.GetAtomicNum() == 6:  # Carbon neighbor
+                        # Check if this carbon is sp2 (has a double bond)
+                        for bond in neighbor.GetBonds():
+                            if bond.GetBondType() == Chem.BondType.DOUBLE:
+                                # Check if both ends of double bond have substituents
+                                # that could make groups diastereotopic
+                                other_atom_idx = bond.GetOtherAtomIdx(neighbor.GetIdx())
+                                other_atom = mol.GetAtomWithIdx(other_atom_idx)
+                                # If the sp2 carbon has asymmetric substitution on the
+                                # other end then the groups on this end are diastereotopic
+                                other_neighbors = [
+                                    n
+                                    for n in other_atom.GetNeighbors()
+                                    if n.GetIdx() != neighbor.GetIdx()
+                                ]
+                                other_ranks = [ranks[n.GetIdx()] for n in other_neighbors]
+                                if len(set(other_ranks)) > 1:  # Asymmetric other end
+                                    diastereotopic_parents.update(parent_indices)
+                                break
+
+    # Build unique environment signatures
+    unique_envs = set()
+    for h_idx, parent_idx, parent_rank in h_data:
+        if parent_idx in diastereotopic_parents:
+            # For diastereotopic groups, each parent atom creates a distinct environment
+            unique_envs.add((parent_rank, parent_idx))
+        else:
+            # For homotopic groups, only the rank matters
+            unique_envs.add((parent_rank, None))
+
+    return len(unique_envs)
 
 
 def score_num_hydrogen_symmetry_classes(
