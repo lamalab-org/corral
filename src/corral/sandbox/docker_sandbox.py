@@ -69,6 +69,7 @@ class DockerSandbox(Sandbox):
             raise RuntimeError(msg)
 
         self._container_id = result.stdout.strip()
+        self._started = True
         logger.info(f"Started sandbox container {self._container_name}")
 
         # Install packages while network is available
@@ -77,8 +78,6 @@ class DockerSandbox(Sandbox):
         # Disable network after setup if policy says so
         if not self.config.network.allow_network:
             self._disable_network()
-
-        self._started = True
 
     def stop(self) -> None:
         if self._container_id:
