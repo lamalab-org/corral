@@ -22,18 +22,24 @@ if "MP_API_KEY" not in os.environ:
 
 
 def resolve_working_dir_path(path_or_str: str, work_dir: str | None = None) -> str:
-    """Resolve path relative to the current working directory"""
-    if not Path(path_or_str).is_absolute():
-        if work_dir:
-            return str(Path(work_dir) / path_or_str)
-        else:
-            work_dir = os.getenv("CORRAL_WORK_DIR")
-            if work_dir:
-                return str(Path(work_dir) / path_or_str)
+    """Resolve path relative to the working directory (idempotent).
 
-            # Fallback to current directory if no work_dir provided
-            return str(Path.cwd() / path_or_str)
-    return path_or_str
+    Uses Path.resolve() to normalize ``../`` segments, so even if the
+    agent passes a path that already contains the work_dir prefix the
+    result is a clean absolute path.  Calling this on an already-absolute
+    path is a no-op.
+    """
+    path_obj = Path(path_or_str)
+
+    if path_obj.is_absolute():
+        return str(path_obj)
+
+    effective_work_dir = work_dir or os.getenv("CORRAL_WORK_DIR")
+    if not effective_work_dir:
+        return str(Path.cwd() / path_obj)
+
+    resolved = (Path(effective_work_dir) / path_obj).resolve()
+    return str(resolved)
 
 
 @tool

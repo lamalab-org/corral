@@ -165,3 +165,75 @@ class TestSubprocessSandbox:
             assert "stderr" in parsed
             assert "return_code" in parsed
             assert "execution_result" in parsed
+
+
+class TestSetWorkDir:
+    """Tests for SubprocessSandbox.set_work_dir()."""
+
+    def test_set_work_dir_changes_cwd(self, tmp_path):
+        """After set_work_dir, code executes in the new directory."""
+        new_dir = tmp_path / "trial_dir"
+        new_dir.mkdir()
+
+        config = SandboxConfig(backend="subprocess")
+        with SubprocessSandbox(config) as sb:
+            sb.set_work_dir(str(new_dir))
+            result = sb.execute("import os; result = os.getcwd()")
+            assert result.success
+            assert result.execution_result.get("result") == str(new_dir)
+
+    def test_set_work_dir_clears_state(self, tmp_path):
+        """Persistent state does not leak across set_work_dir calls."""
+        dir_a = tmp_path / "trial_a"
+        dir_b = tmp_path / "trial_b"
+
+        config = SandboxConfig(backend="subprocess", persistent_state=True)
+        with SubprocessSandbox(config) as sb:
+            sb.set_work_dir(str(dir_a))
+            r1 = sb.execute("x = 99")
+            assert r1.success
+
+            r2 = sb.execute("result = x")
+            assert r2.success
+            assert r2.execution_result.get("result") == 99
+
+            # Switch to a new trial directory — state should be fresh
+            sb.set_work_dir(str(dir_b))
+            r3 = sb.execute("result = x")
+            # x should not be defined in the new trial
+            assert not r3.success
+
+    def test_stop_preserves_external_work_dir(self, tmp_path):
+        """stop() does not delete a directory provided via set_work_dir."""
+        external_dir = tmp_path / "env_managed"
+        external_dir.mkdir()
+        marker = external_dir / "keep_me.txt"
+        marker.write_text("important")
+
+        config = SandboxConfig(backend="subprocess")
+        sb = SubprocessSandbox(config)
+        sb.start()
+        sb.set_work_dir(str(external_dir))
+        sb.stop()
+
+        assert external_dir.exists()
+        assert marker.read_text() == "important"
+
+    def test_set_work_dir_creates_directory(self, tmp_path):
+        """set_work_dir creates the directory if it doesn't exist yet."""
+        new_dir = tmp_path / "nonexistent" / "trial"
+
+        config = SandboxConfig(backend="subprocess")
+        with SubprocessSandbox(config) as sb:
+            sb.set_work_dir(str(new_dir))
+            assert new_dir.exists()
+
+    def test_stop_removes_own_temp_dir(self):
+        """stop() still removes the sandbox's own temporary directory."""
+        config = SandboxConfig(backend="subprocess")
+        sb = SubprocessSandbox(config)
+        sb.start()
+        work_dir = sb._work_dir
+        assert work_dir.exists()
+        sb.stop()
+        assert not work_dir.exists()

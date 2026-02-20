@@ -77,6 +77,15 @@ class Sandbox(ABC):
     def download_file(self, sandbox_path: str, local_path: str | Path) -> None:
         """Copy a file from the sandbox to the host."""
 
+    def set_work_dir(self, work_dir: str | Path) -> None:
+        """Update the sandbox working directory for subsequent executions.
+
+        Called when the environment's trial directory changes.  The default
+        implementation is a no-op so that existing sandbox backends remain
+        backward-compatible.
+        """
+        _ = work_dir  # no-op; subclasses may override
+
     def __enter__(self):
         self.start()
         return self

@@ -215,7 +215,7 @@ Required submission format:
 
         # Add workspace info
         if self.current_work_dir:
-            prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace {self.current_work_dir}\n"
+            prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace. Use simple relative paths (e.g., 'polymorph_data', 'results/output.json') — paths are resolved automatically.\n"
 
         # Add note about dependencies
         if self.current_task.input_from_tasks:

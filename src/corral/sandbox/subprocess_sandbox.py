@@ -30,16 +30,19 @@ class SubprocessSandbox(Sandbox):
         super().__init__(config)
         self._work_dir: Path | None = None
         self._state_file: Path | None = None
+        self._owns_work_dir: bool = False
 
     def start(self) -> None:
         if self._started:
             return
 
         if self.config.state_dir:
-            self._work_dir = Path(self.config.state_dir)
+            self._work_dir = Path(self.config.state_dir).resolve()
             self._work_dir.mkdir(parents=True, exist_ok=True)
+            self._owns_work_dir = False
         else:
-            self._work_dir = Path(tempfile.mkdtemp(prefix="corral_sandbox_"))
+            self._work_dir = Path(tempfile.mkdtemp(prefix="corral_sandbox_")).resolve()
+            self._owns_work_dir = True
 
         if self.config.persistent_state:
             self._state_file = self._work_dir / ".sandbox_state.pkl"
@@ -48,12 +51,31 @@ class SubprocessSandbox(Sandbox):
         logger.info(f"Started subprocess sandbox in {self._work_dir}")
 
     def stop(self) -> None:
-        if self._work_dir and self._work_dir.exists() and not self.config.state_dir:
-            # Only remove if we created the temp dir (not a user-supplied state_dir)
+        if self._work_dir and self._work_dir.exists() and self._owns_work_dir:
+            # Only remove if the sandbox created its own temp dir
             shutil.rmtree(self._work_dir, ignore_errors=True)
         self._work_dir = None
         self._state_file = None
+        self._owns_work_dir = False
         self._started = False
+
+    def set_work_dir(self, work_dir: str | Path) -> None:
+        """Update the sandbox working directory for subsequent executions.
+
+        Switches the sandbox to execute code in *work_dir* and resets
+        any persisted state so that trial state does not leak across
+        trial boundaries.  The path is always resolved to an absolute
+        path to avoid double-prefix issues when used as subprocess cwd.
+        """
+        new_dir = Path(work_dir).resolve()
+        new_dir.mkdir(parents=True, exist_ok=True)
+        self._work_dir = new_dir
+        # Environment manages this directory — don't delete it on stop()
+        self._owns_work_dir = False
+        # Reset persistent state for trial isolation
+        if self.config.persistent_state:
+            self._state_file = self._work_dir / ".sandbox_state.pkl"
+        logger.info(f"Sandbox work_dir updated to {self._work_dir}")
 
     def execute(
         self,

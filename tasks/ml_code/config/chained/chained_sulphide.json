@@ -1,0 +1,71 @@
+{
+  "batch_retrieve_sulphide_polymorphs": {
+    "name": "Batch Retrieve Sulphide Polymorphs",
+    "description": "Retrieve polymorphs for a diverse set of sulphide compositions from the Materials Project database. Use the retrieval tools to fetch polymorph data, then write Python code to filter by energy_above_hull and consolidate all entries into a single comprehensive JSON dataset. Each entry must have a `source_composition` field.\n\nWrite code to:\n1. Process the retrieved JSON files — filter entries with energy_above_hull < max_energy_above_hull.\n2. Consolidate all individual composition files into one JSON array.\n3. Ensure each entry includes `source_composition`.\n\nPackages available in the sandbox: numpy, pandas, scikit-learn, xgboost, scipy, joblib.",
+    "tools": [
+      "batch_retrieve_polymorphs",
+      "get_bulk_polymorphs_data",
+      "get_bulk_polymorphs_data_to_file"
+    ],
+    "scoring_function": "score_polymorph_dataset",
+    "submission_format": "path to the json file (eg. polymorph_data.json)",
+    "input_from_tasks": [],
+    "initial_input": {
+      "max_energy_above_hull": 0.3,
+      "max_per_composition": 3,
+      "max_compositions": 40
+    }
+  },
+  "prepare_ml_ready_dataset": {
+    "name": "Prepare ML-Ready Dataset",
+    "description": "Write Python code to transform the consolidated polymorph JSON dataset into an ML-ready tabular format. Engineer features from the polymorph data (structural, compositional), create proper train/test splits (80/20 random split), and save the results.\n\nYour code should:\n1. Load the consolidated JSON from the previous task.\n2. Extract and engineer numerical features (density, volume, nsites, band_gap, space group encoding, compositional features, etc.).\n3. Set the target variable to formation_energy_per_atom.\n4. Split into train (80%) and test (20%) sets.\n5. Save train.csv and test.csv files.\n6. Create a metadata JSON file with keys: `features` (list of feature names), `train_path`, `test_path`, `train_samples`, `test_samples`, `feature_count`.\n\nPackages available in the sandbox: numpy, pandas, scikit-learn, xgboost, scipy, joblib.",
+    "tools": [],
+    "scoring_function": "ml_dataset_preparation_quality_binary",
+    "submission_format": "path to the json file (eg. ml_dataset_metadata.json)",
+    "input_from_tasks": [
+      "batch_retrieve_sulphide_polymorphs"
+    ],
+    "initial_input": {
+      "target_property": "formation_energy_per_atom",
+      "test_split": 0.2,
+      "output_path": "sulphide_ml_dataset"
+    }
+  },
+  "train_xgboost_formation_energy_model": {
+    "name": "Train XGBoost Formation Energy Model",
+    "description": "Write Python code to train an XGBoost regression model for predicting formation energies of sulphide polymorphs. Use the prepared train/test CSV datasets from the previous task.\n\nYour code should:\n1. Load the training data CSV.\n2. Train an XGBoost regressor with hyperparameters: n_estimators=200, max_depth=8, learning_rate=0.1, subsample=0.8, colsample_bytree=0.8, reg_alpha=0.1, reg_lambda=0.1.\n3. Save the trained model as a .pkl file using joblib.\n\nPackages available in the sandbox: numpy, pandas, scikit-learn, xgboost, scipy, joblib.",
+    "tools": [],
+    "scoring_function": "model_training_success_binary",
+    "submission_format": "path to the model checkpoint file (eg. trained_xgboost_model.pkl)",
+    "input_from_tasks": [
+      "prepare_ml_ready_dataset"
+    ],
+    "initial_input": {
+      "target_column": "formation_energy_per_atom",
+      "hyperparameters": {
+        "n_estimators": 200,
+        "max_depth": 8,
+        "learning_rate": 0.1,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_alpha": 0.1,
+        "reg_lambda": 0.1
+      }
+    }
+  },
+  "evaluate_model_performance": {
+    "name": "Evaluate Model Performance",
+    "description": "Write Python code to evaluate the trained XGBoost model on the test set and perform cross-validation.\n\nYour code should:\n1. Load the trained model (.pkl) and the test dataset CSV.\n2. Compute test set metrics: MAE, RMSE, R2.\n3. Extract feature importance from the model.\n4. Perform 5-fold cross-validation on the full dataset (train + test).\n5. Save results as a JSON file with the following structure:\n   - `test_set_evaluation`: dict with `mae`, `rmse`, `r2`, and `feature_importance` (dict of feature_name -> importance).\n   - `cross_validation_results`: dict with `r2_mean` and `r2_std`.\n\nPackages available in the sandbox: numpy, pandas, scikit-learn, xgboost, scipy, joblib.",
+    "tools": [],
+    "scoring_function": "model_evaluation_completeness_binary",
+    "submission_format": "path to the results file (eg. model_evaluation_results.json)",
+    "input_from_tasks": [
+      "train_xgboost_formation_energy_model",
+      "prepare_ml_ready_dataset"
+    ],
+    "initial_input": {
+      "target_column": "formation_energy_per_atom",
+      "cv_folds": 5
+    }
+  }
+}

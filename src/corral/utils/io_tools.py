@@ -22,24 +22,16 @@ class FSManager:
         **kwargs,
     ):
         self.protocol = protocol
-        self.base_path = Path(base_path) if base_path else None
+        self.base_path = Path(base_path).resolve() if base_path else None
         self.fs = fsspec.filesystem(protocol, **kwargs)
         self.app = app
 
     def _resolve_path(self, path: str) -> str:
-        """Resolve a relative path against the base_path"""
-        if self.base_path is None:
-            return path
+        """Resolve a relative path against the base_path.
 
-        path_obj = Path(path)
-        if path_obj.is_absolute():
-            return str(path_obj)
-        # Relative path - resolve against base_path
-        resolved = self.base_path / path_obj
-        return str(resolved)
-
-    def _resolve_path(self, path: str) -> str:
-        """Resolve a relative path against the base_path"""
+        Always returns an absolute, normalized path so that ``../``
+        segments never leak into tool results or downstream callers.
+        """
         if self.base_path is None:
             return path
 
@@ -47,8 +39,8 @@ class FSManager:
         if path_obj.is_absolute():
             return str(path_obj)
         else:
-            # Relative path - resolve against base_path
-            resolved = self.base_path / path_obj
+            # Relative path - resolve against base_path and normalize
+            resolved = (self.base_path / path_obj).resolve()
             return str(resolved)
 
     def list_files(self, path: str, recursive: bool = False) -> list[str]:
