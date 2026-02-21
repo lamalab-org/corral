@@ -244,7 +244,12 @@ def run_independent_trials(
     logger.info(
         f"Running independent trials for {len(task_ids)} tasks with {trials_per_task} trials each"
     )
-    remaining_tasks = filter_incomplete_tasks(task_results, trials_per_task)
+    remaining_tasks = [
+        task_id
+        for task_id in task_ids
+        if len(task_results.get(task_id, TaskTrialResults(task_id=task_id)).trials)
+        < trials_per_task
+    ]
 
     for task_id in remaining_tasks:
         while len(task_results[task_id].trials) < trials_per_task:
@@ -737,6 +742,10 @@ class CorralRunner:
         if checkpoint and "task_results" in checkpoint:
             task_results = checkpoint["task_results"]
             logger.info(f"Loaded existing results for {len(task_results)} tasks")
+
+            # Prune to only the requested tasks so stale checkpoints don't
+            # cause unrelated tasks to be re-run.
+            task_results = {k: v for k, v in task_results.items() if k in task_ids}
 
             # Ensure all requested tasks have entries
             for task_id in task_ids:

@@ -55,6 +55,19 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         """Get list of available task IDs"""
         return list(environments.keys())
 
+    @app.get("/tasks/{task_id}")
+    def get_task(task_id: str):
+        """Get metadata for a single task"""
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+        env = environments[task_id]
+        return {
+            "id": task_id,
+            "name": task_id,
+            "description": env.get_task_prompt(),
+            "tools": list(env.tools.keys()),
+        }
+
     @app.get("/dependency_chain")
     def get_dependency_chain_setting():
         has_chained_tasks = any(

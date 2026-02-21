@@ -71,7 +71,7 @@ class DockerBenchmarkRunner:
         self,
         env_image: str,
         agent_class: str = "ReActAgent",
-        model: str = "claude-3-5-sonnet-20241022",
+        model: str = "claude-sonnet-4-5-20250929",
         trials_per_task: int = 5,
         task_ids: str | None = None,
         max_iterations: int = 10,
@@ -116,11 +116,9 @@ class DockerBenchmarkRunner:
             auto_find_port: Automatically find a free port if ``port`` is busy.
             host: Host address the environment binds to inside the container.
         """
-        # Resolve output directory (default to cwd)
+        # Resolve output directory (default to cwd — should already be absolute from CLI)
         results_host_path = Path(output_dir or Path.cwd()) / "corral-results"
         results_host_path.mkdir(parents=True, exist_ok=True)
-
-        console.print(f"[cyan]Results will be saved to:[/cyan] {results_host_path}")
 
         with Progress(
             SpinnerColumn(),
@@ -198,6 +196,18 @@ class DockerBenchmarkRunner:
                 console.print(
                     "\n[bold green]Benchmark completed successfully![/bold green]"
                 )
+                # List result files written to the host directory
+                saved = sorted(results_host_path.glob("*.json"))
+                if saved:
+                    console.print(
+                        f"\n[cyan]Results saved to:[/cyan] {results_host_path}"
+                    )
+                    for f in saved:
+                        console.print(f"  [dim]→[/dim] {f.name}")
+                else:
+                    console.print(
+                        f"\n[yellow]No result files found in {results_host_path}[/yellow]"
+                    )
             else:
                 console.print(
                     f"\n[bold red]Benchmark failed with exit code {exit_code}[/bold red]"
@@ -205,6 +215,71 @@ class DockerBenchmarkRunner:
 
             # Cleanup
             self.stop()
+
+    def build_agent_runner(
+        self,
+        tag: str = "corral-agent-runner:latest",
+        source_dir: str | None = None,
+    ) -> None:
+        """Build the agent runner Docker image from local source.
+
+        This is the recommended approach for development so that the image
+        reflects the locally installed version of corral rather than the
+        published GitHub release.
+
+        Args:
+            tag: Image tag to assign to the built image.
+            source_dir: Path to the corral source tree (the directory that
+                contains ``pyproject.toml``).  Defaults to the directory two
+                levels above this file (i.e. the repo root).
+        """
+        import subprocess
+
+        # Locate the Dockerfile and the build context (repo root).
+        # The Dockerfile uses BuildKit heredoc syntax (# syntax=docker/dockerfile:1),
+        # so we invoke the docker CLI directly (which uses BuildKit by default)
+        # rather than the Python SDK's legacy builder.
+        dockerfile_path = (
+            Path(__file__).parent.parent.parent.parent
+            / ".docker"
+            / "corral-agent-runner"
+            / "Dockerfile"
+        )
+        if not dockerfile_path.exists():
+            raise FileNotFoundError(
+                f"Agent runner Dockerfile not found at {dockerfile_path}. "
+                "Make sure you are running from the corral repository."
+            )
+
+        build_context = (
+            Path(source_dir) if source_dir else dockerfile_path.parent.parent.parent
+        )
+
+        console.print(f"[cyan]Building agent runner image:[/cyan] {tag}")
+        console.print(f"[dim]Context: {build_context}[/dim]")
+        console.print("[dim]CORRAL_SOURCE=local (installing from local source)[/dim]\n")
+
+        try:
+            subprocess.run(
+                [
+                    "docker",
+                    "build",
+                    "--build-arg",
+                    "CORRAL_SOURCE=local",
+                    "--file",
+                    str(dockerfile_path),
+                    "--tag",
+                    tag,
+                    str(build_context),
+                ],
+                check=True,
+            )
+            console.print(f"\n[bold green]Image built successfully:[/bold green] {tag}")
+        except subprocess.CalledProcessError as exc:
+            console.print(
+                f"[bold red]Build failed with exit code {exc.returncode}[/bold red]"
+            )
+            raise
 
     def _resolve_agent_image(self, agent_image: str | None) -> str:
         """Resolve the agent image to use.
@@ -281,6 +356,11 @@ class DockerBenchmarkRunner:
         if env_args:
             environment["CORRAL_ENV_ARGS"] = json.dumps(env_args)
 
+        # Pass through any LiteLLM-supported API keys from environment
+        for key in os.environ:
+            if key.endswith("_API_KEY"):
+                environment[key] = os.environ[key]
+
         container = self.client.containers.run(
             image,
             name=self.ENV_CONTAINER_NAME,
@@ -331,6 +411,9 @@ class DockerBenchmarkRunner:
             "TEMPERATURE": str(temperature),
             "VERBOSE": str(verbose).lower(),
             "RESULTS_DIR": self.DEFAULT_RESULTS_DIR,
+            # Automatically clip k_values to the number of trials so pass@k
+            # metrics don't request more trials than were run.
+            "K_VALUES": ",".join(str(k) for k in range(1, trials_per_task + 1)),
         }
 
         # Pass through any LiteLLM-supported API keys from environment
@@ -436,8 +519,9 @@ class DockerBenchmarkRunner:
         self,
         base_url: str,
         agent_class: str = "ReActAgent",
-        model: str = "claude-3-5-sonnet-20241022",
+        model: str = "claude-sonnet-4-5-20250929",
         trials_per_task: int = 5,
+        task_ids: str | None = None,
         agent_kwargs: dict[str, Any] | None = None,
     ):
         """Run agent locally against an already-running environment.
@@ -457,11 +541,14 @@ class DockerBenchmarkRunner:
         agent_init_kwargs.setdefault("model", model)
         agent = agent_cls(**agent_init_kwargs)
 
+        # Parse task IDs if provided
+        parsed_task_ids = [t.strip() for t in task_ids.split(",")] if task_ids else None
+
         # Run benchmark
         runner = CorralRunner(router, agent)
         console.print(f"Running {agent_class} with {model}...\n")
 
-        result = runner.bench(trials_per_task=trials_per_task)
+        result = runner.bench(trials_per_task=trials_per_task, task_ids=parsed_task_ids)
         result.generate_report("corral_run.json")
 
         console.print("\n[bold green]Benchmark completed![/bold green]")

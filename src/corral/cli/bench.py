@@ -81,7 +81,7 @@ DEFAULTS = {
     "temperature": 1.0,
     "tasks": None,
     "output": None,
-    "output_dir": None,  # Defaults to ./corral-results in cwd
+    "output_dir": None,  # Resolved to Path.cwd() at invocation time
     "detach": False,
     "verbose": True,
     "metrics_file": None,  # Custom metrics file path
@@ -197,6 +197,11 @@ def run_benchmark(
     # This must be imported here to avoid circular imports
     from corral.cli.docker_runner import DockerBenchmarkRunner
 
+    # Resolve output_dir to an absolute path NOW, capturing the directory from which
+    # the command was invoked.  This ensures results always land in the user's cwd
+    # even if the working directory changes later (e.g. inside library code).
+    resolved_output_dir = str(Path(output_dir).resolve() if output_dir else Path.cwd())
+
     # Load config file if provided
     file_config = load_config(config) if config else {}
 
@@ -211,7 +216,7 @@ def run_benchmark(
         "max_iterations": max_iterations,
         "temperature": temperature,
         "output": output,
-        "output_dir": output_dir,
+        "output_dir": resolved_output_dir,  # always a concrete absolute path
         "detach": detach,
         "verbose": verbose,
         "metrics_file": metrics_file,
@@ -350,7 +355,7 @@ def run_agent_only(
         help="Agent class to use",
     ),
     model: str = typer.Option(
-        "claude-3-5-sonnet-20241022",
+        "claude-sonnet-4-5-20250929",
         "--model",
         "-m",
         help="LLM model to use",
@@ -360,6 +365,11 @@ def run_agent_only(
         "--trials",
         "-t",
         help="Number of trials per task",
+    ),
+    tasks: str | None = typer.Option(
+        None,
+        "--tasks",
+        help="Comma-separated task IDs to run. Defaults to all tasks.",
     ),
     config: str | None = typer.Option(
         None,
@@ -396,8 +406,44 @@ def run_agent_only(
             agent_class=agent,
             model=model,
             trials_per_task=trials,
+            task_ids=tasks,
             agent_kwargs=extra_kwargs,
         )
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1) from e
+
+
+@bench_app.command("build")
+def build_agent_runner(
+    tag: str = typer.Option(
+        "corral-agent-runner:latest",
+        "--tag",
+        "-t",
+        help="Image tag for the built agent runner.",
+    ),
+    source_dir: str | None = typer.Option(
+        None,
+        "--source-dir",
+        "-s",
+        help=(
+            "Path to the corral source directory (containing pyproject.toml). "
+            "Defaults to the corral repo root detected automatically."
+        ),
+    ),
+):
+    """Build the agent runner Docker image from local source.
+
+    Use this instead of pulling from GHCR when developing locally or when
+    you do not have registry access.  The built image is tagged
+    'corral-agent-runner:latest' by default and can be used immediately via
+    'corral bench run --agent-image local'.
+    """
+    from corral.cli.docker_runner import DockerBenchmarkRunner
+
+    runner = DockerBenchmarkRunner()
+    try:
+        runner.build_agent_runner(tag=tag, source_dir=source_dir)
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1) from e
@@ -459,6 +505,9 @@ def _show_config(settings: dict, agent_kwargs: dict, runner_kwargs: dict):
     table.add_row("Temperature", str(settings["temperature"]))
     if settings.get("tasks"):
         table.add_row("Task IDs", settings["tasks"])
+    # Always show where results will be written on the host
+    results_path = str(Path(settings["output_dir"]) / "corral-results")
+    table.add_row("Results Directory", results_path)
     if agent_kwargs:
         table.add_row("Agent Kwargs", str(agent_kwargs))
     if runner_kwargs:
