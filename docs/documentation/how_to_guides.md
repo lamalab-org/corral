@@ -7,3 +7,5 @@
 ###4. How to [implement `Task` chaining](how_tos/task_chaining.md)
 
 ###5. How to [add `Tool` verbosity control support](how_tos/tool_verbosity.md)
+
+###6. How to [use Hydra launching for benchmarks](how_tos/hydra_launching.md)

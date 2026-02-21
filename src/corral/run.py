@@ -328,6 +328,9 @@ class CorralRunner:
         self.logger = logger
         self.enable_surrender = enable_surrender
 
+        # Store config reference if created from config
+        self._hydra_config = None
+
         # Initialize metric registry
         self._metric_registry = MetricRegistry()
         self._default_k_values: list[int] = [5]  # Match BenchmarkResult default
@@ -338,6 +341,127 @@ class CorralRunner:
                 self._metric_registry.register(metric)
         # If no metrics provided, registry stays empty until bench() is called
         # This allows lazy initialization with proper k_values
+
+    @classmethod
+    def from_config(
+        cls,
+        cfg: Any,
+    ) -> "CorralRunner":
+        """Create a ``CorralRunner`` from a Hydra / structured config.
+
+        This is a convenience factory that wires up all the components from a
+        ``CorralConfig`` (or an ``OmegaConf`` DictConfig resolved from one).
+
+        Args:
+            cfg: A ``CorralConfig`` dataclass or an ``OmegaConf.DictConfig``
+                 that conforms to the ``CorralConfig`` schema.
+
+        Returns:
+            A fully initialised ``CorralRunner``.
+
+        Example::
+
+            from corral.conf.config import CorralConfig, AgentConfig, RunnerConfig
+            cfg = CorralConfig(
+                agent=AgentConfig(model="openai/gpt-4o"),
+                runner=RunnerConfig(trials_per_task=3),
+            )
+            runner = CorralRunner.from_config(cfg)
+            result = runner.bench()
+        """
+        import importlib
+
+        try:
+            from omegaconf import OmegaConf
+
+            is_omegaconf = OmegaConf.is_config(cfg)
+        except ImportError:
+            is_omegaconf = False
+
+        # --- Agent ---
+        if is_omegaconf:
+            target = cfg.agent._target_
+            agent_model = cfg.agent.model
+            agent_max_iter = cfg.agent.max_iterations
+            agent_temp = cfg.agent.temperature
+            agent_api = OmegaConf.select(cfg.agent, "api_endpoint", default=None)
+            agent_sys = OmegaConf.select(cfg.agent, "system_prompt", default=None)
+            agent_usr = OmegaConf.select(cfg.agent, "user_prompt", default=None)
+            agent_ext = OmegaConf.select(cfg.agent, "extractor_prompt", default=None)
+            agent_sur = OmegaConf.select(cfg.agent, "surrender_prompt", default=None)
+            extra = (
+                OmegaConf.to_container(cfg.agent.get("extra_kwargs", {}), resolve=True)
+                or {}
+            )
+        else:
+            target = cfg.agent._target_
+            agent_model = cfg.agent.model
+            agent_max_iter = cfg.agent.max_iterations
+            agent_temp = cfg.agent.temperature
+            agent_api = getattr(cfg.agent, "api_endpoint", None)
+            agent_sys = getattr(cfg.agent, "system_prompt", None)
+            agent_usr = getattr(cfg.agent, "user_prompt", None)
+            agent_ext = getattr(cfg.agent, "extractor_prompt", None)
+            agent_sur = getattr(cfg.agent, "surrender_prompt", None)
+            extra = dict(getattr(cfg.agent, "extra_kwargs", {}))
+
+        module_path, class_name = target.rsplit(".", 1)
+        mod = importlib.import_module(module_path)
+        agent_cls = getattr(mod, class_name)
+
+        init_kwargs: dict[str, Any] = {
+            "model": agent_model,
+            "max_iterations": agent_max_iter,
+            "temperature": agent_temp,
+        }
+        init_kwargs.update(
+            {
+                key: val
+                for key, val in [
+                    ("api_endpoint", agent_api),
+                    ("system_prompt", agent_sys),
+                    ("user_prompt", agent_usr),
+                    ("extractor_prompt", agent_ext),
+                    ("surrender_prompt", agent_sur),
+                ]
+                if val is not None
+            }
+        )
+        init_kwargs.update(extra)
+        agent = agent_cls(**init_kwargs)
+
+        # --- Interface ---
+        if is_omegaconf:
+            base_url = cfg.runner.base_url
+            checkpoint_dir = cfg.runner.checkpoint_dir
+            enable_surrender = cfg.runner.enable_surrender
+            metrics_file = OmegaConf.select(cfg.runner, "metrics_file", default=None)
+        else:
+            base_url = cfg.runner.base_url
+            checkpoint_dir = cfg.runner.checkpoint_dir
+            enable_surrender = cfg.runner.enable_surrender
+            metrics_file = getattr(cfg.runner, "metrics_file", None)
+
+        interface = CorralRouter(base_url=base_url)
+
+        # --- Metrics ---
+        metrics = None
+        if metrics_file:
+            metrics_path = Path(metrics_file)
+            if metrics_path.exists():
+                from corral.report.metrics.loader import load_metrics_from_file
+
+                metrics = load_metrics_from_file(str(metrics_path))
+
+        instance = cls(
+            interface=interface,
+            agent=agent,
+            checkpoint_dir=checkpoint_dir,
+            enable_surrender=enable_surrender,
+            metrics=metrics,
+        )
+        instance._hydra_config = cfg
+        return instance
 
     @property
     def metric_registry(self) -> MetricRegistry:

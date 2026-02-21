@@ -44,3 +44,13 @@ Each of the folder in task is a standalone repository
    ```bash
    cd tasks/samplemath && uv venv && uv sync
    ```
+
+**4. (Optional) Install Hydra support**
+
+For composable configuration and multi-run sweeps:
+
+   ```bash
+   uv pip install -e ".[hydra]"
+   ```
+
+   This enables the `corral-hydra` CLI. See the [Hydra Launching guide](documentation/how_tos/hydra_launching.md) for details.
