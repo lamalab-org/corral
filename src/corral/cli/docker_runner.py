@@ -54,13 +54,18 @@ DEFAULT_ENV_BASE_IMAGE = "ghcr.io/lamalab-org/corral-envs-base:latest"
 class DockerBenchmarkRunner:
     """Runs benchmarks using Docker containers."""
 
-    NETWORK_NAME = "corral-network"
-    ENV_CONTAINER_NAME = "corral-env"
-    AGENT_CONTAINER_NAME = "corral-agent"
     DEFAULT_RESULTS_DIR = "/opt/corral-workspace/results"
 
-    def __init__(self):
+    def __init__(
+        self,
+        network_name: str = "corral-network",
+        env_container_name: str = "corral-env",
+        agent_container_name: str = "corral-agent",
+    ):
         self.client = docker.from_env()
+        self.NETWORK_NAME = network_name
+        self.ENV_CONTAINER_NAME = env_container_name
+        self.AGENT_CONTAINER_NAME = agent_container_name
 
     def run(
         self,
@@ -80,6 +85,9 @@ class DockerBenchmarkRunner:
         agent_image: str | None = None,
         env_args: dict[str, Any] | None = None,
         metrics_file: str | None = None,
+        port: int = 8000,
+        auto_find_port: bool = True,
+        host: str = "0.0.0.0",
     ):
         """Run benchmark with two-container architecture.
 
@@ -104,6 +112,9 @@ class DockerBenchmarkRunner:
                      These are converted to CLI arguments by the entrypoint script.
             metrics_file: Path to Python file containing custom metrics.
                          Will be mounted into the container.
+            port: Preferred port for the environment server (default 8000).
+            auto_find_port: Automatically find a free port if ``port`` is busy.
+            host: Host address the environment binds to inside the container.
         """
         # Resolve output directory (default to cwd)
         results_host_path = Path(output_dir or Path.cwd()) / "corral-results"
@@ -124,7 +135,11 @@ class DockerBenchmarkRunner:
             # 2. Start environment container
             task = progress.add_task("Starting environment container...", total=None)
             env_container, env_port = self._start_environment(
-                env_image, env_args=env_args
+                env_image,
+                port=port,
+                auto_find_port=auto_find_port,
+                env_args=env_args,
+                host=host,
             )
             progress.update(
                 task,
@@ -222,6 +237,7 @@ class DockerBenchmarkRunner:
         port: int = 8000,
         auto_find_port: bool = True,
         env_args: dict[str, Any] | None = None,
+        host: str = "0.0.0.0",
     ) -> tuple[Container, int]:
         """Start the environment container.
 
@@ -257,7 +273,7 @@ class DockerBenchmarkRunner:
 
         # Build environment variables
         environment = {
-            "CORRAL_HOST": "0.0.0.0",
+            "CORRAL_HOST": host,
             "CORRAL_PORT": str(actual_port),
         }
 

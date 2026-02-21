@@ -63,10 +63,20 @@ def _show_resolved_config(cfg: DictConfig) -> None:
 
     if cfg.mode == "docker":
         table.add_row("Docker Image", cfg.docker.image)
+        table.add_row("Port", str(cfg.docker.port))
+        table.add_row("Host", cfg.docker.host)
+        table.add_row("Network", cfg.docker.network)
+        table.add_row("Auto-find Port", str(cfg.docker.auto_find_port))
         if cfg.docker.agent_image:
             table.add_row("Agent Image", cfg.docker.agent_image)
         if cfg.docker.output_dir:
             table.add_row("Output Dir", cfg.docker.output_dir)
+        if cfg.docker.env_container_name != "corral-env":
+            table.add_row("Env Container", cfg.docker.env_container_name)
+        if cfg.docker.agent_container_name != "corral-agent":
+            table.add_row("Agent Container", cfg.docker.agent_container_name)
+        if cfg.docker.env_args:
+            table.add_row("Env Args", str(OmegaConf.to_container(cfg.docker.env_args)))
 
     if cfg.wandb.enabled:
         table.add_row("W&B Project", cfg.wandb.project)
@@ -197,7 +207,11 @@ def _run_docker(cfg: DictConfig) -> None:
         OmegaConf.to_container(cfg.docker.get("env_args", {}), resolve=True) or None
     )
 
-    runner = DockerBenchmarkRunner()
+    runner = DockerBenchmarkRunner(
+        network_name=cfg.docker.network,
+        env_container_name=cfg.docker.env_container_name,
+        agent_container_name=cfg.docker.agent_container_name,
+    )
     runner.run(
         env_image=cfg.docker.image,
         agent_class=agent_class_name,
@@ -214,6 +228,9 @@ def _run_docker(cfg: DictConfig) -> None:
         agent_image=cfg.docker.agent_image,
         env_args=env_args,
         metrics_file=cfg.runner.metrics_file,
+        port=cfg.docker.port,
+        auto_find_port=cfg.docker.auto_find_port,
+        host=cfg.docker.host,
     )
 
 

@@ -74,7 +74,12 @@ class DockerConfig:
     Attributes:
         image: Docker image for the benchmark environment.
         agent_image: Docker image for the agent runner (None = GHCR default).
+        port: Preferred port for the environment server (default 8000).
+        auto_find_port: Automatically find a free port if ``port`` is busy.
+        host: Host address the environment binds to inside the container.
         network: Docker network name.
+        env_container_name: Name for the environment Docker container.
+        agent_container_name: Name for the agent Docker container.
         detach: Run containers in the background.
         output_dir: Host directory to mount for results.
         env_args: Extra arguments forwarded to the environment container.
@@ -82,7 +87,12 @@ class DockerConfig:
 
     image: str = "ghcr.io/lamalab-org/corral-materials:latest"
     agent_image: str | None = None
+    port: int = 8000
+    auto_find_port: bool = True
+    host: str = "0.0.0.0"
     network: str = "corral-network"
+    env_container_name: str = "corral-env"
+    agent_container_name: str = "corral-agent"
     detach: bool = False
     output_dir: str | None = None
     env_args: dict[str, Any] = field(default_factory=dict)

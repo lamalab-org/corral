@@ -128,6 +128,46 @@ corral-hydra tasks.ids='[task_1,task_3]'
 corral-hydra mode=docker docker.image=ghcr.io/lamalab-org/corral-materials:latest
 ```
 
+### Configuring Docker Environment Settings
+
+All Docker environment settings are exposed through the `docker` config group:
+
+```bash
+# Change the port
+corral-hydra mode=docker docker.port=9000
+
+# Disable automatic port discovery
+corral-hydra mode=docker docker.auto_find_port=false docker.port=8000
+
+# Change the host binding
+corral-hydra mode=docker docker.host=127.0.0.1
+
+# Use a custom Docker network
+corral-hydra mode=docker docker.network=my-network
+
+# Custom container names
+corral-hydra mode=docker docker.env_container_name=my-env docker.agent_container_name=my-agent
+
+# Pass extra arguments to the environment container
+corral-hydra mode=docker 'docker.env_args={num_workers: 4, seed: 42}'
+```
+
+The full Docker config (`conf/docker/default.yaml`):
+
+```yaml
+image: "ghcr.io/lamalab-org/corral-materials:latest"
+agent_image: null          # agent Docker image (null = run agent locally)
+port: 8000                 # environment server port
+auto_find_port: true       # automatically find a free port if taken
+host: "0.0.0.0"           # host address for the environment server
+network: corral-network    # Docker network name
+env_container_name: corral-env      # environment container name
+agent_container_name: corral-agent  # agent container name
+detach: false              # detach containers after run
+output_dir: null           # custom output directory
+env_args: {}               # extra args passed to the environment
+```
+
 ### Custom Metrics File
 
 ```bash
@@ -186,6 +226,14 @@ corral-hydra mode=local runner.base_url=http://localhost:8000
 
 # Docker mode — spins up containers automatically
 corral-hydra mode=docker docker.image=ghcr.io/lamalab-org/corral-materials:latest
+
+# Docker mode with full control over environment settings
+corral-hydra mode=docker \
+  docker.image=ghcr.io/lamalab-org/corral-materials:latest \
+  docker.port=9000 \
+  docker.host=127.0.0.1 \
+  docker.network=my-network \
+  docker.auto_find_port=false
 ```
 
 ## Hydra Output Directory
