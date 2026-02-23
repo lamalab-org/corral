@@ -141,7 +141,9 @@ def create_prompt(
         system_prompt: The system prompt object
         user_prompt: The user prompt object
         task_guide (Union[str, list]): The task guide or prompt to use
-        history (list[LiteLLMMessage], optional): Message history to include. Defaults to None.
+        history (list[LiteLLMMessage], optional): Message history to start from. When provided,
+            these messages are inserted after the system prompt so the agent resumes from that
+            conversation state. Defaults to None.
         surrender_prompt: The surrender prompt object. Instructions for how the agent can surrender from unsolvable tasks. Defaults to None.
         enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
         **kwargs: Additional keyword arguments for building user content
@@ -154,20 +156,20 @@ def create_prompt(
     if history is None:
         history = []
 
+    if system_prompt and not history:
+        messages.append(LiteLLMMessage(role="system", content=system_prompt))
+
     if history:
         messages.extend(history)
-
-    if system_prompt:
-        messages.append(LiteLLMMessage(role="system", content=system_prompt))
 
     # Add surrender instructions if enabled
     if enable_surrender and surrender_prompt:
         surrender_instructions = surrender_prompt.fill({})
         kwargs["surrender_instructions"] = surrender_instructions
 
-    user_content = build_user_content(user_prompt, task_guide=task_guide, **kwargs)
-
-    messages.append(LiteLLMMessage(role="user", content=user_content))
+    if not history:
+        user_content = build_user_content(user_prompt, task_guide=task_guide, **kwargs)
+        messages.append(LiteLLMMessage(role="user", content=user_content))
 
     return messages
 

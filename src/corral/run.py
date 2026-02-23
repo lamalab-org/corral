@@ -10,6 +10,7 @@ from loguru import logger
 
 from corral.agents import BaseAgent
 from corral.agents.hooks import AgentHooks
+from corral.agents.utils import LiteLLMMessage
 from corral.report import (
     BenchmarkResult,
     CorralWandbLogger,
@@ -157,6 +158,7 @@ def execute_single_trial(
     tool_verbosity: str | None = None,
     configure_timeout: float | None = None,
     enable_surrender: bool = False,
+    history: list[LiteLLMMessage] | None = None,
 ) -> TaskTrialResult:
     """Execute a single trial - pure function."""
     trial_start_time = datetime.now(tz=timezone.utc)
@@ -169,6 +171,7 @@ def execute_single_trial(
         answer, messages, token_usage = agent.run_agent(
             interface,
             task_id,
+            history=history,
             verbose=verbose,
             tool_verbosity=tool_verbosity or "brief",
             enable_surrender=enable_surrender,
@@ -481,6 +484,7 @@ class CorralRunner:
         configure_timeout: float | None = None,
         hooks: AgentHooks | None = None,
         run_name: str | None = None,
+        history: list[LiteLLMMessage] | None = None,
     ) -> BenchmarkResult:
         """Run benchmark with functional approach
 
@@ -492,8 +496,12 @@ class CorralRunner:
             session_id: Session identifier. Auto-generated if None.
             tool_verbosity: Verbosity level for tools.
             configure_timeout: Timeout for configuring additional apps.
+            hooks: Agent hooks to inject into the agent before running.
             run_name: Name for the benchmark run (used in report filename).
                      If None, defaults to "unknown_env".
+            history: Conversation history to prepend to every trial. Useful for
+                    providing prior context (e.g. few-shot demonstrations or
+                    cross-task memory). Defaults to None.
 
         Returns:
             BenchmarkResult containing all trial results and metrics.
@@ -528,6 +536,7 @@ class CorralRunner:
                 tool_verbosity=tool_verbosity,
                 configure_timeout=configure_timeout,
                 enable_surrender=self.enable_surrender,
+                history=history,
             )
 
         checkpoint_saver = partial(self._save_checkpoint, session_id)
