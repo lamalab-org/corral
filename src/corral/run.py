@@ -1,3 +1,5 @@
+import copy
+import json
 import pickle
 import re
 from collections.abc import Callable
@@ -158,7 +160,6 @@ def execute_single_trial(
     tool_verbosity: str | None = None,
     configure_timeout: float | None = None,
     enable_surrender: bool = False,
-    history: list[LiteLLMMessage] | None = None,
 ) -> TaskTrialResult:
     """Execute a single trial - pure function."""
     trial_start_time = datetime.now(tz=timezone.utc)
@@ -171,7 +172,6 @@ def execute_single_trial(
         answer, messages, token_usage = agent.run_agent(
             interface,
             task_id,
-            history=history,
             verbose=verbose,
             tool_verbosity=tool_verbosity or "brief",
             enable_surrender=enable_surrender,
@@ -484,7 +484,6 @@ class CorralRunner:
         configure_timeout: float | None = None,
         hooks: AgentHooks | None = None,
         run_name: str | None = None,
-        history: list[LiteLLMMessage] | None = None,
     ) -> BenchmarkResult:
         """Run benchmark with functional approach
 
@@ -499,33 +498,16 @@ class CorralRunner:
             hooks: Agent hooks to inject into the agent before running.
             run_name: Name for the benchmark run (used in report filename).
                      If None, defaults to "unknown_env".
-            history: Conversation history to prepend to every trial. Useful for
-                    providing prior context (e.g. few-shot demonstrations or
-                    cross-task memory). Defaults to None.
 
         Returns:
             BenchmarkResult containing all trial results and metrics.
         """
-
-        # Setup
-        if tool_verbosity:
-            self.interface.set_verbosity(tool_verbosity)
-
         task_ids = task_ids or self.interface.get_available_tasks()
-        session_id = session_id or create_session_id()
-        k_values = validate_k_values(k_values, trials_per_task)
-
-        if trials_per_task == 0:
-            raise ValueError("Number of trials per task must be greater than 0")
 
         # Set agent hooks if provided
         if hooks:
             self.agent.hooks = hooks
 
-        # Initialize or load results
-        task_results = self._load_or_initialize_results(task_ids, session_id)
-
-        # Create execution functions
         def trial_executor(task_id: str, trial_index: int) -> TaskTrialResult:
             return execute_single_trial(
                 task_id=task_id,
@@ -536,8 +518,135 @@ class CorralRunner:
                 tool_verbosity=tool_verbosity,
                 configure_timeout=configure_timeout,
                 enable_surrender=self.enable_surrender,
-                history=history,
             )
+
+        return self._run_benchmark(
+            task_ids=task_ids,
+            trial_executor=trial_executor,
+            trials_per_task=trials_per_task,
+            k_values=k_values,
+            verbose=verbose,
+            session_id=session_id,
+            tool_verbosity=tool_verbosity,
+            hooks=hooks,
+            run_name=run_name,
+        )
+
+    def bench_from_traces(
+        self,
+        traces: dict[str, list[LiteLLMMessage]],
+        trials_per_task: int = 1,
+        k_values: int | list[int] | None = None,
+        verbose: bool = False,
+        session_id: str | None = None,
+        tool_verbosity: str | None = None,
+        configure_timeout: float | None = None,
+        hooks: AgentHooks | None = None,
+        run_name: str | None = None,
+    ) -> BenchmarkResult:
+        """Run benchmark from previously saved conversation traces.
+
+        Instead of building prompts from scratch, each task is initialised
+        from the trace provided in ``traces``.  A deep-copy of the prototype
+        agent (``self.agent``) is created per task with its
+        ``_initial_messages`` set to the corresponding trace so the agent
+        continues from that conversation state.
+
+        Args:
+            traces: Mapping of task_id to the conversation trace (list of
+                ``LiteLLMMessage``) to replay from.
+            trials_per_task: Number of trials to run per task.
+            k_values: k values for pass@k metrics.
+            verbose: Whether to enable verbose logging.
+            session_id: Session identifier. Auto-generated if None.
+            tool_verbosity: Verbosity level for tools.
+            configure_timeout: Timeout for configuring additional apps.
+            hooks: Agent hooks to inject into every agent clone.
+            run_name: Name for the benchmark run (used in report filename).
+                     If None, auto-generates one.
+
+        Returns:
+            BenchmarkResult containing all trial results and metrics.
+        """
+        task_ids = list(traces.keys())
+
+        def trial_executor(task_id: str, trial_index: int) -> TaskTrialResult:
+            trace = traces[task_id]
+            agent_clone = copy.deepcopy(self.agent)
+            agent_clone._initial_messages = list(trace)
+            if hooks:
+                agent_clone.hooks = hooks
+            return execute_single_trial(
+                task_id=task_id,
+                trial_index=trial_index,
+                interface=self.interface,
+                agent=agent_clone,
+                verbose=verbose,
+                tool_verbosity=tool_verbosity,
+                configure_timeout=configure_timeout,
+                enable_surrender=self.enable_surrender,
+            )
+
+        return self._run_benchmark(
+            task_ids=task_ids,
+            trial_executor=trial_executor,
+            trials_per_task=trials_per_task,
+            k_values=k_values,
+            verbose=verbose,
+            session_id=session_id,
+            tool_verbosity=tool_verbosity,
+            hooks=hooks,
+            run_name=run_name,
+            extra_wandb_config={"from_traces": True},
+        )
+
+    def _run_benchmark(
+        self,
+        task_ids: list[str],
+        trial_executor: Callable[[str, int], TaskTrialResult],
+        trials_per_task: int = 1,
+        k_values: int | list[int] | None = None,
+        verbose: bool = False,
+        session_id: str | None = None,
+        tool_verbosity: str | None = None,
+        hooks: AgentHooks | None = None,
+        run_name: str | None = None,
+        extra_wandb_config: dict[str, Any] | None = None,
+    ) -> BenchmarkResult:
+        """Shared benchmark execution logic used by ``bench`` and ``bench_from_traces``.
+
+        This method handles setup, logging, trial orchestration (independent or
+        chained), result aggregation, checkpointing, and report generation.
+
+        Args:
+            task_ids: List of task IDs to benchmark.
+            trial_executor: Callable that runs a single trial given
+                ``(task_id, trial_index)`` and returns a ``TaskTrialResult``.
+            trials_per_task: Number of trials to run per task.
+            k_values: k values for pass@k metrics.
+            verbose: Whether to enable verbose logging.
+            session_id: Session identifier. Auto-generated if None.
+            tool_verbosity: Verbosity level for tools.
+            hooks: Agent hooks (used only for wandb config flag).
+            run_name: Name for the benchmark run.
+            extra_wandb_config: Additional key-value pairs merged into the
+                wandb configuration dict.
+
+        Returns:
+            BenchmarkResult containing all trial results and metrics.
+        """
+        # Setup
+        if tool_verbosity:
+            self.interface.set_verbosity(tool_verbosity)
+
+        session_id = session_id or create_session_id()
+        k_values = validate_k_values(k_values, trials_per_task)
+
+        if trials_per_task == 0:
+            raise ValueError("Number of trials per task must be greater than 0")
+
+        # Initialize or load results
+        task_results = self._load_or_initialize_results(task_ids, session_id)
 
         checkpoint_saver = partial(self._save_checkpoint, session_id)
 
@@ -553,6 +662,7 @@ class CorralRunner:
                 dependency_chain=self.interface.supports_dependency_chain(),
                 enable_surrender=self.enable_surrender,
                 hooks_enabled=hooks is not None,
+                **(extra_wandb_config or {}),
             )
             self.logger.start_logging(config)
 
@@ -612,6 +722,64 @@ class CorralRunner:
         finally:
             if self.logger:
                 self.logger.finish()
+
+    @staticmethod
+    def _load_traces_from_agent_logs(
+        directory: Path, trial_index: int
+    ) -> dict[str, list[LiteLLMMessage]]:
+        """Extract traces from a directory of agent log JSON files."""
+        json_files = sorted(directory.glob("*.json"))
+        if not json_files:
+            raise ValueError(f"No JSON files found in directory: {directory}")
+
+        # Group files by task_id
+        task_files: dict[str, list[Path]] = {}
+        for file_path in json_files:
+            try:
+                with file_path.open() as f:
+                    data = json.load(f)
+                task_id = data.get("task_id")
+                if task_id is None:
+                    logger.warning(f"Skipping {file_path.name}: no 'task_id' field.")
+                    continue
+                task_files.setdefault(task_id, []).append(file_path)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(f"Skipping {file_path.name}: {e}")
+
+        if not task_files:
+            raise ValueError(
+                f"No valid agent log files found in directory: {directory}"
+            )
+
+        traces: dict[str, list[LiteLLMMessage]] = {}
+
+        for task_id, files in task_files.items():
+            if trial_index >= len(files):
+                logger.warning(
+                    f"Task '{task_id}' has only {len(files)} log file(s), "
+                    f"skipping (requested trial_index={trial_index})."
+                )
+                continue
+
+            selected_file = files[trial_index]
+            with selected_file.open() as f:
+                data = json.load(f)
+
+            messages = data.get("messages")
+            if not messages:
+                logger.warning(
+                    f"Task '{task_id}' log {selected_file.name} has no messages."
+                )
+                continue
+
+            traces[task_id] = [LiteLLMMessage(**msg) for msg in messages]
+
+        if not traces:
+            raise ValueError(
+                f"No traces could be extracted from agent logs in: {directory}"
+            )
+
+        return traces
 
     def _load_or_initialize_results(
         self, task_ids: list[str], session_id: str

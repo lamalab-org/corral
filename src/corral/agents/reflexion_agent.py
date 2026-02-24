@@ -5,6 +5,8 @@ This implements the Reflexion architecture (https://arxiv.org/abs/2303.11366)
 by wrapping existing agents with a trial-reflect-retry loop.
 """
 
+from typing import TYPE_CHECKING
+
 from loguru import logger
 
 from corral.agents import BaseAgent
@@ -14,8 +16,10 @@ from corral.agents.reflection import (
     ReflectionModule,
     create_reflexion_history,
 )
-from corral.agents.utils import LiteLLMMessage
 from corral.router.routes import CorralRouter
+
+if TYPE_CHECKING:
+    from corral.agents.utils import LiteLLMMessage
 
 
 class ReflexionAgent(BaseAgent):
@@ -132,7 +136,6 @@ class ReflexionAgent(BaseAgent):
         self,
         interface: CorralRouter,
         task_id: str,
-        history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         **kwargs,  # noqa: ARG002
@@ -143,14 +146,13 @@ class ReflexionAgent(BaseAgent):
         This works with the framework's trial system:
         1. Retrieve the last score (if this is not the first trial)
         2. If previous trial exists, generate reflection and add to memory
-        3. Inject reflections from memory into history
-        4. Run the actor with enriched history
+        3. Inject reflections from memory into the actor's ``_initial_messages``
+        4. Run the actor
         5. Return the answer (framework will submit and score it)
 
         Args:
             interface (CorralRouter): The interface to use
             task_id (str): The task ID to solve
-            history (list[LiteLLMMessage] | None): Initial history items (optional)
             task_prompt (str | None): Custom task prompt (optional)
             examples (list[str] | None): Few-shot examples (optional)
             enable_surrender (bool): Whether to enable surrendering (not used here)
@@ -189,24 +191,19 @@ class ReflexionAgent(BaseAgent):
                     task_description=task_description,
                 )
 
-        # Inject reflections from memory into history
+        # Inject reflections from memory into actor's _initial_messages
         reflexion_history = create_reflexion_history(self.memory)
 
-        # Combine with any provided history
-        combined_history = []
-        if history:
-            combined_history.extend(history)
         if reflexion_history:
-            combined_history.extend(reflexion_history)
+            self.actor._initial_messages = list(reflexion_history)
+        else:
+            self.actor._initial_messages = None
 
-        final_history = combined_history or None
-
-        # Run the actor with enriched history
+        # Run the actor
         try:
             answer = self.actor.run(
                 interface=interface,
                 task_id=task_id,
-                history=final_history,
                 task_prompt=task_prompt,
                 examples=examples,
             )
