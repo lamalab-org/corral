@@ -543,7 +543,7 @@ class Environment(ABC):
             Tuple of (task_tex_path, tools_tex_path, scoring_tex_path) - paths to the generated .tex files
         """
         from corral.router.verbosity import ToolVerbosity, VerbosityConfig
-        from corral.utils.code2latex import CacheMetadata, Code2Latex
+        from corral.utils.code2latex import Code2Latex, LatexMetadata
 
         # Get task description from prompt
         description = str(self.get_task_prompt())
@@ -616,8 +616,8 @@ class Environment(ABC):
             else:
                 env_name = "unknown"
 
-        # Create CacheMetadata
-        metadata = CacheMetadata(
+        # Create LatexMetadata
+        metadata = LatexMetadata(
             env_name=env_name,
             level=level,
         )

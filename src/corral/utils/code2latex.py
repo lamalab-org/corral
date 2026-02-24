@@ -6,20 +6,16 @@ containing task descriptions, tools, and scoring information. All data is kept i
 and lost at the end of the run.
 """
 
-from __future__ import annotations
-
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from loguru import logger
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
 
 @dataclass
-class CacheMetadata:
+class LatexMetadata:
     """Metadata for file naming."""
 
     env_name: str
@@ -47,7 +43,7 @@ class Code2Latex:
         description: str,
         tools: list[str],
         scoring_fn: Callable,
-        metadata: CacheMetadata,
+        metadata: LatexMetadata,
         output_dir: str,
     ) -> str:
         """
@@ -214,7 +210,7 @@ class Code2Latex:
     def longtable(
         cls,
         tools: list[dict[str, Any]],
-        metadata: CacheMetadata,
+        metadata: LatexMetadata,
         output_dir: str,
     ) -> str:
         """
@@ -247,7 +243,7 @@ class Code2Latex:
 
     @classmethod
     def _create_tools_entry(
-        cls, metadata: CacheMetadata, tools: list[dict[str, Any]]
+        cls, metadata: LatexMetadata, tools: list[dict[str, Any]]
     ) -> dict[str, Any]:
         """Create a data entry for tools."""
         return {
@@ -405,7 +401,7 @@ class Code2Latex:
     def scoring_longtable(
         cls,
         scoring_functions: list[dict[str, Any]],
-        metadata: CacheMetadata,
+        metadata: LatexMetadata,
         output_dir: str,
     ) -> str:
         """
@@ -450,7 +446,7 @@ class Code2Latex:
 
     @classmethod
     def _create_scoring_entry(
-        cls, metadata: CacheMetadata, scoring_functions: list[dict[str, Any]]
+        cls, metadata: LatexMetadata, scoring_functions: list[dict[str, Any]]
     ) -> dict[str, Any]:
         """Create a data entry for scoring functions."""
         return {
