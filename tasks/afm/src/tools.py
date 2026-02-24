@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 AFM Tools Module
 This module provides tools for operating an Atomic Force Microscope (AFM) using the Nanosurf API.
@@ -96,7 +95,7 @@ def visualize_grain_boxes(image_path: str) -> list:
 
     plt.use("Agg")  # Use non-GUI backend for saving
 
-    indexed_boxes, extents, Z_flat2, labeled = image_process(image_path)  # noqa: F405
+    indexed_boxes, extents, Z_flat2, _labeled = image_process(image_path)  # noqa: F405
 
     fig, ax = plt.subplots()
     ax.imshow(Z_flat2, cmap="afmhot", origin="lower", extent=extents)

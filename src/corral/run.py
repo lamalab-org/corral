@@ -23,6 +23,7 @@ from corral.report.metrics import Metric, get_default_metrics
 from corral.report.metrics.base import TaskMetric
 from corral.report.metrics.registry import MetricRegistry
 from corral.router import CorralRouter
+from corral.types import BudgetExhaustedError
 
 
 def create_session_id() -> str:
@@ -222,6 +223,10 @@ def execute_single_trial(
             )
             result.duration = (trial_end_time - trial_start_time).total_seconds()
             return result
+    except BudgetExhaustedError:
+        # Re-raise to stop the benchmark immediately
+        # When an error with the llm running out of credits occurs
+        raise
     except Exception as agent_error:
         trial_end_time = datetime.now(tz=timezone.utc)
         result = exception_trial_result(
@@ -708,7 +713,7 @@ class CorralRunner:
 
             # Log final results
             if self.logger:
-                self.logger.log_final_results(result, k_values)
+                self.logger.log_final_results(result)
 
             # Save final checkpoint with finished suffix and remove original
             self._save_finished_checkpoint(session_id, task_results)

@@ -16,6 +16,7 @@ from corral.agents.utils import (
     save_agent_messages,
 )
 from corral.router.routes import CorralRouter
+from corral.types import BudgetExhaustedError
 
 
 class BaseAgent(ABC):
@@ -156,13 +157,13 @@ class BaseAgent(ABC):
             tools (dict[str, Any], optional): Optional tools/functions for function calling
 
         Returns:
-            Any: The response from the LLM
+            Any: The LLMResponse wrapper containing the message and metadata
         """
         self.messages = count_tokens_and_add(
             self.messages, self.model, self.token_usage.get("total_tokens", 0)
         )
         try:
-            response, usage_info = llm_call(
+            response = llm_call(
                 model=self.model,
                 messages=self.messages,
                 tools=tools,
@@ -172,8 +173,9 @@ class BaseAgent(ABC):
                 **self.kwargs,
             )
 
-            # Track token usage
-            self.token_usage = usage_info
+            # Track token usage from metadata
+            if response.usage:
+                self.token_usage = response.usage
 
             return response
 
@@ -290,6 +292,9 @@ class BaseAgent(ABC):
                 logger.error(f"Error in agent response: {final_answer}")
                 return final_answer, self.messages, self.get_total_token_usage()
 
+        except BudgetExhaustedError:
+            # Re-raise to stop the benchmark immediately
+            raise
         except Exception as e:
             logger.error(f"Error running agent: {e}")
             return (
@@ -311,15 +316,16 @@ class BaseAgent(ABC):
         )
 
         try:
-            answer = llm_call(
+            response = llm_call(
                 model=self.model,
                 messages=[LiteLLMMessage(role="user", content=prompt)],
                 temperature=0.0,
                 api_endpoint=self.api_endpoint,
+                return_usage=False,  # No need for usage tracking in extractor
                 **self.kwargs,
             )
 
-            return answer.content, self.messages, self.get_total_token_usage()
+            return response.content, self.messages, self.get_total_token_usage()
 
         except Exception as e:
             logger.error(f"Error extracting final answer: {e}")
@@ -372,6 +378,6 @@ class BaseAgent(ABC):
             interface=interface,
             messages=self.messages,
             iteration=self._current_iteration,
-            **extra_context,
+            iteration_data=extra_context,
         )
         return self.hooks.execute(hook_point, context)

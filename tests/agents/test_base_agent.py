@@ -194,15 +194,15 @@ def test_base_agent_kwargs_passed_through():
 
 def test_base_agent_get_llm_response_success(monkeypatch, concrete_agent):
     """Test successful LLM response."""
-    mock_response = MockLLMResponse("Test response")
     mock_usage = {
         "prompt_tokens": 100,
         "completion_tokens": 50,
         "total_tokens": 150,
     }
+    mock_response = MockLLMResponse("Test response", usage=mock_usage)
 
     def mock_llm_call(*args, **kwargs):
-        return (mock_response, mock_usage)
+        return mock_response
 
     monkeypatch.setattr("corral.agents.base_agent.llm_call", mock_llm_call)
 
@@ -218,15 +218,15 @@ def test_base_agent_get_llm_response_success(monkeypatch, concrete_agent):
 
 def test_get_llm_response_with_tools(monkeypatch, concrete_agent):
     """Test LLM response with tools."""
-    mock_response = MockLLMResponse()
     mock_usage = {
         "prompt_tokens": 100,
         "completion_tokens": 50,
         "total_tokens": 150,
     }
+    mock_response = MockLLMResponse(usage=mock_usage)
 
     def mock_llm_call(*args, **kwargs):
-        return (mock_response, mock_usage)
+        return mock_response
 
     monkeypatch.setattr("corral.agents.base_agent.llm_call", mock_llm_call)
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 import matplotlib.pyplot as plt
 import numpy as np
 from NSFopen.read import read
@@ -210,7 +209,7 @@ def image_process(filename):
     thresh = otsu_threshold(Z_inv)
     mask = mark_grains(Z_inv, thresh)
     # Label connected components
-    labeled, num_features = label(mask)
+    labeled, _num_features = label(mask)
 
     # Get bounding boxes
     slices = find_objects(labeled)
