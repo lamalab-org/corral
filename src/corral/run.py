@@ -454,14 +454,14 @@ class CorralRunner:
         for metric in get_default_metrics(k_vals):
             self._metric_registry.register(metric)
 
-    def _generate_latex_for_tasks(
+    def generate_latex_docs(
         self,
         task_ids: list[str],
-        output_dir: str,
-        level: int | str,
+        output_dir: str | None = None,
+        level: int | str = 1,
         env_name: str | None = None,
     ) -> None:
-        """Generate LaTeX documentation for all tasks before benchmarking.
+        """Generate LaTeX documentation for a list of tasks.
 
         The colorbox generation workflow:
         1. First task (main task, no input_from_tasks): saves to cache only
@@ -470,13 +470,15 @@ class CorralRunner:
 
         Args:
             task_ids: List of task IDs to generate LaTeX for.
-            output_dir: Directory for output .tex files.
-            level: Task level identifier (e.g., 1, 2,...).
+            output_dir: Directory for output .tex files. Defaults to
+                        "tex_files" in the current working directory.
+            level: Task level identifier (e.g., 1, 2,...). Default: 1.
             env_name: Environment name (e.g., "afm", "catalyst").
         """
+        output_dir = output_dir or str(Path.cwd() / "tex_files")
         logger.info(f"Generating LaTeX documentation for {len(task_ids)} tasks...")
 
-        for _idx, task_id in enumerate(task_ids):
+        for task_id in task_ids:
             try:
                 result = self.interface.generate_latex(
                     task_id=task_id,
@@ -522,10 +524,6 @@ class CorralRunner:
         configure_timeout: float | None = None,
         hooks: AgentHooks | None = None,
         run_name: str | None = None,
-        generate_latex: bool = False,
-        latex_output_dir: str | None = None,
-        level: int | str = 1,
-        env_name: str | None = None,
     ) -> BenchmarkResult:
         """Run benchmark with functional approach
 
@@ -539,12 +537,6 @@ class CorralRunner:
             configure_timeout: Timeout for configuring additional apps.
             run_name: Name for the benchmark run (used in report filename).
                      If None, defaults to "unknown_env".
-            generate_latex: If True, generates LaTeX documentation for all tasks
-                           before running the benchmark.
-            latex_output_dir: Directory for LaTeX output files. Defaults to
-                            "tex_files" in the current working directory.
-            level: Task level identifier for LaTeX generation (default: 1).
-            env_name: Environment name for LaTeX generation (e.g., "afm", "catalyst").
 
         Returns:
             BenchmarkResult containing all trial results and metrics.
@@ -554,29 +546,12 @@ class CorralRunner:
         if tool_verbosity:
             self.interface.set_verbosity(tool_verbosity)
 
-        # Validate: generate_latex requires explicit task_ids
-        if generate_latex and task_ids is None:
-            raise ValueError(
-                "task_ids must be explicitly provided when generate_latex=True. "
-                "LaTeX generation requires knowing which tasks to document."
-            )
-
         task_ids = task_ids or self.interface.get_available_tasks()
         session_id = session_id or create_session_id()
         k_values = validate_k_values(k_values, trials_per_task)
 
         if trials_per_task == 0:
             raise ValueError("Number of trials per task must be greater than 0")
-
-        # Generate LaTeX documentation if requested
-        if generate_latex:
-            output_dir = latex_output_dir or str(Path.cwd() / "tex_files")
-            self._generate_latex_for_tasks(
-                task_ids=task_ids,
-                output_dir=output_dir,
-                level=level,
-                env_name=env_name,
-            )
 
         # Set agent hooks if provided
         if hooks:
