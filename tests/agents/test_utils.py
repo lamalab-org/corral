@@ -10,6 +10,7 @@ from corral.agents.utils import (
     RETRY_EXCEPTIONS,
     TYPE_MAPPING,
     LiteLLMMessage,
+    LLMResponse,
     _parse_argument_string_to_dict,
     before_sleep_loguru,
     convert_dict_arg,
@@ -41,6 +42,7 @@ class MockLiteLLMChoice:
 
     def __init__(self):
         self.message = MockLiteLLMMessage()
+        self.logprobs = None
 
 
 class MockLiteLLMResponse:
@@ -48,8 +50,9 @@ class MockLiteLLMResponse:
 
     def __init__(self, include_usage=False):
         self.choices = [MockLiteLLMChoice()]
-        if include_usage:
-            self.usage = MockLiteLLMUsage()
+        self.id = "mock_response_id"
+        # Always have usage attribute, but set to None if not included
+        self.usage = MockLiteLLMUsage() if include_usage else None
 
 
 class MockLiteLLMUsage:
@@ -103,12 +106,14 @@ class MockSerializableMessage:
         tool_calls=None,
         tool_call_id=None,
         name=None,
+        msg_id=None,
     ):
         self.role = role
         self.content = content
         self.tool_calls = tool_calls or []
         self.tool_call_id = tool_call_id
         self.name = name
+        self.id = msg_id
 
 
 def test_type_mapping_functionality():
@@ -168,9 +173,11 @@ def test_litellm_message_structure():
         "content": "Hi there",
         "tool_call_id": "call_123",
         "name": "assistant",
+        "id": "msg_123",
     }
     assert msg2["tool_call_id"] == "call_123"
     assert msg2["name"] == "assistant"
+    assert msg2["id"] == "msg_123"
 
 
 def test_llm_call_basic(monkeypatch):
@@ -181,7 +188,11 @@ def test_llm_call_basic(monkeypatch):
 
     result = llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
 
-    assert result == mock_response.choices[0].message
+    # Check that result is LLMResponse wrapper
+    assert isinstance(result, LLMResponse)
+    assert result.message == mock_response.choices[0].message
+    assert result.content == "This is a response"
+    assert result.id == "mock_response_id"  # ID should always be included
     mock_litellm.completion.assert_called_once_with(
         model="gpt-3.5-turbo",
         messages=messages,
@@ -201,7 +212,10 @@ def test_llm_call_with_tools(monkeypatch):
         model="gpt-3.5-turbo", messages=messages, temperature=0.7, tools=tools
     )
 
-    assert result == mock_response.choices[0].message
+    # Check that result is LLMResponse wrapper
+    assert isinstance(result, LLMResponse)
+    assert result.message == mock_response.choices[0].message
+    assert result.id == "mock_response_id"
     mock_litellm.completion.assert_called_once_with(
         model="gpt-3.5-turbo",
         messages=messages,
@@ -222,7 +236,10 @@ def test_llm_call_anthropic_model(monkeypatch):
         model="anthropic/claude-3-sonnet", messages=messages, temperature=0.7
     )
 
-    assert result == mock_response.choices[0].message
+    # Check that result is LLMResponse wrapper
+    assert isinstance(result, LLMResponse)
+    assert result.message == mock_response.choices[0].message
+    assert result.id == "mock_response_id"
     mock_litellm.completion.assert_called_once_with(
         model="anthropic/claude-3-sonnet",
         messages=messages,
@@ -242,14 +259,51 @@ def test_llm_call_with_usage_info(monkeypatch):
         model="gpt-3.5-turbo", messages=messages, temperature=0.7, return_usage=True
     )
 
-    assert isinstance(result, tuple)
-    message, usage_info = result
-    assert message == mock_response.choices[0].message
-    assert usage_info == {
+    # Check that result is LLMResponse wrapper with usage metadata
+    assert isinstance(result, LLMResponse)
+    assert result.message == mock_response.choices[0].message
+    assert result.id == "mock_response_id"
+    assert result.usage == {
         "prompt_tokens": 10,
         "completion_tokens": 20,
         "total_tokens": 30,
     }
+
+
+def test_llm_call_with_logprobs(monkeypatch):
+    """Test llm_call with logprobs=True in kwargs."""
+    mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
+    # Set logprobs on the mock response
+    mock_response.choices[0].logprobs = {"token": "test", "logprob": -0.5}
+
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
+
+    result = llm_call(
+        model="gpt-3.5-turbo",
+        messages=messages,
+        temperature=0.7,
+        logprobs=True,
+        top_logprobs=20,
+    )
+
+    # Check that result includes logprobs when requested
+    assert isinstance(result, LLMResponse)
+    assert result.logprobs == {"token": "test", "logprob": -0.5}
+    assert result.id == "mock_response_id"
+
+
+def test_llm_call_without_logprobs(monkeypatch):
+    """Test llm_call without logprobs (default behavior)."""
+    mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
+
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
+
+    result = llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
+
+    # Check that result does NOT include logprobs when not requested
+    assert isinstance(result, LLMResponse)
+    assert result.logprobs is None
+    assert result.id == "mock_response_id"
 
 
 def test_llm_call_exception_handling(monkeypatch):
@@ -759,6 +813,21 @@ def test_serialize_messages_with_tool_calls():
     assert message["tool_calls"][0]["id"] == "call_123"
     assert message["tool_calls"][0]["function"]["name"] == "test_function"
     assert message["tool_calls"][0]["function"]["arguments"] == '{"arg": "value"}'
+
+
+def test_serialize_messages_with_id():
+    """Test serializing messages with id field."""
+    mock_message = MockSerializableMessage(
+        role="assistant", content="Hi there", msg_id="msg_12345"
+    )
+
+    result = serialize_messages([mock_message])
+
+    assert len(result) == 1
+    message = result[0]
+    assert message["role"] == "assistant"
+    assert message["content"] == "Hi there"
+    assert message["id"] == "msg_12345"
 
 
 def test_save_agent_messages_basic():

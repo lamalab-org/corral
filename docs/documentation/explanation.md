@@ -511,7 +511,6 @@ Consider an agent given a task: "Find the molecular structure of unobtanium." If
 
 **Ambiguous Tasks**: If the task description is unclear or contradictory, surrender with explanation is better than guessing.
 
-
 ### Design Philosophy
 
 `Corral` makes surrender explicit and trackable:
@@ -521,6 +520,7 @@ Consider an agent given a task: "Find the molecular structure of unobtanium." If
 - Metrics distinguish surrenders from failures
 
 This lets you analyze:
+
 - Surrender rates per task
 - Whether surrenders are justified
 - Resource savings from surrender

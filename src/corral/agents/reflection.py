@@ -218,7 +218,7 @@ class ReflectionModule:
             )
 
         try:
-            response, usage_info = llm_call(
+            response = llm_call(
                 model=self.model,
                 messages=messages,
                 temperature=self.temperature,
@@ -227,10 +227,16 @@ class ReflectionModule:
                 **self.kwargs,
             )
 
-            reflection_text = response.content.strip()
+            content = response.content or ""
+            reflection_text = content.strip()
             logger.debug(f"Generated reflection: {reflection_text}")
 
-            # usage_info is a dict with prompt_tokens, completion_tokens, total_tokens
+            # Extract usage from metadata
+            usage_info = response.usage or {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            }
             return reflection_text, usage_info
 
         except Exception as e:

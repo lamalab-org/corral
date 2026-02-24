@@ -1,12 +1,12 @@
 import json
 import os
 import sys
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
 from ml.score import (
+    BASE_WORK_DIR,
     ml_dataset_preparation_quality_binary,
     ml_pipeline_score,
     model_evaluation_completeness_binary,
@@ -31,15 +31,7 @@ from corral.utils.io_tools import (
 )
 from corral.utils.tool_helpers import smart_resolve_path
 
-# Base working directory
-if "CORRAL_WORK_DIR" not in os.environ:
-    BASE_WORK_DIR = tempfile.mkdtemp(prefix="catalyst_")
-    logger.info(f"CORRAL_WORK_DIR not set, using temporary directory: {BASE_WORK_DIR}")
-else:
-    BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
-    logger.info(f"Using CORRAL_WORK_DIR: {BASE_WORK_DIR}")
-
-
+logger.info(f"Using BASE_WORK_DIR: {BASE_WORK_DIR}")
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     "ml_pipeline_score": ml_pipeline_score,
@@ -328,26 +320,34 @@ def create_environments(
 
 
 if __name__ == "__main__":
+    # --- Argument Parsing ---
+
     # Determine tasks file path
     if len(sys.argv) > 1:
+        # First argument (sys.argv[1]) is the tasks file path
         tasks_json_path = sys.argv[1]
     else:
-        tasks_json_path = os.environ.get(
-            "CORRAL_TASKS_PATH",
-            str(Path(__file__).parent.parent.parent / "config" / "dataset.json"),
-        )
+        logger.error("Path to tasks not provided")
 
-    # Get server settings from environment if provided
+    # Determine port number
+    if len(sys.argv) > 2:
+        # Second argument (sys.argv[2]) is the port number
+        try:
+            port = int(sys.argv[2])
+        except ValueError:
+            logger.error(
+                f"Error: Invalid port number provided: {sys.argv[2]}. Using default port."
+            )
+            port = int(os.environ.get("CORRAL_PORT", "8000"))
+    else:
+        # Default: Try environment variable, then default 8000
+        port = int(os.environ.get("CORRAL_PORT", "8000"))
+
+    # Get server settings from environment if provided (Host and Work Dir remain env/default)
     host = os.environ.get("CORRAL_HOST", "0.0.0.0")
-    port = int(os.environ.get("CORRAL_PORT", "8005"))
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)
-    # Create environments
-    # add common tools execute_python_code, execute_python_script
-    # taskgroup_common_tools = {
-    #     "execute_python_code": execute_python_code,
-    #     "execute_python_script": execute_python_script,
-    # }
+
     taskgroup_common_tools = None
     environments = create_environments(
         task_json_path=tasks_json_path,
@@ -362,5 +362,6 @@ if __name__ == "__main__":
         if env.current_task.input_from_tasks:
             logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
 
-    # Run server
+    # --- Run Server ---
+    logger.info(f"Running server on {host}:{port}")
     run_server(environments, host, port)
