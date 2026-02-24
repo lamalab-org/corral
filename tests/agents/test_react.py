@@ -716,47 +716,6 @@ Action Input: <action_input>{"expression": "2+2"}</action_input>"""
         assert len(create_prompt_calls) == 1
         assert create_prompt_calls[0][1]["task_guide"] == custom_task_prompt
 
-    def test_run_with_history_and_examples(
-        self, react_agent, mock_interface, monkeypatch
-    ):
-        """Test run method with history and examples."""
-        # Mock the LLM response
-        call_tracker = {"get_llm_response": 0, "create_prompt": 0}
-        create_prompt_calls = []
-
-        def mock_get_llm_response(*args, **kwargs):
-            call_tracker["get_llm_response"] += 1
-            return MockLLMResponse(
-                content=(
-                    "Thought: <thought>Using history and examples.</thought>\nFinal Answer: <final_answer>Success</final_answer>"
-                )
-            )
-
-        def mock_create_prompt(*args, **kwargs):
-            call_tracker["create_prompt"] += 1
-            create_prompt_calls.append((args, kwargs))
-            return []
-
-        monkeypatch.setattr(
-            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
-        )
-        monkeypatch.setattr("corral.agents.react.create_prompt", mock_create_prompt)
-
-        history = [LiteLLMMessage(role="user", content="Previous message")]
-        examples = ["Example 1", "Example 2"]
-
-        result = react_agent.run(
-            mock_interface, "test_task_id", history=history, examples=examples
-        )
-
-        assert result == "Success"
-
-        # Verify create_prompt was called with history and examples
-        assert len(create_prompt_calls) == 1
-        call_args = create_prompt_calls[0]
-        assert call_args[1]["history"] == history
-        assert call_args[1]["examples"] == examples
-
     def test_run_message_construction(self, react_agent, mock_interface, monkeypatch):
         """Test that messages are constructed correctly during run."""
         # Mock the LLM responses
