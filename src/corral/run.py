@@ -1,4 +1,3 @@
-import copy
 import json
 import pickle
 import re
@@ -577,20 +576,22 @@ class CorralRunner:
 
         def trial_executor(task_id: str, trial_index: int) -> TaskTrialResult:
             trace = traces[task_id]
-            agent_clone = copy.deepcopy(self.agent)
-            agent_clone._initial_messages = list(trace)
+            self.agent._initial_messages = list(trace)
             if hooks:
-                agent_clone.hooks = hooks
-            return execute_single_trial(
-                task_id=task_id,
-                trial_index=trial_index,
-                interface=self.interface,
-                agent=agent_clone,
-                verbose=verbose,
-                tool_verbosity=tool_verbosity,
-                configure_timeout=configure_timeout,
-                enable_surrender=self.enable_surrender,
-            )
+                self.agent.hooks = hooks
+            try:
+                return execute_single_trial(
+                    task_id=task_id,
+                    trial_index=trial_index,
+                    interface=self.interface,
+                    agent=self.agent,
+                    verbose=verbose,
+                    tool_verbosity=tool_verbosity,
+                    configure_timeout=configure_timeout,
+                    enable_surrender=self.enable_surrender,
+                )
+            finally:
+                self.agent._initial_messages = None
 
         return self._run_benchmark(
             task_ids=task_ids,
