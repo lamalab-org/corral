@@ -86,7 +86,6 @@ class LLMPlanner(BaseAgent):
         self,
         interface: CorralRouter,
         task_id: str,
-        history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         **kwargs,  # noqa: ARG002
@@ -96,7 +95,6 @@ class LLMPlanner(BaseAgent):
         Args:
             interface (CorralRouter): The benchmark interface to use
             task_id (str): The task ID to solve
-            history (List[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
             **kwargs: Additional keyword arguments (e.g., enable_surrender - not used by this agent)
@@ -106,24 +104,26 @@ class LLMPlanner(BaseAgent):
         """
         tools = interface.get_available_tools_for_task(task_id)
 
-        if task_prompt is None:
-            task_guide = interface.get_task_prompt(task_id)
-        else:
-            task_guide = task_prompt
-
         tool_usage = (
             False  # Default to False, could be passed as a parameter in the future
         )
 
-        self.messages = create_prompt(
-            system_prompt=self.system_prompt,
-            user_prompt=self.user_prompt,
-            task_guide=task_guide,
-            history=history,
-            max_iterations=self.max_iterations,
-            examples=examples,
-            tools=tools,
-        )
+        if self._initial_messages is not None:
+            self.messages = list(self._initial_messages)
+        else:
+            if task_prompt is None:
+                task_guide = interface.get_task_prompt(task_id)
+            else:
+                task_guide = task_prompt
+
+            self.messages = create_prompt(
+                system_prompt=self.system_prompt,
+                user_prompt=self.user_prompt,
+                task_guide=task_guide,
+                max_iterations=self.max_iterations,
+                examples=examples,
+                tools=tools,
+            )
 
         if tool_usage:
             agent = ToolCallingAgent(
@@ -145,11 +145,15 @@ class LLMPlanner(BaseAgent):
             )
 
         for _i in range(self.max_iterations):
-            plan = self.get_llm_response().content
+            response = self.get_llm_response()
+            plan = response.content
 
             self.messages.append(
                 LiteLLMMessage(
-                    role="assistant", content=plan, name="high-level-planner"
+                    role="assistant",
+                    content=plan,
+                    name="high-level-planner",
+                    id=response.id,
                 )
             )
             if plan is None:

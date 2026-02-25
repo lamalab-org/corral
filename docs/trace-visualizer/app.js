@@ -6,7 +6,13 @@ let currentNodes = []; // Store current graph nodes
 let selectedNodeIndex = -1; // Track selected node index (-1 means none selected)
 
 // API endpoint configuration
-const API_ENDPOINT = 'https://lamalab-org--llm-annotation-endpoint-fastapi-app.modal.run/ingest';
+const DEFAULT_API_ENDPOINT = 'https://lamalab-org--llm-annotation-endpoint-fastapi-app.modal.run/ingest';
+
+// Get the current API endpoint from the input field or use default
+function getApiEndpoint() {
+    const endpointInput = document.getElementById('apiEndpoint');
+    return endpointInput && endpointInput.value.trim() ? endpointInput.value.trim() : DEFAULT_API_ENDPOINT;
+}
 
 // Storage for behavioral markers and notes per node, per file
 let allFileAnnotations = {}; // Format: { fileName: { nodeId: { markers: [], notes: '' } } }
@@ -1519,7 +1525,7 @@ document.getElementById('submitBtn').addEventListener('click', async function() 
 
     try {
         // Send data to the API endpoint
-        const response = await fetch(API_ENDPOINT, {
+        const response = await fetch(getApiEndpoint(), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

@@ -2,12 +2,20 @@
 import gc
 import json
 import os
+import platform
 from collections.abc import Callable
 from pathlib import Path
 
 import nanosurf
-import pythoncom
 from loguru import logger
+
+# ----------------------------------------------------------
+# Safe pythoncom import (Windows only)
+# ----------------------------------------------------------
+if platform.system() == "Windows":
+    import pythoncom
+else:
+    pythoncom = None
 
 from corral.backend.env import Environment
 from corral.backend.server import run_server
@@ -40,9 +48,11 @@ from tools import (
     visualize_grain_boxes,
 )
 
+LLM_MODEL = os.environ.get("LLM_MODEL", "gpt_4o").strip()
+logger.info(f"[SERVER] Using LLM_MODEL={LLM_MODEL}")
 ENVIRONMENT = "enviroment"
-TASK_TYPE = "tasks_4"  # "single_task" or "subtasks"
-BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\mat-agent-bench\tasks\afm\src\afm\{ENVIRONMENT}\{TASK_TYPE}"
+TASK_TYPE = "subtasks_2"  # "single_task" or "subtasks"
+BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\{TASK_TYPE}"
 
 SCORING_FUNCTIONS = {
     "check_numerical": check_numerical,
@@ -187,8 +197,8 @@ class AFMEnvironment(Environment):
             logger.warning("DEBUG: No current_work_dir set, skipping file tools setup")
 
     def reset_params(self) -> None:
-        pythoncom.CoInitialize()
-
+        if pythoncom:
+            pythoncom.CoInitialize()
         spm = nanosurf.SPM()
         application = spm.application
         application.SetGalleryHistoryDirectoryPath(self.current_work_dir)
@@ -239,7 +249,8 @@ class AFMEnvironment(Environment):
         del application
         del spm
         gc.collect()
-        pythoncom.CoUninitialize()
+        if pythoncom:
+            pythoncom.CoUninitialize()
 
     def reset_state(self) -> str:
         """Reset state and update file tools for new workspace"""

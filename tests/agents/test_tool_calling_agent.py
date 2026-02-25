@@ -390,27 +390,6 @@ def test_tool_calling_agent_run_with_custom_task_prompt(
     assert mock_interface.call_counts.get("get_task_prompt", 0) == 0
 
 
-def test_run_with_history(tool_calling_agent, mock_interface, monkeypatch):
-    """Test run method with conversation history."""
-    history = [
-        LiteLLMMessage(role="user", content="Previous question"),
-        LiteLLMMessage(role="assistant", content="Previous answer"),
-    ]
-
-    mock_llm_response = MockFunction(
-        return_value=MockLLMResponse(content="Final Answer: With history")
-    )
-    monkeypatch.setattr(tool_calling_agent, "get_llm_response", mock_llm_response)
-
-    result = tool_calling_agent.run(mock_interface, "test_task", history=history)
-
-    assert result == "With history"
-
-    # Verify history was included in messages
-    # Should have system + user + history + user (task) + assistant
-    assert len(tool_calling_agent.messages) >= 4
-
-
 def test_run_with_examples(tool_calling_agent, mock_interface, monkeypatch):
     """Test run method with examples."""
     examples = ["Example 1", "Example 2"]

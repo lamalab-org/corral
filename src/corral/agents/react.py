@@ -127,7 +127,6 @@ class ReActAgent(BaseAgent):
         self,
         interface: CorralRouter,
         task_id: str,
-        history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         enable_surrender: bool = False,
@@ -138,7 +137,6 @@ class ReActAgent(BaseAgent):
         Args:
             interface (CorralRouter): The interface to use
             task_id (str): The task ID to solve
-            history (List[Dict[str, Any]], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. `task_prompt` is intended to be a plan or description about the task, that should always be provided when this agent is called as a subagent of a main orchestrator. Defaults to None.
             examples (List[str], optional): List with the few-shot examples to use. Defaults to None.
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
@@ -146,20 +144,22 @@ class ReActAgent(BaseAgent):
         Returns:
             str: The final answer to the task
         """
-        if task_prompt is None:
-            task_guide = interface.get_task_guide(task_id)
+        if self._initial_messages is not None:
+            self.messages = list(self._initial_messages)
         else:
-            task_guide = task_prompt
+            if task_prompt is None:
+                task_guide = interface.get_task_guide(task_id)
+            else:
+                task_guide = task_prompt
 
-        self.messages = create_prompt(
-            system_prompt=self.system_prompt,
-            user_prompt=self.user_prompt,
-            task_guide=task_guide,
-            history=history,
-            examples=examples,
-            surrender_prompt=self.surrender_prompt,
-            enable_surrender=enable_surrender,
-        )
+            self.messages = create_prompt(
+                system_prompt=self.system_prompt,
+                user_prompt=self.user_prompt,
+                task_guide=task_guide,
+                examples=examples,
+                surrender_prompt=self.surrender_prompt,
+                enable_surrender=enable_surrender,
+            )
 
         # Execute BEFORE_TASK hooks
         self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
@@ -170,9 +170,14 @@ class ReActAgent(BaseAgent):
             # Execute BEFORE_ITERATION hooks
             self._execute_hooks(HookPoint.BEFORE_ITERATION, interface, task_id)
             # Create prompt and get LLM response
-            llm_response = self.get_llm_response().content
+            full_llm_response = self.get_llm_response()
+            llm_response = full_llm_response.content
 
-            self.messages.append(LiteLLMMessage(role="assistant", content=llm_response))
+            self.messages.append(
+                LiteLLMMessage(
+                    role="assistant", content=llm_response, id=full_llm_response.id
+                )
+            )
 
             # Parse response
             thoughts, actions = self.parse_llm_response(llm_response)
@@ -217,6 +222,13 @@ class ReActAgent(BaseAgent):
                             name=action.tool_name,
                         )
                     )
+
+            self._execute_hooks(
+                HookPoint.AFTER_ITERATION,
+                interface,
+                task_id,
+                llm_response=full_llm_response,
+            )
             if final_answer_match:
                 return final_answer_match.group(1).strip()
 
