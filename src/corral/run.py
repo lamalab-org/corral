@@ -465,6 +465,7 @@ class CorralRunner:
         output_dir: str | None = None,
         level: int | str = 1,
         env_name: str | None = None,
+        verbosity: str | None = None,
     ) -> None:
         """Generate LaTeX documentation for a list of tasks.
 
@@ -479,6 +480,11 @@ class CorralRunner:
                         "tex_files" in the current working directory.
             level: Task level identifier (e.g., 1, 2,...). Default: 1.
             env_name: Environment name (e.g., "afm", "catalyst").
+            verbosity: Tool verbosity level used to filter tool descriptions and
+                       return sections in the generated LaTeX. Accepts a
+                       `ToolVerbosity` value string (e.g. "brief",
+                       "detailed"). Defaults to "detailed" when not
+                       provided.
         """
         output_dir = output_dir or str(Path.cwd() / "tex_files")
         logger.info(f"Generating LaTeX documentation for {len(task_ids)} tasks...")
@@ -490,6 +496,7 @@ class CorralRunner:
                     output_dir=output_dir,
                     level=level,
                     env_name=env_name,
+                    verbosity=verbosity,
                 )
                 logger.debug(
                     f"Generated LaTeX for task {task_id}: "

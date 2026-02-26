@@ -67,6 +67,7 @@ class ToLatexRequest(BaseModel):
     task_name: str | None = None
     subtask_index: int | None = None
     cache_dir: str | None = None
+    verbosity: str | None = None
 
 
 class ClearLatexCacheRequest(BaseModel):

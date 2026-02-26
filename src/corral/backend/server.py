@@ -318,6 +318,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
                 level=request.level,
                 env_name=request.env_name,
                 task_name=request.task_name,
+                verbosity=request.verbosity,
             )
             return {
                 "status": "success",

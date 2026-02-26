@@ -178,6 +178,7 @@ class CorralRouter:
         level: int | str,
         env_name: str | None = None,
         task_name: str | None = None,
+        verbosity: str | None = None,
     ) -> dict[str, str]:
         """Generate LaTeX documentation for a task.
 
@@ -187,6 +188,9 @@ class CorralRouter:
             level: Task level identifier (e.g., 1, 2, "advanced").
             env_name: Environment name (e.g., "afm", "catalyst").
             task_name: Optional custom name for the task.
+            verbosity: Tool verbosity level used to filter descriptions and
+                       return sections (e.g. ``"brief"``, ``"detailed"``). Defaults
+                       to ``"detailed"`` when not provided.
 
         Returns:
             Dictionary with 'output_path' (task .tex), 'tools_output_path' (tools .tex),
@@ -197,6 +201,7 @@ class CorralRouter:
             "level": level,
             "env_name": env_name,
             "task_name": task_name,
+            "verbosity": verbosity,
         }
         response = requests.post(
             f"{self.base_url}/tasks/{task_id}/latex",

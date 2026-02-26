@@ -518,6 +518,7 @@ class Environment(ABC):
         level: int | str,
         env_name: str | None = None,
         task_name: str | None = None,
+        verbosity: str | None = None,
     ) -> tuple[str, str, str | None]:
         """
         Generate LaTeX documentation for this task.
@@ -538,12 +539,31 @@ class Environment(ABC):
             env_name: Environment name (e.g., "afm", "catalyst"). If not provided,
                      will try to get from task_group.group_id
             task_name: Optional custom name for the task (defaults to task_id)
+            verbosity: Tool verbosity level used to filter tool descriptions and
+                       return sections. Accepts a `ToolVerbosity` value string
+                       (e.g. "brief", "detailed"). Defaults to
+                       `ToolVerbosity.DETAILED` when not provided.
 
         Returns:
             Tuple of (task_tex_path, tools_tex_path, scoring_tex_path) - paths to the generated .tex files
         """
+        # Import here to avoid circular imports
         from corral.router.verbosity import ToolVerbosity, VerbosityConfig
         from corral.utils.code2latex import Code2Latex, LatexMetadata
+
+        # Resolve verbosity level (default to DETAILED)
+        if verbosity is None:
+            resolved_verbosity = ToolVerbosity.DETAILED
+        elif isinstance(verbosity, ToolVerbosity):
+            resolved_verbosity = verbosity
+        else:
+            resolved_verbosity = ToolVerbosity.FULL
+
+        # Map verbosity levels to the RETURNS_* sections that should be included.
+        RETURNS_VERBOSITY_MAP: dict[ToolVerbosity, list[str]] = {
+            ToolVerbosity.BRIEF: ["RETURNS_BRIEF"],
+            ToolVerbosity.DETAILED: ["RETURNS_BRIEF", "RETURNS_DETAILED"],
+        }
 
         # Get task description from prompt
         description = str(self.get_task_prompt())
@@ -551,25 +571,26 @@ class Environment(ABC):
         # Get list of tool names
         tools = list(self.tools.keys())
 
-        # Get detailed tool information for longtable with DETAILED verbosity parsing
-        # This parses the descriptions similarly to server.py, using the Detailed level
+        # Get detailed tool information for longtable using the resolved verbosity
         tools_details = []
-        verbosity = ToolVerbosity.DETAILED
 
         for tool in self.tools.values():
             filtered_description = VerbosityConfig.filter_tool_description(
-                tool.description, verbosity
+                tool.description, resolved_verbosity
             )
 
             # Extract RETURNS section from the original description and filter it
             sections = VerbosityConfig.extract_all_sections(tool.description)
-            returns_parts = [
-                sections.get("RETURNS_BRIEF", ""),
-                sections.get("RETURNS_DETAILED", ""),
-            ]
+            return_keys = RETURNS_VERBOSITY_MAP.get(
+                resolved_verbosity,
+                ["RETURNS_BRIEF", "RETURNS_DETAILED", "RETURNS_EXAMPLES"],
+            )
+            returns_parts = [sections.get(key, "") for key in return_keys]
             returns_raw = "\n\n".join(part for part in returns_parts if part)
             returns_info = (
-                VerbosityConfig.filter_argument_description(returns_raw, verbosity)
+                VerbosityConfig.filter_argument_description(
+                    returns_raw, resolved_verbosity
+                )
                 if returns_raw
                 else ""
             )
@@ -577,7 +598,7 @@ class Environment(ABC):
             structured_args = []
             for arg in tool.arguments:
                 filtered_arg_desc = VerbosityConfig.filter_argument_description(
-                    arg.description, verbosity
+                    arg.description, resolved_verbosity
                 )
                 structured_args.append(
                     {
