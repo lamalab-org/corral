@@ -527,7 +527,7 @@ class Environment(ABC):
         and delegates to `Code2Latex.colorbox()` for generating formatted LaTeX files
         and `Code2Latex.longtable()` for generating tools documentation.
 
-        If the environment has a `current_task` attribute (e.g., TaskGroupEnvironment),
+        If the environment has a `current_task` attribute (e.g., `TaskGroupEnvironment`),
         it will automatically detect:
         - Whether this is a subtask (based on input_from_tasks)
         - Dependencies on other tasks
