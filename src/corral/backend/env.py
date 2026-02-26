@@ -531,7 +531,7 @@ class Environment(ABC):
         it will automatically detect:
         - Whether this is a subtask (based on `input_from_tasks`)
         - Dependencies on other tasks
-        - env_name from task_group.group_id if not provided
+        - `env_name` from `task_group.group_id` if not provided
 
         Args:
             output_dir: Directory for output .tex files
