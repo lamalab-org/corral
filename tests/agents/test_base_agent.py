@@ -5,7 +5,6 @@ import pytest
 from litellm.types.utils import Message
 
 from corral.agents.base_agent import BaseAgent
-from corral.agents.utils import LiteLLMMessage
 from corral.router import CorralRouter
 
 # Import shared mock classes from conftest.py
@@ -48,7 +47,6 @@ class ConcreteAgent(BaseAgent):
         self,
         interface: CorralRouter,
         task_id: str,
-        history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         **kwargs,
@@ -285,7 +283,6 @@ def test_run_agent_success(monkeypatch, concrete_agent, mock_benchmark_interface
     def mock_run(
         interface,
         task_id,
-        history=None,
         task_prompt=None,
         examples=None,
         enable_surrender=False,
@@ -353,7 +350,6 @@ def test_run_agent_with_error_in_answer(
     def mock_run(
         interface,
         task_id,
-        history=None,
         task_prompt=None,
         examples=None,
         enable_surrender=False,
@@ -378,7 +374,6 @@ def test_run_agent_with_exception(
     def mock_run_with_error(
         interface,
         task_id,
-        history=None,
         task_prompt=None,
         examples=None,
         enable_surrender=False,
@@ -402,7 +397,6 @@ def test_run_agent_verbose_mode(monkeypatch, concrete_agent, mock_benchmark_inte
     def mock_run(
         interface,
         task_id,
-        history=None,
         task_prompt=None,
         examples=None,
         verbose=True,
@@ -448,7 +442,6 @@ def test_run_agent_extractor_error(
     def mock_run(
         interface,
         task_id,
-        history=None,
         task_prompt=None,
         examples=None,
         enable_surrender=False,
@@ -571,7 +564,6 @@ def test_extractor_prompt_filling(
     def mock_run(
         interface,
         task_id,
-        history=None,
         task_prompt=None,
         examples=None,
         enable_surrender=False,
@@ -630,7 +622,6 @@ def test_agent_run_accepts_enable_surrender_via_kwargs(
             self,
             interface: CorralRouter,
             task_id: str,
-            history: list[LiteLLMMessage] | None = None,
             task_prompt: str | None = None,
             examples: list[str] | None = None,
             **kwargs,
@@ -683,7 +674,6 @@ def test_agent_run_with_explicit_enable_surrender_parameter(
             self,
             interface: CorralRouter,
             task_id: str,
-            history: list[LiteLLMMessage] | None = None,
             task_prompt: str | None = None,
             examples: list[str] | None = None,
             enable_surrender: bool = False,
@@ -738,7 +728,6 @@ def test_agent_run_without_enable_surrender_uses_default(
             self,
             interface: CorralRouter,
             task_id: str,
-            history: list[LiteLLMMessage] | None = None,
             task_prompt: str | None = None,
             examples: list[str] | None = None,
             enable_surrender: bool = False,
@@ -790,7 +779,6 @@ def test_agent_run_kwargs_dont_interfere_with_agents_not_using_them(
             self,
             interface: CorralRouter,
             task_id: str,
-            history: list[LiteLLMMessage] | None = None,
             task_prompt: str | None = None,
             examples: list[str] | None = None,
             **kwargs,
