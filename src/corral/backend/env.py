@@ -529,7 +529,7 @@ class Environment(ABC):
 
         If the environment has a `current_task` attribute (e.g., `TaskGroupEnvironment`),
         it will automatically detect:
-        - Whether this is a subtask (based on input_from_tasks)
+        - Whether this is a subtask (based on `input_from_tasks`)
         - Dependencies on other tasks
         - env_name from task_group.group_id if not provided
 
