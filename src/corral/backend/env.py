@@ -525,7 +525,7 @@ class Environment(ABC):
 
         This method creates a `TaskDefinition` from the environment's task data
         and delegates to `Code2Latex.colorbox()` for generating formatted LaTeX files
-        and Code2Latex.longtable() for generating tools documentation.
+        and `Code2Latex.longtable()` for generating tools documentation.
 
         If the environment has a `current_task` attribute (e.g., TaskGroupEnvironment),
         it will automatically detect:
