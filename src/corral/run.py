@@ -461,6 +461,56 @@ class CorralRunner:
         for metric in get_default_metrics(k_vals):
             self._metric_registry.register(metric)
 
+    def generate_latex_docs(
+        self,
+        task_ids: list[str],
+        output_dir: str | None = None,
+        level: int | str = 1,
+        env_name: str | None = None,
+        verbosity: str | None = None,
+    ) -> None:
+        """Generate LaTeX documentation for a list of tasks.
+
+        The colorbox generation workflow:
+        1. First task (main task, no input_from_tasks): saves to cache only
+        2. Subsequent tasks (subtasks, have input_from_tasks): add to cache and generate .tex
+        3. After all tasks: clear the cache
+
+        Args:
+            task_ids: List of task IDs to generate LaTeX for.
+            output_dir: Directory for output .tex files. Defaults to
+                        "tex_files" in the current working directory.
+            level: Task level identifier (e.g., 1, 2,...). Default: 1.
+            env_name: Environment name (e.g., "afm", "catalyst").
+            verbosity: Tool verbosity level used to filter tool descriptions and
+                       return sections in the generated LaTeX. Accepts a
+                       `ToolVerbosity` value string (e.g. "brief",
+                       "detailed"). Defaults to "detailed" when not
+                       provided.
+        """
+        output_dir = output_dir or str(Path.cwd() / "tex_files")
+        logger.info(f"Generating LaTeX documentation for {len(task_ids)} tasks...")
+
+        for task_id in task_ids:
+            try:
+                result = self.interface.generate_latex(
+                    task_id=task_id,
+                    output_dir=output_dir,
+                    level=level,
+                    env_name=env_name,
+                    verbosity=verbosity,
+                )
+                logger.debug(
+                    f"Generated LaTeX for task {task_id}: "
+                    f"task={result.get('output_path')}, "
+                    f"tools={result.get('tools_output_path')}, "
+                    f"scoring={result.get('scoring_output_path')}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to generate LaTeX for task {task_id}: {e}")
+
+        logger.info("LaTeX documentation generation complete.")
+
     def _get_metrics_for_benchmark(self) -> list[Metric] | None:
         """Get the metrics list for creating a BenchmarkResult.
 

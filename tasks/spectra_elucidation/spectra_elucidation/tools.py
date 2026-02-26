@@ -19,7 +19,6 @@ from corral.utils.rag import vector_database_search
 
 get_isomers = modal.Function.from_name("chemenv", "get_compound_isomers_pubchem")
 
-
 @tool
 def get_formula_from_smiles(smiles: str) -> str:
     """[BRIEF] Generate a chemical formula from a SMILES string using RDKit. [/BRIEF]
@@ -63,9 +62,9 @@ def get_formula_from_smiles(smiles: str) -> str:
 
     Returns:
         str:
-            [ARGS_BRIEF] The chemical formula in Hill notation (C, H, then alphabetical) [/ARGS_BRIEF]
-            [ARGS_DETAILED] The chemical formula of the molecule represented by the SMILES string, formatted in Hill notation. If the SMILES string is invalid or cannot be parsed, it returns an error message. [/ARGS_DETAILED]
-            [ARGS_EXAMPLES] '"C2H6O" for ethanol, "C6H6" for benzene, "C2H5NO" for acetic acid amide, "C7H6O3" for salicylic acid' [/ARGS_EXAMPLES]
+            [RETURNS_BRIEF] The chemical formula in Hill notation (C, H, then alphabetical) [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The chemical formula of the molecule represented by the SMILES string, formatted in Hill notation. If the SMILES string is invalid or cannot be parsed, it returns an error message. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] '"C2H6O" for ethanol, "C6H6" for benzene, "C2H5NO" for acetic acid amide, "C7H6O3" for salicylic acid' [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
