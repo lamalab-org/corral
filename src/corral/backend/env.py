@@ -523,7 +523,7 @@ class Environment(ABC):
         """
         Generate LaTeX documentation for this task.
 
-        This method creates a TaskDefinition from the environment's task data
+        This method creates a `TaskDefinition` from the environment's task data
         and delegates to Code2Latex.colorbox() for generating formatted LaTeX files
         and Code2Latex.longtable() for generating tools documentation.
 
