@@ -271,6 +271,9 @@ def main():
     if model == "gpt-oss-120b":
         model = "gpt_oss_120b"
 
+    if model == "gpt-4o":
+        model = "gpt_4o"
+
     configs = []
     level_dirs = [d for d in p.rglob("*") if d.is_dir() and d.name.startswith("level_")]
 
@@ -330,7 +333,7 @@ def main():
         for subset_keys, subset_df in trials_df.groupby(group_cols):
             model, env, level, category, agent, verbosity = subset_keys
 
-            subset_name = f"{model}/{env}/{level}/{category}/{agent}/{verbosity}"
+            subset_name = f"{model}-{env}-{level}-{category}-{agent}-{verbosity}-traces"
 
             logger.info(f"\nUploading subset: {subset_name}")
 
