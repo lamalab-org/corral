@@ -156,9 +156,6 @@ def build_trials_from_pair(config, pair):
 
     missing_files = 0
 
-    # --------------------------------------------------
-    # iterate tasks
-    # --------------------------------------------------
     for task_name in task_results:
         trials = task_results.get(task_name).get("trials")
         trials = sorted(trials, key=lambda x: int(x["trial_id"]))
@@ -166,9 +163,7 @@ def build_trials_from_pair(config, pair):
         traces = collect_traces_for_task(trace_dir, task_name)
 
         missing_files += len(trials) - len(traces)
-        # --------------------------------------------
-        # WARNINGS
-        # --------------------------------------------
+
         if len(trials) > len(traces):
             logger.warning(
                 f"[WARNING] {task_name}: "
@@ -348,8 +343,5 @@ def main():
             )
 
 
-"""
-gpt-4o : retro (0), spectra (5), ml (0), md (trial_id : attempt_5), catalyst (extra traces)
-claude_45 : retro (2), spectra (0), ml (3), md (0), catalyst (0)
-gpt-oss : retro (38), spectra (0), ml (2), md (0), catalyst (trial_id : attempt_3, extra traces)
-"""
+if __name__ == "__main__":
+    main()
