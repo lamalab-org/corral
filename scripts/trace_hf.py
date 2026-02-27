@@ -325,12 +325,12 @@ def main():
         )
         trials_df = pd.DataFrame(all_trials)
 
-        group_cols = ["model", "env", "level", "category"]
+        group_cols = ["model", "env", "level", "category", "agent", "verbosity"]
 
         for subset_keys, subset_df in trials_df.groupby(group_cols):
-            model, env, level, category = subset_keys
+            model, env, level, category, agent, verbosity = subset_keys
 
-            subset_name = f"{model}_{env}_{level}_{category}"
+            subset_name = f"{model}/{env}/{level}/{category}/{agent}/{verbosity}"
 
             logger.info(f"\nUploading subset: {subset_name}")
 

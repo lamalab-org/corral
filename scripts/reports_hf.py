@@ -195,12 +195,14 @@ def main():
     )
     trials_df = pd.DataFrame(all_reports)
 
-    group_cols = ["model", "env", "level", "category"]
+    group_cols = ["model", "env", "level", "category", "agent", "verbosity"]
 
     for subset_keys, subset_df in trials_df.groupby(group_cols):
-        model, env, level, category = subset_keys
+        model, env, level, category, agent, verbosity = subset_keys
 
-        subset_name = f"{model}_{env}_{level}_{category}_task_reports"
+        subset_name = (
+            f"{model}/{env}/{level}/{category}/{agent}/{verbosity}/task_reports"
+        )
 
         logger.info(f"\nUploading subset: {subset_name}")
 
@@ -214,12 +216,14 @@ def main():
 
     overall_df = pd.DataFrame(overall_reports)
 
-    group_cols = ["model", "env", "level", "category"]
+    group_cols = ["model", "env", "level", "category", "agent", "verbosity"]
 
     for subset_keys, subset_df in overall_df.groupby(group_cols):
-        model, env, level, category = subset_keys
+        model, env, level, category, agent, verbosity = subset_keys
 
-        subset_name = f"{model}_{env}_{level}_{category}_overall_reports"
+        subset_name = (
+            f"{model}/{env}/{level}/{category}/{agent}/{verbosity}/overall_reports"
+        )
 
         logger.info(f"\nUploading subset: {subset_name}")
 
