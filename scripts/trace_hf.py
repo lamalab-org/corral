@@ -307,6 +307,8 @@ def main():
 
         pairs = match_agent_verbosity(category_path)
 
+        logger.info(f"path : {category_path}")
+
         for pair in pairs:
             trials, missing = build_trials_from_pair(config, pair)
 
