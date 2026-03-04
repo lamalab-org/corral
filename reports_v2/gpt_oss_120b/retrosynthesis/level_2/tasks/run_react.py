@@ -191,7 +191,7 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = CorralRouter(base_url="http://localhost:1111")
+    interface = CorralRouter(base_url="http://localhost:3333")
     wandblogger = CorralWandbLogger(
         project="corral_resistor_oss",
         group="gpt_oss",
@@ -238,9 +238,9 @@ if __name__ == "__main__":
     setup_litellm()
     os.environ["OPENAI_API_KEY"] = os.getenv("BLABLADOR_API_KEY_TEST", "")
     verbosities = [
-        # "brief",
-        # "workflow",
-        "comprehensive"
+        "brief",
+        "workflow",
+        # "comprehensive"
     ]
     for verbose in verbosities:
         hooks = AgentHooks()
