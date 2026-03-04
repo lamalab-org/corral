@@ -14,7 +14,7 @@ from corral.agents.utils import LiteLLMMessage, convert_to_openai_tool_format
 from corral.router.routes import CorralRouter
 
 
-class CompactHistoryAgent(ToolCallingAgent):
+class CompactToolCallingAgent(ToolCallingAgent):
     """
     Agent derived from ToolCallingAgent that stores past tool exchanges as clean
     YAML instead of structured JSON tool-call / tool-result message pairs.
@@ -184,12 +184,14 @@ class CompactHistoryAgent(ToolCallingAgent):
 
                 tool_calls = llm_response.tool_calls
                 if tool_calls:
-                    # Collect all tool results for this turn
-                    call_lines: list[str] = []
-
-                    # Preserve any free-form content alongside the tool calls
+                    # Preserve any free-form content from the assistant turn
                     if content:
-                        call_lines.append(content)
+                        self.messages.append(
+                            LiteLLMMessage(role="assistant", content=content)
+                        )
+
+                    # Collect all tool results for this turn
+                    tool_lines: list[str] = []
 
                     for called_tool in tool_calls:
                         function_name = str(called_tool.function.name)
@@ -218,7 +220,7 @@ class CompactHistoryAgent(ToolCallingAgent):
                                 f"Tool execution error for {function_name}: {e}"
                             )
 
-                        call_lines.append(
+                        tool_lines.append(
                             self._format_tool_block(
                                 function_name,
                                 called_tool.function.arguments,
@@ -226,11 +228,11 @@ class CompactHistoryAgent(ToolCallingAgent):
                             )
                         )
 
-                    # Store the whole exchange as one plain-text assistant message
+                    # Append tool outputs as a user message (environment response)
                     self.messages.append(
                         LiteLLMMessage(
-                            role="assistant",
-                            content="\n".join(call_lines),
+                            role="user",
+                            content="\n".join(tool_lines),
                         )
                     )
                 else:

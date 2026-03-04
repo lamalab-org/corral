@@ -279,6 +279,8 @@ class BaseAgent(ABC):
                 self.get_total_token_usage(),
             )
 
+        return final_answer, self.messages, self.get_total_token_usage()
+
         message = "The task is to:\n" + self.messages[0]["content"]
         if self.messages[0]["role"] == "system":
             message += "\n\n" + self.messages[1]["content"]

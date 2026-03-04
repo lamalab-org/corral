@@ -23,7 +23,7 @@ Think about what to do next and respond in the following format:
 
 <thought>[your reasoning]</thought>
 <action>[tool name]</action>
-<action_input>[tool arguments as JSON]</action_input>. For tool calls without arguments, use `<action_input>{}</action_input>`
+<action_input>[tool arguments as YAML]</action_input>. For tool calls without arguments, use `<action_input>{}</action_input>`
 
 If you have the final answer, respond with:
 <thought>[your reasoning]</thought>

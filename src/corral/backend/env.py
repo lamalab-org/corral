@@ -176,13 +176,10 @@ class Environment(ABC):
             "3. You can make multiple tool calls as needed. The tools will be executed sequentially in the order they are called.\n"
             "4. All tool calls are recorded and affect your final score\n"
             "Example tool call format:\n"
-            "{{\n"
-            '    "tool_name": "tool_name",\n'
-            '    "arguments": {{\n'
-            '        "arg1": value1,\n'
-            '        "arg2": value2\n'
-            "    }}\n"
-            "}}\n"
+            "tool_name: tool_name\n"
+            "arguments:\n"
+            "  arg1: value1\n"
+            "  arg2: value2"
         )
 
     def get_environment_guide(self) -> str:
