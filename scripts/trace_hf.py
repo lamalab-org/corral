@@ -1,4 +1,3 @@
-import argparse
 import ast
 import json
 import re
@@ -6,20 +5,18 @@ from datetime import datetime, timezone
 from itertools import zip_longest
 from pathlib import Path
 
+import fire
 import pandas as pd
 from datasets import Dataset
 from huggingface_hub import HfApi
 from loguru import logger
-
-AGENTS = {
-    "react": "ReActAgent",
-    "reactagent": "ReActAgent",
-    "tool calling": "ToolCallingAgent",
-    "toolcalling": "ToolCallingAgent",
-    "toolcallingagent": "ToolCallingAgent",
-}
-
-VERBOSITY = {"brief", "comprehensive", "workflow"}
+from report_constants import (
+    AGENTS,
+    ALLOWED_CATEGORIES,
+    ALLOWED_MODELS,
+    LEVEL_PREFIX,
+    VERBOSITY,
+)
 
 
 def load_json(path):
@@ -155,6 +152,7 @@ def build_trials_from_pair(config, pair):
     task_results = summary.get("task_results", {})
 
     missing_files = 0
+    extra_traces = 0
 
     for task_name in task_results:
         trials = task_results.get(task_name).get("trials")
@@ -162,18 +160,12 @@ def build_trials_from_pair(config, pair):
 
         traces = collect_traces_for_task(trace_dir, task_name)
 
-        missing_files += len(trials) - len(traces)
-
         if len(trials) > len(traces):
             logger.warning(
                 f"[WARNING] {task_name}: "
                 f"{len(trials)} trials but only {len(traces)} traces."
             )
-            # for trial_id, trial_meta in enumerate(trials):
-            #     trace_path = None
-            #     messages = None
-            #     model_version = None
-            #     timestamp = None
+            missing_files += len(trials) - len(traces)
 
         elif len(trials) < len(traces):
             logger.warning(
@@ -181,6 +173,7 @@ def build_trials_from_pair(config, pair):
                 f"{len(trials)} trials but {len(traces)} traces found. "
                 "Extra traces will be ignored."
             )
+            extra_traces += len(traces) - len(trials)
 
         elif len(trials) == len(traces):
             for trial_meta, trace_path in zip_longest(trials, traces):
@@ -213,7 +206,7 @@ def build_trials_from_pair(config, pair):
 
                 dataset.append(entry)
 
-    return dataset, missing_files
+    return dataset, missing_files, extra_traces
 
 
 # ---------------------------------
@@ -223,12 +216,12 @@ def match_agent_verbosity(category_path: Path):
     grouped = {}
 
     for item in category_path.iterdir():
-        # ✅ Ignore logprobs directories
         if item.is_dir() and item.name.lower().startswith("logprobs"):
             continue
 
         pair = extract_pair(item.name)
         if pair is None:
+            logger.warning(f"No report could be found for {item.name}. Ignoring.")
             continue
 
         if pair not in grouped:
@@ -248,31 +241,68 @@ def match_agent_verbosity(category_path: Path):
     return list(grouped.values())
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Build dataset configs")
-    parser.add_argument(
-        "--path",
-        type=str,
-        required=True,
-        help="Root reports directory path",
-    )
-
-    args = parser.parse_args()
-    path = args.path
-
+def validate_path(path: str):
     p = Path(path)
 
-    env = p.parts[-1]
-    model = p.parts[-2]
+    if len(p.parts) < 4:
+        raise ValueError(
+            "Path must follow structure: {model}/{anything}/{level}/{category}"
+        )
 
-    if model == "claude":
-        model = "claude_sonnet_45"
+    model = p.parts[-4]
+    level = p.parts[-2]
+    category = p.parts[-1]
+    environment = p.parts[-3]
 
-    if model == "gpt-oss-120b":
-        model = "gpt_oss_120b"
+    # Validate model
+    if model not in ALLOWED_MODELS:
+        raise ValueError(f"Invalid model '{model}'. Allowed models: {ALLOWED_MODELS}")
 
-    if model == "gpt-4o":
-        model = "gpt_4o"
+    # Validate level
+    if not level.startswith(LEVEL_PREFIX):
+        raise ValueError(f"Invalid level '{level}'. Must start with '{LEVEL_PREFIX}'")
+
+    # Validate category
+    if category not in ALLOWED_CATEGORIES:
+        raise ValueError(
+            f"Invalid category '{category}'. Allowed: {ALLOWED_CATEGORIES}"
+        )
+
+    return model, level, category, environment
+
+
+def push_trials_to_hub(trials_df: pd.DataFrame, dataset_name: str):
+    api = HfApi()
+
+    api.create_repo(
+        repo_id=dataset_name,
+        repo_type="dataset",
+        private=False,
+        exist_ok=True,
+    )
+
+    group_cols = ["model", "env", "level", "category", "agent", "verbosity"]
+
+    for subset_keys, subset_df in trials_df.groupby(group_cols):
+        model, env, level, category, agent, verbosity = subset_keys
+
+        subset_name = f"{model}-{env}-{level}-{category}-{agent}-{verbosity}-traces"
+
+        logger.info(f"\nUploading subset: {subset_name}")
+
+        dataset = Dataset.from_pandas(subset_df.reset_index(drop=True))
+
+        dataset.push_to_hub(
+            dataset_name,
+            config_name=subset_name,
+            private=False,
+        )
+
+
+def build_dataset_configs(path: str):
+    p = Path(path)
+
+    model, level, category, env = validate_path(path)
 
     configs = []
     level_dirs = [d for d in p.rglob("*") if d.is_dir() and d.name.startswith("level_")]
@@ -301,6 +331,7 @@ def main():
 
     all_trials = []
     missing_files = 0
+    extra_traces = 0
 
     for config in configs:
         category_path = Path(config["path"])
@@ -310,43 +341,31 @@ def main():
         logger.info(f"path : {category_path}")
 
         for pair in pairs:
-            trials, missing = build_trials_from_pair(config, pair)
+            trials, missing, extra = build_trials_from_pair(config, pair)
 
             all_trials.extend(trials)
             missing_files += missing
+            extra_traces += extra
 
     if missing_files > 0:
         logger.error(f"Can't push!!! Number of missing files : {missing_files}")
+        return
 
-    else:
-        DATASET_NAME = "jablonkagroup/corral-traces"
-        api = HfApi()
+    if extra_traces > 0:
+        logger.error(f"Can't push!!! Number of extra traces : {extra_traces}")
+        return
 
-        api.create_repo(
-            repo_id=DATASET_NAME,
-            repo_type="dataset",
-            private=False,
-            exist_ok=True,
-        )
-        trials_df = pd.DataFrame(all_trials)
+    trials_df = pd.DataFrame(all_trials)
 
-        group_cols = ["model", "env", "level", "category", "agent", "verbosity"]
+    if trials_df.isna().any().any():
+        nan_counts = trials_df.isna().sum()
+        nan_cols = nan_counts[nan_counts > 0]
 
-        for subset_keys, subset_df in trials_df.groupby(group_cols):
-            model, env, level, category, agent, verbosity = subset_keys
+        raise ValueError(f"NaNs detected in trials dataframe:\n{nan_cols}")
 
-            subset_name = f"{model}-{env}-{level}-{category}-{agent}-{verbosity}-traces"
-
-            logger.info(f"\nUploading subset: {subset_name}")
-
-            dataset = Dataset.from_pandas(subset_df.reset_index(drop=True))
-
-            dataset.push_to_hub(
-                DATASET_NAME,
-                config_name=subset_name,
-                private=False,
-            )
+    DATASET_NAME = "jablonkagroup/corral-traces"
+    push_trials_to_hub(trials_df, DATASET_NAME)
 
 
 if __name__ == "__main__":
-    main()
+    fire.Fire(build_dataset_configs)

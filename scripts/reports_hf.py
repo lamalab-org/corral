@@ -3,35 +3,19 @@ import json
 import re
 from pathlib import Path
 
+import fire
 import pandas as pd
 from datasets import Dataset
 from huggingface_hub import HfApi
 from loguru import logger
-
-AGENTS = {
-    "react": "ReActAgent",
-    "reactagent": "ReActAgent",
-    "tool calling": "ToolCallingAgent",
-    "toolcalling": "ToolCallingAgent",
-    "toolcallingagent": "ToolCallingAgent",
-}
-
-VERBOSITY = {"brief", "comprehensive", "workflow"}
-
-METRIC_KEYS = [
-    "success_rate",
-    "average_score",
-    "pass@1",
-    "pass@2",
-    "pass@3",
-    "pass@4",
-    "pass@5",
-    "pass^1",
-    "pass^2",
-    "pass^3",
-    "pass^4",
-    "pass^5",
-]
+from report_constants import (
+    AGENTS,
+    ALLOWED_CATEGORIES,
+    ALLOWED_MODELS,
+    LEVEL_PREFIX,
+    METRIC_KEYS,
+    VERBOSITY,
+)
 
 
 def load_json(path):
@@ -239,5 +223,79 @@ def main():
         )
 
 
+def validate_path(path: str):
+    p = Path(path)
+
+    if len(p.parts) < 4:
+        raise ValueError(
+            "Path must follow structure: {model}/{anything}/{level}/{category}"
+        )
+
+    model = p.parts[-4]
+    level = p.parts[-2]
+    category = p.parts[-1]
+    environment = p.parts[-3]
+
+    # Validate model
+    if model not in ALLOWED_MODELS:
+        raise ValueError(f"Invalid model '{model}'. Allowed models: {ALLOWED_MODELS}")
+
+    # Validate level
+    if not level.startswith(LEVEL_PREFIX):
+        raise ValueError(f"Invalid level '{level}'. Must start with '{LEVEL_PREFIX}'")
+
+    # Validate category
+    if category not in ALLOWED_CATEGORIES:
+        raise ValueError(
+            f"Invalid category '{category}'. Allowed: {ALLOWED_CATEGORIES}"
+        )
+
+    return model, level, category, environment
+
+
+def build_dataset_configs(path: str):
+    p = Path(path)
+
+    model, level, category, env = validate_path(path)
+
+    configs = []
+    level_dirs = [d for d in p.rglob("*") if d.is_dir() and d.name.startswith("level_")]
+
+    if not level_dirs:
+        level_dirs = [p]
+
+    for level_path in level_dirs:
+        level = level_path.name if level_path.name.startswith("level_") else "level_1"
+
+        for category_dir in level_path.iterdir():
+            if not category_dir.is_dir():
+                continue
+
+            category = category_dir.name
+
+            config = {
+                "model": model,
+                "env": env,
+                "level": level,
+                "category": category,
+                "path": str(category_dir),
+            }
+
+            configs.append(config)
+
+    all_reports = []
+    overall_reports = []
+
+    for config in configs:
+        category_path = Path(config["path"])
+
+        report_paths = get_jsons(category_path)
+
+        for report_path in report_paths:
+            report, overall_report = get_scores(config, report_path)
+            all_reports.extend(report)
+            overall_reports.extend(overall_report)
+
+
 if __name__ == "__main__":
-    main()
+    fire.Fire(build_dataset_configs)
