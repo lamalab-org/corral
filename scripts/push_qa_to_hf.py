@@ -29,10 +29,20 @@ import json
 from pathlib import Path
 
 import pyarrow.parquet as pq
+from constants import (
+    HF_REPO_QA_REPORTS as REPO_REPORTS,
+)
+from constants import (
+    HF_REPO_QA_TOPIC as REPO_TOPIC,
+)
+from constants import (
+    KNOWN_QA_MODELS as KNOWN_MODELS,
+)
 from datasets import Dataset
 from dotenv import load_dotenv
 from huggingface_hub import HfApi
 from loguru import logger
+from utils import read_json
 
 # Load HF_TOKEN (and any other secrets) from .env
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
@@ -40,22 +50,8 @@ load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 _hf_api = HfApi()
 
 # ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-REPO_REPORTS = "jablonkagroup/corral-QAs-reports"
-REPO_TOPIC = "jablonkagroup/corral-QAs-topic_reports"
-
-KNOWN_MODELS = {"claude", "gpt", "gpt_oss"}
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def read_json(path: Path):
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
 
 
 def record_from_json(

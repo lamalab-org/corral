@@ -16,7 +16,6 @@ Output schema (one row per assistant message):
 
 import argparse
 import json
-import math
 import os
 import re
 from dataclasses import dataclass
@@ -25,50 +24,14 @@ from typing import Any
 
 from datasets import Dataset, Features, Sequence, Value, load_dataset
 from loguru import logger
+from utils import entropy_from_top_logprobs, read_json, safe_float
 
+try:
+    import pandas as pd  # type: ignore
 
-def read_json(path: Path) -> Any:
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def safe_float(x: Any) -> float | None:
-    try:
-        return float(x)
-    except Exception:
-        return None
-
-
-def logsumexp(logps: list[float]) -> float:
-    if not logps:
-        return float("-inf")
-    m = max(logps)
-    return m + math.log(sum(math.exp(lp - m) for lp in logps))
-
-
-def entropy_from_top_logprobs(top_logprobs: list[dict[str, Any]]) -> float | None:
-    """
-    top_logprobs: list of dicts like {"token": "...", "logprob": -0.12, ...}
-    We compute entropy H = -sum_i p_i log p_i over the distribution implied by top_logprobs,
-    normalized across the provided candidates.
-    """
-    if not top_logprobs:
-        return None
-
-    lps = []
-    for cand in top_logprobs:
-        lp = cand.get("logprob")
-        lp = safe_float(lp)
-        if lp is not None:
-            lps.append(lp)
-
-    if not lps:
-        return None
-
-    z = logsumexp(lps)
-    # Normalize within the provided candidate set (approx entropy).
-    ps = [math.exp(lp - z) for lp in lps]
-    return -sum(p * math.log(p + 1e-300) for p in ps)
+    _HAS_PANDAS = True
+except ImportError:
+    _HAS_PANDAS = False
 
 
 def infer_agent_and_verbosity_from_dir(
@@ -667,8 +630,8 @@ def main() -> None:
                 # 4) Optional parquet for the current subset
                 if args.parquet:
                     try:
-                        import pandas as pd  # type: ignore
-
+                        if not _HAS_PANDAS:
+                            raise ImportError
                         _df = pd.DataFrame(rows_to_output)
                         pq_path = Path(
                             args.parquet.replace(".parquet", f"_{subset_name}.parquet")
