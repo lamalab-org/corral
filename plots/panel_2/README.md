@@ -1,150 +1,120 @@
-# Panel 2 Plots - Dumbbell Plot
+# Panel 2 Plots
 
-## Overview
+This directory contains scripts for generating comparison plots across environments, ordered by QA scores.
 
-The `1_slope.py` script generates dumbbell plots comparing React vs Tool-Calling agents across different environments, ordered by QA scores.
+## Available Plots
 
-## Features
+### 1. Dumbbell Plot (`1_slope.py`)
+**Purpose**: Compare React vs Tool-Calling agent performance
 
-### 1. Environment Ordering by QA Score
-- **Strategy**: `average_qa` (default) or `model_specific_qa`
-  - `average_qa`: Orders environments by average QA score across all models
-  - `model_specific_qa`: Orders by QA score of a specific model (requires `--model_for_ordering`)
-- **Direction**: `ascending` or `descending` (default)
+Generates dumbbell plots showing performance differences between React and Tool-Calling agents across environments. Each environment shows dumbbells (one per model) with filled circles for React and hollow circles for Tool-Calling.
 
-### 2. Verbosity Filtering
-- `average` (default): Average across all verbosities (brief, workflow, comprehensive)
-- `brief`: Only brief verbosity
-- `workflow`: Only workflow verbosity
-- `comprehensive`: Only comprehensive verbosity
-
-### 3. Task Type Filtering
-- `both` (default): Include both tasks and subtasks
-- `tasks`: Only level 1 (main tasks)
-- `subtasks`: Only levels > 1 (subtasks)
-
-### 4. Agent Type Selection
-- `average` (default): Shows both React and Tool-Calling agents
-- Note: For dumbbell plots, both agent types are always shown for comparison
-
-### 5. Model Selection
-- Default: `claude-4.5,gpt-4o`
-- Can specify 1-3 models: `claude-4.5`, `gpt-4o`, `gpt-oss-120b`
-
-## Usage
-
-### Basic Usage (Default Settings)
-
+**Quick Start**:
 ```bash
 python 1_slope.py
 ```
 
-This generates `dumbbell_plot.pdf` with:
-- Environments ordered by average QA score (descending)
-- Average verbosity across all levels
-- Both tasks and subtasks
-- Claude-4.5 and GPT-4o models
+**Key Features**:
+- Always shows both agent types for comparison
+- Supports 1-3 models
+- Configurable environment ordering, verbosity, task type, and level strategies
 
-### Custom Configuration Examples
+### 2. Slope Plot (`2_slope.py`)
+**Purpose**: Show model performance trends across environments
 
+Generates slope plots where each model is represented by a colored line connecting its scores across environments. Useful for comparing overall model performance patterns.
 
+**Quick Start**:
 ```bash
-python 1_slope.py \
-    --models="claude-4.5,gpt-4o,gpt-oss-120b" \
-    --ordering_strategy=model_specific_qa \
-    --model_for_ordering=claude \
-    --order_direction=ascending \
-    --verbosity_strategy=average \
-    --task_type_strategy=both
-
+python 2_slope.py
 ```
 
-#### 1. Order by Claude's QA score, ascending order
+**Key Features**:
+- One line per model
+- Can filter by agent type (react/tool_calling/average)
+- Configurable environment ordering, verbosity, task type, and level strategies
 
+**Documentation**: See [README_slope.md](README_slope.md) for detailed usage
+
+### 3. Performance Gap Plot (`3_gap_plot.py`)
+**Purpose**: Show performance gaps across environments
+
+Generates a plot with two lines showing:
+1. **Model Gap**: (best model - worst model) averaged across agents
+2. **Agent Gap**: (best agent - worst agent) averaged across models
+
+**Quick Start**:
 ```bash
-python 1_slope.py \
-    --ordering_strategy=model_specific_qa \
-    --model_for_ordering=claude \
-    --order_direction=ascending
+python 3_gap_plot.py
 ```
 
-#### 2. Only workflow verbosity, only main tasks
+**Key Features**:
+- Two lines showing different types of performance variance
+- Model gap (rose color) - shows how much models differ
+- Agent gap (teal color) - shows how much agents/scaffolds differ
+- Configurable environment ordering, verbosity, task type, and level strategies
 
+## Common Configuration Options
+
+Both scripts support these strategies:
+
+| Strategy | Options | Default | Description |
+|----------|---------|---------|-------------|
+| **Environment Ordering** | `average_qa`, `model_specific_qa` | `average_qa` | How to order environments |
+| **QA Type** | `qa`, `reasoning_qa` | `qa` | Which QA scores to use for ordering |
+| **Order Direction** | `ascending`, `descending` | `descending` | Sort order |
+| **Verbosity** | `average`, `brief`, `workflow`, `comprehensive` | `average` | Tool verbosity filter |
+| **Task Type** | `tasks`, `subtasks`, `both` | `both` | Task category filter |
+| **Level** | `all`, `default_map`, `1-4` | `default_map` | Difficulty level filter |
+| **Metric** | `average_score`, `pass_at_k`, `pass_hat_k` | `average_score` | Performance metric |
+
+### Dumbbell-Specific Options
+- **Agent Type**: Always shows both (React and Tool-Calling)
+
+### Slope-Specific Options
+- **Agent Type**: `average`, `react`, `tool_calling` - can filter or average
+
+## Data Requirements
+
+Both scripts require data files in `analysis/results/data/`:
+1. `reports.jsonl` - Main benchmark results
+2. `qa_topic_reports.jsonl` - QA evaluation scores
+
+Run the Snakefile in `analysis/` to download these files:
 ```bash
-python 1_slope.py \
-    --verbosity_strategy=workflow \
-    --task_type_strategy=tasks
+cd ../../analysis
+snakemake -c1
 ```
 
-#### 3. All three models, brief verbosity, subtasks only
+## Configuration
 
-```bash
-python 1_slope.py \
-    --models="claude-4.5,gpt-4o,gpt-oss-120b" \
-    --verbosity_strategy=brief \
-    --task_type_strategy=subtasks \
-    --output_filename=three_models_brief_subtasks.pdf
-```
-
-#### 4. Full custom configuration
-
-```bash
-python 1_slope.py \
-    --ordering_strategy=model_specific_qa \
-    --model_for_ordering=gpt \
-    --order_direction=descending \
-    --verbosity_strategy=comprehensive \
-    --task_type_strategy=both \
-    --models="claude-4.5,gpt-4o" \
-    --output_filename=custom_plot.pdf
-```
-
-## Parameters
-
-| Parameter | Type | Default | Options | Description |
-|-----------|------|---------|---------|-------------|
-| `--ordering_strategy` | str | `average_qa` | `average_qa`, `model_specific_qa` | How to order environments |
-| `--order_direction` | str | `descending` | `ascending`, `descending` | Sort order |
-| `--model_for_ordering` | str | None | `claude`, `gpt`, `gpt_oss` | Model for `model_specific_qa` |
-| `--verbosity_strategy` | str | `average` | `average`, `brief`, `workflow`, `comprehensive` | Tool verbosity filter |
-| `--task_type_strategy` | str | `both` | `tasks`, `subtasks`, `both` | Task level filter |
-| `--agent_type_strategy` | str | `average` | `average` | Agent type (always shows both for dumbbells) |
-| `--models` | str | `claude-4.5,gpt-4o` | Comma-separated list | Models to plot |
-| `--output_filename` | str | `dumbbell_plot.pdf` | Any filename | Output file path |
+Colors, font sizes, and display names are centralized in:
+- `analysis/plot_config.py` - Shared configuration for all plots
 
 ## Output
 
-The script generates two files:
-- `{output_filename}.pdf` - Vector graphics (recommended for publications)
-- `{output_filename}.png` - Raster graphics (300 DPI)
+Both scripts generate:
+- `.pdf` - Vector graphics (recommended for publications)
+- `.png` - Raster graphics (300 DPI)
 
-## Data Sources
+## Examples
 
-The script uses two datasets downloaded from HuggingFace:
-1. **Main Benchmark Reports** (`analysis/results/data/reports.jsonl`)
-   - Contains agent performance metrics across environments
-2. **QA Topic Reports** (`analysis/results/data/qa_topic_reports.jsonl`)
-   - Contains QA evaluation scores used for ordering
+### Compare agent types across environments ordered by reasoning QA
+```bash
+python 1_slope.py --qa_type_for_ordering=reasoning_qa
+```
 
-## Plot Interpretation
+### Show React agent performance trends
+```bash
+python 2_slope.py --agent_type_strategy=react
+```
 
-- **X-axis**: Environments (ordered by QA score)
-- **Y-axis**: Average Score (0-1)
-- **Lines**: Each line connects React (filled circle) to Tool-Calling (hollow circle) for a model
-- **Colors**:
-  - Purple (#8D5F8C): Claude-4.5
-  - Blue (#696FC7): GPT-4o
-  - Teal (#4A90A4): GPT-OSS-120b
+### Use Pass@5 metric with all three models
+```bash
+python 2_slope.py --metric=pass_at_k --k_value=5 --models="claude-4.5,gpt-4o,gpt-oss-120b"
+```
 
-## Requirements
-
-- Python 3.10+
-- Dependencies: pandas, matplotlib, fire, loguru, scipy, numpy
-- Data files must be downloaded first (run Snakefile in `analysis/`)
-
-## Notes
-
-- The script automatically filters out environments with no data
-- Missing data points are handled gracefully
-- Plot styling uses `plot_config.py` for consistent colors across panels
-- All code passes `ruff` linting checks
+### Show performance gaps ordered by reasoning QA
+```bash
+python 3_gap_plot.py --qa_type_for_ordering=reasoning_qa
+```

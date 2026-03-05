@@ -1,12 +1,12 @@
-"""Plot dumbbell chart comparing React vs Tool-Calling agents across environments.
+"""Plot performance gaps across environments.
 
-Each environment shows two dumbbells (one per model) with React on one end
-and Tool-Calling on the other. Environments are ordered by QA scores.
+Shows two lines:
+1. Model gap: (best model - worst model) averaged across agents
+2. Agent gap: (best agent - worst agent) averaged across models
 
 Usage:
-    python 1_slope.py --ordering_strategy=average_qa --verbosity_strategy=average \\
-                      --task_type_strategy=both --agent_type_strategy=average \\
-                      --order_direction=descending
+    python 3_gap_plot.py --ordering_strategy=average_qa --verbosity_strategy=average \\
+                         --task_type_strategy=both --order_direction=descending
 """
 
 import sys
@@ -14,7 +14,6 @@ from pathlib import Path
 
 import fire
 import lama_aesthetics
-import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -32,8 +31,7 @@ sys.path.insert(0, str(REPO_ROOT / "plots"))
 from plot_config import (  # noqa: E402
     ENVIRONMENT_NAMES,
     FONT_SIZES,
-    MODEL_COLOUR_MAP,
-    MODEL_NAMES,
+    GAP_COLORS,
 )
 
 # ==================== CONFIGURATION ====================
@@ -41,11 +39,6 @@ from plot_config import (  # noqa: E402
 # Data paths (relative to analysis directory)
 REPORTS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "reports.jsonl"
 QA_REPORTS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "qa_topic_reports.jsonl"
-
-
-# Offsets for plotting
-MODEL_OFFSET = 0.1  # Horizontal separation between models
-AGENT_OFFSET = 0.2  # Horizontal separation between react/tool_calling
 
 # Default per-environment level selection (used when level_strategy="default_map")
 DEFAULT_ENV_LEVEL_MAP = {
@@ -95,11 +88,11 @@ def get_metric_display_name(metric: str, k_value: int) -> str:
         Display name for the metric
     """
     if metric == "average_score":
-        return "Average Score"
+        return "Performance Gap"
     elif metric == "pass_at_k":
-        return f"Pass@{k_value}"
+        return f"Pass@{k_value} Gap"
     elif metric == "pass_hat_k":
-        return f"Pass^{k_value}"
+        return f"Pass^{k_value} Gap"
     else:
         msg = f"Invalid metric: {metric}"
         raise ValueError(msg)
@@ -220,30 +213,6 @@ def filter_by_level(
         raise
 
 
-def filter_by_agent_type(
-    df: pd.DataFrame, agent_type_strategy: str, agent_value: str | None = None
-) -> pd.DataFrame:
-    """Filter dataframe by agent type strategy.
-
-    Args:
-        df: Input dataframe with "agent_type" column
-        agent_type_strategy: "average", "react", or "tool_calling"
-        agent_value: Specific agent value (overrides strategy)
-
-    Returns:
-        Filtered dataframe
-    """
-    if agent_value:
-        agent_type_strategy = agent_value
-
-    if agent_type_strategy == "average":
-        return df
-    if agent_type_strategy in ["react", "tool_calling"]:
-        return df[df["agent_type"] == agent_type_strategy]
-    msg = f"Invalid agent_type_strategy: {agent_type_strategy}"
-    raise ValueError(msg)
-
-
 # ==================== ORDERING FUNCTIONS ====================
 
 
@@ -341,75 +310,72 @@ def order_environments(
 # ==================== DATA COLLECTION ====================
 
 
-def collect_plot_data(
+def collect_gap_data(
     df: pd.DataFrame,
     environments: list[str],
-    models: list[str],
-    agent_types: list[str],
     metric_column: str,
 ) -> dict:
-    """Collect aggregated data for plotting.
+    """Collect gap data for plotting.
 
     Args:
         df: Filtered benchmark reports dataframe
         environments: List of environments to plot
-        models: List of models to plot
-        agent_types: List of agent types to plot
         metric_column: Column name of the metric to plot
 
     Returns:
-        Nested dict: {env: {model: {agent: score}}}
+        Dict with {env: {"model_gap": float, "agent_gap": float}}
     """
-    plot_data = {}
+    gap_data = {}
 
     for env in environments:
         env_df = df[df["environment"] == env]
         if env_df.empty:
             continue
 
-        plot_data[env] = {}
+        # Compute model gap: (best model - worst model) averaged across agents
+        # Group by model, average across agents
+        model_scores = env_df.groupby("model")[metric_column].mean()
+        if len(model_scores) > 0:
+            model_gap = model_scores.max() - model_scores.min()
+        else:
+            model_gap = np.nan
 
-        for model in models:
-            model_df = env_df[env_df["model"] == model]
-            if model_df.empty:
-                continue
+        # Compute agent gap: (best agent - worst agent) averaged across models
+        # Group by agent_type, average across models
+        agent_scores = env_df.groupby("agent_type")[metric_column].mean()
+        if len(agent_scores) > 0:
+            agent_gap = agent_scores.max() - agent_scores.min()
+        else:
+            agent_gap = np.nan
 
-            plot_data[env][model] = {}
+        if not np.isnan(model_gap) or not np.isnan(agent_gap):
+            gap_data[env] = {
+                "model_gap": model_gap,
+                "agent_gap": agent_gap,
+            }
 
-            for agent in agent_types:
-                agent_df = model_df[model_df["agent_type"] == agent]
-                if agent_df.empty:
-                    continue
-
-                # Compute mean score across all filtered rows
-                score = agent_df[metric_column].mean()
-                if not np.isnan(score):
-                    plot_data[env][model][agent] = score
-
-    return plot_data
+    return gap_data
 
 
 # ==================== PLOTTING ====================
 
 
-def plot_dumbbell(
-    plot_data: dict,
+def plot_gaps(
+    gap_data: dict,
     environments: list[str],
-    models: list[str],
     output_path: Path,
     metric_display_name: str,
 ) -> None:
-    """Create dumbbell plot.
+    """Create gap plot.
 
     Args:
-        plot_data: Nested dict with scores
+        gap_data: Dict with gap scores {env: {"model_gap": float, "agent_gap": float}}
         environments: Ordered list of environments
-        models: List of models to plot
         output_path: Path to save the figure
         metric_display_name: Display name for the metric (y-axis label)
     """
     # Filter environments with data
-    available_envs = [env for env in environments if plot_data.get(env)]
+    available_envs = [env for env in environments if env in gap_data]
 
     if not available_envs:
         logger.warning("No data available for any environment!")
@@ -418,72 +384,51 @@ def plot_dumbbell(
     # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
 
-    x_positions = []
-    x_labels = []
+    x_positions = list(range(len(available_envs)))
+    x_labels = [ENVIRONMENT_NAMES.get(env, env.upper()) for env in available_envs]
 
-    for x_idx, env in enumerate(available_envs):
-        env_data = plot_data[env]
+    # Collect data for both gap types
+    model_gaps = []
+    agent_gaps = []
 
-        x_positions.append(x_idx)
-        x_labels.append(ENVIRONMENT_NAMES.get(env, env.upper()))
+    for env in available_envs:
+        model_gaps.append(gap_data[env]["model_gap"])
+        agent_gaps.append(gap_data[env]["agent_gap"])
 
-        # Plot for each model
-        for model_idx, model_name in enumerate(models):
-            if model_name not in env_data:
-                continue
+    # Plot model gap line
+    ax.plot(
+        x_positions,
+        model_gaps,
+        color=GAP_COLORS["model_gap"],
+        linewidth=2,
+        marker="o",
+        markersize=6,
+        label="Model Gap",
+        zorder=3,
+    )
 
-            agent_scores = env_data[model_name]
+    # Plot agent gap line
+    ax.plot(
+        x_positions,
+        agent_gaps,
+        color=GAP_COLORS["agent_gap"],
+        linewidth=2,
+        marker="o",
+        markersize=6,
+        label="Agent Gap",
+        zorder=3,
+    )
 
-            # Need both react and tool_calling
-            if "react" not in agent_scores or "tool_calling" not in agent_scores:
-                continue
-
-            react_score = agent_scores["react"]
-            tool_calling_score = agent_scores["tool_calling"]
-
-            # Determine positions
-            model_off = MODEL_OFFSET if model_idx == 1 else -MODEL_OFFSET
-            if len(models) == 3:
-                model_off = MODEL_OFFSET * (model_idx - 1)
-
-            react_x = x_idx + model_off - AGENT_OFFSET
-            tool_x = x_idx + model_off + AGENT_OFFSET
-
-            # Color
-            color = MODEL_COLOUR_MAP.get(model_name, "#333333")
-
-            # Plot sloped dumbbell
-            ax.plot(
-                [react_x, tool_x],
-                [react_score, tool_calling_score],
-                linestyle="-",
-                color=color,
-                linewidth=2.5,
-                alpha=0.7,
-                zorder=2,
-            )
-
-            # Plot endpoints: filled for react, unfilled for tool_calling
-            ax.scatter(
-                react_x,
-                react_score,
-                s=80,
-                color=color,
-                marker="o",
-                edgecolors=color,
-                linewidths=0.5,
-                zorder=3,
-            )
-            ax.scatter(
-                tool_x,
-                tool_calling_score,
-                s=80,
-                marker="o",
-                facecolors="none",
-                edgecolors=color,
-                linewidths=1.5,
-                zorder=3,
-            )
+    # Add vertical dashed lines at each environment
+    for x_pos in x_positions:
+        ax.axvline(
+            x_pos,
+            color="gray",
+            linestyle="--",
+            linewidth=0.5,
+            alpha=0.5,
+            zorder=1,
+        )
 
     # Styling
     ax.set_xticks(x_positions)
@@ -495,81 +440,25 @@ def plot_dumbbell(
     ax.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"])
     ax.tick_params(axis="y", labelsize=FONT_SIZES["tick_label"])
 
-    # Add vertical separators
-    for i in range(len(x_positions) - 1):
-        ax.axvline(
-            x_positions[i] + 0.5,
-            color="gray",
-            linestyle=":",
-            linewidth=0.8,
-            alpha=0.3,
-        )
-
     # Legend
-    handles = []
-    for model_id, model_display in MODEL_NAMES.items():
-        if model_id in models:
-            handles.append(
-                mlines.Line2D(
-                    [0],
-                    [0],
-                    color=MODEL_COLOUR_MAP[model_id],
-                    lw=2.5,
-                    linestyle="-",
-                    label=model_display,
-                )
-            )
-
-    handles.extend(
-        [
-            mlines.Line2D(
-                [0],
-                [0],
-                color="none",
-                marker="o",
-                markersize=8,
-                markerfacecolor="gray",
-                markeredgecolor="gray",
-                linestyle="None",
-                label="React Agent",
-            ),
-            mlines.Line2D(
-                [0],
-                [0],
-                color="none",
-                marker="o",
-                markersize=8,
-                markerfacecolor="none",
-                markeredgecolor="gray",
-                linestyle="None",
-                label="Tool-Calling Agent",
-            ),
-        ]
-    )
-
     ax.legend(
-        handles=handles,
-        bbox_to_anchor=(0.95, 0.98),
+        loc="best",
         fontsize=FONT_SIZES["legend"],
         framealpha=0.9,
     )
 
     # Set axis limits with range_frame
-    all_scores = []
-    for env_data in plot_data.values():
-        for model_data in env_data.values():
-            all_scores.extend(model_data.values())
+    all_gaps = model_gaps + agent_gaps
+    all_gaps = [g for g in all_gaps if not np.isnan(g)]
 
-    if x_positions and all_scores:
+    if x_positions and all_gaps:
         x_range = np.array([min(x_positions) - 0.5, max(x_positions) + 0.5])
-        min_score = min(all_scores)
-        max_score = max(all_scores)
-        y_range = np.array([max(0, min_score), min(1, max_score)])
+        min_gap = min(all_gaps)
+        max_gap = max(all_gaps)
+        y_range = np.array([max(0, min_gap - 0.05), max_gap + 0.05])
 
         # Apply range_frame for clean axis appearance
         range_frame(ax, x_range, y_range, pad=0.05)
-
-    # ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.5)
 
     fig.tight_layout()
 
@@ -596,13 +485,11 @@ def main(
     verbosity_strategy: str = "average",
     task_type_strategy: str = "both",
     level_strategy: str = "default_map",
-    agent_type_strategy: str = "average",
     metric: str = "average_score",
     k_value: int = 5,
-    models: str = "claude-4.5,gpt-4o",
-    output_filename: str = "dumbbell_plot.pdf",
+    output_filename: str = "gap_plot.pdf",
 ) -> None:
-    """Generate dumbbell plot comparing React vs Tool-Calling agents.
+    """Generate gap plot showing model and agent performance gaps across environments.
 
     Args:
         ordering_strategy: How to order environments by QA score.
@@ -621,17 +508,13 @@ def main(
             Options: "all" (average across all levels),
                      "default_map" (use per-environment mapping),
                      or specific level like "1", "2", "3", "4"
-        agent_type_strategy: Which agent types to compare.
-            Options: "average" (shows both), "react", "tool_calling"
         metric: Metric to plot.
             Options: "average_score", "pass_at_k", "pass_hat_k"
         k_value: K value for Pass@k or Pass^k metrics (1-5)
-        models: Comma-separated list of models to plot
-            (e.g., "claude-4.5,gpt-4o,gpt-oss-80b")
         output_filename: Output filename (PDF)
     """
     logger.info("=" * 60)
-    logger.info("Dumbbell Plot Generation")
+    logger.info("Performance Gap Plot Generation")
     logger.info("=" * 60)
     logger.info(f"Ordering strategy: {ordering_strategy}")
     logger.info(f"Order direction: {order_direction}")
@@ -641,11 +524,9 @@ def main(
     logger.info(f"Verbosity strategy: {verbosity_strategy}")
     logger.info(f"Task type strategy: {task_type_strategy}")
     logger.info(f"Level strategy: {level_strategy}")
-    logger.info(f"Agent type strategy: {agent_type_strategy}")
     logger.info(f"Metric: {metric}")
     if metric in ["pass_at_k", "pass_hat_k"]:
         logger.info(f"K value: {k_value}")
-    logger.info(f"Models to plot: {models}")
     logger.info("")
 
     # Validate inputs
@@ -660,9 +541,6 @@ def main(
     # Get metric column name and display name
     metric_column = get_metric_column_name(metric, k_value)
     metric_display_name = get_metric_display_name(metric, k_value)
-
-    # Parse models list
-    model_list = [m.strip() for m in models.split(",")]
 
     # Load data
     logger.info("Loading datasets...")
@@ -687,32 +565,27 @@ def main(
     filtered_df = filter_by_task_type(filtered_df, task_type_strategy)
     filtered_df = filter_by_level(filtered_df, level_strategy)
 
-    # For dumbbell plot, we always show both agent types
-    agent_types_to_plot = ["react", "tool_calling"]
-
     logger.info(f"Filtered to {len(filtered_df)} rows")
     if level_strategy == "default_map":
         logger.info(f"Using default level map: {DEFAULT_ENV_LEVEL_MAP}")
     logger.info("")
 
-    # Collect plot data
-    logger.info("Collecting plot data...")
-    plot_data = collect_plot_data(
+    # Collect gap data
+    logger.info("Computing performance gaps...")
+    gap_data = collect_gap_data(
         filtered_df,
         ordered_envs,
-        model_list,
-        agent_types_to_plot,
         metric_column,
     )
 
     # Generate plot
     logger.info("Generating plot...")
     output_path = Path(output_filename)
-    plot_dumbbell(plot_data, ordered_envs, model_list, output_path, metric_display_name)
+    plot_gaps(gap_data, ordered_envs, output_path, metric_display_name)
 
     logger.info("")
     logger.info("=" * 60)
-    logger.info("Dumbbell plot generated successfully!")
+    logger.info("Gap plot generated successfully!")
     logger.info("=" * 60)
 
 

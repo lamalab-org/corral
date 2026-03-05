@@ -1,10 +1,10 @@
-"""Plot dumbbell chart comparing React vs Tool-Calling agents across environments.
+"""Plot slope chart showing model performance across environments.
 
-Each environment shows two dumbbells (one per model) with React on one end
-and Tool-Calling on the other. Environments are ordered by QA scores.
+Each model is represented by a colored line connecting scores across environments.
+Environments are ordered by QA scores on the x-axis.
 
 Usage:
-    python 1_slope.py --ordering_strategy=average_qa --verbosity_strategy=average \\
+    python 2_slope.py --ordering_strategy=average_qa --verbosity_strategy=average \\
                       --task_type_strategy=both --agent_type_strategy=average \\
                       --order_direction=descending
 """
@@ -14,7 +14,6 @@ from pathlib import Path
 
 import fire
 import lama_aesthetics
-import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -41,11 +40,6 @@ from plot_config import (  # noqa: E402
 # Data paths (relative to analysis directory)
 REPORTS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "reports.jsonl"
 QA_REPORTS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "qa_topic_reports.jsonl"
-
-
-# Offsets for plotting
-MODEL_OFFSET = 0.1  # Horizontal separation between models
-AGENT_OFFSET = 0.2  # Horizontal separation between react/tool_calling
 
 # Default per-environment level selection (used when level_strategy="default_map")
 DEFAULT_ENV_LEVEL_MAP = {
@@ -345,7 +339,6 @@ def collect_plot_data(
     df: pd.DataFrame,
     environments: list[str],
     models: list[str],
-    agent_types: list[str],
     metric_column: str,
 ) -> dict:
     """Collect aggregated data for plotting.
@@ -354,37 +347,29 @@ def collect_plot_data(
         df: Filtered benchmark reports dataframe
         environments: List of environments to plot
         models: List of models to plot
-        agent_types: List of agent types to plot
         metric_column: Column name of the metric to plot
 
     Returns:
-        Nested dict: {env: {model: {agent: score}}}
+        Nested dict: {model: {env: score}}
     """
     plot_data = {}
 
-    for env in environments:
-        env_df = df[df["environment"] == env]
-        if env_df.empty:
+    for model in models:
+        model_df = df[df["model"] == model]
+        if model_df.empty:
             continue
 
-        plot_data[env] = {}
+        plot_data[model] = {}
 
-        for model in models:
-            model_df = env_df[env_df["model"] == model]
-            if model_df.empty:
+        for env in environments:
+            env_df = model_df[model_df["environment"] == env]
+            if env_df.empty:
                 continue
 
-            plot_data[env][model] = {}
-
-            for agent in agent_types:
-                agent_df = model_df[model_df["agent_type"] == agent]
-                if agent_df.empty:
-                    continue
-
-                # Compute mean score across all filtered rows
-                score = agent_df[metric_column].mean()
-                if not np.isnan(score):
-                    plot_data[env][model][agent] = score
+            # Compute mean score across all filtered rows (agent types, verbosities, etc.)
+            score = env_df[metric_column].mean()
+            if not np.isnan(score):
+                plot_data[model][env] = score
 
     return plot_data
 
@@ -392,24 +377,26 @@ def collect_plot_data(
 # ==================== PLOTTING ====================
 
 
-def plot_dumbbell(
+def plot_slope(
     plot_data: dict,
     environments: list[str],
     models: list[str],
     output_path: Path,
     metric_display_name: str,
 ) -> None:
-    """Create dumbbell plot.
+    """Create slope plot.
 
     Args:
-        plot_data: Nested dict with scores
+        plot_data: Nested dict with scores {model: {env: score}}
         environments: Ordered list of environments
         models: List of models to plot
         output_path: Path to save the figure
         metric_display_name: Display name for the metric (y-axis label)
     """
     # Filter environments with data
-    available_envs = [env for env in environments if plot_data.get(env)]
+    available_envs = [
+        env for env in environments if any(env in plot_data.get(m, {}) for m in models)
+    ]
 
     if not available_envs:
         logger.warning("No data available for any environment!")
@@ -418,72 +405,50 @@ def plot_dumbbell(
     # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
 
-    x_positions = []
-    x_labels = []
+    x_positions = list(range(len(available_envs)))
+    x_labels = [ENVIRONMENT_NAMES.get(env, env.upper()) for env in available_envs]
 
-    for x_idx, env in enumerate(available_envs):
-        env_data = plot_data[env]
+    # Plot lines for each model
+    for model_name in models:
+        if model_name not in plot_data:
+            continue
 
-        x_positions.append(x_idx)
-        x_labels.append(ENVIRONMENT_NAMES.get(env, env.upper()))
+        model_scores = plot_data[model_name]
 
-        # Plot for each model
-        for model_idx, model_name in enumerate(models):
-            if model_name not in env_data:
-                continue
+        # Collect x and y for this model
+        x_vals = []
+        y_vals = []
+        for x_idx, env in enumerate(available_envs):
+            if env in model_scores:
+                x_vals.append(x_idx)
+                y_vals.append(model_scores[env])
 
-            agent_scores = env_data[model_name]
+        if not x_vals:
+            continue
 
-            # Need both react and tool_calling
-            if "react" not in agent_scores or "tool_calling" not in agent_scores:
-                continue
+        # Plot line
+        color = MODEL_COLOUR_MAP.get(model_name, "#333333")
+        ax.plot(
+            x_vals,
+            y_vals,
+            color=color,
+            linewidth=2.5,
+            marker="o",
+            markersize=6,
+            label=MODEL_NAMES.get(model_name, model_name),
+            zorder=3,
+        )
 
-            react_score = agent_scores["react"]
-            tool_calling_score = agent_scores["tool_calling"]
-
-            # Determine positions
-            model_off = MODEL_OFFSET if model_idx == 1 else -MODEL_OFFSET
-            if len(models) == 3:
-                model_off = MODEL_OFFSET * (model_idx - 1)
-
-            react_x = x_idx + model_off - AGENT_OFFSET
-            tool_x = x_idx + model_off + AGENT_OFFSET
-
-            # Color
-            color = MODEL_COLOUR_MAP.get(model_name, "#333333")
-
-            # Plot sloped dumbbell
-            ax.plot(
-                [react_x, tool_x],
-                [react_score, tool_calling_score],
-                linestyle="-",
-                color=color,
-                linewidth=2.5,
-                alpha=0.7,
-                zorder=2,
-            )
-
-            # Plot endpoints: filled for react, unfilled for tool_calling
-            ax.scatter(
-                react_x,
-                react_score,
-                s=80,
-                color=color,
-                marker="o",
-                edgecolors=color,
-                linewidths=0.5,
-                zorder=3,
-            )
-            ax.scatter(
-                tool_x,
-                tool_calling_score,
-                s=80,
-                marker="o",
-                facecolors="none",
-                edgecolors=color,
-                linewidths=1.5,
-                zorder=3,
-            )
+    # Add vertical dashed lines at each environment
+    for x_pos in x_positions:
+        ax.axvline(
+            x_pos,
+            color="gray",
+            linestyle="--",
+            linewidth=1,
+            alpha=0.5,
+            zorder=1,
+        )
 
     # Styling
     ax.set_xticks(x_positions)
@@ -495,81 +460,26 @@ def plot_dumbbell(
     ax.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"])
     ax.tick_params(axis="y", labelsize=FONT_SIZES["tick_label"])
 
-    # Add vertical separators
-    for i in range(len(x_positions) - 1):
-        ax.axvline(
-            x_positions[i] + 0.5,
-            color="gray",
-            linestyle=":",
-            linewidth=0.8,
-            alpha=0.3,
-        )
-
     # Legend
-    handles = []
-    for model_id, model_display in MODEL_NAMES.items():
-        if model_id in models:
-            handles.append(
-                mlines.Line2D(
-                    [0],
-                    [0],
-                    color=MODEL_COLOUR_MAP[model_id],
-                    lw=2.5,
-                    linestyle="-",
-                    label=model_display,
-                )
-            )
-
-    handles.extend(
-        [
-            mlines.Line2D(
-                [0],
-                [0],
-                color="none",
-                marker="o",
-                markersize=8,
-                markerfacecolor="gray",
-                markeredgecolor="gray",
-                linestyle="None",
-                label="React Agent",
-            ),
-            mlines.Line2D(
-                [0],
-                [0],
-                color="none",
-                marker="o",
-                markersize=8,
-                markerfacecolor="none",
-                markeredgecolor="gray",
-                linestyle="None",
-                label="Tool-Calling Agent",
-            ),
-        ]
-    )
-
     ax.legend(
-        handles=handles,
-        bbox_to_anchor=(0.95, 0.98),
+        loc="best",
         fontsize=FONT_SIZES["legend"],
         framealpha=0.9,
     )
 
     # Set axis limits with range_frame
     all_scores = []
-    for env_data in plot_data.values():
-        for model_data in env_data.values():
-            all_scores.extend(model_data.values())
+    for model_data in plot_data.values():
+        all_scores.extend(model_data.values())
 
     if x_positions and all_scores:
         x_range = np.array([min(x_positions) - 0.5, max(x_positions) + 0.5])
         min_score = min(all_scores)
         max_score = max(all_scores)
-        y_range = np.array([max(0, min_score), min(1, max_score)])
+        y_range = np.array([max(0, min_score - 0.05), min(1, max_score + 0.05)])
 
         # Apply range_frame for clean axis appearance
         range_frame(ax, x_range, y_range, pad=0.05)
-
-    # ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.5)
 
     fig.tight_layout()
 
@@ -600,9 +510,9 @@ def main(
     metric: str = "average_score",
     k_value: int = 5,
     models: str = "claude-4.5,gpt-4o",
-    output_filename: str = "dumbbell_plot.pdf",
+    output_filename: str = "slope_plot.pdf",
 ) -> None:
-    """Generate dumbbell plot comparing React vs Tool-Calling agents.
+    """Generate slope plot showing model performance across environments.
 
     Args:
         ordering_strategy: How to order environments by QA score.
@@ -621,17 +531,17 @@ def main(
             Options: "all" (average across all levels),
                      "default_map" (use per-environment mapping),
                      or specific level like "1", "2", "3", "4"
-        agent_type_strategy: Which agent types to compare.
-            Options: "average" (shows both), "react", "tool_calling"
+        agent_type_strategy: Which agent types to include.
+            Options: "average" (average both), "react", "tool_calling"
         metric: Metric to plot.
             Options: "average_score", "pass_at_k", "pass_hat_k"
         k_value: K value for Pass@k or Pass^k metrics (1-5)
         models: Comma-separated list of models to plot
-            (e.g., "claude-4.5,gpt-4o,gpt-oss-80b")
+            (e.g., "claude-4.5,gpt-4o,gpt-oss-120b")
         output_filename: Output filename (PDF)
     """
     logger.info("=" * 60)
-    logger.info("Dumbbell Plot Generation")
+    logger.info("Slope Plot Generation")
     logger.info("=" * 60)
     logger.info(f"Ordering strategy: {ordering_strategy}")
     logger.info(f"Order direction: {order_direction}")
@@ -686,9 +596,7 @@ def main(
     filtered_df = filter_by_verbosity(filtered_df, verbosity_strategy)
     filtered_df = filter_by_task_type(filtered_df, task_type_strategy)
     filtered_df = filter_by_level(filtered_df, level_strategy)
-
-    # For dumbbell plot, we always show both agent types
-    agent_types_to_plot = ["react", "tool_calling"]
+    filtered_df = filter_by_agent_type(filtered_df, agent_type_strategy)
 
     logger.info(f"Filtered to {len(filtered_df)} rows")
     if level_strategy == "default_map":
@@ -701,18 +609,17 @@ def main(
         filtered_df,
         ordered_envs,
         model_list,
-        agent_types_to_plot,
         metric_column,
     )
 
     # Generate plot
     logger.info("Generating plot...")
     output_path = Path(output_filename)
-    plot_dumbbell(plot_data, ordered_envs, model_list, output_path, metric_display_name)
+    plot_slope(plot_data, ordered_envs, model_list, output_path, metric_display_name)
 
     logger.info("")
     logger.info("=" * 60)
-    logger.info("Dumbbell plot generated successfully!")
+    logger.info("Slope plot generated successfully!")
     logger.info("=" * 60)
 
 
