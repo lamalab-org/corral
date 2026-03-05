@@ -43,8 +43,8 @@ from pathlib import Path
 
 import fire
 import pandas as pd
-from datasets import get_dataset_config_names, load_dataset
 from dotenv import load_dotenv
+from huggingface_hub import hf_hub_download
 from loguru import logger
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -85,12 +85,27 @@ def load_local_dataset(output_dir: str | Path = "results/data") -> pd.DataFrame:
 def _list_configs(configs: list[str] | None) -> list[str]:
     """Return configs to download, validating any user-supplied names against
     what the Hub actually has to catch typos early."""
+    from huggingface_hub import HfApi
+
     logger.info(f"Fetching config list from '{HF_REPO}' …")
-    available: list[str] = get_dataset_config_names(HF_REPO, token=HF_TOKEN)
-    logger.info(f"  → {len(available)} config(s) found: {sorted(available)}")
+
+    # List all files in the repo and extract config names from parquet file paths
+    api = HfApi()
+    files = api.list_repo_files(HF_REPO, repo_type="dataset", token=HF_TOKEN)
+
+    # Extract config names from parquet file paths like "afm_qa_claude/train-00000-of-00001.parquet"
+    available = []
+    for f in files:
+        if f.endswith("/train-00000-of-00001.parquet"):
+            config_name = f.split("/")[0]
+            available.append(config_name)
+
+    available = sorted(available)
+    logger.info(f"  → {len(available)} config(s) found")
+    logger.debug(f"  Available configs: {available}")
 
     if not configs:
-        return sorted(available)
+        return available
 
     available_set = set(available)
     unknown = [c for c in configs if c not in available_set]
@@ -106,8 +121,20 @@ def _list_configs(configs: list[str] | None) -> list[str]:
 def _fetch_config(config_name: str) -> pd.DataFrame:
     """Download one Hub config and return it as a DataFrame with nested JSON decoded."""
     logger.info(f"  ↳ Downloading config '{config_name}' …")
-    ds = load_dataset(HF_REPO, name=config_name, token=HF_TOKEN, split="train")
-    config_df = ds.to_pandas()
+
+    # Download parquet file directly - the configs are stored as parquet files
+    # with paths like: afm_qa_claude/train-00000-of-00001.parquet
+    parquet_file = hf_hub_download(
+        repo_id=HF_REPO,
+        filename=f"{config_name}/train-00000-of-00001.parquet",
+        repo_type="dataset",
+        token=HF_TOKEN,
+    )
+    logger.info("  ↳ Downloaded parquet file")
+
+    # Read the parquet file directly with pandas
+    config_df = pd.read_parquet(parquet_file)
+    logger.info(f"  ↳ Loaded {len(config_df)} rows from parquet")
 
     # Decode JSON string columns that contain complex nested structures
     # Common columns that might be JSON strings: topics_summary, file_report
