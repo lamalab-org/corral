@@ -22,6 +22,8 @@ volume_potential = modal.Volume.from_name("potentials", create_if_missing=True)
 volume_sim = modal.Volume.from_name("simulations", create_if_missing=True)
 volume_struct = modal.Volume.from_name("structures", create_if_missing=True)
 volume_test_files = modal.Volume.from_name("test_files", create_if_missing=True)
+volume_image_files = modal.Volume.from_name("image_files", create_if_missing=True)
+volume_eval_struct = modal.Volume.from_name("eval_structures", create_if_missing=True)
 
 CPUS = 2
 
@@ -33,6 +35,12 @@ CPUS = 2
 
 # with volume_test_files.batch_upload() as batch:
 #     batch.put_directory("./test_files/", "/")
+
+# with volume_image_files.batch_upload() as batch:
+#     batch.put_directory("./image_files/", "/")
+
+# with volume_eval_struct.batch_upload() as batch:
+#     batch.put_directory("./eval_structures/", "/")
 
 
 def _run_lammps(
@@ -59,6 +67,7 @@ def _run_lammps(
     if directory_path:
         os.chdir(directory_path)
     try:
+        # sanitize_lammps_input_inplace(input_file)
         command = [
             "mpirun",
             "--allow-run-as-root",
@@ -264,6 +273,57 @@ def parse_execution_output(stdout: str) -> tuple[dict, list[str]]:
             output_lines.append(line)
 
     return execution_result, output_lines
+
+@app.function(
+    image=lammps_image,
+    cpu=1,
+    memory=5120,
+    volumes={
+        "/results": volume_sim,
+        "/eval_structures": volume_eval_struct.read_only(),
+        "/test_files": volume_test_files,
+    },
+)
+def check_structure(target, atom_style, result):
+    from pymatgen.analysis.structure_matcher import StructureMatcher
+    from pymatgen.io.lammps.data import LammpsData
+    volume_sim.reload()
+    try:
+        ld1 = LammpsData.from_file(target, atom_style=atom_style)
+        ld2 = LammpsData.from_file(result, atom_style=atom_style)
+        matcher = StructureMatcher()
+        are_equal = matcher.fit(ld1.structure, ld2.structure)
+        return 1.0 if are_equal else 0.0
+    except Exception:
+        logger.exception("Error in check_structure")  # full traceback here
+        return 0.0
+    finally:
+        volume_sim.commit()
+
+
+@app.function(
+    image=lammps_image,
+    cpu=1,
+    memory=5120,
+    volumes={
+        "/results": volume_sim,
+        "/test_files": volume_test_files,
+        "/potentials": volume_potential.read_only(),
+    },
+)
+def check_potential(target: str, result: str):
+    volume_sim.reload()
+    try:
+        with open(target, "r") as f:
+            target_content = f.read()
+        with open(result, "r") as f:
+            result_content = f.read()
+        return 1.0 if target_content == result_content else 0.0
+    except Exception as e:
+        logger.warning(f"Error in check_potential: {e}")
+        return 0.0
+    finally:
+        volume_sim.commit()
 
 
 @app.function(
@@ -517,7 +577,7 @@ def execute_python_code(
 @app.function(
     image=lammps_image,
     cpu=CPUS,
-    timeout=3600,
+    timeout=7200,
     memory=5120,
     volumes={
         "/potentials": volume_potential.read_only(),
@@ -538,11 +598,61 @@ def run_lammps(input_file: str, log_file: str) -> None:
     Raises:
         ValueError: If the simulation fails.
     """
-    volume_sim.reload()
-    input_path = Path(input_file)
-    directory_path = input_path.parent
-    input_file_ = input_path.name
+    def sanitize_lammps_input_inplace(input_file: str) -> None:
+        import re
+        import fsspec
+        logger.info("Sanitizing LAMMPS input: %s", input_file)
+
+        fs = fsspec.filesystem("file")
+
+        volume_sim.reload()
+
+        # Read
+        try:
+            with fs.open(input_file, "r") as f:
+                text = f.read()
+        except Exception as e:
+            raise RuntimeError(f"Error reading file {input_file}: {e}") from e
+
+        logger.info("Original input content:\n%s", text)
+
+        log_cmd_re = re.compile(r"^\s*log\s+", re.IGNORECASE)
+        lines = text.splitlines(keepends=True)
+
+        cleaned = []
+        removed = 0
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                cleaned.append(line)
+                continue
+            if log_cmd_re.match(stripped):
+                removed += 1
+                continue
+            cleaned.append(line)
+
+        if removed == 0:
+            logger.info("No log commands found; no changes made.")
+            return
+
+        new_text = "".join(cleaned)
+
+        # Write
+        try:
+            with fs.open(input_file, "w") as f:
+                f.write(new_text)
+        except Exception as e:
+            raise RuntimeError(f"Error writing file {input_file}: {e}") from e
+
+        logger.info("Removed %d log command(s) from %s", removed, input_file)
+        volume_sim.commit()
+
     try:
+        sanitize_lammps_input_inplace(input_file)
+        volume_sim.reload()
+        input_path = Path(input_file)
+        directory_path = input_path.parent
+        input_file_ = input_path.name
         _run_lammps(input_file_, log_file, str(directory_path), CPUS)
         volume_sim.commit()
 
@@ -704,6 +814,31 @@ def read_file(path: str) -> str:
     try:
         with fs.open(path, "r") as f:
             return f.read()
+    except Exception as e:
+        raise RuntimeError(f"Error reading files: {e}") from e
+
+
+@app.function(
+    image=lammps_image,
+    cpu=1.0,
+    memory=5120,
+    volumes={
+        "/potentials": volume_potential.read_only(),
+        "/results": volume_sim,
+        "/structures": volume_struct.read_only(),
+        "/test_files": volume_test_files,
+        "/image_files": volume_image_files,
+    },
+)
+def read_file_mode(path: str, mode="rb") -> str:
+    """Read contents of a file"""
+    import base64
+
+    fs = fsspec.filesystem("file")
+    volume_sim.reload()
+    try:
+        with fs.open(path, mode) as f:
+            return base64.b64encode(f.read()).decode("utf-8")
     except Exception as e:
         raise RuntimeError(f"Error reading files: {e}") from e
 

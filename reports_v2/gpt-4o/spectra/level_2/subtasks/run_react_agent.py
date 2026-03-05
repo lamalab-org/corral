@@ -50,7 +50,7 @@ if __name__ == "__main__":
     verboses = [
         "brief",
         "workflow",
-        "comprehensive",
+        # "comprehensive",
     ]
     for verbose in verboses:
         logger.info(f"Running benchmark with verbosity: {verbose}")

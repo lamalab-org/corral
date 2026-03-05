@@ -1,6 +1,7 @@
 import importlib.resources
+import traceback
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Self
 
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import Message
@@ -84,6 +85,7 @@ class BaseAgent(ABC):
         self.token_usage: dict = {}  # Track token usage per LLM call
         self.hooks = hooks or AgentHooks()
         self._current_iteration = 0  # Track current iteration for hooks
+        self._initial_messages: list[LiteLLMMessage] | None = None
 
         with importlib.resources.path("corral.agents", "") as style_path:
             self.store = PromptStore(f"{style_path}/prompts")
@@ -121,6 +123,33 @@ class BaseAgent(ABC):
             self.surrender_prompt = ensure_jinja_compatible(surrender_prompt)
         else:
             self.surrender_prompt = None
+
+    @classmethod
+    def from_trace(
+        cls,
+        trace: list[LiteLLMMessage],
+        **init_kwargs,
+    ) -> Self:
+        """Construct an agent pre-loaded with a previous conversation trace.
+
+        This classmethod creates a new agent instance whose message history is
+        initialised from ``trace``.  When the agent's ``run()`` method is
+        called it will use these messages instead of building a fresh prompt,
+        allowing benchmarks to be replayed from saved traces.
+
+        Args:
+            trace: A list of ``LiteLLMMessage`` dicts representing the
+                conversation history from a previous run.
+            **init_kwargs: All remaining keyword arguments are forwarded to
+                the class ``__init__``.
+
+        Returns:
+            A new agent instance with ``_initial_messages`` set to the
+            provided trace.
+        """
+        agent = cls(**init_kwargs)
+        agent._initial_messages = list(trace)
+        return agent
 
     def get_llm_response(self, tools: list[dict[str, Any]] | None = None) -> Any:
         """Get response from the LLM using LiteLLM
@@ -176,7 +205,6 @@ class BaseAgent(ABC):
         self,
         interface: CorralRouter,
         task_id: str,
-        history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         **kwargs,
@@ -184,12 +212,15 @@ class BaseAgent(ABC):
         """
         Run the agent to solve a task
 
-        This method must be implemented by all subclasses
+        This method must be implemented by all subclasses.
+
+        If the agent was created via ``from_trace()``, ``self._initial_messages``
+        will contain the conversation history and should be used instead of
+        building a fresh prompt.
 
         Args:
             interface (BenchmarkInterface): The benchmark interface to use
             task_id (str): The task ID to solve
-            history (list[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             **kwargs: Additional keyword arguments that may include:
@@ -205,7 +236,6 @@ class BaseAgent(ABC):
         self,
         interface: CorralRouter,
         task_id: str,
-        history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         verbose: bool = False,
@@ -219,7 +249,6 @@ class BaseAgent(ABC):
         Args:
             interface (BenchmarkInterface): The benchmark interface to use
             task_id (str): The task ID to solve
-            history (list[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             verbose (bool, optional): Whether to save agent messages. Defaults to False.
@@ -234,14 +263,10 @@ class BaseAgent(ABC):
         """
         self.reset_token_usage()
 
-        if history is None:
-            history = []
-
         try:
             final_answer = self.run(
                 interface,
                 task_id,
-                history,
                 task_prompt,
                 examples,
                 enable_surrender=enable_surrender,
@@ -252,6 +277,27 @@ class BaseAgent(ABC):
                 logger.info(f"Agent surrender from task {task_id}")
                 return "GIVE UP", self.messages, self.get_total_token_usage()
 
+            if "Error" in final_answer:
+                logger.error(f"Error in agent response: {final_answer}")
+                return final_answer, self.messages, self.get_total_token_usage()
+
+        except BudgetExhaustedError:
+            # Re-raise to stop the benchmark immediately
+            raise
+        except Exception:
+            full_error = traceback.format_exc()
+            logger.error(f"Error running agent: {full_error}")
+            self.messages.append(
+                LiteLLMMessage(
+                    role="user", content=f"Error running agent: {full_error}"
+                )
+            )
+            return (
+                f"Error running agent: {full_error}",
+                self.messages,
+                self.get_total_token_usage(),
+            )
+        finally:
             if verbose:
                 # Check if agent has stored tools information
                 tools = getattr(self, "_available_tools", None)
@@ -263,21 +309,6 @@ class BaseAgent(ABC):
                     tools=tools,
                     tool_verbosity=tool_verbosity,
                 )
-
-            if "Error" in final_answer:
-                logger.error(f"Error in agent response: {final_answer}")
-                return final_answer, self.messages, self.get_total_token_usage()
-
-        except BudgetExhaustedError:
-            # Re-raise to stop the benchmark immediately
-            raise
-        except Exception as e:
-            logger.error(f"Error running agent: {e}")
-            return (
-                f"Error running agent: {e}",
-                self.messages,
-                self.get_total_token_usage(),
-            )
 
         message = "The task is to:\n" + self.messages[0]["content"]
         if self.messages[0]["role"] == "system":

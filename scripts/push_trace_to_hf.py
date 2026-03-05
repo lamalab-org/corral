@@ -23,12 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from datasets import Dataset, Features, Sequence, Value
+from datasets import Dataset, Features, Sequence, Value, load_dataset
 from loguru import logger
-
-# -----------------------------
-# Helpers
-# -----------------------------
 
 
 def read_json(path: Path) -> Any:
@@ -115,9 +111,83 @@ def infer_environment_from_path(p: Path) -> str:
     return p.parent.name
 
 
-# -----------------------------
-# Extraction
-# -----------------------------
+@dataclass
+class UpdateFilter:
+    """Filter specifying which rows to replace during incremental update."""
+
+    environment: str  # "tasks" or "subtasks"
+    agent_type: str  # "react" or "tool_calling"
+    verbosity: list[str]  # e.g. ["brief", "workflow"]
+    level: int  # 1 or 2
+
+
+def parse_update_filters(raw: str | list) -> list[UpdateFilter]:
+    """Parse JSON string (or already-parsed list) into a list of UpdateFilter objects.
+
+    Expected format:
+    [
+      {"environment": "subtasks", "agent_type": "react", "verbosity": ["brief", "workflow"], "level": 1},
+      {"environment": "tasks", "agent_type": "react", "verbosity": ["brief", "comprehensive"], "level": 2}
+    ]
+    """
+    data = raw if isinstance(raw, list) else json.loads(raw)
+    if not isinstance(data, list):
+        raise ValueError("--update must be a JSON list of filter objects")
+    filters: list[UpdateFilter] = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise ValueError(f"Each filter must be a dict, got: {type(item)}")
+        for key in ("environment", "agent_type", "verbosity", "level"):
+            if key not in item:
+                raise ValueError(f"Filter missing required key: {key}")
+        verbosity = item["verbosity"]
+        if isinstance(verbosity, str):
+            verbosity = [verbosity]
+        filters.append(
+            UpdateFilter(
+                environment=item["environment"],
+                agent_type=item["agent_type"],
+                verbosity=verbosity,
+                level=int(item["level"]),
+            )
+        )
+    return filters
+
+
+def row_matches_filter(row: dict[str, Any], f: UpdateFilter) -> bool:
+    """Check if a dataset row matches the given filter criteria."""
+    return (
+        str(row.get("environment", "")) == f.environment
+        and str(row.get("agent_type", "")) == f.agent_type
+        and str(row.get("verbosity", "")) in f.verbosity
+        and int(row.get("level", -1)) == f.level
+    )
+
+
+def filters_for_config(
+    filters: list[UpdateFilter], level_num: int, task_type: str
+) -> list[UpdateFilter]:
+    """Return only filters that apply to this config (level + environment/task_type)."""
+    return [f for f in filters if f.level == level_num and f.environment == task_type]
+
+
+def download_existing_config(
+    dataset_name: str, config_name: str
+) -> list[dict[str, Any]]:
+    """Download existing HF dataset config and return rows as list of dicts."""
+    try:
+        ds = load_dataset(dataset_name, config_name)
+        rows = ds["train"].to_list()
+        logger.info(
+            f"Downloaded {len(rows)} existing rows from {dataset_name}/{config_name}"
+        )
+        return rows
+    except Exception as e:
+        logger.info(
+            f"Could not load existing config '{config_name}' from {dataset_name}: {e}"
+        )
+        logger.info("Starting with empty dataset for this config.")
+        return []
 
 
 @dataclass
@@ -272,11 +342,6 @@ def load_logprob_files(root: Path) -> dict[str, dict[str, Any]]:
     return by_id
 
 
-# -----------------
-# HF
-# ---------
-
-
 def push_environment_to_hf(
     rows: list[dict[str, Any]],
     dataset_name: str,
@@ -378,11 +443,6 @@ def push_environment_to_hf(
     )
 
 
-# -----------------------------
-# Main
-# -----------------------------
-
-
 def main() -> None:
     # Set Hugging Face Hub timeout to a higher value to avoid ReadTimeout errors
     os.environ.setdefault("HF_HUB_READ_TIMEOUT", "240")
@@ -412,17 +472,43 @@ def main() -> None:
     ap.add_argument(
         "--hf_dataset_name",
         type=str,
-        default="n0w0f/oss-trace-logprobs",
+        default="jablonkagroup/corral-oss-trace-logprobs",
         help="HF dataset name.",
+    )
+    ap.add_argument(
+        "--update",
+        type=str,
+        default=None,
+        help=(
+            "JSON list of filter sets for incremental update. Each filter is a dict with "
+            'keys: environment ("tasks"|"subtasks"), agent_type ("react"|"tool_calling"), '
+            "verbosity (list of strings), level (int). "
+            "When provided, the existing HF config is downloaded, rows matching the filters "
+            "are removed, new local rows matching the filters are added, and the merged "
+            "result is pushed. "
+            'Example: \'[{"environment": "subtasks", "agent_type": "react", '
+            '"verbosity": ["brief", "workflow"], "level": 1}]\''
+        ),
     )
     # hf_subset_name is now dynamically generated, so it's not a direct arg
     args = ap.parse_args()
+
+    # Parse update filters if provided
+    update_filters: list[UpdateFilter] | None = None
+    if args.update:
+        update_filters = parse_update_filters(args.update)
+        logger.info(f"Update mode: {len(update_filters)} filter(s) provided")
+        for i, uf in enumerate(update_filters):
+            logger.info(
+                f"  Filter {i + 1}: environment={uf.environment}, agent_type={uf.agent_type}, "
+                f"verbosity={uf.verbosity}, level={uf.level}"
+            )
 
     base_root = Path(args.root).resolve()
 
     # Define the structure to iterate
     # This assumes a structure like: base_root/level_1/tasks, base_root/level_1/subtasks, etc.
-    levels = {1: ["level_1"], 2: ["level_2"]}
+    levels = {1: ["level_1"], 2: ["level_2"], 3: ["level_3"]}
     task_types = ["tasks", "subtasks"]
 
     all_rows: list[dict[str, Any]] = []
@@ -519,50 +605,91 @@ def main() -> None:
                 all_rows.extend(current_rows)
 
                 # --- Process each subset individually for file output and HF push ---
-                if current_rows:
-                    subset_name = f"{base_root.name}_{level_dir_name}_{task_type}"
+                subset_name = f"{base_root.name}_{level_dir_name}_{task_type}"
 
-                    # 3) Write JSONL for the current subset
-                    out_path = Path(args.out.replace(".jsonl", f"_{subset_name}.jsonl"))
-                    out_path.parent.mkdir(parents=True, exist_ok=True)
-                    with out_path.open("w", encoding="utf-8") as f:
-                        for row in current_rows:
-                            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-                    logger.info(f"Wrote {len(current_rows)} rows -> {out_path}")
-
-                    # 4) Optional parquet for the current subset
-                    if args.parquet:
-                        try:
-                            import pandas as pd  # type: ignore
-
-                            _df = pd.DataFrame(current_rows)
-                            pq_path = Path(
-                                args.parquet.replace(
-                                    ".parquet", f"_{subset_name}.parquet"
-                                )
-                            )
-                            pq_path.parent.mkdir(parents=True, exist_ok=True)
-                            _df.to_parquet(pq_path, index=False)
-                            logger.info(f"Wrote parquet -> {pq_path}")
-                        except ImportError:
-                            logger.info(
-                                "pandas/pyarrow not installed; skipping parquet."
-                            )
-                        except Exception as e:
-                            logger.info(f"Failed parquet write for {subset_name}: {e}")
-
-                    # 5) Optional push to HF for the current subset
-                    if args.push_to_hub:
-                        push_environment_to_hf(
-                            current_rows,
-                            dataset_name=args.hf_dataset_name,
-                            environment_subset=subset_name,
-                            private=False,
-                            max_shard_size="1GB",
+                if update_filters:
+                    # ---- Update mode: merge new local rows into existing HF data ----
+                    applicable_filters = filters_for_config(
+                        update_filters, level_num, task_type
+                    )
+                    if not applicable_filters:
+                        logger.info(
+                            f"No update filters match config '{subset_name}', skipping."
                         )
+                        continue
+
+                    # Keep only new local rows that match the filter criteria
+                    filtered_new_rows = [
+                        r
+                        for r in current_rows
+                        if any(row_matches_filter(r, f) for f in applicable_filters)
+                    ]
+
+                    # Download existing dataset and remove entries matching the filters
+                    existing_rows = download_existing_config(
+                        args.hf_dataset_name, subset_name
+                    )
+                    kept_rows = [
+                        r
+                        for r in existing_rows
+                        if not any(row_matches_filter(r, f) for f in applicable_filters)
+                    ]
+
+                    removed_count = len(existing_rows) - len(kept_rows)
+                    logger.info(
+                        f"Update mode for '{subset_name}': removed {removed_count} "
+                        f"existing rows matching filters, "
+                        f"adding {len(filtered_new_rows)} new rows"
+                    )
+
+                    rows_to_output = kept_rows + filtered_new_rows
+                    if not rows_to_output:
+                        logger.info(
+                            f"No rows after merge for '{subset_name}', skipping."
+                        )
+                        continue
+
+                elif current_rows:
+                    rows_to_output = current_rows
                 else:
                     logger.info(f"No data collected for {level_dir_name}/{task_type}.")
+                    continue
+
+                # 3) Write JSONL for the current subset
+                out_path = Path(args.out.replace(".jsonl", f"_{subset_name}.jsonl"))
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                with out_path.open("w", encoding="utf-8") as f:
+                    for row in rows_to_output:
+                        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+                logger.info(f"Wrote {len(rows_to_output)} rows -> {out_path}")
+
+                # 4) Optional parquet for the current subset
+                if args.parquet:
+                    try:
+                        import pandas as pd  # type: ignore
+
+                        _df = pd.DataFrame(rows_to_output)
+                        pq_path = Path(
+                            args.parquet.replace(".parquet", f"_{subset_name}.parquet")
+                        )
+                        pq_path.parent.mkdir(parents=True, exist_ok=True)
+                        _df.to_parquet(pq_path, index=False)
+                        logger.info(f"Wrote parquet -> {pq_path}")
+                    except ImportError:
+                        logger.info("pandas/pyarrow not installed; skipping parquet.")
+                    except Exception as e:
+                        logger.info(f"Failed parquet write for {subset_name}: {e}")
+
+                # 5) Optional push to HF for the current subset
+                if args.push_to_hub:
+                    push_environment_to_hf(
+                        rows_to_output,
+                        dataset_name=args.hf_dataset_name,
+                        environment_subset=subset_name,
+                        private=False,
+                        max_shard_size="1GB",
+                    )
 
     logger.info("\nFinished processing all specified directories.")
 

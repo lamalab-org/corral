@@ -1,4 +1,5 @@
 from . import (
+    code2latex,
     code_tools,
     context7_tools,
     io_tools,
@@ -11,6 +12,7 @@ from . import (
 )
 
 __all__ = [
+    "code2latex",
     "code_tools",
     "context7_tools",
     "io_tools",
