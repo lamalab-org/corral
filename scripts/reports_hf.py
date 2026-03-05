@@ -1,4 +1,3 @@
-import argparse
 import json
 import re
 from pathlib import Path
@@ -107,122 +106,6 @@ def get_jsons(category_path: Path):
     ]
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Build dataset configs")
-    parser.add_argument(
-        "--path",
-        type=str,
-        required=True,
-        help="Root reports directory path",
-    )
-
-    args = parser.parse_args()
-    path = args.path
-
-    p = Path(path)
-
-    env = p.parts[-1]
-    model = p.parts[-2]
-
-    if model == "claude":
-        model = "claude_sonnet_45"
-
-    if model == "gpt-oss-120b":
-        model = "gpt_oss_120b"
-
-    if model == "gpt-4o":
-        model = "gpt_4o"
-
-    configs = []
-    level_dirs = [d for d in p.rglob("*") if d.is_dir() and d.name.startswith("level_")]
-
-    if not level_dirs:
-        level_dirs = [p]
-
-    for level_path in level_dirs:
-        level = level_path.name if level_path.name.startswith("level_") else "level_1"
-
-        for category_dir in level_path.iterdir():
-            if not category_dir.is_dir():
-                continue
-
-            category = category_dir.name
-
-            config = {
-                "model": model,
-                "env": env,
-                "level": level,
-                "category": category,
-                "path": str(category_dir),
-            }
-
-            configs.append(config)
-
-    all_reports = []
-    overall_reports = []
-
-    for config in configs:
-        category_path = Path(config["path"])
-
-        report_paths = get_jsons(category_path)
-
-        for report_path in report_paths:
-            report, overall_report = get_scores(config, report_path)
-            all_reports.extend(report)
-            overall_reports.extend(overall_report)
-
-    DATASET_NAME = "jablonkagroup/corral-reports"
-    api = HfApi()
-
-    api.create_repo(
-        repo_id=DATASET_NAME,
-        repo_type="dataset",
-        private=False,
-        exist_ok=True,
-    )
-    trials_df = pd.DataFrame(all_reports)
-
-    group_cols = ["model", "env", "level", "category", "agent", "verbosity"]
-
-    for subset_keys, subset_df in trials_df.groupby(group_cols):
-        model, env, level, category, agent, verbosity = subset_keys
-
-        subset_name = (
-            f"{model}-{env}-{level}-{category}-{agent}-{verbosity}-task_reports"
-        )
-
-        logger.info(f"\nUploading subset: {subset_name}")
-
-        dataset = Dataset.from_pandas(subset_df.reset_index(drop=True))
-
-        dataset.push_to_hub(
-            DATASET_NAME,
-            config_name=subset_name,
-            private=False,
-        )
-
-    overall_df = pd.DataFrame(overall_reports)
-
-    group_cols = ["model", "env", "level", "category", "agent", "verbosity"]
-
-    for subset_keys, subset_df in overall_df.groupby(group_cols):
-        model, env, level, category, agent, verbosity = subset_keys
-
-        subset_name = (
-            f"{model}-{env}-{level}-{category}-{agent}-{verbosity}-overall_reports"
-        )
-
-        logger.info(f"\nUploading subset: {subset_name}")
-
-        dataset = Dataset.from_pandas(subset_df.reset_index(drop=True))
-
-        dataset.push_to_hub(
-            DATASET_NAME,
-            config_name=subset_name,
-            private=False,
-        )
-
-
 def validate_path(path: str):
     p = Path(path)
 
@@ -251,6 +134,61 @@ def validate_path(path: str):
         )
 
     return model, level, category, environment
+
+
+def push_trials_to_hub(trials_df: pd.DataFrame, dataset_name: str):
+    api = HfApi()
+
+    api.create_repo(
+        repo_id=dataset_name,
+        repo_type="dataset",
+        private=False,
+        exist_ok=True,
+    )
+
+    group_cols = ["model", "env", "level", "category", "agent", "verbosity"]
+
+    for subset_keys, subset_df in trials_df.groupby(group_cols):
+        model, env, level, category, agent, verbosity = subset_keys
+
+        subset_name = f"{model}-{env}-{level}-{category}-{agent}-{verbosity}-traces"
+
+        logger.info(f"\nUploading subset: {subset_name}")
+
+        dataset = Dataset.from_pandas(subset_df.reset_index(drop=True))
+
+        dataset.push_to_hub(
+            dataset_name,
+            config_name=subset_name,
+            private=False,
+        )
+
+
+def push_grouped_reports(df: pd.DataFrame, report_type: str, dataset_name: str):
+    """
+    Push grouped subsets of a dataframe to the HuggingFace Hub.
+
+    Args:
+        df: DataFrame containing report data
+        report_type: suffix for config name (e.g., 'task_reports', 'overall_reports')
+    """
+    group_cols = ["model", "env", "level", "category", "agent", "verbosity"]
+    for subset_keys, subset_df in df.groupby(group_cols):
+        model, env, level, category, agent, verbosity = subset_keys
+
+        subset_name = (
+            f"{model}-{env}-{level}-{category}-{agent}-{verbosity}-{report_type}"
+        )
+
+        logger.info(f"\nUploading subset: {subset_name}")
+
+        dataset = Dataset.from_pandas(subset_df.reset_index(drop=True))
+
+        dataset.push_to_hub(
+            dataset_name,
+            config_name=subset_name,
+            private=False,
+        )
 
 
 def build_dataset_configs(path: str):
@@ -295,6 +233,27 @@ def build_dataset_configs(path: str):
             report, overall_report = get_scores(config, report_path)
             all_reports.extend(report)
             overall_reports.extend(overall_report)
+
+    DATASET_NAME = "jablonkagroup/corral-reports"
+
+    trials_df = pd.DataFrame(all_reports)
+
+    overall_df = pd.DataFrame(overall_reports)
+
+    if trials_df.isna().any().any():
+        nan_counts = trials_df.isna().sum()
+        nan_cols = nan_counts[nan_counts > 0]
+
+        raise ValueError(f"NaNs detected in trials dataframe:\n{nan_cols}")
+
+    if overall_df.isna().any().any():
+        nan_counts = overall_df.isna().sum()
+        nan_cols = nan_counts[nan_counts > 0]
+
+        raise ValueError(f"NaNs detected in overall dataframe:\n{nan_cols}")
+
+    push_grouped_reports(trials_df, "task_reports", DATASET_NAME)
+    push_grouped_reports(overall_df, "overall_reports", DATASET_NAME)
 
 
 if __name__ == "__main__":
