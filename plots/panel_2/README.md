@@ -50,9 +50,33 @@ python 3_gap_plot.py
 
 **Key Features**:
 - Two lines showing different types of performance variance
-- Model gap (rose color) - shows how much models differ
-- Agent gap (teal color) - shows how much agents/scaffolds differ
+- Model gap (violet color) - shows how much models differ
+- Agent gap (rose color) - shows how much agents/scaffolds differ
 - Configurable environment ordering, verbosity, task type, and level strategies
+
+### 4. Subtask Heaviness Plot (`4_task_heaviness.py`)
+**Purpose**: Visualize subtask reasoning complexity and success rates
+
+Generates flowing ribbon plots for each environment showing:
+- **Color**: Reasoning heaviness (darker = more reasoning intensive)
+  - Reasoning (darkest)
+  - Validation
+  - Code Execution
+  - Experiment Execution
+  - Retrieval (lightest)
+- **Thickness**: Success rate (thicker = higher success)
+
+**Quick Start**:
+```bash
+python 4_task_heaviness.py
+```
+
+**Key Features**:
+- Smooth ribbons showing workflow progression
+- Each environment shows subtask sequence from first to last
+- Can filter to specific model, agent, or environment
+- Configurable verbosity and level strategies
+- Uses `reasoning.json` for heaviness mapping
 
 ## Common Configuration Options
 
@@ -117,4 +141,14 @@ python 2_slope.py --metric=pass_at_k --k_value=5 --models="claude-4.5,gpt-4o,gpt
 ### Show performance gaps ordered by reasoning QA
 ```bash
 python 3_gap_plot.py --qa_type_for_ordering=reasoning_qa
+```
+
+### Show subtask heaviness for Claude-4.5 only
+```bash
+python 4_task_heaviness.py --model_strategy=claude-4.5
+```
+
+### Show subtask heaviness for catalyst environment only
+```bash
+python 4_task_heaviness.py --env_filter=catalyst
 ```
