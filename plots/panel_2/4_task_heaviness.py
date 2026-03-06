@@ -31,12 +31,17 @@ sys.path.insert(0, str(REPO_ROOT / "analysis"))
 sys.path.insert(0, str(REPO_ROOT / "plots"))
 
 from plot_config import FONT_SIZES  # noqa: E402
+from plot_utils import (  # noqa: E402
+    DEFAULT_ENV_LEVEL_MAP,
+    filter_by_agent,
+    filter_by_level,
+    filter_by_model,
+    filter_by_verbosity,
+    load_reasoning_data,
+    load_reports_data,
+)
 
 # ==================== CONFIGURATION ====================
-
-# Data paths
-REPORTS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "reports.jsonl"
-REASONING_PATH = REPO_ROOT / "analysis" / "reasoning.json"
 
 # Figure sizing
 ONE_COL_WIDTH_INCH = 3
@@ -54,18 +59,6 @@ HEAVINESS_SCORES = {
     "unknown": 1,
 }
 
-# Default per-environment level selection
-DEFAULT_ENV_LEVEL_MAP = {
-    "afm": 1,
-    "catalyst": 1,
-    "md": 2,
-    "ml": 1,
-    "resistor": 1,
-    "retro": 2,
-    "spectra": 1,
-    "wetlab": 2,
-}
-
 # Environment name normalization (maps from reports.jsonl to reasoning.json)
 # Only needed for environments where the names differ
 ENV_NAME_MAP = {
@@ -73,89 +66,6 @@ ENV_NAME_MAP = {
     "spectra": "sptectra",  # Reports: "spectra" -> reasoning.json: "sptectra" (typo in json)
     # Note: "ml" matches in both, no mapping needed
 }
-
-
-# ==================== DATA LOADING ====================
-
-
-def load_reports_data() -> pd.DataFrame:
-    """Load main benchmark reports dataset."""
-    if not REPORTS_PATH.exists():
-        msg = f"Reports file not found: {REPORTS_PATH}"
-        raise FileNotFoundError(msg)
-
-    df = pd.read_json(REPORTS_PATH, lines=True)  # noqa: PD901
-    logger.info(f"Loaded {len(df)} rows from reports.jsonl")
-    return df
-
-
-def load_reasoning_data() -> dict:
-    """Load reasoning heaviness mapping."""
-    if not REASONING_PATH.exists():
-        msg = f"Reasoning file not found: {REASONING_PATH}"
-        raise FileNotFoundError(msg)
-
-    with REASONING_PATH.open() as f:
-        reasoning_data = json.load(f)
-
-    logger.info(f"Loaded reasoning data for {len(reasoning_data)} environments")
-    return reasoning_data
-
-
-# ==================== FILTERING FUNCTIONS ====================
-
-
-def filter_by_verbosity(df: pd.DataFrame, verbosity_strategy: str) -> pd.DataFrame:
-    """Filter dataframe by verbosity strategy."""
-    if verbosity_strategy == "average":
-        return df
-    if verbosity_strategy in ["brief", "workflow", "comprehensive"]:
-        return df[df["Tool Verbosity"] == verbosity_strategy]
-    msg = f"Invalid verbosity_strategy: {verbosity_strategy}"
-    raise ValueError(msg)
-
-
-def filter_by_level(df: pd.DataFrame, level_strategy: str) -> pd.DataFrame:
-    """Filter dataframe by level strategy."""
-    if level_strategy == "all":
-        return df
-
-    if level_strategy == "default_map":
-        mask = pd.Series(False, index=df.index)
-        for env, level in DEFAULT_ENV_LEVEL_MAP.items():
-            mask |= (df["environment"] == env) & (df["level"] == level)
-        return df[mask]
-
-    # Parse as integer level
-    try:
-        level_int = int(level_strategy)
-        if level_int < 1:
-            msg = f"Level must be >= 1, got: {level_int}"
-            raise ValueError(msg)
-        return df[df["level"] == level_int]
-    except ValueError as e:
-        if "invalid literal" in str(e):
-            msg = f"Invalid level_strategy: {level_strategy}"
-            raise ValueError(msg) from e
-        raise
-
-
-def filter_by_model(df: pd.DataFrame, model_strategy: str) -> pd.DataFrame:
-    """Filter dataframe by model strategy."""
-    if model_strategy == "average":
-        return df
-    # Specific model
-    return df[df["model"] == model_strategy]
-
-
-def filter_by_agent(df: pd.DataFrame, agent_strategy: str) -> pd.DataFrame:
-    """Filter dataframe by agent strategy."""
-    if agent_strategy == "average":
-        return df
-    if agent_strategy in ["react", "tool_calling"]:
-        return df[df["agent_type"] == agent_strategy]
-    msg = f"Invalid agent_strategy: {agent_strategy}"
-    raise ValueError(msg)
 
 
 # ==================== SUBTASK EXTRACTION ====================
