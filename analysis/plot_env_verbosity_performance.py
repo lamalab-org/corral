@@ -1,13 +1,12 @@
 """
-Two-panel figure:
-  Left  - horizontal bar plot of Average Score per environment x verbosity
-  Right - Δ dot plot: change relative to "brief" baseline
+Figures summarizing Average Score as a function of tool verbosity.
 
-Aggregation:
-- Average over: models, agent types, categories (task/subtask), levels
-- Group by: environment x Tool Verbosity
-
-Output: analysis/results/figures/app_fig5_ver1.pdf
+Outputs:
+- Two-panel environment summary:
+    - Left  - horizontal bar plot of Average Score per environment x verbosity
+    - Right - Δ dot plot: change relative to the "brief" baseline
+- One-column model summary: average over environments for each model x verbosity
+- One-column agent summary: average over environments for each agent type x verbosity
 """
 
 import json
@@ -17,7 +16,7 @@ import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH, TWO_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 
@@ -27,6 +26,8 @@ DATA_PATH = Path(__file__).parent / "results" / "data" / "reports.jsonl"
 OUT_DIR = Path(__file__).parent / "results" / "figures"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_FILE = OUT_DIR / "app_fig5_ver1.pdf"
+OUT_FILE_MODEL = OUT_DIR / "app_fig5_ver1_model_avg.pdf"
+OUT_FILE_AGENT = OUT_DIR / "app_fig5_ver1_agent_type_avg.pdf"
 
 records = []
 with DATA_PATH.open() as fh:
@@ -64,8 +65,6 @@ VERBOSITY_LABELS = {
 COLORS = {"brief": "#4C72B0", "workflow": "#DD8452", "comprehensive": "#55A868"}
 MARKERS = {"workflow": "D", "comprehensive": "o"}
 
-envs = sorted(agg["environment"].unique())
-
 ENV_LABELS = {
     "afm": "AFM",
     "catalyst": "Catalyst",
@@ -75,26 +74,109 @@ ENV_LABELS = {
     "retro": "Retro",
     "spectra": "Spectra",
 }
+MODEL_LABELS = {
+    "claude-4.5": "Claude 4.5",
+    "gpt-4o": "GPT-4o",
+    "gpt-oss-120b": "GPT-OSS-120B",
+}
+AGENT_TYPE_LABELS = {
+    "react": "ReAct",
+    "tool_calling": "Tool calling",
+}
+
+
+def build_pivot(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
+    agg_df = df.groupby([group_col, "Tool Verbosity"], as_index=False)[
+        "Average Score"
+    ].mean()
+    pivot_df = agg_df.pivot_table(
+        index=group_col, columns="Tool Verbosity", values="Average Score"
+    )
+    for verbosity in VERBOSITIES:
+        if verbosity not in pivot_df.columns:
+            pivot_df[verbosity] = np.nan
+    return pivot_df[VERBOSITIES]
+
+
+def get_group_centers(
+    n_groups: int, bar_width: float = 0.22, gap_width: float = 0.1
+) -> np.ndarray:
+    return np.arange(n_groups) * (
+        len(VERBOSITIES) * bar_width + gap_width + bar_width * 0.3
+    )
+
+
+def get_group_frame(_bar_width: float, y_centers: np.ndarray) -> np.ndarray:
+    return np.array([y_centers.min(), y_centers.max()])
+
+
+def plot_horizontal_verbosity_bars(
+    ax: plt.Axes,
+    pivot_df: pd.DataFrame,
+    groups: list[str],
+    group_labels: list[str],
+    y_label: str,
+    *,
+    bar_width: float = 0.22,
+    gap_width: float = 0.1,
+    show_legend: bool = True,
+) -> np.ndarray:
+    y_centers = get_group_centers(len(groups), bar_width=bar_width, gap_width=gap_width)
+
+    for vi, verbosity in enumerate(VERBOSITIES):
+        offsets = y_centers + (vi - (len(VERBOSITIES) - 1) / 2) * bar_width
+        scores = [
+            pivot_df.loc[group, verbosity] if group in pivot_df.index else np.nan
+            for group in groups
+        ]
+        valid_offsets = [
+            offset
+            for offset, score in zip(offsets, scores, strict=True)
+            if not np.isnan(score)
+        ]
+        valid_scores = [score for score in scores if not np.isnan(score)]
+        ax.hlines(
+            valid_offsets,
+            0,
+            valid_scores,
+            label=VERBOSITY_LABELS[verbosity],
+            color=COLORS[verbosity],
+            alpha=0.5,
+            linewidth=5,
+        )
+        ax.plot(
+            valid_scores,
+            valid_offsets,
+            "o",
+            markersize=5,
+            color=COLORS[verbosity],
+            alpha=0.6,
+        )
+
+    ax.set_yticks(y_centers)
+    ax.set_yticklabels(group_labels)
+    ax.set_xlabel("Average Score")
+    ax.set_ylabel(y_label)
+    range_frame(ax, np.array([0, 1]), get_group_frame(bar_width, y_centers))
+
+    if show_legend:
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles, labels, title="Tool Verbosity", loc="upper right")
+
+    return y_centers
+
+
+envs = sorted(agg["environment"].unique())
 yticklabels = [ENV_LABELS.get(e, e.capitalize()) for e in envs]
 
-pivot = agg.pivot_table(
-    index="environment", columns="Tool Verbosity", values="Average Score"
-)
-for v in VERBOSITIES:
-    if v not in pivot.columns:
-        pivot[v] = np.nan
-pivot = pivot[VERBOSITIES]
+env_pivot = build_pivot(performance_df, "environment")
 
 BASELINE = "brief"
 NON_BASELINE = ["workflow", "comprehensive"]
 for v in NON_BASELINE:
-    pivot[f"delta_{v}"] = pivot[v] - pivot[BASELINE]
+    env_pivot[f"delta_{v}"] = env_pivot[v] - env_pivot[BASELINE]
 
-n_envs = len(envs)
-n_verb = len(VERBOSITIES)
-bar_w = 0.22
-gap = 0.1
-x_centers = np.arange(n_envs) * (n_verb * bar_w + gap + bar_w * 0.3)
+x_centers = get_group_centers(len(envs))
 
 JITTER = {"workflow": -0.08, "comprehensive": 0.08}
 
@@ -106,41 +188,22 @@ fig, (ax_bar, ax_delta) = plt.subplots(
 )
 
 all_scores = []
-for vi, verb in enumerate(VERBOSITIES):
-    offsets = x_centers + (vi - (n_verb - 1) / 2) * bar_w
-    scores = [pivot.loc[e, verb] if e in pivot.index else np.nan for e in envs]
-    all_scores.extend([s for s in scores if not np.isnan(s)])
-    valid_offsets = [o for o, s in zip(offsets, scores, strict=True) if not np.isnan(s)]
-    valid_scores = [s for s in scores if not np.isnan(s)]
-    ax_bar.hlines(
-        valid_offsets,
-        0,
-        valid_scores,
-        label=VERBOSITY_LABELS[verb],
-        color=COLORS[verb],
-        alpha=0.5,
-        linewidth=5,
-    )
-    ax_bar.plot(
-        valid_scores,
-        valid_offsets,
-        "o",
-        markersize=5,
-        color=COLORS[verb],
-        alpha=0.6,
-    )
-
-ax_bar.set_yticks(x_centers)
-ax_bar.set_yticklabels(yticklabels)
-ax_bar.set_xlabel("Average Score")
-ax_bar.set_ylabel("Environment")
-range_frame(ax_bar, np.array([0, 1]), x_centers)
+plot_horizontal_verbosity_bars(
+    ax_bar,
+    env_pivot,
+    envs,
+    yticklabels,
+    "Environment",
+    show_legend=False,
+)
 
 ax_delta.axvline(0, color="black", linewidth=1.0, linestyle="--", alpha=0.7, zorder=1)
 
 all_deltas = []
 for v in NON_BASELINE:
-    deltas = [pivot.loc[e, f"delta_{v}"] if e in pivot.index else np.nan for e in envs]
+    deltas = [
+        env_pivot.loc[e, f"delta_{v}"] if e in env_pivot.index else np.nan for e in envs
+    ]
     all_deltas.extend([d for d in deltas if not np.isnan(d)])
     y_pos = x_centers + JITTER[v]
     ax_delta.scatter(
@@ -172,3 +235,51 @@ ax_bar.legend(bar_handles, bar_labels, title="Tool Verbosity", loc="upper right"
 plt.tight_layout()
 fig.savefig(OUT_FILE, bbox_inches="tight")
 logger.info(f"Saved figure to {OUT_FILE}")
+
+models = sorted(performance_df["model"].dropna().unique())
+model_labels = [MODEL_LABELS.get(model, model) for model in models]
+model_pivot = build_pivot(performance_df, "model")
+
+fig_model, ax_model = plt.subplots(
+    1,
+    1,
+    figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT),
+)
+model_centers = plot_horizontal_verbosity_bars(
+    ax_model,
+    model_pivot,
+    models,
+    model_labels,
+    "Model",
+    bar_width=0.16,
+    show_legend=False,
+)
+range_frame(ax_model, np.array([0, 1]), get_group_frame(0.16, model_centers), pad=0.2)
+plt.tight_layout()
+fig_model.savefig(OUT_FILE_MODEL, bbox_inches="tight")
+logger.info(f"Saved figure to {OUT_FILE_MODEL}")
+
+agent_types = sorted(performance_df["agent_type"].dropna().unique())
+agent_type_labels = [
+    AGENT_TYPE_LABELS.get(agent_type, agent_type) for agent_type in agent_types
+]
+agent_type_pivot = build_pivot(performance_df, "agent_type")
+
+fig_agent, ax_agent = plt.subplots(
+    1,
+    1,
+    figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT),
+)
+agent_centers = plot_horizontal_verbosity_bars(
+    ax_agent,
+    agent_type_pivot,
+    agent_types,
+    agent_type_labels,
+    "Scaffold",
+    bar_width=0.16,
+    show_legend=False,
+)
+range_frame(ax_agent, np.array([0, 1]), np.array([0, 1]), pad=0.2)
+plt.tight_layout()
+fig_agent.savefig(OUT_FILE_AGENT, bbox_inches="tight")
+logger.info(f"Saved figure to {OUT_FILE_AGENT}")
