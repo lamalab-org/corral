@@ -56,8 +56,8 @@ MODEL_COLOURS = [
 ]
 
 AGENT_COLOURS = [
-    "#e11d48",  # React (rose)
-    "#0d9488",  # Tool calling (teal)
+    "#30292F",  # React
+    "#5D737E",  # Tool calling
 ]
 
 ENVIRONMENT_COLOURS = [

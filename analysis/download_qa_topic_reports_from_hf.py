@@ -155,7 +155,7 @@ def main(
                 repo_type="dataset",
                 token=HF_TOKEN,
             )
-            df = pd.read_parquet(local_path)  # noqa: PD901
+            df = pd.read_parquet(local_path)
 
             # Add metadata columns
             df["env"] = env
@@ -179,8 +179,7 @@ def main(
         )
         size_kb = output_file.stat().st_size // 1024
         logger.success(
-            f"Dataset written → '{output_file}'  "
-            f"({len(combined):,} rows, {size_kb} KB)"
+            f"Dataset written → '{output_file}'  ({len(combined):,} rows, {size_kb} KB)"
         )
     else:
         logger.warning("No data downloaded")
