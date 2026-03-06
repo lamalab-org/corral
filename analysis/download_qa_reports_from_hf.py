@@ -115,9 +115,7 @@ def extract_score_from_row(row: pd.Series) -> int:
         return 0
 
 
-def download_and_process_config(
-    dirname: str, parquet_file: str
-) -> pd.DataFrame | None:
+def download_and_process_config(dirname: str, parquet_file: str) -> pd.DataFrame | None:
     """Download and process a single config file.
 
     Args:
@@ -151,11 +149,11 @@ def download_and_process_config(
             token=HF_TOKEN,
         )
 
-        df = pd.read_parquet(local_path)
+        report_df = pd.read_parquet(local_path)
 
         # Extract question-level data
         records = []
-        for _, row in df.iterrows():
+        for _, row in report_df.iterrows():
             # Use UUID as item_id for stable unique identification
             item_id = row.get("uuid", row.get("name", "unknown"))
             correct = extract_score_from_row(row)
@@ -226,7 +224,9 @@ def main():
         logger.info(f"  Overall accuracy: {knowledge_qa['correct'].mean():.3f}")
         logger.info("  By model:")
         for model in sorted(knowledge_qa["model_id"].unique()):
-            model_acc = knowledge_qa[knowledge_qa["model_id"] == model]["correct"].mean()
+            model_acc = knowledge_qa[knowledge_qa["model_id"] == model][
+                "correct"
+            ].mean()
             logger.info(f"    {model}: {model_acc:.3f}")
 
     if reasoning_dfs:
@@ -243,7 +243,9 @@ def main():
         logger.info(f"  Overall accuracy: {reasoning_qa['correct'].mean():.3f}")
         logger.info("  By model:")
         for model in sorted(reasoning_qa["model_id"].unique()):
-            model_acc = reasoning_qa[reasoning_qa["model_id"] == model]["correct"].mean()
+            model_acc = reasoning_qa[reasoning_qa["model_id"] == model][
+                "correct"
+            ].mean()
             logger.info(f"    {model}: {model_acc:.3f}")
 
     if failed:

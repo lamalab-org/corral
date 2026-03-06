@@ -14,9 +14,10 @@ Output format:
     success: binary success (0 or 1)
 """
 
+from pathlib import Path
+
 import pandas as pd
 from loguru import logger
-from pathlib import Path
 
 # Normalization mappings - standardize variants to canonical IDs
 # Canonical IDs match reports.jsonl exactly
@@ -80,22 +81,23 @@ def extract_trial_data(reports_df: pd.DataFrame) -> pd.DataFrame:
                 success = trial.get("success", False)
                 score = trial.get("score", 0)
 
-                records.append({
-                    "model": model_normalized,
-                    "environment": env_normalized,
-                    "scaffold": agent_type,  # Keep raw ID: react, tool_calling
-                    "level": f"level_{level}",
-                    "category": category,
-                    "verbosity": verbosity,
-                    "task": task_id,
-                    "success": 1 if success else 0,
-                    "score": score,
-                    **pass_at_k,
-                    **pass_hat_k,
-                })
+                records.append(
+                    {
+                        "model": model_normalized,
+                        "environment": env_normalized,
+                        "scaffold": agent_type,  # Keep raw ID: react, tool_calling
+                        "level": f"level_{level}",
+                        "category": category,
+                        "verbosity": verbosity,
+                        "task": task_id,
+                        "success": 1 if success else 0,
+                        "score": score,
+                        **pass_at_k,
+                        **pass_hat_k,
+                    }
+                )
 
-    result_df = pd.DataFrame(records)
-    return result_df
+    return pd.DataFrame(records)
 
 
 def main():

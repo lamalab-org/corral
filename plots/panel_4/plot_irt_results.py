@@ -33,6 +33,7 @@ Usage:
 """
 
 import argparse
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -52,16 +53,20 @@ from lama_aesthetics import (
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 
-# Add analysis directory to path for imports
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(REPO_ROOT / "analysis"))
-
-from plot_config import (
-    MODEL_NAMES,
-    ENVIRONMENT_NAMES,
-    AGENT_NAMES,
-    MODEL_COLOURS,
+PLOT_CONFIG_PATH = REPO_ROOT / "analysis" / "plot_config.py"
+plot_config_spec = importlib.util.spec_from_file_location(
+    "plot_config", PLOT_CONFIG_PATH
 )
+if plot_config_spec is None or plot_config_spec.loader is None:
+    raise ImportError(f"Could not load plot config from {PLOT_CONFIG_PATH}")
+plot_config = importlib.util.module_from_spec(plot_config_spec)
+plot_config_spec.loader.exec_module(plot_config)
+
+AGENT_NAMES = plot_config.AGENT_NAMES
+ENVIRONMENT_NAMES = plot_config.ENVIRONMENT_NAMES
+MODEL_COLOURS = plot_config.MODEL_COLOURS
+MODEL_NAMES = plot_config.MODEL_NAMES
 
 # Apply style
 lama_aesthetics.get_style("main")
@@ -69,8 +74,7 @@ lama_aesthetics.get_style("main")
 # Create color maps: raw ID -> color and display name -> color
 MODEL_COLORS_BY_ID = dict(zip(MODEL_NAMES.keys(), MODEL_COLOURS, strict=False))
 MODEL_COLORS_BY_NAME = {
-    MODEL_NAMES[model_id]: color
-    for model_id, color in MODEL_COLORS_BY_ID.items()
+    MODEL_NAMES[model_id]: color for model_id, color in MODEL_COLORS_BY_ID.items()
 }
 
 
@@ -79,25 +83,25 @@ MODEL_COLORS_BY_NAME = {
 # =============================================================================
 
 
-def map_display_names(df):
+def map_display_names(dataframe):
     """Map raw IDs to display names for plotting.
 
     Args:
-        df: DataFrame with raw ID columns (model, environment, scaffold)
+        dataframe: DataFrame with raw ID columns (model, environment, scaffold)
 
     Returns:
         DataFrame with display names
     """
-    df = df.copy()
+    mapped_df = dataframe.copy()
 
-    if "model" in df.columns:
-        df["model"] = df["model"].map(MODEL_NAMES)
-    if "environment" in df.columns:
-        df["environment"] = df["environment"].map(ENVIRONMENT_NAMES)
-    if "scaffold" in df.columns:
-        df["scaffold"] = df["scaffold"].map(AGENT_NAMES)
+    if "model" in mapped_df.columns:
+        mapped_df["model"] = mapped_df["model"].map(MODEL_NAMES)
+    if "environment" in mapped_df.columns:
+        mapped_df["environment"] = mapped_df["environment"].map(ENVIRONMENT_NAMES)
+    if "scaffold" in mapped_df.columns:
+        mapped_df["scaffold"] = mapped_df["scaffold"].map(AGENT_NAMES)
 
-    return df
+    return mapped_df
 
 
 def get_model_color(display_name):
@@ -666,7 +670,7 @@ Examples:
     parser.add_argument(
         "--plots",
         nargs="+",
-        choices=list(PLOT_FUNCTIONS.keys()) + ["all"],
+        choices=[*list(PLOT_FUNCTIONS.keys()), "all"],
         default=["all"],
         help="Plots to generate (default: all)",
     )
@@ -686,9 +690,14 @@ Examples:
         "category_task": Path("../../analysis/results/irt_category_task"),
     }
 
-    if args.results_dir == Path("../../analysis/results/irt_baseline") and args.model_type != "baseline":
+    if (
+        args.results_dir == Path("../../analysis/results/irt_baseline")
+        and args.model_type != "baseline"
+    ):
         args.results_dir = default_dirs[args.model_type]
-        logger.info(f"Using model_type={args.model_type}, results_dir={args.results_dir}")
+        logger.info(
+            f"Using model_type={args.model_type}, results_dir={args.results_dir}"
+        )
 
     # List plots and exit
     if args.list_plots:
@@ -759,9 +768,15 @@ Examples:
 
         try:
             # Call appropriate plot function based on requirements
-            if plot_name in ["capability_heatmaps", "capability_profiles", "capability_comparison"]:
-                func(knowledge_theta_df, reasoning_theta_df, output_path)
-            elif plot_name == "knowledge_vs_reasoning":
+            if (
+                plot_name
+                in [
+                    "capability_heatmaps",
+                    "capability_profiles",
+                    "capability_comparison",
+                ]
+                or plot_name == "knowledge_vs_reasoning"
+            ):
                 func(knowledge_theta_df, reasoning_theta_df, output_path)
             elif plot_name in ["lambda_forest", "psi_forest"]:
                 func(agent_trace, env_names, output_path)
@@ -774,6 +789,7 @@ Examples:
         except Exception as e:
             logger.error(f"Failed to generate {plot_name}: {e}")
             import traceback
+
             traceback.print_exc()
 
     logger.success(f"\n✅ All plots saved to {args.output_dir}")

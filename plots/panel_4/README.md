@@ -22,10 +22,10 @@ cd ../../analysis
 snakemake -j2
 
 # Or run individually
-python latent_factor_modeling.py --output-dir results/irt_baseline
-python latent_factor_modeling.py --with-category --output-dir results/irt_category
-python latent_factor_modeling.py --with-task-effects --output-dir results/irt_task
-python latent_factor_modeling.py --with-task-effects --with-category --output-dir results/irt_category_task
+python latent_factor_modeling.py --output_dir results/irt_baseline
+python latent_factor_modeling.py --with_category --output_dir results/irt_category
+python latent_factor_modeling.py --with_task_effects --output_dir results/irt_task
+python latent_factor_modeling.py --with_task_effects --with_category --output_dir results/irt_category_task
 ```
 
 Results will be in:

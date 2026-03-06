@@ -1,4 +1,5 @@
 import arviz as az
+import fire
 import numpy as np
 import pandas as pd
 import pymc as pm
@@ -125,7 +126,9 @@ def filter_extreme_groups(df, min_rate=0.05, max_rate=1):
     return grouped.filter(is_valid_group)
 
 
-def fit_agent_model_no_task_effects(agent_df, knowledge_theta_df, reasoning_theta_df, include_category=False):
+def fit_agent_model_no_task_effects(
+    agent_df, knowledge_theta_df, reasoning_theta_df, include_category=False
+):
     """
     Model without task random effects.
     Uses both knowledge and reasoning theta from IRT.
@@ -330,7 +333,9 @@ def variance_decomposition(trace, agent_df, include_task=False, include_category
     return {k: 100 * v / total for k, v in vars_dict.items()}
 
 
-def fit_agent_model_with_task_effects(agent_df, knowledge_theta_df, reasoning_theta_df, include_category=False):
+def fit_agent_model_with_task_effects(
+    agent_df, knowledge_theta_df, reasoning_theta_df, include_category=False
+):
     """
     Full model WITH task-specific random intercepts (eta_t).
     Uses both knowledge and reasoning theta from IRT.
@@ -495,27 +500,22 @@ def fit_agent_model_with_task_effects(agent_df, knowledge_theta_df, reasoning_th
     return trace, agent_df
 
 
-if __name__ == "__main__":
-    import argparse
+def main(
+    with_task_effects: bool = False,
+    with_category: bool = False,
+    output_dir: str = "./results",
+):
+    """Latent Factor Model for Agent Benchmarks.
+
+    Args:
+        with_task_effects: Include task random effects (η_t)
+        with_category: Include category effects (κ_c for task vs subtask)
+        output_dir: Output directory for saved results
+    """
     import json
-
-    parser = argparse.ArgumentParser(
-        description="Latent Factor Model for Agent Benchmarks"
-    )
-    parser.add_argument(
-        "--with-task-effects", action="store_true", help="Include task random effects (η_t)"
-    )
-    parser.add_argument(
-        "--with-category", action="store_true", help="Include category effects (κ_c for task vs subtask)"
-    )
-    parser.add_argument(
-        "--output-dir", default="./results", help="Output directory for saved results"
-    )
-    args = parser.parse_args()
-
     from pathlib import Path
 
-    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # ==========================================================================
     # Stage 1a: IRT Model on Knowledge Q&A Data
@@ -536,8 +536,8 @@ if __name__ == "__main__":
 
     logger.info("\nKnowledge theta estimates:")
     logger.info(knowledge_theta_df)
-    knowledge_theta_df.to_csv(f"{args.output_dir}/knowledge_theta.csv", index=False)
-    logger.info(f"Saved {args.output_dir}/knowledge_theta.csv")
+    knowledge_theta_df.to_csv(f"{output_dir}/knowledge_theta.csv", index=False)
+    logger.info(f"Saved {output_dir}/knowledge_theta.csv")
 
     # ==========================================================================
     # Stage 1b: IRT Model on Reasoning Q&A Data
@@ -558,8 +558,8 @@ if __name__ == "__main__":
 
     logger.info("\nReasoning theta estimates:")
     logger.info(reasoning_theta_df)
-    reasoning_theta_df.to_csv(f"{args.output_dir}/reasoning_theta.csv", index=False)
-    logger.info(f"Saved {args.output_dir}/reasoning_theta.csv")
+    reasoning_theta_df.to_csv(f"{output_dir}/reasoning_theta.csv", index=False)
+    logger.info(f"Saved {output_dir}/reasoning_theta.csv")
 
     # ==========================================================================
     # Prepare Agent Data
@@ -568,15 +568,15 @@ if __name__ == "__main__":
     logger.info("Preparing Agent Data")
     logger.info("=" * 60)
 
-    agent_data = agent_data[agent_data["environment"] != "wetlab"]
+    filtered_agent_data = agent_data[agent_data["environment"] != "wetlab"]
 
     # Agent data should already be normalized from prepare_agent_data.py
 
-    logger.info("Models:", agent_data["model"].unique())
-    logger.info("Environments:", agent_data["environment"].unique())
+    logger.info("Models:", filtered_agent_data["model"].unique())
+    logger.info("Environments:", filtered_agent_data["environment"].unique())
 
     # Filter extreme groups
-    agent_data_filtered = filter_extreme_groups(agent_data)
+    agent_data_filtered = filter_extreme_groups(filtered_agent_data)
     logger.info(f"Filtered data: {len(agent_data_filtered)} rows")
 
     # ==========================================================================
@@ -584,40 +584,36 @@ if __name__ == "__main__":
     # ==========================================================================
     logger.info("\n" + "=" * 60)
     model_desc = "STAGE 2: Fitting Agent Model"
-    if args.with_task_effects and args.with_category:
+    if with_task_effects and with_category:
         model_desc += " WITH Task Effects AND Category Effects"
-    elif args.with_task_effects:
+    elif with_task_effects:
         model_desc += " WITH Task Effects"
-    elif args.with_category:
+    elif with_category:
         model_desc += " WITH Category Effects"
     else:
         model_desc += " (baseline: no task or category effects)"
     logger.info(model_desc)
     logger.info("=" * 60)
 
-    if args.with_task_effects:
+    if with_task_effects:
         agent_trace, agent_df = fit_agent_model_with_task_effects(
             agent_df=agent_data_filtered,
             knowledge_theta_df=knowledge_theta_df,
             reasoning_theta_df=reasoning_theta_df,
-            include_category=args.with_category,
+            include_category=with_category,
         )
         var_result = variance_decomposition(
-            agent_trace, agent_df,
-            include_task=True,
-            include_category=args.with_category
+            agent_trace, agent_df, include_task=True, include_category=with_category
         )
     else:
         agent_trace, agent_df = fit_agent_model_no_task_effects(
             agent_df=agent_data_filtered,
             knowledge_theta_df=knowledge_theta_df,
             reasoning_theta_df=reasoning_theta_df,
-            include_category=args.with_category,
+            include_category=with_category,
         )
         var_result = variance_decomposition(
-            agent_trace, agent_df,
-            include_task=False,
-            include_category=args.with_category
+            agent_trace, agent_df, include_task=False, include_category=with_category
         )
 
     # ==========================================================================
@@ -630,10 +626,10 @@ if __name__ == "__main__":
         logger.info(f"  {component:12s}: {pct:6.2f}%")
 
     # Save trace and agent_df for plotting
-    agent_trace.to_netcdf(f"{args.output_dir}/agent_trace.nc")
-    agent_df.to_csv(f"{args.output_dir}/agent_df.csv", index=False)
+    agent_trace.to_netcdf(f"{output_dir}/agent_trace.nc")
+    agent_df.to_csv(f"{output_dir}/agent_df.csv", index=False)
 
-    results_path = f"{args.output_dir}/results.json"
+    results_path = f"{output_dir}/results.json"
     from pathlib import Path
 
     with Path(results_path).open("w") as f:
@@ -647,7 +643,11 @@ if __name__ == "__main__":
             indent=2,
         )
 
-    logger.info(f"\nAll results saved to {args.output_dir}/")
+    logger.info(f"\nAll results saved to {output_dir}/")
     logger.info("  - agent_trace.nc, agent_df.csv, results.json")
     logger.info("  - knowledge_theta.csv, reasoning_theta.csv")
     logger.info("Run plot_results.py to generate plots.")
+
+
+if __name__ == "__main__":
+    fire.Fire(main)

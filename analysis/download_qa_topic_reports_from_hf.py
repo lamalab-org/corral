@@ -155,15 +155,15 @@ def main(
                 repo_type="dataset",
                 token=HF_TOKEN,
             )
-            df = pd.read_parquet(local_path)
+            topic_df = pd.read_parquet(local_path)
 
             # Add metadata columns
-            df["env"] = env
-            df["qa_type"] = qa_type
-            df["model"] = model
+            topic_df["env"] = env
+            topic_df["qa_type"] = qa_type
+            topic_df["model"] = model
 
-            dfs.append(df)
-            logger.success(f"  ✓ '{dirname}'  {len(df):,} rows")
+            dfs.append(topic_df)
+            logger.success(f"  ✓ '{dirname}'  {len(topic_df):,} rows")
         except Exception as exc:
             logger.error(f"  ✗ '{dirname}' failed: {exc}")
             failed.append(dirname)
