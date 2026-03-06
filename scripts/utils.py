@@ -20,7 +20,7 @@ def read_json(path: Path) -> Any:
 
 
 def safe_float(x: Any) -> float | None:
-    """Convert *x* to float, returning ``None`` on failure."""
+    """Convert *x* to float, returning `None` on failure."""
     try:
         return float(x)
     except Exception:
@@ -37,7 +37,7 @@ def logsumexp(logps: list[float]) -> float:
 def entropy_from_top_logprobs(top_logprobs: list[dict[str, Any]]) -> float | None:
     """Compute entropy over the distribution implied by *top_logprobs*.
 
-    *top_logprobs* is a list of dicts like ``{"token": "...", "logprob": -0.12, …}``.
+    *top_logprobs* is a list of dicts like `{"token": "...", "logprob": -0.12, …}`.
     Normalises across the provided candidates (approximate entropy).
     """
     if not top_logprobs:
@@ -58,7 +58,7 @@ def entropy_from_top_logprobs(top_logprobs: list[dict[str, Any]]) -> float | Non
 
 
 def infer_model_from_str(s: str) -> str | None:
-    """Return the canonical model key found in *s*, or ``None``."""
+    """Return the canonical model key found in *s*, or `None`."""
     s_norm = s.lower().replace("-", "_")
     # Longest-first ordering prevents shorter aliases (e.g. 'claude') from
     # shadowing more specific ones (e.g. 'claude_45').
@@ -69,7 +69,7 @@ def infer_model_from_str(s: str) -> str | None:
 
 
 def infer_agent_type(filename: str) -> str:
-    """Return ``'tool_calling'`` or ``'react'`` based on the filename."""
+    """Return `'tool_calling'` or `'react'` based on the filename."""
     fl = filename.lower()
     if "tool_calling" in fl or "toolcalling" in fl:
         return "tool_calling"
@@ -77,7 +77,7 @@ def infer_agent_type(filename: str) -> str:
 
 
 def should_skip_dir(name: str) -> bool:
-    """Return ``True`` if a directory with *name* should be ignored."""
+    """Return `True` if a directory with *name* should be ignored."""
     return any(name.startswith(p) for p in SKIP_DIR_PREFIXES)
 
 
@@ -89,7 +89,7 @@ def is_report_json(filepath: Path) -> bool:
 
 
 def load_report(filepath: Path) -> dict | None:
-    """Load a report JSON; return ``None`` if it cannot be read or is not a report."""
+    """Load a report JSON; return `None` if it cannot be read or is not a report."""
     try:
         data = json.loads(filepath.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
