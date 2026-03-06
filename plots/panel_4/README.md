@@ -6,6 +6,8 @@ Unified plotting script for IRT (Item Response Theory) model results.
 
 `plot_irt_results.py` generates all visualizations for the latent factor modeling analysis, combining capability estimates (θ_K, θ_R) and agent model effects.
 
+**CLI Interface:** Uses Python Fire for a clean, intuitive command-line interface with automatic help generation.
+
 **Four model versions available:**
 - **`baseline`**: Knowledge, reasoning, scaffold, level, verbosity (no task or category effects)
 - **`category`**: Adds category effect (κ_c) for task vs subtask distinction
@@ -36,26 +38,41 @@ Results will be in:
 
 ## Usage
 
+### List available plots
+```bash
+python plot_irt_results.py list_plots
+```
+
 ### Generate all plots (baseline model)
 ```bash
-python plot_irt_results.py --model-type baseline
+python plot_irt_results.py generate --model_type=baseline
 ```
 
 ### Generate plots for other models
 ```bash
-python plot_irt_results.py --model-type category
-python plot_irt_results.py --model-type task
-python plot_irt_results.py --model-type category_task
+python plot_irt_results.py generate --model_type=category
+python plot_irt_results.py generate --model_type=task
+python plot_irt_results.py generate --model_type=category_task
 ```
 
-### Generate specific plots
+### Generate specific plots (comma-separated)
 ```bash
-python plot_irt_results.py --model-type baseline --plots capability_heatmaps lambda_forest
+python plot_irt_results.py generate --model_type=baseline --plots=capability_heatmaps,lambda_forest
 ```
 
-### List available plots
+### Custom output directory
 ```bash
-python plot_irt_results.py --list-plots
+python plot_irt_results.py generate --model_type=baseline --output_dir=./my_plots
+```
+
+### Advanced: Specify custom results directory
+```bash
+python plot_irt_results.py generate --results_dir=../../analysis/results/irt_baseline --output_dir=./output
+```
+
+### Get help
+```bash
+python plot_irt_results.py generate -- --help
 ```
 
 ## Available Plots

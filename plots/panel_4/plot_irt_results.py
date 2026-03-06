@@ -23,22 +23,25 @@ Model types (4 specifications):
 
 Usage:
   # Generate all plots for baseline model
-  python plot_irt_results.py --model-type baseline
+  python plot_irt_results.py --model_type=baseline
 
   # Generate specific plots for category+task model
-  python plot_irt_results.py --model-type category_task --plots capability_heatmaps lambda_forest
+  python plot_irt_results.py --model_type=category_task --plots=capability_heatmaps,lambda_forest
 
   # Custom paths
-  python plot_irt_results.py --results-dir ../analysis/results/irt_baseline --output-dir ./output
+  python plot_irt_results.py --results_dir=../analysis/results/irt_baseline --output_dir=./output
+
+  # List available plots
+  python plot_irt_results.py list_plots
 """
 
-import argparse
 import importlib.util
 import json
 import sys
 from pathlib import Path
 
 import arviz as az
+import fire
 import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
@@ -470,7 +473,7 @@ def plot_variance_decomposition(var_dict, output_path):
 
     colors = ["#5f59d0", "#e84ab5", "#a052c3", "#668fb6", "#6bb5a4", "#2a9d8f"]
 
-    bars = ax.barh(labels, values, color=colors, edgecolor="black", linewidth=0.5)
+    bars = ax.barh(labels, values, color=colors)
 
     for bar, val in zip(bars, values, strict=False):
         ax.text(
@@ -478,14 +481,14 @@ def plot_variance_decomposition(var_dict, output_path):
             bar.get_y() + bar.get_height() / 2,
             f"{val:.1f}%",
             va="center",
-            fontsize=10,
+            fontsize=9,
         )
 
     y_pos = np.arange(len(values))
     range_frame(ax, np.array([0, max(values)]), y_pos, pad=0.15)
 
-    ax.set_xlabel("Variance Explained (%)", fontsize=6)
-    ax.set_title("Variance Decomposition", fontsize=6, fontweight="bold")
+    ax.set_xlabel("Variance Explained (%)", fontsize=8)
+    ax.set_title("Variance Decomposition", fontsize=8, fontweight="bold")
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -630,100 +633,86 @@ PLOT_FUNCTIONS = {
 # =============================================================================
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Generate IRT model result plots",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
-Available plots:
-{chr(10).join(f"  {name:25s} - {info['description']}" for name, info in PLOT_FUNCTIONS.items())}
+def list_plots():
+    """List all available plots and their descriptions."""
+    logger.info("Available plots:")
+    for name, info in PLOT_FUNCTIONS.items():
+        logger.info(f"  {name:25s} - {info['description']}")
 
-Examples:
-  # Generate all plots
-  python plot_irt_results.py
 
-  # Generate specific plots
-  python plot_irt_results.py --plots capability_heatmaps lambda_forest
+def generate(
+    model_type: str = "baseline",
+    results_dir: str | None = None,
+    output_dir: str = "./output",
+    plots: str | list[str] = "all",
+):
+    """
+    Generate IRT model result plots.
 
-  # List available plots
-  python plot_irt_results.py --list-plots
-        """,
-    )
-    parser.add_argument(
-        "--results-dir",
-        type=Path,
-        default=Path("../../analysis/results/irt_baseline"),
-        help="Directory with IRT results (default: ../../analysis/results/irt_baseline)",
-    )
-    parser.add_argument(
-        "--model-type",
-        choices=["baseline", "category", "task", "category_task"],
-        default="baseline",
-        help="Which IRT model results to plot (default: baseline)",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("./output"),
-        help="Output directory for plots (default: ./output)",
-    )
-    parser.add_argument(
-        "--plots",
-        nargs="+",
-        choices=[*list(PLOT_FUNCTIONS.keys()), "all"],
-        default=["all"],
-        help="Plots to generate (default: all)",
-    )
-    parser.add_argument(
-        "--list-plots",
-        action="store_true",
-        help="List available plots and exit",
-    )
+    Args:
+        model_type: Which IRT model results to plot (baseline, category, task, category_task)
+        results_dir: Directory with IRT results (auto-determined from model_type if not provided)
+        output_dir: Output directory for plots
+        plots: Comma-separated plot names or "all" (default: all)
+               Options: capability_heatmaps, capability_profiles, capability_comparison,
+                       knowledge_vs_reasoning, lambda_forest, psi_forest,
+                       variance_decomposition, scaffold_effects, level_effects
 
-    args = parser.parse_args()
+    Examples:
+        python plot_irt_results.py generate --model_type=baseline
+        python plot_irt_results.py generate --model_type=category_task --plots=lambda_forest,psi_forest
+        python plot_irt_results.py generate --results_dir=../analysis/results/irt_baseline
+    """
+    # Validate model_type
+    valid_model_types = ["baseline", "category", "task", "category_task"]
+    if model_type not in valid_model_types:
+        logger.error(f"Invalid model_type: {model_type}")
+        logger.error(f"Valid options: {', '.join(valid_model_types)}")
+        sys.exit(1)
 
-    # Override results_dir based on model_type if not explicitly set
+    # Set results_dir based on model_type if not provided
     default_dirs = {
-        "baseline": Path("../../analysis/results/irt_baseline"),
-        "category": Path("../../analysis/results/irt_category"),
-        "task": Path("../../analysis/results/irt_task"),
-        "category_task": Path("../../analysis/results/irt_category_task"),
+        "baseline": "../../analysis/results/irt_baseline",
+        "category": "../../analysis/results/irt_category",
+        "task": "../../analysis/results/irt_task",
+        "category_task": "../../analysis/results/irt_category_task",
     }
 
-    if (
-        args.results_dir == Path("../../analysis/results/irt_baseline")
-        and args.model_type != "baseline"
-    ):
-        args.results_dir = default_dirs[args.model_type]
-        logger.info(
-            f"Using model_type={args.model_type}, results_dir={args.results_dir}"
-        )
+    if results_dir is None:
+        results_dir = default_dirs[model_type]
+        logger.info(f"Using model_type={model_type}, results_dir={results_dir}")
 
-    # List plots and exit
-    if args.list_plots:
-        logger.info("Available plots:")
-        for name, info in PLOT_FUNCTIONS.items():
-            logger.info(f"  {name:25s} - {info['description']}")
-        return
+    results_dir = Path(results_dir)
+    output_dir = Path(output_dir)
 
     # Create output directory
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Determine which plots to generate
-    if "all" in args.plots:
-        plots_to_generate = list(PLOT_FUNCTIONS.keys())
+    # Parse plots argument
+    if isinstance(plots, str):
+        if plots == "all":
+            plots_to_generate = list(PLOT_FUNCTIONS.keys())
+        else:
+            plots_to_generate = [p.strip() for p in plots.split(",")]
     else:
-        plots_to_generate = args.plots
+        plots_to_generate = plots
+
+    # Validate plot names
+    invalid_plots = [p for p in plots_to_generate if p not in PLOT_FUNCTIONS]
+    if invalid_plots:
+        logger.error(f"Invalid plot names: {', '.join(invalid_plots)}")
+        logger.error(f"Valid options: {', '.join(PLOT_FUNCTIONS.keys())}")
+        sys.exit(1)
 
     logger.info(f"Generating {len(plots_to_generate)} plots...")
 
     # Load theta estimates (required for all plots)
     logger.info("Loading theta estimates...")
-    knowledge_theta_path = args.results_dir / "knowledge_theta.csv"
-    reasoning_theta_path = args.results_dir / "reasoning_theta.csv"
+    knowledge_theta_path = results_dir / "knowledge_theta.csv"
+    reasoning_theta_path = results_dir / "reasoning_theta.csv"
 
     if not knowledge_theta_path.exists() or not reasoning_theta_path.exists():
-        logger.error(f"Theta CSV files not found in {args.results_dir}")
+        logger.error(f"Theta CSV files not found in {results_dir}")
         logger.error("Expected files: knowledge_theta.csv, reasoning_theta.csv")
         sys.exit(1)
 
@@ -738,9 +727,9 @@ Examples:
 
     if requires_trace:
         logger.info("Loading MCMC trace and agent data...")
-        trace_path = args.results_dir / "agent_trace.nc"
-        agent_df_path = args.results_dir / "agent_df.csv"
-        results_json_path = args.results_dir / "results.json"
+        trace_path = results_dir / "agent_trace.nc"
+        agent_df_path = results_dir / "agent_df.csv"
+        results_json_path = results_dir / "results.json"
 
         if not trace_path.exists():
             logger.error(f"Trace file not found: {trace_path}")
@@ -758,13 +747,13 @@ Examples:
         logger.success("Loaded MCMC trace and agent data")
 
     # Generate plots
-    logger.info(f"\nGenerating plots to {args.output_dir}...")
+    logger.info(f"\nGenerating plots to {output_dir}...")
 
     for plot_name in plots_to_generate:
         logger.info(f"Generating {plot_name}...")
         plot_info = PLOT_FUNCTIONS[plot_name]
         func = plot_info["func"]
-        output_path = args.output_dir / f"{plot_name}.png"
+        output_path = output_dir / f"{plot_name}.png"
 
         try:
             # Call appropriate plot function based on requirements
@@ -792,8 +781,8 @@ Examples:
 
             traceback.print_exc()
 
-    logger.success(f"\n✅ All plots saved to {args.output_dir}")
+    logger.success(f"\n✅ All plots saved to {output_dir}")
 
 
 if __name__ == "__main__":
-    main()
+    fire.Fire({"generate": generate, "list_plots": list_plots})
