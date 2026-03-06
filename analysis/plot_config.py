@@ -1,18 +1,33 @@
 """
 Name maps and colour palettes for Corral plots.
-Models: claude-4.5, gpt-4o, gpt-oss-120b
+Models: claude-sonnet-4.5, gpt-4o, gpt-oss-120b
 Environments: afm, catalyst, md, ml, resistor, retro, spectra, wetlab
 Agents: react, tool_calling
 """
 
-# ---------- Name maps (id -> display name) ----------
+# ---------- Name maps (canonical ID -> display name) ----------
+# Canonical IDs match reports.jsonl exactly
 MODEL_NAMES = {
     "claude-4.5": "Claude-4.5-Sonnet",
     "gpt-4o": "GPT-4o",
     "gpt-oss-120b": "GPT-OSS-120B",
 }
 
+# For environments, keep simple names without newlines for IRT plots
+# (other plots may want multi-line names for axis labels)
 ENVIRONMENT_NAMES = {
+    "afm": "AFM",
+    "catalyst": "Catalyst",
+    "md": "MD",  # Simple name for IRT
+    "ml": "ML",  # Simple name for IRT
+    "resistor": "Resistor",
+    "retro": "Retrosynthesis",  # Simple name for IRT
+    "spectra": "Spectra",
+    "wetlab": "Wetlab",
+}
+
+# Multi-line environment names for plots with tight x-axis spacing
+ENVIRONMENT_NAMES_MULTILINE = {
     "afm": "AFM",
     "catalyst": "Catalyst",
     "md": "Molecular\nDynamics",

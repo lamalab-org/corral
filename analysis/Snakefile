@@ -1,7 +1,17 @@
 rule all:
     input:
-        "results/data/reports.jsonl",
-        "results/data/qa_topic_reports.jsonl",
+        # Baseline model (no task or category effects)
+        "results/irt_baseline/agent_trace.nc",
+        "results/irt_baseline/results.json",
+        # Category effects only
+        "results/irt_category/agent_trace.nc",
+        "results/irt_category/results.json",
+        # Task effects only
+        "results/irt_task/agent_trace.nc",
+        "results/irt_task/results.json",
+        # Both category and task effects
+        "results/irt_category_task/agent_trace.nc",
+        "results/irt_category_task/results.json",
 
 
 rule download_reports:
@@ -20,3 +30,92 @@ rule download_qa_topic_reports:
         "results/logs/download_qa_topic_reports.log",
     shell:
         "python download_qa_topic_reports_from_hf.py > {log} 2>&1"
+
+
+rule download_qa_reports:
+    output:
+        "results/data/knowledge_qa.csv",
+        "results/data/reasoning_qa.csv",
+    log:
+        "results/logs/download_qa_reports.log",
+    shell:
+        "python download_qa_reports_from_hf.py > {log} 2>&1"
+
+
+rule prepare_agent_data:
+    input:
+        "results/data/reports.jsonl",
+    output:
+        "results/data/overall_trace.csv",
+    log:
+        "results/logs/prepare_agent_data.log",
+    shell:
+        "python prepare_agent_data.py > {log} 2>&1"
+
+
+rule fit_irt_model_baseline:
+    input:
+        "results/data/knowledge_qa.csv",
+        "results/data/reasoning_qa.csv",
+        "results/data/overall_trace.csv",
+    output:
+        "results/irt_baseline/agent_trace.nc",
+        "results/irt_baseline/agent_df.csv",
+        "results/irt_baseline/results.json",
+        "results/irt_baseline/knowledge_theta.csv",
+        "results/irt_baseline/reasoning_theta.csv",
+    log:
+        "results/logs/fit_irt_model_baseline.log",
+    shell:
+        "python latent_factor_modeling.py --output-dir results/irt_baseline > {log} 2>&1"
+
+
+rule fit_irt_model_category:
+    input:
+        "results/data/knowledge_qa.csv",
+        "results/data/reasoning_qa.csv",
+        "results/data/overall_trace.csv",
+    output:
+        "results/irt_category/agent_trace.nc",
+        "results/irt_category/agent_df.csv",
+        "results/irt_category/results.json",
+        "results/irt_category/knowledge_theta.csv",
+        "results/irt_category/reasoning_theta.csv",
+    log:
+        "results/logs/fit_irt_model_category.log",
+    shell:
+        "python latent_factor_modeling.py --with-category --output-dir results/irt_category > {log} 2>&1"
+
+
+rule fit_irt_model_task:
+    input:
+        "results/data/knowledge_qa.csv",
+        "results/data/reasoning_qa.csv",
+        "results/data/overall_trace.csv",
+    output:
+        "results/irt_task/agent_trace.nc",
+        "results/irt_task/agent_df.csv",
+        "results/irt_task/results.json",
+        "results/irt_task/knowledge_theta.csv",
+        "results/irt_task/reasoning_theta.csv",
+    log:
+        "results/logs/fit_irt_model_task.log",
+    shell:
+        "python latent_factor_modeling.py --with-task-effects --output-dir results/irt_task > {log} 2>&1"
+
+
+rule fit_irt_model_category_task:
+    input:
+        "results/data/knowledge_qa.csv",
+        "results/data/reasoning_qa.csv",
+        "results/data/overall_trace.csv",
+    output:
+        "results/irt_category_task/agent_trace.nc",
+        "results/irt_category_task/agent_df.csv",
+        "results/irt_category_task/results.json",
+        "results/irt_category_task/knowledge_theta.csv",
+        "results/irt_category_task/reasoning_theta.csv",
+    log:
+        "results/logs/fit_irt_model_category_task.log",
+    shell:
+        "python latent_factor_modeling.py --with-task-effects --with-category --output-dir results/irt_category_task > {log} 2>&1"
