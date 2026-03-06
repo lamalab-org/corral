@@ -15,10 +15,10 @@ MODEL_NAMES = {
 ENVIRONMENT_NAMES = {
     "afm": "AFM",
     "catalyst": "Catalyst",
-    "md": "MD",
-    "ml": "ML",
+    "md": "Molecular\nDynamics",
+    "ml": "Machine\nLearning",
     "resistor": "Resistor",
-    "retro": "Retrosynthesis",
+    "retro": "Retro-\nsynthesis",
     "spectra": "Spectra",
     "wetlab": "Wetlab",
 }
@@ -29,10 +29,17 @@ AGENT_NAMES = {
 }
 
 # ---------- Primary / secondary colour lists ----------
+
+GAP_COLORS = {
+    "model_gap": "#7150e0",
+    "agent_gap": "#e87584",
+}
+
+
 PRIMARY_COLOURS = [
-    "#2563eb",  # blue
-    "#dc2626",  # red
-    "#16a34a",  # green
+    "#aae463",
+    "#7150e0",
+    "#e87584",
 ]
 
 SECONDARY_COLOURS = [
@@ -43,9 +50,9 @@ SECONDARY_COLOURS = [
 
 # ---------- Colours per category (ordered to match logical order) ----------
 MODEL_COLOURS = [
-    "#8D5F8C",  # Claude 4.5
-    "#696FC7",  # GPT-4o
-    "#4A90A4",  # GPT-OSS-120B
+    "#711c91",  # Claude 4.5
+    "#ea00d9",  # GPT-4o
+    "#7150e0",  # GPT-OSS-120B
 ]
 
 AGENT_COLOURS = [
@@ -70,6 +77,14 @@ ENVIRONMENT_COLOUR_MAP = dict(
     zip(ENVIRONMENT_NAMES.keys(), ENVIRONMENT_COLOURS, strict=False)
 )
 
+# ---------- Font sizes ----------
+FONT_SIZES = {
+    "axis_label": 8,  # X and Y axis labels
+    "tick_label": 8,  # X and Y tick labels
+    "legend": 7,  # Legend text
+    "title": 10,  # Plot title
+}
+
 # ---------- Single export dict (all of the above) ----------
 PLOT_CONFIG = {
     "model_names": MODEL_NAMES,
@@ -83,4 +98,5 @@ PLOT_CONFIG = {
     "model_colour_map": MODEL_COLOUR_MAP,
     "agent_colour_map": AGENT_COLOUR_MAP,
     "environment_colour_map": ENVIRONMENT_COLOUR_MAP,
+    "font_sizes": FONT_SIZES,
 }
