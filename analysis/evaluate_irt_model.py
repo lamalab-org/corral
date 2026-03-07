@@ -268,6 +268,51 @@ def fit_and_predict(
     }
 
 
+# =============================================================================
+# Helper functions for parallel execution (must be at module level for pickling)
+# =============================================================================
+
+
+def _kfold_worker(holdout_env, agent_data, knowledge_qa, reasoning_qa):
+    """Worker function for K-fold CV. Must be at module level for pickling."""
+    train_data = agent_data[agent_data["environment"] != holdout_env]
+    test_data = agent_data[agent_data["environment"] == holdout_env]
+
+    return fit_and_predict(
+        train_data,
+        test_data,
+        knowledge_qa,
+        reasoning_qa,
+        fold_name=f"LOEO-{holdout_env}",
+    )
+
+
+def _group_worker(
+    group_idx, model, env, scaffold, agent_data, knowledge_qa, reasoning_qa
+):
+    """Worker function for Group LOO-CV. Must be at module level for pickling."""
+    train_data = agent_data[
+        ~(
+            (agent_data["model"] == model)
+            & (agent_data["environment"] == env)
+            & (agent_data["scaffold"] == scaffold)
+        )
+    ]
+    test_data = agent_data[
+        (agent_data["model"] == model)
+        & (agent_data["environment"] == env)
+        & (agent_data["scaffold"] == scaffold)
+    ]
+
+    return fit_and_predict(
+        train_data,
+        test_data,
+        knowledge_qa,
+        reasoning_qa,
+        fold_name=f"Group-{group_idx:02d}-{model}-{env}-{scaffold}",
+    )
+
+
 def kfold_cv(
     knowledge_qa, reasoning_qa, agent_data, n_jobs=7, output_dir="results/eval"
 ):
@@ -294,21 +339,10 @@ def kfold_cv(
     logger.info(f"Environments: {environments}")
     logger.info(f"Running {len(environments)}-fold CV with {n_jobs} parallel jobs")
 
-    def run_fold(holdout_env):
-        train_data = agent_data[agent_data["environment"] != holdout_env]
-        test_data = agent_data[agent_data["environment"] == holdout_env]
-
-        return fit_and_predict(
-            train_data,
-            test_data,
-            knowledge_qa,
-            reasoning_qa,
-            fold_name=f"LOEO-{holdout_env}",
-        )
-
     # Run folds in parallel
-    results = Parallel(n_jobs=n_jobs, verbose=10)(
-        delayed(run_fold)(env) for env in environments
+    results = Parallel(n_jobs=n_jobs, backend="multiprocessing", verbose=10)(
+        delayed(_kfold_worker)(env, agent_data, knowledge_qa, reasoning_qa)
+        for env in environments
     )
 
     # Aggregate metrics
@@ -377,31 +411,17 @@ def group_loo_cv(
     logger.info(f"Total groups: {len(groups)}")
     logger.info(f"Running with {n_jobs} parallel jobs")
 
-    def run_group(group_idx, model, env, scaffold):
-        train_data = agent_data[
-            ~(
-                (agent_data["model"] == model)
-                & (agent_data["environment"] == env)
-                & (agent_data["scaffold"] == scaffold)
-            )
-        ]
-        test_data = agent_data[
-            (agent_data["model"] == model)
-            & (agent_data["environment"] == env)
-            & (agent_data["scaffold"] == scaffold)
-        ]
-
-        return fit_and_predict(
-            train_data,
-            test_data,
+    # Run groups in parallel
+    results = Parallel(n_jobs=n_jobs, backend="multiprocessing", verbose=10)(
+        delayed(_group_worker)(
+            i,
+            row["model"],
+            row["environment"],
+            row["scaffold"],
+            agent_data,
             knowledge_qa,
             reasoning_qa,
-            fold_name=f"Group-{group_idx:02d}-{model}-{env}-{scaffold}",
         )
-
-    # Run groups in parallel
-    results = Parallel(n_jobs=n_jobs, verbose=10)(
-        delayed(run_group)(i, row["model"], row["environment"], row["scaffold"])
         for i, row in groups.iterrows()
     )
 

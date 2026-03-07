@@ -92,7 +92,13 @@ def fit_irt_model(qa_df):
         eta = a[item_indices] * theta[theta_indices] - b[item_indices]
         pm.Bernoulli("y", logit_p=eta, observed=qa_df["correct"].to_numpy())
 
-        trace = pm.sample(2000, tune=1000, chains=4, target_accept=0.9)
+        trace = pm.sample(
+            2000,
+            tune=1000,
+            chains=4,
+            target_accept=0.9,
+            idata_kwargs={"log_likelihood": True},
+        )
 
     return trace, qa_df
 
@@ -285,7 +291,13 @@ def fit_agent_model_no_task_effects(
         except Exception as e:
             logger.info(f"Error during initial point test: {e}")
 
-        trace = pm.sample(1000, tune=1000, chains=4, target_accept=0.95)
+        trace = pm.sample(
+            1000,
+            tune=1000,
+            chains=4,
+            target_accept=0.95,
+            idata_kwargs={"log_likelihood": True},
+        )
 
     return trace, agent_df
 
@@ -495,7 +507,13 @@ def fit_agent_model_with_task_effects(
         except Exception as e:
             logger.info(f"Error during initial point test: {e}")
 
-        trace = pm.sample(2000, tune=1000, chains=4, target_accept=0.9)
+        trace = pm.sample(
+            2000,
+            tune=1000,
+            chains=4,
+            target_accept=0.9,
+            idata_kwargs={"log_likelihood": True},
+        )
 
     return trace, agent_df
 

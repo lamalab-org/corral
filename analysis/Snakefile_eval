@@ -1,0 +1,146 @@
+"""
+Snakemake workflow for IRT model cross-validation evaluation.
+
+Usage:
+    # K-fold CV only (7 jobs, ~50 min with 8 cores per job)
+    snakemake -s Snakefile_eval --cores 32 kfold_summary
+
+    # Group LOO-CV only (42 jobs, ~5 hours with 8 cores per job)
+    snakemake -s Snakefile_eval --cores 32 group_summary
+
+    # Both evaluations
+    snakemake -s Snakefile_eval --cores 32 all_eval
+"""
+
+# Environments for K-fold CV
+ENVIRONMENTS = ["afm", "catalyst", "md", "ml", "resistor", "retro", "spectra"]
+
+# Models, environments, scaffolds for Group LOO-CV
+MODELS = ["claude-4.5", "gpt-4o", "gpt-oss-120b"]
+GROUP_ENVS = ["afm", "catalyst", "md", "ml", "resistor", "retro", "spectra"]
+SCAFFOLDS = ["react", "tool_calling"]
+
+# Generate all group combinations
+GROUPS = []
+for model in MODELS:
+    for env in GROUP_ENVS:
+        for scaffold in SCAFFOLDS:
+            GROUPS.append(f"{model}_{env}_{scaffold}")
+
+
+rule all_eval:
+    input:
+        "results/eval/kfold_summary.json",
+        "results/eval/group_summary.json",
+
+
+rule kfold_summary:
+    input:
+        expand("results/eval/kfold/{env}.json", env=ENVIRONMENTS),
+    output:
+        "results/eval/kfold_summary.json",
+    run:
+        import json
+        import numpy as np
+        from pathlib import Path
+
+        results = []
+        for env_file in input:
+            with open(env_file) as f:
+                results.append(json.load(f))
+
+        # Compute summary
+        valid_results = [r for r in results if r["metrics"] is not None]
+        if len(valid_results) == 0:
+            summary = None
+        else:
+            all_metrics = [r["metrics"] for r in valid_results]
+            summary = {
+                metric: float(np.mean([m[metric] for m in all_metrics]))
+                for metric in all_metrics[0]
+            }
+            summary["n_folds"] = len(valid_results)
+
+        with open(output[0], "w") as f:
+            json.dump({"results": results, "summary": summary}, f, indent=2)
+
+        if summary:
+            print("\n" + "=" * 80)
+            print("K-FOLD CV SUMMARY")
+            print("=" * 80)
+            for metric, value in summary.items():
+                if metric != "n_folds":
+                    print(f"  {metric:20s}: {value:.4f}")
+            print(f"  {'n_folds':20s}: {summary['n_folds']}")
+
+
+rule group_summary:
+    input:
+        expand("results/eval/group/{group}.json", group=GROUPS),
+    output:
+        "results/eval/group_summary.json",
+    run:
+        import json
+        import numpy as np
+        from pathlib import Path
+
+        results = []
+        for group_file in input:
+            with open(group_file) as f:
+                results.append(json.load(f))
+
+        # Compute summary
+        valid_results = [r for r in results if r["metrics"] is not None]
+        if len(valid_results) == 0:
+            summary = None
+        else:
+            all_metrics = [r["metrics"] for r in valid_results]
+            summary = {
+                metric: float(np.mean([m[metric] for m in all_metrics]))
+                for metric in all_metrics[0]
+            }
+            summary["n_groups"] = len(valid_results)
+
+        with open(output[0], "w") as f:
+            json.dump({"results": results, "summary": summary}, f, indent=2)
+
+        if summary:
+            print("\n" + "=" * 80)
+            print("GROUP LOO-CV SUMMARY")
+            print("=" * 80)
+            for metric, value in summary.items():
+                if metric != "n_groups":
+                    print(f"  {metric:20s}: {value:.4f}")
+            print(f"  {'n_groups':20s}: {summary['n_groups']}")
+
+
+rule run_kfold:
+    output:
+        "results/eval/kfold/{env}.json",
+    threads: 4  # 4 cores for MCMC chains
+    log:
+        "results/eval/logs/kfold_{env}.log",
+    shell:
+        """
+        python evaluate_single_fold.py kfold \
+            --holdout_env={wildcards.env} \
+            --output_file={output} \
+            > {log} 2>&1
+        """
+
+
+rule run_group:
+    output:
+        "results/eval/group/{model}_{env}_{scaffold}.json",
+    threads: 4  # 4 cores for MCMC chains
+    log:
+        "results/eval/logs/group_{model}_{env}_{scaffold}.log",
+    shell:
+        """
+        python evaluate_single_fold.py group \
+            --holdout_model={wildcards.model} \
+            --holdout_env={wildcards.env} \
+            --holdout_scaffold={wildcards.scaffold} \
+            --output_file={output} \
+            > {log} 2>&1
+        """
