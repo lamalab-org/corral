@@ -152,3 +152,109 @@ python 4_task_heaviness.py --model_strategy=claude-4.5
 ```bash
 python 4_task_heaviness.py --env_filter=catalyst
 ```
+
+### 5. Gap Scatter Plot (`5_gap_scatter.py`)
+**Purpose**: Scatter plot showing model gap vs agent gap
+
+Generates a scatter plot where each point represents an environment, with agent gap on the x-axis and model gap on the y-axis. Points above the diagonal line (y=x) indicate that model choice contributes more performance variance than agent scaffold.
+
+**Quick Start**:
+```bash
+python 5_gap_scatter.py
+```
+
+**Key Features**:
+- Each point = one environment
+- Diagonal line shows equal gap (y=x)
+- Points above diagonal = model dominance
+- Automatic label positioning to avoid overlap
+- Shows clear quantitative model/agent ratio
+
+### 6. Gap Bar Chart (`6_gap_bars.py`)
+**Purpose**: Side-by-side bars comparing model and agent gaps
+
+Generates grouped bar charts showing model gap and agent gap for each environment. Bars are sorted by model gap (descending) to emphasize consistent model dominance.
+
+**Quick Start**:
+```bash
+python 6_gap_bars.py
+```
+
+**Key Features**:
+- Two bars per environment (model gap | agent gap)
+- Sorted by model gap to show consistent pattern
+- Optional sorting by agent gap or no sorting
+- Easy visual comparison of gap magnitudes
+
+### 7. Clustered Scatter Plot (`7_clustered_scatter.py`)
+**Purpose**: Show all model×agent combinations without derived gap metric
+
+Generates scatter plot showing every (model, agent, environment) combination. Points are colored by model and shaped by agent type. Visual clustering shows that model clusters are more separated than agent variations within each model.
+
+**Quick Start**:
+```bash
+python 7_clustered_scatter.py
+```
+
+**Key Features**:
+- No derived "gap" metric - uses raw performance scores
+- Color = model (3 colors)
+- Shape = agent type (circle for ReAct, square for Tool-Calling)
+- Points clustered by model show model dominance
+- X-axis jitter for visibility
+
+### 8. Performance Heatmap (`8_performance_heatmap.py`)
+**Purpose**: Dual heatmap view showing model×environment performance by agent type
+
+Generates two side-by-side heatmaps (ReAct and Tool-Calling), each showing a 3×7 matrix where rows are models and columns are environments. The similarity between the two heatmaps shows minimal agent effect, while strong row-wise color variation within each heatmap shows large model effect.
+
+**Quick Start**:
+```bash
+python 8_performance_heatmap.py
+```
+
+**Key Features**:
+- No derived "gap" metric - uses raw performance scores
+- Two 3×7 matrices side-by-side (one per agent type)
+- Rows = models (shared y-axis), Columns = environments
+- Consistent color scale across both heatmaps
+- Annotated cells show exact scores
+- Visual pattern: Two heatmaps look very similar (small agent effect), but rows within each show strong color variation (large model effect)
+- Prints comparison statistics including mean absolute difference between agent types
+
+### 9. Full Coverage Heatmap (`9_full_coverage_heatmap.py`)
+**Purpose**: Show complete experimental coverage with all environment-level combinations
+
+Generates a single wide heatmap where rows are model×agent configurations (6 total) and columns are all environment-level combinations tested (14 total: AFM-1 through AFM-4, Catalyst-1, MD-1, MD-2, ML-1, Resistor-1, Retro-1 through Retro-3, Spectra-1, Spectra-2). This shows the full experimental scope.
+
+**Quick Start**:
+```bash
+python 9_full_coverage_heatmap.py
+```
+
+**Key Features**:
+- No derived "gap" metric - uses raw performance scores
+- 6 rows (model×agent configs) × 14 columns (env-level combos)
+- Shows complete experimental coverage (84 total conditions, with 8 missing data points)
+- Column labels include level information (e.g., "AFM-L2", "MD-L1")
+- Title displays experimental scope
+- Identifies missing data points
+
+### 10. Bubble Chart (`10_bubble_chart.py`)
+**Purpose**: Alternative visualization showing performance clustering by model
+
+Generates a bubble chart where x-axis shows environment-level combinations, y-axis shows performance score, color represents model, and shape represents agent type. Points cluster by color (model), not by shape (agent), demonstrating model dominance.
+
+**Quick Start**:
+```bash
+python 10_bubble_chart.py
+```
+
+**Key Features**:
+- No derived "gap" metric - uses raw performance scores
+- X-axis: Environment-level combinations (14)
+- Y-axis: Performance score
+- Color: Model (3 colors)
+- Shape: Agent type (○ ReAct, □ Tool-Calling)
+- Size: Number of runs (uniform if all same)
+- Visual pattern: Horizontal bands of same color (model clustering) rather than shape clustering

@@ -8,7 +8,6 @@ Usage:
     python 4_task_heaviness.py --verbosity_strategy=average --level_strategy=default_map
 """
 
-import json
 import sys
 from collections import defaultdict
 from pathlib import Path

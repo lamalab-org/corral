@@ -37,7 +37,6 @@ from plot_config import (  # noqa: E402
 )
 from plot_utils import (  # noqa: E402
     DEFAULT_ENV_LEVEL_MAP,
-    filter_by_agent_type,
     filter_by_level,
     filter_by_task_type,
     filter_by_verbosity,
