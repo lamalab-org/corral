@@ -258,3 +258,30 @@ python 10_bubble_chart.py
 - Shape: Agent type (○ ReAct, □ Tool-Calling)
 - Size: Number of runs (uniform if all same)
 - Visual pattern: Horizontal bands of same color (model clustering) rather than shape clustering
+
+### 11. Verbosity Heatmap (`11_verbosity_heatmap.py`)
+**Purpose**: Enhanced coverage heatmap showing verbosity-level performance breakdown
+
+Creates a clean grid where each cell contains 3 full-width bars showing performance at different verbosity levels. Uses purple shading (light → dark) to distinguish verbosity levels, with bar heights representing performance scores.
+
+**Quick Start**:
+```bash
+python 11_verbosity_heatmap.py
+```
+
+**Key Features**:
+- 6 rows (model×agent configs) × 7 columns (environments using default_map levels)
+- **Background**: Purple gradient heatmap showing mean performance (white = low, #efbbff = high)
+- **Text annotation**: Average score centered in each cell (bold, 2 decimal places)
+  - **Adaptive text color**: Black text on light backgrounds (score < 0.5), white text on dark backgrounds (score ≥ 0.5)
+  - Just like standard seaborn heatmaps for optimal readability
+- **Overlay**: 3 full-width bars per cell in darker purple shades:
+  - **Light purple (#D1C4E9)** = Brief verbosity
+  - **Medium purple (#9575CD)** = Workflow verbosity
+  - **Dark purple (#5E35B1)** = Comprehensive verbosity
+- Bar heights proportional to individual verbosity-level scores (0-1 scale)
+- Bars span entire cell width for maximum visibility
+- Semi-transparent bars (alpha=0.5) so background and text remain visible
+- Colorbar shows white → #efbbff gradient for mean scores
+- Purple color palette throughout for visual consistency
+- Shows three layers of information: background intensity (mean), text (exact mean), and bars (verbosity breakdown)

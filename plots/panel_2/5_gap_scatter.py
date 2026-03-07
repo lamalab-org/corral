@@ -62,7 +62,7 @@ ENVIRONMENT_NAMES = {
 # ==================== CONFIGURATION ====================
 
 # Color for scatter points
-SCATTER_COLOR = "#7150e0"  # "#7C4DFF"  # Purple
+SCATTER_COLOR = "#e87584"  # "#7C4DFF"  # Purple
 
 
 # ==================== DATA COLLECTION ====================
