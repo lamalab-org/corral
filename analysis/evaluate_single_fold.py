@@ -150,10 +150,16 @@ def fit_and_predict(
     )
     kappa = agent_trace.posterior["kappa"].mean(dim=["chain", "draw"]).to_numpy()
 
+    # Preprocess test data to match training data format
+    # Extract numeric level from "level_1" → 1
+    test_with_theta["level_numeric"] = (
+        test_with_theta["level"].str.extract(r"(\d+)").astype(int)
+    )
+    test_with_theta["level_idx"] = test_with_theta["level_numeric"] - 1
+
     # Map test data to indices
     env_map = {env: i for i, env in enumerate(sorted(agent_df["environment"].unique()))}
     scaffold_map = {s: i for i, s in enumerate(sorted(agent_df["scaffold"].unique()))}
-    level_map = {lv: i for i, lv in enumerate(sorted(agent_df["level"].unique()))}
     verbosity_map = {v: i for i, v in enumerate(sorted(agent_df["verbosity"].unique()))}
     category_map = {"task": 0, "subtask": 1}
 
@@ -162,7 +168,7 @@ def fit_and_predict(
     for _, row in test_with_theta.iterrows():
         env_idx = env_map.get(row["environment"])
         scaffold_idx = scaffold_map.get(row["scaffold"])
-        level_idx = level_map.get(row["level"])
+        level_idx = int(row["level_idx"])  # Already computed above
         verbosity_idx = verbosity_map.get(row["verbosity"])
         category_idx = category_map.get(row["category"])
 
