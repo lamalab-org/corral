@@ -15,6 +15,10 @@ they highlight both the central tendency and the spread, which makes the
 differences between those groups easier to compare than a simple mean-only bar
 chart.
 
+The script also includes an alternate scaled distribution view so the same
+trial-level spreads can be inspected on `log` or `symlog` x-axes when the long
+right tail makes the linear plots harder to read.
+
 The script also creates two grouped environment summaries that mirror the
 verbosity comparison style, but use vertical stems and markers for agent type
 and model breakdowns.
@@ -41,6 +45,10 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_FILE_ENV = OUT_DIR / "avg_output_tokens_per_message_by_environment.pdf"
 OUT_FILE_MODEL = OUT_DIR / "avg_output_tokens_per_message_by_model.pdf"
 OUT_FILE_AGENT = OUT_DIR / "avg_output_tokens_per_message_by_agent_type.pdf"
+OUT_FILE_MODEL_SYMLOG = OUT_DIR / "avg_output_tokens_per_message_by_model_symlog.pdf"
+OUT_FILE_AGENT_SYMLOG = (
+    OUT_DIR / "avg_output_tokens_per_message_by_agent_type_symlog.pdf"
+)
 OUT_FILE_ENV_AGENT = (
     OUT_DIR / "avg_output_tokens_per_message_by_environment_and_agent.pdf"
 )
@@ -295,6 +303,177 @@ def plot_distribution_summary(
     logger.info(f"Saved figure to {out_file}")
 
 
+def plot_scaled_distribution_summary(
+    results_df: pd.DataFrame,
+    *,
+    group_col: str,
+    label_map: dict[str, str],
+    colors: list[str],
+    ylabel: str,
+    out_file: Path,
+    x_scale: str = "symlog",
+    show_legend: bool = False,
+) -> None:
+    """Save a distribution summary plot using a log-like x-axis scale.
+
+    `symlog` is the safest default because the dataset contains a small number
+    of zero-valued trials, while `log` can still be used if those are filtered
+    out for a purely multiplicative view.
+    """
+    if x_scale not in {"log", "symlog"}:
+        raise ValueError("x_scale must be either 'log' or 'symlog'")
+
+    grouped = (
+        results_df.groupby(group_col)["output_tokens_per_message"]
+        .mean()
+        .sort_values(ascending=True)
+    )
+    groups = list(grouped.index)
+    raw_values_per_group = [
+        results_df.loc[results_df[group_col].eq(group), "output_tokens_per_message"]
+        .dropna()
+        .to_numpy(dtype=float)
+        for group in groups
+    ]
+
+    if x_scale == "log":
+        values_per_group = [values[values > 0] for values in raw_values_per_group]
+        skipped_non_positive = sum(
+            len(raw_values) - len(values)
+            for raw_values, values in zip(
+                raw_values_per_group, values_per_group, strict=True
+            )
+        )
+        if skipped_non_positive:
+            logger.warning(
+                "Skipped "
+                f"{skipped_non_positive} non-positive trials in the log-scaled "
+                f"{group_col} distribution plot"
+            )
+    else:
+        values_per_group = raw_values_per_group
+
+    non_empty = [
+        (group, values)
+        for group, values in zip(groups, values_per_group, strict=True)
+        if len(values) > 0
+    ]
+    if not non_empty:
+        logger.warning(
+            f"Skipping scaled distribution plot for {group_col}: insufficient data"
+        )
+        return
+
+    groups = [group for group, _ in non_empty]
+    values_per_group = [values for _, values in non_empty]
+    positions = np.arange(1, len(groups) + 1)
+    labels = [label_map.get(group, str(group)) for group in groups]
+    plot_colors = [colors[i % len(colors)] for i in range(len(groups))]
+    flattened_values = np.concatenate(values_per_group)
+    positive_values = flattened_values[flattened_values > 0]
+
+    fig, ax = plt.subplots(1, 1, figsize=(TWO_COL_WIDTH * 0.75, ONE_COL_HEIGHT))
+
+    boxplot = ax.boxplot(
+        values_per_group,
+        vert=False,
+        positions=positions,
+        widths=0.55,
+        patch_artist=True,
+        showfliers=False,
+        medianprops={"color": "#1f1f1f", "linewidth": 1.4},
+        whiskerprops={"color": "#666666", "linewidth": 1.0},
+        capprops={"color": "#666666", "linewidth": 1.0},
+    )
+
+    for patch in boxplot["boxes"]:
+        patch.set_visible(False)
+
+    for idx, (position, values, color) in enumerate(
+        zip(positions, values_per_group, plot_colors, strict=True)
+    ):
+        rng = np.random.default_rng(100 + idx)
+        jitter = rng.uniform(-0.12, 0.12, size=len(values))
+        ax.scatter(
+            values,
+            np.full(len(values), position) + jitter,
+            s=14,
+            color=color,
+            alpha=0.22,
+            edgecolors="none",
+            zorder=2,
+        )
+        ax.scatter(
+            values.mean(),
+            position,
+            marker="D",
+            s=52,
+            color="#1f1f1f",
+            edgecolors="white",
+            linewidths=0.7,
+            zorder=3,
+        )
+
+    ax.set_yticks(positions)
+    ax.set_yticklabels(labels)
+    ax.set_xlabel(f"Output Tokens per Message ({x_scale} scale)")
+    ax.set_ylabel(ylabel)
+
+    upper_limit = get_axis_max(flattened_values, minimum=1.0)
+    ax.set_ylim(positions[0] - 0.4, positions[-1] + 0.4)
+    if x_scale == "log":
+        lower_limit = float(positive_values.min())
+        if lower_limit >= 1:
+            lower_limit = 10 ** math.floor(math.log10(lower_limit))
+        else:
+            lower_limit *= 0.9
+        ax.set_xscale("log")
+        ax.set_xlim(lower_limit, upper_limit)
+    else:
+        linthresh = 1.0
+        if len(positive_values) > 0:
+            linthresh = max(1.0, float(np.quantile(positive_values, 0.05)))
+        ax.set_xscale("symlog", linthresh=linthresh)
+        ax.set_xlim(0, upper_limit)
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    if show_legend:
+        legend_handles = [
+            Line2D([0], [0], color="#1f1f1f", linewidth=1.4, label="Median"),
+            Line2D(
+                [0],
+                [0],
+                marker="D",
+                color="#1f1f1f",
+                markerfacecolor="#1f1f1f",
+                markeredgecolor="white",
+                markeredgewidth=0.7,
+                linewidth=0,
+                markersize=7,
+                label="Mean",
+            ),
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="#666666",
+                markerfacecolor="#666666",
+                linewidth=0,
+                alpha=0.35,
+                markersize=5,
+                label="Trials",
+            ),
+        ]
+        ax.legend(handles=legend_handles, loc="lower right", frameon=False)
+
+    plt.tight_layout()
+    fig.savefig(out_file, bbox_inches="tight")
+    plt.close(fig)
+    logger.info(f"Saved figure to {out_file}")
+
+
 def get_group_centers(
     n_groups: int, *, stem_width: float = 0.22, gap_width: float = 0.18
 ) -> np.ndarray:
@@ -433,6 +612,25 @@ def main() -> None:
         colors=AGENT_COLORS,
         ylabel="Agent",
         out_file=OUT_FILE_AGENT,
+    )
+    plot_scaled_distribution_summary(
+        results_df,
+        group_col="model",
+        label_map=MODEL_LABELS,
+        colors=MODEL_COLORS,
+        ylabel="Model",
+        out_file=OUT_FILE_MODEL_SYMLOG,
+        x_scale="symlog",
+        show_legend=True,
+    )
+    plot_scaled_distribution_summary(
+        results_df,
+        group_col="agent_type",
+        label_map=AGENT_TYPE_LABELS,
+        colors=AGENT_COLORS,
+        ylabel="Agent",
+        out_file=OUT_FILE_AGENT_SYMLOG,
+        x_scale="symlog",
     )
 
     logger.info(f"Skipped {skipped_trials} trials without message histories")
