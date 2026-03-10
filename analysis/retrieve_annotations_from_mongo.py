@@ -1,20 +1,17 @@
-"""
-Dump all documents from the MongoDB collection defined in your Modal app
-to a local JSON file.
+"""Export annotation documents from MongoDB into a local JSON snapshot.
 
-It uses the same env vars as your server:
-- MONGODB_URI          (required)
-- MONGODB_DB           (default: "Corral")
-- MONGODB_COLLECTION   (default: "First-traces")
-
-Output: corral_dump.json (JSON array of documents, MongoDB Extended JSON)
+This script reads the MongoDB connection settings from the same environment
+variables used by the application, fetches every document from the configured
+collection, and writes the result to
+`analysis/results/data/corral_annotations_dump.json` using MongoDB Extended
+JSON so BSON values such as `ObjectId` and datetimes are preserved.
 """
 
 import os
 import sys
 from pathlib import Path
 
-from bson.json_util import dumps as bson_dumps  # handles ObjectId, datetime, etc.
+from bson.json_util import dumps as bson_dumps
 from dotenv import load_dotenv
 from loguru import logger
 from pymongo import MongoClient
@@ -22,7 +19,12 @@ from pymongo import MongoClient
 load_dotenv("../.env", override=True)
 
 
-def main():
+def main() -> None:
+    """Export the configured MongoDB collection to disk.
+
+    Returns:
+        None.
+    """
     uri = os.environ.get("MONGODB_URI")
     if not uri:
         logger.error("MONGODB_URI is not set.")
@@ -42,9 +44,6 @@ def main():
         f"Dumping all documents from {db_name}.{coll_name} to {output_path} ..."
     )
     cursor = coll.find({})
-
-    # If the collection is not massive, collecting into a list is fine.
-    # This will produce a single JSON array in the output file.
     docs = list(cursor)
 
     json_str = bson_dumps(docs, indent=4)
