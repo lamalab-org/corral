@@ -1,21 +1,10 @@
-"""Plot action-category distributions across benchmark environments.
+"""Summarize how benchmark environments distribute agent actions across tool families.
 
-This script loads `analysis/results/data/reports.jsonl`, extracts per-tool actions from
-nested trial data, maps tools into coarse action categories, and produces three
-figures:
-
-- environment comparison averaged over level, verbosity, agent type, and model
-- environment comparison with separate bars for each agent type, averaged over
-  level, verbosity, and model
-- environment comparison with separate bars for each model, averaged over level,
-  verbosity, and agent type
-
-Action categories:
-- retrieval
-- file operations
-- code execution
-- experiment execution
-- validation
+The script reconstructs tool usage from nested trial traces, collapses the raw
+tool vocabulary into a small set of analysis categories, and then compares the
+mean category mix across environments. The grouped plots are intended to expose
+whether environment differences persist after averaging over verbosity settings,
+agent scaffolds, and models.
 """
 
 from __future__ import annotations
@@ -32,13 +21,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
+from lama_aesthetics.plotutils import range_frame
 from loguru import logger
+from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 lama_aesthetics.get_style("main")
 
 DATA_PATH = Path(__file__).parent / "results" / "data" / "reports.jsonl"
-OUT_DIR = Path(__file__).parent / "results" / "figures"
+OUT_DIR = Path(__file__).parent / "results" / "figures" / "fig_4_app"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 OUT_FILE_AGENT = OUT_DIR / "action_distribution_by_environment_and_agent.pdf"
@@ -209,7 +200,12 @@ EXPERIMENT_PREFIXES = ("run_", "simulate_", "train_", "evaluate_", "perform_")
 
 
 def load_reports_df() -> pd.DataFrame:
-    """Load the combined benchmark reports."""
+    """Load the raw benchmark rows used for all downstream aggregations.
+
+    Returns:
+        pd.DataFrame: One row per JSONL record, including nested trial payloads
+        that are unpacked later when action shares are computed.
+    """
     records: list[dict] = []
     with DATA_PATH.open() as fh:
         for raw_line in fh:
@@ -220,7 +216,19 @@ def load_reports_df() -> pd.DataFrame:
 
 
 def ensure_task_results(task_results: object) -> dict:
-    """Return task results as a dictionary."""
+    """Normalize a `Task Results` payload before iterating over trials.
+
+    Some report rows store task results as serialized JSON, while others already
+    provide a mapping. Returning an empty dictionary lets the caller skip
+    malformed payloads without special-case branching.
+
+    Args:
+        task_results: Raw `Task Results` value read from a report row.
+
+    Returns:
+        dict: Parsed task-result mapping, or an empty dictionary when the input
+        cannot be interpreted as a mapping.
+    """
     if isinstance(task_results, dict):
         return task_results
     if isinstance(task_results, str):
@@ -232,7 +240,18 @@ def ensure_task_results(task_results: object) -> dict:
 
 
 def extract_tool_name(tool_call: object) -> str | None:
-    """Extract a tool name from a tool-call payload."""
+    """Recover the most reliable tool identifier from a logged call payload.
+
+    The benchmark traces are not schema-stable across agents, so the tool name
+    may appear under several alternative keys.
+
+    Args:
+        tool_call: Raw object from a trial's `tool_calls` list.
+
+    Returns:
+        str | None: The extracted tool name, or `None` when no plausible name is
+        present.
+    """
     if not isinstance(tool_call, dict):
         return None
 
@@ -258,7 +277,20 @@ def extract_tool_name(tool_call: object) -> str | None:
 
 
 def normalize_tool_name(tool_name: str | None) -> str | None:
-    """Normalize noisy tool-name strings extracted from logs."""
+    """Clean logging artefacts from a candidate tool name.
+
+    The traces sometimes include channel markers, bracketed wrappers, or entire
+    assistant messages where a bare tool name was expected. This filter keeps
+    only short, single-line identifiers that are suitable for heuristic
+    classification.
+
+    Args:
+        tool_name: Candidate tool identifier extracted from a trace.
+
+    Returns:
+        str | None: Normalized tool name, or `None` when the value looks like a
+        non-tool artefact.
+    """
     if tool_name is None:
         return None
 
@@ -300,7 +332,19 @@ def normalize_tool_name(tool_name: str | None) -> str | None:
 
 
 def extract_tool_name_from_message(message: object) -> str | None:
-    """Extract a tool name from a logged message if direct tool calls are absent."""
+    """Infer a tool name from message logs when `tool_calls` is unavailable.
+
+    Older traces sometimes encode tool execution only inside assistant messages
+    or `Observation:` payloads. This fallback preserves those trials instead of
+    dropping them from the action mix entirely.
+
+    Args:
+        message: Raw message object from a trial transcript.
+
+    Returns:
+        str | None: Normalized tool name recovered from the message, or `None`
+        when the message does not encode a tool invocation.
+    """
     if not isinstance(message, dict):
         return None
 
@@ -321,7 +365,18 @@ def extract_tool_name_from_message(message: object) -> str | None:
 
 
 def iter_trial_tool_names(trial: dict) -> list[str]:
-    """Return tool names used in a trial."""
+    """Collect tool names from a trial in preference order.
+
+    Direct `tool_calls` data is used when available because it is less ambiguous
+    than transcript reconstruction. Message parsing is only used as a fallback
+    for traces that do not expose structured tool metadata.
+
+    Args:
+        trial: Trial payload from the nested benchmark report structure.
+
+    Returns:
+        list[str]: Tool names in the order they were recovered from the trace.
+    """
     tool_names: list[str] = []
 
     tool_calls = trial.get("tool_calls")
@@ -345,7 +400,18 @@ def iter_trial_tool_names(trial: dict) -> list[str]:
 
 
 def classify_tool(tool_name: str) -> str | None:
-    """Map a tool name into a coarse action category."""
+    """Assign a tool name to the coarse action taxonomy used in the figure.
+
+    Exact-name lookups are preferred, with prefix and regex heuristics used only
+    to keep newer tool variants from appearing as uncategorized noise.
+
+    Args:
+        tool_name: Normalized tool identifier.
+
+    Returns:
+        str | None: Action category for the tool, or `None` when the heuristic
+        mapping does not recognize it.
+    """
     normalized_name = tool_name.strip().lower()
 
     if normalized_name in RETRIEVAL_TOOLS:
@@ -388,7 +454,20 @@ def classify_tool(tool_name: str) -> str | None:
 def build_action_distribution_df(
     reports_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
-    """Create one normalized action-distribution row per benchmark record."""
+    """Convert raw reports into per-record action-share summaries.
+
+    Each benchmark record contributes one share value per action category so the
+    later averaging step weights records rather than absolute tool-call volume.
+    Unknown tools are counted separately to make classification gaps visible in
+    the logs.
+
+    Args:
+        reports_df: Top-level report table loaded from `reports.jsonl`.
+
+    Returns:
+        tuple[pd.DataFrame, dict[str, int]]: A long-form table with one row per
+        record-category pair and a frequency table for uncategorized tool names.
+    """
     rows: list[dict[str, object]] = []
     unknown_tool_counter: Counter[str] = Counter()
 
@@ -440,7 +519,19 @@ def make_pivot(
     distribution_df: pd.DataFrame,
     group_cols: list[str],
 ) -> pd.DataFrame:
-    """Aggregate mean shares and return a wide table."""
+    """Average action shares at the requested grouping level.
+
+    Missing categories are filled with zeros so stacked bars remain aligned even
+    when a subgroup never uses one of the action families.
+
+    Args:
+        distribution_df: Long-form action-share table.
+        group_cols: Columns that define each stacked-bar group.
+
+    Returns:
+        pd.DataFrame: Wide table with one column per action category ordered to
+        match the plotting palette.
+    """
     aggregated_df = (
         distribution_df.groupby([*group_cols, "action_category"], as_index=False)[
             "share"
@@ -457,6 +548,21 @@ def make_pivot(
     return aggregated_df[ACTION_ORDER]
 
 
+def safe_float(value: object) -> float:
+    """Coerce plotting values to floats while treating missing entries as zero.
+
+    Args:
+        value: Scalar-like value from a pivot table.
+
+    Returns:
+        float: Numeric value suitable for bar heights.
+    """
+    numeric_value = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(numeric_value):
+        return 0.0
+    return float(numeric_value)
+
+
 def plot_grouped_stacked_distribution(
     distribution_df: pd.DataFrame,
     subgroup_col: str,
@@ -466,7 +572,23 @@ def plot_grouped_stacked_distribution(
     *,
     figsize: tuple[float, float],
 ) -> None:
-    """Plot grouped stacked bars split by either agent type or model."""
+    """Render environment-level action mixes split by a secondary subgroup.
+
+    The plot uses stacked bars for action categories and letter annotations for
+    subgroup identity so the same visual grammar works for both agent-type and
+    model comparisons without overwhelming the legend.
+
+    Args:
+        distribution_df: Long-form action-share table.
+        subgroup_col: Column used to split each environment into multiple bars.
+        subgroup_order: Preferred plotting order for subgroup values.
+        subgroup_labels: Human-readable labels for subgroup values.
+        out_file: Destination PDF path.
+        figsize: Figure size in inches.
+
+    Returns:
+        None: The function writes a figure to disk.
+    """
     env_order = [
         env for env in ENV_LABELS if env in set(distribution_df["environment"])
     ]
@@ -478,7 +600,10 @@ def plot_grouped_stacked_distribution(
     total_group_width = 0.8
     bar_width = total_group_width / max(n_subgroups, 1)
     offsets = (np.arange(n_subgroups, dtype=float) - (n_subgroups - 1) / 2) * bar_width
-    hatches = ["", "//", "xx", "..", "\\"]
+    subgroup_markers = {
+        subgroup: chr(ord("A") + subgroup_index)
+        for subgroup_index, subgroup in enumerate(subgroup_order)
+    }
 
     fig, ax = plt.subplots(1, 1, figsize=figsize)
 
@@ -491,7 +616,7 @@ def plot_grouped_stacked_distribution(
             for environment in env_order:
                 index_key = (environment, subgroup)
                 if index_key in pivot_df.index:
-                    heights.append(float(pivot_df.loc[index_key, action_category]))
+                    heights.append(safe_float(pivot_df.loc[index_key, action_category]))
                 else:
                     heights.append(0.0)
 
@@ -503,28 +628,50 @@ def plot_grouped_stacked_distribution(
                 color=ACTION_COLORS[action_category],
                 edgecolor="white",
                 linewidth=0.4,
-                hatch=hatches[subgroup_index % len(hatches)],
             )
             bottom += np.array(heights, dtype=float)
 
     ax.set_xlim(-0.6, n_env - 0.4)
-    ax.set_ylim(0, 1.0)
+    ax.set_ylim(0, 1.06)
     ax.set_xticks(x_centers)
     ax.set_xticklabels(
         [ENV_LABELS.get(env, str(env).capitalize()) for env in env_order]
     )
     ax.set_xlabel("Environment")
     ax.set_ylabel("Average action share")
+    if n_env > 0:
+        range_frame(ax, np.array([0, 6]), np.array([0, 1.0]), pad=0.05)
+
+    if n_env > 0 and n_subgroups > 1:
+        example_positions = x_centers[0] + offsets
+        for x_position, subgroup in zip(
+            example_positions, subgroup_order, strict=False
+        ):
+            ax.text(
+                x_position,
+                1.015,
+                subgroup_markers[subgroup],
+                transform=ax.transData,
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                fontweight="bold",
+                clip_on=False,
+            )
 
     subgroup_handles = [
-        Patch(
-            facecolor="white",
-            edgecolor="black",
-            hatch=hatches[idx % len(hatches)],
-            label=subgroup_labels.get(subgroup, str(subgroup)),
+        Line2D(
+            [],
+            [],
+            linestyle="None",
+            label=(
+                f"{subgroup_markers[subgroup]}: "
+                f"{subgroup_labels.get(subgroup, str(subgroup))}"
+            ),
         )
-        for idx, subgroup in enumerate(subgroup_order)
+        for subgroup in subgroup_order
     ]
+
     category_handles = [
         Patch(
             facecolor=ACTION_COLORS[action_category],
@@ -533,18 +680,23 @@ def plot_grouped_stacked_distribution(
         for action_category in ACTION_ORDER
     ]
 
-    first_legend = ax.legend(
-        handles=subgroup_handles,
-        loc="upper left",
-        bbox_to_anchor=(1.01, 1.0),
-        ncol=1,
-        frameon=False,
-    )
-    ax.add_artist(first_legend)
+    if subgroup_handles:
+        first_legend = ax.legend(
+            handles=subgroup_handles,
+            loc="upper left",
+            bbox_to_anchor=(1.01, 1.0),
+            ncol=1,
+            frameon=False,
+            title=subgroup_col.replace("_", " ").title(),
+            handlelength=0,
+            handletextpad=0,
+        )
+        ax.add_artist(first_legend)
+
     ax.legend(
         handles=category_handles,
         loc="upper left",
-        bbox_to_anchor=(1.01, 1.0 - len(subgroup_order) * 0.08 - 0.06),
+        bbox_to_anchor=(1.01, 1.0 - len(subgroup_order) * 0.08 - 0.08),
         ncol=1,
         frameon=False,
         title="Action category",
@@ -557,7 +709,12 @@ def plot_grouped_stacked_distribution(
 
 
 def main() -> None:
-    """Load the reports, build action distributions, and save all figures."""
+    """Build action-share summaries and write the comparison figures.
+
+    Returns:
+        None: The function saves the requested PDFs and logs any uncategorized
+        tool names indirectly through the summary counts.
+    """
     reports_df = load_reports_df()
     distribution_df, unknown_tools = build_action_distribution_df(reports_df)
 

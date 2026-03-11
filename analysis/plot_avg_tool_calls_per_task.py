@@ -1,25 +1,17 @@
-"""Plot tool-call summaries per task trial across benchmark groupings.
+"""Compare how much tool interaction each benchmark slice requires per trial.
 
-This script loads the combined benchmark dataset from
-`analysis/results/data/reports.jsonl`, iterates over the nested `Task Results`
-trial data, extracts the number of tool calls made in each trial, and plots that
-quantity for three different aggregations:
-
-- environment
-- model
-- agent type
-- environment by agent type, split into one figure per model
-
-- environment: horizontal box-and-whisker plot
-- model: ridgeline (joy) plot
-- agent type: ridgeline (joy) plot
-- environment by agent type: grouped bar chart for each model
+The script works at the trial level so repeated retries remain visible in the
+distribution plots. It pairs a capped environment boxplot with ridgeline views
+for models and scaffolds, then optionally adds model-specific environment
+breakdowns to show whether the same environment is tool-heavy for all models or
+only a subset of them.
 """
 
 import json
 import math
 from pathlib import Path
 
+import fire
 import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,8 +25,10 @@ from scipy.stats import gaussian_kde
 lama_aesthetics.get_style("main")
 
 DATA_PATH = Path(__file__).parent / "results" / "data" / "reports.jsonl"
-OUT_DIR = Path(__file__).parent / "results" / "figures"
+FIGURES_DIR = Path(__file__).parent / "results" / "figures"
+OUT_DIR = FIGURES_DIR / "fig_4_app"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
+ANALYSIS_OUT_DIR = FIGURES_DIR / "analysis"
 OUT_FILE = OUT_DIR / "avg_tool_calls_per_task_by_environment.pdf"
 OUT_FILE_MODEL = OUT_DIR / "avg_tool_calls_per_task_by_model.pdf"
 OUT_FILE_AGENT = OUT_DIR / "avg_tool_calls_per_task_by_agent_type.pdf"
@@ -64,17 +58,36 @@ AGENT_TYPE_LABELS = {
 PLOT_COLOR = "#4C72B0"
 GROUP_COLORS = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2"]
 AGENT_COLORS = ["#64B5CD", "#D08770", "#A3BE8C", "#B48EAD"]
+DISPLAY_PERCENTILE = 99.0
+ENVIRONMENT_BOXPLOT_MAX = 32.0
 
 
 def get_group_centers(
     n_groups: int, *, bar_width: float = 0.22, gap_width: float = 0.16
 ) -> np.ndarray:
-    """Return evenly spaced group centers for grouped categorical plots."""
+    """Compute evenly spaced anchors for grouped environment summaries.
+
+    Args:
+        n_groups: Number of categorical groups to place on the axis.
+        bar_width: Horizontal footprint allocated to one subgroup.
+        gap_width: Extra spacing inserted between neighboring groups.
+
+    Returns:
+        np.ndarray: Center coordinate for each categorical group.
+    """
     return np.arange(n_groups) * (bar_width * 2 + gap_width + bar_width * 0.3)
 
 
 def get_axis_max(values: pd.Series | np.ndarray, *, minimum: float = 1.0) -> float:
-    """Return a rounded y-axis maximum with a small amount of headroom."""
+    """Choose a rounded upper bound for count-based y-axes.
+
+    Args:
+        values: Numeric values that should fit on the axis.
+        minimum: Fallback maximum when the input is empty or non-positive.
+
+    Returns:
+        float: Rounded axis maximum with light headroom.
+    """
     cleaned_values = pd.Series(values).dropna()
     if cleaned_values.empty:
         return minimum
@@ -89,13 +102,62 @@ def get_axis_max(values: pd.Series | np.ndarray, *, minimum: float = 1.0) -> flo
     return max(minimum, math.ceil(max_value * 1.05 / 10) * 10)
 
 
+def get_display_cap(
+    values: pd.Series | np.ndarray,
+    *,
+    percentile: float = DISPLAY_PERCENTILE,
+    minimum: float = 1.0,
+) -> float:
+    """Estimate a plotting cap that hides only the most extreme tail values.
+
+    Args:
+        values: Numeric values used to determine the display cutoff.
+        percentile: High percentile used as the visual cap.
+        minimum: Fallback cap when the input is empty or non-positive.
+
+    Returns:
+        float: Rounded cap derived from the requested percentile.
+    """
+    cleaned_values = pd.Series(values).dropna()
+    if cleaned_values.empty:
+        return minimum
+
+    percentile_value = float(np.percentile(cleaned_values, percentile))
+    if percentile_value <= 0:
+        return minimum
+
+    return get_axis_max(
+        np.array([percentile_value]),
+        minimum=minimum,
+    )
+
+
 def slugify_model_name(model_name: str) -> str:
-    """Create a filesystem-safe slug for a model key."""
+    """Create deterministic filenames for per-model output figures.
+
+    Args:
+        model_name: Raw model identifier from the benchmark table.
+
+    Returns:
+        str: Filesystem-safe model slug.
+    """
     return model_name.replace("-", "_").replace(".", "_")
 
 
 def extract_tool_call_count(trial: dict) -> int | None:
-    """Return the tool call count for a trial, if available."""
+    """Recover a comparable tool-call count from heterogeneous trial schemas.
+
+    Different trace formats record the same quantity under different keys. The
+    fallback order prefers explicit totals, then raw call lists, then separate
+    success and failure counters.
+
+    Args:
+        trial: Trial payload from the nested report structure.
+
+    Returns:
+        int | None: Tool-call count for the trial, or `None` when no count can
+        be inferred safely.
+    """
     total_calls = trial.get("total_calls")
     if total_calls is not None:
         return int(total_calls)
@@ -118,11 +180,38 @@ def plot_group_boxplots(
     group_col: str,
     label_map: dict[str, str],
     y_label: str,
+    *,
+    max_display_value: float | None = None,
+    box_color: str = PLOT_COLOR,
 ) -> None:
+    """Draw horizontal boxplots for one categorical grouping.
+
+    The optional display cap is intended for the environment view, where a few
+    outlier trials can otherwise stretch the axis enough to hide the bulk of the
+    distribution.
+
+    Args:
+        ax: Axis that receives the boxplots.
+        results_df: Trial-level tool-call table.
+        group_col: Column defining the categorical groups.
+        label_map: Human-readable labels for group values.
+        y_label: Label shown on the categorical axis.
+        max_display_value: Optional hard cap for values included in the plot.
+        box_color: Fill color used for all boxes.
+
+    Returns:
+        None: The function mutates the provided axis.
+    """
     group_keys = sorted(results_df[group_col].dropna().unique())
+    filtered_results_df = results_df
+    if max_display_value is not None:
+        filtered_results_df = results_df.loc[
+            results_df["tool_calls_per_trial"].le(max_display_value)
+        ]
+
     plot_data = [
-        results_df.loc[
-            results_df[group_col].eq(group_key), "tool_calls_per_trial"
+        filtered_results_df.loc[
+            filtered_results_df[group_col].eq(group_key), "tool_calls_per_trial"
         ].to_numpy()
         for group_key in group_keys
     ]
@@ -156,18 +245,18 @@ def plot_group_boxplots(
         },
     )
 
-    for idx, box in enumerate(boxplot["boxes"]):
-        color = GROUP_COLORS[idx % len(GROUP_COLORS)]
-        box.set_facecolor(color)
-        box.set_edgecolor(color)
+    for box in boxplot["boxes"]:
+        box.set_facecolor(box_color)
+        box.set_edgecolor(box_color)
         box.set_alpha(0.75)
 
     ax.set_yticks(positions)
     ax.set_yticklabels(labels)
     ax.set_xlabel("Tool Calls per Task Trial")
     ax.set_ylabel(y_label)
+    ax.set_xlim(0, 30)
 
-    range_frame(ax, np.array([0, 100]), positions)
+    range_frame(ax, np.array([0, 30]), positions)
 
 
 def plot_ridgeline(
@@ -178,7 +267,21 @@ def plot_ridgeline(
     *,
     figsize: tuple[float, float] = (ONE_COL_WIDTH, ONE_COL_HEIGHT),
 ) -> None:
-    """Create a ridgeline (joy) plot of tool-call distributions."""
+    """Render overlapping density estimates for one grouping variable.
+
+    Median reference lines are included because the KDE shape can look smoother
+    than the underlying discrete call counts actually are.
+
+    Args:
+        results_df: Trial-level tool-call table.
+        group_col: Column defining the ridgeline groups.
+        label_map: Human-readable labels for group values.
+        out_path: Destination path for the saved figure.
+        figsize: Base figure size in inches.
+
+    Returns:
+        None: The function saves the ridgeline figure.
+    """
     group_keys = sorted(results_df[group_col].dropna().unique())
     plot_data = [
         results_df.loc[results_df[group_col].eq(k), "tool_calls_per_trial"].to_numpy()
@@ -203,7 +306,7 @@ def plot_ridgeline(
         axes = [axes]
 
     x_min = 0.0
-    x_max = float(max(v.max() for v in plot_data)) * 1.05
+    x_max = get_display_cap(results_df["tool_calls_per_trial"], minimum=1.0)
     x_grid = np.linspace(x_min, x_max, 500)
 
     for idx in range(n_groups):
@@ -252,8 +355,21 @@ def plot_ridgeline(
     plt.close(fig)
 
 
-def plot_environment_agent_bars_by_model(results_df: pd.DataFrame) -> list[Path]:
-    """Save one grouped lollipop-style chart per model for environment-agent averages."""
+def plot_environment_agent_bars_by_model(
+    results_df: pd.DataFrame, out_dir: Path
+) -> list[Path]:
+    """Write one environment-by-scaffold summary for each model.
+
+    Splitting the chart by model avoids a single overloaded legend while still
+    making cross-model differences easy to compare by filename.
+
+    Args:
+        results_df: Trial-level tool-call table.
+        out_dir: Directory where the per-model figures are written.
+
+    Returns:
+        list[Path]: Paths of the figures that were successfully saved.
+    """
     saved_paths: list[Path] = []
 
     for model_key in sorted(results_df["model"].dropna().unique()):
@@ -345,7 +461,7 @@ def plot_environment_agent_bars_by_model(results_df: pd.DataFrame) -> list[Path]
         )
 
         plt.tight_layout()
-        out_path = OUT_DIR / OUT_FILE_ENV_AGENT_TEMPLATE.format(
+        out_path = out_dir / OUT_FILE_ENV_AGENT_TEMPLATE.format(
             model_slug=slugify_model_name(model_key)
         )
         fig.savefig(out_path, bbox_inches="tight")
@@ -355,7 +471,15 @@ def plot_environment_agent_bars_by_model(results_df: pd.DataFrame) -> list[Path]
     return saved_paths
 
 
-def main() -> None:
+def main(analysis: bool = False) -> None:
+    """Generate the tool-call distribution figures from the combined reports.
+
+    Args:
+        analysis: Whether to create the extra per-model environment summaries.
+
+    Returns:
+        None: The function saves the requested PDFs and logs skipped trials.
+    """
     records = []
     skipped_trials = 0
 
@@ -394,7 +518,15 @@ def main() -> None:
         raise ValueError(f"No trials with tool call counts found in {DATA_PATH}")
 
     fig, ax = plt.subplots(1, 1, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
-    plot_group_boxplots(ax, results_df, "environment", ENV_LABELS, "Environment")
+    plot_group_boxplots(
+        ax,
+        results_df,
+        "environment",
+        ENV_LABELS,
+        "Environment",
+        max_display_value=ENVIRONMENT_BOXPLOT_MAX,
+        box_color=PLOT_COLOR,
+    )
 
     plt.tight_layout()
     fig.savefig(OUT_FILE, bbox_inches="tight")
@@ -403,9 +535,15 @@ def main() -> None:
 
     plot_ridgeline(results_df, "agent_type", AGENT_TYPE_LABELS, OUT_FILE_AGENT)
 
-    env_agent_paths = plot_environment_agent_bars_by_model(results_df)
+    env_agent_paths: list[Path] = []
+    if analysis:
+        ANALYSIS_OUT_DIR.mkdir(parents=True, exist_ok=True)
+        env_agent_paths = plot_environment_agent_bars_by_model(
+            results_df, ANALYSIS_OUT_DIR
+        )
 
     logger.info(f"Skipped {skipped_trials} trials without tool call counts")
+    logger.info(f"Applied display cap at the {DISPLAY_PERCENTILE}th percentile")
     logger.info(f"Saved figure to {OUT_FILE}")
     logger.info(f"Saved figure to {OUT_FILE_MODEL}")
     logger.info(f"Saved figure to {OUT_FILE_AGENT}")
@@ -414,4 +552,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    fire.Fire(main)

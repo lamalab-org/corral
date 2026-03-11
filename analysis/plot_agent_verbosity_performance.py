@@ -1,12 +1,9 @@
-"""Plot ReAct vs tool-calling performance across verbosity settings.
+"""Compare how agent scaffolds respond to the benchmark verbosity settings.
 
-This script mirrors the style of `plot_env_verbosity_performance.py`, but changes
-focus from verbosity-only summaries to scaffold comparisons:
-
-- a small-multiples figure that compares ReAct vs tool calling across tool
-  verbosities for the full benchmark and for each environment separately
-- an environment summary that compares ReAct vs tool calling after averaging
-  over all verbosity levels within each environment
+The figures reuse the visual language of the environment-verbosity analysis but
+shift the analytical question: instead of asking whether a verbosity level is
+globally better, they highlight whether ReAct and tool-calling scaffolds react
+differently to the same verbosity regime overall and within each environment.
 """
 
 import json
@@ -25,7 +22,7 @@ from matplotlib.lines import Line2D
 lama_aesthetics.get_style("main")
 
 DATA_PATH = Path(__file__).parent / "results" / "data" / "reports.jsonl"
-OUT_DIR = Path(__file__).parent / "results" / "figures"
+OUT_DIR = Path(__file__).parent / "results" / "figures" / "analysis"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_FILE_VERBOSITY_GRID = OUT_DIR / "avg_score_by_agent_type_and_verbosity.pdf"
 OUT_FILE_ENV_AGENT = (
@@ -61,7 +58,15 @@ ENV_LABELS = {
 
 
 def safe_float(value: object) -> float:
-    """Convert a scalar-like value to float while preserving missing values."""
+    """Convert a scalar-like value to float without collapsing missingness.
+
+    Args:
+        value: Value pulled from a pivot table or aggregation result.
+
+    Returns:
+        float: Parsed numeric value, or `np.nan` when the input is missing or
+        non-numeric.
+    """
     numeric_value = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
     if pd.isna(numeric_value):
         return np.nan
@@ -69,7 +74,12 @@ def safe_float(value: object) -> float:
 
 
 def load_performance_df() -> pd.DataFrame:
-    """Load the benchmark-level performance summary table."""
+    """Load the score columns needed for scaffold-versus-verbosity comparisons.
+
+    Returns:
+        pd.DataFrame: Filtered benchmark table containing only the grouping keys
+        and the numeric score used in the plots.
+    """
     records = []
     with DATA_PATH.open() as fh:
         for raw_line in fh:
@@ -99,7 +109,19 @@ def build_pivot(
     index_order: list[str] | None = None,
     column_order: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Return an ordered mean-value pivot table for plotting."""
+    """Aggregate mean scores into a pivot table with stable plotting order.
+
+    Args:
+        df: Source table containing the grouping columns and score column.
+        index_col: Column to place on the pivot index.
+        column_col: Column to place on the pivot columns.
+        value_col: Numeric column to aggregate before pivoting.
+        index_order: Optional preferred order for index labels.
+        column_order: Optional preferred order for column labels.
+
+    Returns:
+        pd.DataFrame: Mean-value pivot table ready for direct plotting.
+    """
     agg_df = df.groupby([index_col, column_col], as_index=False)[value_col].mean()
     pivot_df = agg_df.pivot_table(index=index_col, columns=column_col, values=value_col)
 
@@ -117,7 +139,16 @@ def build_pivot(
 def get_group_centers(
     n_groups: int, *, bar_width: float = 0.22, gap_width: float = 0.1
 ) -> np.ndarray:
-    """Return evenly spaced centers for grouped categorical plots."""
+    """Compute group anchors with enough spacing for paired scaffold markers.
+
+    Args:
+        n_groups: Number of categorical groups to place on the axis.
+        bar_width: Horizontal footprint allocated to one scaffold within a group.
+        gap_width: Extra space inserted between neighboring groups.
+
+    Returns:
+        np.ndarray: Center coordinate for each categorical group.
+    """
     return np.arange(n_groups) * (
         len(AGENT_TYPES) * bar_width + gap_width + bar_width * 0.3
     )
@@ -130,7 +161,17 @@ def plot_agent_vs_verbosity_panel(
     *,
     show_ylabel: bool = False,
 ) -> None:
-    """Plot ReAct vs tool calling across verbosity levels for a single panel."""
+    """Draw one panel of the scaffold-versus-verbosity small-multiples grid.
+
+    Args:
+        ax: Axis that receives the panel.
+        pivot_df: Pivot table indexed by verbosity with one column per scaffold.
+        title: Panel title, typically an environment name.
+        show_ylabel: Whether to keep the shared y-axis label on this panel.
+
+    Returns:
+        None: The function mutates the provided axis.
+    """
     x_centers = np.arange(len(VERBOSITIES), dtype=float)
     offset_width = 0.16
 
@@ -198,7 +239,17 @@ def plot_agent_vs_verbosity_panel(
 
 
 def plot_agent_vs_verbosity_grid(performance_df: pd.DataFrame) -> None:
-    """Save a grid comparing ReAct vs tool calling across verbosity levels."""
+    """Write the full grid of scaffold-versus-verbosity comparisons.
+
+    The first panel aggregates all environments so local deviations can be read
+    against the benchmark-wide trend.
+
+    Args:
+        performance_df: Benchmark score table.
+
+    Returns:
+        None: The function saves the grid figure to disk.
+    """
     environments = sorted(performance_df["environment"].dropna().unique())
     panels = [(None, "All environments")] + [
         (environment, ENV_LABELS.get(environment, str(environment).capitalize()))
@@ -274,7 +325,19 @@ def plot_horizontal_agent_comparison(
     bar_width: float = 0.18,
     gap_width: float = 0.14,
 ) -> None:
-    """Plot grouped horizontal lollipop bars for agent-type comparison."""
+    """Draw environment-level scaffold averages as horizontal lollipop groups.
+
+    Args:
+        ax: Axis that receives the plot.
+        pivot_df: Pivot table indexed by group with scaffold columns.
+        groups: Ordered raw group identifiers to plot.
+        group_labels: Display labels corresponding to `groups`.
+        bar_width: Vertical separation between scaffold markers in one group.
+        gap_width: Extra spacing between neighboring groups.
+
+    Returns:
+        None: The function mutates the provided axis.
+    """
     y_centers = get_group_centers(len(groups), bar_width=bar_width, gap_width=gap_width)
 
     for idx, agent_type in enumerate(AGENT_TYPES):
@@ -326,7 +389,17 @@ def plot_horizontal_agent_comparison(
 
 
 def plot_environment_agent_summary(performance_df: pd.DataFrame) -> None:
-    """Save an environment summary averaged over all verbosity settings."""
+    """Write the environment summary after collapsing over verbosity levels.
+
+    This complementary view isolates scaffold differences that remain once the
+    verbosity choice has been averaged out.
+
+    Args:
+        performance_df: Benchmark score table.
+
+    Returns:
+        None: The function saves the summary figure to disk.
+    """
     environments = sorted(performance_df["environment"].dropna().unique())
     env_labels = [
         ENV_LABELS.get(environment, str(environment)) for environment in environments
@@ -349,6 +422,11 @@ def plot_environment_agent_summary(performance_df: pd.DataFrame) -> None:
 
 
 def main() -> None:
+    """Generate both scaffold comparison figures from the combined reports.
+
+    Returns:
+        None: The function saves the requested PDFs.
+    """
     performance_df = load_performance_df()
     if performance_df.empty:
         raise ValueError(f"No performance rows found in {DATA_PATH}")

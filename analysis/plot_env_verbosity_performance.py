@@ -1,12 +1,8 @@
-"""
-Figures summarizing Average Score as a function of tool verbosity.
+"""Summarize how benchmark scores shift as tool verbosity increases.
 
-Outputs:
-- Two-panel environment summary:
-    - Left  - horizontal bar plot of Average Score per environment x verbosity
-    - Right - Δ dot plot: change relative to the "brief" baseline
-- One-column model summary: average over environments for each model x verbosity
-- One-column agent summary: average over environments for each agent type x verbosity
+The figure combines absolute score comparisons with a delta view relative to the
+brief setting so small but consistent gains or regressions remain visible even
+when the raw scores cluster tightly near one another.
 """
 
 import json
@@ -16,18 +12,16 @@ import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH, TWO_COL_HEIGHT, TWO_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 
 lama_aesthetics.get_style("main")
 
 DATA_PATH = Path(__file__).parent / "results" / "data" / "reports.jsonl"
-OUT_DIR = Path(__file__).parent / "results" / "figures"
+OUT_DIR = Path(__file__).parent / "results" / "figures" / "fig_5_app"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_FILE = OUT_DIR / "app_fig5_ver1.pdf"
-OUT_FILE_MODEL = OUT_DIR / "app_fig5_ver1_model_avg.pdf"
-OUT_FILE_AGENT = OUT_DIR / "app_fig5_ver1_agent_type_avg.pdf"
 
 records = []
 with DATA_PATH.open() as fh:
@@ -86,6 +80,18 @@ AGENT_TYPE_LABELS = {
 
 
 def build_pivot(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
+    """Average scores by verbosity for one comparison axis.
+
+    Missing verbosity levels are inserted explicitly so every panel shares the
+    same ordering even when a slice has incomplete data.
+
+    Args:
+        df: Benchmark score table.
+        group_col: Column that defines the rows of the pivot table.
+
+    Returns:
+        pd.DataFrame: Pivot table with verbosity columns in canonical order.
+    """
     agg_df = df.groupby([group_col, "Tool Verbosity"], as_index=False)[
         "Average Score"
     ].mean()
@@ -101,12 +107,31 @@ def build_pivot(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
 def get_group_centers(
     n_groups: int, bar_width: float = 0.22, gap_width: float = 0.1
 ) -> np.ndarray:
+    """Compute categorical anchors for grouped horizontal plots.
+
+    Args:
+        n_groups: Number of groups to place on the axis.
+        bar_width: Vertical spacing allocated to one verbosity level.
+        gap_width: Additional spacing between neighboring groups.
+
+    Returns:
+        np.ndarray: Center coordinate for each group.
+    """
     return np.arange(n_groups) * (
         len(VERBOSITIES) * bar_width + gap_width + bar_width * 0.3
     )
 
 
 def get_group_frame(_bar_width: float, y_centers: np.ndarray) -> np.ndarray:
+    """Return the y-range that encloses the grouped positions.
+
+    Args:
+        _bar_width: Unused legacy parameter kept for call-site symmetry.
+        y_centers: Group center coordinates on the y-axis.
+
+    Returns:
+        np.ndarray: Two-value range passed to `range_frame()`.
+    """
     return np.array([y_centers.min(), y_centers.max()])
 
 
@@ -121,6 +146,21 @@ def plot_horizontal_verbosity_bars(
     gap_width: float = 0.1,
     show_legend: bool = True,
 ) -> np.ndarray:
+    """Draw grouped horizontal lollipops for verbosity-specific mean scores.
+
+    Args:
+        ax: Axis that receives the plot.
+        pivot_df: Pivot table indexed by group with verbosity columns.
+        groups: Ordered raw group identifiers to plot.
+        group_labels: Display labels corresponding to `groups`.
+        y_label: Label shown on the categorical axis.
+        bar_width: Vertical spacing allocated to one verbosity level.
+        gap_width: Additional spacing between neighboring groups.
+        show_legend: Whether to draw the verbosity legend on this axis.
+
+    Returns:
+        np.ndarray: Group-center coordinates used for further annotations.
+    """
     y_centers = get_group_centers(len(groups), bar_width=bar_width, gap_width=gap_width)
 
     for vi, verbosity in enumerate(VERBOSITIES):
@@ -166,6 +206,37 @@ def plot_horizontal_verbosity_bars(
     return y_centers
 
 
+def add_panel_label(ax: plt.Axes, label: str, x: float = -0.18) -> None:
+    """Place a circled panel tag outside the axis bounds.
+
+    Args:
+        ax: Axis that receives the panel tag.
+        label: Single-letter panel identifier.
+        x: Horizontal offset in axes coordinates.
+
+    Returns:
+        None: The function mutates the provided axis.
+    """
+    ax.text(
+        x,
+        1.08,
+        label,
+        transform=ax.transAxes,
+        fontweight="bold",
+        fontsize=11,
+        color="black",
+        ha="center",
+        va="center",
+        clip_on=False,
+        bbox={
+            "boxstyle": "circle,pad=0.35",
+            "facecolor": "white",
+            "edgecolor": "black",
+            "linewidth": 1.0,
+        },
+    )
+
+
 envs = sorted(agg["environment"].unique())
 yticklabels = [ENV_LABELS.get(e, e.capitalize()) for e in envs]
 
@@ -176,88 +247,124 @@ NON_BASELINE = ["workflow", "comprehensive"]
 for v in NON_BASELINE:
     env_pivot[f"delta_{v}"] = env_pivot[v] - env_pivot[BASELINE]
 
-x_centers = get_group_centers(len(envs))
-
 JITTER = {"workflow": -0.08, "comprehensive": 0.08}
 
-fig, (ax_bar, ax_delta) = plt.subplots(
-    1,
-    2,
-    figsize=(TWO_COL_WIDTH, TWO_COL_HEIGHT),
-    gridspec_kw={"width_ratios": [1.4, 1]},
-)
 
-all_scores = []
-plot_horizontal_verbosity_bars(
-    ax_bar,
-    env_pivot,
-    envs,
-    yticklabels,
-    "Environment",
-    show_legend=False,
-)
+def plot_environment_summary(ax_bar: plt.Axes, ax_delta: plt.Axes) -> None:
+    """Draw the environment summary and the delta-from-brief companion view.
 
-ax_delta.axvline(0, color="black", linewidth=1.0, linestyle="--", alpha=0.7, zorder=1)
+    The delta panel exists to surface consistent but small verbosity effects
+    that can disappear in the absolute-score panel.
 
-all_deltas = []
-for v in NON_BASELINE:
-    deltas = [
-        env_pivot.loc[e, f"delta_{v}"] if e in env_pivot.index else np.nan for e in envs
-    ]
-    all_deltas.extend([d for d in deltas if not np.isnan(d)])
-    y_pos = x_centers + JITTER[v]
-    ax_delta.scatter(
-        deltas,
-        y_pos,
-        color=COLORS[v],
-        marker=MARKERS[v],
-        s=90,
-        alpha=0.75,
-        zorder=3,
-        label=f"{VERBOSITY_LABELS[v]} - Brief",
-        edgecolors="white",
-        linewidths=0.6,
+    Args:
+        ax_bar: Axis for the absolute environment means.
+        ax_delta: Axis for the environment deltas relative to `brief`.
+
+    Returns:
+        None: The function mutates both provided axes.
+    """
+    x_centers = get_group_centers(len(envs))
+
+    plot_horizontal_verbosity_bars(
+        ax_bar,
+        env_pivot,
+        envs,
+        yticklabels,
+        "Environment",
+        show_legend=False,
     )
-    for yi, di in zip(y_pos, deltas, strict=True):
-        if not np.isnan(di):
-            ax_delta.plot(
-                [0, di], [yi, yi], color=COLORS[v], linewidth=0.8, alpha=0.5, zorder=2
-            )
 
-ax_delta.set_yticks(x_centers)
-ax_delta.set_yticklabels([])
-ax_delta.set_xlabel("Δ Average Score  (vs. Brief)")
-range_frame(ax_delta, np.array([-0.05, 0.05]), x_centers)
+    ax_delta.axvline(
+        0, color="black", linewidth=1.0, linestyle="--", alpha=0.7, zorder=1
+    )
 
-bar_handles, bar_labels = ax_bar.get_legend_handles_labels()
-ax_bar.legend(bar_handles, bar_labels, title="Tool Verbosity", loc="upper right")
+    for v in NON_BASELINE:
+        deltas = [
+            env_pivot.loc[e, f"delta_{v}"] if e in env_pivot.index else np.nan
+            for e in envs
+        ]
+        y_pos = x_centers + JITTER[v]
+        ax_delta.scatter(
+            deltas,
+            y_pos,
+            color=COLORS[v],
+            marker=MARKERS[v],
+            s=90,
+            alpha=0.75,
+            zorder=3,
+            label=f"{VERBOSITY_LABELS[v]} - Brief",
+            edgecolors="white",
+            linewidths=0.6,
+        )
+        for yi, di in zip(y_pos, deltas, strict=True):
+            if not np.isnan(di):
+                ax_delta.plot(
+                    [0, di],
+                    [yi, yi],
+                    color=COLORS[v],
+                    linewidth=0.8,
+                    alpha=0.5,
+                    zorder=2,
+                )
 
-plt.tight_layout()
-fig.savefig(OUT_FILE, bbox_inches="tight")
-logger.info(f"Saved figure to {OUT_FILE}")
+    ax_delta.set_yticks(x_centers)
+    ax_delta.set_yticklabels([])
+    ax_delta.set_xlabel("Δ Average Score  (vs. Brief)")
+    range_frame(ax_delta, np.array([-0.05, 0.05]), x_centers)
+
+    bar_handles, bar_labels = ax_bar.get_legend_handles_labels()
+    ax_bar.legend(bar_handles, bar_labels, title="Tool Verbosity", loc="upper right")
+
 
 models = sorted(performance_df["model"].dropna().unique())
 model_labels = [MODEL_LABELS.get(model, model) for model in models]
 model_pivot = build_pivot(performance_df, "model")
 
-fig_model, ax_model = plt.subplots(
+
+def plot_model_summary(ax: plt.Axes) -> None:
+    """Draw the model-level verbosity summary averaged over environments.
+
+    Args:
+        ax: Axis that receives the plot.
+
+    Returns:
+        None: The function mutates the provided axis.
+    """
+    model_centers = plot_horizontal_verbosity_bars(
+        ax,
+        model_pivot,
+        models,
+        model_labels,
+        "Model",
+        bar_width=0.16,
+        show_legend=False,
+    )
+    range_frame(ax, np.array([0, 1]), get_group_frame(0.16, model_centers), pad=0.2)
+    ax.set_ylabel("")
+
+
+fig = plt.figure(figsize=(TWO_COL_WIDTH, 3 * ONE_COL_HEIGHT))
+outer_grid = fig.add_gridspec(
+    2,
     1,
-    1,
-    figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT),
+    height_ratios=[TWO_COL_HEIGHT, ONE_COL_HEIGHT],
+    hspace=0.38,
 )
-model_centers = plot_horizontal_verbosity_bars(
-    ax_model,
-    model_pivot,
-    models,
-    model_labels,
-    "Model",
-    bar_width=0.16,
-    show_legend=False,
-)
-range_frame(ax_model, np.array([0, 1]), get_group_frame(0.16, model_centers), pad=0.2)
-plt.tight_layout()
-fig_model.savefig(OUT_FILE_MODEL, bbox_inches="tight")
-logger.info(f"Saved figure to {OUT_FILE_MODEL}")
+top_grid = outer_grid[0].subgridspec(1, 2, width_ratios=[1.4, 1], wspace=0.22)
+bottom_grid = outer_grid[1].subgridspec(1, 2, wspace=0.32)
+
+ax_bar = fig.add_subplot(top_grid[0, 0])
+ax_delta = fig.add_subplot(top_grid[0, 1])
+ax_model_grid = fig.add_subplot(bottom_grid[0, 0])
+ax_agent_grid = fig.add_subplot(bottom_grid[0, 1])
+
+plot_environment_summary(ax_bar, ax_delta)
+plot_model_summary(ax_model_grid)
+
+add_panel_label(ax_bar, "A", x=-0.33)
+add_panel_label(ax_delta, "B", x=-0.18)
+add_panel_label(ax_model_grid, "C", x=-0.4)
+add_panel_label(ax_agent_grid, "D", x=-0.4)
 
 agent_types = sorted(performance_df["agent_type"].dropna().unique())
 agent_type_labels = [
@@ -265,21 +372,31 @@ agent_type_labels = [
 ]
 agent_type_pivot = build_pivot(performance_df, "agent_type")
 
-fig_agent, ax_agent = plt.subplots(
-    1,
-    1,
-    figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT),
-)
-agent_centers = plot_horizontal_verbosity_bars(
-    ax_agent,
-    agent_type_pivot,
-    agent_types,
-    agent_type_labels,
-    "Scaffold",
-    bar_width=0.16,
-    show_legend=False,
-)
-range_frame(ax_agent, np.array([0, 1]), np.array([0, 1]), pad=0.2)
+
+def plot_agent_summary(ax: plt.Axes) -> None:
+    """Draw the scaffold-level verbosity summary averaged over environments.
+
+    Args:
+        ax: Axis that receives the plot.
+
+    Returns:
+        None: The function mutates the provided axis.
+    """
+    agent_centers = plot_horizontal_verbosity_bars(
+        ax,
+        agent_type_pivot,
+        agent_types,
+        agent_type_labels,
+        "Scaffold",
+        bar_width=0.16,
+        show_legend=False,
+    )
+    range_frame(ax, np.array([0, 1]), get_group_frame(0.16, agent_centers), pad=0.2)
+    ax.set_ylabel("")
+
+
+plot_agent_summary(ax_agent_grid)
+
 plt.tight_layout()
-fig_agent.savefig(OUT_FILE_AGENT, bbox_inches="tight")
-logger.info(f"Saved figure to {OUT_FILE_AGENT}")
+fig.savefig(OUT_FILE, bbox_inches="tight")
+logger.info(f"Saved figure to {OUT_FILE}")
