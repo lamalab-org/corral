@@ -38,7 +38,7 @@ VERBOSITY_LABELS = {
 AGENT_TYPES = ["react", "tool_calling"]
 AGENT_TYPE_LABELS = {
     "react": "ReAct",
-    "tool_calling": "Tool calling",
+    "tool_calling": "Tool Calling",
 }
 AGENT_TYPE_COLORS = {
     "react": "#4C72B0",
@@ -251,7 +251,7 @@ def plot_agent_vs_verbosity_grid(performance_df: pd.DataFrame) -> None:
         None: The function saves the grid figure to disk.
     """
     environments = sorted(performance_df["environment"].dropna().unique())
-    panels = [(None, "All environments")] + [
+    panels = [(None, "All Environments")] + [
         (environment, ENV_LABELS.get(environment, str(environment).capitalize()))
         for environment in environments
     ]
@@ -382,7 +382,7 @@ def plot_horizontal_agent_comparison(
 
     ax.set_yticks(y_centers)
     ax.set_yticklabels(group_labels)
-    ax.set_xlabel("Average Score (mean over verbosities)")
+    ax.set_xlabel("Average Score (Mean Over Verbosities)")
     ax.set_ylabel("Environment")
     range_frame(ax, np.array([0, 1]), np.array([y_centers.min(), y_centers.max()]))
     ax.legend(title="Scaffold", loc="upper right", frameon=False)

@@ -58,7 +58,7 @@ MODEL_LABELS = {
 
 AGENT_TYPE_LABELS = {
     "react": "ReAct",
-    "tool_calling": "Tool calling",
+    "tool_calling": "Tool Calling",
 }
 
 PLOT_COLOR = "#4C72B0"
@@ -185,7 +185,7 @@ def plot_environment_summary(results_df: pd.DataFrame) -> None:
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(labels)
-    ax.set_xlabel("Average Output Tokens per Message")
+    ax.set_xlabel("Average Output Tokens Per Message")
     ax.set_ylabel("Environment")
 
     range_frame(ax, np.array([0, get_axis_max(np.array(tokens), minimum=1.0)]), y_pos)
@@ -320,7 +320,7 @@ def plot_scaled_distribution_summary(
 
     ax.set_yticks(positions)
     ax.set_yticklabels(labels)
-    ax.set_xlabel(f"Output Tokens per Message ({x_scale} scale)")
+    ax.set_xlabel(f"Output Tokens Per Message ({x_scale.title()} Scale)")
 
     upper_limit = get_axis_max(flattened_values, minimum=1.0)
     if x_scale == "log":
@@ -546,7 +546,7 @@ def plot_environment_grouped_lollipops(
         [ENV_LABELS.get(environment, str(environment)) for environment in environments]
     )
     ax.set_xlabel("Environment")
-    ax.set_ylabel("Average Output\nTokens per Message")
+    ax.set_ylabel("Average Output\nTokens Per Message")
     range_frame(
         ax,
         get_group_frame(x_centers),

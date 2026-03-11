@@ -75,7 +75,7 @@ MODEL_LABELS = {
 }
 AGENT_TYPE_LABELS = {
     "react": "ReAct",
-    "tool_calling": "Tool calling",
+    "tool_calling": "Tool Calling",
 }
 
 
@@ -309,7 +309,7 @@ def plot_environment_summary(ax_bar: plt.Axes, ax_delta: plt.Axes) -> None:
 
     ax_delta.set_yticks(x_centers)
     ax_delta.set_yticklabels([])
-    ax_delta.set_xlabel("Δ Average Score  (vs. Brief)")
+    ax_delta.set_xlabel("Δ Average Score (Vs. Brief)")
     range_frame(ax_delta, np.array([-0.05, 0.05]), x_centers)
 
     bar_handles, bar_labels = ax_bar.get_legend_handles_labels()

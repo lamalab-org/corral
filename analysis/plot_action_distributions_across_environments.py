@@ -51,7 +51,7 @@ MODEL_LABELS = {
 }
 AGENT_TYPE_LABELS = {
     "react": "ReAct",
-    "tool_calling": "Tool calling",
+    "tool_calling": "Tool Calling",
 }
 
 ACTION_ORDER = [
@@ -63,9 +63,9 @@ ACTION_ORDER = [
 ]
 ACTION_LABELS = {
     "retrieval": "Retrieval",
-    "file operations": "File ops",
-    "code execution": "Code exec.",
-    "experiment execution": "Experiment exec.",
+    "file operations": "File Operations",
+    "code execution": "Code Execution",
+    "experiment execution": "Experiment Execution",
     "validation": "Validation",
 }
 ACTION_COLORS = {
@@ -96,16 +96,6 @@ CODE_EXECUTION_TOOLS = {
     "exec_python",
     "exec_code",
     "run_in_terminal",
-}
-VALIDATION_TOOLS = {
-    "analyze_measurements",
-    "validate_smiles",
-    "validate_measurements",
-    "verify_step",
-    "verify_route",
-    "check_smiles_reaction_template_matching",
-}
-HYPOTHESIS_TOOLS = {
     "obtain_isomers_from_molecular_formula",
     "return_possible_fragments",
     "propose_simple_topology",
@@ -116,25 +106,6 @@ HYPOTHESIS_TOOLS = {
     "select_polymorphs_with_strategy",
     "select_polymorphs_with_strategy_to_file",
     "finalize",
-}
-EXPERIMENT_TOOLS = {
-    "image_analyzer",
-    "calculate_parallel_resistance",
-    "calculate_series_resistance",
-    "run_lammps",
-    "train_xgboost_model",
-    "evaluate_xgboost_model",
-    "perform_cross_validation",
-    "simulate_circuit_resistance",
-    "simulate_spectra",
-    "carbon_nmr_spectra",
-    "proton_nmr_spectra",
-    "ir_spectra",
-    "hsqc_nmr_spectra",
-    "mass_spectrometry_spectra",
-    "generate_test_measurements",
-}
-TRANSFORMATION_TOOLS = {
     "convert_structure_to_lammps_data",
     "prepare_tabular_dataset",
     "filter_json_with_strategy",
@@ -156,6 +127,31 @@ TRANSFORMATION_TOOLS = {
     "merge_subnetworks",
     "combine_subnetworks_manually",
     "merge_subnetworks_manually",
+}
+VALIDATION_TOOLS = {
+    "analyze_measurements",
+    "validate_smiles",
+    "validate_measurements",
+    "verify_step",
+    "verify_route",
+    "check_smiles_reaction_template_matching",
+    "evaluate_xgboost_model",
+}
+EXPERIMENT_TOOLS = {
+    "image_analyzer",
+    "calculate_parallel_resistance",
+    "calculate_series_resistance",
+    "run_lammps",
+    "train_xgboost_model",
+    "perform_cross_validation",
+    "simulate_circuit_resistance",
+    "simulate_spectra",
+    "carbon_nmr_spectra",
+    "proton_nmr_spectra",
+    "ir_spectra",
+    "hsqc_nmr_spectra",
+    "mass_spectrometry_spectra",
+    "generate_test_measurements",
 }
 RETRIEVAL_TOOLS = {
     "document_retrieval",
@@ -181,7 +177,7 @@ RETRIEVAL_PREFIXES = (
     "smiles_to_",
     "cas_to_",
 )
-TRANSFORMATION_PREFIXES = (
+CODE_EXECUTION_PREFIXES = (
     "create_",
     "convert_",
     "filter_",
@@ -193,9 +189,12 @@ TRANSFORMATION_PREFIXES = (
     "map_",
     "generate_",
     "add_",
+    "propose_",
+    "estimate_",
+    "choose_",
+    "select_",
 )
 VALIDATION_PREFIXES = ("validate_", "verify_", "check_")
-HYPOTHESIS_PREFIXES = ("propose_", "estimate_", "choose_", "select_")
 EXPERIMENT_PREFIXES = ("run_", "simulate_", "train_", "evaluate_", "perform_")
 
 
@@ -402,8 +401,10 @@ def iter_trial_tool_names(trial: dict) -> list[str]:
 def classify_tool(tool_name: str) -> str | None:
     """Assign a tool name to the coarse action taxonomy used in the figure.
 
-    Exact-name lookups are preferred, with prefix and regex heuristics used only
-    to keep newer tool variants from appearing as uncategorized noise.
+    Exact-name lookups are preferred, with all code-producing helper families
+    intentionally merged into one `code execution` bucket. Prefix and regex
+    heuristics are only used to keep newer tool variants from appearing as
+    uncategorized noise.
 
     Args:
         tool_name: Normalized tool identifier.
@@ -420,22 +421,16 @@ def classify_tool(tool_name: str) -> str | None:
         return "file operations"
     if normalized_name in CODE_EXECUTION_TOOLS:
         return "code execution"
-    if normalized_name in TRANSFORMATION_TOOLS:
-        return "code execution"
     if normalized_name in VALIDATION_TOOLS:
         return "validation"
-    if normalized_name in HYPOTHESIS_TOOLS:
-        return "code execution"
     if normalized_name in EXPERIMENT_TOOLS:
         return "experiment execution"
 
     if normalized_name.startswith(RETRIEVAL_PREFIXES):
         return "retrieval"
-    if normalized_name.startswith(TRANSFORMATION_PREFIXES):
-        return "code execution"
     if normalized_name.startswith(VALIDATION_PREFIXES):
         return "validation"
-    if normalized_name.startswith(HYPOTHESIS_PREFIXES):
+    if normalized_name.startswith(CODE_EXECUTION_PREFIXES):
         return "code execution"
     if normalized_name.startswith(EXPERIMENT_PREFIXES):
         return "experiment execution"
@@ -638,7 +633,7 @@ def plot_grouped_stacked_distribution(
         [ENV_LABELS.get(env, str(env).capitalize()) for env in env_order]
     )
     ax.set_xlabel("Environment")
-    ax.set_ylabel("Average action share")
+    ax.set_ylabel("Average Action Share")
     if n_env > 0:
         range_frame(ax, np.array([0, 6]), np.array([0, 1.0]), pad=0.05)
 
@@ -699,7 +694,7 @@ def plot_grouped_stacked_distribution(
         bbox_to_anchor=(1.01, 1.0 - len(subgroup_order) * 0.08 - 0.08),
         ncol=1,
         frameon=False,
-        title="Action category",
+        title="Action Category",
     )
 
     fig.tight_layout(rect=(0, 0, 0.80, 1))

@@ -52,7 +52,7 @@ MODEL_LABELS = {
 
 AGENT_TYPE_LABELS = {
     "react": "ReAct",
-    "tool_calling": "Tool calling",
+    "tool_calling": "Tool Calling",
 }
 
 PLOT_COLOR = "#4C72B0"
@@ -252,7 +252,7 @@ def plot_group_boxplots(
 
     ax.set_yticks(positions)
     ax.set_yticklabels(labels)
-    ax.set_xlabel("Tool Calls per Task Trial")
+    ax.set_xlabel("Tool Calls Per Task Trial")
     ax.set_ylabel(y_label)
     ax.set_xlim(0, 30)
 
@@ -347,7 +347,7 @@ def plot_ridgeline(
             fontsize=10,
         )
 
-    axes[-1].set_xlabel("Tool Calls per Task Trial")
+    axes[-1].set_xlabel("Tool Calls Per Task Trial")
     axes[-1].spines["bottom"].set_visible(True)
 
     fig.subplots_adjust(hspace=-overlap)
@@ -441,7 +441,7 @@ def plot_environment_agent_bars_by_model(
             ]
         )
         ax.set_xlabel("Environment")
-        ax.set_ylabel("Average Tool Calls\nper Task Trial")
+        ax.set_ylabel("Average Tool Calls\nPer Task Trial")
         ax.set_title(MODEL_LABELS.get(model_key, str(model_key)))
         ax.set_ylim(0, get_axis_max(summary["tool_calls_per_trial"], minimum=1.0))
         ax.legend(
