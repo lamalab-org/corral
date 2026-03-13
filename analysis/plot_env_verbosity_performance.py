@@ -105,7 +105,7 @@ def build_pivot(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
 
 
 def get_group_centers(
-    n_groups: int, bar_width: float = 0.22, gap_width: float = 0.1
+    n_groups: int, bar_width: float = 0.22, gap_width: float = 0.04
 ) -> np.ndarray:
     """Compute categorical anchors for grouped horizontal plots.
 
@@ -117,9 +117,7 @@ def get_group_centers(
     Returns:
         np.ndarray: Center coordinate for each group.
     """
-    return np.arange(n_groups) * (
-        len(VERBOSITIES) * bar_width + gap_width + bar_width * 0.3
-    )
+    return np.arange(n_groups) * (len(VERBOSITIES) * bar_width + gap_width)
 
 
 def get_group_frame(_bar_width: float, y_centers: np.ndarray) -> np.ndarray:
@@ -207,7 +205,7 @@ def plot_horizontal_verbosity_bars(
 
 
 def add_panel_label(ax: plt.Axes, label: str, x: float = -0.18) -> None:
-    """Place a circled panel tag outside the axis bounds.
+    """Place a bold panel tag outside the axis bounds.
 
     Args:
         ax: Axis that receives the panel tag.
@@ -217,23 +215,26 @@ def add_panel_label(ax: plt.Axes, label: str, x: float = -0.18) -> None:
     Returns:
         None: The function mutates the provided axis.
     """
+    # label_color = next(
+    #     (
+    #         spine.get_edgecolor()
+    #         for spine in ax.spines.values()
+    #         if spine.get_visible()
+    #     ),
+    #     plt.rcParams.get("axes.edgecolor", "black"),
+    # )
+
     ax.text(
         x,
         1.08,
         label,
         transform=ax.transAxes,
         fontweight="bold",
-        fontsize=11,
+        fontsize=16,
         color="black",
         ha="center",
         va="center",
         clip_on=False,
-        bbox={
-            "boxstyle": "circle,pad=0.35",
-            "facecolor": "white",
-            "edgecolor": "black",
-            "linewidth": 1.0,
-        },
     )
 
 
@@ -310,7 +311,7 @@ def plot_environment_summary(ax_bar: plt.Axes, ax_delta: plt.Axes) -> None:
     ax_delta.set_yticks(x_centers)
     ax_delta.set_yticklabels([])
     ax_delta.set_xlabel("Δ Average Score (Vs. Brief)")
-    range_frame(ax_delta, np.array([-0.05, 0.05]), x_centers)
+    range_frame(ax_delta, np.array([-0.050, 0.050]), x_centers)
 
     bar_handles, bar_labels = ax_bar.get_legend_handles_labels()
     ax_bar.legend(bar_handles, bar_labels, title="Tool Verbosity", loc="upper right")
@@ -391,7 +392,7 @@ def plot_agent_summary(ax: plt.Axes) -> None:
         bar_width=0.16,
         show_legend=False,
     )
-    range_frame(ax, np.array([0, 1]), get_group_frame(0.16, agent_centers), pad=0.2)
+    range_frame(ax, np.array([0, 1]), get_group_frame(0.16, agent_centers), pad=0.325)
     ax.set_ylabel("")
 
 

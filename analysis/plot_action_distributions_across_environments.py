@@ -29,7 +29,7 @@ from matplotlib.patches import Patch
 lama_aesthetics.get_style("main")
 
 DATA_PATH = Path(__file__).parent / "results" / "data" / "reports.jsonl"
-OUT_DIR = Path(__file__).parent / "results" / "figures" / "fig_4_app"
+OUT_DIR = Path(__file__).parent / "results" / "figures" / "analysis"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 OUT_FILE_AGENT = OUT_DIR / "action_distribution_by_environment_and_agent.pdf"
@@ -635,7 +635,7 @@ def plot_grouped_stacked_distribution(
     ax.set_xlabel("Environment")
     ax.set_ylabel("Average Action Share")
     if n_env > 0:
-        range_frame(ax, np.array([0, 6]), np.array([0, 1.0]), pad=0.05)
+        range_frame(ax, np.array([0, 6]), np.array([0, 1.0]), pad=0.1)
 
     if n_env > 0 and n_subgroups > 1:
         example_positions = x_centers[0] + offsets

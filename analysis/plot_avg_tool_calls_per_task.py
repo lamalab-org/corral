@@ -26,9 +26,10 @@ lama_aesthetics.get_style("main")
 
 DATA_PATH = Path(__file__).parent / "results" / "data" / "reports.jsonl"
 FIGURES_DIR = Path(__file__).parent / "results" / "figures"
-OUT_DIR = FIGURES_DIR / "fig_4_app"
+OUT_DIR = FIGURES_DIR / "analysis"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 ANALYSIS_OUT_DIR = FIGURES_DIR / "analysis"
+ANALYSIS_OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_FILE = OUT_DIR / "avg_tool_calls_per_task_by_environment.pdf"
 OUT_FILE_MODEL = OUT_DIR / "avg_tool_calls_per_task_by_model.pdf"
 OUT_FILE_AGENT = OUT_DIR / "avg_tool_calls_per_task_by_agent_type.pdf"

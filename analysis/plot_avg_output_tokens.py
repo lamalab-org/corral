@@ -24,7 +24,7 @@ from matplotlib.lines import Line2D
 lama_aesthetics.get_style("main")
 
 DATA_PATH = Path(__file__).parent / "results" / "data" / "reports.jsonl"
-OUT_DIR = Path(__file__).parent / "results" / "figures" / "fig_4_app"
+OUT_DIR = Path(__file__).parent / "results" / "figures" / "analysis"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 ANALYSIS_OUT_DIR = Path(__file__).parent / "results" / "figures" / "analysis"
 ANALYSIS_OUT_DIR.mkdir(parents=True, exist_ok=True)
