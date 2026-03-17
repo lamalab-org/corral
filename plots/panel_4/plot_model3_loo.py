@@ -15,17 +15,14 @@ Usage:
 """
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
-import arviz as az
 import fire
 import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger

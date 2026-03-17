@@ -585,9 +585,9 @@ def fit_agent_model3_abilities_env(
     N_levels = agent_df["level_idx"].nunique()
     N_verbosities = agent_df["verbosity_idx"].nunique()
 
-    logger.info("="*60)
+    logger.info("=" * 60)
     logger.info("MODEL 3: Environment-Specific Ability Slopes + Tasks")
-    logger.info("="*60)
+    logger.info("=" * 60)
     logger.info(f"Environments:    {N_envs}")
     logger.info(f"Tasks:           {N_tasks}")
     logger.info(f"Scaffolds:       {N_scaffolds}")
@@ -799,7 +799,9 @@ def main(
     # Filter extreme groups (skip if using balanced data, already balanced)
     if use_balanced_data:
         agent_data_filtered = filtered_agent_data
-        logger.info(f"Using balanced data (no extreme group filtering): {len(agent_data_filtered)} rows")
+        logger.info(
+            f"Using balanced data (no extreme group filtering): {len(agent_data_filtered)} rows"
+        )
     else:
         agent_data_filtered = filter_extreme_groups(filtered_agent_data)
         logger.info(f"Filtered data: {len(agent_data_filtered)} rows")
@@ -810,7 +812,9 @@ def main(
     logger.info("\n" + "=" * 60)
 
     if use_model3:
-        model_desc = "STAGE 2: Fitting MODEL 3 (Environment-Specific Ability Slopes + Tasks)"
+        model_desc = (
+            "STAGE 2: Fitting MODEL 3 (Environment-Specific Ability Slopes + Tasks)"
+        )
         logger.info(model_desc)
         logger.info("=" * 60)
 
@@ -823,7 +827,9 @@ def main(
         # Model 3 has different parameter structure (lambda_base, theta, etc.)
         # Skip variance decomposition for now - it would need to be rewritten for Model 3
         var_result = None
-        logger.info("Skipping variance decomposition for Model 3 (different parameter structure)")
+        logger.info(
+            "Skipping variance decomposition for Model 3 (different parameter structure)"
+        )
     else:
         model_desc = "STAGE 2: Fitting Agent Model"
         if with_task_effects and with_category:
@@ -855,7 +861,10 @@ def main(
                 include_category=with_category,
             )
             var_result = variance_decomposition(
-                agent_trace, agent_df, include_task=False, include_category=with_category
+                agent_trace,
+                agent_df,
+                include_task=False,
+                include_category=with_category,
             )
 
     # ==========================================================================
