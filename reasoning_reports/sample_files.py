@@ -1,10 +1,10 @@
-import argparse
 import json
 import random
 import re
 from collections import defaultdict
 from pathlib import Path
 
+import fire
 from datasets import load_dataset
 from huggingface_hub import HfApi
 from loguru import logger
@@ -16,7 +16,6 @@ AGENT = "ReActAgent"
 VERBOSITY = "brief"
 COMPLEXITY = "tasks"
 
-# Config format: {model}-{env}-level_{N}-{complexity}-{agent}-{verbosity}-traces
 CONFIG_RE = re.compile(
     r"^(?P<model>[^-]+(?:_[^-]+)*)-(?P<env>[^-]+)-level_(?P<level>\d+)"
     r"-(?P<complexity>[^-]+)-(?P<agent>[^-]+)-(?P<verbosity>[^-]+)-traces$"
@@ -39,7 +38,9 @@ def discover_configs() -> list[dict]:
     api = HfApi()
     ds_info = api.dataset_info(DATASET_ID)
     parquet_siblings = [
-        s.rfilename for s in ds_info.siblings if s.rfilename.endswith(".parquet")
+        s.rfilename
+        for s in (ds_info.siblings or [])
+        if s.rfilename.endswith(".parquet")
     ]
     configs: list[dict] = []
     seen = set()
@@ -89,7 +90,6 @@ def sample_diverse(rows: list[dict], k: int) -> list[dict]:
     sampled: list[dict] = []
     used_indices: set[int] = set()
 
-    # One per task first
     for tn in task_names:
         if len(sampled) >= k:
             break
@@ -98,7 +98,6 @@ def sample_diverse(rows: list[dict], k: int) -> list[dict]:
         sampled.append(choice)
         used_indices.add(idx)
 
-    # Fill remaining slots
     if len(sampled) < k:
         remaining = [r for r in rows if id(r) not in used_indices]
         random.shuffle(remaining)
@@ -118,14 +117,12 @@ def sample_env(
     If *n* exceeds the total number of available traces for this env, it is
     clamped to the available amount.  Returns the number of files saved.
     """
-    # Collect (model, level) combos
     combos = [(c["model"], c["level"], c["config_name"]) for c in env_configs]
     num_combos = len(combos)
     if num_combos == 0:
         logger.info(f"  [{env_name}] No matching configs - skipping.")
         return 0
 
-    # Load all combo datasets upfront so we know the true total available
     combo_rows: list[tuple[str, str, str, list[dict]]] = []
     total_available = 0
     for model, level, config_name in combos:
@@ -135,7 +132,6 @@ def sample_env(
         combo_rows.append((model, level, config_name, rows))
         total_available += len(rows)
 
-    # Clamp n to the number of available traces
     effective_n = min(n, total_available)
     if effective_n < n:
         logger.info(
@@ -157,7 +153,6 @@ def sample_env(
     )
 
     saved = 0
-    leftover_rows: list[dict] = []
 
     for idx, (model, level, config_name, rows) in enumerate(combo_rows):
         target = per_combo + (1 if idx < remainder else 0)
@@ -171,7 +166,6 @@ def sample_env(
                 f"    ⚠ Only {len(chosen)}/{target} available for {config_name}."
             )
 
-        # Save chosen files into model/env/level_N/
         for row in chosen:
             record = {col: row[col] for col in SAVE_COLUMNS if col in row}
             task = record.get("task_name", "unknown")
@@ -182,10 +176,6 @@ def sample_env(
             with out_path.open("w") as f:
                 json.dump(record, f, indent=2, default=str)
             saved += 1
-
-        # Keep unused rows for potential overflow redistribution
-        chosen_ids = {id(r) for r in chosen}
-        leftover_rows.extend(r for r in rows if id(r) not in chosen_ids)
 
     logger.info(f"  [{env_name}] Saved {saved}/{effective_n} traces.")
     return saved
@@ -222,43 +212,28 @@ def sample_files(
     logger.info(f"\nDone - saved {total_saved} trace(s) under '{output_path}'.")
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description=(
-            "Sample N trace files per environment from the HF dataset "
-            f"'{DATASET_ID}'. Traces are drawn from models {MODELS}, "
-            f"agent={AGENT}, verbosity={VERBOSITY}, complexity={COMPLEXITY}. "
-            "Sampling maximises task-name diversity across levels and models."
-        )
-    )
-    parser.add_argument(
-        "--output-dir",
-        "-o",
-        type=str,
-        default=None,
-        help="Destination directory for sampled JSON trace files "
-        "(default: same directory as this script)",
-    )
-    parser.add_argument(
-        "-n",
-        "--number",
-        type=int,
-        default=90,
-        help="Number of traces to sample per environment (default: 10)",
-    )
-    parser.add_argument(
-        "--env",
-        type=str,
-        default=None,
-        help="If set, sample only from this environment (e.g. 'catalyst'). "
-        "Default: sample from all environments.",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Random seed for reproducibility",
-    )
-    args = parser.parse_args()
+def main(
+    output_dir: str | None = None,
+    n: int = 90,
+    env: str | None = None,
+    seed: int | None = None,
+) -> None:
+    """Sample trace files from the Hugging Face dataset into JSON files.
 
-    sample_files(args.output_dir, args.number, env=args.env, seed=args.seed)
+    The command filters dataset configs to the repository's target model,
+    agent, verbosity, and complexity settings, then samples traces per
+    environment while favoring task-name diversity across levels and models.
+
+    Args:
+        output_dir: Destination directory for sampled JSON files. When not
+            provided, files are written beside this script.
+        n: Number of traces to sample per environment.
+        env: Optional environment name to restrict sampling to a single
+            environment, such as "catalyst".
+        seed: Optional random seed used to make sampling reproducible.
+    """
+    sample_files(output_dir=output_dir, n=n, env=env, seed=seed)
+
+
+if __name__ == "__main__":
+    fire.Fire(main)

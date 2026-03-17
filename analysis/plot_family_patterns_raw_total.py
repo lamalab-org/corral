@@ -1,13 +1,14 @@
 """
-Plot anti-pattern and good-workflow *family*-level summaries from reasoning_reports.
+Plot anti-pattern and good-workflow *family*-level summaries from reasoning_reports,
+using **raw_total** (absolute occurrence counts) instead of the trace-fraction used
+in plot_family_patterns.py.
 
 All plots use family-aggregated labels (evidence_handling, hypothesis_testing,
-discovery, …) instead of the individual pattern names used in
-reports/plots/plot_antipatterns.py.
+discovery, …) instead of the individual pattern names.
 
 Usage:
-  python analysis/plot_family_patterns.py
-  python analysis/plot_family_patterns.py --summary-path /path/to/summary.json
+  python analysis/plot_family_patterns_raw_total.py
+  python analysis/plot_family_patterns_raw_total.py --summary-path /path/to/summary.json
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from pathlib import Path
 import fire
 import lama_aesthetics
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import numpy as np
 from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH, TWO_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
@@ -32,7 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUMMARY_PATH = (
     REPO_ROOT / "reasoning_reports" / "analysis" / "annotation_summary.json"
 )
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "analysis" / "results" / "figures"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "analysis" / "results" / "figures" / "raw_total"
 
 ANTIPATTERN_FAMILY_FIELDS = [
     "evidence_handling",
@@ -59,7 +59,6 @@ METRIC_FIELDS = [
 MODEL_COLORS = {"claude_sonnet_45": "#768eab", "gpt_4o": "#a285a6"}
 GOOD_COLOR = "#5d8aa8"
 BAD_COLOR = "#c05746"
-NEGATIVE_PATTERN_LABEL = "Reasoning breakdowns"
 
 
 def load_summary(path: Path) -> dict:
@@ -83,8 +82,8 @@ def short_name(key: str) -> str:
     return abbrevs.get(key, key.replace("_", " "))
 
 
-def _frac(data: dict, section: str, field: str) -> float:
-    v = data.get(section, {}).get(field, {}).get("fraction")
+def _raw_total(data: dict, section: str, field: str) -> float:
+    v = data.get(section, {}).get(field, {}).get("raw_total")
     if v is None:
         return 0.0
     return float(v)
@@ -104,17 +103,17 @@ def _save(fig: plt.Figure, path: Path) -> None:
     logger.info(f"  saved: {path}")
 
 
-def _avg_family_frac_over_levels(
+def _avg_family_raw_total_over_levels(
     summary: dict, model: str, env: str, section: str, field: str
 ) -> float:
-    """Average a family fraction over all levels for a given model/env combo."""
+    """Sum raw_total over all levels for a given model/env combo."""
     mel = summary["groupings"]["by_model_env_level"]
     prefix = f"{model}/{env}/"
-    vals = []
+    total = 0.0
     for k, data in mel.items():
         if k.startswith(prefix):
-            vals.append(_frac(data, section, field))
-    return float(np.mean(vals)) if vals else 0.0
+            total += _raw_total(data, section, field)
+    return total
 
 
 def _avg_metric_over_levels(summary: dict, model: str, env: str, field: str) -> float:
@@ -142,7 +141,7 @@ def _get_model_env_combos(summary: dict) -> list[tuple[str, str]]:
 def plot_family_delta_model(summary: dict, out: Path) -> None:
     """
     Diverging bar: antipattern_family_global + subgraph_family_global,
-    averaged over all envs and levels, comparing two models.
+    comparing two models by raw_total difference.
     Positive = model_a higher, negative = model_b higher.
     """
     models = list(summary["groupings"]["by_model"].keys())
@@ -156,13 +155,13 @@ def plot_family_delta_model(summary: dict, out: Path) -> None:
     labels = []
     deltas = []
     for f in ANTIPATTERN_FAMILY_FIELDS:
-        va = _frac(data_a, "antipattern_family_global", f)
-        vb = _frac(data_b, "antipattern_family_global", f)
+        va = _raw_total(data_a, "antipattern_family_global", f)
+        vb = _raw_total(data_b, "antipattern_family_global", f)
         labels.append(short_name(f))
         deltas.append(va - vb)
     for f in SUBGRAPH_FAMILY_FIELDS:
-        va = _frac(data_a, "subgraph_family_global", f)
-        vb = _frac(data_b, "subgraph_family_global", f)
+        va = _raw_total(data_a, "subgraph_family_global", f)
+        vb = _raw_total(data_b, "subgraph_family_global", f)
         labels.append(short_name(f))
         deltas.append(va - vb)
 
@@ -177,8 +176,7 @@ def plot_family_delta_model(summary: dict, out: Path) -> None:
     ax.axvline(0, color="black", linewidth=0.8)
     ax.set_yticks(y)
     ax.set_yticklabels(labels, fontsize=7)
-    ax.set_xlabel(f"← {model_b} worse | {model_a} worse →")
-    ax.xaxis.set_major_formatter(mticker.PercentFormatter(1.0))
+    ax.set_xlabel(f"← {model_b} higher | {model_a} higher →\n(raw_total difference)")
     range_frame(ax, np.array([min(deltas), max(deltas)]), y, nice=False)
     ax.invert_yaxis()
     fig.tight_layout()
@@ -187,8 +185,9 @@ def plot_family_delta_model(summary: dict, out: Path) -> None:
 
 def plot_family_trends_by_env(summary: dict, out: Path) -> None:
     """
-    Grouped bar chart: x-axis = environments (averaged over levels),
+    Grouped bar chart: x-axis = environments,
     different colours = family elements (anti-pattern + subgraph families).
+    Values are raw_total occurrence counts.
     """
     envs = list(summary["groupings"]["by_env"].keys())
     all_fields = [
@@ -203,7 +202,8 @@ def plot_family_trends_by_env(summary: dict, out: Path) -> None:
 
     for i, (field, section) in enumerate(all_fields):
         vals = [
-            _frac(summary["groupings"]["by_env"][env], section, field) for env in envs
+            _raw_total(summary["groupings"]["by_env"][env], section, field)
+            for env in envs
         ]
         offset = (i - (n_groups - 1) / 2) * bar_width
         ax.vlines(
@@ -219,16 +219,20 @@ def plot_family_trends_by_env(summary: dict, out: Path) -> None:
 
     ax.set_xticks(x)
     ax.set_xticklabels(envs, fontsize=7, rotation=30, ha="right")
-    ax.set_ylabel("Fraction of traces")
-    ax.yaxis.set_major_formatter(mticker.PercentFormatter(1.0))
+    ax.set_ylabel("Raw total occurrences")
     ax.legend(fontsize=6, ncol=2, loc="upper left", bbox_to_anchor=(1.02, 1.0))
-    range_frame(ax, x, np.array([0.0, 1.0]), pad=0.1, pad_x=0.0)
+    all_vals = [
+        _raw_total(summary["groupings"]["by_env"][env], section, field)
+        for field, section in all_fields
+        for env in envs
+    ]
+    range_frame(ax, x, np.array([0.0, max(all_vals)]), pad=0.1, pad_x=0.0)
     fig.tight_layout()
     _save(fig, out / "family_trends_by_env.pdf")
 
 
 def plot_family_patterns_by_model(summary: dict, out: Path) -> None:
-    """Grouped horizontal bars: family fraction for each model."""
+    """Grouped horizontal bars: family raw_total for each model."""
     models = list(summary["groupings"]["by_model"].keys())
     all_fields = [
         (f, "antipattern_family_global") for f in ANTIPATTERN_FAMILY_FIELDS
@@ -241,7 +245,7 @@ def plot_family_patterns_by_model(summary: dict, out: Path) -> None:
 
     for i, model in enumerate(models):
         data = summary["groupings"]["by_model"][model]
-        vals = [_frac(data, section, f) for f, section in all_fields]
+        vals = [_raw_total(data, section, f) for f, section in all_fields]
         offset = (i - (len(models) - 1) / 2) * bar_height
         ax.hlines(
             y + offset,
@@ -263,10 +267,14 @@ def plot_family_patterns_by_model(summary: dict, out: Path) -> None:
 
     ax.set_yticks(y)
     ax.set_yticklabels(field_labels, fontsize=7)
-    ax.set_xlabel("Fraction of traces")
-    ax.xaxis.set_major_formatter(mticker.PercentFormatter(1.0))
+    ax.set_xlabel("Raw total occurrences")
     ax.legend(fontsize=8)
-    range_frame(ax, np.array([0.0, 1.0]), y)
+    all_vals = [
+        _raw_total(summary["groupings"]["by_model"][m], section, f)
+        for f, section in all_fields
+        for m in models
+    ]
+    range_frame(ax, np.array([0.0, max(all_vals)]), y)
     ax.invert_yaxis()
     fig.tight_layout()
     _save(fig, out / "family_patterns_by_model.pdf")
@@ -274,43 +282,43 @@ def plot_family_patterns_by_model(summary: dict, out: Path) -> None:
 
 def plot_good_bad_balance_by_env(summary: dict, out: Path) -> None:
     """
-    Stacked horizontal bars: for each environment (averaged over levels),
-    mean good-workflow family fraction vs mean anti-pattern family fraction.
+    Stacked horizontal bars: for each environment,
+    total good-workflow raw_total vs total anti-pattern raw_total.
     """
     envs = list(summary["groupings"]["by_env"].keys())
-    good_means = []
-    bad_means = []
+    good_totals = []
+    bad_totals = []
     for env in envs:
         data = summary["groupings"]["by_env"][env]
         g_vals = [
-            _frac(data, "subgraph_family_global", f) for f in SUBGRAPH_FAMILY_FIELDS
+            _raw_total(data, "subgraph_family_global", f)
+            for f in SUBGRAPH_FAMILY_FIELDS
         ]
         b_vals = [
-            _frac(data, "antipattern_family_global", f)
+            _raw_total(data, "antipattern_family_global", f)
             for f in ANTIPATTERN_FAMILY_FIELDS
         ]
-        good_means.append(np.mean(g_vals))
-        bad_means.append(np.mean(b_vals))
+        good_totals.append(sum(g_vals))
+        bad_totals.append(sum(b_vals))
 
     fig, ax = plt.subplots(figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT * 1.2))
     y = np.arange(len(envs))
     ax.barh(
-        y, good_means, color=GOOD_COLOR, alpha=0.8, label="Good workflow (mean frac.)"
+        y, good_totals, color=GOOD_COLOR, alpha=0.8, label="Good workflow (total count)"
     )
     ax.barh(
         y,
-        bad_means,
-        left=good_means,
+        bad_totals,
+        left=good_totals,
         color=BAD_COLOR,
         alpha=0.8,
-        label="Anti-pattern (mean frac.)",
+        label="Anti-pattern (total count)",
     )
     ax.set_yticks(y)
     ax.set_yticklabels(envs, fontsize=7)
-    ax.set_xlabel("Mean fraction of traces")
+    ax.set_xlabel("Raw total occurrences")
     ax.legend(fontsize=7, loc="lower right")
-    ax.xaxis.set_major_formatter(mticker.PercentFormatter(1.0))
-    totals = np.array(good_means) + np.array(bad_means)
+    totals = np.array(good_totals) + np.array(bad_totals)
     range_frame(ax, np.array([0.0, float(totals.max())]), y, nice=False)
     ax.invert_yaxis()
     fig.tight_layout()
@@ -319,17 +327,17 @@ def plot_good_bad_balance_by_env(summary: dict, out: Path) -> None:
 
 def plot_overall_families_ranked(summary: dict, out: Path) -> None:
     """
-    Single horizontal bar chart with ALL family labels ranked by prevalence.
+    Single horizontal bar chart with ALL family labels ranked by raw_total.
     Good families in blue, anti-pattern families in red.
     """
     overall = summary["groupings"]["overall"]
 
     items = [
-        (short_name(f), _frac(overall, "subgraph_family_global", f), "good")
+        (short_name(f), _raw_total(overall, "subgraph_family_global", f), "good")
         for f in SUBGRAPH_FAMILY_FIELDS
     ]
     items.extend(
-        (short_name(f), _frac(overall, "antipattern_family_global", f), "bad")
+        (short_name(f), _raw_total(overall, "antipattern_family_global", f), "bad")
         for f in ANTIPATTERN_FAMILY_FIELDS
     )
 
@@ -342,12 +350,18 @@ def plot_overall_families_ranked(summary: dict, out: Path) -> None:
         color = GOOD_COLOR if kind == "good" else BAD_COLOR
         ax.hlines(i, 0, val, color=color, alpha=0.5, linewidth=5)
         ax.plot(val, i, "o", markersize=5, color=color, alpha=0.6)
-        ax.text(val + 0.01, i, f"{val:.0%}", va="center", fontsize=6, color=color)
+        ax.text(
+            val + vals_arr.max() * 0.01,
+            i,
+            f"{val:.0f}",
+            va="center",
+            fontsize=6,
+            color=color,
+        )
 
     ax.set_yticks(y)
     ax.set_yticklabels([item[0] for item in items], fontsize=7)
-    ax.set_xlabel("Fraction of traces")
-    ax.xaxis.set_major_formatter(mticker.PercentFormatter(1.0))
+    ax.set_xlabel("Raw total occurrences")
     legend_elements = [
         Patch(facecolor=GOOD_COLOR, alpha=0.75, label="Good workflow family"),
         Patch(facecolor=BAD_COLOR, alpha=0.75, label="Anti-pattern family"),
@@ -362,13 +376,31 @@ def plot_overall_families_ranked(summary: dict, out: Path) -> None:
 def plot_radar_envs(summary: dict, out: Path) -> None:
     """
     Single radar chart with 6 edges (all family labels).
-    Each environment is a series (averaged over all levels).
+    Each environment is a series. Values are raw_total occurrence counts
+    normalised per chart to [0, 1] for shape comparison.
     """
     envs = list(summary["groupings"]["by_env"].keys())
     labels = [short_name(f) for f in ALL_FAMILY_FIELDS]
     n = len(ALL_FAMILY_FIELDS)
     angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
     angles += angles[:1]
+
+    all_raw: list[float] = []
+    for env in envs:
+        data = summary["groupings"]["by_env"][env]
+        all_raw.extend(
+            [
+                _raw_total(data, "antipattern_family_global", f)
+                for f in ANTIPATTERN_FAMILY_FIELDS
+            ]
+        )
+        all_raw.extend(
+            [
+                _raw_total(data, "subgraph_family_global", f)
+                for f in SUBGRAPH_FAMILY_FIELDS
+            ]
+        )
+    global_max = max(all_raw) if all_raw else 1.0
 
     cmap = plt.get_cmap("tab10")
     env_colors = {env: cmap(i) for i, env in enumerate(envs)}
@@ -381,18 +413,20 @@ def plot_radar_envs(summary: dict, out: Path) -> None:
     ax.set_theta_direction(-1)
     ax.set_rlabel_position(0)
     ax.set_thetagrids(np.degrees(angles[:-1]), labels, fontsize=6)
-    ax.set_ylim(0, 1)
-    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
-    ax.set_yticklabels(["25%", "50%", "75%", "100%"], fontsize=5, alpha=0.5)
+    ax.set_ylim(0, global_max)
+    tick_vals = np.linspace(0, global_max, 5)[1:]
+    ax.set_yticks(tick_vals)
+    ax.set_yticklabels([f"{v:.0f}" for v in tick_vals], fontsize=5, alpha=0.5)
 
     for env in envs:
         data = summary["groupings"]["by_env"][env]
         vals = [
-            _frac(data, "antipattern_family_global", f)
+            _raw_total(data, "antipattern_family_global", f)
             for f in ANTIPATTERN_FAMILY_FIELDS
         ]
         vals.extend(
-            _frac(data, "subgraph_family_global", f) for f in SUBGRAPH_FAMILY_FIELDS
+            _raw_total(data, "subgraph_family_global", f)
+            for f in SUBGRAPH_FAMILY_FIELDS
         )
         vals_closed = vals + vals[:1]
         ax.plot(angles, vals_closed, linewidth=1.5, label=env, color=env_colors[env])
@@ -405,8 +439,8 @@ def plot_radar_envs(summary: dict, out: Path) -> None:
 
 def plot_scientificness_vs_antipatterns_env(summary: dict, out: Path) -> None:
     """
-    Scatter: each point is a model/env combination (averaged over levels).
-    x = mean anti-pattern family fraction, y = scientificness score.
+    Scatter: each point is a model/env combination (summed over levels).
+    x = total anti-pattern raw_total, y = scientificness score (averaged over levels).
     """
     combos = _get_model_env_combos(summary)
 
@@ -425,17 +459,17 @@ def plot_scientificness_vs_antipatterns_env(summary: dict, out: Path) -> None:
         color = envs_seen[env]
         marker = markers.get(model, "^")
 
-        bad_fracs = [
-            _avg_family_frac_over_levels(
+        bad_totals = [
+            _avg_family_raw_total_over_levels(
                 summary, model, env, "antipattern_family_global", f
             )
             for f in ANTIPATTERN_FAMILY_FIELDS
         ]
-        mean_bad = np.mean(bad_fracs)
+        total_bad = sum(bad_totals)
         ss = _avg_metric_over_levels(summary, model, env, "scientificness_score")
 
         ax.scatter(
-            mean_bad,
+            total_bad,
             ss,
             color=color,
             marker=marker,
@@ -446,14 +480,14 @@ def plot_scientificness_vs_antipatterns_env(summary: dict, out: Path) -> None:
         )
         ax.annotate(
             f"{model}/{env}",
-            (mean_bad, ss),
+            (total_bad, ss),
             fontsize=4.5,
             ha="left",
             va="bottom",
             xytext=(3, 3),
             textcoords="offset points",
         )
-        all_x.append(float(mean_bad))
+        all_x.append(float(total_bad))
         if not np.isnan(ss):
             all_y.append(float(ss))
 
@@ -476,9 +510,8 @@ def plot_scientificness_vs_antipatterns_env(summary: dict, out: Path) -> None:
         bbox_to_anchor=(1.02, 1.0),
     )
 
-    ax.set_xlabel("Mean anti-pattern family fraction")
+    ax.set_xlabel("Total anti-pattern occurrences (raw_total sum)")
     ax.set_ylabel("Scientificness score")
-    ax.xaxis.set_major_formatter(mticker.PercentFormatter(1.0))
     if all_x and all_y:
         range_frame(ax, np.array(all_x), np.array(all_y))
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
@@ -506,11 +539,11 @@ def main(
     output_dir: str = str(DEFAULT_OUTPUT_DIR),
     only: str | None = None,
 ) -> None:
-    """Generate family-level fraction plots from the annotation summary.
+    """Generate family-level raw-total plots from the annotation summary.
 
     The command loads the aggregated reasoning summary, creates the output
-    directory if needed, and renders the selected plot set using trace-level
-    family fractions.
+    directory if needed, and renders the selected plot set using absolute
+    family occurrence counts.
 
     Args:
         summary_path: Path to the annotation_summary.json file produced by
@@ -527,7 +560,7 @@ def main(
     if only:
         selected = {item.strip() for item in only.split(",") if item.strip()}
 
-    logger.info(f"Generating plots in {out} ...")
+    logger.info(f"Generating raw_total plots in {out} ...")
     for num, name, func in ALL_PLOTS:
         if selected and num not in selected:
             continue

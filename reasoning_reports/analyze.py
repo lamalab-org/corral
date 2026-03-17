@@ -292,11 +292,9 @@ def _load_litellm():
 def _extract_json_text(raw: str) -> str:
     """Strip markdown fences and find the outermost JSON object in *raw*."""
     raw = raw.strip()
-    # Remove ```json ... ``` fences
     m = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", raw, re.DOTALL)
     if m:
         raw = m.group(1).strip()
-    # Find first '{' to last '}'
     start = raw.find("{")
     end = raw.rfind("}")
     if start != -1 and end != -1 and end > start:
