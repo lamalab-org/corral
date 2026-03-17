@@ -32,20 +32,21 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_FILE = OUT_DIR / "app_fig4_behavior_panel.pdf"
 
 
-def add_panel_label(ax, label: str, x: float = -0.18) -> None:
+def add_panel_label(ax, label: str, x: float = -0.18, y: float = 1.08) -> None:
     """Place a bold panel label just outside an axis.
 
     Args:
         ax: Axis that receives the label.
         label: Panel identifier.
         x: Horizontal position in axes coordinates.
+        y: Vertical position in axes coordinates.
 
     Returns:
         None: The function mutates the provided axis.
     """
     ax.text(
         x,
-        1.08,
+        y,
         label,
         transform=ax.transAxes,
         fontweight="bold",
@@ -219,7 +220,7 @@ def plot_action_distribution_panel(
     ax.set_xticklabels(
         [action_plots.ENV_LABELS.get(env, str(env).capitalize()) for env in env_order]
     )
-    ax.set_ylabel("Average Action Share")
+    ax.set_ylabel("Fraction of Tool Calls by Action Type")
 
     if n_env > 0:
         range_frame(
@@ -526,8 +527,7 @@ def plot_tool_call_ridgeline_panel(
     *,
     group_col: str,
     label_map: dict[str, str],
-    panel_label: str,
-) -> None:
+):
     """Draw one ridgeline panel inside a nested subplot specification.
 
     Args:
@@ -536,10 +536,10 @@ def plot_tool_call_ridgeline_panel(
         results_df: Trial-level tool-call table.
         group_col: Column defining the ridgeline groups.
         label_map: Human-readable labels for group values.
-        panel_label: Letter label for the panel.
 
     Returns:
-        None: The function mutates the figure by adding axes.
+        The topmost axis of the ridgeline stack, or *None* when no data is
+        available.
     """
     group_keys = sorted(results_df[group_col].dropna().unique())
     plot_data = [
@@ -555,7 +555,7 @@ def plot_tool_call_ridgeline_panel(
     ]
     if not non_empty:
         logger.warning(f"Skipping ridgeline plot for {group_col}: insufficient data")
-        return
+        return None
 
     group_keys = [group_key for group_key, _ in non_empty]
     plot_data = [group_values for _, group_values in non_empty]
@@ -621,7 +621,7 @@ def plot_tool_call_ridgeline_panel(
 
     axes[-1].set_xlabel("Tool Calls Per Task Trial")
     axes[-1].spines["bottom"].set_visible(True)
-    add_panel_label(axes[0], panel_label, x=-0.22)
+    return axes[0]
 
 
 def main() -> None:
@@ -708,7 +708,7 @@ def main() -> None:
         label_map=action_plots.MODEL_LABELS,
         colors=output_token_plots.MODEL_COLORS,
         x_scale="symlog",
-        show_legend=False,
+        show_legend=True,
     )
     tool_call_plots.plot_group_boxplots(
         ax_tool_calls,
@@ -719,21 +719,19 @@ def main() -> None:
         max_display_value=tool_call_plots.ENVIRONMENT_BOXPLOT_MAX,
         box_color=tool_call_plots.PLOT_COLOR,
     )
-    plot_tool_call_ridgeline_panel(
+    ridge_ax_agent = plot_tool_call_ridgeline_panel(
         fig,
         ridge_grid[0, 0],
         tool_call_df,
         group_col="agent_type",
         label_map=action_plots.AGENT_TYPE_LABELS,
-        panel_label="G",
     )
-    plot_tool_call_ridgeline_panel(
+    ridge_ax_model = plot_tool_call_ridgeline_panel(
         fig,
         ridge_grid[0, 1],
         tool_call_df,
         group_col="model",
         label_map=action_plots.MODEL_LABELS,
-        panel_label="H",
     )
 
     category_handles = [
@@ -749,21 +747,83 @@ def main() -> None:
         bbox_to_anchor=(0.5, -0.6),
         ncol=len(action_plots.ACTION_ORDER),
         frameon=False,
-        title="Action Category",
+        title="Action Types",
         fontsize=LABEL_SIZE,
         title_fontsize=LABEL_SIZE,
     )
 
-    add_panel_label(ax_action_agent, "A", x=-0.16)
-    add_panel_label(ax_action_model, "B", x=-0.12)
-    add_panel_label(ax_output_tokens, "C", x=-0.08)
-    add_panel_label(ax_output_tokens_agent, "D", x=-0.25)
-    add_panel_label(ax_output_tokens_model, "E", x=-0.25)
-    add_panel_label(ax_tool_calls, "F", x=-0.08)
-
     # Unify tick label sizes across all axes
     for ax in fig.get_axes():
         ax.tick_params(axis="both", labelsize=LABEL_SIZE)
+
+    # --- Place panel labels with pixel-perfect column alignment ------------
+    # Render once so all layout positions are finalised.
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    def _tight_fig_bbox(ax):
+        """Return the tight bounding box of *ax* in figure coordinates."""
+        tb = ax.get_tightbbox(renderer)
+        if tb is None:
+            return ax.get_position()
+        return tb.transformed(fig.transFigure.inverted())
+
+    # Define left-column and right-column label specifications.
+    left_specs = [
+        (ax_action_agent, "A"),
+        (ax_output_tokens, "C"),
+        (ax_output_tokens_agent, "D"),
+        (ax_tool_calls, "F"),
+    ]
+    right_specs = [
+        (ax_action_model, "B"),
+        (ax_output_tokens_model, "E"),
+    ]
+    if ridge_ax_agent is not None:
+        left_specs.append((ridge_ax_agent, "G"))
+    if ridge_ax_model is not None:
+        right_specs.append((ridge_ax_model, "H"))
+
+    left_bboxes = [_tight_fig_bbox(ax) for ax, _ in left_specs]
+    right_bboxes = [_tight_fig_bbox(ax) for ax, _ in right_specs]
+
+    # Aligned x = leftmost tight-bbox edge in each column, minus padding.
+    X_PAD = 0.018
+    RIGHT_X_OFFSET = 0.1  # shift B, E, H a bit to the right
+    Y_PAD_TOP = 0.008  # y padding for A and B (top row)
+    Y_PAD_REST = 0.002  # y padding for C-H (lower rows, moved down)
+    left_x = min(bb.x0 for bb in left_bboxes) - X_PAD
+    right_x = min(bb.x0 for bb in right_bboxes) - X_PAD + RIGHT_X_OFFSET
+
+    top_labels = {"A", "B"}
+    for (_ax, label), bb in zip(left_specs, left_bboxes, strict=True):
+        y_pad = Y_PAD_TOP if label in top_labels else Y_PAD_REST
+        fig.text(
+            left_x,
+            bb.y1 + y_pad,
+            label,
+            fontweight="bold",
+            fontsize=16,
+            color="black",
+            ha="right",
+            va="bottom",
+            clip_on=False,
+        )
+    for (_ax, label), bb in zip(right_specs, right_bboxes, strict=True):
+        y_pad = Y_PAD_TOP if label in top_labels else Y_PAD_REST
+        fig.text(
+            right_x,
+            bb.y1 + y_pad,
+            label,
+            fontweight="bold",
+            fontsize=16,
+            color="black",
+            ha="right",
+            va="bottom",
+            clip_on=False,
+        )
+
+    logger.info(f"Label alignment -- left_x={left_x:.4f}, right_x={right_x:.4f}")
 
     fig.savefig(OUT_FILE, bbox_inches="tight")
     plt.close(fig)

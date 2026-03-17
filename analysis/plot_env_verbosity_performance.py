@@ -15,6 +15,7 @@ import pandas as pd
 from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
+from matplotlib.transforms import blended_transform_factory
 
 lama_aesthetics.get_style("main")
 
@@ -191,11 +192,15 @@ def plot_horizontal_verbosity_bars(
             alpha=0.6,
         )
 
-    ax.set_yticks(y_centers)
-    ax.set_yticklabels(group_labels)
     ax.set_xlabel("Average Score")
     ax.set_ylabel(y_label)
-    range_frame(ax, np.array([0, 1]), get_group_frame(bar_width, y_centers))
+    range_frame(ax, np.array([0, 1]), y_centers)
+    # Override y-axis: spine bounds must match categorical tick positions
+    ax.spines["left"].set_bounds(y_centers[0], y_centers[-1])
+    y_pad = bar_width * 1.8
+    ax.set_ylim(y_centers[0] - y_pad, y_centers[-1] + y_pad)
+    ax.set_yticks(y_centers)
+    ax.set_yticklabels(group_labels)
 
     if show_legend:
         handles, labels = ax.get_legend_handles_labels()
@@ -215,14 +220,6 @@ def add_panel_label(ax: plt.Axes, label: str, x: float = -0.18) -> None:
     Returns:
         None: The function mutates the provided axis.
     """
-    # label_color = next(
-    #     (
-    #         spine.get_edgecolor()
-    #         for spine in ax.spines.values()
-    #         if spine.get_visible()
-    #     ),
-    #     plt.rcParams.get("axes.edgecolor", "black"),
-    # )
 
     ax.text(
         x,
@@ -279,11 +276,13 @@ def plot_environment_summary(ax_bar: plt.Axes, ax_delta: plt.Axes) -> None:
         0, color="black", linewidth=1.0, linestyle="--", alpha=0.7, zorder=1
     )
 
+    all_deltas = [0]
     for v in NON_BASELINE:
         deltas = [
             env_pivot.loc[e, f"delta_{v}"] if e in env_pivot.index else np.nan
             for e in envs
         ]
+        all_deltas.extend(d for d in deltas if not np.isnan(d))
         y_pos = x_centers + JITTER[v]
         ax_delta.scatter(
             deltas,
@@ -308,10 +307,15 @@ def plot_environment_summary(ax_bar: plt.Axes, ax_delta: plt.Axes) -> None:
                     zorder=2,
                 )
 
+    ax_delta.set_xlabel("Δ Average Score (Vs. Brief)")
+    range_frame(ax_delta, np.array([-0.05, 0.05]), x_centers, nice=False)
+    ax_delta.set_xticks([-0.05, 0, 0.05])
+    # Override y-axis to match environment bar plot
+    ax_delta.spines["left"].set_bounds(x_centers[0], x_centers[-1])
+    y_pad = 0.22 * 1.8
+    ax_delta.set_ylim(x_centers[0] - y_pad, x_centers[-1] + y_pad)
     ax_delta.set_yticks(x_centers)
     ax_delta.set_yticklabels([])
-    ax_delta.set_xlabel("Δ Average Score (Vs. Brief)")
-    range_frame(ax_delta, np.array([-0.050, 0.050]), x_centers)
 
     bar_handles, bar_labels = ax_bar.get_legend_handles_labels()
     ax_bar.legend(bar_handles, bar_labels, title="Tool Verbosity", loc="upper right")
@@ -331,16 +335,6 @@ def plot_model_summary(ax: plt.Axes) -> None:
     Returns:
         None: The function mutates the provided axis.
     """
-    model_centers = plot_horizontal_verbosity_bars(
-        ax,
-        model_pivot,
-        models,
-        model_labels,
-        "Model",
-        bar_width=0.16,
-        show_legend=False,
-    )
-    range_frame(ax, np.array([0, 1]), get_group_frame(0.16, model_centers), pad=0.2)
     ax.set_ylabel("")
 
 
@@ -362,10 +356,6 @@ ax_agent_grid = fig.add_subplot(bottom_grid[0, 1])
 plot_environment_summary(ax_bar, ax_delta)
 plot_model_summary(ax_model_grid)
 
-add_panel_label(ax_bar, "A", x=-0.33)
-add_panel_label(ax_delta, "B", x=-0.18)
-add_panel_label(ax_model_grid, "C", x=-0.4)
-add_panel_label(ax_agent_grid, "D", x=-0.4)
 
 agent_types = sorted(performance_df["agent_type"].dropna().unique())
 agent_type_labels = [
@@ -383,21 +373,43 @@ def plot_agent_summary(ax: plt.Axes) -> None:
     Returns:
         None: The function mutates the provided axis.
     """
-    agent_centers = plot_horizontal_verbosity_bars(
-        ax,
-        agent_type_pivot,
-        agent_types,
-        agent_type_labels,
-        "Scaffold",
-        bar_width=0.16,
-        show_legend=False,
-    )
-    range_frame(ax, np.array([0, 1]), get_group_frame(0.16, agent_centers), pad=0.325)
     ax.set_ylabel("")
 
 
 plot_agent_summary(ax_agent_grid)
 
 plt.tight_layout()
+
+# Place aligned panel labels using figure coordinates
+pos_bar = ax_bar.get_position()
+pos_delta = ax_delta.get_position()
+pos_model = ax_model_grid.get_position()
+pos_agent = ax_agent_grid.get_position()
+
+left_x = min(pos_bar.x0, pos_model.x0)
+right_x = min(pos_delta.x0, pos_agent.x0)
+LABEL_X_OFFSET = 0.135
+RIGHT_LABEL_SHIFT = 0.1
+
+for ax_curr, label, col_x in [
+    (ax_bar, "A", left_x),
+    (ax_delta, "B", right_x + RIGHT_LABEL_SHIFT),
+    (ax_model_grid, "C", left_x),
+    (ax_agent_grid, "D", right_x + RIGHT_LABEL_SHIFT),
+]:
+    trans = blended_transform_factory(fig.transFigure, ax_curr.transAxes)
+    ax_curr.text(
+        col_x - LABEL_X_OFFSET,
+        1.08,
+        label,
+        transform=trans,
+        fontweight="bold",
+        fontsize=16,
+        color="black",
+        ha="center",
+        va="center",
+        clip_on=False,
+    )
+
 fig.savefig(OUT_FILE, bbox_inches="tight")
 logger.info(f"Saved figure to {OUT_FILE}")
