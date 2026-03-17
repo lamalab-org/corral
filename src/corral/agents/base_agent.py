@@ -1,4 +1,5 @@
 import importlib.resources
+import traceback
 from abc import ABC, abstractmethod
 from typing import Any, Self
 
@@ -276,6 +277,27 @@ class BaseAgent(ABC):
                 logger.info(f"Agent surrender from task {task_id}")
                 return "GIVE UP", self.messages, self.get_total_token_usage()
 
+            if "Error" in final_answer:
+                logger.error(f"Error in agent response: {final_answer}")
+                return final_answer, self.messages, self.get_total_token_usage()
+
+        except BudgetExhaustedError:
+            # Re-raise to stop the benchmark immediately
+            raise
+        except Exception:
+            full_error = traceback.format_exc()
+            logger.error(f"Error running agent: {full_error}")
+            self.messages.append(
+                LiteLLMMessage(
+                    role="user", content=f"Error running agent: {full_error}"
+                )
+            )
+            return (
+                f"Error running agent: {full_error}",
+                self.messages,
+                self.get_total_token_usage(),
+            )
+        finally:
             if verbose:
                 # Check if agent has stored tools information
                 tools = getattr(self, "_available_tools", None)
@@ -287,21 +309,6 @@ class BaseAgent(ABC):
                     tools=tools,
                     tool_verbosity=tool_verbosity,
                 )
-
-            if "Error" in final_answer:
-                logger.error(f"Error in agent response: {final_answer}")
-                return final_answer, self.messages, self.get_total_token_usage()
-
-        except BudgetExhaustedError:
-            # Re-raise to stop the benchmark immediately
-            raise
-        except Exception as e:
-            logger.error(f"Error running agent: {e}")
-            return (
-                f"Error running agent: {e}",
-                self.messages,
-                self.get_total_token_usage(),
-            )
 
         message = "The task is to:\n" + self.messages[0]["content"]
         if self.messages[0]["role"] == "system":
