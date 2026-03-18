@@ -286,6 +286,17 @@ def convert_dict_arg(arg: dict) -> dict:
         prop["description"] += (
             ' - Provide as an array of strings, e.g., ["item1", "item2"]'
         )
+    elif arg_type == ("list[tuple[str, float]]"):
+        prop["type"] = "array"
+        prop["items"] = {
+            "type": "array",
+            "items": {
+                "anyOf": [
+                    {"type": "string"},
+                    {"type": "number"}
+                ]
+            }
+        }
     else:
         json_type = TYPE_MAPPING.get(arg_type)
         if not json_type:
