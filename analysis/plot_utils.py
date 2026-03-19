@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Data paths
 REPORTS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "reports.jsonl"
 QA_REPORTS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "qa_topic_reports.jsonl"
+LOGPROBS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "logprobs.jsonl"
 REASONING_PATH = REPO_ROOT / "analysis" / "reasoning.json"
 
 # Default per-environment level selection (used when level_strategy="default_map")
@@ -102,6 +103,17 @@ def load_qa_data() -> pd.DataFrame:
 
     df = pd.read_json(QA_REPORTS_PATH, lines=True)  # noqa: PD901
     logger.info(f"Loaded {len(df)} rows from qa_topic_reports.jsonl")
+    return df
+
+
+def load_logprobs_data() -> pd.DataFrame:
+    """Load per-message log-probability trace dataset."""
+    if not LOGPROBS_PATH.exists():
+        msg = f"Logprobs file not found: {LOGPROBS_PATH}"
+        raise FileNotFoundError(msg)
+
+    df = pd.read_json(LOGPROBS_PATH, lines=True)  # noqa: PD901
+    logger.info(f"Loaded {len(df)} rows from logprobs.jsonl")
     return df
 
 
