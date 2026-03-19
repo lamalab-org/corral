@@ -370,7 +370,7 @@ def create_environments(
     ordered_tasks = task_group.get_ordered_tasks()
     logger.info("\nTask Execution Order:")
     for i, task_id in enumerate(ordered_tasks):
-        logger.info(f"{i+1}. {task_id}")
+        logger.info(f"{i + 1}. {task_id}")
 
     subtask_specific_tools = {
         "visualize_grain_boxes": visualize_grain_boxes,
