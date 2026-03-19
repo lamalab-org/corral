@@ -17,10 +17,10 @@ import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from adjustText import adjust_text
 from lama_aesthetics import ONE_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
-from adjustText import adjust_text
 from scipy import stats
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -119,7 +119,7 @@ def _add_correlation_panel(
     ax.scatter(x, y, color=COLOUR, s=30, zorder=3)
 
     texts = []
-    for e, xi, yi in zip(envs, x, y):
+    for e, xi, yi in zip(envs, x, y, strict=False):
         label = ENVIRONMENT_NAMES.get(e, e)
         texts.append(
             ax.text(
@@ -207,8 +207,12 @@ def main() -> None:
         )
 
     plot_correlation(
-        logprob_map, logprobs_scores, reports_scores,
-        qa_scores, reasoning_qa_scores, OUT_FILE,
+        logprob_map,
+        logprobs_scores,
+        reports_scores,
+        qa_scores,
+        reasoning_qa_scores,
+        OUT_FILE,
     )
 
 
