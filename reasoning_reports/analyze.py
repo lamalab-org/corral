@@ -92,18 +92,18 @@ ANTIPATTERN_NAMES = [
 ]
 
 ANTIPATTERN_FAMILIES: dict[str, list[str]] = {
+    "hypothesis_generation": [
+        "untested_hypothesis",
+        "unresolved_contradiction",
+        "confirmation_only",
+    ],
     "evidence_handling": [
         "evidence_ignored",
         "orphan_evidence",
         "judgment_without_evidence",
         "test_without_evidence",
     ],
-    "hypothesis_evaluation": [
-        "untested_hypothesis",
-        "unresolved_contradiction",
-        "confirmation_only",
-    ],
-    "belief_revision_commitment": [
+    "experimental_strategy": [
         "dead_end_update",
         "no_belief_revision",
         "hypothesis_to_commitment_shortcut",
@@ -112,18 +112,18 @@ ANTIPATTERN_FAMILIES: dict[str, list[str]] = {
 ANTIPATTERN_FAMILY_NAMES = list(ANTIPATTERN_FAMILIES.keys())
 
 SUBGRAPH_FAMILIES: dict[str, list[str]] = {
-    "hypothesis_testing": [
+    "hypothesis_generation": [
         "popperian_falsification",
         "bayesian_belief_updating",
-        "triangulation",
-        "preregistered",
-    ],
-    "discovery": [
         "abductive",
+    ],
+    "evidence_handling": [
+        "triangulation",
         "exploratory_to_confirmatory",
     ],
-    "search_optimization": [
+    "experimental_strategy": [
         "ml_make_it_work",
+        "preregistered",
         "active_learning",
     ],
 }
@@ -2073,6 +2073,8 @@ def resolve_input_file(annotated_doc: dict[str, Any], annotated_path: Path) -> P
     raw_input = annotated_doc.get("input_file")
     if raw_input:
         candidate = Path(raw_input)
+        if not candidate.is_absolute():
+            candidate = SCRIPT_DIR / candidate
         if candidate.is_file():
             return candidate
     stem = annotated_path.name.removesuffix(".annotated.json")
@@ -2096,13 +2098,17 @@ def collect_trace_node_rows(
                 continue
             input_doc = safe_read_json(input_path)
             messages = input_doc.get("messages", []) or []
+            try:
+                _rel_input = input_path.relative_to(SCRIPT_DIR)
+            except ValueError:
+                _rel_input = input_path
             rows.append(
                 TraceNodeRow(
                     model=agg.model,
                     env=agg.env,
                     level=agg.level,
                     file=ap.name,
-                    input_file=str(input_path),
+                    input_file=str(_rel_input),
                     message_count=len(messages),
                     counts=count_nodes_by_type_annotated(doc.get("nodes", []) or []),
                 )
@@ -2385,8 +2391,12 @@ def build_cross_model_summary(root: Path) -> dict[str, Any]:
     envs = sorted({a.env for a in aggregates})
     levels = sorted({a.level for a in aggregates})
 
+    try:
+        _rel_root = root.relative_to(SCRIPT_DIR)
+    except ValueError:
+        _rel_root = root
     summary: dict[str, Any] = {
-        "root": str(root),
+        "root": str(_rel_root),
         "node_probability_definition": "node_count / number_of_messages_in_original_trace",
         "groupings": {
             "by_model_env_level": {},
@@ -2726,8 +2736,12 @@ async def process_file_async(
 
     metrics = compute_metrics(nodes, edges) if not dry_run else {}
 
+    try:
+        _rel_in = in_path.relative_to(SCRIPT_DIR)
+    except ValueError:
+        _rel_in = in_path
     result = {
-        "input_file": str(in_path),
+        "input_file": str(_rel_in),
         "provenance": {
             "model": model,
             "window": window,
@@ -2913,19 +2927,19 @@ def main(
 ) -> None:
     """Unified reasoning analysis pipeline: annotate, analyze, and aggregate.
 
-    Processes trace files organized as ``<root>/<model>/<env>/<level>/*.json``
+    Processes trace files organized as `<root>/<model>/<env>/<level>/*.json`
     through three stages: LLM-based annotation, per-directory analysis with
     aggregate statistics and plots, and cross-model aggregation.
 
-    Only annotation is optional (via ``skip_annotate``). Analysis and
+    Only annotation is optional (via `skip_annotate`). Analysis and
     aggregation always run on existing annotated files.
 
     Args:
-        root: Root directory containing ``model/env/level/`` folders with
+        root: Root directory containing `model/env/level/` folders with
             JSON trace files. Defaults to the directory containing this
             script.
         model: LiteLLM model identifier used for annotation LLM calls
-            (e.g. ``"anthropic/claude-sonnet-4-6"``, ``"openai/gpt-4o"``).
+            (e.g. `"anthropic/claude-sonnet-4-6"`, `"openai/gpt-4o"`).
         concurrency: Maximum number of trace files to annotate in parallel.
             Increase for faster throughput; decrease to avoid rate limits.
         window: Sliding window size in number of messages passed to the LLM
@@ -2938,7 +2952,7 @@ def main(
             quotes cannot be found verbatim in the original messages.
         dry_run: When True, discover and validate input files without making
             any LLM calls. Useful for checking directory layout.
-        force: When True, re-annotate files even if an ``.annotated.json``
+        force: When True, re-annotate files even if an `.annotated.json`
             output already exists.
         shade_motifs: When True, shade H-T-E-J-U motif time spans in the
             generated timeline plots.

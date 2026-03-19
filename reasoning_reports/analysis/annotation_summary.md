@@ -79,25 +79,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 3 | 0.2000 | 4 | 0.2667 |
 | evidence_handling | 15 | 1.0000 | 121 | 8.0667 |
-| hypothesis_evaluation | 3 | 0.2000 | 4 | 0.2667 |
-| belief_revision_commitment | 15 | 1.0000 | 16 | 1.0667 |
+| experimental_strategy | 15 | 1.0000 | 16 | 1.0667 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 3 | 0.2000 | 4 | 0.2667 |
 | evidence_handling | 15 | 1.0000 | 121 | 8.0667 |
-| hypothesis_evaluation | 3 | 0.2000 | 4 | 0.2667 |
-| belief_revision_commitment | 15 | 1.0000 | 16 | 1.0667 |
+| experimental_strategy | 15 | 1.0000 | 16 | 1.0667 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 0 | 0.0000 | 0 | 0.0000 |
-| discovery | 1 | 0.0667 | 1 | 0.0667 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 1 | 0.0667 | 1 | 0.0667 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### claude_sonnet_45/md/level_1
 
@@ -174,25 +174,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 9 | 0.9000 | 25 | 2.5000 |
 | evidence_handling | 10 | 1.0000 | 122 | 12.2000 |
-| hypothesis_evaluation | 9 | 0.9000 | 25 | 2.5000 |
-| belief_revision_commitment | 9 | 0.9000 | 10 | 1.0000 |
+| experimental_strategy | 9 | 0.9000 | 10 | 1.0000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 9 | 0.9000 | 29 | 2.9000 |
 | evidence_handling | 10 | 1.0000 | 122 | 12.2000 |
-| hypothesis_evaluation | 9 | 0.9000 | 29 | 2.9000 |
-| belief_revision_commitment | 9 | 0.9000 | 10 | 1.0000 |
+| experimental_strategy | 9 | 0.9000 | 10 | 1.0000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 1 | 0.1000 | 1 | 0.1000 |
-| discovery | 1 | 0.1000 | 1 | 0.1000 |
-| search_optimization | 1 | 0.1000 | 1 | 0.1000 |
+| hypothesis_generation | 2 | 0.2000 | 2 | 0.2000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 1 | 0.1000 | 1 | 0.1000 |
 
 ### claude_sonnet_45/md/level_2
 
@@ -269,25 +269,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 9 | 0.9000 | 27 | 2.7000 |
 | evidence_handling | 10 | 1.0000 | 129 | 12.9000 |
-| hypothesis_evaluation | 9 | 0.9000 | 27 | 2.7000 |
-| belief_revision_commitment | 9 | 0.9000 | 11 | 1.1000 |
+| experimental_strategy | 9 | 0.9000 | 11 | 1.1000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 9 | 0.9000 | 27 | 2.7000 |
 | evidence_handling | 10 | 1.0000 | 129 | 12.9000 |
-| hypothesis_evaluation | 9 | 0.9000 | 27 | 2.7000 |
-| belief_revision_commitment | 9 | 0.9000 | 11 | 1.1000 |
+| experimental_strategy | 9 | 0.9000 | 11 | 1.1000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 1 | 0.1000 | 1 | 0.1000 |
-| discovery | 4 | 0.4000 | 4 | 0.4000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 5 | 0.5000 | 5 | 0.5000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### claude_sonnet_45/retrosynthesis/level_1
 
@@ -364,25 +364,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 2 | 0.1333 | 10 | 0.6667 |
 | evidence_handling | 8 | 0.5333 | 28 | 1.8667 |
-| hypothesis_evaluation | 2 | 0.1333 | 10 | 0.6667 |
-| belief_revision_commitment | 12 | 0.8000 | 13 | 0.8667 |
+| experimental_strategy | 12 | 0.8000 | 13 | 0.8667 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 3 | 0.2000 | 10 | 0.6667 |
 | evidence_handling | 9 | 0.6000 | 28 | 1.8667 |
-| hypothesis_evaluation | 3 | 0.2000 | 10 | 0.6667 |
-| belief_revision_commitment | 12 | 0.8000 | 13 | 0.8667 |
+| experimental_strategy | 12 | 0.8000 | 13 | 0.8667 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 2 | 0.1333 | 2 | 0.1333 |
-| discovery | 5 | 0.3333 | 6 | 0.4000 |
-| search_optimization | 1 | 0.0667 | 1 | 0.0667 |
+| hypothesis_generation | 6 | 0.4000 | 7 | 0.4667 |
+| evidence_handling | 1 | 0.0667 | 1 | 0.0667 |
+| experimental_strategy | 1 | 0.0667 | 1 | 0.0667 |
 
 ### claude_sonnet_45/retrosynthesis/level_2
 
@@ -459,25 +459,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 0.6667 | 45 | 3.0000 |
 | evidence_handling | 15 | 1.0000 | 129 | 8.6000 |
-| hypothesis_evaluation | 10 | 0.6667 | 45 | 3.0000 |
-| belief_revision_commitment | 10 | 0.6667 | 13 | 0.8667 |
+| experimental_strategy | 10 | 0.6667 | 13 | 0.8667 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 11 | 0.7333 | 53 | 3.5333 |
 | evidence_handling | 15 | 1.0000 | 129 | 8.6000 |
-| hypothesis_evaluation | 11 | 0.7333 | 53 | 3.5333 |
-| belief_revision_commitment | 10 | 0.6667 | 13 | 0.8667 |
+| experimental_strategy | 10 | 0.6667 | 13 | 0.8667 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 5 | 0.3333 | 5 | 0.3333 |
-| discovery | 1 | 0.0667 | 1 | 0.0667 |
-| search_optimization | 4 | 0.2667 | 4 | 0.2667 |
+| hypothesis_generation | 6 | 0.4000 | 6 | 0.4000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 4 | 0.2667 | 4 | 0.2667 |
 
 ### claude_sonnet_45/retrosynthesis/level_3
 
@@ -554,25 +554,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 13 | 0.8667 | 50 | 3.3333 |
 | evidence_handling | 15 | 1.0000 | 136 | 9.0667 |
-| hypothesis_evaluation | 13 | 0.8667 | 50 | 3.3333 |
-| belief_revision_commitment | 10 | 0.6667 | 12 | 0.8000 |
+| experimental_strategy | 10 | 0.6667 | 12 | 0.8000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 13 | 0.8667 | 51 | 3.4000 |
 | evidence_handling | 15 | 1.0000 | 136 | 9.0667 |
-| hypothesis_evaluation | 13 | 0.8667 | 51 | 3.4000 |
-| belief_revision_commitment | 10 | 0.6667 | 12 | 0.8000 |
+| experimental_strategy | 10 | 0.6667 | 12 | 0.8000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 7 | 0.4667 | 7 | 0.4667 |
-| discovery | 1 | 0.0667 | 2 | 0.1333 |
-| search_optimization | 1 | 0.0667 | 1 | 0.0667 |
+| hypothesis_generation | 6 | 0.4000 | 7 | 0.4667 |
+| evidence_handling | 2 | 0.1333 | 2 | 0.1333 |
+| experimental_strategy | 1 | 0.0667 | 1 | 0.0667 |
 
 ### claude_sonnet_45/spectra/level_1
 
@@ -649,25 +649,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 20 | 0.9091 | 67 | 3.0455 |
 | evidence_handling | 8 | 0.3636 | 67 | 3.0455 |
-| hypothesis_evaluation | 20 | 0.9091 | 67 | 3.0455 |
-| belief_revision_commitment | 11 | 0.5000 | 14 | 0.6364 |
+| experimental_strategy | 11 | 0.5000 | 14 | 0.6364 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 20 | 0.9091 | 68 | 3.0909 |
 | evidence_handling | 17 | 0.7727 | 67 | 3.0455 |
-| hypothesis_evaluation | 20 | 0.9091 | 68 | 3.0909 |
-| belief_revision_commitment | 11 | 0.5000 | 14 | 0.6364 |
+| experimental_strategy | 11 | 0.5000 | 14 | 0.6364 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 11 | 0.5000 | 11 | 0.5000 |
-| discovery | 21 | 0.9545 | 21 | 0.9545 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 21 | 0.9545 | 32 | 1.4545 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### claude_sonnet_45/spectra/level_2
 
@@ -744,25 +744,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 19 | 0.8636 | 79 | 3.5909 |
 | evidence_handling | 12 | 0.5455 | 85 | 3.8636 |
-| hypothesis_evaluation | 19 | 0.8636 | 79 | 3.5909 |
-| belief_revision_commitment | 9 | 0.4091 | 11 | 0.5000 |
+| experimental_strategy | 9 | 0.4091 | 11 | 0.5000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 19 | 0.8636 | 91 | 4.1364 |
 | evidence_handling | 21 | 0.9545 | 85 | 3.8636 |
-| hypothesis_evaluation | 19 | 0.8636 | 91 | 4.1364 |
-| belief_revision_commitment | 9 | 0.4091 | 11 | 0.5000 |
+| experimental_strategy | 9 | 0.4091 | 11 | 0.5000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 12 | 0.5455 | 12 | 0.5455 |
-| discovery | 20 | 0.9091 | 20 | 0.9091 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 22 | 1.0000 | 32 | 1.4545 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### claude_sonnet_45/wetlab/level1
 
@@ -839,25 +839,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 61 | 6.1000 |
 | evidence_handling | 10 | 1.0000 | 70 | 7.0000 |
-| hypothesis_evaluation | 10 | 1.0000 | 61 | 6.1000 |
-| belief_revision_commitment | 4 | 0.4000 | 4 | 0.4000 |
+| experimental_strategy | 4 | 0.4000 | 4 | 0.4000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 62 | 6.2000 |
 | evidence_handling | 10 | 1.0000 | 70 | 7.0000 |
-| hypothesis_evaluation | 10 | 1.0000 | 62 | 6.2000 |
-| belief_revision_commitment | 4 | 0.4000 | 4 | 0.4000 |
+| experimental_strategy | 4 | 0.4000 | 4 | 0.4000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 4 | 0.4000 | 4 | 0.4000 |
-| discovery | 10 | 1.0000 | 10 | 1.0000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 10 | 1.0000 | 14 | 1.4000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### claude_sonnet_45/wetlab/level2
 
@@ -934,25 +934,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 100 | 10.0000 |
 | evidence_handling | 10 | 1.0000 | 112 | 11.2000 |
-| hypothesis_evaluation | 10 | 1.0000 | 100 | 10.0000 |
-| belief_revision_commitment | 4 | 0.4000 | 8 | 0.8000 |
+| experimental_strategy | 4 | 0.4000 | 8 | 0.8000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 105 | 10.5000 |
 | evidence_handling | 10 | 1.0000 | 112 | 11.2000 |
-| hypothesis_evaluation | 10 | 1.0000 | 105 | 10.5000 |
-| belief_revision_commitment | 4 | 0.4000 | 8 | 0.8000 |
+| experimental_strategy | 4 | 0.4000 | 8 | 0.8000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 10 | 1.0000 | 10 | 1.0000 |
-| discovery | 10 | 1.0000 | 10 | 1.0000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 10 | 1.0000 | 20 | 2.0000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### claude_sonnet_45/wetlab/level3
 
@@ -1029,25 +1029,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 145 | 14.5000 |
 | evidence_handling | 10 | 1.0000 | 146 | 14.6000 |
-| hypothesis_evaluation | 10 | 1.0000 | 145 | 14.5000 |
-| belief_revision_commitment | 6 | 0.6000 | 21 | 2.1000 |
+| experimental_strategy | 6 | 0.6000 | 21 | 2.1000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 152 | 15.2000 |
 | evidence_handling | 10 | 1.0000 | 146 | 14.6000 |
-| hypothesis_evaluation | 10 | 1.0000 | 152 | 15.2000 |
-| belief_revision_commitment | 6 | 0.6000 | 21 | 2.1000 |
+| experimental_strategy | 6 | 0.6000 | 21 | 2.1000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 9 | 0.9000 | 9 | 0.9000 |
-| discovery | 10 | 1.0000 | 11 | 1.1000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 10 | 1.0000 | 19 | 1.9000 |
+| evidence_handling | 1 | 0.1000 | 1 | 0.1000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### gpt_4o/catalyst/level_1
 
@@ -1124,25 +1124,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 2 | 0.1333 | 3 | 0.2000 |
 | evidence_handling | 15 | 1.0000 | 115 | 7.6667 |
-| hypothesis_evaluation | 2 | 0.1333 | 3 | 0.2000 |
-| belief_revision_commitment | 15 | 1.0000 | 16 | 1.0667 |
+| experimental_strategy | 15 | 1.0000 | 16 | 1.0667 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 2 | 0.1333 | 3 | 0.2000 |
 | evidence_handling | 15 | 1.0000 | 115 | 7.6667 |
-| hypothesis_evaluation | 2 | 0.1333 | 3 | 0.2000 |
-| belief_revision_commitment | 15 | 1.0000 | 16 | 1.0667 |
+| experimental_strategy | 15 | 1.0000 | 16 | 1.0667 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 0 | 0.0000 | 0 | 0.0000 |
-| discovery | 2 | 0.1333 | 2 | 0.1333 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 2 | 0.1333 | 2 | 0.1333 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### gpt_4o/md/level_1
 
@@ -1219,25 +1219,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 30 | 3.0000 |
 | evidence_handling | 10 | 1.0000 | 100 | 10.0000 |
-| hypothesis_evaluation | 10 | 1.0000 | 30 | 3.0000 |
-| belief_revision_commitment | 7 | 0.7000 | 7 | 0.7000 |
+| experimental_strategy | 7 | 0.7000 | 7 | 0.7000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 30 | 3.0000 |
 | evidence_handling | 10 | 1.0000 | 100 | 10.0000 |
-| hypothesis_evaluation | 10 | 1.0000 | 30 | 3.0000 |
-| belief_revision_commitment | 7 | 0.7000 | 7 | 0.7000 |
+| experimental_strategy | 7 | 0.7000 | 7 | 0.7000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 4 | 0.4000 | 4 | 0.4000 |
-| discovery | 9 | 0.9000 | 14 | 1.4000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 10 | 1.0000 | 13 | 1.3000 |
+| evidence_handling | 5 | 0.5000 | 5 | 0.5000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### gpt_4o/md/level_2
 
@@ -1314,25 +1314,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 4 | 0.8000 | 15 | 3.0000 |
 | evidence_handling | 5 | 1.0000 | 57 | 11.4000 |
-| hypothesis_evaluation | 4 | 0.8000 | 15 | 3.0000 |
-| belief_revision_commitment | 3 | 0.6000 | 3 | 0.6000 |
+| experimental_strategy | 3 | 0.6000 | 3 | 0.6000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 5 | 1.0000 | 16 | 3.2000 |
 | evidence_handling | 5 | 1.0000 | 57 | 11.4000 |
-| hypothesis_evaluation | 5 | 1.0000 | 16 | 3.2000 |
-| belief_revision_commitment | 3 | 0.6000 | 3 | 0.6000 |
+| experimental_strategy | 3 | 0.6000 | 3 | 0.6000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 4 | 0.8000 | 5 | 1.0000 |
-| discovery | 5 | 1.0000 | 9 | 1.8000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 5 | 1.0000 | 10 | 2.0000 |
+| evidence_handling | 4 | 0.8000 | 4 | 0.8000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### gpt_4o/ml/level_1
 
@@ -1409,25 +1409,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
 | evidence_handling | 14 | 0.9333 | 67 | 4.4667 |
-| hypothesis_evaluation | 0 | 0.0000 | 0 | 0.0000 |
-| belief_revision_commitment | 15 | 1.0000 | 15 | 1.0000 |
+| experimental_strategy | 15 | 1.0000 | 15 | 1.0000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
 | evidence_handling | 14 | 0.9333 | 67 | 4.4667 |
-| hypothesis_evaluation | 0 | 0.0000 | 0 | 0.0000 |
-| belief_revision_commitment | 15 | 1.0000 | 15 | 1.0000 |
+| experimental_strategy | 15 | 1.0000 | 15 | 1.0000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 0 | 0.0000 | 0 | 0.0000 |
-| discovery | 0 | 0.0000 | 0 | 0.0000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### gpt_4o/retrosynthesis/level_1
 
@@ -1504,25 +1504,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 6 | 0.4000 | 9 | 0.6000 |
 | evidence_handling | 10 | 0.6667 | 40 | 2.6667 |
-| hypothesis_evaluation | 6 | 0.4000 | 9 | 0.6000 |
-| belief_revision_commitment | 14 | 0.9333 | 17 | 1.1333 |
+| experimental_strategy | 14 | 0.9333 | 17 | 1.1333 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 6 | 0.4000 | 9 | 0.6000 |
 | evidence_handling | 11 | 0.7333 | 40 | 2.6667 |
-| hypothesis_evaluation | 6 | 0.4000 | 9 | 0.6000 |
-| belief_revision_commitment | 14 | 0.9333 | 17 | 1.1333 |
+| experimental_strategy | 14 | 0.9333 | 17 | 1.1333 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 1 | 0.0667 | 1 | 0.0667 |
-| discovery | 5 | 0.3333 | 6 | 0.4000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 5 | 0.3333 | 6 | 0.4000 |
+| evidence_handling | 1 | 0.0667 | 1 | 0.0667 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### gpt_4o/retrosynthesis/level_2
 
@@ -1599,25 +1599,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 8 | 0.5333 | 21 | 1.4000 |
 | evidence_handling | 12 | 0.8000 | 61 | 4.0667 |
-| hypothesis_evaluation | 8 | 0.5333 | 21 | 1.4000 |
-| belief_revision_commitment | 11 | 0.7333 | 12 | 0.8000 |
+| experimental_strategy | 11 | 0.7333 | 12 | 0.8000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 8 | 0.5333 | 21 | 1.4000 |
 | evidence_handling | 14 | 0.9333 | 61 | 4.0667 |
-| hypothesis_evaluation | 8 | 0.5333 | 21 | 1.4000 |
-| belief_revision_commitment | 11 | 0.7333 | 12 | 0.8000 |
+| experimental_strategy | 11 | 0.7333 | 12 | 0.8000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 0 | 0.0000 | 0 | 0.0000 |
-| discovery | 8 | 0.5333 | 11 | 0.7333 |
-| search_optimization | 3 | 0.2000 | 4 | 0.2667 |
+| hypothesis_generation | 8 | 0.5333 | 8 | 0.5333 |
+| evidence_handling | 3 | 0.2000 | 3 | 0.2000 |
+| experimental_strategy | 3 | 0.2000 | 4 | 0.2667 |
 
 ### gpt_4o/retrosynthesis/level_3
 
@@ -1694,25 +1694,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 11 | 0.7857 | 34 | 2.4286 |
 | evidence_handling | 14 | 1.0000 | 245 | 17.5000 |
-| hypothesis_evaluation | 11 | 0.7857 | 34 | 2.4286 |
-| belief_revision_commitment | 8 | 0.5714 | 9 | 0.6429 |
+| experimental_strategy | 8 | 0.5714 | 9 | 0.6429 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 12 | 0.8571 | 34 | 2.4286 |
 | evidence_handling | 14 | 1.0000 | 245 | 17.5000 |
-| hypothesis_evaluation | 12 | 0.8571 | 34 | 2.4286 |
-| belief_revision_commitment | 8 | 0.5714 | 9 | 0.6429 |
+| experimental_strategy | 8 | 0.5714 | 9 | 0.6429 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 4 | 0.2857 | 4 | 0.2857 |
-| discovery | 1 | 0.0714 | 1 | 0.0714 |
-| search_optimization | 2 | 0.1429 | 2 | 0.1429 |
+| hypothesis_generation | 4 | 0.2857 | 5 | 0.3571 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 2 | 0.1429 | 2 | 0.1429 |
 
 ### gpt_4o/spectra/level_1
 
@@ -1789,25 +1789,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 13 | 0.5909 | 25 | 1.1364 |
 | evidence_handling | 9 | 0.4091 | 28 | 1.2727 |
-| hypothesis_evaluation | 13 | 0.5909 | 25 | 1.1364 |
-| belief_revision_commitment | 19 | 0.8636 | 24 | 1.0909 |
+| experimental_strategy | 19 | 0.8636 | 24 | 1.0909 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 14 | 0.6364 | 25 | 1.1364 |
 | evidence_handling | 12 | 0.5455 | 28 | 1.2727 |
-| hypothesis_evaluation | 14 | 0.6364 | 25 | 1.1364 |
-| belief_revision_commitment | 19 | 0.8636 | 24 | 1.0909 |
+| experimental_strategy | 19 | 0.8636 | 24 | 1.0909 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 3 | 0.1364 | 3 | 0.1364 |
-| discovery | 21 | 0.9545 | 22 | 1.0000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 21 | 0.9545 | 24 | 1.0909 |
+| evidence_handling | 1 | 0.0455 | 1 | 0.0455 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### gpt_4o/spectra/level_2
 
@@ -1884,25 +1884,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 16 | 0.7273 | 31 | 1.4091 |
 | evidence_handling | 5 | 0.2273 | 23 | 1.0455 |
-| hypothesis_evaluation | 16 | 0.7273 | 31 | 1.4091 |
-| belief_revision_commitment | 20 | 0.9091 | 30 | 1.3636 |
+| experimental_strategy | 20 | 0.9091 | 30 | 1.3636 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 16 | 0.7273 | 31 | 1.4091 |
 | evidence_handling | 12 | 0.5455 | 23 | 1.0455 |
-| hypothesis_evaluation | 16 | 0.7273 | 31 | 1.4091 |
-| belief_revision_commitment | 20 | 0.9091 | 30 | 1.3636 |
+| experimental_strategy | 20 | 0.9091 | 30 | 1.3636 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 2 | 0.0909 | 2 | 0.0909 |
-| discovery | 22 | 1.0000 | 22 | 1.0000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 22 | 1.0000 | 24 | 1.0909 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### gpt_4o/wetlab/level1
 
@@ -1979,25 +1979,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 36 | 3.6000 |
 | evidence_handling | 9 | 0.9000 | 52 | 5.2000 |
-| hypothesis_evaluation | 10 | 1.0000 | 36 | 3.6000 |
-| belief_revision_commitment | 5 | 0.5000 | 10 | 1.0000 |
+| experimental_strategy | 5 | 0.5000 | 10 | 1.0000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 36 | 3.6000 |
 | evidence_handling | 10 | 1.0000 | 52 | 5.2000 |
-| hypothesis_evaluation | 10 | 1.0000 | 36 | 3.6000 |
-| belief_revision_commitment | 5 | 0.5000 | 10 | 1.0000 |
+| experimental_strategy | 5 | 0.5000 | 10 | 1.0000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 6 | 0.6000 | 6 | 0.6000 |
-| discovery | 10 | 1.0000 | 11 | 1.1000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 10 | 1.0000 | 16 | 1.6000 |
+| evidence_handling | 1 | 0.1000 | 1 | 0.1000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### gpt_4o/wetlab/level2
 
@@ -2074,25 +2074,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 55 | 5.5000 |
 | evidence_handling | 10 | 1.0000 | 68 | 6.8000 |
-| hypothesis_evaluation | 10 | 1.0000 | 55 | 5.5000 |
-| belief_revision_commitment | 6 | 0.6000 | 15 | 1.5000 |
+| experimental_strategy | 6 | 0.6000 | 15 | 1.5000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 55 | 5.5000 |
 | evidence_handling | 10 | 1.0000 | 68 | 6.8000 |
-| hypothesis_evaluation | 10 | 1.0000 | 55 | 5.5000 |
-| belief_revision_commitment | 6 | 0.6000 | 15 | 1.5000 |
+| experimental_strategy | 6 | 0.6000 | 15 | 1.5000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 5 | 0.5000 | 5 | 0.5000 |
-| discovery | 10 | 1.0000 | 10 | 1.0000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 10 | 1.0000 | 15 | 1.5000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### gpt_4o/wetlab/level3
 
@@ -2169,25 +2169,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 44 | 4.4000 |
 | evidence_handling | 10 | 1.0000 | 64 | 6.4000 |
-| hypothesis_evaluation | 10 | 1.0000 | 44 | 4.4000 |
-| belief_revision_commitment | 7 | 0.7000 | 15 | 1.5000 |
+| experimental_strategy | 7 | 0.7000 | 15 | 1.5000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 10 | 1.0000 | 47 | 4.7000 |
 | evidence_handling | 10 | 1.0000 | 64 | 6.4000 |
-| hypothesis_evaluation | 10 | 1.0000 | 47 | 4.7000 |
-| belief_revision_commitment | 7 | 0.7000 | 15 | 1.5000 |
+| experimental_strategy | 7 | 0.7000 | 15 | 1.5000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 4 | 0.4000 | 4 | 0.4000 |
-| discovery | 10 | 1.0000 | 10 | 1.0000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 10 | 1.0000 | 14 | 1.4000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ## By model
 
@@ -2266,25 +2266,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 115 | 0.7468 | 613 | 3.9805 |
 | evidence_handling | 123 | 0.7987 | 1145 | 7.4351 |
-| hypothesis_evaluation | 115 | 0.7468 | 613 | 3.9805 |
-| belief_revision_commitment | 99 | 0.6429 | 133 | 0.8636 |
+| experimental_strategy | 99 | 0.6429 | 133 | 0.8636 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 117 | 0.7597 | 652 | 4.2338 |
 | evidence_handling | 142 | 0.9221 | 1145 | 7.4351 |
-| hypothesis_evaluation | 117 | 0.7597 | 652 | 4.2338 |
-| belief_revision_commitment | 99 | 0.6429 | 133 | 0.8636 |
+| experimental_strategy | 99 | 0.6429 | 133 | 0.8636 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 62 | 0.4026 | 62 | 0.4026 |
-| discovery | 84 | 0.5455 | 87 | 0.5649 |
-| search_optimization | 7 | 0.0455 | 7 | 0.0455 |
+| hypothesis_generation | 99 | 0.6429 | 145 | 0.9416 |
+| evidence_handling | 4 | 0.0260 | 4 | 0.0260 |
+| experimental_strategy | 7 | 0.0455 | 7 | 0.0455 |
 
 ### gpt_4o
 
@@ -2361,25 +2361,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 100 | 0.6135 | 303 | 1.8589 |
 | evidence_handling | 123 | 0.7546 | 920 | 5.6442 |
-| hypothesis_evaluation | 100 | 0.6135 | 303 | 1.8589 |
-| belief_revision_commitment | 130 | 0.7975 | 173 | 1.0613 |
+| experimental_strategy | 130 | 0.7975 | 173 | 1.0613 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 103 | 0.6319 | 307 | 1.8834 |
 | evidence_handling | 137 | 0.8405 | 920 | 5.6442 |
-| hypothesis_evaluation | 103 | 0.6319 | 307 | 1.8834 |
-| belief_revision_commitment | 130 | 0.7975 | 173 | 1.0613 |
+| experimental_strategy | 130 | 0.7975 | 173 | 1.0613 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 33 | 0.2025 | 34 | 0.2086 |
-| discovery | 103 | 0.6319 | 118 | 0.7239 |
-| search_optimization | 5 | 0.0307 | 6 | 0.0368 |
+| hypothesis_generation | 107 | 0.6564 | 137 | 0.8405 |
+| evidence_handling | 15 | 0.0920 | 15 | 0.0920 |
+| experimental_strategy | 5 | 0.0307 | 6 | 0.0368 |
 
 ## By env
 
@@ -2458,25 +2458,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 5 | 0.1667 | 7 | 0.2333 |
 | evidence_handling | 30 | 1.0000 | 236 | 7.8667 |
-| hypothesis_evaluation | 5 | 0.1667 | 7 | 0.2333 |
-| belief_revision_commitment | 30 | 1.0000 | 32 | 1.0667 |
+| experimental_strategy | 30 | 1.0000 | 32 | 1.0667 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 5 | 0.1667 | 7 | 0.2333 |
 | evidence_handling | 30 | 1.0000 | 236 | 7.8667 |
-| hypothesis_evaluation | 5 | 0.1667 | 7 | 0.2333 |
-| belief_revision_commitment | 30 | 1.0000 | 32 | 1.0667 |
+| experimental_strategy | 30 | 1.0000 | 32 | 1.0667 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 0 | 0.0000 | 0 | 0.0000 |
-| discovery | 3 | 0.1000 | 3 | 0.1000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 3 | 0.1000 | 3 | 0.1000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### md
 
@@ -2553,25 +2553,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 32 | 0.9143 | 97 | 2.7714 |
 | evidence_handling | 35 | 1.0000 | 408 | 11.6571 |
-| hypothesis_evaluation | 32 | 0.9143 | 97 | 2.7714 |
-| belief_revision_commitment | 28 | 0.8000 | 31 | 0.8857 |
+| experimental_strategy | 28 | 0.8000 | 31 | 0.8857 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 33 | 0.9429 | 102 | 2.9143 |
 | evidence_handling | 35 | 1.0000 | 408 | 11.6571 |
-| hypothesis_evaluation | 33 | 0.9429 | 102 | 2.9143 |
-| belief_revision_commitment | 28 | 0.8000 | 31 | 0.8857 |
+| experimental_strategy | 28 | 0.8000 | 31 | 0.8857 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 10 | 0.2857 | 11 | 0.3143 |
-| discovery | 19 | 0.5429 | 28 | 0.8000 |
-| search_optimization | 1 | 0.0286 | 1 | 0.0286 |
+| hypothesis_generation | 22 | 0.6286 | 30 | 0.8571 |
+| evidence_handling | 9 | 0.2571 | 9 | 0.2571 |
+| experimental_strategy | 1 | 0.0286 | 1 | 0.0286 |
 
 ### ml
 
@@ -2648,25 +2648,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
 | evidence_handling | 14 | 0.9333 | 67 | 4.4667 |
-| hypothesis_evaluation | 0 | 0.0000 | 0 | 0.0000 |
-| belief_revision_commitment | 15 | 1.0000 | 15 | 1.0000 |
+| experimental_strategy | 15 | 1.0000 | 15 | 1.0000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
 | evidence_handling | 14 | 0.9333 | 67 | 4.4667 |
-| hypothesis_evaluation | 0 | 0.0000 | 0 | 0.0000 |
-| belief_revision_commitment | 15 | 1.0000 | 15 | 1.0000 |
+| experimental_strategy | 15 | 1.0000 | 15 | 1.0000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 0 | 0.0000 | 0 | 0.0000 |
-| discovery | 0 | 0.0000 | 0 | 0.0000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### retrosynthesis
 
@@ -2743,25 +2743,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 50 | 0.5618 | 169 | 1.8989 |
 | evidence_handling | 74 | 0.8315 | 639 | 7.1798 |
-| hypothesis_evaluation | 50 | 0.5618 | 169 | 1.8989 |
-| belief_revision_commitment | 65 | 0.7303 | 76 | 0.8539 |
+| experimental_strategy | 65 | 0.7303 | 76 | 0.8539 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 53 | 0.5955 | 178 | 2.0000 |
 | evidence_handling | 78 | 0.8764 | 639 | 7.1798 |
-| hypothesis_evaluation | 53 | 0.5955 | 178 | 2.0000 |
-| belief_revision_commitment | 65 | 0.7303 | 76 | 0.8539 |
+| experimental_strategy | 65 | 0.7303 | 76 | 0.8539 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 19 | 0.2135 | 19 | 0.2135 |
-| discovery | 21 | 0.2360 | 27 | 0.3034 |
-| search_optimization | 11 | 0.1236 | 12 | 0.1348 |
+| hypothesis_generation | 35 | 0.3933 | 39 | 0.4382 |
+| evidence_handling | 7 | 0.0787 | 7 | 0.0787 |
+| experimental_strategy | 11 | 0.1236 | 12 | 0.1348 |
 
 ### spectra
 
@@ -2838,25 +2838,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 68 | 0.7727 | 202 | 2.2955 |
 | evidence_handling | 34 | 0.3864 | 203 | 2.3068 |
-| hypothesis_evaluation | 68 | 0.7727 | 202 | 2.2955 |
-| belief_revision_commitment | 59 | 0.6705 | 79 | 0.8977 |
+| experimental_strategy | 59 | 0.6705 | 79 | 0.8977 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 69 | 0.7841 | 215 | 2.4432 |
 | evidence_handling | 62 | 0.7045 | 203 | 2.3068 |
-| hypothesis_evaluation | 69 | 0.7841 | 215 | 2.4432 |
-| belief_revision_commitment | 59 | 0.6705 | 79 | 0.8977 |
+| experimental_strategy | 59 | 0.6705 | 79 | 0.8977 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 28 | 0.3182 | 28 | 0.3182 |
-| discovery | 84 | 0.9545 | 85 | 0.9659 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 86 | 0.9773 | 112 | 1.2727 |
+| evidence_handling | 1 | 0.0114 | 1 | 0.0114 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### wetlab
 
@@ -2933,25 +2933,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 60 | 1.0000 | 441 | 7.3500 |
 | evidence_handling | 59 | 0.9833 | 512 | 8.5333 |
-| hypothesis_evaluation | 60 | 1.0000 | 441 | 7.3500 |
-| belief_revision_commitment | 32 | 0.5333 | 73 | 1.2167 |
+| experimental_strategy | 32 | 0.5333 | 73 | 1.2167 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 60 | 1.0000 | 457 | 7.6167 |
 | evidence_handling | 60 | 1.0000 | 512 | 8.5333 |
-| hypothesis_evaluation | 60 | 1.0000 | 457 | 7.6167 |
-| belief_revision_commitment | 32 | 0.5333 | 73 | 1.2167 |
+| experimental_strategy | 32 | 0.5333 | 73 | 1.2167 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 38 | 0.6333 | 38 | 0.6333 |
-| discovery | 60 | 1.0000 | 62 | 1.0333 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 60 | 1.0000 | 98 | 1.6333 |
+| evidence_handling | 2 | 0.0333 | 2 | 0.0333 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ## By level
 
@@ -3030,25 +3030,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 20 | 1.0000 | 97 | 4.8500 |
 | evidence_handling | 19 | 0.9500 | 122 | 6.1000 |
-| hypothesis_evaluation | 20 | 1.0000 | 97 | 4.8500 |
-| belief_revision_commitment | 9 | 0.4500 | 14 | 0.7000 |
+| experimental_strategy | 9 | 0.4500 | 14 | 0.7000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 20 | 1.0000 | 98 | 4.9000 |
 | evidence_handling | 20 | 1.0000 | 122 | 6.1000 |
-| hypothesis_evaluation | 20 | 1.0000 | 98 | 4.9000 |
-| belief_revision_commitment | 9 | 0.4500 | 14 | 0.7000 |
+| experimental_strategy | 9 | 0.4500 | 14 | 0.7000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 10 | 0.5000 | 10 | 0.5000 |
-| discovery | 20 | 1.0000 | 21 | 1.0500 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 20 | 1.0000 | 30 | 1.5000 |
+| evidence_handling | 1 | 0.0500 | 1 | 0.0500 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### level2
 
@@ -3125,25 +3125,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 20 | 1.0000 | 155 | 7.7500 |
 | evidence_handling | 20 | 1.0000 | 180 | 9.0000 |
-| hypothesis_evaluation | 20 | 1.0000 | 155 | 7.7500 |
-| belief_revision_commitment | 10 | 0.5000 | 23 | 1.1500 |
+| experimental_strategy | 10 | 0.5000 | 23 | 1.1500 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 20 | 1.0000 | 160 | 8.0000 |
 | evidence_handling | 20 | 1.0000 | 180 | 9.0000 |
-| hypothesis_evaluation | 20 | 1.0000 | 160 | 8.0000 |
-| belief_revision_commitment | 10 | 0.5000 | 23 | 1.1500 |
+| experimental_strategy | 10 | 0.5000 | 23 | 1.1500 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 15 | 0.7500 | 15 | 0.7500 |
-| discovery | 20 | 1.0000 | 20 | 1.0000 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 20 | 1.0000 | 35 | 1.7500 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### level3
 
@@ -3220,25 +3220,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 20 | 1.0000 | 189 | 9.4500 |
 | evidence_handling | 20 | 1.0000 | 210 | 10.5000 |
-| hypothesis_evaluation | 20 | 1.0000 | 189 | 9.4500 |
-| belief_revision_commitment | 13 | 0.6500 | 36 | 1.8000 |
+| experimental_strategy | 13 | 0.6500 | 36 | 1.8000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 20 | 1.0000 | 199 | 9.9500 |
 | evidence_handling | 20 | 1.0000 | 210 | 10.5000 |
-| hypothesis_evaluation | 20 | 1.0000 | 199 | 9.9500 |
-| belief_revision_commitment | 13 | 0.6500 | 36 | 1.8000 |
+| experimental_strategy | 13 | 0.6500 | 36 | 1.8000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 13 | 0.6500 | 13 | 0.6500 |
-| discovery | 20 | 1.0000 | 21 | 1.0500 |
-| search_optimization | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 20 | 1.0000 | 33 | 1.6500 |
+| evidence_handling | 1 | 0.0500 | 1 | 0.0500 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### level_1
 
@@ -3315,25 +3315,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 65 | 0.4676 | 173 | 1.2446 |
 | evidence_handling | 99 | 0.7122 | 688 | 4.9496 |
-| hypothesis_evaluation | 65 | 0.4676 | 173 | 1.2446 |
-| belief_revision_commitment | 117 | 0.8417 | 132 | 0.9496 |
+| experimental_strategy | 117 | 0.8417 | 132 | 0.9496 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 67 | 0.4820 | 178 | 1.2806 |
 | evidence_handling | 113 | 0.8129 | 688 | 4.9496 |
-| hypothesis_evaluation | 67 | 0.4820 | 178 | 1.2806 |
-| belief_revision_commitment | 117 | 0.8417 | 132 | 0.9496 |
+| experimental_strategy | 117 | 0.8417 | 132 | 0.9496 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 22 | 0.1583 | 22 | 0.1583 |
-| discovery | 65 | 0.4676 | 73 | 0.5252 |
-| search_optimization | 2 | 0.0144 | 2 | 0.0144 |
+| hypothesis_generation | 68 | 0.4892 | 87 | 0.6259 |
+| evidence_handling | 8 | 0.0576 | 8 | 0.0576 |
+| experimental_strategy | 2 | 0.0144 | 2 | 0.0144 |
 
 ### level_2
 
@@ -3410,25 +3410,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 66 | 0.7416 | 218 | 2.4494 |
 | evidence_handling | 59 | 0.6629 | 484 | 5.4382 |
-| hypothesis_evaluation | 66 | 0.7416 | 218 | 2.4494 |
-| belief_revision_commitment | 62 | 0.6966 | 80 | 0.8989 |
+| experimental_strategy | 62 | 0.6966 | 80 | 0.8989 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 68 | 0.7640 | 239 | 2.6854 |
 | evidence_handling | 77 | 0.8652 | 484 | 5.4382 |
-| hypothesis_evaluation | 68 | 0.7640 | 239 | 2.6854 |
-| belief_revision_commitment | 62 | 0.6966 | 80 | 0.8989 |
+| experimental_strategy | 62 | 0.6966 | 80 | 0.8989 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 24 | 0.2697 | 25 | 0.2809 |
-| discovery | 60 | 0.6742 | 67 | 0.7528 |
-| search_optimization | 7 | 0.0787 | 8 | 0.0899 |
+| hypothesis_generation | 68 | 0.7640 | 85 | 0.9551 |
+| evidence_handling | 7 | 0.0787 | 7 | 0.0787 |
+| experimental_strategy | 7 | 0.0787 | 8 | 0.0899 |
 
 ### level_3
 
@@ -3505,25 +3505,25 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 24 | 0.8276 | 84 | 2.8966 |
 | evidence_handling | 29 | 1.0000 | 381 | 13.1379 |
-| hypothesis_evaluation | 24 | 0.8276 | 84 | 2.8966 |
-| belief_revision_commitment | 18 | 0.6207 | 21 | 0.7241 |
+| experimental_strategy | 18 | 0.6207 | 21 | 0.7241 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 25 | 0.8621 | 85 | 2.9310 |
 | evidence_handling | 29 | 1.0000 | 381 | 13.1379 |
-| hypothesis_evaluation | 25 | 0.8621 | 85 | 2.9310 |
-| belief_revision_commitment | 18 | 0.6207 | 21 | 0.7241 |
+| experimental_strategy | 18 | 0.6207 | 21 | 0.7241 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 11 | 0.3793 | 11 | 0.3793 |
-| discovery | 2 | 0.0690 | 3 | 0.1034 |
-| search_optimization | 3 | 0.1034 | 3 | 0.1034 |
+| hypothesis_generation | 10 | 0.3448 | 12 | 0.4138 |
+| evidence_handling | 2 | 0.0690 | 2 | 0.0690 |
+| experimental_strategy | 3 | 0.1034 | 3 | 0.1034 |
 
 ## Overall
 
@@ -3602,22 +3602,22 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 215 | 0.6782 | 916 | 2.8896 |
 | evidence_handling | 246 | 0.7760 | 2065 | 6.5142 |
-| hypothesis_evaluation | 215 | 0.6782 | 916 | 2.8896 |
-| belief_revision_commitment | 229 | 0.7224 | 306 | 0.9653 |
+| experimental_strategy | 229 | 0.7224 | 306 | 0.9653 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 220 | 0.6940 | 959 | 3.0252 |
 | evidence_handling | 279 | 0.8801 | 2065 | 6.5142 |
-| hypothesis_evaluation | 220 | 0.6940 | 959 | 3.0252 |
-| belief_revision_commitment | 229 | 0.7224 | 306 | 0.9653 |
+| experimental_strategy | 229 | 0.7224 | 306 | 0.9653 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_testing | 95 | 0.2997 | 96 | 0.3028 |
-| discovery | 187 | 0.5899 | 205 | 0.6467 |
-| search_optimization | 12 | 0.0379 | 13 | 0.0410 |
+| hypothesis_generation | 206 | 0.6498 | 282 | 0.8896 |
+| evidence_handling | 19 | 0.0599 | 19 | 0.0599 |
+| experimental_strategy | 12 | 0.0379 | 13 | 0.0410 |
