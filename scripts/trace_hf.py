@@ -1,3 +1,10 @@
+"""Build and publish trace datasets to the Hugging Face Hub.
+
+This script reads Corral summary reports and per-trial trace JSON files,
+matches them by agent and verbosity, validates the expected directory layout,
+assembles a tabular dataset, and uploads grouped subsets to the Hub.
+"""
+
 import ast
 import json
 import re
@@ -20,12 +27,33 @@ from report_constants import (
 
 
 def load_json(path):
+    """Load a JSON file from disk.
+
+    Args:
+        path: Path to the JSON file.
+
+    Returns:
+        Parsed JSON content.
+    """
+
     path = Path(path)
     with path.open() as f:
         return json.load(f)
 
 
 def extract_observations(messages):
+    """Extract tool observations from a trace message list.
+
+    The first user message is skipped because it contains the original task
+    prompt rather than a tool observation.
+
+    Args:
+        messages: Sequence of trace messages.
+
+    Returns:
+        A list of parsed observation payloads.
+    """
+
     observations = []
 
     if not messages:
@@ -37,11 +65,7 @@ def extract_observations(messages):
         role = msg.get("role")
         content = msg.get("content", "")
 
-        # -----------------------------
-        # USER ROLE
-        # -----------------------------
         if role == "user":
-            # ignore first user message
             if not first_user_skipped:
                 first_user_skipped = True
                 continue
@@ -51,18 +75,12 @@ def extract_observations(messages):
 
             payload = content.split("Observation:", 1)[1].strip()
 
-        # -----------------------------
-        # TOOL ROLE
-        # -----------------------------
         elif role == "tool":
             payload = content.strip()
 
         else:
             continue
 
-        # -----------------------------
-        # Try parsing
-        # -----------------------------
         try:
             observations.append(json.loads(payload))
             continue
@@ -79,6 +97,13 @@ def extract_observations(messages):
 
 
 def check_tool_calls(trial_metadata, trace_json):
+    """Compare reported tool calls with parsed observations from a trace.
+
+    Args:
+        trial_metadata: Trial metadata from the summary JSON.
+        trace_json: Full trace payload.
+    """
+
     tool_calls_report = trial_metadata.get("tool_calls")
 
     messages = trace_json.get("messages")
@@ -92,23 +117,39 @@ def check_tool_calls(trial_metadata, trace_json):
 
 
 def normalize(text: str):
-    # keep word boundaries
+    """Normalize a label for fuzzy agent and verbosity matching.
+
+    Args:
+        text: Raw file or directory name.
+
+    Returns:
+        Lowercased text with separators normalized to spaces.
+    """
+
     return re.sub(r"[-_]+", " ", text.lower())
 
 
 def extract_pair(name: str):
+    """Extract agent and verbosity labels from a name.
+
+    Args:
+        name: File or directory name to inspect.
+
+    Returns:
+        A tuple of agent and verbosity when both can be resolved, otherwise
+        None.
+    """
+
     name = normalize(name)
 
     agent = None
     verbosity = None
 
-    # agent detection
     for key, val in AGENTS.items():
         if key in name:
             agent = val
             break
 
-    # verbosity detection
     for v in VERBOSITY:
         if v in name:
             verbosity = v
@@ -121,29 +162,57 @@ def extract_pair(name: str):
 
 
 def extract_timestamp(path: Path, task_name: str):
-    # remove "{task_name}_"
+    """Extract the UTC timestamp encoded in a trace filename.
+
+    Args:
+        path: Trace file path.
+        task_name: Task prefix used in the filename.
+
+    Returns:
+        Parsed UTC timestamp.
+    """
+
     suffix = path.stem[len(task_name) + 1 :]
 
-    # suffix = "20250803_224644"
     return datetime.strptime(suffix, "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc)
 
 
 def collect_traces_for_task(trace_dir: Path, task_name: str):
+    """Collect and order trace files for a task.
+
+    Args:
+        trace_dir: Directory containing trace JSON files.
+        task_name: Task name prefix to match.
+
+    Returns:
+        Sorted trace paths for the task.
+    """
+
     traces = [
         f for f in trace_dir.rglob("*.json") if f.stem.startswith(f"{task_name}_")
     ]
 
-    # sort by timestamp encoded in filename
     traces.sort(key=lambda p: extract_timestamp(p, task_name))
 
     return traces
 
 
 def build_trials_from_pair(config, pair):
+    """Build dataset rows for one summary/trace pairing.
+
+    Args:
+        config: Dataset configuration metadata.
+        pair: Matched summary and trace locations for one agent/verbosity pair.
+
+    Returns:
+        A tuple with the dataset rows, missing trace count, and extra trace
+        count.
+    """
+
     dataset = []
 
     if not pair["json_files"] or not pair["directories"]:
-        return dataset
+        return dataset, 0, 0
 
     summary_path = Path(pair["json_files"][0])
     trace_dir = Path(pair["directories"][0])
@@ -209,10 +278,16 @@ def build_trials_from_pair(config, pair):
     return dataset, missing_files, extra_traces
 
 
-# ---------------------------------
-# Core matcher
-# ---------------------------------
 def match_agent_verbosity(category_path: Path):
+    """Group files and directories by detected agent and verbosity.
+
+    Args:
+        category_path: Category directory containing reports and traces.
+
+    Returns:
+        Grouped metadata for each detected agent/verbosity pair.
+    """
+
     grouped = {}
 
     for item in category_path.iterdir():
@@ -242,36 +317,63 @@ def match_agent_verbosity(category_path: Path):
 
 
 def validate_path(path: str):
+    """Validate the expected report directory structure.
+
+    Args:
+        path: Input path expected to contain model, environment, level, and
+            category components.
+
+    Returns:
+        Tuple of model, level, category, and environment.
+
+    Raises:
+        ValueError: If the path does not match the expected structure or uses
+            unsupported values.
+    """
+
     p = Path(path)
 
-    if len(p.parts) < 4:
+    if len(p.parts) < 2:
         raise ValueError(
-            "Path must follow structure: {model}/{anything}/{level}/{category}"
+            "Path must follow structure: {model}/{environment} or "
+            "{model}/{environment}/{level}/{category}"
         )
 
-    model = p.parts[-4]
-    level = p.parts[-2]
-    category = p.parts[-1]
-    environment = p.parts[-3]
+    if len(p.parts) >= 4 and p.parts[-2].startswith(LEVEL_PREFIX):
+        model = p.parts[-4]
+        level = p.parts[-2]
+        category = p.parts[-1]
+        environment = p.parts[-3]
+    else:
+        model = p.parts[-2]
+        environment = p.parts[-1]
+        level = None
+        category = None
 
-    # Validate model
-    if model not in ALLOWED_MODELS:
+    normalized_model = model.replace("-", "_")
+
+    if normalized_model not in ALLOWED_MODELS:
         raise ValueError(f"Invalid model '{model}'. Allowed models: {ALLOWED_MODELS}")
 
-    # Validate level
-    if not level.startswith(LEVEL_PREFIX):
+    if level is not None and not level.startswith(LEVEL_PREFIX):
         raise ValueError(f"Invalid level '{level}'. Must start with '{LEVEL_PREFIX}'")
 
-    # Validate category
-    if category not in ALLOWED_CATEGORIES:
+    if category is not None and category not in ALLOWED_CATEGORIES:
         raise ValueError(
             f"Invalid category '{category}'. Allowed: {ALLOWED_CATEGORIES}"
         )
 
-    return model, level, category, environment
+    return normalized_model, level, category, environment
 
 
 def push_trials_to_hub(trials_df: pd.DataFrame, dataset_name: str):
+    """Upload grouped trace subsets to the Hugging Face Hub.
+
+    Args:
+        trials_df: Dataframe containing all trial rows.
+        dataset_name: Destination dataset repository name.
+    """
+
     api = HfApi()
 
     api.create_repo(
@@ -300,6 +402,15 @@ def push_trials_to_hub(trials_df: pd.DataFrame, dataset_name: str):
 
 
 def build_dataset_configs(path: str):
+    """Build trace dataset rows from a report directory and upload them.
+
+    Args:
+        path: Root path for one model/environment report tree.
+
+    Raises:
+        ValueError: If the assembled dataframe contains missing values.
+    """
+
     p = Path(path)
 
     model, level, category, env = validate_path(path)
@@ -356,6 +467,28 @@ def build_dataset_configs(path: str):
         return
 
     trials_df = pd.DataFrame(all_trials)
+
+    # "error" is sparse by design (only present on failed trials).
+    # Other optional fields may be None when an agent crashes before
+    # submitting, which is valid data.  Fill them with typed sentinels so the
+    # strict NaN check below only fires for truly unexpected missing columns.
+    OPTIONAL_STR_COLS = ["error", "submitted_answer"]
+    OPTIONAL_INT_COLS = ["total_calls", "successful_calls", "failed_calls"]
+    OPTIONAL_LIST_COLS = ["tools_used", "error_types"]
+
+    for col in OPTIONAL_STR_COLS:
+        if col in trials_df.columns:
+            trials_df[col] = trials_df[col].fillna("")
+
+    for col in OPTIONAL_INT_COLS:
+        if col in trials_df.columns:
+            trials_df[col] = trials_df[col].fillna(0).astype(int)
+
+    for col in OPTIONAL_LIST_COLS:
+        if col in trials_df.columns:
+            trials_df[col] = trials_df[col].apply(
+                lambda v: v if isinstance(v, list) else []
+            )
 
     if trials_df.isna().any().any():
         nan_counts = trials_df.isna().sum()
