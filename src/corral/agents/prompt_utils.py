@@ -130,18 +130,16 @@ def create_prompt(
     system_prompt: Any,
     user_prompt: Any,
     task_guide: str | list,
-    history: list[LiteLLMMessage] | None = None,
     surrender_prompt: Any | None = None,
     enable_surrender: bool = False,
     **kwargs,
 ) -> list[LiteLLMMessage]:
-    """Create prompt for LLM including context and history
+    """Create prompt for LLM including context
 
     Args:
         system_prompt: The system prompt object
         user_prompt: The user prompt object
         task_guide (Union[str, list]): The task guide or prompt to use
-        history (list[LiteLLMMessage], optional): Message history to include. Defaults to None.
         surrender_prompt: The surrender prompt object. Instructions for how the agent can surrender from unsolvable tasks. Defaults to None.
         enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
         **kwargs: Additional keyword arguments for building user content
@@ -150,12 +148,6 @@ def create_prompt(
         List[LiteLLMMessage]: The prepared messages for the LLM
     """
     messages: list[LiteLLMMessage] = []
-
-    if history is None:
-        history = []
-
-    if history:
-        messages.extend(history)
 
     if system_prompt:
         messages.append(LiteLLMMessage(role="system", content=system_prompt))
@@ -166,7 +158,6 @@ def create_prompt(
         kwargs["surrender_instructions"] = surrender_instructions
 
     user_content = build_user_content(user_prompt, task_guide=task_guide, **kwargs)
-
     messages.append(LiteLLMMessage(role="user", content=user_content))
 
     return messages

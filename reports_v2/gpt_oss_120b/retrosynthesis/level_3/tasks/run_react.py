@@ -237,7 +237,11 @@ if __name__ == "__main__":
     load_dotenv()
     setup_litellm()
     os.environ["OPENAI_API_KEY"] = os.getenv("BLABLADOR_API_KEY_TEST", "")
-    verbosities = ["brief", "workflow", "comprehensive"]
+    verbosities = [
+        "brief",
+        "workflow",
+        # "comprehensive"
+    ]
     for verbose in verbosities:
         hooks = AgentHooks()
         hooks.register(HookPoint.AFTER_ITERATION, logprobs_hook)
