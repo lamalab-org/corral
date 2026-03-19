@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import fire
 import lama_aesthetics
@@ -24,6 +25,9 @@ import numpy as np
 from lama_aesthetics import TWO_COL_WIDTH
 from loguru import logger
 from matplotlib.patches import FancyBboxPatch, Patch
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 
 lama_aesthetics.get_style("main")
 
@@ -76,36 +80,36 @@ GOOD_COLOR = "#1a5276"
 BAD_COLOR = "#c0392b"
 
 FAMILY_DISPLAY = {
-    "hypothesis_generation": "Hypothesis generation",
-    "evidence_handling": "Evidence handling",
-    "experimental_strategy": "Experimental strategy",
+    "hypothesis_generation": "Hypothesis Generation",
+    "evidence_handling": "Evidence Handling",
+    "experimental_strategy": "Experimental Strategy",
 }
 
 PATTERN_SHORT: dict[str, str] = {
-    "untested_hypothesis": "Untested hyp.",
-    "unresolved_contradiction": "Unresolved contrad.",
-    "confirmation_only": "Confirmation only",
-    "evidence_ignored": "Evidence ignored",
-    "orphan_evidence": "Orphan evidence",
-    "judgment_without_evidence": "Judgment w/o evid.",
-    "test_without_evidence": "Test w/o evid.",
-    "dead_end_update": "Dead-end update",
-    "no_belief_revision": "No belief revision",
-    "hypothesis_to_commitment_shortcut": "Hyp.\u2192commit shortcut",
-    "popperian_falsification": "Popper. falsification",
-    "bayesian_belief_updating": "Bayesian updating",
+    "untested_hypothesis": "Untested Hyp.",
+    "unresolved_contradiction": "Unresolved Contrad.",
+    "confirmation_only": "Confirmation Only",
+    "evidence_ignored": "Evidence Ignored",
+    "orphan_evidence": "Orphan Evidence",
+    "judgment_without_evidence": "Judgment w/o Evid.",
+    "test_without_evidence": "Test w/o Evid.",
+    "dead_end_update": "Dead-End Update",
+    "no_belief_revision": "No Belief Revision",
+    "hypothesis_to_commitment_shortcut": "Hyp.\u2192Commit Shortcut",
+    "popperian_falsification": "Popper. Falsification",
+    "bayesian_belief_updating": "Bayesian Updating",
     "abductive": "Abductive",
     "triangulation": "Triangulation",
-    "exploratory_to_confirmatory": "Explor.\u2192confirm.",
-    "ml_make_it_work": "ML make-it-work",
+    "exploratory_to_confirmatory": "Explor.\u2192Confirm.",
+    "ml_make_it_work": "ML Make-It-Work",
     "preregistered": "Preregistered",
-    "active_learning": "Active learning",
+    "active_learning": "Active Learning",
 }
 
 
 def _pretty(key: str) -> str:
     """Turn a snake_case pattern key into a readable label."""
-    return PATTERN_SHORT.get(key, key.replace("_", " ").capitalize())
+    return PATTERN_SHORT.get(key, key.replace("_", " ").title())
 
 
 def load_summary(path: Path) -> dict:
@@ -120,7 +124,7 @@ def _frac(data: dict, section: str, field: str) -> float:
     return float(v)
 
 
-def _save(fig: plt.Figure, path: Path) -> None:
+def _save(fig: Figure, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, format=path.suffix.lstrip("."), bbox_inches="tight")
     plt.close(fig)
@@ -255,8 +259,8 @@ def plot(summary: dict, out: Path) -> None:
 
     # ── Legend (bottom-left) + trace count (bottom-right) ─────────────
     legend_elements = [
-        Patch(facecolor=GOOD_COLOR, alpha=0.85, label="Productive patterns"),
-        Patch(facecolor=BAD_COLOR, alpha=0.85, label="Reasoning breakdowns"),
+        Patch(facecolor=GOOD_COLOR, alpha=0.85, label="Productive Patterns"),
+        Patch(facecolor=BAD_COLOR, alpha=0.85, label="Reasoning Breakdowns"),
     ]
     ax.legend(
         handles=legend_elements,
@@ -274,7 +278,7 @@ def plot(summary: dict, out: Path) -> None:
     ax.text(
         1.0,
         -0.04,
-        f"$N$ = {n_traces} traces across all domains and models for ReAct",
+        f"$N$ = {n_traces} Traces Across All Domains and Models for ReAct",
         fontsize=9,
         ha="right",
         va="top",
