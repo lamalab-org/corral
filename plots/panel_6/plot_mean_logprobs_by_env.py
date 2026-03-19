@@ -23,8 +23,6 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "analysis"))
 
 from plot_config import (  # noqa: E402
-    ENVIRONMENT_COLOUR_MAP,
-    # ENVIRONMENT_NAMES,
     FONT_SIZES,
 )
 from plot_utils import load_logprobs_data  # noqa: E402
