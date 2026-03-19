@@ -5,29 +5,47 @@ Hypothesis: in common-domain environments (ml, md) the model assigns higher
 (less negative) token log-probabilities than in specialised domains (spectra,
 retro), reflecting greater familiarity with the vocabulary and reasoning steps.
 
-Exactly-zero logprob tokens are excluded: a zero value indicates the token was
-sampled with near-certainty (logprob ≈ 0) or is a data artefact — keeping
-them inflates the mean toward zero and masks the domain-familiarity signal.
-
-Output: plots/panel_6/mean_logprobs_by_env.pdf
+Exactly-zero logprob tokens are excluded because they are for special tokens like <|endoftext|> or <|im_end|>.
 """
 
 import sys
 from pathlib import Path
 
+import lama_aesthetics
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import lama_aesthetics
-from lama_aesthetics import ONE_COL_WIDTH, ONE_COL_HEIGHT
+from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
-import matplotlib.pyplot as plt
 from loguru import logger
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "analysis"))
 
+from plot_config import (  # noqa: E402
+    ENVIRONMENT_COLOUR_MAP,
+    # ENVIRONMENT_NAMES,
+    FONT_SIZES,
+)
 from plot_utils import load_logprobs_data  # noqa: E402
-from plot_config import ENVIRONMENT_NAMES, ENVIRONMENT_COLOUR_MAP, FONT_SIZES  # noqa: E402
+
+ENVIRONMENT_NAMES = {
+    "afm": "AFM operation",
+    "catalyst": "Surface construction",
+    "md": "Molecular simulation",
+    "ml": "Build property predictor",
+    # Options for a shorter name focused on building ML models:
+    # "ml": "ML training",
+    # "ml": "Build ML model",
+    # "ml": "Model fitting",
+    # "ml": "ML build",
+    # "ml": "Train ML model",
+    "resistor": "Circuit Inference",
+    "retro": "Retrosynthetic planning",
+    "spectra": "Spectroscopic elucidation",
+    "wetlab": "Qualitative analysis",
+}
+
 
 lama_aesthetics.get_style("main")
 
@@ -71,7 +89,7 @@ def compute_env_stats(df: pd.DataFrame) -> pd.DataFrame:
                 "display_name": ENVIRONMENT_NAMES.get(env, env),
                 "mean": float(np.mean(tokens)),
                 "n_tokens": int(tokens.size),
-                "color": ENVIRONMENT_COLOUR_MAP.get(env, "#888888"),
+                "color": "#7150e0",
             }
         )
 
@@ -106,14 +124,19 @@ def plot_mean_logprobs(stats: pd.DataFrame, output_path: Path):
         ax.text(
             bar.get_width() + 0.002,
             bar.get_y() + bar.get_height() / 2,
-            f"{val:.3f}",
+            f"{val:.2f}",
             va="center",
+            ha="right",
+            # color="white",
             fontsize=FONT_SIZES["tick_label"] - 1,
         )
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(labels, fontsize=FONT_SIZES["tick_label"])
-    ax.set_xlabel("Mean log-probability\n(non-zero tokens, token-pooled)", fontsize=FONT_SIZES["axis_label"])
+    ax.set_xlabel(
+        "Mean log-probability",
+        fontsize=FONT_SIZES["axis_label"],
+    )
 
     range_frame(ax, np.array([min(values), 0]), y_pos, pad=0.15)
 
@@ -130,7 +153,9 @@ def plot_mean_logprobs(stats: pd.DataFrame, output_path: Path):
 def main() -> None:
     logger.info("Loading logprobs data …")
     df = load_logprobs_data()
-    logger.info(f"  {len(df):,} rows | environments: {sorted(df['environment'].unique())}")
+    logger.info(
+        f"  {len(df):,} rows | environments: {sorted(df['environment'].unique())}"
+    )
 
     stats = compute_env_stats(df)
     logger.info("\nEnvironment stats (mean logprob, non-zero tokens):")
