@@ -191,7 +191,7 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    interface = CorralRouter(base_url="http://localhost:1111")
+    interface = CorralRouter(base_url="http://localhost:1211")
     wandblogger = CorralWandbLogger(
         project="corral_resistor_oss",
         group="gpt_oss",
