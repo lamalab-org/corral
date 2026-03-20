@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Corral - Benchmarking AI Agents on Scientific Tasks</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              200: '#bfdbfe',
+              300: '#93c5fd',
+              400: '#60a5fa',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              800: '#1e40af',
+              900: '#1e3a8a',
+            },
+            surface: '#f8fafc',
+            ink: '#1e293b',
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    [x-cloak] { display: none !important; }
+
+    /* Range slider */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 4px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      outline: none;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      background: #2563eb;
+      border: 2px solid white;
+      border-radius: 50%;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+      cursor: pointer;
+      transition: box-shadow 0.15s, transform 0.15s;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover {
+      box-shadow: 0 0 0 4px rgba(37,99,235,0.15);
+      transform: scale(1.1);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 16px; height: 16px;
+      background: #2563eb;
+      border: 2px solid white;
+      border-radius: 50%;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+      cursor: pointer;
+    }
+    input[type="range"]:focus-visible::-webkit-slider-thumb {
+      box-shadow: 0 0 0 4px rgba(37,99,235,0.3);
+    }
+
+    /* Code panel */
+    .code-panel {
+      background: #0c1222;
+      color: #cbd5e1;
+    }
+    .code-panel::-webkit-scrollbar { width: 5px; height: 5px; }
+    .code-panel::-webkit-scrollbar-track { background: transparent; }
+    .code-panel::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .code-panel pre::-webkit-scrollbar { width: 5px; height: 5px; }
+    .code-panel pre::-webkit-scrollbar-track { background: transparent; }
+    .code-panel pre::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+    /* Smooth entry */
+    .fade-up {
+      animation: fadeUp 0.25s ease-out;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Pill button base */
+    .env-pill {
+      transition: all 0.15s ease;
+    }
+    .tool-chip {
+      transition: all 0.12s ease;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .fade-up { animation: none; }
+      * { transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body class="bg-surface text-ink font-sans antialiased min-h-screen flex flex-col">
+  <script src="data.js"></script>
+
+  <div x-data="corralApp()" x-cloak class="flex flex-col min-h-screen">
+
+    <!-- ==================== HEADER ==================== -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+      <div class="max-w-[1400px] mx-auto px-5 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-14">
+          <!-- Logo + tagline -->
+          <div class="flex items-center gap-4">
+            <a href="#" class="flex items-center gap-2">
+              <span class="text-lg font-extrabold tracking-tight text-brand-600">CORRAL</span>
+            </a>
+            <span class="hidden md:block text-[13px] text-slate-400 border-l border-slate-200 pl-4">Benchmarking AI Agents on Scientific Tasks</span>
+          </div>
+          <!-- Nav tabs + GitHub -->
+          <div class="flex items-center gap-1">
+            <template x-for="tab in tabs" :key="tab.id">
+              <button
+                @click="activeTab = tab.id"
+                :class="activeTab === tab.id
+                  ? 'bg-brand-50 text-brand-700 font-semibold'
+                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'"
+                class="px-3 py-1.5 rounded-md text-[13px] cursor-pointer transition-all focus-visible:outline-2 focus-visible:outline-brand-500"
+                x-text="tab.label">
+              </button>
+            </template>
+            <a href="https://github.com/lamalab-org/corral" target="_blank" aria-label="GitHub repository"
+              class="ml-3 text-slate-400 hover:text-slate-700 cursor-pointer transition-colors p-1">
+              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ==================== ENVIRONMENTS TAB ==================== -->
+    <div x-show="activeTab === 'environments'" class="flex-1 flex flex-col">
+
+      <!-- Environment Selector Strip -->
+      <div class="bg-white border-b border-slate-200">
+        <div class="max-w-[1400px] mx-auto px-5 sm:px-6 lg:px-8 py-2.5">
+          <div class="flex items-center gap-2 overflow-x-auto no-scrollbar">
+            <template x-for="env in envNames" :key="env">
+              <button
+                @click="selectEnv(env)"
+                :class="selectedEnv === env
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:border-brand-300 hover:text-brand-600'"
+                class="env-pill px-4 py-1.5 rounded-full text-[13px] font-medium whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-brand-500"
+                x-text="env">
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content area -->
+      <div class="flex-1 max-w-[1400px] w-full mx-auto px-5 sm:px-6 lg:px-8 py-6">
+
+        <!-- Env header + toggle -->
+        <div x-show="selectedEnv" class="mb-5">
+          <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-3">
+            <h2 class="text-xl font-bold text-slate-800" x-text="selectedEnv"></h2>
+            <!-- Tools / Tasks toggle -->
+            <div class="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+              <button
+                @click="envSection = 'tools'"
+                :class="envSection === 'tools' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                class="px-4 py-1 text-[13px] font-medium rounded-md cursor-pointer transition-all">
+                Tools <span class="text-[11px] opacity-60" x-text="'(' + (currentEnvData?.tools?.length || 0) + ')'"></span>
+              </button>
+              <button
+                @click="envSection = 'tasks'"
+                :class="envSection === 'tasks' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                class="px-4 py-1 text-[13px] font-medium rounded-md cursor-pointer transition-all">
+                Tasks <span class="text-[11px] opacity-60" x-text="'(' + (currentEnvData?.tasks?.length || 0) + ')'"></span>
+              </button>
+            </div>
+          </div>
+          <p class="text-[13px] text-slate-500 leading-relaxed max-w-2xl" x-text="currentEnvData?.description"></p>
+        </div>
+
+        <!-- ===== TOOLS VIEW ===== -->
+        <div x-show="selectedEnv && envSection === 'tools'" class="fade-up">
+
+          <!-- Tool chips -->
+          <div class="flex flex-wrap gap-1.5 mb-5">
+            <template x-for="tool in currentEnvData?.tools || []" :key="tool.name">
+              <button
+                @click="selectedTool = tool.name"
+                :class="selectedTool === tool.name
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'bg-white text-slate-500 border border-slate-200 hover:border-brand-200 hover:text-brand-600'"
+                class="tool-chip px-2.5 py-1 rounded-md text-[12px] font-mono font-medium cursor-pointer focus-visible:outline-2 focus-visible:outline-brand-500"
+                x-text="tool.name">
+              </button>
+            </template>
+          </div>
+
+          <!-- Tool detail: description + code side by side -->
+          <div x-show="selectedTool && currentToolData" class="fade-up">
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+
+              <!-- LEFT: Description Card -->
+              <div class="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col min-h-0">
+                <!-- Header -->
+                <div class="px-5 py-3 border-b border-slate-100 flex-shrink-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <h3 class="font-semibold font-mono text-sm text-slate-800" x-text="currentToolData?.name"></h3>
+                    <template x-if="currentToolData?.returns">
+                      <span class="text-[11px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded"
+                        x-text="'-> ' + currentToolData.returns"></span>
+                    </template>
+                  </div>
+                  <div class="flex flex-wrap gap-1 mt-2">
+                    <template x-for="arg in currentToolData?.args || []" :key="arg.name">
+                      <span class="text-[11px] font-mono text-brand-700 bg-brand-50 px-1.5 py-0.5 rounded"
+                        x-text="arg.name + (arg.type ? ': ' + arg.type : '')"></span>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- Description body (scrollable) -->
+                <div class="px-5 py-4 flex-1 overflow-y-auto max-h-[380px] text-[13px] text-slate-600 leading-relaxed whitespace-pre-wrap"
+                  x-text="computedDescription">
+                </div>
+
+                <!-- Verbosity slider pinned to bottom -->
+                <div class="px-5 py-3 bg-slate-50 border-t border-slate-100 flex-shrink-0 rounded-b-xl">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Verbosity</span>
+                    <span class="text-[11px] font-bold px-2 py-0.5 rounded bg-brand-100 text-brand-700"
+                      x-text="verbosityLabels[verbosityLevel]"></span>
+                  </div>
+                  <input type="range" min="0" max="6" step="1"
+                    x-model.number="verbosityLevel"
+                    aria-label="Verbosity level"
+                    class="w-full">
+                  <div class="flex justify-between mt-1.5 select-none">
+                    <template x-for="(label, i) in verbosityLabels" :key="i">
+                      <span class="text-[9px] font-medium cursor-pointer"
+                        :class="i <= verbosityLevel ? 'text-brand-600' : 'text-slate-300'"
+                        @click="verbosityLevel = i"
+                        x-text="label.slice(0,5)"></span>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <!-- RIGHT: Code Panel -->
+              <div class="code-panel rounded-xl overflow-hidden shadow-sm flex flex-col min-h-0 border border-slate-800/10">
+                <div class="px-4 py-2.5 flex items-center justify-between border-b border-white/5 flex-shrink-0">
+                  <div class="flex items-center gap-2">
+                    <div class="flex gap-1">
+                      <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f57]"></span>
+                      <span class="w-2.5 h-2.5 rounded-full bg-[#febc2e]"></span>
+                      <span class="w-2.5 h-2.5 rounded-full bg-[#28c840]"></span>
+                    </div>
+                    <span class="text-[11px] text-slate-500 font-mono ml-1" x-text="'tools.py'"></span>
+                  </div>
+                  <span class="text-[10px] text-slate-600 bg-white/5 px-2 py-0.5 rounded font-mono">Python</span>
+                </div>
+                <pre class="p-4 text-[12.5px] leading-[1.65] overflow-auto max-h-[460px] flex-1 font-mono"><code x-text="currentToolData?.code"></code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== TASKS VIEW ===== -->
+        <div x-show="selectedEnv && envSection === 'tasks'" class="fade-up">
+
+          <!-- Task chips -->
+          <div class="flex flex-wrap gap-1.5 mb-5">
+            <template x-for="task in currentEnvData?.tasks || []" :key="task.id">
+              <button
+                @click="selectedTask = task.id"
+                :class="selectedTask === task.id
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'bg-white text-slate-500 border border-slate-200 hover:border-brand-200 hover:text-brand-600'"
+                class="tool-chip px-3 py-1 rounded-md text-[12px] font-medium cursor-pointer focus-visible:outline-2 focus-visible:outline-brand-500"
+                x-text="task.name || task.id">
+              </button>
+            </template>
+          </div>
+
+          <!-- Task detail -->
+          <div x-show="selectedTask && currentTaskData" class="fade-up">
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+
+              <!-- LEFT: Task Description -->
+              <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-5 py-3 border-b border-slate-100 flex items-center gap-2 flex-wrap">
+                  <h3 class="font-semibold text-sm text-slate-800" x-text="currentTaskData?.name || currentTaskData?.id"></h3>
+                  <template x-if="currentTaskData?.level">
+                    <span class="text-[10px] font-mono text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium"
+                      x-text="currentTaskData.level"></span>
+                  </template>
+                </div>
+                <div class="p-5 space-y-4 max-h-[460px] overflow-y-auto">
+                  <p class="text-[13px] text-slate-600 leading-relaxed" x-text="currentTaskData?.description"></p>
+
+                  <template x-if="currentTaskData?.submission_format">
+                    <div class="pt-3 border-t border-slate-100">
+                      <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Submission Format</p>
+                      <div class="text-[12px] text-slate-600 font-mono bg-slate-50 rounded-lg px-3 py-2.5 leading-relaxed" x-text="currentTaskData.submission_format"></div>
+                    </div>
+                  </template>
+
+                  <div class="pt-3 border-t border-slate-100">
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Tools Used</p>
+                    <div class="flex flex-wrap gap-1">
+                      <template x-for="t in currentTaskData?.tools || []" :key="t">
+                        <span class="text-[11px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded" x-text="t"></span>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- RIGHT: Scoring Code -->
+              <div class="code-panel rounded-xl overflow-hidden shadow-sm flex flex-col border border-slate-800/10">
+                <div class="px-4 py-2.5 flex items-center justify-between border-b border-white/5 flex-shrink-0">
+                  <div class="flex items-center gap-2">
+                    <div class="flex gap-1">
+                      <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f57]"></span>
+                      <span class="w-2.5 h-2.5 rounded-full bg-[#febc2e]"></span>
+                      <span class="w-2.5 h-2.5 rounded-full bg-[#28c840]"></span>
+                    </div>
+                    <span class="text-[11px] text-slate-500 font-mono ml-1">score.py</span>
+                    <span class="text-[11px] text-brand-400 font-mono"
+                      x-text="currentTaskData?.scoring_function || ''"></span>
+                  </div>
+                  <span class="text-[10px] text-slate-600 bg-white/5 px-2 py-0.5 rounded font-mono">Python</span>
+                </div>
+                <pre class="p-4 text-[12.5px] leading-[1.65] overflow-auto max-h-[460px] flex-1 font-mono"><code x-text="matchedScoringCode"></code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== RESULTS TAB ==================== -->
+    <div x-show="activeTab === 'results'" class="flex-1 fade-up">
+      <div class="max-w-4xl mx-auto px-5 sm:px-6 lg:px-8 py-10">
+        <h2 class="text-2xl font-bold text-slate-800 mb-1">Results</h2>
+        <p class="text-slate-500 text-sm mb-8">Benchmark results across models, agent types, and verbosity levels.</p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <p class="text-[10px] text-slate-400 uppercase tracking-wider font-bold mb-3">Models</p>
+            <div class="space-y-1.5">
+              <p class="text-sm font-medium text-slate-700">GPT-4o</p>
+              <p class="text-sm font-medium text-slate-700">Claude 4.5</p>
+              <p class="text-sm font-medium text-slate-700">GPT-OSS (120B)</p>
+            </div>
+          </div>
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <p class="text-[10px] text-slate-400 uppercase tracking-wider font-bold mb-3">Agent Types</p>
+            <div class="space-y-1.5">
+              <p class="text-sm font-medium text-slate-700">ReAct</p>
+              <p class="text-sm font-medium text-slate-700">ToolCalling</p>
+            </div>
+          </div>
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <p class="text-[10px] text-slate-400 uppercase tracking-wider font-bold mb-3">Verbosity</p>
+            <div class="space-y-1.5">
+              <p class="text-sm font-medium text-slate-700">Brief</p>
+              <p class="text-sm font-medium text-slate-700">Workflow</p>
+              <p class="text-sm font-medium text-slate-700">Comprehensive</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white border-2 border-dashed border-slate-200 rounded-xl p-16 text-center">
+          <svg class="w-10 h-10 mx-auto text-slate-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+          <p class="text-slate-400 text-sm font-medium">Charts and detailed result tables coming soon.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== LEADERBOARD TAB ==================== -->
+    <div x-show="activeTab === 'leaderboard'" class="flex-1 fade-up">
+      <div class="max-w-5xl mx-auto px-5 sm:px-6 lg:px-8 py-10">
+        <h2 class="text-2xl font-bold text-slate-800 mb-1">Leaderboard</h2>
+        <p class="text-slate-500 text-sm mb-6">Model performance across all environments.</p>
+
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200">
+                  <th class="text-left px-5 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Model</th>
+                  <th class="text-left px-5 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Agent</th>
+                  <th class="text-center px-5 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Overall</th>
+                  <template x-for="env in envNames" :key="env">
+                    <th class="text-center px-3 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider" x-text="env"></th>
+                  </template>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <template x-for="(row, idx) in leaderboardData" :key="idx">
+                  <tr class="hover:bg-slate-50/60 transition-colors">
+                    <td class="px-5 py-3 font-medium text-slate-800 whitespace-nowrap" x-text="row.model"></td>
+                    <td class="px-5 py-3 whitespace-nowrap">
+                      <span class="text-[11px] font-semibold px-2 py-0.5 rounded"
+                        :class="row.agent === 'ReAct' ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'"
+                        x-text="row.agent"></span>
+                    </td>
+                    <td class="px-5 py-3 text-center font-mono font-semibold text-slate-700" x-text="row.overall"></td>
+                    <template x-for="env in envNames" :key="env">
+                      <td class="px-3 py-3 text-center font-mono text-slate-400 text-xs" x-text="row.scores[env] || '--'"></td>
+                    </template>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="text-[11px] text-slate-400 mt-3">Scores are placeholders. Results will be populated from evaluation runs.</p>
+      </div>
+    </div>
+
+    <!-- ==================== TEAM TAB ==================== -->
+    <div x-show="activeTab === 'team'" class="flex-1 fade-up">
+      <div class="max-w-3xl mx-auto px-5 sm:px-6 lg:px-8 py-10">
+        <h2 class="text-2xl font-bold text-slate-800 mb-1">Team</h2>
+        <p class="text-slate-500 text-sm mb-8">
+          Built at <a href="https://lamalab.org" target="_blank" class="text-brand-600 hover:text-brand-700 hover:underline font-medium">LAMAlab</a>.
+        </p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <template x-for="member in teamMembers" :key="member.name">
+            <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm hover:shadow-md hover:border-brand-200 cursor-default transition-all">
+              <p class="font-semibold text-slate-800" x-text="member.name"></p>
+              <p class="text-[13px] text-slate-500 mt-0.5" x-text="member.role"></p>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== FOOTER ==================== -->
+    <footer class="border-t border-slate-200 bg-white mt-auto">
+      <div class="max-w-[1400px] mx-auto px-5 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+        <p class="text-[11px] text-slate-400">Corral Benchmark &middot; LAMAlab</p>
+        <a href="https://github.com/lamalab-org/corral" target="_blank" class="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer transition-colors">GitHub</a>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ==================== APP LOGIC ==================== -->
+  <script>
+    function corralApp() {
+      return {
+        activeTab: 'environments',
+        tabs: [
+          { id: 'environments', label: 'Environments' },
+          { id: 'results', label: 'Results' },
+          { id: 'leaderboard', label: 'Leaderboard' },
+          { id: 'team', label: 'Team' },
+        ],
+
+        envNames: Object.keys(CORRAL_DATA),
+        selectedEnv: null,
+        envSection: 'tools',
+        selectedTool: null,
+        selectedTask: null,
+
+        verbosityLevel: 0,
+        verbosityLabels: ['Brief', 'Detailed', 'Procedural', 'Contextual', 'Workflow', 'Syntactical', 'Comprehensive'],
+        verbositySections: [
+          ['BRIEF'],
+          ['BRIEF', 'DETAILED'],
+          ['BRIEF', 'DETAILED', 'PROCEDURAL'],
+          ['BRIEF', 'DETAILED', 'PROCEDURAL', 'CONTEXTUAL'],
+          ['BRIEF', 'DETAILED', 'PROCEDURAL', 'CONTEXTUAL', 'WORKFLOW_INTEGRATION'],
+          ['BRIEF', 'DETAILED', 'PROCEDURAL', 'CONTEXTUAL', 'WORKFLOW_INTEGRATION', 'SYNTACTICAL'],
+          ['BRIEF', 'DETAILED', 'PROCEDURAL', 'CONTEXTUAL', 'WORKFLOW_INTEGRATION', 'SYNTACTICAL', 'RAISES', 'LIMITATIONS', 'EXAMPLES'],
+        ],
+
+        teamMembers: [
+          { name: 'Kevin Maik Jablonka', role: 'Principal Investigator' },
+          { name: 'Nawaf Alampara', role: 'Research' },
+          { name: 'Martino Rios-Garcia', role: 'Research' },
+          { name: 'Chandan Gupta', role: 'Research' },
+          { name: 'Sajid Mannan', role: 'Research' },
+        ],
+
+        leaderboardData: [
+          { model: 'GPT-4o', agent: 'ToolCalling', overall: '--', scores: {} },
+          { model: 'GPT-4o', agent: 'ReAct', overall: '--', scores: {} },
+          { model: 'Claude 4.5', agent: 'ToolCalling', overall: '--', scores: {} },
+          { model: 'Claude 4.5', agent: 'ReAct', overall: '--', scores: {} },
+          { model: 'GPT-OSS', agent: 'ToolCalling', overall: '--', scores: {} },
+          { model: 'GPT-OSS', agent: 'ReAct', overall: '--', scores: {} },
+        ],
+
+        get currentEnvData() {
+          return this.selectedEnv ? CORRAL_DATA[this.selectedEnv] : null;
+        },
+        get currentToolData() {
+          if (!this.currentEnvData || !this.selectedTool) return null;
+          return this.currentEnvData.tools.find(t => t.name === this.selectedTool);
+        },
+        get currentTaskData() {
+          if (!this.currentEnvData || !this.selectedTask) return null;
+          return this.currentEnvData.tasks.find(t => t.id === this.selectedTask);
+        },
+        get computedDescription() {
+          const tool = this.currentToolData;
+          if (!tool || !tool.sections) return '';
+          const secs = this.verbositySections[this.verbosityLevel] || [];
+          const parts = [];
+          for (const sec of secs) {
+            if (tool.sections[sec]) parts.push(tool.sections[sec]);
+          }
+          return parts.join('\n\n') || tool.sections.BRIEF || 'No description available.';
+        },
+        get matchedScoringCode() {
+          const task = this.currentTaskData;
+          if (!task || !this.currentEnvData) return '# No scoring function found.';
+          const fnName = task.scoring_function;
+          const match = this.currentEnvData.scoring_functions.find(f => f.name === fnName);
+          return match ? match.code : `# Scoring function: ${fnName}\n# (Code not extracted)`;
+        },
+
+        selectEnv(env) {
+          this.selectedEnv = env;
+          this.selectedTool = null;
+          this.selectedTask = null;
+          this.envSection = 'tools';
+          this.verbosityLevel = 0;
+          const data = CORRAL_DATA[env];
+          if (data?.tools?.length) this.selectedTool = data.tools[0].name;
+          if (data?.tasks?.length) this.selectedTask = data.tasks[0].id;
+        },
+
+        init() {
+          if (this.envNames.length) this.selectEnv(this.envNames[0]);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

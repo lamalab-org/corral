@@ -1,0 +1,3502 @@
+const CORRAL_DATA = {
+  "Catalyst": {
+    "description": "Design and evaluate catalyst structures for CO2 adsorption on crystal slabs using Materials Project data and surface chemistry tools.",
+    "tools": [
+      {
+        "name": "get_structure_from_mp_text",
+        "sections": {
+          "BRIEF": "Retrieve a pymatgen structure from Materials Project using its API and return CIF content as text.",
+          "DETAILED": "This tool connects to the Materials Project database to download crystal structure data for a given material ID.\n    It retrieves the structure object and converts it to CIF (Crystallographic Information File) format, which is the standard format for storing crystal structure information.\n    CIF is then returned as string",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need to retrieve a bulk crystal structure from the Materials Project database\n    - Best suited for materials with known MP IDs\n    - Usually first step in simulation workflows\n    - Recommended for obtaining a crystal structure for preparing bulk structures, supercells, bulk cells, slabs etc.\n    - Avoid when you need multiple structures",
+          "CONTEXTUAL": "How this tool works:\n    - Connects to Materials Project API using authentication key (which is already provided in the environment)\n    - Searches for the specified material ID (MP ID) in the database (MP ID is given as input parameter or if other tools are available to search for MP ID based on available information, then use those tools)\n    - Retrieves the pymatgen Structure object containing atomic positions and lattice parameters\n    - Converts the structure to CIF format string for compatibility with other tools\n    - Returns standardized crystallographic data suitable for further processing",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  Ensure that the other more specific tools are not suitable and you dont have to retrieve multiple strucutres\n    2.  Apply this tool with a valid MP ID to retrieve bulk structure \n    3.  Use the CIF output with slab generation tools like enumerate_slabs_text to create slab structures",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `get_structure_from_mp_text(\"mp-149\")`, # Silicon structure\n        `get_structure_from_mp_text(\"mp-20066\")`, # CO2 structure\n        `get_structure_from_mp_text(\"mp-2\")` # Other material\n        `get_structure_from_mp_text(\"mp-12345\")` # Example with a different MP ID\n        `get_structure_from_mp_text(\"mp-67890\")` # Another example with a different MP ID\n    ]",
+          "ARGS_BRIEF": "Materials Project identifier string.",
+          "ARGS_DETAILED": "The unique identifier used by Materials Project to catalog materials.\n               Should be in the format \"mp-XXXXX\" where XXXXX is a numerical ID.\n               This ID corresponds to a specific material entry in the Materials Project database.",
+          "ARGS_EXAMPLES": "\"mp-149\" (Silicon), \"mp-20066\" (CO2), \"mp-2\" (Li)",
+          "RETURNS_BRIEF": "CIF content string containing the crystal structure data.",
+          "RETURNS_DETAILED": "A properly formatted CIF (Crystallographic Information File) string containing all necessary information about the crystal structure including lattice parameters, atomic positions, space group, and symmetry operations.\n             This format is widely compatible with crystallographic software and other structure analysis tools.",
+          "RETURNS_EXAMPLES": "\"\n_chemical_formula_structural Si\n_cell_length_a 5.468...\"",
+          "RAISES": "Exceptions:\n        ConnectionError:  When unable to connect to Materials Project API \n                         Network connectivity issues or API server downtime \n                         Check internet connection and MP_API_KEY environment variable \n        KeyError:  When the specified MP ID is not found in the database \n                  Invalid or non-existent material ID provided \n                  Verify MP ID exists on Materials Project website or check MP ID syntax\n        AuthenticationError:  When API key is invalid or missing \n                              MP_API_KEY environment variable not set or expired \n                              Obtain valid API key from Materials Project and set environment variable",
+          "LIMITATIONS": "Known limitations:\n    - Requires valid Materials Project API key to be set and internet connection\n    - Limited to materials available in the Materials Project database\n    - May not include the most recent experimental structures"
+        },
+        "args": [
+          {
+            "name": "mp_id",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_structure_from_mp_text(mp_id: str) -> str:\n    with MPRester(os.getenv(\"MP_API_KEY\")) as mpr:\n        docs = mpr.materials.summary.search(\n            material_ids=[str(mp_id)], fields=[\"structure\"]\n        )\n        structure = docs[0].structure\n\n    return structure.to(fmt=\"cif\")"
+      },
+      {
+        "name": "create_slab_from_structure_text",
+        "sections": {
+          "BRIEF": "Create a surface slab from a bulk crystal structure with specified Miller indices and dimensions.",
+          "DETAILED": "This tool generates a surface slab by cleaving a bulk crystal structure along a specified crystallographic plane.\n    It creates a two-dimensional periodic surface model suitable for surface chemistry calculations, catalysis studies, and adsorption analysis.\n    The tool automatically handles the creation of vacuum space above the surface and ensures proper termination of the crystal structure.\n    This is essential for computational surface science studies.",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need to create a single slab from a bulk structure with known Miller indices\n    - Best suited for straightforward surface generation without need for multiple terminations\n    - Recommended when you have specific requirements for slab thickness and vacuum spacing\n    - Avoid when you need to explore multiple possible surface terminations",
+          "CONTEXTUAL": "How this tool works:\n    - Parses the input CIF structure to create a pymatgen Structure object\n    - Uses SlabGenerator to cleave the structure along specified Miller indices\n    - Creates a slab with the specified minimum thickness and vacuum spacing\n    - Reorients the slab to have the surface normal along the c-axis\n    - Sorts atomic positions for consistent structure representation\n    - Converts the final slab structure back to CIF format",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  First obtain bulk structure using get_structure_from_mp_text or using other tools that return single structure CIF \n    2.  Apply this tool to create slab from bulk structure \n    3.  Use output with adsorption site tools like get_adsorption_sites_text",
+          "SYNTACTICAL": "Usage examples:\n    [ create_slab_from_structure_text(cif_string, (1,1,1), 12, 5, True), # Create slab with (1,1,1) Miller indices\n    create_slab_from_structure_text(cif_string, (1,0,0), 15, 10, False), # Create slab with (1,0,0) Miller indices\n    create_slab_from_structure_text(cif_string)  # Uses defaults (1,1,1), 12, 5, True\n    ]",
+          "ARGS_BRIEF": "Whether to create a primitive cell slab. Defaults to True.",
+          "ARGS_DETAILED": "Controls whether to use the primitive cell or conventional cell for slab generation.\n                  Primitive cells have the minimum number of atoms while maintaining the essential symmetry, leading to smaller, more efficient computational models.\n                  Setting to False uses the conventional cell which may be larger but more intuitive.",
+          "ARGS_EXAMPLES": "True, False",
+          "RETURNS_BRIEF": "CIF content string of the generated surface slab.",
+          "RETURNS_DETAILED": "A CIF-formatted string containing the surface slab structure with the specified Miller indices, thickness, and vacuum spacing.\n             The structure is oriented with the surface normal along the c-axis and includes all necessary crystallographic information for surface calculations.",
+          "RETURNS_EXAMPLES": "CIF string with slab structure having surface atoms and vacuum region",
+          "RAISES": "Exceptions:\n        ValueError:  When CIF string is malformed or Miller indices are invalid \n                    Invalid CIF format, zero Miller indices, or incompatible surface \n                    Verify CIF format and choose valid Miller indices for the crystal system \n        StructureError:  When slab generation fails due to structural issues \n                        Insufficient slab thickness or problematic surface termination \n                        Increase min_slab_size or try different Miller indices",
+          "LIMITATIONS": "Known limitations:\n    - May not handle complex surface reconstructions or relaxations\n    - Does not optimize atomic positions\n    - Limited to simple surface terminations without defects\n    - Cannot account for surface segregation or compositional changes"
+        },
+        "args": [
+          {
+            "name": "structure_cif",
+            "type": "str"
+          },
+          {
+            "name": "miller_index",
+            "type": "tuple"
+          },
+          {
+            "name": "min_slab_size",
+            "type": "int"
+          },
+          {
+            "name": "min_vacuum_size",
+            "type": "int"
+          },
+          {
+            "name": "primitive",
+            "type": "bool"
+          }
+        ],
+        "returns": "str",
+        "code": "def create_slab_from_structure_text(\n    from pymatgen.core import Structure\n    from pymatgen.core.surface import SlabGenerator\n\n    # Load the structure from CIF string\n    structure = Structure.from_str(structure_cif, fmt=\"cif\")\n\n    # Create the slab\n    slab_gen = SlabGenerator(\n        structure, miller_index, min_slab_size, min_vacuum_size, primitive=primitive\n    )\n    slab = slab_gen.get_slab()\n    slab = slab.get_orthogonal_c_slab().get_sorted_structure()\n\n    return slab.to(fmt=\"cif\")"
+      },
+      {
+        "name": "enumerate_slabs_text",
+        "sections": {
+          "BRIEF": "Enumerate all possible surface slab terminations from a bulk structure and return as JSON.",
+          "DETAILED": "This tool generates all possible surface terminations for a given bulk crystal structure along specified Miller indices.\n    Unlike creating a single slab, this tool explores different ways to terminate the surface, which is crucial for materials with complex structures or multiple chemically distinct layers.\n    Each termination represents a different surface chemistry and reactivity, making this tool essential for comprehensive surface studies.",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need to explore all possible surface terminations for a material\n    - Best suited for complex materials with multiple distinct atomic layers\n    - Recommended for systematic surface studies and comparing different surface chemistries\n    - Avoid when you only need a single, well-defined surface",
+          "CONTEXTUAL": "How this tool works:\n    - Parses the bulk CIF structure to create a pymatgen Structure object\n    - Uses SlabGenerator to systematically create all possible surface terminations\n    - Generates multiple slabs with different atomic arrangements at the surface\n    - Applies structural sorting and standardization to each slab\n    - Returns all slabs as a JSON dictionary with indexed keys for easy selection",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  First obtain bulk structure using get_structure_from_mp_text \n    2.  Apply this tool to enumerate all possible slab terminations \n    3.  Use choose_slab_text to select a specific termination from the results",
+          "SYNTACTICAL": "Usage examples:\n    [\n    `enumerate_slabs_text(cif_string, (1,1,1), 12, 5)`,  # Enumerate slabs with (1,1,1) Miller indices\n    `enumerate_slabs_text(cif_string, (1,0,0), 15, 10)`,  # Enumerate slabs with (1,0,0) Miller indices\n    `enumerate_slabs_text(cif_string)`  # Uses default parameters (1,1,1), 12, 5\n    ]",
+          "ARGS_BRIEF": "Minimum vacuum layer thickness in Angstroms. Defaults to 5.",
+          "ARGS_DETAILED": "The minimum vacuum space above each surface to prevent interactions between periodic images.\n                        This parameter is applied to all generated slabs and is crucial for accurate surface calculations.\n                        Larger values reduce spurious interactions but increase computational cost.",
+          "ARGS_EXAMPLES": "5.0, 10.0, 15.0",
+          "RETURNS_BRIEF": "JSON string mapping slab indices to their CIF representations.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing a dictionary where keys are slab identifiers (e.g., \"slab_0\", \"slab_1\") and values are the corresponding CIF strings for each surface termination.\n             This format allows easy selection and comparison of different surface terminations.",
+          "RETURNS_EXAMPLES": "\"{\"slab_0\": \"CIF content...\", \"slab_1\": \"CIF content...\", ...}\"",
+          "RAISES": "Exceptions:\n        ValueError:  When CIF string is malformed or parameters are invalid \n                    Invalid CIF format, negative size parameters, or incompatible Miller indices \n                    Verify CIF format and ensure all parameters are positive numbers \n        StructureError:  When slab generation fails for the given structure \n                        Structure not compatible with specified Miller indices or size constraints \n                        Try different Miller indices or adjust size parameters",
+          "LIMITATIONS": "Known limitations:\n    - This tool might generate really many slabs.\n    - Does not perform surface relaxation or optimization\n    - May generate many similar terminations for high-symmetry structures\n    - Limited to periodic slab models without defects or reconstructions"
+        },
+        "args": [
+          {
+            "name": "bulk_cif",
+            "type": "str"
+          },
+          {
+            "name": "miller_index",
+            "type": "tuple"
+          },
+          {
+            "name": "min_slab_size",
+            "type": "float"
+          },
+          {
+            "name": "min_vacuum_size",
+            "type": "float"
+          }
+        ],
+        "returns": "str",
+        "code": "def enumerate_slabs_text(\n    import json\n\n    from pymatgen.core import Structure\n    from pymatgen.core.surface import SlabGenerator\n\n    bulk_structure = Structure.from_str(bulk_cif, fmt=\"cif\")\n\n    # Create a SlabGenerator from the bulk structure\n    slab_gen = SlabGenerator(\n        bulk_structure, miller_index, min_slab_size, min_vacuum_size\n    )\n    slabs = slab_gen.get_slabs()  # returns a list of Slab objects\n\n    slabs_dict = {}\n    for i, slab in enumerate(slabs):\n        # We use get_orthogonal_c_slab() ensures that the slab lattice is reoriented in c axis for easier adsorption placement.\n        # get_sorted_structure() variations in atom ordering that might occur due to how the slab was originally created.\n        slab_clean = (\n            slab.get_sorted_structure()\n            # slab.get_orthogonal_c_slab().get_sorted_structure()\n    ..."
+      },
+      {
+        "name": "choose_slab_text",
+        "sections": {
+          "BRIEF": "Select a specific slab from a JSON dictionary of enumerated slabs by index.",
+          "DETAILED": "This tool selects one surface slab from a collection of enumerated slabs based on its index number.\nIt's designed to work with the output from enumerate_slabs_text, allowing users to choose a specific surface termination for further analysis.\nThis selection process is crucial for focusing on the most relevant or interesting surface termination for catalysis or adsorption studies.",
+          "PROCEDURAL": "When to use this tool:\n- Use after enumerate_slabs_text to select a specific surface termination\n- Best suited for systematic exploration of different surface terminations\n- Could be useful for workflows that require a single slab for adsorption or catalysis studies\n- Recommended when you need to compare results from different surface terminations\n- One can randomly pick index to select a slab from the enumerated list if they want to randomly pick a slab\n- Avoid when you only need one slab",
+          "CONTEXTUAL": "How this tool works:\n- Parses the JSON string containing multiple slab structures\n- Locates the slab with the specified index key (e.g., \"slab_0\", \"slab_1\")\n- Extracts the CIF string for the selected slab\n- Returns the CIF content ready for use in subsequent tools",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n1.  First run enumerate_slabs_text to generate multiple slab terminations \n2.  Apply this tool to select a specific slab by index. Can be coupled with io tools or python execution tools to figure out which index to use depending on the task, for example, filter based on miller index\n3.  Use the selected slab with adsorption tools like get_adsorption_sites_text",
+          "SYNTACTICAL": "Usage examples:\n[\n`choose_slab_text(slabs_json, 0)`,  # Select first slab\n`choose_slab_text(slabs_json, 1)`,  # Select second slab\n`choose_slab_text(slabs_json)`       # Select first slab (default)\n]",
+          "ARGS_BRIEF": "Index of the slab to select. Defaults to 0.",
+          "ARGS_DETAILED": "The numerical index of the slab to select from the JSON dictionary.\n          This corresponds to the enumeration order from enumerate_slabs_text, where index 0 is the first slab, index 1 is the second, and so on.\n          The tool will look for a key named \"slab_{index}\" in the JSON dictionary.",
+          "ARGS_EXAMPLES": "0 (first slab), 1 (second slab), 2 (third slab)",
+          "RETURNS_BRIEF": "CIF string for the selected slab.",
+          "RETURNS_DETAILED": "A properly formatted CIF string containing the structure data for the selected slab.\n         This includes atomic positions, lattice parameters, and all necessary crystallographic information.\n         The CIF can be used directly with other structure analysis tools.",
+          "RETURNS_EXAMPLES": "CIF string with selected slab structure",
+          "RAISES": "Exceptions:\n    ValueError:  When the specified slab index is not found in the JSON \n                The key \"slab_{index}\" does not exist in the JSON dictionary \n                Check available slab indices in the JSON or use a valid index \n    JSONDecodeError:  When the slabs_json string is not valid JSON \n                     Malformed JSON string or incorrect format \n                     Verify JSON format and ensure it's output from enumerate_slabs_text",
+          "LIMITATIONS": "Known limitations:\n- Cannot validate the quality or stability of the selected slab\n- Does not provide information about surface termination characteristics\n- Limited to slabs generated by enumerate_slabs_text tool\n- Cannot modify or optimize the selected slab structure"
+        },
+        "args": [
+          {
+            "name": "slabs_json",
+            "type": "str"
+          },
+          {
+            "name": "index",
+            "type": "int"
+          }
+        ],
+        "returns": "str",
+        "code": "def choose_slab_text(slabs_json: str, index: int = 0) -> str:\n    import json\n\n    slabs = json.loads(slabs_json)\n    key = f\"slab_{index}\"\n    if key not in slabs:\n        raise ValueError(f\"Slab index {index} not found.\")\n    return slabs[key]"
+      },
+      {
+        "name": "get_adsorption_sites_text",
+        "sections": {
+          "BRIEF": "Identify and classify all possible adsorption sites on a surface slab.",
+          "DETAILED": "This tool analyzes a surface slab structure to identify and classify potential adsorption sites where molecules can bind.\n    It uses geometric and chemical analysis to determine different types of binding sites such as top sites (above surface atoms), bridge sites (between two atoms), and hollow sites (in multi-atom depressions).\n    This analysis is fundamental for understanding surface reactivity and designing catalysts.",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need to identify all possible adsorption sites on a surface\n    - Best suited for systematic studies of surface reactivity and catalysis\n    - Essential for understanding how molecules interact with surfaces\n    - Recommended before placing adsorbates to understand binding options\n    - Avoid when you already know the specific binding site coordinates",
+          "CONTEXTUAL": "How this tool works:\n    - Parses the slab CIF structure to identify surface atoms\n    - Uses AdsorbateSiteFinder from pymatgen to geometrically analyze the surface topology\n    - Classifies sites based on coordination environment (ontop, bridge, hollow)\n    - Calculates fractional coordinates for each potential binding site\n    - Returns sites organized by type in a JSON format for easy selection",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  First obtain a slab structure using choose_slab_text or create_slab_from_structure_text \n    2.  Apply this tool to identify all adsorption sites on the surface \n    3.  Use choose_adsorption_site_text to select a specific site for adsorbate placement",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `get_adsorption_sites_text(slab_cif_string)`,  # Analyze slab structure\n        `get_adsorption_sites_text(output_from_choose_slab_text)`,  # Use output\n        `get_adsorption_sites_text(create_slab_from_structure_text)`,  # From slab creation\n        `get_adsorption_sites_text(\"CIF string of a slab\")`,  # Direct\n        `get_adsorption_sites_text(\"CIF string with surface atoms\")`,  # Example with specific slab\n    ]",
+          "ARGS_BRIEF": "CIF string of the surface slab structure.",
+          "ARGS_DETAILED": "A properly formatted CIF string containing the surface slab structure with atomic positions, lattice parameters, and surface geometry.\n                 This should be a two-dimensional periodic structure with a well-defined surface and vacuum region.\n                 The structure is analyzed to identify potential adsorption sites.",
+          "ARGS_EXAMPLES": "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\"",
+          "RETURNS_BRIEF": "JSON string containing classified adsorption sites with fractional coordinates.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing a dictionary where keys are site types (e.g., \"top\", \"bridge\", \"hollow\") and values are lists of fractional coordinates for each site of that type.\n             Each coordinate is a list of three numbers [x, y, z] representing the fractional position within the unit cell.",
+          "RETURNS_EXAMPLES": "\"{\"ontop\": [[0.0, 0.0, 0.9], [0.5, 0.5, 0.9]], \"bridge\": [[0.25, 0.25, 0.85]]}\"",
+          "RAISES": "Exceptions:\n        ValueError:  When the CIF string is malformed or doesn't represent a valid slab \n                    Invalid CIF format, missing surface atoms, or improper slab structure \n                    Verify CIF format and ensure it represents a proper surface slab \n        StructureError:  When the slab structure cannot be analyzed for adsorption sites \n                        Insufficient surface area, unclear surface definition, or geometric issues \n                        Check slab structure quality and surface termination",
+          "LIMITATIONS": "Known limitations:\n    - Does not account for surface relaxation or reconstruction effects\n    - Cannot predict relative binding strengths or preferences\n    - Limited to geometric analysis without chemical bonding considerations\n    - May not identify all possible sites for large or complex molecules"
+        },
+        "args": [
+          {
+            "name": "slab_cif",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_adsorption_sites_text(slab_cif: str) -> str:\n    import json\n\n    from pymatgen.analysis.adsorption import AdsorbateSiteFinder\n    from pymatgen.core import Structure\n\n    finder = AdsorbateSiteFinder(Structure.from_str(slab_cif, fmt=\"cif\"))\n    sites = (\n        finder.find_adsorption_sites()\n    )  # returns a dict, e.g. {\"top\": [site1, ...], \"bridge\": [...], ...}\n\n    # Convert sites to a serializable format (list of fractional coordinates)\n    serializable_sites = {\n        key: [\n            list(site.frac_coords) if hasattr(site, \"frac_coords\") else list(site)\n            for site in site_list\n        ]\n        for key, site_list in sites.items()\n    }\n\n    return json.dumps(serializable_sites, indent=2)"
+      },
+      {
+        "name": "choose_adsorption_site_text",
+        "sections": {
+          "BRIEF": "Select a specific adsorption site from classified sites by type and index.",
+          "DETAILED": "This tool selects one specific adsorption site from a collection of classified sites based on the site type (ontop, bridge, hollow) and index within that type.\nThis selection is crucial for systematic studies of different binding environments and their effects on adsorption energetics.",
+          "PROCEDURAL": "When to use this tool:\n- Use after identifying all possible adsorption site to select a specific binding site\n- Best suited for systematic comparison of different site types\n- Essential for placing adsorbates at specific coordination environments\n- Recommended when studying site-specific reactivity or selectivity\n- Avoid when you need to place adsorbates at multiple sites simultaneously",
+          "CONTEXTUAL": "How this tool works:\n- Parses the JSON string containing classified adsorption sites\n- Locates the specified site type in the dictionary\n- Selects the site at the specified index within that type\n- Returns the fractional coordinates as a list of three floats",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n1.  First run get_adsorption_sites_text to identify available sites \n2.  Apply this tool to select a specific site by type and index \n3.  Use the coordinates with add_adsorbate_to_slab_text for molecule placement",
+          "SYNTACTICAL": "Usage examples:\n[\n    `choose_adsorption_site_text(sites_json, \"ontop\", 0)`,\n    `choose_adsorption_site_text(sites_json, \"bridge\", 1)`,\n    `choose_adsorption_site_text(sites_json, \"hollow\", 0)`,\n    `choose_adsorption_site_text(sites_json, \"ontop\", 1)`,\n    `choose_adsorption_site_text(sites_json, \"bridge\", 0)`\n]",
+          "ARGS_BRIEF": "Index of the site within the specified type. Defaults to 0.",
+          "ARGS_DETAILED": "The numerical index of the site to select from the list of sites of the specified type.\n          Index 0 selects the first site, index 1 the second, and so on.\n          The index must be within the range of available sites for the specified type.",
+          "ARGS_EXAMPLES": "0 (first site), 1 (second site), 2 (third site)",
+          "RETURNS_BRIEF": "Fractional coordinates of the selected adsorption site.",
+          "RETURNS_DETAILED": "A list of three floating-point numbers representing the fractional coordinates [x, y, z] of the selected adsorption site within the unit cell.\n                These coordinates can be used directly for adsorbate placement and represent the optimal binding position for the specified site type.",
+          "RETURNS_EXAMPLES": "[0.0, 0.0, 0.9] or [0.25, 0.25, 0.85]",
+          "RAISES": "Exceptions:\n    ValueError:  When the specified site type is not found in the JSON \n                The site_type key does not exist in the JSON dictionary \n                Check available site types in the JSON or use a valid type \n    IndexError:  When the specified index is out of range for the site type \n                The index is greater than or equal to the number of sites of that type \n                Check the number of available sites for the specified type \n    JSONDecodeError:  When the adsorption_sites_json string is not valid JSON \n                     Malformed JSON string or incorrect format \n                     Verify JSON format and ensure it's output from get_adsorption_sites_text",
+          "LIMITATIONS": "Known limitations:\n- Cannot evaluate the relative quality or stability of different sites\n- Limited to sites identified by get_adsorption_sites_text\n- Cannot modify or optimize the selected site coordinates"
+        },
+        "args": [
+          {
+            "name": "adsorption_sites_json",
+            "type": "str"
+          },
+          {
+            "name": "site_type",
+            "type": "str"
+          },
+          {
+            "name": "index",
+            "type": "int"
+          }
+        ],
+        "returns": "list[float]",
+        "code": "def choose_adsorption_site_text(\n    import json\n\n    sites = json.loads(adsorption_sites_json)\n    if site_type not in sites:\n        raise ValueError(f\"Site type {site_type} not found.\")\n    if index >= len(sites[site_type]):\n        raise ValueError(f\"Site index {index} not found.\")\n    return sites[site_type][index]"
+      },
+      {
+        "name": "add_adsorbate_to_slab_text",
+        "sections": {
+          "BRIEF": "Place an adsorbate molecule on a surface slab at a specified adsorption site.",
+          "DETAILED": "This tool combines a surface slab with an adsorbate molecule by placing the adsorbate at a specific binding site on the surface.\n    It handles the geometric placement of the molecule at the correct height above the surface and ensures proper structural integration.\n    This is essential for creating realistic surface-adsorbate systems for computational studies of catalysis, adsorption energetics, and surface reactivity.",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need to create a surface-adsorbate system\n    - Recommended for systematic studies of different binding sites or orientations\n    - Avoid when you need complex multi-adsorbate systems or surface reconstructions",
+          "CONTEXTUAL": "How this tool works:\n    - Parses the slab CIF structure to identify the surface geometry\n    - Loads the adsorbate as a molecular structure (handles both XYZ and CIF formats)\n    - Uses AdsorbateSiteFinder from pymatgen to place the adsorbate at the specified site\n    - Adjusts the vertical position according to the specified height parameter\n    - Combines the structures into a single CIF-formatted output\n    - Automatically selects a top site if no specific site is provided",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  First obtain slab from choose_slab_text and adsorbate from get_structure_from_mp_text \n    2.  Apply this tool to place the adsorbate on the surface \n    3.  Use the combined structure for further analysis or optimization",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)`,  # Default height and auto-select site\n        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 2.0)`,  # Specify height only\n        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 1.5, [0.0, 0.0, 0.9])`,  # Specify height\n        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, site=[0.5, 0.5, 0.9])`,  # Auto-select height\n        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 2.0, None)`  # Specify height, auto-select site\n    ]",
+          "ARGS_BRIEF": "Optional fractional coordinates for adsorbate placement.",
+          "ARGS_DETAILED": "A list of three floating-point numbers representing the fractional coordinates [x, y, z] where the adsorbate should be placed\n             If not provided, the tool will automatically select the first available top site.\n             These coordinates should typically come from choose_adsorption_site_text output.",
+          "ARGS_EXAMPLES": "[0.0, 0.0, 0.9], [0.5, 0.5, 0.9], None (auto-select)",
+          "RETURNS_BRIEF": "CIF string of the combined surface-adsorbate structure.",
+          "RETURNS_DETAILED": "A properly formatted CIF string containing the combined structure with the adsorbate placed on the surface at the specified position and height.\n             This structure includes both the original slab atoms and the adsorbate atoms, properly integrated into a single periodic structure.",
+          "RETURNS_EXAMPLES": "CIF string with both slab and adsorbate atoms",
+          "RAISES": "Exceptions:\n        ValueError:  When CIF strings are malformed or adsorbate cannot be parsed \n                    Invalid CIF format, unsupported molecule format, or structural issues \n                    Verify CIF formats and ensure adsorbate is a valid molecular structure \n        StructureError:  When adsorbate placement fails due to geometric constraints \n                        Site coordinates outside unit cell, insufficient surface area, or placement conflicts \n                        Check site coordinates are within [0,1] range and surface has adequate space \n        RuntimeError:  When no adsorption sites are found on the surface \n                      Surface structure lacks identifiable binding sites \n                      Verify slab structure has proper surface termination and geometry",
+          "LIMITATIONS": "Known limitations:\n    - Does not optimize adsorbate orientation or conformation\n    - Cannot handle multiple adsorbates or complex binding modes\n    - Limited to simple geometric placement without chemical bonding\n    - Does not account for surface relaxation or reconstruction upon adsorption"
+        },
+        "args": [
+          {
+            "name": "slab_cif",
+            "type": "str"
+          },
+          {
+            "name": "adsorbate_cif",
+            "type": "str"
+          },
+          {
+            "name": "height",
+            "type": "float"
+          },
+          {
+            "name": "site",
+            "type": "list[float] | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def add_adsorbate_to_slab_text(\n    import numpy as np\n    from pymatgen.analysis.adsorption import AdsorbateSiteFinder\n    from pymatgen.core import Molecule, Structure\n\n    # Load slab\n    slab = Structure.from_str(slab_cif, fmt=\"cif\")\n\n    # Load adsorbate as a Molecule\n    try:\n        # If that fails, try as structure and convert to molecule\n        struct = Structure.from_str(adsorbate_cif, fmt=\"cif\")\n        adsorbate = Molecule(\n            species=struct.species,\n            coords=struct.cart_coords.tolist(),\n            charge=0,\n        )\n    except Exception as e:\n        raise ValueError(f\"Could not parse adsorbate CIF: {e!r}\") from e\n\n    finder = AdsorbateSiteFinder(slab)\n    ..."
+      },
+      {
+        "name": "generate_reconstructed_slab",
+        "sections": {
+          "BRIEF": "Generate surface slabs with complex reconstructions from bulk structures using detailed instructions.",
+          "DETAILED": "This tool creates reconstructed surface slabs that go beyond simple terminations to include complex surface arrangements, atomic rearrangements, and compositional changes.\n    Surface reconstructions are crucial for understanding real surface behavior as many materials undergo significant structural changes when cleaved to create surfaces.\n    This tool handles sophisticated reconstruction patterns including atomic additions, removals, and rearrangements based on experimental observations.",
+          "PROCEDURAL": "When to use this tool:\n    - Best suited for materials known to undergo significant surface rearrangements\n    - If the slab has no adsorption site, reconstruction may introduce suitable sites.\n    - Essential for accurate modeling of catalytic surfaces with complex structures\n    - Recommended for systematic studies of reconstruction effects on surface properties\n    - Avoid for simple surface terminations",
+          "CONTEXTUAL": "How this tool works:\n    - Parses the bulk structure and validates Miller indices for the crystal system\n    - Interprets complex reconstruction instructions in JSON format\n    - Uses ReconstructionGenerator from pymatgen to apply transformation matrices and structural changes\n    - Implements atomic additions, removals, and rearrangements as specified\n    - Generates either a single reconstruction or all possible variants\n    - Validates and optimizes the resulting surface structures",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  First obtain bulk structure using get_structure_from_mp_text \n    2.  Apply this tool with detailed reconstruction instructions \n    3.  Use the reconstructed surface for adsorption studies or analysis",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `generate_reconstructed_slab(bulk_cif, (1,1,1), 12.0, 5.0, instructions_json)`,  # Basic reconstruction\n        `generate_reconstructed_slab(bulk_cif, (1,0,0), 15.0, 10.0, instructions_json, True)`,  # All variants\n        `generate_reconstructed_slab(bulk_cif, (1,1,0), 10.0, 5.0, instructions_json)`,  # Rectangular slab\n        `generate_reconstructed_slab(bulk_cif, (1,2,1), 20.0, 15.0, instructions_json, False)`,  # Complex reconstruction\n        `generate_reconstructed_slab(bulk_cif, (2,0,0), 25.0, 10.0, instructions_json, True)`,  # Thick slab\n    ]",
+          "ARGS_BRIEF": "Whether to return all reconstruction variants. Defaults to False.",
+          "ARGS_DETAILED": "Controls whether to return a single CIF string (False) or a comprehensive JSON with all possible reconstruction variants and metadata (True).\n                           When True, provides detailed information about each variant including structural parameters and characteristics.",
+          "ARGS_EXAMPLES": "False (single CIF), True (all variants with metadata)",
+          "RETURNS_BRIEF": "CIF string of reconstructed slab or JSON with all variants depending on return_all_variants.",
+          "RETURNS_DETAILED": "Either a single CIF-formatted string containing the reconstructed surface structure (if return_all_variants=False) or a comprehensive JSON string with all variants, metadata, and structural information (if return_all_variants=True).\n             The JSON format includes detailed characterization of each variant.",
+          "RETURNS_EXAMPLES": "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\"",
+          "RAISES": "Exceptions:\n        ValueError:  When reconstruction parameters are invalid or incompatible \n                    Invalid JSON format, missing required fields, or incompatible parameters \n                    Verify JSON format and ensure all required fields are present \n        StructureError:  When reconstruction fails due to structural incompatibilities \n                        Invalid transformation matrix, incompatible surface orientation, or atomic placement issues \n                        Check transformation matrix and atomic modification parameters \n        ReconstructionError:  When the reconstruction process fails to generate valid structures \n                             Complex reconstruction instructions cannot be implemented \n                             Simplify reconstruction instructions or try different parameters",
+          "LIMITATIONS": "Known limitations:\n    - Cannot predict the thermodynamic stability of reconstructions\n    - Limited to predefined reconstruction patterns and transformations\n    - Does not account for temperature or environmental effects on reconstruction\n    - May not capture all possible reconstruction variants for complex systems\n    - Requires detailed prior knowledge of reconstruction parameters"
+        },
+        "args": [
+          {
+            "name": "bulk_cif",
+            "type": "str"
+          },
+          {
+            "name": "miller_index",
+            "type": "tuple[int, int, int]"
+          },
+          {
+            "name": "min_slab_size",
+            "type": "float"
+          },
+          {
+            "name": "min_vacuum_size",
+            "type": "float"
+          },
+          {
+            "name": "reconstruction_instructions",
+            "type": "str"
+          },
+          {
+            "name": "return_all_variants",
+            "type": "bool"
+          }
+        ],
+        "returns": "str",
+        "code": "def generate_reconstructed_slab(\n    import json\n    from copy import deepcopy\n\n    import numpy as np\n    from pymatgen.core import Structure\n    from pymatgen.core.surface import ReconstructionGenerator\n    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer\n\n    # Parse bulk structure\n    try:\n        bulk_structure = Structure.from_str(bulk_cif, fmt=\"cif\")\n    except Exception as e:\n        raise ValueError(f\"Invalid CIF format: {e!s}\") from e\n\n    # Validate Miller indices are valid for the structure\n    try:\n        sg = SpacegroupAnalyzer(bulk_structure)\n        # This will raise an exception if the Miller indices are invalid\n        sg.get_conventional_standard_structure(international_monoclinic=True)\n    except Exception as err:\n    ..."
+      },
+      {
+        "name": "get_bulk_polymorphs_data",
+        "sections": {
+          "BRIEF": "Query Materials Project database to find all polymorphs for a given chemical composition.",
+          "DETAILED": "This tool retrieves comprehensive polymorph data from the Materials Project database for a specific chemical composition. Polymorphs are different crystal structures with the same chemical formula but different atomic arrangements, leading to distinct physical and chemical properties. This tool could be relevant for retrieving structures of the same compoisition. Apart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need to explore all known structural variants of a single material composition\n- Suitable for identifying thermodynamically stable and metastable phases and other properties like band gap, density, volume, number of sites, space group of the structure.\n- Recommended for retrieving structure and Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group of one single composition\n- Avoid when you only need a single, well-known structure\n- Avoid when you need data for multiple compositions",
+          "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project API using authentication credentials\n- Searches for all materials matching the specified chemical composition\n- Retrieves comprehensive data including energetics, structural, and electronic properties\n- Converts crystal structures to CIF format for compatibility with other tools\n- Sorts results by energy above hull (thermodynamic stability) for easy analysis",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you need to retrieve data for only one composition and there is no better tool \n2.  Apply this tool to retrieve all polymorphs for a composition \n3.  Use select_polymorphs_with_strategy to filter results or batch_retrieve_polymorphs for multiple compositions",
+          "SYNTACTICAL": "Usage examples:\n[\n`get_bulk_polymorphs_data(\"TiO2\")`,  # Retrieve polymorphs for titanium dioxide\n`get_bulk_polymorphs_data(\"SiO2\")`,  # Retrieve polymorphs for silicon dioxide\n`get_bulk_polymorphs_data(\"Al2O3\n]",
+          "ARGS_BRIEF": "Chemical composition formula.",
+          "ARGS_DETAILED": "Chemical formula specifying the composition for which polymorphs should be retrieved. Should follow standard chemical notation with element symbols. The tool will find all known crystal structures with this exact composition in the Materials Project database.",
+          "ARGS_EXAMPLES": "\"TiO2\" (rutile, anatase, brookite), \"SiO2\" (quartz, cristobalite), \"Fe2O3\" (hematite, maghemite)",
+          "RETURNS_BRIEF": "JSON string containing comprehensive polymorph data sorted by stability.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing a list of dictionaries, each representing a polymorph with properties including Materials Project ID, CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information. Results are sorted by energy above hull for easy identification of the most stable phases.",
+          "RETURNS_EXAMPLES": "'[{\"material_id\": \"mp-2657\", \"cif\": \"...\", \"energy_above_hull\": 0.0, \"formation_energy_per_atom\": -4.2, ...}]'",
+          "RAISES": "Exceptions:\n    KeyError:  When the specified compoisiton is not found in the database \n         Invalid or non-existent material composition is provided \n         Verify if the composition is valid\n    ValueError:  When Materials Project API key is not available \n                MP_API_KEY environment variable not set or invalid \n                If API key is not set, the tool might not work, hence choose some other tool \n    ConnectionError:  When unable to connect to Materials Project API \n                     Network connectivity issues or API server downtime \n                     Check internet connection if not working the tool might not work, hence choose some other tool",
+          "LIMITATIONS": "Known limitations:\n- Limited to materials available in the Materials Project database\n- Requires valid API key and internet connection\n- Can retrieve polymorphs only for one composition at a time"
+        },
+        "args": [
+          {
+            "name": "composition",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_bulk_polymorphs_data(composition: str) -> str:\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Query for materials with the given composition\n        docs = mpr.materials.summary.search(\n            formula=composition,\n            fields=[\n                \"material_id\",\n                \"structure\",\n                \"energy_above_hull\",\n                \"formation_energy_per_atom\",\n                \"band_gap\",\n                \"density\",\n                \"volume\",\n                \"nsites\",\n                \"symmetry\",\n    ..."
+      },
+      {
+        "name": "get_bulk_polymorphs_data_to_file",
+        "sections": {
+          "BRIEF": "Query Materials Project for polymorphs and save comprehensive data to a JSON file to give path.",
+          "DETAILED": "This tool performs the same comprehensive polymorph retrieval as get_bulk_polymorphs_data but saves the results directly to a JSON file for persistent storage and later analysis.\nThis tool retrieves comprehensive polymorph data from the Materials Project database for a specific chemical composition.\nPolymorphs are different crystal structures with the same chemical formula but different atomic arrangements, leading to distinct physical and chemical properties.\nThis tool could be relevant for retrieving structures of the same compoisition.\nApart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved.\nThe result is then saved a JSON file at the specified save_path.\nThe file-based approach allows for efficient handling of large datasets and facilitates saving context of llm.",
+          "PROCEDURAL": "When to use this tool:\n - Use when you need to explore all known structural variants of a single material composition.\n - Suitable for identifying thermodynamically stable and metastable phases and other properties like band gap, density, volume, number of sites, space group of the structure.\n - Use when you need to store polymorph data for later analysis or sharing or if you want to save context of llm.\n - Best suited for building persistent datasets and material databases\n - Highly recommended if the number of polymorphs for a compoisition could be very big\n - Avoid when you only need temporary data access\n - Avoid when you only need a single structure\n - Avoid when you need data for multiple compositions",
+          "CONTEXTUAL": "How this tool works:\n - Connects to Materials Project API using authentication credentials\n - Searches for all materials matching the specified chemical composition\n - Retrieves comprehensive data including energetics, structural, and electronic properties\n - Converts crystal structures to CIF format for compatibility with other tools\n - Sorts results by energy above hull (thermodynamic stability) for easy analysis\n - Saves results to specified file path in JSON format with proper formatting\n - Ensures data persistence and enables later processing by other tools\n - Validates file path and creates directories as needed",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n 1.  Ensure you need to retrieve data for only one composition and there is no better tool  \n 2.  Apply this tool to retrieve and save polymorph data and save to a file\n 3.  Use consolidate_polymorph_datasets to combine multiple files of different composition or prepare_tabular_dataset",
+          "SYNTACTICAL": "Usage examples:\n [\n `get_bulk_polymorphs_data_to_file(\"TiO2\", \"data/tio2_polymorphs.json\")`,  # Save polymorphs for titanium dioxide\n `get_bulk_polymorphs_data_to_file(\"SiO2\", \"data/si2_polymorphs.json\")`,  # Save polymorphs for silicon dioxide\n `get_bulk_polymorphs_data_to_file(\"Al2O3\", \"data/al2o3_polymorphs.json\")`,  # Save polymorphs for aluminum oxide\n `get_bulk_polymorphs_data_to_file(\"Fe2O3\", \"data/fe2o3_polymorphs.json\")`,  # Save polymorphs for iron\n ]",
+          "ARGS_BRIEF": "File path where JSON data will be saved.",
+          "ARGS_DETAILED": "Complete file path including filename and extension where the polymorph data will be saved.\n               The path should be writable and the directory will be created if it doesn't exist.\n               Using .json extension is recommended for clarity.\n               If None, the tool will raise an error as the file path is required.",
+          "ARGS_EXAMPLES": "\"data/tio2_polymorphs.json\", \"save_path/tio2_polymorphs.json\", \"results/Cu2O_polymorphsides.json\"",
+          "RETURNS_BRIEF": "File path where the polymorph data was saved.",
+          "RETURNS_DETAILED": "Returns the exact file path where the JSON data was successfully written.\n          This path can be used by subsequent tools for data loading and processing.\n          The file contains comprehensive polymorph data in JSON format, sorted by thermodynamic stability.",
+          "RETURNS_EXAMPLES": "\"data/tio2_polymorphs.json\"",
+          "RAISES": "Exceptions:\n     ValueError:  When save_path is None or API key is not available \n                 Either save_path parameter is not provided or MP_API_KEY environment variable is missing \n                 Provide valid save_path. If  MP_API_KEY is not set, tool might not work and use a different tool \n     IOError:  When unable to write to the specified file path \n              File path is not writable or directory doesn't exist \n              Check file permissions and ensure directory exists",
+          "LIMITATIONS": "Known limitations:\n - Requires writable file system access\n - Limited to materials available in the Materials Project database\n - Can retrieve polymorphs only for one composition at a time\n - Does not validate file format compatibility with other tools"
+        },
+        "args": [
+          {
+            "name": "composition",
+            "type": "str"
+          },
+          {
+            "name": "save_path",
+            "type": "str | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_bulk_polymorphs_data_to_file(\n    if save_path is None:\n        raise ValueError(\"save_path must be provided to save the JSON data\")\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Query for materials with the given composition\n        docs = mpr.materials.summary.search(\n            formula=composition,\n            fields=[\n                \"material_id\",\n                \"structure\",\n                \"energy_above_hull\",\n                \"formation_energy_per_atom\",\n                \"band_gap\",\n    ..."
+      },
+      {
+        "name": "sort_and_get_first_from_json",
+        "sections": {
+          "BRIEF": "Sort JSON data by specified key and return the first element's specified value.",
+          "DETAILED": "This utility tool provides flexible sorting and extraction capabilities for JSON data, particularly useful for materials data analysis where you need to identify optimal structures based on specific criteria.\n    It enables quick identification of the best material according to any numerical property, such as finding the most stable phase, highest band gap material, or densest structure.",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need to quickly identify the best material from a dataset\n    - Best suited for extracting optimal values from sorted lists\n    - Recommended for picking materials with desired properties like lowest energy, highest band gap, etc.\n    - Avoid when you need multiple values or complex filtering criteria",
+          "CONTEXTUAL": "How this tool works:\n    - Parses JSON string into Python data structure\n    - Applies sorting based on specified key using numerical comparison\n    - Extracts the first element after sorting (best/optimal value)\n    - Returns the specified property value from the optimal element\n    - Handles various data types and provides robust error handling\n    - To find the right keys from polymorph data maybe use io tools or python tools",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  First obtain JSON data from polymorph retrieval tools \n    2.  Apply this tool to identify optimal material based on specific criteria \n    3.  Use the returned value for further analysis or material selection",
+          "SYNTACTICAL": "Usage examples:\n    `sort_and_get_first_from_json(polymorphs_json, \"energy_above_hull\", \"material_id\")`,\n    `sort_and_get_first_from_json(polymorphs_json, \"band_gap\", \"cif\")`,\n    `sort_and_get_first_from_json(polymorphs_json, \"density\", \"formation_energy_per_atom\")`,",
+          "ARGS_BRIEF": "Property name to return from the first element after sorting.",
+          "ARGS_DETAILED": "The dictionary key name for the value that should be returned from the first (optimal) element after sorting.\n                   This allows extraction of any property from the optimal structure, such as material_id for identification, cif for structure, or any other calculated property.",
+          "ARGS_EXAMPLES": "\"material_id\", \"cif\", \"formation_energy_per_atom\"",
+          "RETURNS_BRIEF": "Value of the specified return_key from the first element after sorting.",
+          "RETURNS_DETAILED": "The value corresponding to the return_key from the material that has the smallest value for the sort_key.\n             This could be a string (like material_id or CIF), a number (like energy or band gap), or any other data type stored in the JSON.\n             The returned value represents the optimal material according to the specified sorting criterion.",
+          "RETURNS_EXAMPLES": "\"mp-2657\" (material ID), \"1.23\" (energy value), CIF structure string",
+          "RAISES": "Exceptions:\n        JSONDecodeError:  When the json_data string is not valid JSON \n                         Malformed JSON string or incorrect format \n                         Verify JSON format and ensure proper string escaping \n        KeyError:  When sort_key or return_key is not found in the data \n                  Specified keys don't exist in the JSON data dictionaries \n                  Check available keys in the JSON data and use valid key names \n        IndexError:  When the JSON data is empty or contains no elements \n                    Empty list or no valid data after parsing \n                    Ensure JSON data contains at least one element",
+          "LIMITATIONS": "Known limitations:\n    - Only returns the first element after sorting (single optimal result)\n    - Sorting is performed in ascending order only\n    - Does not handle complex sorting criteria or multiple keys\n    - May not work properly with non-numerical sort keys"
+        },
+        "args": [
+          {
+            "name": "json_data",
+            "type": "str"
+          },
+          {
+            "name": "sort_key",
+            "type": "str"
+          },
+          {
+            "name": "return_key",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def sort_and_get_first_from_json(json_data: str, sort_key: str, return_key: str) -> str:\n    data = json.loads(json_data)\n\n    # Sort the data based on the given key\n    sorted_data = sorted(data, key=lambda x: x[sort_key])\n\n    # Return the value of the specified key from the first element\n    return sorted_data[0][return_key]"
+      },
+      {
+        "name": "get_mp_thermo_data",
+        "sections": {
+          "BRIEF": "Retrieve comprehensive thermodynamic data for materials from Materials Project database.",
+          "DETAILED": "This tool accesses detailed thermodynamic information from the Materials Project database, providing essential data for understanding material stability, phase relationships, and thermodynamic properties.\nIt retrieves formation energies, energy above hull, decomposition pathways, and stability information crucial for materials design and selection.\nThis thermodynamic data enables informed decisions about material synthesis feasibility and provides benchmarks for computational studies.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need comprehensive thermodynamic data for specific materials\n- Recommended if you need to retrieve more thermodynamic information of a structure\n- Avoid when you only need basic structural or electronic properties",
+          "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project thermodynamics database via API\n- Retrieves calculated formation energies and stability information\n- Provides energy above hull data for phase stability assessment\n- Reports decomposition pathways and competing phases\n- Returns comprehensive thermodynamic dataset with proper energy corrections",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure material MPID is valid \n2.  Retrieve comprehensive thermodynamic data for target material \n3.  Use thermodynamic data for stability analysis or phase diagram studies",
+          "SYNTACTICAL": "Usage examples:\n`get_mp_thermo_data(\"mp-149\")   # Silicon thermodynamic data`,\n`get_mp_thermo_data(\"mp-2657\")  # TiO2 thermodynamic properties`,\n`get_mp_thermo_data(\"mp-1143\")  # Al2O3 stability information`,",
+          "ARGS_BRIEF": "Materials Project ID for the target material.",
+          "ARGS_DETAILED": "The unique Materials Project identifier for the material of interest.\n                Should be in the format \"mp-XXXXX\" where XXXXX is the numerical ID.\n                The material must exist in the Materials Project database and have thermodynamic calculations available.",
+          "ARGS_EXAMPLES": "\"mp-149\" (Silicon), \"mp-2657\" (TiO2), \"mp-1143\" (Al2O3)",
+          "RETURNS_BRIEF": "JSON string containing comprehensive thermodynamic data and stability information.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing thermodynamic properties including material ID, thermodynamic functional used, formation energy per atom, energy above hull, decomposition products, stability status, energy type, and uncorrected energies.\n         Returns error information if thermodynamic data is not available.",
+          "RETURNS_EXAMPLES": "'[{\"material_id\": \"mp-149\", \"formation_energy_per_atom\": -4.2, \"energy_above_hull\": 0.0, \"is_stable\": true, ...}]'",
+          "RAISES": "Exceptions:\n    ValueError:  When Materials Project API key is not available \n                MP_API_KEY environment variable not set or invalid \n                Obtain valid API key from Materials Project and set environment variable \n    ConnectionError:  When unable to connect to Materials Project API \n                     Network connectivity issues or API server problems \n                     Check internet connection and try again later \n    KeyError:  When material ID is not found or has no thermodynamic data \n              Invalid material ID or thermodynamic properties not calculated \n              Verify material ID exists and has thermodynamic calculations",
+          "LIMITATIONS": "Known limitations:\n- Limited to materials with calculated thermodynamic properties in Materials Project\n- Thermodynamic accuracy depends on computational methodology and corrections applied\n- May not include experimental thermodynamic data or recent calculations\n- Cannot provide thermodynamic data for custom or modified compositions"
+        },
+        "args": [
+          {
+            "name": "material_id",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_mp_thermo_data(material_id: str) -> str:\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Get thermodynamic data\n        thermo_docs = mpr.thermo.search(\n            material_ids=[material_id],\n            fields=[\n                \"material_id\",\n                \"thermo_type\",\n                \"formation_energy_per_atom\",\n                \"energy_above_hull\",\n                \"decomposes_to\",\n                \"is_stable\",\n                \"energy_type\",\n                \"uncorrected_energy_per_atom\",\n            ],\n    ..."
+      },
+      {
+        "name": "find_all_unique_slabs_upto_millerindex",
+        "sections": {
+          "BRIEF": "Generate all unique surface slabs for bulk structure up to specified Miller indices systematically.",
+          "DETAILED": "This tool provides comprehensive surface generation by systematically creating all unique surface slabs for a given bulk structure across all Miller indices up to a specified maximum. It implements advanced slab generation algorithms that explore different surface orientations and terminations, essential for systematic surface studies, catalysis research, and comprehensive materials characterization. This approach ensures no important surface orientations are missed in analysis.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need comprehensive exploration of all possible surface orientations\n- Best suited for systematic surface studies and complete materials characterization\n- Essential for identifying optimal surface orientations for catalysis or adsorption\n- Recommended for research requiring exhaustive surface analysis\n- Avoid when you only need specific known surface orientations",
+          "CONTEXTUAL": "How this tool works:\n- Systematically generates slabs for all Miller indices up to the specified maximum\n- Uses advanced algorithms to identify unique surface terminations and orientations\n- Applies consistent slab thickness and vacuum parameters across all surfaces\n- Calculates surface properties including area, thickness, and atom count\n- Returns comprehensive dataset with detailed metadata for each surface",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First obtain bulk structure using get_structure_from_mp_text or select from polymorphs \n2.  Generate comprehensive collection of all possible surface slabs \n3.  Use select_slabs_with_strategy to filter results or save_structures_to_db for storage",
+          "SYNTACTICAL": "Usage examples:\n`find_all_unique_slabs_upto_millerindex(bulk_cif, False, 2, 10, 15, True, 10)`,\n`find_all_unique_slabs_upto_millerindex(\"bulk_structure.cif\", True, 1, 8, 12, True, 5)`,\n`find_all_unique_slabs_upto_millerindex(structure_string, False, 3, 12, 20, False, 15)`,",
+          "ARGS_BRIEF": "Maximum number of surface normals to search. Defaults to 10.",
+          "ARGS_DETAILED": "The maximum number of surface normal directions to explore for each Miller index. Higher values may find more unique terminations but increase computational cost. This parameter controls the thoroughness of surface termination exploration for complex structures.",
+          "ARGS_EXAMPLES": "5 (quick), 10 (standard), 20 (thorough)",
+          "RETURNS_BRIEF": "JSON dictionary with comprehensive slab data including properties and metadata.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing a dictionary where keys are slab identifiers and values contain comprehensive slab information including Miller indices, termination numbers, CIF structures, surface areas, atom counts, and slab thicknesses. This provides complete characterization of all generated surfaces for analysis and selection.",
+          "RETURNS_EXAMPLES": "\"{\"111_0\": {\"miller_index\": [1,1,1], \"cif\": \"...\", \"area\": 45.2, \"num_sites\": 24, ...}}\"",
+          "RAISES": "Exceptions:\n    ValueError:  When bulk structure is invalid or parameters are incompatible \n                Invalid CIF format, negative size parameters, or structure incompatible with Miller indices \n                Verify structure format and ensure all parameters are positive \n    FileNotFoundError:  When from_path=True but file doesn't exist \n                       Specified file path cannot be found or accessed \n                       Check file path exists and is readable \n    MemoryError:  When max_index is too large for available memory \n                 Exponential growth in surface combinations exceeds memory limits \n                 Reduce max_index or increase available memory",
+          "LIMITATIONS": "Known limitations:\n- Computational cost grows exponentially with max_index\n- May generate many similar surfaces for high-symmetry structures\n- Does not perform surface relaxation or energy calculations\n- Cannot predict relative stability or importance of different surfaces"
+        },
+        "args": [
+          {
+            "name": "bulk_structure_path_or_string",
+            "type": "str"
+          },
+          {
+            "name": "from_path",
+            "type": "bool"
+          },
+          {
+            "name": "max_index",
+            "type": "int"
+          },
+          {
+            "name": "min_slab_size",
+            "type": "float"
+          },
+          {
+            "name": "min_vacuum_size",
+            "type": "float"
+          },
+          {
+            "name": "center_slab",
+            "type": "bool"
+          },
+          {
+            "name": "max_normal_search",
+            "type": "int"
+          }
+        ],
+        "returns": "str",
+        "code": "def find_all_unique_slabs_upto_millerindex(\n    from pymatgen.core.surface import generate_all_slabs\n\n    bulk_structure = load_structure(bulk_structure_path_or_string, from_path)\n\n    slabs = generate_all_slabs(\n        bulk_structure,\n        max_index=max_index,\n        min_slab_size=min_slab_size,\n        min_vacuum_size=min_vacuum_size,\n        center_slab=center_slab,\n        max_normal_search=max_normal_search,\n    )\n    slabs_dict = {}\n    for i, slab in enumerate(slabs):\n        slab_id = (\n            f\"{slab.miller_index[0]}{slab.miller_index[1]}{slab.miller_index[2]}_{i}\"\n        )\n        slabs_dict[slab_id] = {\n            \"miller_index\": slab.miller_index,\n            \"termination\": i,\n    ..."
+      },
+      {
+        "name": "get_mp_surface_properties",
+        "sections": {
+          "BRIEF": "Retrieve comprehensive surface properties for materials from Materials Project database.",
+          "DETAILED": "This tool retrieves detailed surface properties and energetics for specific materials from the Materials Project database, providing essential information for surface chemistry and catalysis studies.\nIt accesses calculated surface energies, anisotropy factors, shape factors, and reconstruction information that are crucial for understanding surface stability and reactivity.\nThis data enables informed selection of materials for surface applications and provides theoretical benchmarks for computational studies.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need comprehensive surface property data for specific materials\n- Best suited for surface stability analysis and catalysis material selection\n- Essential for benchmarking computational surface calculations\n- Recommended for systematic surface property studies across material classes\n- Avoid when you only need basic structural information",
+          "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project API to access surface property database\n- Retrieves calculated surface energies and related thermodynamic properties\n- Provides surface anisotropy and shape factor information for crystal habit prediction\n- Reports reconstruction information for complex surface behavior\n- Returns comprehensive JSON with all available surface properties",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure MPID is valid \n2.  Retrieve comprehensive surface properties for target material \n3.  Use surface property data for material selection or computational benchmarking",
+          "SYNTACTICAL": "Usage examples:\n- get_mp_surface_properties(\"mp-149\")  # Silicon surface properties\n- get_mp_surface_properties(\"mp-2657\")  # TiO2 surface properties\n- get_mp_surface_properties(\"mp-1143\")  # Other material surface data",
+          "ARGS_BRIEF": "Materials Project ID for the target material.",
+          "ARGS_DETAILED": "The unique Materials Project identifier for the material of interest.\n                Should be in the format \"mp-XXXXX\" where XXXXX is the numerical ID.\n                The material must exist in the Materials Project database and have calculated surface properties available.",
+          "ARGS_EXAMPLES": "\"mp-149\" (Silicon), \"mp-2657\" (TiO2 anatase), \"mp-1143\" (Al2O3)",
+          "RETURNS_BRIEF": "JSON string containing comprehensive surface properties and energetics data.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing surface properties including material ID, formula, weighted surface energy, surface energy in eV/Å², surface anisotropy, shape factor, and reconstruction information.\n         Returns error information if surface properties are not available for the specified material.",
+          "RETURNS_EXAMPLES": "'[{\"material_id\": \"mp-149\", \"weighted_surface_energy\": 1.23, \"surface_anisotropy\": 0.15, ...}]'",
+          "RAISES": "Exceptions:\n    ValueError:  When Materials Project API key is not available \n                MP_API_KEY environment variable not set or invalid \n                Obtain valid API key from Materials Project and set environment variable \n    ConnectionError:  When unable to connect to Materials Project API \n                     Network connectivity issues or API server problems \n                     Check internet connection and try again later \n    KeyError:  When material ID is not found or has no surface data \n              Invalid material ID or surface properties not calculated \n              Verify material ID exists and has surface property calculations",
+          "LIMITATIONS": "Known limitations:\n- Limited to materials with calculated surface properties in Materials Project\n- Surface property accuracy depends on computational methodology used\n- May not include very recent calculations or experimental data\n- Cannot provide surface properties for custom or modified structures"
+        },
+        "args": [
+          {
+            "name": "material_id",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_mp_surface_properties(material_id: str) -> str:\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Get surface properties\n        try:\n            surface_docs = mpr.summary.search(\n                material_ids=[material_id],\n                fields=[\n                    \"material_id\",\n                    \"formula_pretty\",\n                    \"weighted_surface_energy\",\n                    \"weighted_surface_energy_EV_PER_ANG2\",\n                    \"surface_anisotropy\",\n                    \"shape_factor\",\n                    \"has_reconstructed\",\n                ],\n    ..."
+      },
+      {
+        "name": "generate_adsorbate_slab_configs",
+        "sections": {
+          "BRIEF": "Generate adsorbate-slab configurations by placing adsorbate molecules at different surface sites.",
+          "DETAILED": "This tool creates multiple adsorbate-slab configurations by systematically placing adsorbate molecules at different adsorption sites on a slab surface.\n    It uses pymatgen's AdsorbateSiteFinder to handle the geometric placement of adsorbates at specified surface sites, including top, bridge, and hollow sites.\n    This is essential for adsorption energy calculations, catalysis studies, and surface reactivity analysis.",
+          "PROCEDURAL": "When to use this tool:\n    - Use after identifying adsorption sites on a slab surface\n    - Essential for creating input structures for adsorption energy calculations\n    - Use when studying catalytic reactions or surface interactions\n    - Recommended for systematic screening of adsorption configurations\n    - Avoid when you only need the clean slab surface without adsorbates",
+          "CONTEXTUAL": "How this tool works:\n    - Loads the slab structure from CIF string\n    - Converts adsorbate CIF to a molecular structure\n    - Parses the adsorption sites information from JSON\n    - Uses AdsorbateSiteFinder from pymatgen to place adsorbates at each site\n    - Generates multiple configurations with different site types and positions\n    - Returns a JSON containing all successfully generated adsorbate-slab configurations",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  Generate slab structure using slab creation tools \n    2.  Identify adsorption sites using get_adsorption_sites_text \n    3.  Have adsorbate molecule structure available \n    4.  Apply this tool to generate adsorbate-slab configurations \n    5.  Use configurations for DFT calculations or energy analysis",
+          "SYNTACTICAL": "Usage examples:\n    `generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json, 1.8)`,\n    `generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json, height=2.0)`,\n    `generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json)`,",
+          "ARGS_BRIEF": "Height in Angstroms for initial adsorbate placement. Defaults to 1.8.",
+          "ARGS_DETAILED": "The initial height above the surface at which the adsorbate will be placed.\n               This is the starting geometry for optimization and should be reasonable for the specific adsorbate-surface system.\n               Typical values are 1.5-2.5 Å.",
+          "ARGS_EXAMPLES": "1.5 (close), 1.8 (standard), 2.2 (distant)",
+          "RETURNS_BRIEF": "JSON string containing all generated adsorbate-slab configurations.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing all successfully generated adsorbate-slab configurations, with each configuration including site information, coordinates, and the complete CIF structure ready for calculations.",
+          "RETURNS_EXAMPLES": "{\"top_0\": {\"site_coords\": [x,y,z], \"cif\": \"...\"}, ...}",
+          "RAISES": "Exceptions:\n        ValueError:  When CIF structures are malformed or incompatible \n                    Invalid CIF format for slab or adsorbate, or parsing errors \n                    Verify CIF formats and ensure structures are valid \n        StructureError:  When adsorbate placement fails \n                        Geometric conflicts or invalid adsorption sites \n                        Check adsorption sites and adjust height parameter",
+          "LIMITATIONS": "Known limitations:\n    - Limited to 3 sites per site type to manage computational cost\n    - Does not optimize adsorbate geometry or consider surface relaxation\n    - May skip sites that cause geometric conflicts\n    - No validation of chemical reasonableness of adsorption sites"
+        },
+        "args": [
+          {
+            "name": "slab_cif",
+            "type": "str"
+          },
+          {
+            "name": "adsorbate_cif",
+            "type": "str"
+          },
+          {
+            "name": "adsorption_sites_json",
+            "type": "str"
+          },
+          {
+            "name": "height",
+            "type": "float"
+          }
+        ],
+        "returns": "str",
+        "code": "def generate_adsorbate_slab_configs(\n    from pymatgen.analysis.adsorption import AdsorbateSiteFinder\n    from pymatgen.core import Molecule, Structure\n\n    # Load structures\n    slab = Structure.from_str(slab_cif, fmt=\"cif\")\n\n    # Try to load adsorbate as a molecule or structure\n    try:\n        adsorbate_struct = Structure.from_str(adsorbate_cif, fmt=\"cif\")\n        adsorbate = Molecule(\n            species=adsorbate_struct.species,\n            coords=list(adsorbate_struct.cart_coords),\n            charge=0,\n        )\n    except Exception as e:\n        raise ValueError(f\"Could not parse adsorbate: {e}\") from e\n\n    # Parse adsorption sites\n    adsorption_sites = json.loads(adsorption_sites_json)\n\n    ..."
+      }
+    ],
+    "tasks": [
+      {
+        "id": "si_workflow",
+        "name": "Complete CO2 Adsorption on Silicon Slab Workflow",
+        "description": "Create a CO2 adsorbed structure on a Silicon slab. Submit the path to the final combined structure CIF file.",
+        "tools": [
+          "get_structure_from_mp_text",
+          "enumerate_slabs_text",
+          "choose_slab_text",
+          "get_adsorption_sites_text",
+          "choose_adsorption_site_text",
+          "add_adsorbate_to_slab_text"
+        ],
+        "scoring_function": "adsorption_structure",
+        "submission_format": "path to cif file (eg. slab_with_co2.cif)",
+        "level": "single"
+      },
+      {
+        "id": "tio2_workflow",
+        "name": "Complete CO2 Adsorption on TiO2 Slab Workflow",
+        "description": "Create a CO2 adsorbed structure on a Titanium dioxide slab. Submit the path to the final combined structure CIF file.",
+        "tools": [
+          "get_structure_from_mp_text",
+          "enumerate_slabs_text",
+          "choose_slab_text",
+          "get_adsorption_sites_text",
+          "choose_adsorption_site_text",
+          "add_adsorbate_to_slab_text"
+        ],
+        "scoring_function": "adsorption_structure",
+        "submission_format": "path to cif file (eg. slab_with_co2.cif)",
+        "level": "single"
+      },
+      {
+        "id": "cu2o_workflow",
+        "name": "Complete CO2 Adsorption on Cuprous Oxide Slab Workflow",
+        "description": "Create a CO2 adsorbed structure on a Cuprous Oxide slab. Submit the path to the final combined structure CIF file.",
+        "tools": [
+          "get_structure_from_mp_text",
+          "enumerate_slabs_text",
+          "choose_slab_text",
+          "get_adsorption_sites_text",
+          "choose_adsorption_site_text",
+          "add_adsorbate_to_slab_text"
+        ],
+        "scoring_function": "adsorption_structure",
+        "submission_format": "path to cif file (eg. slab_with_co2.cif)",
+        "level": "single"
+      }
+    ],
+    "scoring_functions": [
+      {
+        "name": "resolve_path",
+        "docstring": "Resolves a path that might be relative to the base work directory.\nAlso cleans up common input format issues.",
+        "code": "def resolve_path(path_or_str: str) -> str:\n    \"\"\"\n    Resolves a path that might be relative to the base work directory.\n    Also cleans up common input format issues.\n    \"\"\"\n    # Handle various input issues\n    if isinstance(path_or_str, str):\n        # Remove \"answer:\" prefix if present\n        if path_or_str.startswith(\"answer:\"):\n            path_or_str = path_or_str.replace(\"answer:\", \"\", 1).strip()\n\n        # Replace escaped quotes that might come from JSON strings\n        path_or_str = path_or_str.replace('\\\\\"', '\"').replace(\"\\\\'\", \"'\")\n\n    try:\n        # If it's an absolute path or already exists, return as is\n        if Path(path_or_str).is_absolute() or Path(path_or_str).exists():\n            return path_or_str\n\n        # Try to resolve against base directory\n        full_path = Path(BASE_WORK_DIR) / path_or_str\n        if full_path.exists():\n            return str(full_path)\n\n        # If we can't resolve it, return the original\n    ..."
+      },
+      {
+        "name": "check_valid_json_file",
+        "docstring": "Check if a valid JSON file exists at the given path.\n\nArgs:\n    json_path: Path to the JSON file to validate\n\nReturns:\n    float: 1.0 if valid JSON file exists, 0.0 otherwise",
+        "code": "def check_valid_json_file(json_path: str) -> float:\n    \"\"\"\n    Check if a valid JSON file exists at the given path.\n\n    Args:\n        json_path: Path to the JSON file to validate\n\n    Returns:\n        float: 1.0 if valid JSON file exists, 0.0 otherwise\n    \"\"\"\n    try:\n        json_path = json_path.strip()\n        if not json_path or not json_path.strip():\n            logger.warning(\"Empty path provided to check_valid_json_file\")\n            return 0.0\n\n        # Check if file exists\n        if not Path(json_path).exists():\n            logger.info(f\"JSON file not found at: {json_path}\")\n            return 0.0\n\n        # Check if it's a file (not a directory)\n        if not Path(json_path).is_file():\n            logger.info(f\"Path exists but is not a file: {json_path}\")\n            return 0.0\n    ..."
+      },
+      {
+        "name": "check_slabs_json",
+        "docstring": "Check that the slabs JSON contains at least one valid slab by trying to parse\nthe CIF string for one of the slabs. Accepts either a path to a JSON file or a raw JSON string.",
+        "code": "def check_slabs_json(slabs_json: str) -> float:\n    \"\"\"\n    Check that the slabs JSON contains at least one valid slab by trying to parse\n    the CIF string for one of the slabs. Accepts either a path to a JSON file or a raw JSON string.\n    \"\"\"\n    try:\n        logger.info(f\"check_slabs_json: input={slabs_json!r}\")\n\n        # Try to resolve as path\n        resolved_input = smart_resolve_path(slabs_json)\n        logger.info(f\"check_slabs_json: resolved={resolved_input!r}\")\n\n        # Try loading from file if it's a valid path\n        json_data = None\n        if Path(resolved_input).exists():\n            with Path(resolved_input).open() as f:\n                json_data = json.load(f)\n        else:\n            # Try parsing as raw JSON string (try original first, then resolved)\n            try:\n                json_data = json.loads(slabs_json)\n            except json.JSONDecodeError:\n                json_data = json.loads(resolved_input)\n\n        if not json_data or not isinstance(json_data, dict):\n    ..."
+      },
+      {
+        "name": "check_mp_structure",
+        "docstring": "Check if the path points to a valid CIF file containing a structure from Materials Project.",
+        "code": "def check_mp_structure(path_or_cif: str) -> float:\n    \"\"\"\n    Check if the path points to a valid CIF file containing a structure from Materials Project.\n    \"\"\"\n    logger.info(\"check_mp_structure\")\n    logger.info(f\"Input path_or_cif: {path_or_cif}\")\n    try:\n        # Try first as a CIF string since that's more common\n        try:\n            logger.info(f\"Trying to parse as CIF string first: {path_or_cif}\")\n            structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n            logger.info(\"Successfully parsed as CIF string\")\n        except Exception as e:\n            logger.info(f\"Could not parse as CIF string: {e}\")\n            # If that fails, try as a file path\n            if Path(path_or_cif).exists():\n                logger.info(f\"Input is a valid file path: {path_or_cif}\")\n                structure = Structure.from_file(path_or_cif)\n            else:\n                logger.error(\n                    f\"Input is neither a valid CIF string nor a file path: {path_or_cif}\"\n                )\n                return 0.0\n\n        return 1.0 if structure and len(structure) > 0 else 0.0\n    ..."
+      },
+      {
+        "name": "check_slab_structure",
+        "docstring": "Check if the path points to a valid CIF file containing a slab structure.\n\nArgs:\n    path_or_cif: Either a path to a CIF file or a CIF string\n\nReturns:\n    float: Score between 0.0 and 1.0",
+        "code": "def check_slab_structure(path_or_cif: str) -> float:  # TODO: better slab check.\n    \"\"\"\n    Check if the path points to a valid CIF file containing a slab structure.\n\n    Args:\n        path_or_cif: Either a path to a CIF file or a CIF string\n\n    Returns:\n        float: Score between 0.0 and 1.0\n    \"\"\"\n    logger.info(f\"Input path_or_cif: {path_or_cif}\")\n    try:\n        # Determine if the input is a path or a CIF string\n        if Path(path_or_cif).exists():\n            structure = Structure.from_file(path_or_cif)\n        else:\n            structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n\n        # Check if the structure is valid\n        return 1.0 if structure and len(structure) > 0 else 0.0\n    except Exception as e:\n        logger.error(f\"Error validating slab structure: {e}\")\n        return 0.0"
+      },
+      {
+        "name": "check_co2_molecule_structure",
+        "docstring": "Check if the path points to a valid CIF file contains a CO2 molecule.\n\nCaveat: Does not work if there is more than one CO2 molecule.\nAlso does not check for connectivity of the atoms.\n\nArgs:\n    path_or_cif: Either a path to a CIF file or a CIF string\n\nReturns:\n    float: Score between 0.0 and 1.0",
+        "code": "def check_co2_molecule_structure(path_or_cif: str) -> float:\n    \"\"\"\n    Check if the path points to a valid CIF file contains a CO2 molecule.\n\n    Caveat: Does not work if there is more than one CO2 molecule.\n    Also does not check for connectivity of the atoms.\n\n    Args:\n        path_or_cif: Either a path to a CIF file or a CIF string\n\n    Returns:\n        float: Score between 0.0 and 1.0\n    \"\"\"\n    logger.info(f\"Input path_or_cif: {path_or_cif}\")\n    try:\n        # Determine if the input is a path or a CIF string\n        if Path(path_or_cif).exists():\n            structure = Structure.from_file(path_or_cif)\n        else:\n            structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n\n        # Check if the structure is valid\n        if structure and len(structure) > 0:\n            # Check for CO2 molecule (simple check for C and O atoms)\n            has_carbon = any(site.species_string == \"C\" for site in structure)\n    ..."
+      },
+      {
+        "name": "check_adsorption_structure",
+        "docstring": "Returns a scoring function customized to given slab and adsorbate elements",
+        "code": "def check_adsorption_structure(\n    slab_elements: list[str], adsorbate_elements: list[str]\n) -> Callable[[str], float]:\n    \"\"\"Returns a scoring function customized to given slab and adsorbate elements\"\"\"\n\n    logger.info(\n        f\"Creating adsorption structure checker for slab_elements={slab_elements}, adsorbate_elements={adsorbate_elements}\"\n    )\n\n    def score_fn(path_or_cif: str) -> float:\n        try:\n            logger.info(f\"check_adsorption_structure: input={path_or_cif!r}\")\n\n            # Check if file exists\n            if Path(path_or_cif).exists():\n                logger.info(f\"File exists at resolved path: {path_or_cif}\")\n                structure = Structure.from_file(path_or_cif)\n                logger.info(\"Successfully loaded structure from file\")\n            else:\n                logger.warning(f\"File does not exist at resolved path: {path_or_cif}\")\n                # If resolved path doesn't exist, try original input as CIF string\n                try:\n                    logger.info(\"Trying to parse original input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed original input as CIF\")\n    ..."
+      },
+      {
+        "name": "check_adsorption_sites",
+        "docstring": "Check if the JSON string contains valid adsorption sites.\n\nArgs:\n    sites_json_or_path: JSON string containing adsorption sites or path to a JSON file\n\nReturns:\n    float: Score between 0.0 and 1.0",
+        "code": "def check_adsorption_sites(sites_json_or_path: str) -> float:\n    \"\"\"\n    Check if the JSON string contains valid adsorption sites.\n\n    Args:\n        sites_json_or_path: JSON string containing adsorption sites or path to a JSON file\n\n    Returns:\n        float: Score between 0.0 and 1.0\n    \"\"\"\n    try:\n        if not sites_json_or_path or not sites_json_or_path.strip():\n            logger.warning(\"Empty input provided to check_adsorption_sites\")\n            return 0.0\n\n        logger.info(f\"check_adsorption_sites: input={sites_json_or_path!r}\")\n\n        # Try to resolve as path\n        resolved_input = smart_resolve_path(sites_json_or_path.strip())\n        logger.info(f\"check_adsorption_sites: resolved={resolved_input!r}\")\n\n        # Try to load from file first\n        if Path(resolved_input).is_file():\n            with Path(resolved_input).open() as f:\n                json_content = f.read()\n    ..."
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(path_or_cif: str) -> float:\n        try:\n            logger.info(f\"check_adsorption_structure: input={path_or_cif!r}\")\n\n            # Check if file exists\n            if Path(path_or_cif).exists():\n                logger.info(f\"File exists at resolved path: {path_or_cif}\")\n                structure = Structure.from_file(path_or_cif)\n                logger.info(\"Successfully loaded structure from file\")\n            else:\n                logger.warning(f\"File does not exist at resolved path: {path_or_cif}\")\n                # If resolved path doesn't exist, try original input as CIF string\n                try:\n                    logger.info(\"Trying to parse original input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed original input as CIF\")\n                except Exception as e1:\n                    logger.warning(f\"Failed to parse original input as CIF: {e1}\")\n                    # If that fails too, try resolved input as CIF string\n                    logger.info(\"Trying to parse resolved input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed resolved input as CIF\")\n\n            if not structure:\n                logger.error(\"Structure is None\")\n    ..."
+      }
+    ]
+  },
+  "MD": {
+    "description": "Run molecular dynamics simulations with LAMMPS to compute physical properties like diffusion coefficients, glass transition temperatures, and surface energies.",
+    "tools": [
+      {
+        "name": "get_nth_run_log",
+        "sections": {
+          "BRIEF": "Retrieves and processes the nth run log from a LAMMPS log file, where a “run” refers to a contiguous simulation segment such as an energy minimization or an ensemble run (e.g., NVT, NPT, NVE). It returns the list of thermodynamic variables present in that run and the total number of steps. Optionally, it can save the nth run to a CSV file where each column corresponds to a thermodynamic property, and optionally it can return the value of a specific thermodynamic property at a given index.",
+          "DETAILED": "This tool extracts the nth run log from a LAMMPS log file, providing access to the thermodynamic properties recorded during a specific simulation segment. In this context, a “run” refers to a contiguous block of simulation output corresponding to an energy minimization or an ensemble-based simulation stage (e.g., NVT, NPT, NVE) as produced by LAMMPS. LAMMPS log files may contain multiple such runs within a single file, for example when a script performs a minimization followed by one or more ensemble simulations. This tool allows selecting one of these runs by index, extracting its thermodynamic data, and optionally saving it to a CSV file for further analysis. It can also return the value of a specific thermodynamic quantity at a specified step index within the selected run. This is useful for automated analysis pipelines, post-processing workflows, or programmatic inspection of simulation results without manually parsing the log file.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need to extract and analyze the nth run log from a LAMMPS log file without reading the entire log file.\n- Best suited for post-processing and analyzing simulation outputs using external tools or data analysis pipelines.\n- Recommended for automating the extraction of thermodynamic data from LAMMPS simulations.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you have a valid LAMMPS log file generated from a simulation. \n2.  Use this tool to extract the nth run log and optionally save it to a CSV file. \n3.  Utilize the extracted data for analysis, visualization, or further processing in your materials science workflow.",
+          "CONTEXTUAL": "How this tool works:\n- Reads the LAMMPS log file and identifies the nth run section.\n- Extracts thermodynamic data and organises it into a python dataframe, where each column corresponds to a thermodynamic property.\n- Optionally saves the data to a CSV file and retrieves specific data at a given index.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `get_nth_run_log(\"/path/to/log.lammps\", 0, \"run0_thermo.csv\")`,\n    `get_nth_run_log(\"log.lammps\", 1, None)`,\n    `get_nth_run_log(\"/data/simulations/log.lammps\", 2, \"run2_thermo.csv\", 10)`,\n    `get_nth_run_log(\"sim_log.lammps\", 0, \"run0_thermo.csv\", 5)`,\n    `get_nth_run_log(\"/workspace/log.lammps\", 3, None, 20)`,\n]",
+          "ARGS_BRIEF": "Summary of the extracted run log and optional data at the specified index.",
+          "ARGS_DETAILED": "A string summarizing the columns present in the extracted run log, total number of rows, and optionally the thermodynamic data at the specified index.",
+          "ARGS_SYNTACTICAL": "Format: \"Non-negative integer\"",
+          "ARGS_EXAMPLES": "Examples: \"the thermo data has been saved successfully at run0_thermo.csv. The thermo columns are: ['Step', 'Temp', 'Press']. There are total 1000 rows. Data at index 10: {'Step': 100, 'Temp': 300, 'Press': 1.0}\", \"The thermo columns are: ['Step', 'Temp', 'Press']. There are total 500 rows.\"",
+          "RAISES": "Exceptions:\n    Exception:\n         If there is an error reading the log file or extracting the run log. \n         Raised when the log file cannot be read or the specified run log cannot be extracted. \n         Verify the log file path and ensure the run index is valid.",
+          "LIMITATIONS": "Known limitations:\n- Only supports LAMMPS log files with standard formatting.\n- May not handle corrupted or non-standard log files gracefully."
+        },
+        "args": [
+          {
+            "name": "path",
+            "type": "str"
+          },
+          {
+            "name": "n",
+            "type": "int"
+          },
+          {
+            "name": "save",
+            "type": "str | None"
+          },
+          {
+            "name": "index",
+            "type": "int | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_nth_run_log(\n    try:\n        func = modal.Function.from_name(\"simagent\", \"get_nth_run_log\")\n        return func.remote(path=path, n=n, save=save, index=index)\n    except Exception as e:\n        # Handle unexpected errors\n        raise Exception(\n            f\"An unexpected error occurred while parsing the log: {e!s}\"\n        ) from e"
+      },
+      {
+        "name": "keyword_log_extractor",
+        "sections": {
+          "BRIEF": "Extracts sections of a LAMMPS log file that start with a specified keyword.",
+          "DETAILED": "This tool scans a LAMMPS log file for sections that begin with a given keyword and extracts those sections for analysis. It is useful for retrieving specific information such as fixes, computes, or other logged data from simulation runs.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need to extract specific sections of a LAMMPS log file based on keywords.\n- Best suited for targeted analysis of simulation outputs.\n- Recommended for retrieving logged data for further processing or visualization.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you have a valid LAMMPS log file generated from a simulation. \n2.  Use this tool to extract sections of the log file that start with the specified keyword. \n3.  Utilize the extracted data for analysis, visualization, or further processing in your materials science workflow.",
+          "CONTEXTUAL": "How this tool works:\n- Reads the LAMMPS log file line by line.\n- Identifies sections that start with the specified keyword.\n- Extracts and returns those sections as a structured dictionary.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `keyword_log_extractor(\"/path/to/log.lammps\", \"fix\")`,\n    `keyword_log_extractor(\"log.lammps\", \"BULK ENERGY\")`,\n    `keyword_log_extractor(\"/data/simulations/log.lammps\", \"thermo\")`,\n    `keyword_log_extractor(\"sim_log.lammps\", \"dump\")`,\n    `keyword_log_extractor(\"/workspace/log.lammps\", \"velocity\")`,\n]",
+          "ARGS_BRIEF": "Extracted sections as a structured dictionary in string format.",
+          "ARGS_DETAILED": "A string representation of a dictionary containing the extracted sections that start with the specified keyword.",
+          "ARGS_SYNTACTICAL": "Format: \"Non-empty string\"",
+          "ARGS_EXAMPLES": "\"{'fix': [...]}\", \"{'compute': [...]}\"",
+          "RAISES": "Exceptions:\n    Exception:\n         If there is an error reading the log file or extracting sections. \n         Raised when the log file cannot be read or the keyword is not found. \n         Verify the log file path and ensure the keyword is valid.",
+          "LIMITATIONS": "Known limitations:\n- Only supports LAMMPS log files with standard formatting.\n- May not handle corrupted or non-standard log files gracefully."
+        },
+        "args": [
+          {
+            "name": "path",
+            "type": "str"
+          },
+          {
+            "name": "keyword",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def keyword_log_extractor(path: str, keyword: str) -> str:\n    try:\n        func = modal.Function.from_name(\"simagent\", \"keyword_log_extractor\")\n        return func.remote(path=path, keyword=keyword)\n    except Exception as e:\n        # Handle unexpected errors\n        raise Exception(\n            f\"An unexpected error occurred while extracting keyword from log: {e!s}\"\n        ) from e"
+      },
+      {
+        "name": "execute_python_script",
+        "sections": {
+          "BRIEF": "Execute a Python script file with arguments in a controlled environment.",
+          "DETAILED": "This tool executes existing Python script files with command-line arguments, providing a controlled environment for running complex analysis workflows, data processing pipelines, or computational simulations.\nIt captures all output streams and provides comprehensive execution monitoring with timeout protection.\nThis is essential for integrating existing Python scripts into automated workflows and materials analysis pipelines.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need to execute existing Python scripts with specific arguments. You can also use io tool to write a script and then execute it.\n- Best suited for running complex analysis workflows or simulations\n- Essential for integrating external Python tools into automated pipelines\n- Recommended for batch processing and computational workflows\n- Avoid for simple code execution",
+          "CONTEXTUAL": "How this tool works:\n- Validates script file existence and accessibility\n- Constructs command with script path and provided arguments\n- Executes script in subprocess with timeout protection\n- Captures standard output, error streams, and return codes\n- Provides comprehensive execution monitoring and error reporting\n- Supports custom working directory for script execution",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n1.  Ensure script file exists and is executable with proper dependencies \n2.  Execute script with appropriate arguments and timeout \n3.  Process script output and results for further analysis. Can be used to process json script as required",
+          "SYNTACTICAL": "Usage examples:\n`execute_python_script(\"analysis.py\", [\"--input\", \"data.json\", \"--output\", \"results.json\"], 300)`,\n`execute_python_script(\"simulation.py\", [\"--steps\", \"1000\", \"--temp\", \"300\"], 1800, \"/path/to/workdir\")`,\n`execute_python_script(\"processing.py\", None, 600, None)`,",
+          "ARGS_BRIEF": "JSON string with comprehensive execution results and monitoring data.",
+          "ARGS_DETAILED": "The directory from which the script should be executed.\n                This affects relative path resolution and file I/O operations within the script.\n                If None, the current working directory will be used.\n                This is useful when scripts expect to run from specific directories or access relative files.",
+          "ARGS_SYNTACTICAL": "Valid directory path or None",
+          "ARGS_EXAMPLES": "\"{\"success\": true, \"stdout\": \"Processing complete\", \"stderr\": \"\", \"return_code\": 0, \"command\": \"python script.py --input data.json\"}\"",
+          "RAISES": "Exceptions:\n    FileNotFoundError:  When the specified script file doesn't exist \n                       Script path is invalid or file is not accessible \n                       Verify script path exists and is readable \n    TimeoutExpired:  When script execution exceeds the specified timeout \n                    Script terminated due to timeout limit \n                    Increase timeout value or optimize script performance \n    PermissionError:  When script file lacks execute permissions \n                     Insufficient permissions to execute the script \n                     Check file permissions and ensure script is executable",
+          "LIMITATIONS": "Known limitations:\n- Cannot modify script execution environment beyond working directory\n- Limited to Python scripts and available system Python installation\n- No real-time output streaming during execution\n- Cannot interact with scripts requiring user input"
+        },
+        "args": [
+          {
+            "name": "script_path",
+            "type": "str"
+          },
+          {
+            "name": "args",
+            "type": "list | None"
+          },
+          {
+            "name": "timeout",
+            "type": "int"
+          },
+          {
+            "name": "working_dir",
+            "type": "str | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def execute_python_script(\n    try:\n        logger.info(f\"script path {script_path}\")\n        execute_code_script = modal.Function.from_name(\n            \"simagent\", \"execute_python_script\"\n        )\n        return execute_code_script.remote(\n            script_path=script_path, args=args, timeout=timeout, working_dir=working_dir\n        )\n    except Exception as e:\n        # Handle unexpected errors\n        raise Exception(\n            f\"An unexpected error occurred while executing the code: {e!s}\"\n        ) from e"
+      },
+      {
+        "name": "get_potential_metadata",
+        "sections": {
+          "BRIEF": "Returns metadata from a known LAMMPS potential file given the file path. The metadata includes potential type, elements supported, and the LAMMPS-compatible pair style keyword. Raises an exception if the path is invalid or the potential file is not recognized.",
+          "DETAILED": "This tool provides a quick and reliable way to identify the type and supported elements of a LAMMPS potential file based on its filename, after first verifying that the file path is accessible.\nIt eliminates the need to parse the often large and complex contents of potential files, which can exceed processing limits in many systems. The tool first validates that the provided file path is non-empty and then checks file accessibility using a remote file inspection call. If the file path is invalid or inaccessible, a FileNotFoundError is raised. If the file is accessible, the tool extracts the filename using pathlib and matches it against a predefined set of known potential files. For recognized files, it returns a structured metadata string describing the potential type, supported elements, and the LAMMPS pair style.\nIf the filename does not match any known potential, a ValueError is raised.",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need to quickly determine the type, supported elements, or the LAMMPS pair style of a LAMMPS potential file based on its filename.\n    - Use when you want to validate that a potential file path is accessible before using it in a simulation workflow.\n    - Best suited for selecting an appropriate potential file for a specific molecular dynamics (MD) simulation without reading or parsing the full file contents.\n    - Recommended for gaining a fast, structured overview of a potential file's applicability to specific element combinations or simulation scenarios.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Select or obtain the potential file paths that might be relevant to your simulation task. \n    2.  Use this tool to retrieve metadata for each potential file path. The tool will either return metadata or raise an exception if the path or filename is invalid. \n    3.  Based on the metadata returned, choose the appropriate potential file for your simulation setup, and run the simulation using the selected potential file and the tool `run_lammps`.",
+          "CONTEXTUAL": "How this tool works:\n    - Validates that the input file path is non-empty\n    - Checks file accessibility using a remote file inspection call\n    - Extracts the filename from the provided path using pathlib\n    - Matches it against a set of known potential filenames\n    - Returns a structured metadata string for recognized files\n    - Raises FileNotFoundError for invalid or inaccessible paths\n    - Raises ValueError for unrecognized potential filenames",
+          "SYNTACTICAL": "Usage examples:\n[\n    `get_potential_metadata(\"sim_data/Al99.eam.alloy\")`,\n    `get_potential_metadata(\"/path/to/potentials/Mg_Zhou04.eam.alloy\")`,\n    `get_potential_metadata(\"/data/Fe-C_Hepburn_Ackland.eam.fs\")`,\n    `get_potential_metadata(\"Cu_Zhou04.eam.alloy\")`\n]",
+          "ARGS_BRIEF": "Structured metadata string describing the potential file.",
+          "ARGS_DETAILED": "The returned string includes the type of interatomic potential, supported chemical elements, and the LAMMPS pair style.",
+          "ARGS_SYNTACTICAL": "Format: \"string ending in a recognized potential filename\".",
+          "ARGS_EXAMPLES": "Example output: \"{potential type : EAM, elements supported : Al (Aluminum), pair_style : eam/alloy}\"",
+          "RAISES": "Exceptions:\n    ValueError:\n         If the file path is empty or the potential filename is not recognized. \n         Raised when the input path is empty or when the filename does not match any known potential files. \n         Ensure the file path is non-empty and that the filename matches one of the supported potential files. \n\n    FileNotFoundError:\n         If the file path is invalid or the file is not accessible. \n         Raised when the remote file accessibility check fails for the given path. \n         Verify that the file exists at the given path and that it is accessible in the execution environment.",
+          "LIMITATIONS": "Limitations:\n    - This tool only recognizes a predefined set of potential filenames. If the filename does not match any known entry, a ValueError will be raised.\n    - The metadata returned is static and does not include dynamic information from the file contents, such as specific parameters or coefficients used in the potential.\n    - The tool does not validate the actual contents or physical correctness of the potential file; it relies on file accessibility and filename-based identification only."
+        },
+        "args": [
+          {
+            "name": "file_path",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_potential_metadata(file_path: str) -> str:\n    POTENTIALS = {\n        \"Si.sw\": \"{potential type : Stillinger Weber (SW), elements supported : Si (Silicon), pair_style : sw}\",\n        \"2007_SiO.tersoff\": \"{potential type : tersoff, elements supported : Si (Silicon), Oxygen (O), pair_style : tersoff}\",\n        \"Al99.eam.alloy\": \"{potential type : EAM, elements supported : Al (Aluminum), pair_style : eam/alloy}\",\n        \"Cu_Zhou04.eam.alloy\": \"{potential type : EAM, elements supported : Cu (Copper), pair_style : eam/alloy}\",\n        \"Mg_Zhou04.eam.alloy\": \"{potential type : EAM, elements supported : Mg (Magnesium), pair_style : eam/alloy}\",\n        \"Fe-C_Hepburn_Ackland.eam.fs\": \"{potential type : EAM, elements supported : Fe (Iron), C (Carbon), pair_style : eam/fs}\",\n        \"pot.mod\": (\n            \"{potential type : Buckingham + Coulomb (BKS-type), elements supported : \"\n            \"Na (Sodium), Si (Silicon), O (Oxygen), \"\n            \"pair_style : hybrid/overlay buck/coul/long + kspace_style pppm}\"\n        ),\n    }\n    # 1) Validate input\n    if not file_path or not file_path.strip():\n        raise ValueError(\"File path must not be None or empty.\")\n\n    # 2) Check existence / accessibility via modal\n    try:\n        info = modal.Function.from_name(\"simagent\", \"file_info\").remote(file_path)\n    ..."
+      },
+      {
+        "name": "get_structure_from_mp_text",
+        "sections": {
+          "BRIEF": "Retrieves and saves the conventional crystal structure of a material from the Materials Project as a CIF file.",
+          "DETAILED": "This tool retrieves the conventional unit cell structure of a material from the Materials Project using its material ID. It transforms the primitive structure returned by the database into its conventional crystallographic form using symmetry operations, and exports the result in CIF format to a specified file path. This tool is valuable for workflows that require standardized crystal structure representations — such as simulations, visualization, structure matching, or publication. It avoids the need for manual structure transformation or dealing with primitive cells when conventional representation is needed.",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need the conventional crystallographic (not primitive) structure of a material from the Materials Project.\n    - Best suited for preparing simulation-ready input files, visualizing crystal structures, or storing standardized CIFs.\n    - Recommended for quick and automated generation of conventional structure files for structure-based computation or crystallographic analysis.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Ensure you have the Materials Project ID of the material you want to retrieve. Sometimes the MP ID is in the task description so be sure to fully capture the information there. \n    2.  Use this tool to fetch the conventional structure in CIF format by providing the MP ID and desired file path. \n    3.  The resulting CIF file can be used in subsequent steps such as molecular dynamics simulations (using the tool `run_lammps`), structure visualization, or crystallographic analysis.",
+          "CONTEXTUAL": "How this tool works:\n    - Queries the Materials Project database using the provided material ID to retrieve the material's primitive crystal structure.\n    - Applies symmetry analysis to convert the primitive structure into its conventional crystallographic form.\n    - Converts the conventional structure into CIF (Crystallographic Information File) format.\n    - Saves the CIF content to the specified file path using an external function.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `get_structure_from_mp_text(\"mp-149\", \"/workspace/Si_conventional.cif\")`,\n    `get_structure_from_mp_text(\"mp-13\", \"outputs/Aluminum_structure.cif\")`,\n    `get_structure_from_mp_text(\"mp-1692\", \"/data/structures/CuO_conventional.cif\")`,\n    `get_structure_from_mp_text(\"mp-19770\", \"structure_files/Fe2O3.cif\")`,\n    `get_structure_from_mp_text(\"mp-1143\", \"/tmp/Al2O3_structure.cif\")`,\n]",
+          "ARGS_BRIEF": "Status message indicating successful structure retrieval and saving at required path.",
+          "ARGS_DETAILED": "If successful, the tool retrieves the conventional crystallographic structure for the given Materials Project ID, converts it into CIF format, saves it at the specified path, and returns a confirmation message.\n        If any step fails, a descriptive error message is returned instead.",
+          "ARGS_SYNTACTICAL": "Format: 'string path ending in \".cif\" corresponding to the path of the CIF file'.",
+          "ARGS_EXAMPLES": "- \"Structure saved successfully at /workspace/data/structure.cif\"\n            - \"Failed to retrieve or save structure: Invalid Materials Project ID\"",
+          "RAISES": "Exceptions:\n    Exception:\n         Raised if structure retrieval or file saving fails. \n         This generic exception is returned if any error occurs during Materials Project API access, structure conversion, or remote file write. The error message is descriptive and includes the failure reason. \n         To resolve this, check the MP ID for correctness, and verify that the specified file path is writable. If the MP ID is invalid or does not exist, you may need to use a different ID or check the Materials Project database for available materials. If the file path is incorrect or inaccessible, ensure that the directory exists and has the correct permissions for writing files. If the API key is invalid or the Materials Project service is down, you may need to use another tool.",
+          "LIMITATIONS": "Known limitations:\n    - The tool requires a Materials Project API key to access the database, which is hardcoded in the function.\n    - It assumes that the MP ID provided corresponds to a valid material in the Materials Project database.\n    - The tool does not handle cases where the material has multiple structures or polymorphs; it retrieves only the first available structure."
+        },
+        "args": [
+          {
+            "name": "mp_id",
+            "type": "str"
+          },
+          {
+            "name": "file_path",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:\n    try:\n        from mp_api.client import MPRester\n        from pymatgen.symmetry.analyzer import SpacegroupAnalyzer\n\n        with MPRester(os.getenv(\"MP_API_KEY\")) as mpr:\n            docs = mpr.materials.summary.search(\n                material_ids=[str(mp_id)], fields=[\"structure\"]\n            )\n            structure = docs[0].structure\n\n        sga = SpacegroupAnalyzer(structure)\n        structure = sga.get_conventional_standard_structure()\n        structure_cif = structure.to(fmt=\"cif\")\n\n        write_file_sim = modal.Function.from_name(\"simagent\", \"write_file\")\n        write_file_sim.remote(file_path, structure_cif)\n\n        return f\"Structure saved successfully at {file_path}\"\n\n    except Exception as e:\n    ..."
+      },
+      {
+        "name": "convert_structure_to_lammps_data",
+        "sections": {
+          "BRIEF": "Converts a CIF-format structure file into a LAMMPS data file using a specified atom style.",
+          "DETAILED": "This tool converts a crystal structure provided in CIF format (as a file) into a LAMMPS-compatible data file. Internally, it reads the CIF structure file using pymatgen, transforms it into a Structure object, and then serializes it to a LAMMPS data format using the LammpsData class. It supports configurable atom styles such as \"atomic\" or \"charge\", allowing flexibility based on simulation requirements.\nThis enables seamless transformation of standardized crystallographic data into simulation-ready LAMMPS input files, streamlining the setup process for molecular dynamics workflows.",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need to convert crystallographic structure data in CIF format into a LAMMPS-compatible `.data` file.\n    - Best suited for setting up molecular dynamics simulations where LAMMPS is the engine, and structure data is sourced from databases like Materials Project or experimental CIFs.\n    - Avoid when your structure data is already in LAMMPS format or requires extensive pre-processing (e.g., force field assignments).\n    - Recommended for automating simulation pipelines that begin with standardized structural data and end in LAMMPS-ready input formats.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Ensure you have a valid CIF file containing the crystallographic structure of the material you want to simulate. Use the tool `get_structure_from_mp_text` to obtain one. \n    2.  Use this tool to convert the CIF file into a LAMMPS data file by providing the path to the CIF file, the desired output file path, and the atom style (if different from the default \"charge\"). \n    3.  The resulting LAMMPS data file can be used directly in LAMMPS simulations, using the tool `run_lammps` to run the simulation.",
+          "CONTEXTUAL": "How this tool works:\n    - The tool reads the `.cif` file using `pymatgen.core.Structure.from_file` to create a Structure object.\n    - The `LammpsData.from_structure` function is called, using the chosen `atom_style` to format the atomic data accordingly.\n    - The resulting LAMMPS data file is written to the path specified by `output_file`.\n    - The tool does not apply force fields or assign charges explicitly; it assumes the structure is already complete and appropriate for the selected `atom_style`.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `convert_structure_to_lammps_data(\"/workspace/graphene.cif\", \"/workspace/output/graphene.data\")`,\n    `convert_structure_to_lammps_data(\"./structures/NaCl.cif\", \"./data/NaCl.data\", atom_style=\"atomic\")`,\n    `convert_structure_to_lammps_data(\"/data/SiO2.cif\", \"/converted_data/SiO2.data\", atom_style=\"charge\")`,\n    `convert_structure_to_lammps_data(\"MgO.cif\", \"MgO.data\", atom_style=\"charge\")`,\n    `convert_structure_to_lammps_data(\"/tmp/Al2O3.cif\", \"/tmp/Al2O3.data\", atom_style=\"atomic\")`\n]",
+          "ARGS_BRIEF": "Status message indicating successful LAMMPS data file generation.",
+          "ARGS_DETAILED": "If the conversion is successful, returns a confirmation message specifying the path where the LAMMPS data file has been saved. This message can be used for logging or downstream validation in automated simulation workflows.",
+          "ARGS_SYNTACTICAL": "Format: \"one of the predefined LAMMPS atom styles as a lowercase string\".",
+          "ARGS_EXAMPLES": "Example outputs:\n            - \"LAMMPS data file successfully written to: /workspace/output/graphene.data\"\n            - \"LAMMPS data file successfully written to: ./converted_data/SiO2.data\"",
+          "RAISES": "Exceptions:\n    Exception:\n         Raised if structure conversion or file writing fails. \n         This may occur due to issues such as:\n            - Invalid or malformed CIF file that cannot be parsed.\n            - File I/O errors when writing the output file (e.g., permission issues, invalid paths).\n            - Internal errors in the conversion process (e.g., unsupported atom styles, missing dependencies).\n        The error message will provide context for debugging the issue. \n         To resolve this, ensure the CIF file is well-formed and accessible, check that the output file path is valid and writable, and verify that the specified atom style is supported by LAMMPS. If the CIF file is malformed, you may need to correct it or use a different file.\n        If the atom style is unsupported, choose a valid atom style from the LAMMPS documentation.",
+          "LIMITATIONS": "Known limitations:\n    - The tool assumes the CIF file is well-formed and contains a valid crystallographic structure.\n    - It does not perform any validation on the structure content beyond what pymatgen provides.\n    - If the CIF file contains unsupported features or is malformed, it may raise an error during parsing.\n    - The atom style must be one of the recognized LAMMPS styles; otherwise, it will raise an error."
+        },
+        "args": [
+          {
+            "name": "structure_path",
+            "type": "str"
+          },
+          {
+            "name": "output_file",
+            "type": "str"
+          },
+          {
+            "name": "atom_style",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def convert_structure_to_lammps_data(\n    try:\n        convert_structure_to_lammps_data_sim = modal.Function.from_name(\n            \"simagent\", \"convert_structure_to_lammps_data\"\n        )\n        convert_structure_to_lammps_data_sim.remote(\n            structure_path, output_file, atom_style\n        )\n        return f\"LAMMPS data file successfully written to: {output_file}\"\n    except Exception as e:\n        # Handle unexpected errors\n        raise Exception(\n            f\"An unexpected error occurred while converting structure to LAMMPS data: {e!s}\"\n        ) from e"
+      },
+      {
+        "name": "run_lammps",
+        "sections": {
+          "BRIEF": "Runs a LAMMPS simulation based on the provided input script and generates a corresponding log file (named after the input script, with `.log` extension replacing the original extension).",
+          "DETAILED": "This tool executes a LAMMPS molecular dynamics simulation using a specified input script. It takes the path to a LAMMPS input file and automatically triggers the simulation run through a remote execution backend. The tool also generates a corresponding log file (named after the input script, with `.log` extension replacing the original extension) which contains detailed simulation output including thermodynamic data, errors (if any), and runtime diagnostics.",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need to execute a LAMMPS molecular dynamics simulation using a predefined input script.\n    - Use to run a molecular dynamics simulation without needing to manually start LAMMPS or handle the command line interface.\n    - Recommended for production simulations, high-throughput screening, and automated pipelines where simulation setup is complete and ready to run.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Ensure you have a valid LAMMPS input script ready for execution.\n    This script should contain all necessary simulation parameters, atom definitions, force fields, and commands. Additionally, ensure that the .data file is in place. You can create one using the function `convert_structure_to_lammps_data`.  \n    2.  Use this tool to run the LAMMPS simulation by providing the path to the input script. The tool will handle the remote execution and log file generation. \n    3.  After the simulation completes, check the generated log file for results, diagnostics, and any errors. The log file will be named based on the input script, with a `.log` extension. You can then proceed to analyze the results or use the output data in subsequent steps of your workflow.",
+          "CONTEXTUAL": "How this tool works:\n    - The input LAMMPS script (typically ending in `.in`) is passed to the remote backend.\n    - The tool constructs a log file name by replacing the script's extension with `.log`.\n    - A remote function is invoked with the input file, the log file path.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `run_lammps(\"/workspace/lammps_inputs/graphene_sim.in\")`,\n    `run_lammps(\"./data/sio2_minimize.in\")`,\n    `run_lammps(\"minimize_bulk_sio2.in\")`,\n    `run_lammps(\"/path/to/simulation/input_script.in\")`,\n    `run_lammps(\"job123.lmp\", 2)`,\n]",
+          "ARGS_BRIEF": "Message indicating simulation completion with log file location.",
+          "ARGS_DETAILED": "On success, returns a message confirming the simulation run, the path to the latest input script used, and the corresponding log file. The log file contains detailed runtime diagnostics and output for verification.",
+          "ARGS_SYNTACTICAL": "Format: string representing a file path; must be readable by the backend LAMMPS engine.",
+          "ARGS_EXAMPLES": "- \"Simulation ran successfully using input: simulations/run_graphene.in, log saved at: run_graphene.log\"\n            - \"Simulation ran successfully using input: ./jobs/job123.lmp, log saved at: job123.log\"",
+          "RAISES": "Exceptions:\n    ValueError:\n         Raised if the LAMMPS simulation fails due to invalid input or LAMMPS-specific error. \n         This exception is raised when the underlying LAMMPS execution raises a ValueError, which can occur due to issues such as missing sections in the input file, invalid parameters, or other LAMMPS-specific errors that prevent the simulation from running successfully.\n        The error message will provide context about the failure, such as missing commands or unsupported features in the input script. \n         To resolve this, check the input file for correctness, ensuring that all required sections are present and properly formatted.\n        Verify that the parameters used in the input script are valid for the LAMMPS version being used. If the error persists, consult the LAMMPS documentation or community forums for guidance on the specific error encountered. \n\n    Exception:\n         Raised on unexpected backend or runtime errors. \n         This generic exception is raised for any unexpected issues that occur during the execution of the LAMMPS simulation, such as backend unavailability, file system errors, or misconfigured modal runtime.\n        The error message will include details about the failure, which can help in debugging the issue. \n         To resolve this, check the backend configuration to ensure it is correctly set up and available.\n        Verify that the input file path is correct and accessible.\n        If the backend is misconfigured or unavailable, you may need to adjust the modal settings or ensure that the modal service is running properly.\n        If the error persists, consult the modal documentation or support resources for further assistance.",
+          "LIMITATIONS": "Known limitations:\n    - The tool assumes that the input file is correctly formatted and does not require interactive input during execution.\n    - It does not validate the contents of the input file beyond basic file existence checks; any errors in the LAMMPS script will result in a runtime error during execution.\n    - The tool is designed to work with a specific backend (modal) and may not function correctly if the backend is misconfigured or unavailable."
+        },
+        "args": [
+          {
+            "name": "input_file",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def run_lammps(input_file: str) -> str:\n    if not input_file:\n        raise ValueError(\"Input file path must not be None or empty.\")\n\n    try:\n        file_name_without_extension = Path(input_file).stem\n        log_file = f\"{file_name_without_extension}.log\"\n        run_lammps_sim = modal.Function.from_name(\"simagent\", \"run_lammps\")\n        run_lammps_sim.remote(input_file, log_file)\n        return f\"Simulation ran successfully using input: {input_file}, log saved at: {log_file}\"\n\n    except ValueError as e:\n        # Raise a ValueError with more context about the failure\n        raise ValueError(\n            f\"The LAMMPS simulation failed with a ValueError: {e!s}\"\n        ) from None\n    except Exception as e:\n        # Handle unexpected errors\n        raise Exception(\n            f\"An unexpected error occurred while running the LAMMPS simulation: {e!s}\"\n        ) from None"
+      },
+      {
+        "name": "visualisation_tool",
+        "sections": {
+          "BRIEF": "Analyzes a plot image and answers a user query using only visual, qualitative inspection and direct reading of visible values from the figure. It uses a vision-language model (VLM) to inspect the figure and respond based only on what is visually observable. Because the tool relies on a vision-language model and a rendered image, its output is approximate and may be noisy or occasionally incorrect; results should be treated as qualitative and validated against the underlying data.",
+          "DETAILED": "This tool takes the path to an image file containing a plot and a natural-language query about that plot. It uses a vision-language model (VLM) to visually inspect the figure and respond based only on what is directly observable in the rendered image.\nThe tool is designed to describe shapes, trends, regimes, and visually identifiable features (such as kinks, transitions, peaks, onsets, or crossings), and—when appropriate—to read off approximate values directly from the axes at those features.\nCrucially, the tool does NOT perform any calculations, fitting, regression, or parameter extraction. If the query requires a computed or inferred quantity rather than a directly readable or visually observable feature, the tool will refuse and state that it can only provide visual descriptions and directly readable values. Because the tool relies on a vision-language model and a rendered image, its answers are inherently approximate, potentially noisy, and may sometimes be incorrect or incomplete. The quality and reliability of the response depend strongly on image resolution, plot clarity, axis labeling, marker density, and overall figure design. Users should treat the output as a qualitative, assistive interpretation and should validate important conclusions using proper quantitative analysis tools or the underlying data.",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need a qualitative, visual interpretation of a plot image.\n    - Use when you want to identify visually apparent features such as regime changes, kinks, plateaus, jumps, peaks, or onsets.\n    - Use when you want to read off an approximate value from the axis corresponding to a visually identifiable feature (e.g., the temperature of a visible transition).\n    - Use as a first-pass, exploratory or assistive inspection tool, not as a replacement for quantitative analysis.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Ensure that a plot image file (e.g., PNG, JPG) exists at a known path and is readable by the tool. The plot should contain visible axes, labels, and data. \n    2.  Call this tool with the image path and a natural-language query about the visual features or directly readable values of the plot. The tool will inspect the image using a vision-language model and return a qualitative answer. \n    3.  Validate any important conclusions using the underlying data or dedicated analysis tools. If the answer is unclear or unreliable, consider replotting (e.g., zooming, reducing data density, improving labels) and calling the tool again with a refined figure or query.",
+          "CONTEXTUAL": "How this tool works:\n    - The image at the given path is loaded and analyzed by a vision-language model (VLM).\n    - The model performs visual inspection only: it looks at shapes, trends, patterns, and visibly identifiable features in the figure.\n    - The model may report approximate values only when they can be directly read from the axes at a clearly visible feature (e.g., a labeled tick near a visible transition).\n    - The model does not have access to the underlying data and does not perform any numerical computation, fitting, or measurement.\n    - Because this tool relies on visual perception of a rendered image, its answers are limited by image resolution, figure clarity, marker density, and plotting choices, and may be noisy or occasionally incorrect.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `visualisation_tool(\"plots/density_vs_temperature.png\", \"At what temperature does the visible kink occur?\")`,\n    `visualisation_tool(\"plots/stress_strain.png\", \"Is there a clear yield point visible?\")`,\n    `visualisation_tool(\"plots/energy_vs_step.png\", \"Is there a plateau region, and where does it start?\")`,\n    `visualisation_tool(\"plots/spectrum.png\", \"Where is the main peak located on the x-axis?\")`,\n    `visualisation_tool(\"plots/density_vs_temperature.png\", \"Does the curve look linear or does it change regime?\")`,\n]",
+          "ARGS_BRIEF": "A qualitative, visually grounded answer to the query, or a refusal if the query requires a derived quantity.",
+          "ARGS_DETAILED": "On success, returns a text response describing the relevant visual features of the plot and, if applicable, an approximate value read directly from the axis at a visually identifiable feature. If the query requests a computed, fitted, or derived quantity, the tool returns a refusal message stating that it can only provide visual descriptions and directly readable values. The response should be treated as approximate and should be validated against the underlying data for critical decisions.",
+          "ARGS_SYNTACTICAL": "Format: string containing a natural-language query.",
+          "ARGS_EXAMPLES": "- \"There is a clear kink in the curve around the temperature labeled near 350 K, which appears to mark the transition.\"\n            - \"The curve shows a change in behavior roughly in the middle of the x-axis, where it becomes flatter.\"\n            - \"I can describe the plot and read off directly visible values, but I cannot perform calculations or extract derived quantities from it.\"",
+          "RAISES": "Exceptions:\n    Exception:\n         Raised on unexpected errors during image loading, encoding, or backend model invocation. \n         This exception is raised if the image file cannot be read, the backend service is unavailable, or an unexpected runtime error occurs while processing the request. The error message will include details to help diagnose the failure. \n         To resolve this, verify that the image path is correct and accessible, ensure that the backend service is properly configured and running, and check for any file system or environment configuration issues.",
+          "LIMITATIONS": "Known limitations:\n    - This tool is powered by a vision-language model and does not see the raw data—only the rendered image.\n    - The model may be noisy, approximate, or occasionally incorrect, especially for low-resolution, cluttered, or ambiguously labeled plots.\n    - Fine details, subtle transitions, or precise values may not be visually resolvable.\n    - The tool cannot perform calculations, fitting, or extract derived quantities, even if they could be inferred by a human.\n    - Any values reported are approximate and based solely on what is visually readable from the figure.\n    - Results should be validated against the underlying data, and for important cases it is recommended to iteratively refine the figure (e.g., zoom, replot, reduce clutter) and re-run the tool."
+        },
+        "args": [
+          {
+            "name": "path",
+            "type": "str"
+          },
+          {
+            "name": "query",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def visualisation_tool(path: str, query: str) -> str:\n    from dotenv import load_dotenv\n    from openai import OpenAI\n\n    load_dotenv(\"../../../../.env\")\n    try:\n        client = OpenAI()\n        read_file_mode = modal.Function.from_name(\"simagent\", \"read_file_mode\")\n        base64_encoded = read_file_mode.remote(path, \"rb\")\n\n        response = client.responses.create(\n            model=\"gpt-4.1\",\n            temperature=0.0,\n            input=[\n                {\n                    \"role\": \"system\",\n                    \"content\": [\n                        {\n                            \"type\": \"input_text\",\n                            \"text\": (\n                                \"\"\"\n    ..."
+      }
+    ],
+    "tasks": [
+      {
+        "id": "silicon_melting_1",
+        "name": "Melting of Silicon - Level 1",
+        "description": "Calculate the average self diffusion coefficient of liquid silicon at 2500K using molecular dynamics simulations with LAMMPS. Start from a crystalline silicon structure, which is replicated three times in each direction. The Stillinger-Weber (SW) potential should be used to describe interatomic interactions. Perform the heating and equilibration under zero external isotropic pressure control using NPT ensemble. Heat the system from 300K to 2500K at a rate of 2.2 K/ps, then equilibrate the liquid at 2500K for 500 ps. Use the Einstein relation to compute the diffusion coefficient from the mean squared displacement (MSD) data collected during the equilibration phase. Report the diffusion coefficient in units of m²/s.",
+        "tools": [
+          "get_potential_metadata",
+          "get_structure_from_mp_text",
+          "convert_structure_to_lammps_data",
+          "run_lammps",
+          "get_nth_run_log",
+          "keyword_log_extractor",
+          "visualisation_tool"
+        ],
+        "scoring_function": "check_numerical",
+        "submission_format": "numerical value without units (eg. 56.00)",
+        "level": "melting"
+      },
+      {
+        "id": "na2sio3_quenching_1",
+        "name": "Quenching of Sodium Silicate - Level 1",
+        "description": "Determine the glass transition temperature (Tg) of sodium silicate by quenching a molten configuration using molecular dynamics simulations. Start from the given pre-equilibrated molten sodium silicate structure. Use the provided Buckingham + Coulomb (BKS-type) potential with long-range electrostatics (PPPM) to define interatomic interactions. The potential file already contains the required pair_style, pair_coeff, and kspace_style commands and should be included directly. Perform the cooling and equilibration under zero external isotropic pressure control using NPT ensemble. Cool the system from 4000 K down to 300 K with a cooling rate of 10 K/ps and a pressure damping factor of 10000, then equilibrate the glass formed at 300 K for an additional 100 ps with a pressure damping factor of 5000. Estimate the glass transition temperature Tg by constructing the density–temperature curve and fitting two linear regimes corresponding to the high-temperature (supercooled liquid) and low-temperature (glassy) regions. Do not look the data beyond 2600 K as then the density becomes noisy. Extract Tg as the intersection point of the two fitted lines, and report the result in Kelvin (K).",
+        "tools": [
+          "get_potential_metadata",
+          "get_structure_from_mp_text",
+          "convert_structure_to_lammps_data",
+          "run_lammps",
+          "get_nth_run_log",
+          "keyword_log_extractor",
+          "visualisation_tool"
+        ],
+        "scoring_function": "check_numerical",
+        "submission_format": "numerical value without units (eg. 56.00)",
+        "level": "quenching"
+      },
+      {
+        "id": "aluminum_surface_energy_1",
+        "name": "Aluminum Surface Energy - Level 1",
+        "description": "Calculate the surface energy of Aluminum for the surface whose normal is along the given direction by removing periodic boundary conditions in the given direction and computing the energy difference per unit area between the bulk and surface configurations. Use the Embedded Atom Method (EAM) potential and the following simulation parameters. The simulation should replicate the unit cell 5 times in each of the x, y, and z directions. Return the surface energy in eV/Å² units.",
+        "tools": [
+          "get_potential_metadata",
+          "get_structure_from_mp_text",
+          "convert_structure_to_lammps_data",
+          "run_lammps",
+          "get_nth_run_log",
+          "keyword_log_extractor",
+          "visualisation_tool"
+        ],
+        "scoring_function": "check_numerical",
+        "submission_format": "numerical value without units (eg. 56.00)",
+        "level": "surface_energy"
+      }
+    ],
+    "scoring_functions": [
+      {
+        "name": "check_potential_file",
+        "docstring": "Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\nBehavior :This is a higher-order function that returns `score_fn`, a callable which:\n    - Accepts a single argument `result` (str or None).\n    - Logs a warning and returns 0.0 if `result` is None.\n    - Otherwise, calls the remot",
+        "code": "def check_potential_file(target: str):\n    \"\"\"\n    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\n    Behavior :This is a higher-order function that returns `score_fn`, a callable which:\n        - Accepts a single argument `result` (str or None).\n        - Logs a warning and returns 0.0 if `result` is None.\n        - Otherwise, calls the remote Modal function \"simagent/check_potential\"\n        with `target` and `result`, and returns its float score.\n\n    Args:\n        target (str): The target identifier or path to evaluate results against.\n\n    Returns:\n        Callable[[str | None], float]: A function that takes a result string (or None)\n        and returns a floating-point score from the remote checker, or 0.0 if the\n        result is None.\n    \"\"\"\n\n    def score_fn(result: str | None = None) -> float:\n        if result is None:\n            logger.warning(\"Received None as result in check_potential_file\")\n            return 0.0\n\n        return modal.Function.from_name(\"simagent\", \"check_potential\").remote(\n    ..."
+      },
+      {
+        "name": "check_log",
+        "docstring": "Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\nBehavior:\n  - If variable is a string:\n      * Extracts that variable from the LAMMPS log file.\n      * Computes the average of the last 'window' entries.\n      * Compares the average to the target value within tolerance.\n  - If va",
+        "code": "def check_log(variable: str | list, target: float, tolerance: float, window: int):\n    \"\"\"\n    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\n    Behavior:\n      - If variable is a string:\n          * Extracts that variable from the LAMMPS log file.\n          * Computes the average of the last 'window' entries.\n          * Compares the average to the target value within tolerance.\n      - If variable is a list/tuple [var_to_check, var_must_exist]:\n          * Checks var_must_exist exists in the log header.\n          * Checks var_to_check numerically as above.\n          * If either fails, returns 0.0.\n    \"\"\"\n    import json\n\n    import numpy as np\n\n    def read_log_from_text(log_text: str, column: str):\n        steps = []\n        values = []\n\n        lines = log_text.splitlines()\n\n        header = None\n    ..."
+      },
+      {
+        "name": "check_msd",
+        "docstring": "Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\nBehavior:\n  - Extracts the MSD value from the result log file.\n  - Compares the MSD to the target value within the given tolerance.",
+        "code": "def check_msd(target: float):\n    \"\"\"\n    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\n    Behavior:\n      - Extracts the MSD value from the result log file.\n      - Compares the MSD to the target value within the given tolerance.\n    \"\"\"\n    import numpy as np\n    from sklearn.metrics import r2_score\n\n    def read_msd_from_text(content: str):\n        lines = [line.strip() for line in content.splitlines() if line.strip()]\n\n        if not lines:\n            raise ValueError(\"Empty MSD file\")\n\n        def is_float(s):\n            try:\n                float(s)\n                return True\n            except ValueError:\n                return False\n\n        # Detect header: if any token in first line is non-numeric\n    ..."
+      },
+      {
+        "name": "check_numerical",
+        "docstring": "Create a scoring function that validates numerical results against a target\nvalue within a relative tolerance, optionally requiring an associated file\nexistence check.\n\nThe returned function evaluates an input `result` and returns a score in\n{0.0, 1.0} according to the following rules:\n\n- Numeric-on",
+        "code": "def check_numerical(target: float, tolerance: float) -> Callable[[Any], float]:\n    \"\"\"\n    Create a scoring function that validates numerical results against a target\n    value within a relative tolerance, optionally requiring an associated file\n    existence check.\n\n    The returned function evaluates an input `result` and returns a score in\n    {0.0, 1.0} according to the following rules:\n\n    - Numeric-only mode:\n        * If `result` is a number (int/float), a numeric string, or a JSON\n          primitive (number or numeric string), only a numerical tolerance\n          check is performed.\n\n    - Dictionary (JSON) mode:\n        * If `result` is a dict (or a JSON string that parses to a dict), a\n          numerical check is performed AND a file existence check is required.\n        * Recognized key pairs:\n            - \"density\"        -> requires \"trajectory_file\" or \"log_file\"\n            - \"BULK ENERGY\"    -> requires \"path to relaxed structure\" or\n                                  \"Relaxed BULK Structure_path\"\n            - \"SLAB ENERGY\"    -> requires \"path to relaxed structure\" or\n                                  \"Relaxed BULK Structure_path\"\n\n    Numerical validation succeeds if:\n    ..."
+      },
+      {
+        "name": "check_structure",
+        "docstring": "Create a scoring function that evaluates a structure result against a target\nusing a remote Modal function.\n\nThis is a higher-order function that returns `score_fn`, a callable which:\n- Accepts a single argument `result` (str or None).\n- Logs a warning and returns 0.0 if `result` is None.\n- Otherwis",
+        "code": "def check_structure(target, atom_style):\n    \"\"\"\n    Create a scoring function that evaluates a structure result against a target\n    using a remote Modal function.\n\n    This is a higher-order function that returns `score_fn`, a callable which:\n    - Accepts a single argument `result` (str or None).\n    - Logs a warning and returns 0.0 if `result` is None.\n    - Otherwise, calls the remote Modal function \"simagent/check_structure\"\n      with `target`, `atom_style`, and `result`, and returns its float score.\n\n    Args:\n        target: The target identifier or path used for structure validation.\n        atom_style: The atom style configuration passed to the remote checker.\n\n    Returns:\n        Callable[[str | None], float]: A function that takes a result string (or None)\n        and returns a floating-point score from the remote checker, or 0.0 if the\n        result is None.\n    \"\"\"\n\n    def score_fn(result: str | None = None) -> float:\n        if result is None:\n            logger.warning(\"Received None as result in check_structure\")\n            return 0.0\n    ..."
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(result: str | None = None) -> float:\n        if result is None:\n            logger.warning(\"Received None as result in check_potential_file\")\n            return 0.0\n\n        return modal.Function.from_name(\"simagent\", \"check_potential\").remote(\n            target, result\n        )"
+      },
+      {
+        "name": "read_log_from_text",
+        "docstring": "",
+        "code": "    def read_log_from_text(log_text: str, column: str):\n        steps = []\n        values = []\n\n        lines = log_text.splitlines()\n\n        header = None\n        col_index = None\n        step_index = None\n\n        # Allow aliases for certain columns\n        column_aliases = {\n            \"Temp\": [\"Temp\", \"Temperature\"],\n            \"Temperature\": [\"Temp\", \"Temperature\"],\n        }\n\n        for raw_line in lines:\n            line = raw_line.strip()\n\n            if line.startswith(\"Step\"):\n                header = line.split()\n\n                # Resolve column name (handle Temp / Temperature alias)\n                possible_names = column_aliases.get(column, [column])\n\n    ..."
+      },
+      {
+        "name": "header_has_column",
+        "docstring": "",
+        "code": "    def header_has_column(header, column: str) -> bool:\n        # Handle aliases here too\n        column_aliases = {\n            \"Temp\": [\"Temp\", \"Temperature\"],\n            \"Temperature\": [\"Temp\", \"Temperature\"],\n        }\n        possible_names = column_aliases.get(column, [column])\n\n        return any(name in header for name in possible_names)"
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(result: str | None = None) -> float:\n        if result is None:\n            logger.warning(\"Received None as result in check_log\")\n            return 0.0\n        try:\n            data = json.loads(result)\n            log_file_path = data[\"log_file\"]\n\n            if \"restart_file\" in data:\n                restart_file_path = data[\"restart_file\"]\n                try:\n                    info = modal.Function.from_name(\"simagent\", \"file_info\").remote(\n                        restart_file_path\n                    )\n                    logger.info(f\"Restart file info: {info}\")\n                except RuntimeError as e:\n                    logger.warning(f\"Restart file existence check failed: {e}\")\n                    return 0.0\n\n            read_file = modal.Function.from_name(\"simagent\", \"read_file\")\n            content = read_file.remote(log_file_path)\n\n            # Determine mode\n            if isinstance(variable, (list | tuple)):\n                var_to_check = variable[0]\n    ..."
+      },
+      {
+        "name": "read_msd_from_text",
+        "docstring": "",
+        "code": "    def read_msd_from_text(content: str):\n        lines = [line.strip() for line in content.splitlines() if line.strip()]\n\n        if not lines:\n            raise ValueError(\"Empty MSD file\")\n\n        def is_float(s):\n            try:\n                float(s)\n                return True\n            except ValueError:\n                return False\n\n        # Detect header: if any token in first line is non-numeric\n        first_tokens = lines[0].split()\n        has_header = not all(is_float(tok) for tok in first_tokens)\n\n        data_lines = lines[1:] if has_header else lines\n\n        steps = []\n        msd = []\n\n        for line in data_lines:\n            tokens = line.split()\n            if len(tokens) < 2:\n    ..."
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(result: str | None = None) -> float:\n        if result is None:\n            logger.warning(\"Received None as result in check_msd\")\n            return 0.0\n        try:\n            # Read remote result file content\n            read_file = modal.Function.from_name(\"simagent\", \"read_file\")\n            content = read_file.remote(result)\n            steps, msd_values, has_header = read_msd_from_text(content)\n            # Convert to numpy arrays\n            time_ps = np.asarray(steps, dtype=float)\n            msd = np.asarray(msd_values, dtype=float)\n\n            # Basic sanity check\n            if len(time_ps) < 2:\n                return 0.0\n\n            # If you already have a mask logic, keep using it.\n            # Otherwise, fit everything:\n            mask = np.ones_like(time_ps, dtype=bool)\n\n            time_fit = time_ps[mask]\n            msd_fit = msd[mask]\n\n            # Need at least 2 points after masking\n    ..."
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(result) -> float:\n        try:\n            answer = None\n            file_path = None\n\n            # Helper: numeric-only check\n            def numeric_ok(val):\n                tol = tolerance * abs(target)\n                return (target - tol) <= val <= (target + tol)\n\n            # 1) If input is a string, try JSON first; else try regex numeric\n            if isinstance(result, str):\n                s = result.strip()\n                # Try to parse JSON (could be a dict or a primitive JSON value)\n                try:\n                    parsed = json.loads(s)\n                except json.JSONDecodeError:\n                    # Not JSON: try to extract a number with regex (numeric-only mode)\n                    m = re.search(r\"[-+]?\\d*\\.\\d+|\\d+\", s)\n                    if not m:\n                        return 0.0\n                    answer = float(m.group())\n                    return 1.0 if numeric_ok(answer) else 0.0\n                else:\n                    # parsed is the JSON value (dict, number, or string)\n    ..."
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(result: str | None = None) -> float:\n        if result is None:\n            logger.warning(\"Received None as result in check_structure\")\n            return 0.0\n\n        return modal.Function.from_name(\"simagent\", \"check_structure\").remote(\n            target, atom_style, result\n        )"
+      },
+      {
+        "name": "is_float",
+        "docstring": "",
+        "code": "        def is_float(s):\n            try:\n                float(s)\n                return True\n            except ValueError:\n                return False"
+      },
+      {
+        "name": "numeric_ok",
+        "docstring": "",
+        "code": "            def numeric_ok(val):\n                tol = tolerance * abs(target)\n                return (target - tol) <= val <= (target + tol)"
+      }
+    ]
+  },
+  "ML": {
+    "description": "Train and evaluate machine learning models (XGBoost) on materials science datasets from the Materials Project.",
+    "tools": [
+      {
+        "name": "get_structure_from_mp_text",
+        "sections": {
+          "BRIEF": "Retrieve a pymatgen structure from Materials Project using its API and return CIF content as text.",
+          "DETAILED": "This tool connects to the Materials Project database to download crystal structure data for a given material ID.\n    It retrieves the structure object and converts it to CIF (Crystallographic Information File) format, which is the standard format for storing crystal structure information.\n    CIF is then returned as string",
+          "PROCEDURAL": "When to use this tool:\n    - Use when you need to retrieve bulk crystal structures from the Materials Project database\n    - Best suited for materials with known MP IDs\n    - Usually first step in simulation workflows\n    - Recommended for obtaining crystal structures for preparing bulk structures, supercells, bulk cells, slabs etc.\n    - Avoid when you need multiple structures",
+          "CONTEXTUAL": "How this tool works:\n    - Connects to Materials Project API using authentication key\n    - Searches for the specified material ID (MP ID) in the database (MP ID is given as input parameter or if other tools are available to search for MP ID based on available information, then use those tools)\n    - Retrieves the pymatgen Structure object containing atomic positions and lattice parameters\n    - Converts the structure to CIF format string for compatibility with other tools\n    - Returns standardized crystallographic data suitable for further processing",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  Ensure that the other more specific tools are not suitable and you dont have to retrieve multiple structures\n    2.  Apply this tool with a valid MP ID to retrieve bulk structure \n    3.  Use the CIF output with slab generation tools like enumerate_slabs_text to create slab structures",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `get_structure_from_mp_text(\"mp-149\")`, # Silicon structure\n        `get_structure_from_mp_text(\"mp-20066\")`, # CO2 structure\n        `get_structure_from_mp_text(\"mp-2\")` # Other material\n        `get_structure_from_mp_text(\"mp-12345\")` # Example with a different MP ID\n        `get_structure_from_mp_text(\"mp-67890\")` # Another example with a different MP ID\n    ]",
+          "ARGS_BRIEF": "Materials Project identifier string.",
+          "ARGS_DETAILED": "The unique identifier used by Materials Project to catalog materials.\n               Should be in the format \"mp-XXXXX\" where XXXXX is a numerical ID.\n               This ID corresponds to a specific material entry in the Materials Project database.",
+          "ARGS_EXAMPLES": "\"mp-149\" (Silicon), \"mp-20066\" (CO2), \"mp-2\" (Li)",
+          "RETURNS_BRIEF": "CIF content string containing the crystal structure data.",
+          "RETURNS_DETAILED": "A properly formatted CIF (Crystallographic Information File) string containing all necessary information about the crystal structure including lattice parameters, atomic positions, space group, and symmetry operations.\n             This format is widely compatible with crystallographic software and other structure analysis tools.",
+          "RETURNS_EXAMPLES": "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\"",
+          "RAISES": "Exceptions:\n        ConnectionError:  When unable to connect to Materials Project API \n                         Network connectivity issues or API server downtime \n                         Check internet connection and MP_API_KEY environment variable \n        KeyError:  When the specified MP ID is not found in the database \n                  Invalid or non-existent material ID provided \n                  Verify MP ID exists on Materials Project website or check MP ID syntax\n        AuthenticationError:  When API key is invalid or missing \n                              MP_API_KEY environment variable not set or expired \n                              Obtain valid API key from Materials Project and set environment variable",
+          "LIMITATIONS": "Known limitations:\n    - Requires valid Materials Project API key to be set and internet connection\n    - Limited to materials available in the Materials Project database\n    - May not include the most recent experimental structures"
+        },
+        "args": [
+          {
+            "name": "mp_id",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_structure_from_mp_text(mp_id: str) -> str:\n    from mp_api.client import MPRester\n\n    with MPRester(os.getenv(\"MP_API_KEY\")) as mpr:\n        docs = mpr.materials.summary.search(\n            material_ids=[str(mp_id)], fields=[\"structure\"]\n        )\n        structure = docs[0].structure\n\n    return structure.to(fmt=\"cif\")"
+      },
+      {
+        "name": "get_bulk_polymorphs_data",
+        "sections": {
+          "BRIEF": "Query Materials Project database to find all polymorphs for a given chemical composition.",
+          "DETAILED": "This tool retrieves comprehensive polymorph data from the Materials Project database for a specific chemical composition.\nPolymorphs are different crystal structures with the same chemical formula but different atomic arrangements, leading to distinct physical and chemical properties.\nThis tool could be relevant for retrieving structures of the same composition.\nApart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need to explore all known structural variants of a single material composition\n- Suitable for identifying thermodynamically stable and metastable phases and other properties like band gap, density, volume, number of sites, space group of the structure.\n- Recommended for retrieving structure and Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group of one single composition\n- Avoid when you only need a single structure\n- Avoid when you need data for multiple composition",
+          "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project API using authentication credentials\n- Searches for all materials matching the specified chemical composition\n- Retrieves comprehensive data including energetics, structural, and electronic properties\n- Converts crystal structures to CIF format for compatibility with other tools\n- Sorts results by energy above hull (thermodynamic stability) for easy analysis",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you need to retrieve data for only one composition and there is no better tool \n2.  Apply this tool to retrieve all polymorphs for a composition \n3.  Use select_polymorphs_with_strategy to filter results or batch_retrieve_polymorphs for multiple compositions",
+          "SYNTACTICAL": "Usage examples:\n[\n`get_bulk_polymorphs_data(\"TiO2\")`,  # Retrieve polymorphs for titanium dioxide\n`get_bulk_polymorphs_data(\"SiO2\")`,  # Retrieve polymorphs for silicon dioxide\n`get_bulk_polymorphs_data(\"Al2O3\n]",
+          "ARGS_BRIEF": "Chemical composition formula.",
+          "ARGS_DETAILED": "Chemical formula specifying the composition for which polymorphs should be retrieved.\n                Should follow standard chemical notation with element symbols.\n                The tool will find all known crystal structures with this exact composition in the Materials Project database.",
+          "ARGS_EXAMPLES": "\"TiO2\", \"SiO2\", \"Fe2O3\"",
+          "RETURNS_BRIEF": "JSON string containing comprehensive polymorph data sorted by stability.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing a list of dictionaries, each representing a polymorph with properties including Materials Project ID, CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information.\n         Results are sorted by energy above hull for easy identification of the most stable phases.",
+          "RETURNS_EXAMPLES": "'[{\"material_id\": \"mp-2657\", \"cif\": \"...\", \"energy_above_hull\": 0.0, \"formation_energy_per_atom\": -4.2, ...}]'",
+          "RAISES": "Exceptions:\n    KeyError:  When the specified composition is not found in the database \n         Invalid or non-existent material composition is provided \n         Verify if the composition is valid\n    ValueError:  When Materials Project API key is not available \n                MP_API_KEY environment variable not set or invalid \n                If API key is not set, the tool might not work, hence choose some other tool \n    ConnectionError:  When unable to connect to Materials Project API \n                     Network connectivity issues or API server downtime \n                     Check internet connection if not working the tool might not work, hence choose some other tool",
+          "LIMITATIONS": "Known limitations:\n- Limited to materials available in the Materials Project database\n- Requires valid API key and internet connection\n- Can retrieve polymorphs only for one composition at a time"
+        },
+        "args": [
+          {
+            "name": "composition",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_bulk_polymorphs_data(composition: str) -> str:\n    from mp_api.client import MPRester\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Query for materials with the given composition\n        docs = mpr.materials.summary.search(\n            formula=composition,\n            fields=[\n                \"material_id\",\n                \"structure\",\n                \"energy_above_hull\",\n                \"formation_energy_per_atom\",\n                \"band_gap\",\n                \"density\",\n    ..."
+      },
+      {
+        "name": "get_bulk_polymorphs_data_to_file",
+        "sections": {
+          "BRIEF": "Query Materials Project for polymorphs and save comprehensive data to a JSON file to give path.",
+          "DETAILED": "This tool performs the same comprehensive polymorph retrieval  but saves the results directly to a JSON file for persistent storage and later analysis.\nThis tool retrieves comprehensive polymorph data from the Materials Project database for a specific chemical composition.\nPolymorphs are different crystal structures with the same chemical formula but different atomic arrangements, leading to distinct physical and chemical properties.\nThis tool could be relevant for retrieving structures of the same composition.\nApart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved.\nThe result is then saved a JSON file at the specified save_path.\nThe file-based approach allows for efficient handling of large datasets and facilitates saving context of llm.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need to explore all known structural variants of a single material composition.\n- Suitable for identifying thermodynamically stable and metastable phases and other properties like band gap, density, volume, number of sites, space group of the structure.\n- Use when you need to store polymorph data for later analysis or sharing or if you want to save context of llm.\n- Best suited for building persistent datasets and material databases\n- Highly recommended if the number of polymorphs for a composition could be very big\n- Avoid when you only need temporary data access\n- Avoid when you only need a single, well-known structure\n- Avoid when you need data for multiple composition",
+          "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project API using authentication credentials\n- Searches for all materials matching the specified chemical composition\n- Retrieves comprehensive data including energetics, structural, and electronic properties\n- Converts crystal structures to CIF format for compatibility with other tools\n- Sorts results by energy above hull (thermodynamic stability) for easy analysis\n- Saves results to specified file path in JSON format with proper formatting\n- Ensures data persistence and enables later processing by other tools\n- Validates file path and creates directories as needed",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you need to retrieve data for only one composition and there is no better tool  \n2.  Apply this tool to retrieve and save polymorph data and save to a file\n3.  Use consolidate_polymorph_datasets to combine multiple files of different composition or prepare_tabular_dataset",
+          "SYNTACTICAL": "Usage examples:\n[\n`get_bulk_polymorphs_data_to_file(\"TiO2\", \"data/tio2_polymorphs.json\")`,  # Save polymorphs for titanium dioxide\n`get_bulk_polymorphs_data_to_file(\"SiO2\", \"data/si2_polymorphs.json\")`,  # Save polymorphs for silicon dioxide\n`get_bulk_polymorphs_data_to_file(\"Al2O3\", \"data/al2o3_polymorphs.json\")`,  # Save polymorphs for aluminum oxide\n`get_bulk_polymorphs_data_to_file(\"Fe2O3\", \"data/fe2o3_polymorphs.json\")`,  # Save polymorphs for iron\n]",
+          "ARGS_BRIEF": "File path where JSON data will be saved.",
+          "ARGS_DETAILED": "Complete file path including filename and extension where the polymorph data will be saved.\n              The path should be writable and the directory will be created if it doesn't exist.\n              Using .json extension is recommended for clarity.\n              If None, the tool will raise an error as the file path is required.",
+          "ARGS_EXAMPLES": "\"data/tio2_polymorphs.json\", \"save_path/tio2_polymorphs.json\", \"results/Cu2O_polymorphsides.json\"",
+          "RETURNS_BRIEF": "File path where the polymorph data was saved.",
+          "RETURNS_DETAILED": "Returns the exact file path where the JSON data was successfully written.\n         This path can be used by subsequent tools for data loading and processing.\n         The file contains comprehensive polymorph data in JSON format, sorted by thermodynamic stability.",
+          "RETURNS_EXAMPLES": "\"data/tio2_polymorphs.json\"",
+          "RAISES": "Exceptions:\n    ValueError:  When save_path is None or API key is not available \n                Either save_path parameter is not provided or MP_API_KEY environment variable is missing \n                Provide valid save_path.\n               If MP_API_KEY is not set, tool might not work and use a different tool \n    IOError:  When unable to write to the specified file path \n             File path is not writable or directory doesn't exist \n             Check file permissions and ensure directory exists",
+          "LIMITATIONS": "Known limitations:\n- Requires writable file system access\n- Limited to materials available in the Materials Project database\n- Can retrieve polymorphs only for one composition at a time\n- Does not validate file format compatibility with other tools"
+        },
+        "args": [
+          {
+            "name": "composition",
+            "type": "str"
+          },
+          {
+            "name": "save_path",
+            "type": "str | None"
+          },
+          {
+            "name": "work_dir",
+            "type": "str | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_bulk_polymorphs_data_to_file(\n    from mp_api.client import MPRester\n\n    if save_path is None:\n        raise ValueError(\"save_path must be provided to save the JSON data\")\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Query for materials with the given composition\n        docs = mpr.materials.summary.search(\n            formula=composition,\n            fields=[\n                \"material_id\",\n                \"structure\",\n                \"energy_above_hull\",\n    ..."
+      },
+      {
+        "name": "batch_retrieve_polymorphs",
+        "sections": {
+          "BRIEF": "Retrieve polymorphs for multiple chemical compositions efficiently in batch mode and save it to given directory as json.",
+          "DETAILED": "This tool performs polymorph retrieval for multiple chemical compositions simultaneously.\nThe tool applies energy and count filters to focus on thermodynamically relevant phases.\nThis tool retrieves comprehensive polymorph data from the Materials Project database for each chemical composition and save in the user inputted save_directory.\nPolymorphs are different crystal structures with the same chemical formula but different atomic arrangements, leading to distinct physical and chemical properties.\nThis tool could be relevant for retrieving structures of the same composition for multiple composition.\nApart from structure for each polymorph Materials Project ID (MP ID), CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information is also retrieved.\nThe result is then saved a JSON file at the specified directory in the format <composition>_polymorphs.json.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need to systematically explore multiple chemical compositions\n- Best suited for high-throughput materials screening and dataset preparation\n- Use when you need to store polymorph data for later analysis or sharing or if you want to save context of llm.\n- Best suited for building persistent datasets and material databases\n- Avoid when you only need detailed analysis of a single composition",
+          "CONTEXTUAL": "How this tool works:\n- Iterates through list of compositions using robust error handling\n- Connects to Materials Project API using authentication credentials\n- Searches for all materials matching the specified chemical composition\n- Retrieves comprehensive data including energetics, structural, and electronic properties\n- Converts crystal structures to CIF format for compatibility with other tools\n- Applies energy filtering to focus on thermodynamically accessible phases\n- Limits number of structures per composition to prevent data explosion\n- Creates organized directory structure for systematic data storage\n- Provides comprehensive success/failure reporting for quality control",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1. Ensure you need to retrieve data for more than one composition and there is no better tool  \n2.  Apply this tool to retrieve polymorphs for multiple compositions \n3.  Use consolidate_polymorph_datasets to combine results or select_polymorphs_with_strategy for filtering",
+          "SYNTACTICAL": "Usage examples:\n[\n`batch_retrieve_polymorphs([\"TiO2\", \"SiO2\", \"Al2O3\"], 0.3, 5, \"oxides_data\")`,  # Retrieve polymorphs for multiple oxides\n`batch_retrieve_polymorphs([\"CaTiO3\", \"SrTiO3\", \"BaTiO3\"], 0.5, 10, \"perovskites\")`,  # Retrieve polymorphs for perovskites\n`batch_retrieve_polymorphs([\"FeO\", \"Fe2O3\", \"Fe3O4\"], 0.2, 8, \"iron_oxides\")`,  # Retrieve polymorph\n]",
+          "ARGS_BRIEF": "Directory path for saving individual composition files. Defaults to \"polymorph_data\".",
+          "ARGS_DETAILED": "Base directory where individual JSON files for each composition will be saved.\n                   The directory will be created if it doesn't exist.\n                   Each composition will have its own JSON file named with the composition formula.\n                   This organization facilitates easy data management and selective loading of specific compositions.",
+          "ARGS_EXAMPLES": "\"data/polymorphs\", \"materials/oxides\", \"results/batch_data\"",
+          "RETURNS_BRIEF": "JSON string with batch retrieval results and statistics.",
+          "RETURNS_DETAILED": "A comprehensive JSON report containing lists of successfully processed and failed compositions, total number of polymorphs retrieved, file paths for each composition, and summary statistics.\n         This enables quality control and tracking of the batch processing workflow.",
+          "RETURNS_EXAMPLES": "\"{\"successful_compositions\": [\"TiO2\", \"SiO2\"], \"failed_compositions\": [\"BadFormula\"], \"total_polymorphs\": 15, \"composition_files\": {...}}\"",
+          "RAISES": "Exceptions:\n    ValueError:  When parameters are invalid (negative energy, zero max_per_composition) \n                Invalid parameter values or missing API key \n                Check parameter values and ensure MP_API_KEY is set \n    IOError:  When unable to create save directory or write files \n             Directory creation failed or insufficient write permissions \n             Check directory permissions and available disk space",
+          "LIMITATIONS": "Known limitations:\n- Requires writable file system access\n- Limited to materials available in the Materials Project database\n- Processing time scales linearly with number of compositions\n- Individual composition failures don't stop the entire batch\n- Does not validate file format compatibility with other tools"
+        },
+        "args": [
+          {
+            "name": "compositions",
+            "type": "list[str]"
+          },
+          {
+            "name": "max_energy_above_hull",
+            "type": "float"
+          },
+          {
+            "name": "max_per_composition",
+            "type": "int"
+          },
+          {
+            "name": "save_directory",
+            "type": "str"
+          },
+          {
+            "name": "work_dir",
+            "type": "str | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def batch_retrieve_polymorphs(\n    from pathlib import Path\n\n    if isinstance(max_energy_above_hull, str):\n        max_energy_above_hull = float(max_energy_above_hull)\n    if isinstance(max_per_composition, str):\n        max_per_composition = int(max_per_composition)\n\n    # Create save directory\n    save_directory = resolve_working_dir_path(save_directory, work_dir)\n    Path(save_directory).mkdir(exist_ok=True)\n\n    results = {\n        \"successful_compositions\": [],\n        \"failed_compositions\": [],\n        \"total_polymorphs\": 0,\n        \"composition_files\": {},\n    }\n\n    for composition in compositions:\n        try:\n    ..."
+      },
+      {
+        "name": "sort_and_get_first_from_json",
+        "sections": {
+          "BRIEF": "Sort JSON data by specified key and return the first element's specified value.",
+          "DETAILED": "This utility tool provides flexible sorting and extraction capabilities for JSON data, particularly useful for materials data analysis where you need to identify optimal structures based on specific criteria. It enables quick identification of the best material according to any numerical property, such as finding the most stable phase, highest band gap material, or densest structure.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need to quickly identify the best material from a dataset.\n- Best suited for extracting optimal values from sorted lists.\n- Recommended for picking materials with desired properties like lowest energy, highest band gap, etc.\n- Avoid when you need multiple values or complex filtering criteria.",
+          "CONTEXTUAL": "How this tool works:\n- Parses JSON string into Python data structure.\n- Applies sorting based on specified key using numerical comparison.\n- Extracts the first element after sorting (best/optimal value).\n- Returns the specified property value from the optimal element.\n- Handles various data types and provides robust error handling.\n- To find the right keys from polymorph data maybe use io tools or python tools.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First obtain JSON data from polymorph retrieval tools. \n2.  Apply this tool to identify optimal material based on specific criteria. \n3.  Use the returned value for further analysis or material selection.",
+          "SYNTACTICAL": "Usage examples:\n`sort_and_get_first_from_json(polymorphs_json, \"energy_above_hull\", \"material_id\")`,\n`sort_and_get_first_from_json(polymorphs_json, \"band_gap\", \"cif\")`,\n`sort_and_get_first_from_json(polymorphs_json, \"density\", \"formation_energy_per_atom\")`,",
+          "ARGS_BRIEF": "Property name to return from the first element after sorting.",
+          "ARGS_DETAILED": "The dictionary key name for the value that should be returned from the first (optimal) element after sorting. This allows extraction of any property from the optimal structure, such as material_id for identification, cif for structure, or any other calculated property.",
+          "ARGS_EXAMPLES": "\"material_id\", \"cif\", \"formation_energy_per_atom\"",
+          "RETURNS_BRIEF": "Value of the specified return_key from the first element after sorting.",
+          "RETURNS_DETAILED": "The value corresponding to the return_key from the material that has the smallest value for the sort_key. This could be a string (like material_id or CIF), a number (like energy or band gap), or any other data type stored in the JSON. The returned value represents the optimal material according to the specified sorting criterion.",
+          "RETURNS_EXAMPLES": "Example outputs: \"mp-2657\" (material ID), \"1.23\" (energy value), CIF structure string",
+          "RAISES": "Exceptions:\n    JSONDecodeError:  When the polymorph_data_json string is not valid JSON. \n                     Malformed JSON string or incorrect format. \n                     Verify JSON format and ensure proper string escaping. \n    KeyError:  When sort_key or return_key is not found in the data. \n              Specified keys don't exist in the JSON data dictionaries. \n              Check available keys in the JSON data and use valid key names. \n    IndexError:  When the JSON data is empty or contains no elements. \n                Empty list or no valid data after parsing. \n                Ensure JSON data contains at least one element.",
+          "LIMITATIONS": "Known limitations:\n- Only returns the first element after sorting (single optimal result).\n- Sorting is performed in ascending order only.\n- Does not handle complex sorting criteria or multiple keys.\n- May not work properly with non-numerical sort keys."
+        },
+        "args": [
+          {
+            "name": "polymorph_data_json",
+            "type": "str"
+          },
+          {
+            "name": "sort_key",
+            "type": "str"
+          },
+          {
+            "name": "return_key",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def sort_and_get_first_from_json(\n    data = json.loads(polymorph_data_json)\n\n    # Sort the data based on the given key\n    sorted_data = sorted(data, key=lambda x: x[sort_key])\n\n    # Return the value of the specified key from the first element\n    return sorted_data[0][return_key]"
+      },
+      {
+        "name": "select_polymorphs_with_strategy",
+        "sections": {
+          "BRIEF": "Select polymorphs using strategic criteria for systematic materials analysis.",
+          "DETAILED": "This tool implements intelligent selection strategies for polymorph datasets, enabling systematic reduction of large materials databases while preserving important structural and energetic diversity.\nThe input can be json polymorph data as string or path to json file of polymorph data.\nIt supports multiple selection algorithms designed for different research objectives, from stability-focused studies to comprehensive structural surveys.\nThis is crucial for managing computational resources and focusing analysis on the most relevant materials.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need to systematically reduce large polymorph datasets\n- Essential for creating representative training sets for machine learning\n- Recommended for comparative studies requiring diverse structural examples\n- Avoid when you need all available data or have specific material requirements\n- Avoid when you have a custom logic for selection",
+          "CONTEXTUAL": "How this tool works:\n- Applies energy threshold filtering to focus on accessible phases\n- Implements multiple selection algorithms based on different criteria\n- \"diverse_energy\" spreads selection across energy range for representative sampling\n- \"most_stable\" prioritizes thermodynamically favored phases\n- \"diverse_structure\" ensures different space groups are represented\n- Returns optimized subset maintaining important characteristics",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First obtain polymorph data using get_bulk_polymorphs_data or batch_retrieve_polymorphs \n2.  Apply this tool to select representative subset based on strategy \n3.  Use selected polymorphs for slab generation, ML dataset preparation, or detailed analysis.\nYou can even use this multiple times to prepare a set with different strategies",
+          "SYNTACTICAL": "Usage examples:\n`select_polymorphs_with_strategy(polymorphs_json, \"most_stable\", 3, 0.3, False)`,\n`select_polymorphs_with_strategy(\"data/polymorphs.json\", \"diverse_structure\", 5, 0.5, True)`,\n`select_polymorphs_with_strategy(polymorphs_json, \"diverse_energy\", 8, 0.8, False)`,",
+          "ARGS_BRIEF": "Whether polymorphs_data is a file path. Defaults to False.",
+          "ARGS_DETAILED": "Boolean flag indicating whether the polymorphs_data parameter should be treated as a file path (True) or as a JSON string (False).\n            When True, the tool will read the JSON data from the specified file.\n            When False, it will parse the data directly from the string.",
+          "ARGS_EXAMPLES": "True (file path), False (JSON string)",
+          "RETURNS_BRIEF": "JSON string containing selected polymorphs based on the specified strategy.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing the selected subset of polymorphs, maintaining the same data structure as the input but with reduced number of entries.\n         The selection preserves important characteristics according to the chosen strategy while reducing dataset size for efficient processing.",
+          "RETURNS_EXAMPLES": "JSON string with 3-10 selected polymorphs based on strategy",
+          "RAISES": "Exceptions:\n    ValueError:  When invalid selection strategy is specified \n                Strategy name not recognized or invalid parameters \n                Use valid strategy names: \"diverse_energy\", \"most_stable\", \"diverse_structure\" \n    FileNotFoundError:  When is_path=True but file doesn't exist \n                       Specified file path cannot be found or accessed \n                       Check file path and ensure file exists \n    JSONDecodeError:  When polymorphs_data contains invalid JSON \n                     Malformed JSON string or corrupted file \n                     Verify JSON format and data integrity",
+          "LIMITATIONS": "Known limitations:\n- Selection strategies are predefined and not customizable\n- Energy threshold applies uniformly to all polymorphs\n- Does not consider complex multi-objective optimization\n- May not preserve specific structural features of interest"
+        },
+        "args": [
+          {
+            "name": "polymorphs_data",
+            "type": "str"
+          },
+          {
+            "name": "selection_strategy",
+            "type": "str"
+          },
+          {
+            "name": "max_polymorphs",
+            "type": "int"
+          },
+          {
+            "name": "energy_threshold",
+            "type": "float"
+          },
+          {
+            "name": "is_path",
+            "type": "bool"
+          }
+        ],
+        "returns": "str",
+        "code": "def select_polymorphs_with_strategy(\n    if is_path:\n        with Path(polymorphs_data).open(\"r\") as f:\n            polymorphs = json.loads(f.read())\n    else:\n        polymorphs = json.loads(polymorphs_data)\n\n    # Filter by energy threshold\n    filtered = [p for p in polymorphs if p[\"energy_above_hull\"] <= energy_threshold]\n\n    if selection_strategy == \"most_stable\":\n        # Sort by energy above hull, take most stable\n        selected = sorted(filtered, key=lambda x: x[\"energy_above_hull\"])[\n            :max_polymorphs\n        ]\n\n    elif selection_strategy == \"diverse_energy\":\n        # Select polymorphs with diverse energies\n        sorted_polymorphs = sorted(filtered, key=lambda x: x[\"energy_above_hull\"])\n        selected = []\n        if sorted_polymorphs:\n    ..."
+      },
+      {
+        "name": "consolidate_polymorph_datasets",
+        "sections": {
+          "BRIEF": "Consolidate multiple polymorph JSON files into a single comprehensive dataset.",
+          "DETAILED": "This tool combines multiple polymorph datasets from different compositions into a unified dataset suitable for dataset preparation and machine learning applications.\nIt handles data integration and provides comprehensive statistics about the consolidated dataset.\nOften you have multiple polymorph json file and you want to combine them. You can use this tool to combine them",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need to combine multiple datasets\n- Best suited for building comprehensive materials databases\n- Recommended for for combining results\n- Avoid when you need to maintain composition-specific organization\n- AVoid when you have a single polymorph file or no files to combine",
+          "CONTEXTUAL": "How this tool works:\n- Reads multiple JSON files specified in the composition_files dictionary\n- Merges data while maintaining source composition information\n- Adds provenance metadata to track data origins\n- Provides comprehensive statistics about the consolidated dataset\n- Handles missing files and corrupted data gracefully\n- Saves the consolidated dataset to a specified output file",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First use batch_retrieve_polymorphs to create multiple composition files or run get_bulk_polymorphs_data multiple times to have data for multiple composition \n2.  Apply this tool to consolidate separate files into unified dataset \n3.  Use prepare_tabular_dataset or prepare_neural_network_dataset for ML preparation",
+          "SYNTACTICAL": "Usage examples:\n`consolidate_polymorph_datasets({\"TiO2\": \"data/tio2.json\", \"SiO2\": \"data/sio2.json\"})`,\n`consolidate_polymorph_datasets(composition_files_dict, \"materials_database.json\")`,\n`consolidate_polymorph_datasets(batch_results[\"composition_files\"], \"consolidated.json\")`,",
+          "ARGS_BRIEF": "Path for the consolidated dataset file. Defaults to \"consolidated_polymorphs.json\".",
+          "ARGS_DETAILED": "File path where the consolidated dataset will be saved.\n                The file will contain all polymorphs from all compositions in a single JSON structure with added source composition information.\n                The directory will be created if it doesn't exist. Using .json extension is recommended for clarity.",
+          "ARGS_EXAMPLES": "\"consolidated_polymorphs.json\", \"data/all_materials.json\", \"datasets/complete_set.json\"",
+          "RETURNS_BRIEF": "JSON string with consolidation results and comprehensive statistics.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing consolidation status, output file path, and detailed statistics including total number of polymorphs, number of compositions successfully included, average polymorphs per composition, and any processing errors.\n         This enables quality control and assessment of the consolidation process.",
+          "RETURNS_EXAMPLES": "\"{\"success\": true, \"output_path\": \"consolidated.json\", \"statistics\": {\"total_polymorphs\": 150, \"compositions_included\": 15, ...}}\"",
+          "RAISES": "Exceptions:\n    FileNotFoundError:  When one or more input files cannot be found \n                       File paths in composition_files dictionary are invalid \n                       Check file paths and ensure all files exist \n    JSONDecodeError:  When input files contain invalid JSON \n                     Corrupted or malformed JSON in input files \n                     Verify JSON format of input files \n    IOError:  When unable to write to output path \n             Output path is not writable or directory doesn't exist \n             Check write permissions and ensure output directory exists",
+          "LIMITATIONS": "Known limitations:\n- Memory usage scales with total dataset size\n- Does not perform deduplication of identical structures\n- May not handle very large individual files efficiently\n- Does not validate data consistency across files"
+        },
+        "args": [
+          {
+            "name": "composition_files",
+            "type": "dict[str, str]"
+          },
+          {
+            "name": "output_path",
+            "type": "str"
+          },
+          {
+            "name": "work_dir",
+            "type": "str | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def consolidate_polymorph_datasets(\n    all_polymorphs = []\n    stats = {\n        \"total_polymorphs\": 0,\n        \"compositions_included\": 0,\n        \"average_per_composition\": 0,\n    }\n\n    for composition, file_path in composition_files.items():\n        try:\n            with Path(file_path).open() as f:\n                polymorphs = json.load(f)\n\n            # Add composition information to each polymorph\n            for polymorph in polymorphs:\n                polymorph[\"source_composition\"] = composition\n\n            # Extend the all_polymorphs list with the polymorphs from the current file\n            all_polymorphs.extend(polymorphs)\n\n            stats[\"compositions_included\"] += 1\n    ..."
+      },
+      {
+        "name": "select_polymorphs_with_strategy_to_file",
+        "sections": {
+          "BRIEF": "Select polymorphs using strategic criteria and save results to file for persistent storage.",
+          "DETAILED": "This tool combines the strategic polymorph selection capabilities with direct file output for persistent storage and workflow automation.\nIt implements the same selection algorithms as select_polymorphs_with_strategy but automatically saves results to a specified file path.\nThe input can be json polymorph data as string or path to json file of polymorph data.\nIt supports multiple selection algorithms designed for different research objectives, from stability-focused structures to comprehensive structures.\nThis is essential for automated workflows, batch processing, and creating organized datasets where selected polymorphs need to be stored for later use or sharing.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need strategic polymorph selection with automatic file storage\n- Best suited for automated workflows and batch processing pipelines\n- Essential for creating organized datasets that will be shared or archived\n- Recommended when building systematic collections of selected materials\n- Avoid when you only need temporary selection results in memory",
+          "CONTEXTUAL": "How this tool works:\n- Processes energy threshold filtering and strategic selection algorithms\n- Automatically saves selected polymorphs to specified file path in JSON format\n- Ensures proper file formatting and directory creation as needed\n- Returns file path for integration with downstream tools",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First obtain polymorph data using get_bulk_polymorphs_data or load from file \n2.  Apply strategic selection and save results to persistent file storage \n3.  Use saved file with find_all_unique_slabs_upto_millerindex or other structural analysis tools",
+          "SYNTACTICAL": "Usage examples:\n`select_polymorphs_with_strategy_to_file(polymorphs_json, \"selected_tio2.json\", \"most_stable\", 3, 0.3, False)`,\n`select_polymorphs_with_strategy_to_file(\"data/polymorphs.json\", \"output/diverse.json\", \"diverse_structure\", 5, 0.5, True)`,\n`select_polymorphs_with_strategy_to_file(batch_data, \"results/selected_materials.json\", \"diverse_energy\", 8, 0.8, False)`,",
+          "ARGS_BRIEF": "Whether polymorphs_data is a file path. Defaults to False.",
+          "ARGS_DETAILED": "Boolean flag indicating whether the polymorphs_data parameter should be treated as a file path (True) or as a JSON string (False).\n            When True, the tool will read the JSON data from the specified file.\n            This enables flexible input handling for different workflow patterns.",
+          "ARGS_EXAMPLES": "True (file input), False (JSON string input)",
+          "RETURNS_BRIEF": "File path where the selected polymorphs were saved.",
+          "RETURNS_DETAILED": "The complete file path where the selected polymorphs have been successfully saved.\n         This path can be used by subsequent tools for loading the selected dataset or for verification that the file was created correctly.\n         The file contains the subset of polymorphs selected according to the specified strategy.",
+          "RETURNS_EXAMPLES": "\"data/selected_tio2_polymorphs.json\"",
+          "RAISES": "Exceptions:\n    ValueError:  When invalid selection strategy is specified \n                Strategy name not recognized or invalid parameters \n                Use valid strategy names: \"diverse_energy\", \"most_stable\", \"diverse_structure\" \n    FileNotFoundError:  When is_path=True but input file doesn't exist \n                       Specified input file path cannot be found or accessed \n                       Check input file path and ensure file exists \n    IOError:  When unable to write to the save_path location \n             Output directory doesn't exist or insufficient write permissions \n             Check output directory permissions and ensure path is writable",
+          "LIMITATIONS": "Known limitations:\n- Selection strategies are predefined and not customizable\n- File overwriting occurs without warning if save_path already exists\n- Cannot validate file format compatibility with specific downstream tools\n- Energy threshold applies uniformly without consideration of composition differences"
+        },
+        "args": [
+          {
+            "name": "polymorphs_data",
+            "type": "str"
+          },
+          {
+            "name": "save_path",
+            "type": "str"
+          },
+          {
+            "name": "selection_strategy",
+            "type": "str"
+          },
+          {
+            "name": "max_polymorphs",
+            "type": "int"
+          },
+          {
+            "name": "energy_threshold",
+            "type": "float"
+          },
+          {
+            "name": "is_path",
+            "type": "bool"
+          },
+          {
+            "name": "work_dir",
+            "type": "str | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def select_polymorphs_with_strategy_to_file(\n    if is_path:\n        with Path(polymorphs_data).open(\"r\") as f:\n            polymorphs = json.loads(f.read())\n    else:\n        polymorphs = json.loads(polymorphs_data)\n\n    # Filter by energy threshold\n    filtered = [p for p in polymorphs if p[\"energy_above_hull\"] <= energy_threshold]\n\n    if selection_strategy == \"most_stable\":\n        selected = sorted(filtered, key=lambda x: x[\"energy_above_hull\"])[\n            :max_polymorphs\n        ]\n\n    elif selection_strategy == \"diverse_energy\":\n        sorted_polymorphs = sorted(filtered, key=lambda x: x[\"energy_above_hull\"])\n        selected = []\n        if sorted_polymorphs:\n            step = max(1, len(sorted_polymorphs) // max_polymorphs)\n            for i in range(0, min(len(sorted_polymorphs), max_polymorphs * step), step):\n    ..."
+      },
+      {
+        "name": "filter_json_with_strategy",
+        "sections": {
+          "BRIEF": "Filter JSON data using custom Python code and save results to a new file.",
+          "DETAILED": "This tool provides flexible JSON data filtering capabilities using custom Python logic, essential for data preprocessing, quality control, and custom analysis workflows.\nIt enables sophisticated filtering operations that go beyond simple threshold-based selection, allowing for complex multi-criteria filtering, data validation, and custom transformations.\nThis is crucial for preparing datasets for analysis and machine learning applications.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need custom filtering logic beyond standard threshold-based selection\n- Best suited for complex multi-criteria filtering and data validation\n- Essential for data preprocessing and quality control workflows\n- Recommended for custom data transformations and analysis pipelines\n- Avoid for simple filtering operations that can be done with existing tools",
+          "CONTEXTUAL": "How this tool works:\n- Loads JSON data from input file into a 'data' variable\n- Executes custom Python code in an isolated environment\n- Expects filtering logic to produce results in a 'filtered_data' variable\n- Saves filtered results to output file with comprehensive statistics\n- Provides detailed reporting on filtering effectiveness and data reduction\n- Use io tools or python tool to see the  keys from json if required",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure input JSON file exists and custom filtering code is prepared \n2.  Apply custom filtering logic to process and filter JSON data \n3.  Use filtered data for further analysis, ML preparation for example use prepare_tabular_dataset to prepare dataset from the output file",
+          "SYNTACTICAL": "Usage examples:\n`filter_json_with_strategy(\"input.json\", \"output.json\", \"filtered_data = [x for x in data if x['energy'] < 0.5]\")`,\n`filter_json_with_strategy(\"materials.json\", \"stable.json\", \"filtered_data = [x for x in data if x['is_stable']]\")`,\n`filter_json_with_strategy(\"polymorphs.json\", \"filtered.json\", \"filtered_data = [x for x in data if x['band_gap'] > 1.0 and x['density'] < 5.0]\")`,",
+          "ARGS_BRIEF": "Python code string defining the filtering logic.",
+          "ARGS_DETAILED": "A string containing Python code that defines the filtering logic.\n                The code should expect the input data in a variable named 'data' and store the filtered results in a variable named 'filtered_data'.\n                The code can use any Python constructs including list comprehensions, complex conditions, and data transformations.",
+          "ARGS_EXAMPLES": "\"filtered_data = [x for x in data if x['energy'] < threshold]\", \"filtered_data = [x for x in data if x.get('stable', False)]\"",
+          "RETURNS_BRIEF": "JSON string with filtering results and comprehensive statistics.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing filtering status, original and filtered data counts, output file path, and percentage reduction achieved.\n         This provides comprehensive information about the filtering operation's effectiveness and enables quality control of the data processing pipeline.",
+          "RETURNS_EXAMPLES": "\"{\"success\": true, \"original_count\": 100, \"filtered_count\": 25, \"output_path\": \"filtered.json\", \"reduction_percentage\": 75.0}\"",
+          "RAISES": "Exceptions:\n    FileNotFoundError:  When the input JSON file doesn't exist \n                       Input file path is invalid or file is not accessible \n                       Verify input file path exists and is readable \n    JSONDecodeError:  When the input file contains invalid JSON \n                     Malformed JSON in the input file \n                     Verify JSON format and fix any syntax errors \n    SyntaxError:  When the custom filtering code contains syntax errors \n                 Invalid Python syntax in the custom_code parameter \n                 Check and fix Python syntax in the filtering code \n    RuntimeError:  When the custom filtering code fails during execution \n                  Runtime errors in the filtering logic \n                  Debug filtering code and ensure all variables are properly defined",
+          "LIMITATIONS": "Known limitations:\n- Custom code execution is isolated and cannot import external libraries\n- Cannot validate filtered data structure or content\n- Limited error reporting for complex filtering logic"
+        },
+        "args": [
+          {
+            "name": "input_json_path",
+            "type": "str"
+          },
+          {
+            "name": "output_json_path",
+            "type": "str"
+          },
+          {
+            "name": "custom_code",
+            "type": "str | None"
+          },
+          {
+            "name": "work_dir",
+            "type": "str | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def filter_json_with_strategy(\n    try:\n        with Path(input_json_path).open(\"r\") as f:\n            data = json.load(f)\n\n        # Create execution environment with data available\n        exec_globals = {\"data\": data}\n        exec_locals = {}\n\n        # Execute the custom filtering code\n        exec(custom_code, exec_globals, exec_locals)\n\n        # Get the filtered data\n        if \"filtered_data\" not in exec_locals:\n            return json.dumps(\n                {\n                    \"success\": False,\n                    \"error\": \"Custom code must define 'filtered_data' variable\",\n                },\n                indent=2,\n            )\n    ..."
+      },
+      {
+        "name": "prepare_tabular_dataset",
+        "sections": {
+          "BRIEF": "Prepare tabular dataset for traditional ML models with feature engineering.",
+          "DETAILED": "This tool creates ML-ready tabular datasets from materials data with simple feature engineering capabilities suitable for traditional machine learning models like XGBoost.\nIt implements multiple feature engineering strategies such as basic property extraction to structural descriptors, handles data preprocessing, normalization, and train/test splitting.\nThis is essential for building property prediction models.",
+          "PROCEDURAL": "When to use this tool:\n- Use when preparing data for traditional ML models (XGBoost, Random Forest, etc.)\n- Best suited for structured materials property prediction tasks\n- Essential for creating feature-engineered datasets from raw materials data\n- Recommended for establishing baseline models before deep learning approaches\n- Avoid when working with graph-structured or sequential data",
+          "CONTEXTUAL": "How this tool works:\n- Loads materials data (json data) and extracts basic properties (density, volume, composition)\n- Implements advanced feature engineering including structural and electronic properties\n- Handles categorical encoding and missing value imputation automatically\n- Performs data normalization using standard scaling.\n- Creates train/test splits with proper randomization and metadata tracking",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First consolidate materials data using consolidate_polymorph_datasets \n2.  Prepare comprehensive tabular dataset with engineered features \n3.  Use train_xgboost_model or other ML training tools with prepared dataset",
+          "SYNTACTICAL": "Usage examples:\n`prepare_tabular_dataset(\"consolidated.json\", \"ml_data\", \"formation_energy_per_atom\", \"advanced\", 0.2, True)`,\n`prepare_tabular_dataset(\"polymorphs.json\", \"datasets\", \"band_gap\", \"basic\", 0.15, False)`,\n`prepare_tabular_dataset(\"materials.json\", \"output\", \"bulk_modulus\", \"custom\", 0.25, True)`,",
+          "ARGS_BRIEF": "Whether to normalize features. Defaults to True.",
+          "ARGS_DETAILED": "Boolean flag controlling whether features should be normalized using standard scaling (zero mean, unit variance).\n              Normalization is generally recommended for most ML algorithms as it ensures features have similar scales and prevents any single feature from dominating the model.",
+          "ARGS_EXAMPLES": "True (recommended), False (when features already normalized)",
+          "RETURNS_BRIEF": "JSON string with comprehensive dataset preparation results and file paths.",
+          "RETURNS_DETAILED": "A detailed JSON-formatted string containing preparation success status, file paths for training and test data, normalization parameters, dataset statistics, feature information, and metadata.\n         This provides complete information about the prepared dataset for subsequent ML workflows.",
+          "RETURNS_EXAMPLES": "\"{\"success\": true, \"train_path\": \"ml_data_train.csv\", \"test_path\": \"ml_data_test.csv\", \"dataset_info\": {...}}\"",
+          "RAISES": "Exceptions:\n    FileNotFoundError:  When polymorphs JSON file doesn't exist \n                       Invalid file path or missing input data file \n                       Verify file path and ensure input data file exists \n    KeyError:  When target property is not found in the data \n              Specified target property doesn't exist in materials data \n              Check available properties in data and use valid target property name \n    ValueError:  When feature engineering fails or data format is invalid \n                Structural data cannot be processed or insufficient valid samples \n                Check data format and ensure structures are valid for feature extraction",
+          "LIMITATIONS": "Known limitations:\n- Advanced feature engineering requires valid crystal structure data\n- Processing time scales with dataset size and feature engineering complexity\n- Some features may not be meaningful for all material types\n- Cannot handle missing structural data gracefully in advanced mode"
+        },
+        "args": [
+          {
+            "name": "polymorphs_json_path",
+            "type": "str"
+          },
+          {
+            "name": "output_path",
+            "type": "str"
+          },
+          {
+            "name": "target_property",
+            "type": "str"
+          },
+          {
+            "name": "feature_engineering",
+            "type": "str"
+          },
+          {
+            "name": "test_split",
+            "type": "float"
+          },
+          {
+            "name": "normalize",
+            "type": "bool"
+          },
+          {
+            "name": "work_dir",
+            "type": "str | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def prepare_tabular_dataset(\n    import json\n    import pickle\n    from pathlib import Path\n\n    import numpy as np\n    import pandas as pd\n\n    try:\n        # Create output directory if it doesn't exist\n        output_dir = Path(resolve_working_dir_path(output_path, work_dir))\n        output_dir.mkdir(parents=True, exist_ok=True)\n\n        # Load polymorphs data\n        with Path(polymorphs_json_path).open(\"r\") as f:\n            polymorphs = json.load(f)\n\n        if not isinstance(polymorphs, list):\n            return json.dumps(\n                {\"success\": False, \"error\": \"Input must be list of polymorphs\"}\n            )\n    ..."
+      },
+      {
+        "name": "get_mp_thermo_data",
+        "sections": {
+          "BRIEF": "Retrieve comprehensive thermodynamic data for materials from Materials Project database.",
+          "DETAILED": "This tool accesses detailed thermodynamic information from the Materials Project database, providing essential data for understanding material stability, phase relationships, and thermodynamic properties.\nIt retrieves formation energies, energy above hull, decomposition pathways, and stability information crucial for materials design and selection.\nThis thermodynamic data enables informed decisions about material synthesis feasibility and provides benchmarks for computational studies.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need comprehensive thermodynamic data for specific materials\n- Recommended if you need to retrieve more thermodynamic information of a structure\n- Avoid when you only need basic structural or electronic properties",
+          "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project thermodynamics database via API\n- Retrieves calculated formation energies and stability information\n- Provides energy above hull data for phase stability assessment\n- Reports decomposition pathways and competing phases\n- Returns comprehensive thermodynamic dataset with proper energy corrections",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure Material ID is valid \n2.  Retrieve comprehensive thermodynamic data for target material \n3.  Use thermodynamic data for stability analysis or phase diagram studies",
+          "SYNTACTICAL": "Usage examples:\n`get_mp_thermo_data(\"mp-149\")   # Silicon thermodynamic data`,\n`get_mp_thermo_data(\"mp-2657\")  # TiO2 thermodynamic properties`,\n`get_mp_thermo_data(\"mp-1143\")  # Al2O3 stability information`,",
+          "ARGS_BRIEF": "Materials Project ID for the target material.",
+          "ARGS_DETAILED": "The unique Materials Project identifier for the material of interest.\n                Should be in the format \"mp-XXXXX\" where XXXXX is the numerical ID.\n                The material must exist in the Materials Project database and have thermodynamic calculations available.",
+          "ARGS_EXAMPLES": "\"mp-149\" (Silicon), \"mp-2657\" (TiO2), \"mp-1143\" (Al2O3)",
+          "RETURNS_BRIEF": "JSON string containing comprehensive thermodynamic data and stability information.",
+          "RETURNS_DETAILED": "A JSON-formatted string containing thermodynamic properties including material ID, thermodynamic functional used, formation energy per atom, energy above hull, decomposition products, stability status, energy type, and uncorrected energies.\n         Returns error information if thermodynamic data is not available.",
+          "RETURNS_EXAMPLES": "'[{\"material_id\": \"mp-149\", \"formation_energy_per_atom\": -4.2, \"energy_above_hull\": 0.0, \"is_stable\": true, ...}]'",
+          "RAISES": "Exceptions:\n    ValueError:  When Materials Project API key is not available \n                MP_API_KEY environment variable not set or invalid \n                Obtain valid API key from Materials Project and set environment variable \n    ConnectionError:  When unable to connect to Materials Project API \n                     Network connectivity issues or API server problems \n                     Check internet connection and try again later \n    KeyError:  When material ID is not found or has no thermodynamic data \n              Invalid material ID or thermodynamic properties not calculated \n              Verify material ID exists and has thermodynamic calculations",
+          "LIMITATIONS": "Known limitations:\n- Limited to materials with calculated thermodynamic properties in Materials Project\n- Thermodynamic accuracy depends on computational methodology and corrections applied\n- May not include experimental thermodynamic data or recent calculations\n- Cannot provide thermodynamic data for custom or modified compositions"
+        },
+        "args": [
+          {
+            "name": "material_id",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_mp_thermo_data(material_id: str) -> str:\n    from mp_api.client import MPRester\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Get thermodynamic data\n        thermo_docs = mpr.thermo.search(\n            material_ids=[material_id],\n            fields=[\n                \"material_id\",\n                \"thermo_type\",\n                \"formation_energy_per_atom\",\n                \"energy_above_hull\",\n                \"decomposes_to\",\n                \"is_stable\",\n    ..."
+      },
+      {
+        "name": "train_xgboost_model",
+        "sections": {
+          "BRIEF": "Train XGBoost regression model for property prediction with evaluation.",
+          "DETAILED": "This tool implements comprehensive XGBoost model training for materials property prediction,including hyperparameter management, model evaluation.\nThe tool provides complete training pipeline with automatic evaluation metrics and save the model to the give path.\nThe model takes as input csv file for train and test dataset",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need regression models for materials property prediction\n- Best suited for structured/tabular materials data with engineered features\n- We can vary the hyperparameters to optimize performance metrics",
+          "CONTEXTUAL": "How this tool works:\n- Loads training and test data from CSV files with proper feature/target separation\n- Applies XGBoost regression with hyperparameters\n- Performs training with automatic validation and metric calculation\n- Generates comprehensive evaluation including MAE, RMSE, R2, and feature importance\n- Saves trained model and detailed results for future use and analysis",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First prepare tabular dataset using prepare_tabular_dataset \n2.  Train XGBoost model with optimized hyperparameters \n3.  Use evaluate_xgboost_model for detailed analysis or model for predictions",
+          "SYNTACTICAL": "Usage examples:\n`train_xgboost_model(\"train.csv\", \"test.csv\", \"model.pkl\", \"formation_energy_per_atom\")`,\n`train_xgboost_model(\"train.csv\", \"test.csv\", \"model.pkl\", \"band_gap\", {\"n_estimators\": 200})`,\n`train_xgboost_model(\"data/train.csv\", \"data/test.csv\", \"models/xgb_model.pkl\", \"energy\")`,",
+          "ARGS_BRIEF": "Optional dictionary of XGBoost hyperparameters.",
+          "ARGS_DETAILED": "Dictionary containing XGBoost hyperparameters to override default values.\n                    Can include parameters like n_estimators, max_depth, learning_rate, subsample, etc.\n                    If None, optimized default parameters will be used.\n                    Proper hyperparameter tuning can significantly improve model performance.",
+          "ARGS_EXAMPLES": "{\"n_estimators\": 200, \"max_depth\": 8}, {\"learning_rate\": 0.05}, None",
+          "RETURNS_BRIEF": "JSON string with comprehensive training results and model performance metrics.",
+          "RETURNS_DETAILED": "A detailed JSON-formatted string containing training success status, model performance metrics (MAE, RMSE, R2), feature importance rankings, hyperparameters used, dataset information, and file paths for saved model and results.\n         This enables comprehensive model evaluation and comparison.",
+          "RETURNS_EXAMPLES": "\"{\"success\": true, \"test_metrics\": {\"mae\": 0.12, \"rmse\": 0.18, \"r2\": 0.85}, \"feature_importance\": {...}, \"model_path\": \"model.pkl\"}\"",
+          "RAISES": "Exceptions:\n    FileNotFoundError:  When training or test data files don't exist \n                       Invalid file paths or missing CSV files \n                       Verify file paths exist and contain properly formatted CSV data \n    KeyError:  When target column is not found in the data \n              Specified target column doesn't exist in CSV files \n              Check column names in CSV files and use valid target column name \n    ValueError:  When data contains invalid values or format issues \n                Non-numerical data in features or target, or insufficient data \n                Ensure data is properly preprocessed and contains sufficient samples",
+          "LIMITATIONS": "Known limitations:\n- Requires tabular data format (csv) with numerical features\n- Model performance depends on feature engineering quality\n- May not capture complex non-linear relationships as well as deep learning\n- Hyperparameter tuning requires multiple runs"
+        },
+        "args": [
+          {
+            "name": "train_data_path",
+            "type": "str"
+          },
+          {
+            "name": "test_data_path",
+            "type": "str"
+          },
+          {
+            "name": "model_save_path",
+            "type": "str"
+          },
+          {
+            "name": "target_column",
+            "type": "str"
+          },
+          {
+            "name": "hyperparameters",
+            "type": "dict | None"
+          },
+          {
+            "name": "work_dir",
+            "type": "str | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def train_xgboost_model(\n    try:\n        # Load data\n        train_df = pd.read_csv(train_data_path)\n        test_df = pd.read_csv(test_data_path)\n\n        # Separate features and targets\n        X_train = train_df.drop(columns=[target_column])\n        y_train = train_df[target_column]\n        X_test = test_df.drop(columns=[target_column])\n        y_test = test_df[target_column]\n\n        # Default hyperparameters\n        default_params = {\n            \"n_estimators\": 100,\n            \"max_depth\": 6,\n            \"learning_rate\": 0.1,\n            \"subsample\": 0.8,\n            \"colsample_bytree\": 0.8,\n            \"random_state\": 42,\n        }\n    ..."
+      },
+      {
+        "name": "evaluate_xgboost_model",
+        "sections": {
+          "BRIEF": "Evaluate trained XGBoost model with comprehensive performance metrics and detailed analysis.",
+          "DETAILED": "This tool provides thorough evaluation of trained XGBoost models with comprehensive metrics and detailed analysis capabilities.\nIt generates standard regression metrics (MAE, RMSE, R2, MAPE), error analysis (mean error, error standard deviation, max positive/negative errors), prediction ranges (min, max, standard deviation), and top feature importance rankings essential for model validation and deployment decisions.\nThe tool supports both basic and detailed analysis modes, enabling quick assessments or in-depth model understanding for research and production applications.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need comprehensive evaluation of trained XGBoost models\n- Best suited for model validation and performance assessment workflows\n- Essential for comparing different models or hyperparameter configurations\n- Recommended for generating model performance reports and insights\n- Avoid when you only need basic metrics (use simpler evaluation functions)",
+          "CONTEXTUAL": "How this tool works:\n- Loads trained XGBoost model from serialized file\n- Processes test data with identical structure to training data\n- Calculates comprehensive regression metrics (MAE, RMSE, R2, MAPE)\n- Performs detailed error analysis including prediction ranges and distributions\n- Extracts and ranks feature importance for model interpretability\n- Provides statistical analysis of prediction quality and model behavior",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First train model using train_xgboost_model and prepare test data \n2.  Apply comprehensive evaluation to assess model performance \n3.  Use results for model comparison, hyperparameter tuning, or deployment decisions",
+          "SYNTACTICAL": "Usage examples:\n`evaluate_xgboost_model(\"trained_model.pkl\", \"test_data.csv\", \"formation_energy_per_atom\", True)`,\n`evaluate_xgboost_model(\"models/xgb_model.pkl\", \"data/test.csv\", \"band_gap\", False)`,\n`evaluate_xgboost_model(\"model.pkl\", \"test.csv\", \"energy\", True)`,",
+          "ARGS_BRIEF": "Whether to include detailed analysis and feature importance. Defaults to True.",
+          "ARGS_DETAILED": "Boolean flag controlling the depth of analysis performed.\n                      When True, includes prediction ranges (min, max, std), error analysis (mean error, error std, max errors), and top 10 feature importance rankings.\n                      When False, provides only basic metrics (MAE, RMSE, R2, MAPE) for quick assessment.\n                      Detailed analysis is recommended for thorough model evaluation and interpretation.",
+          "ARGS_EXAMPLES": "True (comprehensive analysis), False (basic metrics only)",
+          "RETURNS_BRIEF": "JSON string with comprehensive evaluation metrics and analysis results.",
+          "RETURNS_DETAILED": "A detailed JSON-formatted string containing evaluation success status, comprehensive performance metrics (MAE, RMSE, R2, MAPE), prediction statistics (min/max/std), error analysis (mean error, error std, max positive/negative errors), and top 10 feature importance rankings when detailed analysis is enabled.\n         This provides complete model assessment for validation and comparison purposes.",
+          "RETURNS_EXAMPLES": "\"{\"success\": true, \"evaluation_metrics\": {\"mae\": 0.15, \"rmse\": 0.22, \"r2\": 0.83, \"mape\": 3.45, \"feature_importance\": {...}}}\"",
+          "RAISES": "Exceptions:\n    FileNotFoundError:  When model file or test data file doesn't exist \n                       Invalid file paths or missing files \n                       Verify file paths exist and are accessible \n    KeyError:  When target column is not found in test data \n              Specified target column doesn't exist in CSV \n              Check column names in test data and use valid target column \n    ValueError:  When model and data are incompatible or contain invalid values \n                Feature mismatch between model and data, or non-numerical values \n                Ensure test data has same features as training data and proper preprocessing",
+          "LIMITATIONS": "Known limitations:\n- Requires identical feature structure between training and test data\n- Cannot evaluate model performance on different target variables\n- Feature importance interpretation depends on training data characteristics\n- May not capture model performance on out-of-distribution data\n- MAPE metric becomes unreliable when target values are close to zero"
+        },
+        "args": [
+          {
+            "name": "model_path",
+            "type": "str"
+          },
+          {
+            "name": "test_data_path",
+            "type": "str"
+          },
+          {
+            "name": "target_column",
+            "type": "str"
+          },
+          {
+            "name": "detailed_analysis",
+            "type": "bool"
+          }
+        ],
+        "returns": "str",
+        "code": "def evaluate_xgboost_model(\n    import joblib\n    import numpy as np\n    import pandas as pd\n    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score\n\n    try:\n        # Load model and test data\n        model = joblib.load(model_path)\n        test_df = pd.read_csv(test_data_path)\n\n        X_test = test_df.drop(columns=[target_column])\n        y_test = test_df[target_column]\n\n        # Make predictions\n        y_pred = model.predict(X_test)\n\n        # Basic metrics\n        metrics = {\n            \"mae\": float(mean_absolute_error(y_test, y_pred)),\n            \"rmse\": float(np.sqrt(mean_squared_error(y_test, y_pred))),\n    ..."
+      },
+      {
+        "name": "perform_cross_validation",
+        "sections": {
+          "BRIEF": "Perform k-fold cross-validation to assess model stability and generalization performance.",
+          "DETAILED": "This tool implements comprehensive k-fold cross-validation for XGBoost models to assess model generalization capability, and robustness across different data splits.\nCross-validation provides more reliable performance estimates than single train/test splits by evaluating model performance across multiple data partitions.\nThis is essential for hyperparameter tuning, model comparison, and ensuring reliable performance estimates for materials property prediction models.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need robust estimates of model performance and stability\n- Best suited for hyperparameter tuning and model comparison workflows\n- Essential for assessing model generalization before final deployment\n- Recommended for small to medium datasets where train/test splits may be unreliable\n- Avoid for very large datasets where computational cost becomes prohibitive",
+          "CONTEXTUAL": "How this tool works:\n- Implements k-fold cross-validation with stratified data splitting\n- Trains XGBoost models on k-1 folds and evaluates on the held-out fold\n- Calculates performance metrics (R2, MAE) across all folds\n- Provides statistical analysis including mean performance and variance\n- Uses consistent hyperparameters across all folds for fair comparison",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First prepare training data using prepare_tabular_dataset and train a model using train_xgboost_model \n2.  Apply cross-validation to assess model stability and performance \n3.  Use results for hyperparameter optimization or proceed to train_xgboost_model",
+          "SYNTACTICAL": "Usage examples:\n`perform_cross_validation(\"train_data.csv\", \"formation_energy_per_atom\", 5, None)`,\n`perform_cross_validation(\"data/train.csv\", \"band_gap\", 10, {\"n_estimators\": 200})`,\n`perform_cross_validation(\"training.csv\", \"energy\", 3, {\"max_depth\": 8, \"learning_rate\": 0.05})`,",
+          "ARGS_BRIEF": "Optional XGBoost hyperparameters for cross-validation.",
+          "ARGS_DETAILED": "Dictionary containing XGBoost hyperparameters to use across all cross-validation folds.\n                    If None, optimized default parameters will be used.\n                    Consistent hyperparameters across folds ensure fair comparison and reliable performance estimates.\n                    Useful for testing specific hyperparameter configurations.",
+          "ARGS_EXAMPLES": "{\"n_estimators\": 150, \"max_depth\": 7}, {\"learning_rate\": 0.05}, None",
+          "RETURNS_BRIEF": "JSON string with comprehensive cross-validation results and statistical analysis.",
+          "RETURNS_DETAILED": "A detailed JSON-formatted string containing cross-validation success status, individual fold scores, statistical summaries (mean, standard deviation), hyperparameters used, and performance stability assessment.\n         This enables comprehensive evaluation of model robustness and generalization capability.",
+          "RETURNS_EXAMPLES": "\"{\"success\": true, \"cross_validation_results\": {\"r2_mean\": 0.85, \"r2_std\": 0.03, \"mae_mean\": 0.12, \"mae_std\": 0.02, ...}}\"",
+          "RAISES": "Exceptions:\n    FileNotFoundError:  When training data file doesn't exist \n                       Invalid file path or missing CSV file \n                       Verify file path exists and contains properly formatted CSV data \n    KeyError:  When target column is not found in the data \n              Specified target column doesn't exist in CSV file \n              Check column names in CSV file and use valid target column name \n    ValueError:  When cv_folds is invalid or data contains invalid values \n                cv_folds less than 2, greater than dataset size, or non-numerical data \n                Use valid cv_folds value and ensure data is properly preprocessed",
+          "LIMITATIONS": "Known limitations:\n- Computational cost scales linearly with number of folds\n- May not be suitable for very large datasets due to memory constraints\n- Assumes data is suitable for random splitting (no temporal or spatial dependencies)\n- Cannot assess performance on truly out-of-distribution data"
+        },
+        "args": [
+          {
+            "name": "train_data_path",
+            "type": "str"
+          },
+          {
+            "name": "target_column",
+            "type": "str"
+          },
+          {
+            "name": "cv_folds",
+            "type": "int"
+          },
+          {
+            "name": "hyperparameters",
+            "type": "dict | None"
+          }
+        ],
+        "returns": "str",
+        "code": "def perform_cross_validation(\n    import pandas as pd\n    import xgboost as xgb\n    from sklearn.model_selection import KFold, cross_val_score\n\n    try:\n        # Load data\n        train_df = pd.read_csv(train_data_path)\n        X = train_df.drop(columns=[target_column])\n        y = train_df[target_column]\n\n        # Default hyperparameters\n        default_params = {\n            \"n_estimators\": 100,\n            \"max_depth\": 6,\n            \"learning_rate\": 0.1,\n            \"random_state\": 42,\n        }\n        if hyperparameters:\n            default_params.update(hyperparameters)\n\n    ..."
+      }
+    ],
+    "tasks": [
+      {
+        "id": "ml_oxides",
+        "name": "Train XGBoost model",
+        "description": "Generate a comprehensive dataset of oxide polymorphs from Materials Project and train an XGBoost model to predict formation energies. Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
+        "tools": [
+          "batch_retrieve_polymorphs",
+          "filter_json_with_strategy",
+          "select_polymorphs_with_strategy_to_file",
+          "consolidate_polymorph_datasets",
+          "select_polymorphs_with_strategy",
+          "get_bulk_polymorphs_data",
+          "sort_and_get_first_from_json",
+          "get_bulk_polymorphs_data_to_file",
+          "prepare_tabular_dataset",
+          "train_xgboost_model",
+          "evaluate_xgboost_model",
+          "perform_cross_validation"
+        ],
+        "scoring_function": "model_evaluation_completeness_binary",
+        "submission_format": "path to the results file (eg. model_evaluation_results.json)",
+        "level": "single"
+      },
+      {
+        "id": "ml_nitrides",
+        "name": "Train XGBoost model",
+        "description": "Generate a comprehensive dataset of nitrides polymorphs from Materials Project and train an XGBoost model to predict formation energies. Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
+        "tools": [
+          "batch_retrieve_polymorphs",
+          "filter_json_with_strategy",
+          "select_polymorphs_with_strategy_to_file",
+          "consolidate_polymorph_datasets",
+          "select_polymorphs_with_strategy",
+          "get_bulk_polymorphs_data",
+          "sort_and_get_first_from_json",
+          "get_bulk_polymorphs_data_to_file",
+          "prepare_tabular_dataset",
+          "train_xgboost_model",
+          "evaluate_xgboost_model",
+          "perform_cross_validation"
+        ],
+        "scoring_function": "model_evaluation_completeness_binary",
+        "submission_format": "path to the results file (eg. model_evaluation_results.json)",
+        "level": "single"
+      },
+      {
+        "id": "ml_sulphides",
+        "name": "Train XGBoost model",
+        "description": "Generate a comprehensive dataset of sulphides polymorphs from Materials Project and train an XGBoost model to predict formation energies. Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
+        "tools": [
+          "batch_retrieve_polymorphs",
+          "filter_json_with_strategy",
+          "select_polymorphs_with_strategy_to_file",
+          "consolidate_polymorph_datasets",
+          "select_polymorphs_with_strategy",
+          "get_bulk_polymorphs_data",
+          "sort_and_get_first_from_json",
+          "get_bulk_polymorphs_data_to_file",
+          "prepare_tabular_dataset",
+          "train_xgboost_model",
+          "evaluate_xgboost_model",
+          "perform_cross_validation"
+        ],
+        "scoring_function": "model_evaluation_completeness_binary",
+        "submission_format": "path to the results file (eg. model_evaluation_results.json)",
+        "level": "single"
+      }
+    ],
+    "scoring_functions": [
+      {
+        "name": "resolve_path",
+        "docstring": "Resolves a path that might be relative to the base work directory.\nAlso cleans up common input format issues.",
+        "code": "def resolve_path(path_or_str: str) -> str:\n    \"\"\"\n    Resolves a path that might be relative to the base work directory.\n    Also cleans up common input format issues.\n    \"\"\"\n    # Handle various input issues\n    if isinstance(path_or_str, str):\n        # Remove \"answer:\" prefix if present\n        if path_or_str.startswith(\"answer:\"):\n            path_or_str = path_or_str.replace(\"answer:\", \"\", 1).strip()\n\n        # Replace escaped quotes that might come from JSON strings\n        path_or_str = path_or_str.replace('\\\\\"', '\"').replace(\"\\\\'\", \"'\")\n\n    try:\n        # If it's an absolute path or already exists, return as is\n        if Path(path_or_str).is_absolute() or Path(path_or_str).exists():\n            return path_or_str\n\n        # Try to resolve against base directory\n        full_path = Path(BASE_WORK_DIR) / path_or_str\n        if full_path.exists():\n            return str(full_path)\n\n        # If we can't resolve it, return the original\n    ..."
+      },
+      {
+        "name": "check_mp_structure",
+        "docstring": "Check if the path points to a valid CIF file containing a structure from Materials Project.",
+        "code": "def check_mp_structure(path_or_cif: str) -> float:\n    \"\"\"\n    Check if the path points to a valid CIF file containing a structure from Materials Project.\n    \"\"\"\n    logger.info(\"check_mp_structure\")\n    logger.info(f\"Input path_or_cif: {path_or_cif}\")\n    try:\n        # Try first as a CIF string since that's more common\n        try:\n            logger.info(f\"Trying to parse as CIF string first: {path_or_cif}\")\n            structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n            logger.info(\"Successfully parsed as CIF string\")\n        except Exception as e:\n            logger.info(f\"Could not parse as CIF string: {e}\")\n            # If that fails, try as a file path\n            if Path(path_or_cif).exists():\n                logger.info(f\"Input is a valid file path: {path_or_cif}\")\n                structure = Structure.from_file(path_or_cif)\n            else:\n                logger.error(\n                    f\"Input is neither a valid CIF string nor a file path: {path_or_cif}\"\n                )\n                return 0.0\n\n        return 1.0 if structure and len(structure) > 0 else 0.0\n    ..."
+      },
+      {
+        "name": "compare_with_ground_truth",
+        "docstring": "Generic function to compare a generated JSON file with a ground truth JSON file.\n\nArgs:\n    generated_path: Path to the generated JSON file\n    ground_truth_path: Path to the ground truth JSON file\n    comparison_mode: Mode of comparison:\n                    - \"strict\": Exact matching of structure a",
+        "code": "def compare_with_ground_truth(\n    generated_path, ground_truth_path, comparison_mode=\"strict\", tolerance=0.05\n):\n    \"\"\"\n    Generic function to compare a generated JSON file with a ground truth JSON file.\n\n    Args:\n        generated_path: Path to the generated JSON file\n        ground_truth_path: Path to the ground truth JSON file\n        comparison_mode: Mode of comparison:\n                        - \"strict\": Exact matching of structure and values\n                        - \"keys\": Only check if all required keys exist\n                        - \"numerical\": Compare numerical values with tolerance\n                        - \"subset\": Check if generated contains at least a subset of ground truth\n        tolerance: Tolerance for numerical comparisons (as a fraction)\n\n    Returns:\n        1.0 if generated matches ground truth according to the comparison mode, 0.0 otherwise\n    \"\"\"\n    import json\n\n    # Check if both files exist\n    if not Path(generated_path).exists() or not Path(ground_truth_path).exists():\n        return 0.0\n\n    ..."
+      },
+      {
+        "name": "ml_pipeline_score",
+        "docstring": "Comprehensive scoring function for the single-task ML pipeline.\n\nEvaluates the entire pipeline from data generation to model evaluation.\nThis function looks for evidence of all pipeline steps and evaluates\nthe final model quality.",
+        "code": "def ml_pipeline_score(model_path: str) -> float:\n    \"\"\"\n    Comprehensive scoring function for the single-task ML pipeline.\n\n    Evaluates the entire pipeline from data generation to model evaluation.\n    This function looks for evidence of all pipeline steps and evaluates\n    the final model quality.\n    \"\"\"\n    try:\n        if not Path(model_path).exists():\n            return 0.0\n\n        # Try to load the model\n        try:\n            import joblib\n\n            model = joblib.load(model_path)\n            if not hasattr(model, \"predict\"):\n                return 0.2\n        except Exception:\n            return 0.1\n\n        score = 0.3  # Base score for model existence\n\n        # Look for evidence of dataset creation\n    ..."
+      },
+      {
+        "name": "polymorph_retrieval_success",
+        "docstring": "Score the success of batch polymorph retrieval.\n\nCriteria:\n- At least 80% of compositions have polymorphs retrieved\n- Total polymorphs >= 50\n- Reasonable distribution across compositions",
+        "code": "def polymorph_retrieval_success(retrieval_results_path: str) -> float:\n    \"\"\"\n    Score the success of batch polymorph retrieval.\n\n    Criteria:\n    - At least 80% of compositions have polymorphs retrieved\n    - Total polymorphs >= 50\n    - Reasonable distribution across compositions\n    \"\"\"\n    try:\n        if not Path(retrieval_results_path).exists():\n            return 0.0\n\n        with Path(retrieval_results_path).open() as f:\n            results = json.load(f)\n\n        successful = len(results.get(\"successful_compositions\", []))\n        failed = len(results.get(\"failed_compositions\", []))\n        total_compositions = successful + failed\n        total_polymorphs = results.get(\"total_polymorphs\", 0)\n\n        if total_compositions == 0:\n            return 0.0\n\n        success_rate = successful / total_compositions\n    ..."
+      },
+      {
+        "name": "score_polymorph_dataset",
+        "docstring": "Analyzes a consolidated JSON file of polymorphs to identify if there are\ncompositions with multiple polymorphs.\n\nArgs:\n    consolidated_json_path: Path to the consolidated JSON file\n                            (e.g., created by consolidate_polymorph_datasets).\n\nReturns:\n    A float: 1.0 if at least ",
+        "code": "def score_polymorph_dataset(\n    consolidated_json_path: str,\n) -> float:\n    \"\"\"\n    Analyzes a consolidated JSON file of polymorphs to identify if there are\n    compositions with multiple polymorphs.\n\n    Args:\n        consolidated_json_path: Path to the consolidated JSON file\n                                (e.g., created by consolidate_polymorph_datasets).\n\n    Returns:\n        A float: 1.0 if at least one composition with multiple polymorphs is found,\n        otherwise 0.0. Returns 0.0 if the file is not found or an error occurs.\n    \"\"\"\n    try:\n        # Check if the consolidated JSON file exists\n        # We need Path imported to check for file existence\n        from pathlib import Path\n\n        logger.info(f\"score_polymorph_dataset: input={consolidated_json_path!r}\")\n\n        consolidated_json_file = Path(consolidated_json_path)\n        if not consolidated_json_file.exists():\n            logger.error(\n    ..."
+      },
+      {
+        "name": "ml_dataset_preparation_quality_binary",
+        "docstring": "Scores the quality of ML dataset preparation as binary (0 for fail, 1 for pass).\n\nA dataset preparation passes (1) if it meets the following criteria:\n- Both train and test files exist.\n- Sufficient sample sizes: at least 40 training samples and 10 test samples.\n- A reasonable number of features: at",
+        "code": "def ml_dataset_preparation_quality_binary(ml_metadata_path: str) -> int:\n    \"\"\"\n    Scores the quality of ML dataset preparation as binary (0 for fail, 1 for pass).\n\n    A dataset preparation passes (1) if it meets the following criteria:\n    - Both train and test files exist.\n    - Sufficient sample sizes: at least 40 training samples and 10 test samples.\n    - A reasonable number of features: at least 10 features.\n\n    Args:\n        ml_metadata_path: Path to the ML dataset metadata JSON file.\n\n    Returns:\n        1 if the dataset preparation quality meets the defined passing criteria,\n        0 otherwise (including errors).\n    \"\"\"\n    try:\n        logger.info(f\"ml_dataset_preparation: input={ml_metadata_path!r}\")\n\n        if not Path(ml_metadata_path).exists():\n            logger.info(f\"Metadata file not found: {ml_metadata_path}\")\n            return 0\n\n        with Path(ml_metadata_path).open() as f:\n            metadata = json.load(f)\n    ..."
+      },
+      {
+        "name": "model_training_success_binary",
+        "docstring": "Scores the success of XGBoost model training as binary (0 for fail, 1 for pass).\n\nModel training passes (1) if it meets the following criteria:\n- A valid model file exists and can be loaded.\n- Associated training results indicate successful training.\n- Reasonable performance metrics: R-squared (r2) ",
+        "code": "def model_training_success_binary(model_path: str) -> int:\n    \"\"\"\n    Scores the success of XGBoost model training as binary (0 for fail, 1 for pass).\n\n    Model training passes (1) if it meets the following criteria:\n    - A valid model file exists and can be loaded.\n    - Associated training results indicate successful training.\n    - Reasonable performance metrics: R-squared (r2) >= 0.6 and Mean Absolute Error (mae) <= 0.5.\n\n    Args:\n        model_path: Path to the trained model file (e.g., .pkl).\n\n    Returns:\n        1 if the model training success meets the defined passing criteria,\n        0 otherwise (including errors).\n    \"\"\"\n    try:\n        logger.info(f\"model_training_success_binary: input={model_path!r}\")\n\n        if not Path(model_path).exists():\n            logger.info(f\"Model file not found: {model_path}\")\n            return 0\n\n        # Criteria 1: Try to load the model\n        try:\n    ..."
+      },
+      {
+        "name": "model_evaluation_completeness_binary",
+        "docstring": "Scores the completeness of model evaluation as binary (0 for fail, 1 for pass).\n\nModel evaluation completeness passes (1) if it meets the following criteria:\n- An evaluation results file exists.\n- All required basic evaluation metrics (mae, rmse, r2) are present.\n- Performance quality: R-squared (r2",
+        "code": "def model_evaluation_completeness_binary(evaluation_results_path: str) -> int:\n    \"\"\"\n    Scores the completeness of model evaluation as binary (0 for fail, 1 for pass).\n\n    Model evaluation completeness passes (1) if it meets the following criteria:\n    - An evaluation results file exists.\n    - All required basic evaluation metrics (mae, rmse, r2) are present.\n    - Performance quality: R-squared (r2) in evaluation metrics is at least 0.7.\n    - Cross-validation results are present, including mean and standard deviation for r2.\n    - Feature importance analysis is included in the evaluation metrics.\n\n    Args:\n        evaluation_results_path: Path to the model evaluation results JSON file.\n\n    Returns:\n        1 if the model evaluation completeness meets the defined passing criteria,\n        0 otherwise (including errors).\n    \"\"\"\n    try:\n        logger.info(f\"ml_dataset_preparation: input={evaluation_results_path!r}\")\n\n        if not Path(evaluation_results_path).exists():\n            logger.info(f\"Evaluation results file not found: {evaluation_results_path}\")\n            return 0\n\n    ..."
+      },
+      {
+        "name": "compare_with_tolerance",
+        "docstring": "",
+        "code": "            def compare_with_tolerance(val1, val2, tol):\n                if isinstance(val1, int | float) and isinstance(val2, int | float):\n                    # Use relative tolerance for non-zero values\n                    if abs(val2) > 1e-10:\n                        return abs((val1 - val2) / val2) <= tol\n                    # Use absolute tolerance for values near zero\n                    else:\n                        return abs(val1 - val2) <= tol\n                elif isinstance(val1, dict) and isinstance(val2, dict):\n                    # Compare dictionaries recursively\n                    return all(\n                        k in val1 and compare_with_tolerance(val1[k], val2[k], tol)\n                        for k in val2\n                    )\n                elif isinstance(val1, list) and isinstance(val2, list):\n                    # Compare lists recursively\n                    return len(val1) == len(val2) and all(\n                        compare_with_tolerance(v1, v2, tol)\n                        for v1, v2 in zip(val1, val2, strict=False)\n                    )\n                else:\n                    # For non-numerical values, use strict equality\n                    return val1 == val2"
+      },
+      {
+        "name": "is_subset",
+        "docstring": "",
+        "code": "            def is_subset(generated_val, ground_truth_val):\n                if isinstance(ground_truth_val, dict) and isinstance(\n                    generated_val, dict\n                ):\n                    # Check if all required keys and values match\n                    for k, v in ground_truth_val.items():\n                        if k not in generated_val or not is_subset(generated_val[k], v):\n                            return False\n                    return True\n                elif isinstance(ground_truth_val, list) and isinstance(\n                    generated_val, list\n                ):\n                    # For lists, check if all ground truth items are in generated\n                    # This is a simplified approach that works for primitive values\n                    for gt_item in ground_truth_val:\n                        if isinstance(gt_item, dict | list):\n                            # For complex items, check if any generated item is a superset\n                            if not any(\n                                is_subset(gen_item, gt_item)\n                                for gen_item in generated_val\n                            ):\n                                return False\n                        else:\n                            # For simple items, just check if it's in the list\n                            if gt_item not in generated_val:\n    ..."
+      }
+    ]
+  },
+  "Resistor": {
+    "description": "Infer resistor circuit topologies and values from node-to-node resistance measurements using circuit analysis tools.",
+    "tools": [
+      {
+        "name": "calculate_series_resistance",
+        "sections": {
+          "BRIEF": "Calculate total resistance of resistors connected in series.",
+          "DETAILED": "Computes the equivalent resistance when multiple resistors are connected\nend-to-end in a single path. In series configuration, current flows through each\nresistor sequentially, and the total resistance is the sum of individual resistances.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you have identified a series branch in a circuit.\n- Best suited for simplifying complex networks by combining series elements.\n- Use when testing hypotheses about circuit topology where series connections are assumed.",
+          "CONTEXTUAL": "How this tool works:\n- Takes a list of individual resistance values.\n- Sums all the provided resistance values.\n- The result represents the total equivalent resistance.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Identify a series connection of resistors within a larger circuit. \n    2.  Apply this tool to calculate their combined resistance. \n    3.  Consider the series resistors with their equivalent resistance in the circuit for further analysis or simplification.",
+          "SYNTACTICAL": "Usage examples:\n- `calculate_series_resistance([10, 20, 30])`\n- `calculate_series_resistance([5.5, 12.3, 7.2, 1.0])`",
+          "ARGS_BRIEF": "List of resistance values in ohms.",
+          "ARGS_DETAILED": "A list containing floating-point numbers, each representing the resistance of an individual resistor. All values must be positive.",
+          "ARGS_EXAMPLES": "`[10, 20, 30]`, `[100.5, 200]`",
+          "RETURNS_BRIEF": "Total series resistance in ohms.",
+          "RETURNS_DETAILED": "A single floating-point number representing the sum of all input resistances.",
+          "RETURNS_EXAMPLES": "`60.0` (for `[10, 20, 30]`), `300.5` (for `[100.5, 200]`)",
+          "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When an empty list of resistances is provided. \n         The sum of an empty list is undefined in this context, indicating no resistors are present. \n         Try: Ensure the `resistances` list contains at least one valid resistance value. \n    ValueError: [ERRORS]\n         When a resistance value is not a positive number. \n         Resistances in a physical circuit are typically positive. Zero or negative values would lead to non-physical results. \n         Try: Ensure all resistance values in the input list are positive floating-point numbers.",
+          "LIMITATIONS": "Known limitations:\n- Assumes ideal resistors.\n- Only applicable for purely series connections."
+        },
+        "args": [
+          {
+            "name": "resistances",
+            "type": "list[float]"
+          }
+        ],
+        "returns": "float",
+        "code": "def calculate_series_resistance(resistances: list[float]) -> float:\n    if not resistances:\n        raise ValueError(\"No resistances provided\")\n    return sum(resistances)"
+      },
+      {
+        "name": "calculate_parallel_resistance",
+        "sections": {
+          "BRIEF": "Calculate total resistance of resistors connected in parallel.",
+          "DETAILED": "Computes the equivalent resistance when multiple resistors are connected\nacross the same two nodes. In parallel configuration, current divides among the\nresistors, and the reciprocal of total resistance equals the sum of reciprocals\nof individual resistances. This calculation is crucial for simplifying parallel branches in a circuit.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you have identified parallel branches in a circuit.\n- Best suited for simplifying complex networks by combining parallel elements.\n- Recommended when testing different topology hypotheses involving parallel connections.",
+          "CONTEXTUAL": "How this tool works:\n- Takes a list of individual resistance values.\n- Calculates the reciprocal of each resistance.\n- Sums these reciprocal values.\n- Takes the reciprocal of the sum to find the total parallel resistance.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Identify a parallel connection of resistors within a larger circuit diagram. \n    2.  Apply this tool to calculate their combined resistance. \n    3.  Replace the parallel resistors with their equivalent resistance in the circuit for further analysis or simplification.",
+          "SYNTACTICAL": "Usage examples:\n- `calculate_parallel_resistance([10, 20])`\n- `calculate_parallel_resistance([100, 200, 300])`",
+          "ARGS_BRIEF": "List of resistance values in ohms.",
+          "ARGS_DETAILED": "A list containing floating-point numbers, each representing the resistance of an individual resistor. All values must be positive.",
+          "ARGS_EXAMPLES": "`[10, 20]`, `[100.5, 200, 50]`",
+          "RETURNS_BRIEF": "Total parallel resistance in ohms.",
+          "RETURNS_DETAILED": "A single floating-point number representing the equivalent resistance of all input resistors connected in parallel.",
+          "RETURNS_EXAMPLES": "`6.67` (for `[10, 20]`), `54.545` (for `[100, 200, 300]`)",
+          "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When an empty list of resistances is provided. \n         An empty list means no resistors are in parallel, making the calculation undefined. \n         Try: Ensure the `resistances` list contains at least one positive resistance value. \n    ValueError: [ERRORS]\n         When any resistance value is zero or negative. \n         Resistances in parallel must be positive for a valid physical interpretation and to avoid division by zero. \n         Try: Ensure all resistance values in the input list are positive floating-point numbers.",
+          "LIMITATIONS": "Known limitations:\n- Assumes ideal resistors.\n- Only applicable for purely parallel connections."
+        },
+        "args": [
+          {
+            "name": "resistances",
+            "type": "list[float]"
+          }
+        ],
+        "returns": "float",
+        "code": "def calculate_parallel_resistance(resistances: list[float]) -> float:\n    if not resistances:\n        raise ValueError(\"No resistances provided\")\n    if any(r <= 0 for r in resistances):\n        raise ValueError(\"All resistances must be positive\")\n\n    return 1 / sum(1 / r for r in resistances)"
+      },
+      {
+        "name": "delta_to_wye_transform",
+        "sections": {
+          "BRIEF": "Convert delta (triangle) resistor configuration to wye (star) configuration.",
+          "DETAILED": "Transforms a three-resistor delta network into an equivalent three-resistor\nwye network. This is essential for solving complex resistor networks that cannot be\nreduced using simple series/parallel combinations. The transformation preserves the\nresistance between any two external nodes, simplifying nodal analysis.",
+          "PROCEDURAL": "When to use this tool:\n- Use when encountering triangle (delta) configurations that block series/parallel reduction in a circuit.\n- Best suited as part of a network analysis strategy for complex topologies, especially bridge circuits.\n- Recommended when testing circuit topology hypotheses involving triangular connections.\n- Use before applying nodal analysis to simplify the network's structure.",
+          "CONTEXTUAL": "How this tool works:\n- Takes three resistance values (Ra, Rb, Rc) representing the resistors in a delta configuration.\n- Calculates the equivalent Wye (star) resistances (R1, R2, R3) using standard transformation formulas:\n    - R1 = (Rb * Rc) / (Ra + Rb + Rc)\n    - R2 = (Ra * Rc) / (Ra + Rb + Rc)\n    - R3 = (Ra * Rb) / (Ra + Rb + Rc)\n- Returns these three calculated resistances.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Identify a delta (triangle) configuration in the circuit that prevents further series/parallel simplification. \n    2.  Apply this tool with the three delta resistor values to obtain their equivalent wye resistor values. \n    3.  Substitute the original delta network with the equivalent wye network in the circuit diagram, which should now allow for series/parallel reduction or simpler nodal analysis.",
+          "SYNTACTICAL": "Usage examples:\n- `delta_to_wye_transform(30, 30, 30)`\n- `delta_to_wye_transform(100, 50, 75)`",
+          "ARGS_BRIEF": "Resistance between nodes C and A in delta configuration.",
+          "ARGS_DETAILED": "A positive floating-point number representing the resistance of the resistor connected between nodes C and A in the delta network.",
+          "ARGS_EXAMPLES": "`30`, `75`",
+          "RETURNS_BRIEF": "JSON string with keys 'r1', 'r2', 'r3' for wye resistor values.",
+          "RETURNS_DETAILED": "A JSON string containing a dictionary with three keys: 'r1', 'r2', and 'r3', whose values are the calculated equivalent resistances for the wye network, each being a floating-point number. R1 is connected to original node A, R2 to B, and R3 to C.",
+          "RETURNS_EXAMPLES": "\"{\\\"r1\\\": 10.0, \\\"r2\\\": 10.0, \\\"r3\\\": 10.0}\" (for `delta_to_wye_transform(30, 30, 30)`)",
+          "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When the sum of delta resistances (ra + rb + rc) is zero. \n         A zero sum in the denominator of the transformation formulas would lead to division by zero, indicating an invalid or non-physical delta configuration. \n         Try: Ensure all input resistances `ra`, `rb`, and `rc` are positive values. \n    ValueError: [ERRORS]\n         When any input resistance (ra, rb, or rc) is zero or negative. \n         Physical resistors have positive resistance values. Zero or negative values would result in non-physical wye resistances. \n         Try: Ensure `ra`, `rb`, and `rc` are all positive floating-point numbers.",
+          "LIMITATIONS": "Known limitations:\n- Assumes ideal resistors.\n- Only applicable for 3-resistor delta configurations."
+        },
+        "args": [
+          {
+            "name": "ra",
+            "type": "float"
+          },
+          {
+            "name": "rb",
+            "type": "float"
+          },
+          {
+            "name": "rc",
+            "type": "float"
+          }
+        ],
+        "returns": "str",
+        "code": "def delta_to_wye_transform(ra: float, rb: float, rc: float) -> str:\n    total = ra + rb + rc\n    if total == 0:\n        raise ValueError(\"Sum of delta resistances cannot be zero\")\n    if any(r <= 0 for r in [ra, rb, rc]):\n        raise ValueError(\"All resistances must be positive\")\n\n    r1 = (rb * rc) / total  # Connected to node A\n    r2 = (ra * rc) / total  # Connected to node B\n    r3 = (ra * rb) / total  # Connected to node C\n\n    result = {\"r1\": r1, \"r2\": r2, \"r3\": r3}\n    return json.dumps(result)"
+      },
+      {
+        "name": "wye_to_delta_transform",
+        "sections": {
+          "BRIEF": "Convert wye (star) resistor configuration to delta (triangle) configuration.",
+          "DETAILED": "Transforms a three-resistor wye network into an equivalent three-resistor\ndelta network. This is the inverse of delta-to-wye transformation and is useful when\nthe delta form provides easier analysis or when testing different topology hypotheses. This transformation is key for circuit simplification in cases where a wye configuration is encountered.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you need to convert a wye (star) configuration into an equivalent delta (triangle) configuration.\n- Best suited for situations where the delta form simplifies further series/parallel reductions or nodal analysis.\n- Recommended when testing different topology hypotheses where converting a wye to a delta might offer a clearer path to a solution.\n- Use when a wye configuration makes direct analysis difficult.",
+          "CONTEXTUAL": "How this tool works:\n- Takes three resistance values (R1, R2, R3) representing the resistors in a wye configuration.\n- Calculates the equivalent Delta (triangle) resistances (Ra, Rb, Rc) using standard inverse transformation formulas:\n    - Ra = (R1*R2 + R2*R3 + R3*R1) / R3\n    - Rb = (R1*R2 + R2*R3 + R3*R1) / R1\n    - Rc = (R1*R2 + R2*R3 + R3*R1) / R2\n- Returns these three calculated resistances.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Identify a wye (star) configuration in the circuit that is difficult to analyze directly. \n    2.  Apply this tool with the three wye resistor values to obtain their equivalent delta resistor values. \n    3.  Substitute the original wye network with the equivalent delta network in the circuit diagram, which should now allow for simpler analysis or further circuit reduction.",
+          "SYNTACTICAL": "Usage examples:\n- `wye_to_delta_transform(10, 10, 10)`\n- `wye_to_delta_transform(50, 75, 100)`",
+          "ARGS_BRIEF": "Wye resistor connected to node C.",
+          "ARGS_DETAILED": "A positive floating-point number representing the resistance of the resistor connected from the center of the wye to node C.",
+          "ARGS_EXAMPLES": "`10`, `100`",
+          "RETURNS_BRIEF": "JSON string with keys 'ra', 'rb', 'rc' for delta resistor values.",
+          "RETURNS_DETAILED": "A JSON string containing a dictionary with three keys: 'ra', 'rb', and 'rc', whose values are the calculated equivalent resistances for the delta network, each being a floating-point number. Ra is between original nodes A and B, Rb between B and C, and Rc between C and A.",
+          "RETURNS_EXAMPLES": "\"{\\\"ra\\\": 30.0, \\\"rb\\\": 30.0, \\\"rc\\\": 30.0}\" (for `wye_to_delta_transform(10, 10, 10)`)",
+          "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When any input resistance (r1, r2, or r3) is zero or negative. \n         Physical resistors have positive resistance values. Zero or negative values would lead to non-physical delta resistances or division by zero in the transformation formulas. \n         Try: Ensure `r1`, `r2`, and `r3` are all positive floating-point numbers.",
+          "LIMITATIONS": "Known limitations:\n- Assumes ideal resistors.\n- Only applicable for 3-resistor wye configurations."
+        },
+        "args": [
+          {
+            "name": "r1",
+            "type": "float"
+          },
+          {
+            "name": "r2",
+            "type": "float"
+          },
+          {
+            "name": "r3",
+            "type": "float"
+          }
+        ],
+        "returns": "str",
+        "code": "def wye_to_delta_transform(r1: float, r2: float, r3: float) -> str:\n    denominator = r1 * r2 + r2 * r3 + r3 * r1\n    if any(r <= 0 for r in [r1, r2, r3]):\n        raise ValueError(\"All resistances must be positive\")\n\n    ra = denominator / r3  # Between nodes A and B\n    rb = denominator / r1  # Between nodes B and C\n    rc = denominator / r2  # Between nodes C and A\n\n    result = {\"ra\": ra, \"rb\": rb, \"rc\": rc}\n    return json.dumps(result)"
+      },
+      {
+        "name": "simulate_circuit_resistance",
+        "sections": {
+          "BRIEF": "Simulate total resistance between specified terminals in a given circuit topology.",
+          "DETAILED": "Takes a circuit topology description and calculates the equivalent resistance\nbetween two specified terminal nodes using nodal analysis. This tool allows for the\ntesting and validation of topology hypotheses by comparing calculated resistance with\nmeasured values. It provides a foundational capability for circuit analysis and design.",
+          "PROCEDURAL": "When to use this tool:\n- Use to validate a proposed circuit topology against known or measured values.\n- Best suited after constructing a hypothesis about resistor values and their connections.\n- Recommended for iterative testing of different network configurations to see their impact on equivalent resistance.\n- Use as a verification step before finalizing a circuit design or submitting a solution.",
+          "CONTEXTUAL": "How this tool works:\n- Parses a JSON string representing the circuit's resistors and their connections.\n- Identifies all unique nodes in the circuit and creates a mapping to numerical indices.\n- Constructs a conductance matrix (G matrix) based on the connections and resistor values.\n- Applies a 1A current source between the specified `terminal_nodes`.\n- Solves the resulting system of linear equations (G * V = I) to find the node voltages.\n- The equivalent resistance is then calculated as the absolute voltage difference between the `terminal_nodes` (V_terminal1 - V_terminal2) since the applied current is 1A.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Have a defined circuit `topology` (resistors and connections) and the `terminal_nodes` between which to measure resistance. \n    2.  Apply this tool with the `topology` and `terminal_nodes` to get the simulated resistance. \n    3.  Compare the `simulate_circuit_resistance` output with actual measurements or desired specifications to validate the topology using `validate_measurements`.",
+          "SYNTACTICAL": "Usage examples:\n- `simulate_circuit_resistance(\"{\\\"resistors\\\": {\\\"R1\\\": 7.778, \\\"R2\\\": 11.111, \\\"R3\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}\", [\"A\", \"X1\"])`\n- `simulate_circuit_resistance(\"{\\\"resistors\\\": {\\\"R1\\\": 50.0, \\\"R2\\\": 25.0}, \\\"connections\\\": [[\\\"N1\\\", \\\"N2\\\", \\\"R1\\\"], [\\\"N2\\\", \\\"N3\\\", \\\"R2\\\"]]}\", [\"N1\", \"N3\"])`",
+          "ARGS_BRIEF": "List of two node names to measure resistance between.",
+          "ARGS_DETAILED": "A list containing exactly two strings, where each string is the name of a node in the circuit. The tool will calculate the equivalent resistance between these two specified nodes.",
+          "ARGS_EXAMPLES": "`[\"A\", \"C\"]`, `[\"input_node\", \"output_node\"]`",
+          "RETURNS_BRIEF": "Equivalent resistance between terminals in ohms.",
+          "RETURNS_DETAILED": "A floating-point number representing the total equivalent resistance measured between the two specified terminal nodes in the given circuit topology.",
+          "RETURNS_EXAMPLES": "`30.0` (for a 10Ω and 20Ω resistor in series)",
+          "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When the `topology` JSON string is invalid or malformed. \n         `json.loads` fails, or required keys (\"resistors\", \"connections\") are missing. \n         Try: Ensure the `topology` string is a valid JSON and adheres to the specified structure. \n    ValueError: [ERRORS]\n         When `terminal_nodes` does not contain exactly two node names. \n         Resistance is defined between two distinct points. Fewer or more nodes are ambiguous. \n         Try: Provide a list with exactly two string elements for `terminal_nodes`. \n    ValueError: [ERRORS]\n         When a `resistor_id` in `connections` is not found in the `resistors` dictionary. \n         An undefined resistor ID indicates an inconsistency in the circuit description. \n         Try: Ensure all resistor IDs used in `connections` are defined in the `resistors` dictionary. \n    ValueError: [ERRORS]\n         When a resistor has a non-positive resistance value (<= 0). \n         Nodal analysis assumes positive resistances. Zero or negative resistance can cause mathematical issues. \n         Try: Ensure all resistor values in the `resistors` dictionary are positive floating-point numbers.",
+          "LIMITATIONS": "Known limitations:\n- Assumes ideal resistors (no inductance, capacitance).\n- Only calculates equivalent resistance; does not simulate transient behavior or AC circuits.\n- Circuit must be a passive network for resistance calculation.\n- Numerical stability issues can arise for extremely large/small resistance values."
+        },
+        "args": [
+          {
+            "name": "topology",
+            "type": "str"
+          },
+          {
+            "name": "terminal_nodes",
+            "type": "list[str]"
+          }
+        ],
+        "returns": "float",
+        "code": "def simulate_circuit_resistance(topology: str, terminal_nodes: list[str]) -> float:\n    try:\n        circuit = json.loads(topology)\n        resistors = circuit[\"resistors\"]\n        connections = circuit[\"connections\"]\n\n        if len(terminal_nodes) != 2:\n            raise ValueError(\"Must specify exactly two terminal nodes\")\n\n        # Build adjacency matrix for nodal analysis\n        nodes = set()\n        for conn in connections:\n            nodes.add(conn[0])\n            nodes.add(conn[1])\n\n        node_list = sorted(nodes)\n        n = len(node_list)\n        node_to_idx = {node: i for i, node in enumerate(node_list)}\n\n        # Create conductance matrix\n        G = np.zeros((n, n))\n    ..."
+      },
+      {
+        "name": "validate_measurements",
+        "sections": {
+          "BRIEF": "Validate if proposed topology matches all given measurements.",
+          "DETAILED": "Compares the resistance predictions of a proposed circuit topology against\nactual measurements. It quantifies the discrepancy by calculating error metrics,\nwhich are essential for validating hypotheses about circuit structure and resistor values.\nThis tool helps in refining and confirming circuit designs.",
+          "PROCEDURAL": "When to use this tool:\n- Use after proposing a complete circuit topology and its corresponding resistor values.\n- Best suited to quantify how well your hypothesis matches available experimental measurement data.\n- Recommended before final solution submission to assess the quality and accuracy of the proposed circuit.\n- Use during iterative refinement of topology hypotheses to guide adjustments.",
+          "CONTEXTUAL": "How this tool works:\n- Parses the input JSON strings for the proposed circuit `topology` and the `measurements`.\n- Iterates through each measurement provided in the `measurements` list.\n- For each measurement, it calls `get_resistance_between_nodes` to predict the resistance between the specified nodes in the proposed `topology`.\n- Compares the `predicted_resistance` with the `actual_resistance` from the measurement.\n- Calculates the absolute error and relative error for each measurement.\n- Aggregates these errors to provide `total_error`, `max_error`, and `mean_error`, along with detailed error for each measurement.\n- Returns a JSON string summarizing the validation results.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Have a proposed `topology` (e.g., from `propose_simple_topology` and `estimate_resistor_values`) and a set of `measurements` (actual data). \n    2.  Apply this tool with the `topology` and `measurements` to get a quantitative assessment of the match. \n    3.  If errors are high, iterate back to refining the `topology` or re-estimating resistor values using `estimate_resistor_values`. If errors are acceptable, consider the topology validated.",
+          "SYNTACTICAL": "Usage examples:\n- `validate_measurements(\n\"{\\\"resistors\\\": {\\\"R1\\\": 5.0, \\\"R2\\\": 10.0}, \"\n\"\\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R2\\\"]]}\",\n\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, \"\n\"{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, \"\n\"{\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\")`\n- `validate_measurements(proposed_circuit_topology, experimental_data)`",
+          "ARGS_BRIEF": "JSON string with actual measurements.",
+          "ARGS_DETAILED": "A JSON string representing a list of CircuitMeasurement objects. Each object should contain node_a, node_b, and at least resistance. These are the real-world observations.",
+          "ARGS_EXAMPLES": "`\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\"`",
+          "RETURNS_BRIEF": "JSON string with validation results including error metrics.",
+          "RETURNS_DETAILED": "A JSON string containing a dictionary with various error metrics: `total_error`, `max_error`, `mean_error`, and `detailed_errors` (a list of per-measurement errors including predicted, actual, absolute error, and relative error). It also includes `num_measurements`. This output helps quantify the accuracy of the proposed topology.",
+          "EXAMPLES": "`{\"total_error\": 5.0, \"max_error\": 5.0, \"mean_error\": 5.0, \"detailed_errors\": [{\"nodes\": \"A-B\", \"predicted\": 10.0, \"actual\": 15.0, \"error\": 5.0, \"relative_error\": 0.333}], \"num_measurements\": 1}`",
+          "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When the `topology` or `measurements` JSON strings are malformed or invalid. \n         `json.loads` fails, or required keys are missing from the input dictionaries/lists. \n         Try: Ensure both input strings are valid JSON and adhere to the specified data structures.",
+          "LIMITATIONS": "Known limitations:\n- Currently only validates resistance measurements. Voltage and current validation are not yet implemented.\n- Assumes the measurement data is accurate and reliable.\n- Large errors can occur if the proposed topology is drastically different from the actual circuit or if resistor values are far off."
+        },
+        "args": [
+          {
+            "name": "topology",
+            "type": "str"
+          },
+          {
+            "name": "measurements",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def validate_measurements(topology: str, measurements: str) -> str:\n    try:\n        measurements_data = json.loads(measurements)\n        errors = []\n        detailed_errors = []\n\n        for measurement in measurements_data:\n            node_a = measurement[\"node_a\"]\n            node_b = measurement[\"node_b\"]\n\n            try:\n                predicted_resistance = get_resistance_between_nodes(\n                    topology=topology, terminal_nodes=[node_a, node_b]\n                )\n\n                if \"resistance\" in measurement:\n                    actual_resistance = measurement[\"resistance\"]\n                    error = abs(predicted_resistance - actual_resistance)\n                    errors.append(error)\n                    detailed_errors.append(\n                        {\n    ..."
+      },
+      {
+        "name": "propose_simple_topology",
+        "sections": {
+          "BRIEF": "Generate a simple circuit topology hypothesis for testing.",
+          "DETAILED": "Creates standard, foundational circuit configurations (series, parallel,\nseries-parallel, bridge) with placeholder resistor values (defaulting to 10.0 ohms).\nThis tool is invaluable for initiating the hypothesis generation process when you\nhave a basic idea about the circuit's complexity or expected structure but need a\nstructured, pre-defined starting point for exploration.",
+          "PROCEDURAL": "When to use this tool:\n- Use at the beginning of circuit analysis to generate initial, basic topology hypotheses.\n- Best suited when you have an approximate idea of how many resistors are present in the circuit.\n- Recommended to create templates for manual modification and refinement based on measurements.\n- Use for systematic exploration of common resistor configurations.",
+          "CONTEXTUAL": "How this tool works:\n- Initializes an empty circuit topology dictionary.\n- Adds `num_resistors` placeholder resistors (R1, R2, ...) with a default value of 10.0 ohms.\n- Based on `topology_type`:\n    - \"series\": Connects resistors end-to-end (A-R1-B-R2-C...).\n    - \"parallel\": Connects all resistors between two common nodes (A and B).\n    - \"series_parallel\": Creates a basic configuration with one resistor in series, and two in parallel, adding others in series if `num_resistors` is greater than 3.\n    - \"bridge\": Creates a Wheatstone bridge configuration (requires at least 5 resistors).\n    - If `topology_type` is not recognized or `num_resistors` is too low for complex types, it defaults to a series configuration.\n- Returns the constructed topology as a JSON string.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Have a preliminary idea of the number of resistors and a general type of circuit (e.g., \"series\", \"parallel\"). \n    2.  Apply this tool with `num_resistors` and `topology_type` to get a starting `topology`. \n    3.  Use `estimate_resistor_values` with this generated topology and actual `measurements` to refine the resistor values. Then, `validate_measurements` to check the fit.",
+          "SYNTACTICAL": "Usage examples:\n- `propose_simple_topology(3, \"series\")`\n- `propose_simple_topology(2, \"parallel\")`\n- `propose_simple_topology(5, \"bridge\")`",
+          "ARGS_BRIEF": "Type of configuration.",
+          "ARGS_DETAILED": "A string specifying the desired basic arrangement of resistors. Valid options are \"series\", \"parallel\", \"series_parallel\", or \"bridge\". If an invalid type is provided or `num_resistors` is too low for the chosen type, it defaults to \"series\".",
+          "ARGS_EXAMPLES": "`\"series\"`, `\"parallel\"`, `\"bridge\"`",
+          "RETURNS_BRIEF": "JSON string with proposed topology structure.",
+          "RETURNS_DETAILED": "A JSON string representing a `CircuitTopology` object. It includes a \"resistors\" dictionary (with `R1`, `R2`, etc., initially set to 10.0 ohms) and a \"connections\" list defining how these resistors are wired based on the `topology_type`.",
+          "RETURNS_EXAMPLES": "` \"{\\\"resistors\\\": {\\\"R1\\\": 10.0, \\\"R2\\\": 10.0, \\\"R3\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}\"` (for `propose_simple_topology(3, \"series\")`)",
+          "RAISES": "Exceptions:\n    None explicitly raised by the tool itself, but downstream tools using this output might raise errors if the generated topology is invalid for their operations.",
+          "LIMITATIONS": "Known limitations:\n- Generates only basic, predefined topologies. Complex or arbitrary circuit designs require manual modification.\n- Resistor values are placeholders (10.0 ohms) and need to be refined using `estimate_resistor_values`.\n- Node naming is sequential (A, B, C, ...) and may not align with complex real-world naming conventions.\n- \"series_parallel\" and \"bridge\" types have minimum `num_resistors` requirements."
+        },
+        "args": [
+          {
+            "name": "num_resistors",
+            "type": "int"
+          },
+          {
+            "name": "topology_type",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def propose_simple_topology(num_resistors: int, topology_type: str) -> str:\n    topology = {\"resistors\": {}, \"connections\": []}\n\n    # Create resistor entries with placeholder values\n    for i in range(1, num_resistors + 1):\n        topology[\"resistors\"][f\"R{i}\"] = 10.0  # Placeholder value\n\n    if topology_type == \"series\":\n        # Chain resistors in series A-R1-B-R2-C-R3-D...\n        for i in range(1, num_resistors + 1):\n            node1 = chr(ord(\"A\") + i - 1)  # A, B, C, ...\n            node2 = chr(ord(\"A\") + i)  # B, C, D, ...\n            topology[\"connections\"].append([node1, node2, f\"R{i}\"])\n\n    elif topology_type == \"parallel\":\n        # All resistors between same two nodes A and B\n        for i in range(1, num_resistors + 1):\n            topology[\"connections\"].append([\"A\", \"B\", f\"R{i}\"])\n\n    elif topology_type == \"series_parallel\" and num_resistors >= 3:\n        # Mix of series and parallel\n    ..."
+      },
+      {
+        "name": "estimate_resistor_values",
+        "sections": {
+          "BRIEF": "Estimate resistor values using numerical optimization.",
+          "DETAILED": "Utilizes the SciPy `minimize` function to find the optimal resistor values\nthat minimize the total squared error between the resistance predicted by the\n`get_resistance_between_nodes` tool and the actual `measurements`. This approach\nis robust and efficient for refining initial resistor value guesses within a\nknown or hypothesized circuit topology.",
+          "PROCEDURAL": "When to use this tool:\n- Use when you have a proposed circuit `topology` (connections are fixed) but need to determine the precise resistor values.\n- Best suited for refining placeholder resistor values obtained from tools like `propose_simple_topology`.\n- Recommended for iterative improvement of a circuit model by fitting it to experimental data.\n- Use when brute-force search for resistor values is computationally infeasible or inefficient.",
+          "CONTEXTUAL": "How this tool works:\n- Parses the input JSON strings for the initial `topology` (with resistor IDs and initial guesses) and the `measurements`.\n- Extracts the names of all resistors in the topology.\n- Defines an `objective_function` that takes a set of resistor values, constructs a temporary circuit `topology` with these values, and then uses `get_resistance_between_nodes` to predict resistances for all measurement pairs.\n- The `objective_function` calculates the sum of squared differences between predicted and actual resistances, returning this total error.\n- `scipy.optimize.minimize` (using the 'L-BFGS-B' method) is then employed to find the set of resistor values that minimizes this `objective_function`, subject to bounds (e.g., resistances must be positive).\n- If successful, it returns the optimized resistor values and optimization details.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Have a fixed circuit `topology` (e.g., from `propose_simple_topology` or a known design) and a set of `measurements` from the actual circuit. \n    2.  Apply this tool with the `topology` (containing initial resistor value guesses) and `measurements` to find optimized resistor values. \n    3.  Use the `validate_measurements` tool with the optimized topology to confirm the improved fit, or proceed with the refined resistor values in further circuit analysis.",
+          "SYNTACTICAL": "Usage examples:\n- `estimate_resistor_values(\n\"{\\\"resistors\\\": {\\\"R1\\\": 10.0, \\\"R2\\\": 10.0, \\\"R3\\\": 10.0}, \"\n\"\\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}\",\n\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 7.778}, \"\n\"{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 11.111}, \"\n\"{\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\")`\n- `estimate_resistor_values(initial_topology_json, experimental_measurements_json)`",
+          "ARGS_BRIEF": "JSON string with actual measurements.",
+          "ARGS_DETAILED": "A JSON string representing a list of `CircuitMeasurement` objects, each containing `node_a`, `node_b`, and `resistance`. These are the actual observed resistance values against which the model will be optimized.",
+          "ARGS_EXAMPLES": "`\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 7.778}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 11.111}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\"`",
+          "RETURNS_BRIEF": "JSON string with optimized resistor values and optimization info.",
+          "RETURNS_DETAILED": "A JSON string containing a dictionary. If successful, it includes the `optimized_resistors` (mapping resistor IDs to their newly estimated values, rounded to integers), the original `connections`, and an `optimization_info` sub-dictionary with details like `success` status, `final_error`, `iterations`, and `message`. If optimization fails, it provides an `error` message.",
+          "RETURNS_EXAMPLES": "`{\"resistors\": {\"R1\": 15, \"R2\": 30}, \"connections\": [...], \"optimization_info\": {\"success\": true, \"final_error\": 0.001, \"iterations\": 50, \"message\": \"CONVERGENCE: NORM_OF_GRADIENT_<=_TF_GAUSSIAN_SUM\"}` (on success)",
+          "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When the `topology` or `measurements` JSON strings are malformed or invalid. \n         `json.loads` fails, or required keys are missing from the input dictionaries/lists. \n         Try: Ensure both input strings are valid JSON and adhere to the specified data structures. \n    ValueError: [ERRORS]\n         When an error during optimization (e.g., invalid intermediate topology). \n         The objective function will assign a large penalty, but persistent simulation errors can lead to optimization failure. \n         Try: Ensure the initial `topology` is valid and the bounds for resistor values are reasonable, as extreme values might cause simulation instability. \n    RuntimeError: [ERRORS]\n         When the numerical optimization algorithm fails to converge to a solution. \n         Indicated by `result.success` being `False` and a `message` explaining the failure (e.g., maximum iterations reached, bounds violated). \n         Try: Adjust initial resistor value guesses, widen the bounds, increase `maxiter`, or re-evaluate if the chosen `topology` is appropriate for the measurements.",
+          "LIMITATIONS": "Known limitations:\n- Numerical optimization can get stuck in local minima if initial guesses are poor, or the solution space is complex.\n- Assumes the provided topology (connections) is correct, only optimizing resistor values.\n- Computationally intensive for very large circuits with many unknown resistors."
+        },
+        "args": [
+          {
+            "name": "topology",
+            "type": "str"
+          },
+          {
+            "name": "measurements",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def estimate_resistor_values(topology: str, measurements: str) -> str:\n    try:\n        circuit = json.loads(topology)\n        measurements_data = json.loads(measurements)\n\n        # Extract resistor names and initial values\n        resistor_names = list(circuit[\"resistors\"].keys())\n        initial_values = [circuit[\"resistors\"][name] for name in resistor_names]\n\n        def objective_function(resistor_values: np.ndarray) -> float:\n            \"\"\"Calculate total squared error for given resistor values\"\"\"\n            # Create test topology with current resistor values\n            test_topology = circuit.copy()\n            test_topology[\"resistors\"] = dict(\n                zip(resistor_names, resistor_values, strict=False)\n            )\n\n            total_error = 0.0\n            for measurement in measurements_data:\n                try:\n                    # Use the simulation tool to predict resistance\n    ..."
+      },
+      {
+        "name": "generate_test_measurements",
+        "sections": {
+          "BRIEF": "Generate theoretical measurements for a given circuit topology.",
+          "DETAILED": "Calculates what the resistance measurements would be between specified terminal pairs for a given circuit topology.\n        This tool is useful for testing your circuit analysis tools, understanding the behavior of different topologies.\n        It provides a ground truth for a given circuit design.",
+          "PROCEDURAL": "When to use this tool:\n    - Use to understand what resistance measurements a proposed or known topology would produce.\n    - Best suited for testing and debugging your circuit analysis approach or custom tools.\n    - Recommended to generate additional synthetic measurements for validation of `estimate_resistor_values` or `validate_measurements`.\n    - Use when exploring how changes in topology or resistor values affect the overall circuit measurements.",
+          "CONTEXTUAL": "How this tool works:\n    - Parses the input `topology` JSON string.\n    - Iterates through each `terminal_pair` provided in the list.\n    - For each pair, it calls the `get_resistance_between_nodes` tool to calculate the equivalent resistance between those two nodes.\n    - Stores the calculated resistance along with the `node_a` and `node_b` in a list of measurement dictionaries.\n    - If a simulation fails for a specific `terminal_pair`, it records an error message for that measurement.\n    - Returns a JSON string containing the list of theoretical measurements.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n        1.  Have a fully defined circuit `topology` (including resistor values) and a list of `terminal_pairs` where measurements are desired. \n        2.  Apply this tool with the `topology` and `terminal_pairs` to obtain a set of theoretical resistance measurements. \n        3.  Use these generated measurements to test the `estimate_resistor_values` tool (by trying to recover the original resistor values), or to test the `validate_measurements` tool (by comparing against the same topology).",
+          "SYNTACTICAL": "Usage examples:\n    - `generate_test_measurements(\n    \"{\\\"resistors\\\": {\\\"R1\\\": 7.778, \\\"R2\\\": 11.111, \\\"R3\\\": 10.0}, \"\n    \"\\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}\",\n    [[\"A\", \"N1\"], [\"A\", \"X1\"], [\"N1\", \"X1\"]]\n)`\n    - `generate_test_measurements(my_topology_json, [[\"A\", \"B\"], [\"A\", \"C\"]])`",
+          "ARGS_BRIEF": "List of node pairs to measure between.",
+          "ARGS_DETAILED": "A list of lists, where each inner list contains two strings representing the names of the nodes between which the equivalent resistance should be calculated. Each pair signifies one theoretical measurement point.",
+          "ARGS_EXAMPLES": "`[[\"A\", \"B\"], [\"A\", \"C\"], [\"B\", \"C\"]]`, `[[\"input\", \"output\"]]`",
+          "RETURNS_BRIEF": "JSON string with theoretical measurements.",
+          "RETURNS_DETAILED": "A JSON string representing a list of measurement dictionaries. Each dictionary will include `node_a`, `node_b`, and the `resistance` (rounded to 3 decimal places) between those nodes, as calculated by the `simulate_circuit_resistance` tool. If a simulation fails for a pair, an \"error\" key will be present instead of \"resistance\".",
+          "RETURNS_EXAMPLES": "`'[{\"node_a\": \"A\", \"node_b\": \"B\", \"resistance\": 15.0}, {\"node_a\": \"A\", \"node_b\": \"C\", \"resistance\": 45.0}]'`",
+          "LIMITATIONS": "Known limitations:\n    - Relies entirely on the accuracy and robustness of the `get_resistance_between_nodes` tool.\n    - Does not validate the `topology` for circuit correctness (e.g., disconnected components, short circuits) beyond what `get_resistance_between_nodes` handles.\n    - Handles only resistance measurements; cannot generate other types of circuit measurements (e.g., voltage, current)."
+        },
+        "args": [
+          {
+            "name": "topology",
+            "type": "str"
+          },
+          {
+            "name": "terminal_pairs",
+            "type": "list[list[str]]"
+          }
+        ],
+        "returns": "str",
+        "code": "def generate_test_measurements(topology: str, terminal_pairs: list[list[str]]) -> str:\n    try:\n        measurements = []\n\n        for pair in terminal_pairs:\n            if len(pair) != 2:\n                continue\n\n            try:\n                resistance = get_resistance_between_nodes(topology, pair)\n                measurements.append(\n                    {\n                        \"node_a\": pair[0],\n                        \"node_b\": pair[1],\n                        \"resistance\": round(resistance, 3),\n                    }\n                )\n            except Exception as e:\n                measurements.append(\n                    {\n                        \"node_a\": pair[0],\n    ..."
+      }
+    ],
+    "tasks": [
+      {
+        "id": "task_0",
+        "name": "task_0",
+        "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
+        "tools": [
+          "calculate_series_resistance",
+          "calculate_parallel_resistance",
+          "delta_to_wye_transform",
+          "wye_to_delta_transform",
+          "simulate_circuit_resistance",
+          "validate_measurements"
+        ],
+        "scoring_function": "resistor_topology",
+        "submission_format": "JSON string with circuit topology (e.g., {\"resistors\": {\"R1\": x, ...}, \"connections\": [[\"A\",\"B\",\"R1\"], ...]})",
+        "level": "single"
+      },
+      {
+        "id": "task_1",
+        "name": "task_1",
+        "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
+        "tools": [
+          "calculate_series_resistance",
+          "calculate_parallel_resistance",
+          "delta_to_wye_transform",
+          "wye_to_delta_transform",
+          "simulate_circuit_resistance",
+          "validate_measurements"
+        ],
+        "scoring_function": "resistor_topology",
+        "submission_format": "JSON string with circuit topology (e.g., {\"resistors\": {\"R1\": x, ...}, \"connections\": [[\"A\",\"B\",\"R1\"], ...]})",
+        "level": "single"
+      },
+      {
+        "id": "task_2",
+        "name": "task_2",
+        "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
+        "tools": [
+          "calculate_series_resistance",
+          "calculate_parallel_resistance",
+          "delta_to_wye_transform",
+          "wye_to_delta_transform",
+          "simulate_circuit_resistance",
+          "validate_measurements"
+        ],
+        "scoring_function": "resistor_topology",
+        "submission_format": "JSON string with circuit topology (e.g., {\"resistors\": {\"R1\": x, ...}, \"connections\": [[\"A\",\"B\",\"R1\"], ...]})",
+        "level": "single"
+      },
+      {
+        "id": "task_3",
+        "name": "task_3",
+        "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
+        "tools": [
+          "calculate_series_resistance",
+          "calculate_parallel_resistance",
+          "delta_to_wye_transform",
+          "wye_to_delta_transform",
+          "simulate_circuit_resistance",
+          "validate_measurements"
+        ],
+        "scoring_function": "resistor_topology",
+        "submission_format": "JSON string with circuit topology (e.g., {\"resistors\": {\"R1\": x, ...}, \"connections\": [[\"A\",\"B\",\"R1\"], ...]})",
+        "level": "single"
+      },
+      {
+        "id": "task_4",
+        "name": "task_4",
+        "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
+        "tools": [
+          "calculate_series_resistance",
+          "calculate_parallel_resistance",
+          "delta_to_wye_transform",
+          "wye_to_delta_transform",
+          "simulate_circuit_resistance",
+          "validate_measurements"
+        ],
+        "scoring_function": "resistor_topology",
+        "submission_format": "JSON string with circuit topology (e.g., {\"resistors\": {\"R1\": x, ...}, \"connections\": [[\"A\",\"B\",\"R1\"], ...]})",
+        "level": "single"
+      },
+      {
+        "id": "task_5",
+        "name": "task_5",
+        "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
+        "tools": [
+          "calculate_series_resistance",
+          "calculate_parallel_resistance",
+          "delta_to_wye_transform",
+          "wye_to_delta_transform",
+          "simulate_circuit_resistance",
+          "validate_measurements"
+        ],
+        "scoring_function": "resistor_topology",
+        "submission_format": "JSON string with circuit topology (e.g., {\"resistors\": {\"R1\": x, ...}, \"connections\": [[\"A\",\"B\",\"R1\"], ...]})",
+        "level": "single"
+      }
+    ],
+    "scoring_functions": [
+      {
+        "name": "check_resistor_topology",
+        "docstring": "Enhanced scoring function that checks:\n1. Topology structure (connections)\n2. Functional behavior (does it produce expected measurements?)\n3. Optionally: exact resistor values\n\nArgs:\n    expected_topology: Expected circuit topology (required)\n    use_functional_scoring: Whether to use functional val",
+        "code": "def check_resistor_topology(\n    expected_topology: dict[str, Any],\n    use_functional_scoring: bool,\n    topology_weight: float,\n    functional_weight: float,\n    exact_values_weight: float,\n    tolerance: float = 0.1,\n    require_both: bool = True,\n    expected_measurements: list[dict[str, Any]] | None = None,\n) -> Callable[[str], float]:\n    \"\"\"\n    Enhanced scoring function that checks:\n    1. Topology structure (connections)\n    2. Functional behavior (does it produce expected measurements?)\n    3. Optionally: exact resistor values\n\n    Args:\n        expected_topology: Expected circuit topology (required)\n        use_functional_scoring: Whether to use functional validation (required)\n        topology_weight: Weight for topology structure score (required, set 0.0 to disable)\n        functional_weight: Weight for functional behavior score (required, set 0.0 to disable)\n        exact_values_weight: Weight for exact resistor values score (required, set 0.0 to disable)\n        tolerance: Tolerance for measurements and resistor values (default: 0.1)\n        require_both: Legacy parameter - ignored when use_functional_scoring=True (default: True)\n        expected_measurements: List of expected resistance measurements (required if functional_weight > 0)\n    ..."
+      },
+      {
+        "name": "check_resistance_measurements",
+        "docstring": "Returns a scoring function that validates a topology against expected measurements.\n\nArgs:\n    expected_measurements: list of measurement dicts with node_a, node_b, resistance\n    tolerance: Relative tolerance for resistance comparison (default 5%)\n\nReturns:\n    Scoring function that takes a topolog",
+        "code": "def check_resistance_measurements(\n    expected_measurements: list[dict[str, Any]], tolerance: float = 0.05\n) -> Callable[[str], float]:\n    \"\"\"\n    Returns a scoring function that validates a topology against expected measurements.\n\n    Args:\n        expected_measurements: list of measurement dicts with node_a, node_b, resistance\n        tolerance: Relative tolerance for resistance comparison (default 5%)\n\n    Returns:\n        Scoring function that takes a topology and returns measurement match score 0.0-1.0\n    \"\"\"\n    logger.info(\n        f\"Creating measurement checker with {len(expected_measurements)} measurements\"\n    )\n\n    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"check_resistance_measurements: input={topology_input!r}\")\n\n            # Load topology\n            resolved_input = smart_resolve_path(topology_input.strip())\n            topology_data = None\n\n    ..."
+      },
+      {
+        "name": "check_complete_circuit_solution",
+        "docstring": "Returns a comprehensive scoring function that checks both topology and measurements.",
+        "code": "def check_complete_circuit_solution(\n    expected_topology: dict[str, Any],\n    expected_measurements: list[dict[str, Any]],\n    topology_weight: float = 0.6,\n    measurement_weight: float = 0.4,\n    tolerance: float = 0.1,\n) -> Callable[[str], float]:\n    \"\"\"\n    Returns a comprehensive scoring function that checks both topology and measurements.\n    \"\"\"\n    logger.info(\"Creating complete circuit solution checker\")\n\n    # Use backward-compatible mode (original strict binary scoring)\n    topology_scorer = check_resistor_topology(\n        expected_topology=expected_topology,\n        use_functional_scoring=False,\n        topology_weight=0.5,\n        functional_weight=0.0,\n        exact_values_weight=0.5,\n        tolerance=tolerance,\n        require_both=True,\n    )\n    measurement_scorer = check_resistance_measurements(expected_measurements, tolerance)\n\n    def score_fn(solution_input: str) -> float:\n    ..."
+      },
+      {
+        "name": "check_resistor_values_only",
+        "docstring": "Returns a scoring function that only checks if resistor values are correct.",
+        "code": "def check_resistor_values_only(\n    expected_values: dict[str, float], tolerance: float = 0.1\n) -> Callable[[str], float]:\n    \"\"\"\n    Returns a scoring function that only checks if resistor values are correct.\n    \"\"\"\n    logger.info(\n        f\"Creating resistor values checker for {len(expected_values)} resistors\"\n    )\n\n    def score_fn(values_input: str) -> float:\n        try:\n            logger.info(f\"check_resistor_values_only: input={values_input!r}\")\n\n            # Try to resolve and load values\n            resolved_input = smart_resolve_path(values_input.strip())\n            values_data = None\n\n            if Path(resolved_input).exists():\n                with Path(resolved_input).open() as f:\n                    data = json.load(f)\n                    # Extract resistor values if it's a full topology\n                    values_data = data.get(\"resistors\", data)\n            else:\n                try:\n    ..."
+      },
+      {
+        "name": "check_valid_circuit_json",
+        "docstring": "Check if a valid circuit topology JSON file exists at the given path.",
+        "code": "def check_valid_circuit_json(json_path: str) -> float:\n    \"\"\"\n    Check if a valid circuit topology JSON file exists at the given path.\n    \"\"\"\n    try:\n        json_path = json_path.strip()\n        if not json_path:\n            logger.warning(\"Empty path provided to check_valid_circuit_json\")\n            return 0.0\n\n        if not Path(json_path).exists():\n            logger.info(f\"Circuit JSON file not found at: {json_path}\")\n            return 0.0\n\n        if not Path(json_path).is_file():\n            logger.info(f\"Path exists but is not a file: {json_path}\")\n            return 0.0\n\n        with Path(json_path).open(\"r\", encoding=\"utf-8\") as f:\n            circuit_data = json.load(f)\n\n        # Validate circuit structure\n        if not isinstance(circuit_data, dict):\n            logger.info(\"Circuit JSON is not a dictionary\")\n            return 0.0\n    ..."
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"ENHANCED SCORING INPUT: {topology_input!r}\")\n            logger.info(f\"EXPECTED TOPOLOGY: {expected_topology}\")\n\n            # Parse topology (same logic as before)\n            topology_data = None\n            input_stripped = topology_input.strip()\n\n            if input_stripped.startswith(\"{\") and input_stripped.endswith(\"}\"):\n                try:\n                    topology_data = json.loads(input_stripped)\n                    logger.info(\"Parsed topology from direct JSON string\")\n                except json.JSONDecodeError as e:\n                    logger.warning(f\"Failed to parse as direct JSON: {e}\")\n                    return 0.0\n\n            if (\n                not topology_data\n                or \"resistors\" not in topology_data\n                or \"connections\" not in topology_data\n            ):\n                logger.error(\"Invalid topology data\")\n                return 0.0\n\n    ..."
+      },
+      {
+        "name": "normalize_connection",
+        "docstring": "",
+        "code": "    def normalize_connection(conn):\n        return (*sorted([conn[0], conn[1]]), conn[2])"
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"check_resistance_measurements: input={topology_input!r}\")\n\n            # Load topology\n            resolved_input = smart_resolve_path(topology_input.strip())\n            topology_data = None\n\n            if Path(resolved_input).exists():\n                with Path(resolved_input).open() as f:\n                    topology_data = json.load(f)\n            else:\n                try:\n                    topology_data = json.loads(topology_input)\n                except json.JSONDecodeError:\n                    topology_data = json.loads(resolved_input)\n\n            if not topology_data:\n                return 0.0\n\n            scores = []\n\n            for measurement in expected_measurements:\n                try:\n                    # This would call the actual circuit simulation\n    ..."
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(solution_input: str) -> float:\n        try:\n            topology_score = topology_scorer(solution_input)\n            measurement_score = measurement_scorer(solution_input)\n\n            final_score = (\n                topology_weight * topology_score\n                + measurement_weight * measurement_score\n            )\n\n            logger.info(\n                f\"Complete solution - topology: {topology_score}, \"\n                f\"measurements: {measurement_score}, final: {final_score}\"\n            )\n\n            return final_score\n\n        except Exception as e:\n            logger.error(f\"Error in complete solution checking: {e}\", exc_info=True)\n            return 0.0"
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(values_input: str) -> float:\n        try:\n            logger.info(f\"check_resistor_values_only: input={values_input!r}\")\n\n            # Try to resolve and load values\n            resolved_input = smart_resolve_path(values_input.strip())\n            values_data = None\n\n            if Path(resolved_input).exists():\n                with Path(resolved_input).open() as f:\n                    data = json.load(f)\n                    # Extract resistor values if it's a full topology\n                    values_data = data.get(\"resistors\", data)\n            else:\n                try:\n                    data = json.loads(values_input)\n                    values_data = data.get(\"resistors\", data)\n                except json.JSONDecodeError:\n                    data = json.loads(resolved_input)\n                    values_data = data.get(\"resistors\", data)\n\n            if not values_data:\n                return 0.0\n\n            score = _score_resistor_values(values_data, expected_values, tolerance)\n    ..."
+      }
+    ]
+  },
+  "Spectra": {
+    "description": "Identify organic molecules from spectroscopic data (NMR, IR, mass spectrometry) through systematic spectra analysis.",
+    "tools": [
+      {
+        "name": "get_formula_from_smiles",
+        "sections": {
+          "BRIEF": "Generate a chemical formula from a SMILES string using RDKit.",
+          "DETAILED": "This function takes a SMILES representation of a molecule and generates its chemical formula in Hill notation (C, H, then alphabetical order). It uses RDKit to parse the SMILES string and calculate the molecular formula. If the SMILES string is invalid or cannot be parsed, it returns an error message.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you have a SMILES string and need to obtain the chemical formula of the corresponding molecule.\n- When you want to validate the chemical structure of a proposed molecule.\n- When you need to convert a SMILES representation into a chemical formula for further analysis or reporting.\n- Recommended for tasks that require chemical formula generation from SMILES strings.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Have the SMILES representation of a molecule that you think can produce the analysis results described in the task. Use the tools `carbon_nmr_spectra`, `proton_nmr_spectra`, `ir_spectra`, `hsqc_nmr_spectra`, and `mass_spectrometry_spectra` for obtaining the different spectra. Use the tools `retrieve_protons_shifts`, `retrieve_aromatic_protons_shifts` and `retrieve_carbon_shifts` for having more info about the chemical shifts. \n2.  Apply this tool with a valid SMILES string to generate the chemical formula of the molecule. \n3.  Use the generated chemical formula to compare your proposed molecule with the molecular analysis in the task (MS results).",
+          "CONTEXTUAL": "How this tool works:\n- It uses RDKit to parse the provided SMILES string and create a molecular object.\n- If the SMILES string is valid, it calculates the molecular formula using `rdMolDescriptors.CalcMolFormula`.\n- The formula is returned in Hill notation, which lists carbon (C) atoms first, followed by hydrogen (H) atoms, and then other elements in alphabetical order.\n- If the SMILES string is invalid or cannot be parsed, it returns an error message indicating the issue.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `get_formula_from_smiles(\"CCO\")`,\n    `get_formula_from_smiles(\"C1=CC=CC=C1\")`,\n    `get_formula_from_smiles(\"C(C(=O)O)N\")`,\n    `get_formula_from_smiles(\"C1=CC=C(C=C1)C(=O)O\")`,\n    `get_formula_from_smiles(\"C1=CC=CC=C1C(=O)O\")`,\n]",
+          "ARGS_BRIEF": "SMILES representation of a molecule",
+          "ARGS_DETAILED": "The SMILES string representing the chemical structure of the molecule. It should be a valid SMILES notation that RDKit can parse.",
+          "ARGS_SYNTACTICAL": "Valid SMILES string",
+          "ARGS_EXAMPLES": "\"CCO\", \"C1=CC=CC=C1\", \"C(C(=O)O)N\", \"C1=CC=C(C=C1)C(=O)O\"",
+          "RETURNS_BRIEF": "The chemical formula in Hill notation (C, H, then alphabetical)",
+          "RETURNS_DETAILED": "The chemical formula of the molecule represented by the SMILES string, formatted in Hill notation. If the SMILES string is invalid or cannot be parsed, it returns an error message.",
+          "RETURNS_EXAMPLES": "'\"C2H6O\" for ethanol, \"C6H6\" for benzene, \"C2H5NO\" for acetic acid amide, \"C7H6O3\" for salicylic acid'",
+          "RAISES": "Exceptions:\n    Exception:\n         If the SMILES string is invalid or cannot be parsed by RDKit. \n         This exception is raised when the SMILES string cannot be parsed by RDKit, indicating that it is not a valid SMILES representation of a molecule. It can occur due to syntax errors or unsupported structures in the SMILES string. \n         If the SMILES string is invalid, try to provide a valid SMILES string. You can validate the SMILES using the `validate_smiles` tool. Otherwise do not try to solve the error.",
+          "LIMITATIONS": "Known Limitations:\n    - It may return \"Invalid SMILES string\" if the provided SMILES cannot be parsed.\n    - RDKit may remove certain chemical features or properties during sanitization, which can sometimes lead to unexpected results."
+        },
+        "args": [
+          {
+            "name": "smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_formula_from_smiles(smiles: str) -> str:\n    try:\n        mol = Chem.MolFromSmiles(smiles)\n\n        if mol is None:\n            return \"Invalid SMILES string\"\n        return rdMolDescriptors.CalcMolFormula(mol)\n\n    except Exception as e:\n        return f\"Error: {e!s}\""
+      },
+      {
+        "name": "search_by_smiles",
+        "sections": {
+          "BRIEF": "Search the NMRShift database for entries matching or chemically similar to the given SMILES.",
+          "DETAILED": "This function searches the NMRShift database for entries that match or are chemically similar to the provided SMILES string. It uses a vector database search to find the top `top_k` results based on chemical similarity. The function returns a list of matching entries, each containing relevant information about the compound.",
+          "PROCEDURAL": "When to use this tool:\n- Use it to validate your proposed molecule against the NMRShift database.\n- Use it when you have a SMILES string and want to find related compounds in the NMRShift database.\n- When you need to retrieve chemical shifts or other NMR-related information for a specific compound.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Have a SMILES representation of the molecule you want to search for in the NMRShift database, or the SMILES of a structure that you think can be valid. \n2.  Apply this tool with the SMILES string to search for matching or chemically similar entries in the NMRShift database. \n3.  Use the retrieved entries to validate your proposed molecule, compare chemical shifts, or gather additional information about the compound. You can also use the `get_formula_from_smiles` to validate the molecular formula.",
+          "CONTEXTUAL": "How this tool works:\n- It uses a vector database search to find entries in the NMRShift database that match or are chemically similar to the provided SMILES string.\n- The search is performed in the \"nmrshiftdb2\" collection of the NMRShift database.\n- The search uses chemical embeddings generated by the \"ibm-research/MoLFormer-XL-both-10pct\" model, which allows for chemical similarity searches based on the provided SMILES.\n- The function retrieves the top `top_k` results based on chemical similarity to the provided SMILES.\n- Each result contains relevant information about the compound, such as its SMILES, chemical shifts, and other properties.\n- The function returns a list of matching entries, each represented as a dictionary containing the relevant information.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `search_by_smiles(\"CCO\")`,\n    `search_by_smiles(\"C1=CC=CC=C1\")`,\n    `search_by_smiles(\"C(C(=O)O)N\")`,\n    `search_by_smiles(\"C1=CC=C(C=C1)C(=O)O\")`,\n    `search_by_smiles(\"C1=CC=C\")`,\n]",
+          "ARGS_BRIEF": "The maximum number of results to return. Defaults to 10",
+          "ARGS_DETAILED": "The maximum number of search results to return from the NMRShift database. It should be a positive integer.",
+          "ARGS_SYNTACTICAL": "Any positive integer (e.g., 10, 20, 50)",
+          "ARGS_EXAMPLES": "10, 20, 50",
+          "RETURNS_BRIEF": "A list of dictionaries containing the most relevant entries from the NMRShift database",
+          "RETURNS_DETAILED": "Each dictionary contains relevant information about the compound, such as its SMILES, chemical shifts, and other properties. The results are sorted by similarity score in descending order.",
+          "RETURNS_EXAMPLES": "\"[{\"entry_id\": \"nmrshiftdb2:234\", \"compound_name\": \"Benzene\", \"smiles\": \"c1ccccc1\", \"spectrum\": {\"nucleus\": \"13C\",...]\"",
+          "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the search process, such as errors in the embedding of the query for example. \n         This exception is raised when there is an error in performing the vector database search, or problems with the vector database itself. It can also occur if the `top_k` parameter is not a positive integer. \n         Try another tool.",
+          "LIMITATIONS": "Known Limitations:\n    - The function requires a valid SMILES string that can be processed by the vector database search.\n    - The search results are limited to the `top_k` parameter, which defaults to 10.\n    - The search is based on chemical embeddings, which may not capture all chemical similarities perfectly."
+        },
+        "args": [
+          {
+            "name": "smiles",
+            "type": "str"
+          },
+          {
+            "name": "top_k",
+            "type": "int"
+          }
+        ],
+        "returns": "list[dict[str, Any]]",
+        "code": "def search_by_smiles(smiles: str, top_k: int = 10) -> list[dict[str, Any]]:\n    collection_name = \"nmrshiftdb2\"\n    db_path = Path(__file__).resolve().parents[3] / \"vector_databases\" / \"nmrshiftdb2\"\n\n    top_k = int(top_k) if not isinstance(top_k, int) else top_k\n\n    try:\n        return vector_database_search(\n            query=smiles,\n            collection_name=collection_name,\n            path=db_path,\n            top_k=top_k,\n            chemical_model=\"ibm-research/MoLFormer-XL-both-10pct\",\n        )\n    except Exception as e:\n        error_details = traceback.format_exc()\n        raise ValueError(f\"Error: {e}/n/nFull traceback:/n{error_details}\") from e"
+      },
+      {
+        "name": "retrieve_protons_shifts",
+        "sections": {
+          "BRIEF": "Retrieve the proton chemical shifts ranges for hydrocarbons.",
+          "DETAILED": "This function retrieves the proton chemical shifts ranges for various types of hydrocarbons. The chemical shifts (delta) are reported in parts per million (ppm) relative to tetramethylsilane (TMS) as the reference standard. It returns a list of dictionaries, each containing the type of proton and its corresponding chemical shift range.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you need to know the typical chemical shifts of protons in hydrocarbons for NMR spectroscopy analysis.\n- When you want to validate the chemical shifts of protons in a proposed molecule against known ranges.\n- Recommended for tasks that require understanding the chemical environment of protons in hydrocarbons, such as NMR spectra interpretation or chemical structure elucidation.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Have the proton spectra you want to analyze the proton chemical shifts. Use the tool `proton_nmr_spectra` to obtain the proton spectra. Use with the tools `retrieve_aromatic_protons_shifts` and `retrieve_carbon_shifts` for having more info about the chemical shifts. \n2.  Apply this tool to retrieve the proton chemical shifts ranges for hydrocarbons. \n3.  Use the retrieved chemical shifts to compare with the experimental NMR spectra of the sample at hand, or to validate the chemical shifts of protons in the proposed molecule.",
+          "CONTEXTUAL": "How this tool works:\n- It returns a predefined list of dictionaries containing the proton types and their corresponding chemical shift ranges in ppm.\n- Each dictionary contains the type of proton (e.g., aldehyde, aromatic, alkene) and its chemical shift range relative to TMS.\n- The chemical shifts are based on typical values observed in NMR spectroscopy for various types of protons in hydrocarbons.\n- The function does not perform any calculations or database queries; it simply returns the predefined list of chemical shifts.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `retrieve_protons_shifts()`,\n]",
+          "RETURNS_BRIEF": "A list of dictionaries as an string containing the proton chemical shifts ranges for hydrocarbons",
+          "RETURNS_DETAILED": "Each dictionary (as string) contains the type of proton and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various types of protons in hydrocarbons.",
+          "RETURNS_EXAMPLES": "\"[{\"Proton\": \"Aldehyde\", \"delta / ppm\": \"9.5 - 10.5\"}, {\"Proton\": \"Aromatic\", \"delta / ppm\": \"6.5 - 8.2\"}, ...]\"",
+          "RAISES": "Exceptions:\n    None",
+          "LIMITATIONS": "Known Limitations:\n    - The function returns a predefined list of chemical shifts and does not perform any calculations or database queries.\n    - The chemical shifts are based on typical values and may not be applicable to all compounds or conditions.\n    - The ranges provided are approximate and may vary depending on the specific molecular environment and experimental conditions."
+        },
+        "args": [],
+        "returns": "str",
+        "code": "def retrieve_protons_shifts() -> str:\n    return str(\n        [\n            {\"Proton\": \"Aldehyde\", \"delta / ppm\": \"9.5 - 10.5\"},\n            {\"Proton\": \"Aromatic\", \"delta / ppm\": \"6.5 - 8.2\"},\n            {\"Proton\": \"Alkene\", \"delta / ppm\": \"4.5 - 6.1\"},\n            {\"Proton\": \"Alkyne\", \"delta / ppm\": \"2.0 - 3.2\"},\n            {\"Proton\": \"Acetal\", \"delta / ppm\": \"4.5 - 6.0\"},\n            {\"Proton\": \"Alkoxy\", \"delta / ppm\": \"3.4 - 4.8\"},\n            {\"Proton\": \"Methyl (CH3-R)\", \"delta / ppm\": \"~0.9\"},\n            {\"Proton\": \"N-methyl\", \"delta / ppm\": \"3.0 - 3.5\"},\n            {\"Proton\": \"Methoxy\", \"delta / ppm\": \"3.3 - 3.8\"},\n            {\n                \"Proton\": \"CH3 attached to double bonds/aromatics\",\n                \"delta / ppm\": \"1.8 - 2.5\",\n            },\n            {\"Proton\": \"Methyl (CH3-CO-)\", \"delta / ppm\": \"1.8 - 2.7\"},\n            {\"Proton\": \"Methylene (CH2-O-)\", \"delta / ppm\": \"~3.6 - 4.7\"},\n            {\"Proton\": \"Methylene (CH2-O-)\", \"delta / ppm\": \"~3.6 - 4.7\"},\n            {\"Proton\": \"Methylene (CH2-R1R2)\", \"delta / ppm\": \"~1.3\"},\n            {\"Proton\": \"Methine (CH-R1R2R3)\", \"delta / ppm\": \"~1.5\"},\n    ..."
+      },
+      {
+        "name": "retrieve_aromatic_protons_shifts",
+        "sections": {
+          "BRIEF": "Retrieve the proton shifts ranges for aromatic hydrocarbons.",
+          "DETAILED": "This function retrieves the proton chemical shifts ranges for aromatic hydrocarbons. The values represent chemical shift changes (in ppm) caused by substituents on a benzene ring. The values show how much a substituent shifts the resonance of protons at ortho, meta, and para positions relative to unsubstituted benzene. Positive values indicate downfield shifts (deshielding), while negative values indicate upfield shifts (shielding). All shifts are relative to tetramethylsilane (TMS) as the reference standard.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you need to know the typical chemical shifts of protons in aromatic hydrocarbons for NMR spectroscopy analysis.\n- When you want to validate the chemical shifts of protons in a proposed aromatic molecule against known ranges.\n- Recommended for tasks that require understanding the chemical environment of protons in aromatic rings, such as NMR spectra interpretation or chemical structure elucidation.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Have the proton spectra of the sample at hand. Complement it with the use the tools `retrieve_protons_shifts` and `retrieve_carbon_shifts` for having more info about the chemical shifts. \n2.  Apply this tool to retrieve the proton chemical shifts ranges for aromatic hydrocarbons. \n3.  Use the retrieved chemical shifts to compare with the experimental NMR spectra and propose your candidate molecules, or to validate the chemical shifts of protons in the proposed aromatic molecule.",
+          "CONTEXTUAL": "How this tool works:\n- It returns a predefined list of dictionaries containing the substituent effects on proton chemical shifts in aromatic rings.\n- Each dictionary contains the substituent name and its corresponding chemical shift changes (in ppm) for ortho, meta, and para positions.\n- The chemical shifts are based on typical values observed in NMR spectroscopy for various substituents on aromatic rings.\n- The function does not perform any calculations or database queries; it simply returns the predefined list of chemical shifts.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `retrieve_aromatic_protons_shifts()`,\n]",
+          "RETURNS_BRIEF": "A list of dictionaries as a string, containing the substituent effects on proton chemical shifts in aromatic rings",
+          "RETURNS_DETAILED": "Each dictionary contains the substituent name and its corresponding chemical shift changes (in ppm) for ortho, meta, and para positions. The shifts are based on typical values observed in NMR spectroscopy for various substituents on aromatic rings.",
+          "RETURNS_EXAMPLES": "\"[{\"Substituent\": \"NO2\", \"Ortho\": 0.95, \"Meta\": 0.17, \"Para\": 0.33}, {\"Substituent\": \"CHO\", \"Ortho\": 0.58, \"Meta\": 0.21, \"Para\": 0.27}, ...]\"",
+          "RAISES": "Exceptions:\n    None",
+          "LIMITATIONS": "Known Limitations:\n    - The function returns a predefined list of chemical shifts and does not perform any calculations or database queries.\n    - The chemical shifts are based on typical values and may not be applicable to all aromatic compounds or conditions.\n    - The shifts provided are approximate and may vary depending on the specific molecular environment and experimental conditions."
+        },
+        "args": [],
+        "returns": "str",
+        "code": "def retrieve_aromatic_protons_shifts() -> str:\n    return str(\n        [\n            {\"Substituent\": \"NO2\", \"Ortho\": 0.95, \"Meta\": 0.17, \"Para\": 0.33},\n            {\"Substituent\": \"CHO\", \"Ortho\": 0.58, \"Meta\": 0.21, \"Para\": 0.27},\n            {\"Substituent\": \"COCl\", \"Ortho\": 0.83, \"Meta\": 0.16, \"Para\": 0.30},\n            {\"Substituent\": \"COOH\", \"Ortho\": 0.8, \"Meta\": 0.14, \"Para\": 0.2},\n            {\"Substituent\": \"COOCH3\", \"Ortho\": 0.74, \"Meta\": 0.07, \"Para\": 0.2},\n            {\"Substituent\": \"COCH3\", \"Ortho\": 0.64, \"Meta\": 0.09, \"Para\": 0.3},\n            {\"Substituent\": \"CN\", \"Ortho\": 0.27, \"Meta\": 0.11, \"Para\": 0.3},\n            {\"Substituent\": \"C6H5\", \"Ortho\": 0.18, \"Meta\": 0, \"Para\": 0.08},\n            {\"Substituent\": \"CCl3\", \"Ortho\": 0.8, \"Meta\": 0.2, \"Para\": 0.2},\n            {\"Substituent\": \"CHCl2\", \"Ortho\": 0.1, \"Meta\": 0.06, \"Para\": 0.1},\n            {\"Substituent\": \"CH2Cl\", \"Ortho\": 0, \"Meta\": 0.01, \"Para\": 0},\n            {\"Substituent\": \"CH3\", \"Ortho\": -0.17, \"Meta\": -0.09, \"Para\": -0.18},\n            {\"Substituent\": \"CH2CH3\", \"Ortho\": -0.15, \"Meta\": -0.06, \"Para\": -0.18},\n            {\"Substituent\": \"CH(CH3)2\", \"Ortho\": -0.14, \"Meta\": -0.09, \"Para\": -0.18},\n            {\"Substituent\": \"C(CH3)3\", \"Ortho\": 0.01, \"Meta\": -0.1, \"Para\": -0.24},\n            {\"Substituent\": \"CH2OH\", \"Ortho\": -0.1, \"Meta\": -0.1, \"Para\": -0.1},\n            {\"Substituent\": \"CH2NH2\", \"Ortho\": 0, \"Meta\": 0, \"Para\": 0.22},\n            {\"Substituent\": \"F\", \"Ortho\": -0.3, \"Meta\": -0.02, \"Para\": -0.22},\n    ..."
+      },
+      {
+        "name": "retrieve_carbon_shifts",
+        "sections": {
+          "BRIEF": "Retrieve the carbon chemical shifts ranges for various functional groups in organic compounds.",
+          "DETAILED": "This function retrieves the carbon chemical shifts ranges for various functional groups in organic compounds. The chemical shifts (deltas) are reported in parts per million (ppm) relative to tetramethylsilane (TMS) as the reference standard. These values can be used to interpret 13C NMR spectra and identify carbon environments in unknown compounds. It returns a list of dictionaries, each containing the functional group and its corresponding chemical shift range.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you need to know the typical chemical shifts of carbon atoms in various functional groups for NMR spectroscopy analysis.\n- When you want to validate the chemical shifts of carbon atoms in a proposed molecule against known ranges.\n- Recommended for tasks that require understanding the chemical environment of carbon atoms in organic compounds, such as NMR spectra interpretation or chemical structure elucidation.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Have an NMR spectrum for which you want to analyze the carbon chemical shifts. You can use the `carbon_nmr_spectra` tool to obtain the carbon spectra of the sample at hand. Use the tools `retrieve_protons_shifts` and `retrieve_aromatic_protons_shifts` for having more info about the chemical shifts. \n2.  Apply this tool to retrieve the carbon chemical shifts ranges for various functional groups in organic compounds. \n3.  Use the retrieved chemical shifts to compare with the experimental NMR spectra of the sample, or to validate the chemical shifts of carbon atoms in the proposed molecules.",
+          "CONTEXTUAL": "How this tool works:\n- It returns a predefined list of dictionaries containing the carbon chemical shifts ranges for different functional groups.\n- Each dictionary contains the functional group and its corresponding chemical shift range in ppm.\n- The chemical shifts are based on typical values observed in NMR spectroscopy for various functional groups in organic compounds.\n- The function does not perform any calculations or database queries; it simply returns the predefined list of chemical shifts.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `retrieve_carbon_shifts()`,\n]",
+          "RETURNS_BRIEF": "A list of dictionaries as string containing the carbon chemical shifts ranges for various functional groups in organic compounds",
+          "RETURNS_DETAILED": "Each dictionary contains the functional group and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various functional groups in organic compounds.",
+          "RETURNS_EXAMPLES": "\"[{\"Group\": \"CH3-\", \"Shift (ppm)\": \"10-30 ppm\"}, {\"Group\": \"R3C-, R₂CH, RCH₂\", \"Shift (ppm)\": \"25-50 ppm\"}, ...]\"",
+          "RAISES": "Exceptions:\n    None",
+          "LIMITATIONS": "Known Limitations:\n    - The function returns a predefined list of chemical shifts and does not perform any calculations or database queries.\n    - The chemical shifts are based on typical values and may not be applicable to all compounds or conditions.\n    - The ranges provided are approximate and may vary depending on the specific molecular environment and experimental conditions."
+        },
+        "args": [],
+        "returns": "str",
+        "code": "def retrieve_carbon_shifts() -> str:\n    return str(\n        [\n            {\"Group\": \"CH3-\", \"Shift (ppm)\": \"10-30 ppm\"},\n            {\"Group\": \"R3C-, R₂CH, RCH₂\", \"Shift (ppm)\": \"25-50 ppm\"},\n            {\"Group\": \"=CH2\", \"Shift (ppm)\": \"105-120 ppm\"},\n            {\"Group\": \"=CH\", \"Shift (ppm)\": \"110-140 ppm\"},\n            {\"Group\": \"=CR2\", \"Shift (ppm)\": \"130-150 ppm\"},\n            {\"Group\": \"Alkyne\", \"Shift (ppm)\": \"70-85 ppm\"},\n            {\"Group\": \"Ar-H\", \"Shift (ppm)\": \"115-130 ppm\"},\n            {\"Group\": \"Ar-C\", \"Shift (ppm)\": \"130-150 ppm\"},\n            {\"Group\": \"Ketones\", \"Shift (ppm)\": \"200-210 ppm\"},\n            {\"Group\": \"Aldehydes\", \"Shift (ppm)\": \"190-200 ppm\"},\n            {\"Group\": \"Conjugated C=O\", \"Shift (ppm)\": \"180-200 ppm\"},\n            {\"Group\": \"Carboxylic acids\", \"Shift (ppm)\": \"170-180 ppm\"},\n            {\"Group\": \"Carboxylic esters\", \"Shift (ppm)\": \"160-170 ppm\"},\n            {\"Group\": \"Phenols (C1)\", \"Shift (ppm)\": \"150-160 ppm\"},\n            {\"Group\": \"Furans (C2)\", \"Shift (ppm)\": \"140-150 ppm\"},\n            {\"Group\": \"Acetals\", \"Shift (ppm)\": \"90-110 ppm\"},\n            {\"Group\": \"R3C-O\", \"Shift (ppm)\": \"70-85 ppm\"},\n            {\"Group\": \"R2HC-O\", \"Shift (ppm)\": \"60-80 ppm\"},\n    ..."
+      },
+      {
+        "name": "carbon_nmr_spectra",
+        "sections": {
+          "BRIEF": "Return the 13C NMR spectra for the sample at hand.",
+          "DETAILED": "This function measures the 13C NMR spectra for the sample at hand. It uses the `get_c13_nmr_prediction` function to measure the experiment NMR spectra. The function returns the 13C NMR spectra as a string.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you want to measure the 13C NMR spectra for the sample at hand.\n- When you need to answer questions about the carbon environments in the sample.\n- Recommended for tasks that require understanding the carbon environments in a molecule.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to measure NMR. \n2.  Apply this tool to measure the 13C NMR experiment for the corresponding compound. \n3.  Use the resulting NMR spectra to analyze the carbon environments in the proposed molecule. You can use the `retrieve_carbon_shifts` tool to validate the carbon chemical shifts.",
+          "CONTEXTUAL": "How this tool works:\n- It uses the `get_c13_nmr_prediction` function to measure the 13C NMR experiment for the sample at hand.\n- This function takes the sample at hand and measures the 13C NMR spectra.\n- The function returns the 13C NMR spectra as a string, following the ACS-inspired publication format.\n- If some error occurs during the NMR spectra generation process, the function returns an error message.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `carbon_nmr_spectra()`,\n]",
+          "RETURNS_BRIEF": "The 13C NMR spectra for the molecule in the sample at hand.",
+          "RETURNS_DETAILED": "The function returns the 13C NMR spectra as a string. If some error occurs during the NMR spectra generation process, it returns an error message.",
+          "RETURNS_EXAMPLES": "\"13C NMR spectra: δC 10.0, 20.0, 30.0 ppm\"",
+          "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the NMR spectra measurement process. \n         This exception is raised when there is an error in performing the measurement of the NMR spectra. \n         Try another tool.",
+          "LIMITATIONS": "Known Limitations:\n    - The cost of measuring the NMR spectra repeatedly may be high, so use it judiciously.\n    - The returned NMR spectra may not be accurate for all compounds, especially for complex or unusual structures.\n    - The experiment can only measure for the compound at hand."
+        },
+        "args": [
+          {
+            "name": "h_smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def carbon_nmr_spectra(h_smiles: str) -> str:\n    return remote_call(function_name=\"get_c13_nmr_prediction\", env_name=\"chemenv\")(\n        smiles=h_smiles\n    )"
+      },
+      {
+        "name": "proton_nmr_spectra",
+        "sections": {
+          "BRIEF": "Returns the 1H NMR spectra for a given SMILES string.",
+          "DETAILED": "This function returns the 1H NMR spectra for a given SMILES string. It uses the `get_h_nmr_prediction` function to run the experiment NMR spectra. The function returns the 1H NMR spectra as a string.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you want to measure the 1H NMR spectra for a given SMILES string.\n- When you need to answer questions about the proton environments in the sample.\n- Recommended for tasks that require understanding the proton environments in a molecule.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to measure NMR. Do not perform unnecessary experiments. \n2.  Apply this tool to measure the 1H NMR experiment for the corresponding compound. \n3.  Use the resulting NMR spectra to analyze the proton environments in the proposed molecule. You can use the `retrieve_protons_shifts` and `retrieve_aromatic_protons_shifts` tools to validate the proton chemical shifts.",
+          "CONTEXTUAL": "How this tool works:\n- This function takes the sample of the compound and measures the 1H NMR spectra.\n- The function returns the 1H NMR spectra as a string, following the ACS-inspired publication format.\n- If some error occurs during the NMR spectra generation process, the function returns an error message.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `proton_nmr_spectra()`,\n]",
+          "RETURNS_BRIEF": "The 1H NMR spectra for the molecule in the sample at hand.",
+          "RETURNS_DETAILED": "The function returns the 1H NMR spectra as a string, following the conventions of NMR spectra notation. If some error occurs during the NMR spectra generation process, it returns an error message.",
+          "RETURNS_EXAMPLES": "\"Predicted 1H NMR spectra: δH 7.40 (d, J = 7.9 Hz, 4H), 7.24 (s, 1H), 7.18 (dd, J = 8.0, 1.8 Hz, 4H), 7.03 (d, J = 1.4 Hz, 4H), 2.46 (s, 4H), 1.62 (s, 12H), 1.21 (s, 36H)\"",
+          "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the NMR spectra generation process. \n         This exception is raised when there is an error in generating the NMR spectra. \n         Try another tool. Try elucidate the protons with the other tools.",
+          "LIMITATIONS": "Known Limitations:\n    - The cost of measuring the NMR spectra repeatedly may be high, so use it judiciously.\n    - The experiment NMR spectra may not be accurate for all compounds, especially for complex or unusual structures.\n    - The experiment can only measure the compound of the sample at hand."
+        },
+        "args": [
+          {
+            "name": "h_smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def proton_nmr_spectra(h_smiles: str) -> str:\n    return remote_call(function_name=\"get_h_nmr_prediction\", env_name=\"chemenv\")(\n        smiles=h_smiles\n    )"
+      },
+      {
+        "name": "ir_spectra",
+        "sections": {
+          "BRIEF": "Returns the IR spectra for the sample at hand. This spectra may not be accurate for all compounds. It works best for identifying functional groups such as C=O.",
+          "DETAILED": "The function returns the IR spectra as a string, following the conventions of IR spectra notation. If some error occurs during the IR spectra measurement process, it returns an error message. Very recommended for C=O group elucidation.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you want the IR spectra for the compound at hand.\n- When you need to answer questions about the functional groups in the sample, such as C=O stretching.\n- Recommended for tasks that require understanding the functional groups in a molecule.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to measure IR. Do not perform unnecessary experiments. \n2.  Apply this tool to measure the IR spectra for the corresponding compound. \n3.  Use the resulting IR spectra to analyze the functional groups in the proposed molecule. You can use the `carbon_nmr_spectra` and `hsqc_nmr_spectra` tools to obtain complementary information.",
+          "CONTEXTUAL": "How this tool works:\n- This function takes the sample of the compound and measures the IR spectra.\n- The function returns the IR spectra as a string, following a similar format as the ACS guidelines.\n- If some error occurs during the IR spectra measurement process, the function returns an error message.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `ir_spectra()`,\n]",
+          "RETURNS_BRIEF": "The IR spectra for the molecule in the sample at hand.",
+          "RETURNS_DETAILED": "The function returns the IR spectra as a string, following the conventions of IR spectra notation. If some error occurs during the IR spectra measurement process, it returns an error message.",
+          "RETURNS_EXAMPLES": "\"Predicted IR spectra: 3400 cm-1 (O-H stretch), 1700 cm-1 (C=O stretch), 1600 cm-1 (C=C stretch)\"",
+          "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the IR spectra measurement process. \n         This exception is raised when there is an error in measuring the IR spectra. \n         Try another tool. Try elucidate the functional groups with the other tools.",
+          "LIMITATIONS": "Known Limitations:\n    - The cost of measuring the IR spectra repeatedly may be high, so use it judiciously.\n    - The experiment IR spectra may not be accurate for all compounds, especially for complex or unusual structures.\n    - The experiment can only measure the IR spectra for the compound of the sample at hand."
+        },
+        "args": [
+          {
+            "name": "h_smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def ir_spectra(h_smiles: str) -> str:\n    return remote_call(function_name=\"get_ir_prediction\", env_name=\"chemenv\")(\n        smiles=h_smiles\n    )"
+      },
+      {
+        "name": "hsqc_nmr_spectra",
+        "sections": {
+          "BRIEF": "Returns the HSQC (Heteronuclear Single Quantum Coherence) NMR spectra for the sample at hand.",
+          "DETAILED": "This function returns the HSQC NMR spectra for the sample at hand. It returns the HSQC spectrum data as a string, formatted in standard NMR notation, similar to the ACS conventions. If some error occurs during the measurement, it returns an appropriate message.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you want to measure the HSQC NMR spectra for the sample to elucidate its structure.\n- When you need to analyze the correlation between hydrogen and carbon atoms in the sample.\n- Recommended for tasks that require understanding the connectivity between hydrogen and carbon atoms in a molecule.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to measure HSQC NMR. Do not perform unnecessary experiments. Use first the tools `carbon_nmr_spectra` and `proton_nmr_spectra` and try to link the fragments from there. Only measure this experiment if some of the peaks are ambiguous. \n2.  Apply this tool to measure the HSQC NMR experiment for the corresponding compound. \n3.  Use the resulting HSQC spectrum to analyze the correlation between hydrogen and carbon atoms in the proposed molecule. You can use the `retrieve_protons_shifts` and `retrieve_carbon_shifts` tools to validate the chemical shifts.",
+          "CONTEXTUAL": "How this tool works:\n- This function measures the HSQC NMR spectra for the sample at hand.\n- It makes a POST request to an external API that measures the HSQC NMR experiment for the sample at hand.\n- The function then parses the data from the measurement to extract the HSQC spectrum data and formats it in standard NMR notation, similar to the ACS convention.\n- If an error occurs during the measurement, it returns an appropriate message.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `hsqc_nmr_spectra()`,\n]",
+          "RETURNS_BRIEF": "The HSQC NMR spectra for the molecule in the sample at hand.",
+          "RETURNS_DETAILED": "The function returns the HSQC NMR spectra as a string, formatted in standard NMR notation. If some error occurs during the measurement, it returns an appropriate message.",
+          "RETURNS_EXAMPLES": "\"HSQC: delta H/delta C 7.40/128.0 (2H), 7.24/128.5 (2H), 7.18/129.0 (2H), 7.03/130.0 (2H), 2.46/20.0 (3H), 1.62/15.0 (6H), 1.21/10.0 (9H).\"",
+          "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the HSQC spectrum measurement. \n         This exception is raised when there is an error in performing the HSQC spectrum measurement. \n         Try another tool. Try elucidate the connectivity with the other tools and by using the data from the Carbon and Proton NMR.",
+          "LIMITATIONS": "Known Limitations:\n    - The cost of measuring the HSQC NMR spectra repeatedly may be high, so use it judiciously.\n    - The experiment HSQC spectra may not be accurate for all compounds, especially for complex or unusual structures.\n    - The experiment can only measure for the compound of the sample at hand."
+        },
+        "args": [
+          {
+            "name": "h_smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def hsqc_nmr_spectra(h_smiles: str) -> str:\n    URL = \"https://lamalab-org--nmr-prediction-api-predict-nmr.modal.run\"\n    mol = Chem.MolFromSmiles(h_smiles)\n    if mol is None:\n        return \"Invalid SMILES string provided.\"\n    payload = {\"smiles\": h_smiles}\n\n    spectra = make_api_call(URL, payload)\n    for spectrum in spectra[\"spectra\"]:\n        info = spectrum.get(\"info\", {})\n        pulse_sequence = info.get(\"pulseSequence\", \"\")\n        if pulse_sequence == \"hsqc\":\n            return format_hsqc_spectrum(spectrum)\n    return \"No HSQC spectrum found for the provided SMILES.\""
+      },
+      {
+        "name": "mass_spectrometry_spectra",
+        "sections": {
+          "BRIEF": "Returns the mass spectrometry spectra for the sample at hand using the Electrospray Ionization (ESI) technique.",
+          "DETAILED": "This function returns the mass spectrometry spectra for the sample at hand by making a POST request to an external API that measures the mass spectrometry experiment. The function returns the mass spectrometry spectra as a string in the format \"m/z 100.1 (intensity 500), 101.2 (intensity 450), ...\".",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you want to measure the mass spectrometry spectra for the sample to elucidate its structure.\n- When you need to answer questions about the mass-to-charge ratio (m/z) of the sample.\n- When you need to analyze the isotopic distribution of the sample.\n- When you need to know the number of double bond equivalents in the sample.\n- Recommended for tasks that require understanding the mass spectrum of a molecule.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to measure mass spectrometry. Do not perform unnecessary experiments. If the task is to elucidate the structure of the sample, then this tool is appropriate to begin with. \n2.  Apply this tool to measure the mass spectrometry experiment for the corresponding compound. \n3.  Use the resulting mass spectrometry spectra to analyze the mass-to-charge ratio (m/z) of the proposed molecule. You can use the `retrieve_isotope_distribution` tool to obtain complementary information about the isotopic distribution of the molecule.",
+          "CONTEXTUAL": "How this tool works:\n- It makes a POST request to an external API that measures the mass spectrometry experiment for the sample at hand.\n- The API returns the mass spectrometry spectra data as a JSON response.\n- The function then parses the response to extract the mass spectrometry spectrum data and formats it in a string format.\n- If some error occurs during the experiment, it returns an appropriate message.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `mass_spectrometry_spectra()`,\n]",
+          "RETURNS_BRIEF": "The mass spectrometry spectra for the molecule in the sample at hand.",
+          "RETURNS_DETAILED": "The function returns the mass spectrometry spectra as a string in the format \"m/z 100.1 (intensity 500), 101.2 (intensity 450), ...\". If there is some error during the measurement, it returns an appropriate message.",
+          "RETURNS_EXAMPLES": "\"m/z 100.1 (intensity 500), 101.2 (intensity 450), 102.3 (intensity 400), ...\"",
+          "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the API call to retrieve the mass spectrometry spectrum data. \n         This exception is raised when there is an error in performing the API call to retrieve the mass spectrometry spectrum data. \n         Try another tool. Try elucidate the mass spectrum with the other tools.",
+          "LIMITATIONS": "Known Limitations:\n    - The cost of measuring the mass spectrometry spectra repeatedly may be high, so use it judiciously.\n    - The experiment mass spectrometry spectra may not be accurate for all compounds, especially for complex or unusual structures.\n    - The experiment can only measure for the compound of the sample at hand."
+        },
+        "args": [
+          {
+            "name": "h_smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def mass_spectrometry_spectra(h_smiles: str) -> str:\n    mol = Chem.MolFromSmiles(h_smiles)\n    if mol is None:\n        return \"Invalid SMILES string provided.\"\n\n    URL = \"https://lamalab-org--nmr-prediction-api-predict-isotopic-distribution.modal.run\"\n    payload = {\"smiles\": h_smiles}\n\n    return convert_ms_spectrum_to_string(make_api_call(URL, payload))"
+      },
+      {
+        "name": "retrieve_isotope_distribution",
+        "sections": {
+          "BRIEF": "Retrieve the isotopic distribution of common elements in organic chemistry.",
+          "DETAILED": "This function returns a predefined dictionary containing the isotopic distribution of common elements in organic chemistry, including Carbon, Hydrogen, Sulfur, Chlorine, Bromine, Iodine, Fluorine, Nitrogen, and Oxygen. Each element's isotopes are listed with their natural abundance and m/z values. The function also includes the m/z peaks for each element.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you need to analyze the isotopic distribution of common elements in organic compounds.\n- When you need to answer questions about the isotopic composition of a molecule.\n- Recommended for tasks that require understanding the isotopic distribution of elements in a molecule, such as mass spectrometry analysis or chemical structure elucidation.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to retrieve the isotopic distribution. Measure the `mass_spectrometry_spectra` tool first to obtain the mass-to-charge ratio (m/z) of the molecule. \n2.  Apply this tool to retrieve the isotopic distribution of common elements in organic chemistry. \n3.  Use the retrieved isotopic distribution to analyze the mass spectrometry spectra of the proposed molecule. After that, proceed with the other spectra tools or answer the task at hand.",
+          "CONTEXTUAL": "How this tool works:\n- It returns a predefined dictionary containing the isotopic distribution of common elements in organic chemistry.\n- Each element's isotopes are listed with their natural abundance and m/z values.\n- The function also includes the m/z peaks for each element.\n- The isotopic distribution is based on typical values observed in organic compounds.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `retrieve_isotope_distribution()`,\n]",
+          "RETURNS_BRIEF": "A string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry.",
+          "RETURNS_DETAILED": "The function returns a string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry, including their isotopes, natural abundance, m/z values, and m/z peaks.",
+          "RETURNS_EXAMPLES": "\"{\"Carbon\": {\"isotopes\": {\"12C\": {\"abundance\": 98.89, \"m/z\": 12},\"13C\": {\"abundance\": 1.11, \"m/z\": 13}<more elements...}}}\"",
+          "RAISES": "Exceptions:\n    None",
+          "LIMITATIONS": "Known Limitations:\n    - The isotopic distribution is based on typical values observed in organic compounds and may not be applicable to all compounds.\n    - The function does not perform any calculations or database queries; it returns a predefined dictionary."
+        },
+        "args": [],
+        "returns": "str",
+        "code": "def retrieve_isotope_distribution() -> str:\n    return str(\n        {\n            \"Carbon\": {\n                \"isotopes\": {\n                    \"12C\": {\"abundance\": 98.89, \"m/z\": 12},\n                    \"13C\": {\"abundance\": 1.11, \"m/z\": 13},\n                },\n                \"m/z_peaks\": [\"M+1\"],\n            },\n            \"Hydrogen\": {\n                \"isotopes\": {\n                    \"1H\": {\"abundance\": 99.98, \"m/z\": 1},\n                    \"2H\": {\"abundance\": 0.02, \"m/z\": 2},\n                },\n                \"m/z_peaks\": [\"M+1\"],\n            },\n            \"Sulfur\": {\n                \"isotopes\": {\n                    \"32S\": {\"abundance\": 94.93, \"m/z\": 32},\n                    \"33S\": {\"abundance\": 0.76, \"m/z\": 33},\n    ..."
+      },
+      {
+        "name": "retrieve_dbe_formula",
+        "sections": {
+          "BRIEF": "Retrieve the formula for calculating the Double Bond Equivalent (DBE).",
+          "DETAILED": "This function returns a string containing the formula for calculating the Double Bond Equivalent (DBE), also known as Degree of Unsaturation (DU) or Index of Hydrogen Deficiency (IHD). The formula is essential in organic chemistry for deducing molecular structures from empirical formulas.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you need to calculate the Double Bond Equivalent (DBE) for a given molecular formula.\n- When you need to analyze the degree of unsaturation in a molecule.\n- Recommended for tasks that require understanding the structural features of a molecule, such as chemical structure elucidation or database searches.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to calculate the DBE. Do not perform unnecessary calculations or measurements. \n2.  Apply this tool to retrieve the formula for calculating the DBE. \n3.  Use the retrieved formula to calculate the DBE for a given molecular formula. You can use the `obtain_isomers` tool to explore different structural variations of a compound based on its DBE.",
+          "CONTEXTUAL": "How this tool works:\n- It returns a string containing the formula for calculating the Double Bond Equivalent (DBE).\n- The formula is based on the number of carbon, hydrogen, nitrogen, and halogen atoms in a molecule.\n- The function also provides an interpretation of the DBE values and examples of calculations for common organic compounds.\n- The DBE calculation is essential for understanding the structural features of a molecule, such as the presence of rings and multiple bonds.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `retrieve_dbe_formula()`,\n]",
+          "RETURNS_BRIEF": "A string containing the formula for calculating the Double Bond Equivalent (DBE).",
+          "RETURNS_DETAILED": "The function returns a string containing the formula for calculating the Double Bond Equivalent (DBE), along with an interpretation of the DBE values and examples of calculations for common organic compounds.",
+          "RETURNS_EXAMPLES": "\"Double Bond Equivalent (DBE) = <more details>.\"",
+          "RAISES": "Exceptions:\n    None",
+          "LIMITATIONS": "Known Limitations:\n    - The formula is based on the number of carbon, hydrogen, nitrogen, and halogen atoms in a molecule, and does not account for other elements such as oxygen.\n    - The interpretation of the DBE values is based on typical organic compounds and may not apply to all molecules."
+        },
+        "args": [],
+        "returns": "str",
+        "code": "def retrieve_dbe_formula() -> str:\n    return \"\"\"\nDouble Bond Equivalent (DBE), also known as Degree of Unsaturation (DU) or Index of Hydrogen Deficiency (IHD), quantifies the number of rings and multiple bonds (double or triple) in a molecule. This calculation is essential in organic chemistry for deducing molecular structures from empirical formulas.\n\nFormula:\n    DBE = (2C + 2 + N - H - X) / 2\n\nWhere:\n    C = Number of carbon atoms\n    H = Number of hydrogen atoms\n    N = Number of nitrogen atoms\n    X = Number of halogen atoms (F, Cl, Br, I)\n\nNote:\n    Oxygen atoms do not affect the DBE calculation.\n\nInterpretation:\n    - DBE = 0: Fully saturated molecule (no rings or multiple bonds)\n    - DBE = 1: One ring or one double bond\n    - DBE = 2: Two rings, two double bonds, or one ring plus one double bond\n    - DBE = 3: Three rings, three double bonds, or combinations thereof\n    ..."
+      },
+      {
+        "name": "obtain_isomers_from_molecular_formula",
+        "sections": {
+          "BRIEF": "Obtain isomers for a given molecular formula.",
+          "DETAILED": "This function retrieves isomers for a given molecular formula using the `get_isomers_from_molecular_formula` remote function. It returns a list of isomer SMILES strings. The list of isomers might not be accurate since it is based on the PubChem database.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you want to find isomers for a given molecular formula.\n- When you need to explore different structural variations of a compound.\n- Recommended for tasks that require understanding the structural diversity of a molecule, such as chemical structure elucidation or database searches.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1. Obtain the molecular formula for the compound of interest. You can use the `get_formula_from_smiles` tool to convert a SMILES string to its molecular formula.\n    2. Call this tool with the molecular formula to retrieve isomers.\n    3. Use the list of isomers for further analysis or processing.",
+          "CONTEXTUAL": "How this tool works:\n    - It uses the `get_isomers_from_molecular_formula` remote function to retrieve isomers for the given molecular formula.\n    - The function returns a list of SMILES strings representing the isomers of the input compound that match the molecular formula.\n    - The accuracy of the isomers is dependent on the underlying database (e.g., PubChem).",
+          "SYNTACTICAL": "Usage examples:\n[\n    `obtain_isomers_from_molecular_formula(\"C2H6O\")`,\n    `obtain_isomers_from_molecular_formula(\"C6H6\")`,\n    `obtain_isomers_from_molecular_formula(\"C6H12\")`,\n    `obtain_isomers_from_molecular_formula(\"C6H10O\")`,\n    `obtain_isomers_from_molecular_formula(\"C6H10Cl2\")`,\n]",
+          "ARGS_BRIEF": "The maximum number of isomers to retrieve. 0 means no limit.",
+          "ARGS_DETAILED": "An integer specifying the maximum number of isomers to retrieve for the given molecular formula. This parameter helps to limit the number of results returned by the function.",
+          "ARGS_SYNTACTICAL": "Positive integer",
+          "ARGS_EXAMPLES": "5, 10, 20",
+          "RETURNS_BRIEF": "A list of SMILES strings representing the isomers of the input compound.",
+          "RETURNS_DETAILED": "The function returns a list of SMILES strings representing the isomers of the input compound. If no isomers are found, it returns an empty list.",
+          "RETURNS_EXAMPLES": "`[\"CCO\", \"C1=CC=CC=C1\"]`",
+          "RAISES": "Exceptions:\n    None",
+          "LIMITATIONS": "Known Limitations:\n    - This tool can be really slow for molecular formulas with many isomers, if the limit is set too high.\n    - The list of isomers may not be exhaustive or accurate, as it is based on the PubChem database.\n    - The function may not find all possible isomers, especially for complex or unusual structures."
+        },
+        "args": [
+          {
+            "name": "molecular_formula",
+            "type": "str"
+          },
+          {
+            "name": "limit",
+            "type": "int"
+          }
+        ],
+        "returns": "list[str]",
+        "code": "def obtain_isomers_from_molecular_formula(\n    return remote_call(\n        function_name=\"get_compound_isomers_pubchem_by_formula\", env_name=\"chemenv\"\n    )(formula=molecular_formula, limit=limit)"
+      },
+      {
+        "name": "validate_smiles",
+        "sections": {
+          "BRIEF": "Validate a SMILES string to check if it represents a valid chemical structure.",
+          "DETAILED": "This function checks if a given SMILES string can be converted into a valid chemical structure using RDKit. It returns True if the SMILES is valid, otherwise returns False.",
+          "PROCEDURAL": "When to use this tool:\n- Use it when you need to validate a SMILES string before performing further chemical analysis or processing.\n- When you want to ensure that the SMILES string represents a valid chemical structure before submitting it for final answer or further analysis.\n- Recommended for tasks that require checking the validity of chemical structures represented in SMILES format, such as chemical database searches or structure-based predictions.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1. Obtain a good guess for the molecule in the sample at hand.\n2. Call this tool with the SMILES string to validate it.\n3. If the SMILES string is valid, proceed with further analysis or submit the final answer.",
+          "CONTEXTUAL": "How this tool works:\n- It uses RDKit's `Chem.MolFromSmiles` function to attempt to convert the SMILES string into a chemical structure.\n- If the conversion is successful, it indicates that the SMILES string is valid, and the function returns True.\n- If the conversion fails (i.e., the SMILES string is invalid), it returns False.\n- The function does not perform any chemical analysis or processing; it simply checks the validity of the SMILES string.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `validate_smiles(\"CCO\")`,  # Valid SMILES\n    `validate_smiles(\"C1=CC=CC=C1\")`,  # Valid SMILES for benzene\n    `validate_smiles(\"InvalidSMILES\")`,  # Invalid SMILES\n    `validate_smiles(\"C1CCCCC1\")`,  # Valid SMILES for cyclohexane\n    `validate_smiles(\"C1=CC=C(C=C1)O\")`,  # Valid SMILES for phenol\n]",
+          "ARGS_BRIEF": "The SMILES representation to validate",
+          "ARGS_DETAILED": "The SMILES string representing the chemical structure of the molecule to validate. It should be a valid SMILES notation that can be processed by the validation function.",
+          "ARGS_SYNTACTICAL": "\"valid SMILES string\"",
+          "ARGS_EXAMPLES": "\"CCO\", \"C1=CC=CC=C1\", \"C(C(=O)O)N\", \"C1=CC=C(C=C1)C(=O)O\"",
+          "RETURNS_BRIEF": "True if the SMILES string is valid, False otherwise.",
+          "RETURNS_DETAILED": "The function returns True if the SMILES string can be converted into a valid chemical structure, otherwise it returns False.",
+          "RETURNS_EXAMPLES": "`True`, `False`",
+          "RAISES": "Exceptions:\n    None",
+          "LIMITATIONS": "Known Limitations:\n    - The function only checks the validity of the SMILES string; it does not perform any chemical analysis or processing.\n    - It relies on RDKit's ability to parse SMILES strings, so any limitations of RDKit's SMILES parser will apply.\n    - The function does not handle specific chemical properties or characteristics; it simply checks if the SMILES string can be converted into a valid chemical structure."
+        },
+        "args": [
+          {
+            "name": "smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "bool",
+        "code": "def validate_smiles(smiles: str) -> bool:\n    mol = Chem.MolFromSmiles(smiles)\n    return mol is not None"
+      },
+      {
+        "name": "return_possible_fragments",
+        "sections": {
+          "BRIEF": "Return a list of fragments of the sample at hand by removing one or two atoms from the molecule.",
+          "DETAILED": "This function generates some fragments from the sample at hand. It returns a list of unique fragment SMILES strings.",
+          "PROCEDURAL": "When to use this tool:\n- When you need to generate fragments for the sample at hand.\n- When you want to explore different possible options based on the spectra.\n- When you are at an endpoint and need to consider some potential fragments.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to generate fragments. Ensure that you really tried to guess all the posibilities from the information available. \n2.  Call this tool to generate fragments for the sample at hand. \n3.  Evaluate the fragments for getting the final molecule.",
+          "CONTEXTUAL": "How this tool works:\n- This tool takes the spectra information and generates fragments based on known molecules.\n- It uses a combination of cheminformatics techniques to identify potential fragment structures.\n- It leverages existing databases and algorithms to find some candidates.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `return_possible_fragments()`\n]",
+          "RETURNS_BRIEF": "A list of unique fragment SMILES strings.",
+          "RETURNS_DETAILED": "This list contains all the unique SMILES representations of the fragments found by database lookup.",
+          "RETURNS_EXAMPLES": "Example SMILES strings: [\"C1=CC=CC=C1\", \"C1=CC=CC=C1O\", ...]",
+          "RAISES": "Exceptions:\n    None",
+          "LIMITATIONS": "Known Limitations:\n    - This tool might not return all the fragments, but there the ones returned are 100% accurate.\n    - The quality of the generated fragments depends on the underlying database and its coverage."
+        },
+        "args": [
+          {
+            "name": "h_smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "list[str]",
+        "code": "def return_possible_fragments(h_smiles: str) -> list[str]:\n    mol = Chem.MolFromSmiles(h_smiles)\n    if mol is None:\n        raise ValueError(\"Invalid SMILES string provided.\")\n\n    fragments = enumerate_fragments_from_smiles(h_smiles)\n\n    final_fragments = []\n    for fragment in fragments:\n        try:\n            fragment_mol = Chem.MolFromSmiles(fragment)\n        except Exception:\n            continue\n        if fragment_mol is None:\n            continue\n        final_fragments.append(fragment)\n\n    random.shuffle(final_fragments)\n    return final_fragments"
+      },
+      {
+        "name": "simulate_spectra",
+        "sections": {
+          "BRIEF": "The simulated spectra of the compound",
+          "DETAILED": "A dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.\n        Each key corresponds to a type of spectrum, and the value is a string representation of the simulated spectrum.\n        If some spectra are not available, the value will be None for those keys.",
+          "PROCEDURAL": "When to use this tool:\n- Use it to validate the chemical structure of a proposed molecule by simulating its spectra.\n- When you want to validate some hypothetical molecule against the experimental data in the task description.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Run the spectra tools, and analyze the results thoroughly. Generate different candidate molecules and reason which ones could fit the spectra, until you have a good guess for the molecule in the sample at hand. \n2.  Apply this tool with the SMILES string of the proposed molecule to simulate its spectra and validate if can be the solution to the task. \n3.  Submit the answer if the simulated spectra is similar to the experimental, or go back to step 1 and propose new candidate molecules.",
+          "CONTEXTUAL": "How this tool works:\n- It uses a remote function `simulate_spectra` to perform the simulation.\n- The simulation process involves:\n    1. Structure analysis using HOSE code descriptors to identify the chemical environment of atoms in the molecule.\n    2. Neural network prediction of chemical shifts based on experimental data.\n    3. Prediction of J-coupling constants for proton-proton interactions to simulate the splitting patterns in NMR spectra.\n    4. Quantum-mechanical simulation to generate realistic multiplet patterns and effects in the spectra.\n- The function returns a dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.\nIf some of the spectra are not available, it will return None for those spectra.",
+          "SYNTACTICAL": "Format: \"valid SMILES string\"",
+          "EXAMPLES": "Examples: {\"1H NMR\": \"simulated_1H_NMR_spectrum\", \"13C NMR\": \"simulated_13C_NMR_spectrum\", \"IR\": \"simulated_IR_spectrum\"}",
+          "RAISES": "Exceptions:\n    Exception:\n         If a network error occurs during the remote function call. \n         This exception is raised when there is an error in calling the remote function `simulate_spectra`, such as network issues. \n         This tool is unavailable if the remote function cannot be called.",
+          "LIMITATIONS": "Known Limitations:\n    - The SMILES string must be valid and represent a chemical structure that can be interpreted by the remote function.\n    - The remote function may not be able to simulate spectra for all compounds, especially if they are complex or not well-defined.\n    - The function relies on the availability of the remote service and its simulation capabilities, which may change over time."
+        },
+        "args": [
+          {
+            "name": "smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "dict[str, str]",
+        "code": "def simulate_spectra(smiles: str) -> dict[str, str]:\n    return remote_call(function_name=\"simulate_spectra\", env_name=\"chemenv\")(\n        smiles=smiles\n    )"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "10_15227_orgsyn_084_0077",
+        "name": "task_1",
+        "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
+        "tools": [
+          "get_formula_from_smiles",
+          "retrieve_protons_shifts",
+          "retrieve_aromatic_protons_shifts",
+          "retrieve_carbon_shifts",
+          "search_by_smiles",
+          "carbon_nmr_spectra",
+          "proton_nmr_spectra",
+          "ir_spectra",
+          "hsqc_nmr_spectra",
+          "mass_spectrometry_spectra",
+          "retrieve_isotope_distribution",
+          "retrieve_dbe_formula",
+          "obtain_isomers_from_molecular_formula",
+          "validate_smiles",
+          "return_possible_fragments",
+          "simulate_spectra"
+        ],
+        "scoring_function": "score_molecule",
+        "submission_format": "SMILES string of the molecule, e.g., 'CC(=O)OC1=CC=CC=C1C(=O)O', 'CCO",
+        "level": "level_1"
+      },
+      {
+        "id": "10_15227_orgsyn_084_0077",
+        "name": "task_1",
+        "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
+        "tools": [
+          "get_formula_from_smiles",
+          "retrieve_protons_shifts",
+          "retrieve_aromatic_protons_shifts",
+          "retrieve_carbon_shifts",
+          "search_by_smiles",
+          "carbon_nmr_spectra",
+          "proton_nmr_spectra",
+          "ir_spectra",
+          "hsqc_nmr_spectra",
+          "mass_spectrometry_spectra",
+          "retrieve_isotope_distribution",
+          "retrieve_dbe_formula",
+          "obtain_isomers_from_molecular_formula",
+          "validate_smiles",
+          "simulate_spectra"
+        ],
+        "scoring_function": "score_molecule",
+        "submission_format": "SMILES string of the molecule, e.g., 'CC(=O)OC1=CC=CC=C1C(=O)O', 'CCO",
+        "level": "level_2"
+      }
+    ],
+    "scoring_functions": [
+      {
+        "name": "score_molecule",
+        "docstring": "Compare predicted and ground truth SMILES strings and calculate similarity score.\nStereochemistry is not considered in the comparison.\nMolecules are first converted to canonical SMILES without stereochemistry. Then compared.\n\nArgs:\n    prediction (str): SMILES string of predicted molecule\n    ground",
+        "code": "def score_molecule(prediction: str, ground_truth: str) -> float:\n    \"\"\"\n    Compare predicted and ground truth SMILES strings and calculate similarity score.\n    Stereochemistry is not considered in the comparison.\n    Molecules are first converted to canonical SMILES without stereochemistry. Then compared.\n\n    Args:\n        prediction (str): SMILES string of predicted molecule\n        ground_truth (str): SMILES string of ground truth molecule\n\n    Returns:\n        Score either 0.0 or 1.0 based on correctness of the prediction.\n    \"\"\"\n    try:\n        pred_mol = Chem.MolFromSmiles(prediction)\n    except Exception:\n        pred_mol = None\n    try:\n        true_mol = Chem.MolFromSmiles(ground_truth)\n    except Exception:\n        true_mol = None\n\n    if true_mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    ..."
+      },
+      {
+        "name": "neutralize_charges",
+        "docstring": "Neutralize charges on a molecule by setting formal charges to 0\nand adjusting hydrogen counts appropriately. Handles extreme charges like -2.",
+        "code": "def neutralize_charges(mol):\n    \"\"\"\n    Neutralize charges on a molecule by setting formal charges to 0\n    and adjusting hydrogen counts appropriately. Handles extreme charges like -2.\n    \"\"\"\n    if mol is None:\n        return None\n\n    try:\n        # First try RDKit's neutralization from MolStandardize\n        uncharger = rdMolStandardize.Uncharger()\n        neutralized = uncharger.uncharge(mol)\n\n        # Check if neutralization was successful\n        has_charges = any(\n            atom.GetFormalCharge() != 0 for atom in neutralized.GetAtoms()\n        )\n        if not has_charges:\n            return neutralized\n    except Exception:\n        pass\n\n    # Fallback: more aggressive manual neutralization\n    try:\n        # Create a copy using SMILES round-trip to avoid direct copying issues\n    ..."
+      },
+      {
+        "name": "score_molecule_fragments",
+        "docstring": "Score the prediction based on whether fragments are substructures of the ground truth molecule.\n\nThis function handles charged fragments by neutralizing them before substructure matching.\nFragments with extreme charges (|charge| > 1) that create unrealistic neutral structures\nare treated more lenien",
+        "code": "def score_molecule_fragments(prediction: list[str] | str, ground_truth: str) -> float:\n    \"\"\"Score the prediction based on whether fragments are substructures of the ground truth molecule.\n\n    This function handles charged fragments by neutralizing them before substructure matching.\n    Fragments with extreme charges (|charge| > 1) that create unrealistic neutral structures\n    are treated more leniently to account for fragmentation artifacts.\n\n    Args:\n        prediction: List of SMILES strings representing fragments.\n        ground_truth: SMILES string of the ground truth molecule.\n\n    Returns:\n        Score either 0.0 or 1.0 based on fragment matching.\n               Returns 1.0 if all the valid fragments match substructures of the ground truth molecule,\n    \"\"\"\n    # If prediction is a string representation of a list, parse it\n    if isinstance(prediction, list):\n        seq = prediction\n    elif isinstance(prediction, str):\n        try:\n            seq = ast.literal_eval(prediction)\n        except Exception:\n            return 0.0  # signal bad input\n    else:\n        return 0.0\n    ..."
+      },
+      {
+        "name": "validate_molecular_formula",
+        "docstring": "Check if the predicted formula matches the formula from the ground truth SMILES.\nprediction: molecular formula string (e.g., C6H6)\nground_truth: SMILES string",
+        "code": "def validate_molecular_formula(prediction, ground_truth):\n    \"\"\"\n    Check if the predicted formula matches the formula from the ground truth SMILES.\n    prediction: molecular formula string (e.g., C6H6)\n    ground_truth: SMILES string\n    \"\"\"\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n    actual_formula = rdMolDescriptors.CalcMolFormula(mol)\n    # Use parse_formula to compare element counts\n    try:\n        pred_counts = parse_formula(prediction)\n        actual_counts = parse_formula(actual_formula)\n    except Exception:\n        return False\n    return pred_counts == actual_counts"
+      },
+      {
+        "name": "score_formula_match",
+        "docstring": "Scoring function that checks if the predicted molecular formula matches the ground truth molecule.\nIt decomposes both the predicted formula and the ground truth SMILES into element counts\nand compares them for equality.\n\nArgs:\n    prediction: Predicted molecular formula (e.g., \"C6H6\")\n    ground_tru",
+        "code": "def score_formula_match(prediction: str, ground_truth: str) -> float:\n    \"\"\"\n    Scoring function that checks if the predicted molecular formula matches the ground truth molecule.\n    It decomposes both the predicted formula and the ground truth SMILES into element counts\n    and compares them for equality.\n\n    Args:\n        prediction: Predicted molecular formula (e.g., \"C6H6\")\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float 1.0 if the formulas match, 0.0 otherwise\n    \"\"\"\n    # prediction: SMILES, ground_truth: formula\n    return 1.0 if validate_molecular_formula(prediction, ground_truth) else 0.0"
+      },
+      {
+        "name": "parse_formula",
+        "docstring": "Parse molecular formula into an element-count mapping, handling\nparentheses and dot adducts.",
+        "code": "def parse_formula(formula: str) -> dict[str, int]:\n    \"\"\"\n    Parse molecular formula into an element-count mapping, handling\n    parentheses and dot adducts.\n    \"\"\"\n    parts = _DOT_PAT.split(formula.replace(\" \", \"\"))\n    total = Counter()\n    for part in parts:\n        expanded = _expand_parentheses(part)\n        total += _parse_simple(expanded)\n    return dict(total)"
+      },
+      {
+        "name": "calculate_dbe",
+        "docstring": "Calculate the Degree of Unsaturation (DBE) for a molecule.\nThe formula is C - (H / 2) + (N / 2)\nwhere C is the number of carbons, H is the number of hydrogens,\nN is the number of nitrogens, and X is the number of halogens.\nHalogens count like hydrogens.\nIt is needed to declare the explicit hydrogens",
+        "code": "def calculate_dbe(mol):\n    \"\"\"\n    Calculate the Degree of Unsaturation (DBE) for a molecule.\n    The formula is C - (H / 2) + (N / 2)\n    where C is the number of carbons, H is the number of hydrogens,\n    N is the number of nitrogens, and X is the number of halogens.\n    Halogens count like hydrogens.\n    It is needed to declare the explicit hydrogens to get the correct count.\n    \"\"\"\n    mH = Chem.AddHs(mol)\n    C = H = N = X = 0  # X will be halogens\n\n    for atom in mH.GetAtoms():\n        symbol = atom.GetSymbol()\n        if symbol == \"C\":\n            C += 1\n        elif symbol == \"H\":\n            H += 1\n        elif symbol == \"N\":\n            N += 1\n        elif symbol in (\"F\", \"Cl\", \"Br\", \"I\"):\n            X += 1\n\n    # Halogens count like hydrogens\n    H += X\n    ..."
+      },
+      {
+        "name": "validate_dbe_consistency",
+        "docstring": "Validate that the predicted DBE value (integer) matches the DBE calculated from the ground truth SMILES string within a tolerance.\n\nArgs:\n    prediction: Predicted DBE value (should be an integer or string representing an integer).\n    ground_truth: SMILES string of the ground truth molecule.\n\nRetur",
+        "code": "def validate_dbe_consistency(prediction: int | str, ground_truth: str) -> float:\n    \"\"\"\n    Validate that the predicted DBE value (integer) matches the DBE calculated from the ground truth SMILES string within a tolerance.\n\n    Args:\n        prediction: Predicted DBE value (should be an integer or string representing an integer).\n        ground_truth: SMILES string of the ground truth molecule.\n\n    Returns:\n        A float being 1.0 if the predicted DBE matches the calculated DBE, 0.0 otherwise.\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\"Prediction must be an integer representing the DBE value.\")\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid SMILES string provided.\")\n    # ground_truth can be a formula or a DBE value\n    expected_dbe = calculate_dbe(mol) if isinstance(ground_truth, str) else ground_truth\n    logger.debug(f\"Calculated DBE: {expected_dbe}, Predicted DBE: {prediction}\")\n    return float(prediction == expected_dbe)"
+      },
+      {
+        "name": "score_isotopic_distribution",
+        "docstring": "Score the isotopic distribution of a molecule based on the provided prediction and ground truth.\nChecks that all the elements with significant isotopic distributions (C, S, Cl, Br)\nin the ground truth molecule are present in the predicted list of elements.\n\nArgs:\n    prediction: list of element symb",
+        "code": "def score_isotopic_distribution(\n    prediction: list[str] | str, ground_truth: str\n) -> float:\n    \"\"\"\n    Score the isotopic distribution of a molecule based on the provided prediction and ground truth.\n    Checks that all the elements with significant isotopic distributions (C, S, Cl, Br)\n    in the ground truth molecule are present in the predicted list of elements.\n\n    Args:\n        prediction: list of element symbols (e.g. [\"C\", \"H\", \"O\"]) or a string representation of such a list\n        ground_truth: SMILES string of the sample molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted elements for the isotopic distribution match the ground truth, 0.0 otherwise\n    \"\"\"\n    if isinstance(prediction, list):\n        seq = prediction\n    elif isinstance(prediction, str):\n        try:\n            seq = ast.literal_eval(prediction)\n        except Exception:\n            return 0.0  # signal bad input\n    else:\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    ..."
+      },
+      {
+        "name": "count_h_env",
+        "docstring": "Count unique (NMR-relevant) non-exchangeable proton environments.\n\nThis function identifies chemically equivalent hydrogens based on:\n1. Canonical atom ranking (symmetry)\n2. Diastereotopic relationships around double bonds\n\nFor groups attached to sp2 carbons (double bonds), hydrogens on different\nsu",
+        "code": "def count_h_env(mol: Chem.Mol) -> int:\n    \"\"\"\n    Count unique (NMR-relevant) non-exchangeable proton environments.\n\n    This function identifies chemically equivalent hydrogens based on:\n    1. Canonical atom ranking (symmetry)\n    2. Diastereotopic relationships around double bonds\n\n    For groups attached to sp2 carbons (double bonds), hydrogens on different\n    substituents are diastereotopic and give different NMR signals even if\n    they appear equivalent by simple symmetry analysis.\n    \"\"\"\n    mol = Chem.AddHs(mol)\n    Chem.AssignStereochemistry(mol, force=True, cleanIt=True)\n\n    exchangeable_atomic_nums = {7, 8, 16}  # N, O, S\n\n    # Get canonical ranks for all atoms (with stereochemistry, without breaking ties)\n    ranks = list(\n        rdmolfiles.CanonicalRankAtoms(\n            mol, breakTies=False, includeChirality=True, includeIsotopes=True\n        )\n    )\n\n    # Find non-exchangeable H indices and their parent carbons\n    ..."
+      },
+      {
+        "name": "score_num_hydrogen_symmetry_classes",
+        "docstring": "Count unique hydrogen environments using canonical ranking. Stereochemistry is ignored.\nThen compare to predicted number and score consequently. It avoids acidic hydrogens.\n\nArgs:\n    prediction: Predicted number of hydrogen symmetry classes\n    ground_truth: SMILES string of the ground truth molecu",
+        "code": "def score_num_hydrogen_symmetry_classes(\n    prediction: int | str, ground_truth: str\n) -> float:\n    \"\"\"Count unique hydrogen environments using canonical ranking. Stereochemistry is ignored.\n    Then compare to predicted number and score consequently. It avoids acidic hydrogens.\n\n    Args:\n        prediction: Predicted number of hydrogen symmetry classes\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of hydrogen symmetry classes.\"\n        )\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    num_h_envs = count_h_env(mol)\n    ..."
+      },
+      {
+        "name": "carbon_envs_stereo",
+        "docstring": "",
+        "code": "def carbon_envs_stereo(smiles: str, max_isomers: int = 512):\n    mol = Chem.MolFromSmiles(smiles)\n    if mol is None:\n        raise ValueError(\"Bad SMILES\")\n\n    # Atom identity anchor (stable across generated stereoisomers):\n    for a in mol.GetAtoms():\n        a.SetAtomMapNum(a.GetIdx() + 1)\n\n    # Enumerate only *unassigned* stereo (E/Z, R/S, etc.)\n    opts = StereoEnumerationOptions(\n        onlyUnassigned=True, unique=True, maxIsomers=max_isomers\n    )\n    isomers = list(\n        EnumerateStereoisomers(mol, options=opts)\n    )  # :contentReference[oaicite:2]{index=2}\n    if not isomers:\n        isomers = [mol]\n\n    # For each isomer, compute symmetry classes (equivalence classes)\n    per_iso_classes = []\n    for iso in isomers:\n        Chem.AssignStereochemistry(\n            iso, force=True, cleanIt=True\n        )  # stereo perception/assignment context :contentReference[oaicite:4]{index=4}\n    ..."
+      },
+      {
+        "name": "score_num_carbon_symmetry_classes",
+        "docstring": "Count unique carbon environments using canonical ranking. Stereochemistry is ignored.\nThen compare to predicted number and score consequently.\n\nArgs:\n    prediction: Predicted number of carbon symmetry classes\n    ground_truth: SMILES string of the ground truth molecule\n\nReturns:\n    Float that will",
+        "code": "def score_num_carbon_symmetry_classes(\n    prediction: int | str, ground_truth: str\n) -> float:\n    \"\"\"Count unique carbon environments using canonical ranking. Stereochemistry is ignored.\n    Then compare to predicted number and score consequently.\n\n    Args:\n        prediction: Predicted number of carbon symmetry classes\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of carbon symmetry classes.\"\n        )\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    c_classes = carbon_envs_stereo(ground_truth)[\"n_carbon_envs\"]\n    ..."
+      },
+      {
+        "name": "score_num_aromatic_carbons",
+        "docstring": "Count aromatic carbons in the molecule, this is centers on cyclic,\nplanar molecules with a specific number of delocalized pi electrons,\nexhibiting enhanced stability due to resonance.\nThen compare to predicted number and score consequently.\n\nArgs:\n    prediction: Predicted number of aromatic carbons",
+        "code": "def score_num_aromatic_carbons(prediction: int | str, ground_truth: str) -> float:\n    \"\"\"Count aromatic carbons in the molecule, this is centers on cyclic,\n    planar molecules with a specific number of delocalized pi electrons,\n    exhibiting enhanced stability due to resonance.\n    Then compare to predicted number and score consequently.\n\n    Args:\n        prediction: Predicted number of aromatic carbons\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of aromatic carbons.\"\n        )\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n    aromatic_carbons = sum(\n        1\n    ..."
+      },
+      {
+        "name": "score_num_ch3_groups",
+        "docstring": "Count CH3 groups in the molecule and compare to predicted number.\nIt works through identifying carbon atoms bonded to three hydrogen atoms and one other atom.\nThen compare to predicted number and score consequently.\n\nArgs:\n    prediction: Predicted number of CH3 groups\n    ground_truth: SMILES strin",
+        "code": "def score_num_ch3_groups(prediction: int | str, ground_truth: str) -> float:\n    \"\"\"Count CH3 groups in the molecule and compare to predicted number.\n    It works through identifying carbon atoms bonded to three hydrogen atoms and one other atom.\n    Then compare to predicted number and score consequently.\n\n    Args:\n        prediction: Predicted number of CH3 groups\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of CH3 groups.\"\n        )\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n    ch3_groups = sum(\n        1\n        for a in mol.GetAtoms()\n    ..."
+      },
+      {
+        "name": "score_num_carbonyl_groups",
+        "docstring": "Count carbonyl groups (C=O) in the molecule, handling tautomers.\nIt works through identifying double bonds between carbon and oxygen atoms.\nThen compare to predicted number and score consequently.\n\nArgs:\n    prediction: Predicted number of carbonyl groups\n    ground_truth: SMILES string of the groun",
+        "code": "def score_num_carbonyl_groups(prediction: int | str, ground_truth: str) -> float:\n    \"\"\"Count carbonyl groups (C=O) in the molecule, handling tautomers.\n    It works through identifying double bonds between carbon and oxygen atoms.\n    Then compare to predicted number and score consequently.\n\n    Args:\n        prediction: Predicted number of carbonyl groups\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of carbonyl groups.\"\n        )\n        return 0.0\n\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    # Canonicalize tautomers to get the most stable form (usually keto)\n    ..."
+      }
+    ]
+  },
+  "Retrosynthesis": {
+    "description": "Plan retrosynthetic routes for target molecules using reaction template catalogs and chemical verification tools.",
+    "tools": [
+      {
+        "name": "search_template_catalog_by_criteria",
+        "sections": {
+          "BRIEF": "Searches the retrosynthetic template database based on specified criteria. The search criteria refer to the forward reaction.",
+          "DETAILED": "This function allows users to search a retrosynthetic template database using various chemical criteria, including functional groups that are broken or formed, as well as specific bonds that are formed, broken, or have their order changed.\nThis changes refer to the forward reaction, meaning that if you are looking for a retrosynthetic template that breaks the alcohol in the current molecule to form an alkene, you should specify \"alcohol\" in `functional_groups_formed` and \"alkene\" in `functional_groups_broken`.\nIt returns a list of templates that match the given criteria, each represented as a dictionary containing relevant information, and ranked by Tanimoto similarity with respect the reference molecule.",
+          "PROCEDURAL": "When to use this tool:\n- When you need to find retrosynthetic templates that involve specific functional group transformations.\n- When you want to explore templates based on bond changes in a target molecule.\n- When planning retrosynthetic routes and looking for applicable templates based on chemical features.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Identify the chemical features (functional groups, bonds) relevant to your retrosynthetic analysis. You can use the tool `get_available_functional_groups` to see the list of functional groups that can be used for searching. \n2.  Use `search_template_catalog_by_criteria` to find templates that match your specified criteria. \n3.  Review the returned templates and select those that are most relevant to your synthesis planning. You can then apply these templates using the `apply_template` tool or validate retrosynthetic steps with `verify_step`.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string representing the target molecule and optional criteria for functional groups and bonds.\n- It analyzes the molecule to identify its functional groups and bond structure.\n- It searches the retrosynthetic template database for templates that match the specified criteria.\n- It ranks the matching templates based on their Tanimoto similarity to the reference molecule.\n- It checks that all returned templates can be applied to the target molecule.\n- The search results are returned as a list of dictionaries, each containing details about a matching template.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `search_template_catalog_by_criteria(\"CCO\", functional_groups_broken=[\"alcohol\"], functional_groups_formed=[\"alkene\"])`,\n    `search_template_catalog_by_criteria(\"c1ccccc1O\", bonds_broken=[\"C-O\"], bonds_formed=[\"C-C\"])`,\n    `search_template_catalog_by_criteria(\"C1=CC=CC=C1\", functional_groups_formed=[\"carboxylic_acid\"])`,\n    `search_template_catalog_by_criteria(\"C1=CC=CC=C1\", bonds_order_changed=[\"C=C\"])`,\n    `search_template_catalog_by_criteria(\"C1=CC=CC=C1C(=O)O\", functional_groups_broken=[\"carboxylic_acid\"], bonds_broken=[\"C=O\"])`,\n]",
+          "ARGS_BRIEF": "Maximum number of templates to return. Default is 10.",
+          "ARGS_DETAILED": "An integer specifying the maximum number of retrosynthetic templates to return from the search results. This helps to limit the output to a manageable number of templates for review. If more templates are needed, one can call the tool with higher limit.",
+          "ARGS_SYNTACTICAL": "Positive integer",
+          "ARGS_EXAMPLES": "5, 10, 20",
+          "RETURNS_BRIEF": "List of dictionaries representing matching retrosynthetic templates.",
+          "RETURNS_DETAILED": "Each dictionary in the returned list contains details about a retrosynthetic template that matches the specified criteria, including its SMARTS representation and other relevant information. If no templates match the criteria, an empty list is returned.",
+          "RETURNS_EXAMPLES": "[{\"template_id\": \"123\", \"smarts\": \"...\"}], []",
+          "RAISES": "Exceptions:\n    ValueError:\n         Raised when none of the criteria parameters are provided. \n         At least one of the parameters `functional_groups_broken`, `functional_groups_formed`, `bonds_formed`, `bonds_broken`, or `bonds_order_changed` must be provided as a list of strings to perform a search. \n         Provide at least one of the criteria parameters as a list of strings to perform the search. \n\n    TypeError:\n         Raised when any of the list parameters is not a list. \n         This occurs if the user provides a string or other non-list type for any of the parameters that expect a list of strings. \n         Ensure that all parameters expecting lists are provided with list types, even if they contain only a single string. \n\n    ValueError:\n         Raised when invalid functional groups are provided. \n         This occurs if any functional group in `functional_groups_broken` or `functional_groups_formed` is not in the list of available functional groups. \n         Use the tool `get_available_functional_groups` to see the list of valid functional groups and ensure all provided functional groups are in that list. \n\n    ValueError:\n         Raised when bonds are provided in an invalid format. \n         This occurs if bonds in `bonds_formed` or `bonds_broken` don't follow the format \"X-Y\" (e.g., \"6-6\", \"6-8\"), or if bonds in `bonds_order_changed` don't follow the format \"X-Y (A->B)\" (e.g., \"6-6 (1.0->2.0)\"). \n         Ensure bonds follow the expected format: \"X-Y\" for bonds_formed/bonds_broken, or \"X-Y (A->B)\" for bonds_order_changed. \n\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Check the SMILES string for correctness and try again. \n\n    Exception:\n         Raised for any unexpected errors during the search process. \n         This can occur due to various reasons, such as issues with the retrosynthetic template database or internal processing errors. \n         Check the input parameters and try again. If the issue persists, let the user know and try another way of solving the task.",
+          "LIMITATIONS": "Known limitations:\n    - The function relies on the completeness and accuracy of the retrosynthetic template catalog. If the catalog is incomplete or contains errors, the search results may be affected.\n    - The criteria provided must be specific enough to yield meaningful results; overly broad criteria may return too many templates, while overly narrow criteria may return none.\n    - The function may not handle all edge cases in chemical structures, such as unusual bonding patterns or rare functional groups.\n    - The accuracy of the search results is dependent on the quality of the underlying reaction templates and algorithms used in the retrosynthetic analysis."
+        },
+        "args": [
+          {
+            "name": "molecule_smiles",
+            "type": "str"
+          },
+          {
+            "name": "functional_groups_broken",
+            "type": "list[str] | None"
+          },
+          {
+            "name": "functional_groups_formed",
+            "type": "list[str] | None"
+          },
+          {
+            "name": "bonds_formed",
+            "type": "list[str] | None"
+          },
+          {
+            "name": "bonds_broken",
+            "type": "list[str] | None"
+          },
+          {
+            "name": "bonds_order_changed",
+            "type": "list[str] | None"
+          },
+          {
+            "name": "limit",
+            "type": "int"
+          }
+        ],
+        "returns": "list[dict[str, Any]]",
+        "code": "def search_template_catalog_by_criteria(\n    list_params = {\n        \"functional_groups_broken\": functional_groups_broken,\n        \"functional_groups_formed\": functional_groups_formed,\n        \"bonds_formed\": bonds_formed,\n        \"bonds_broken\": bonds_broken,\n        \"bonds_order_changed\": bonds_order_changed,\n    }\n\n    for param_name, param_value in list_params.items():\n        if param_value is not None and not isinstance(param_value, list):\n            raise TypeError(\n                f\"Parameter '{param_name}' must be a list of strings, not a {type(param_value).__name__}. \"\n                f\"Received: {param_value!r}. \"\n                f\"Example: If you want to search for 'alcohol', use [{param_value!r}] instead of {param_value!r}\"\n            )\n        if param_value is not None and param_value and len(param_value) == 0:\n            raise ValueError(\n                f\"Parameter '{param_name}' cannot be empty. \"\n                f\"Please provide at least one value or set it to None.\"\n            )\n    ..."
+      },
+      {
+        "name": "get_template",
+        "sections": {
+          "BRIEF": "Retrieves a retrosynthetic template and other information by its ID.",
+          "DETAILED": "This function takes a template ID as input and returns the corresponding retrosynthetic template in SMARTS format.\nIf the template ID is not found, it raises a ValueError.\nIt also retrieves the canonical SMARTS template (template for the forward reaction), and an example reaction for that example reaction.",
+          "PROCEDURAL": "When to use this tool:\n- When you need to retrieve a specific retrosynthetic template for analysis or application.\n- When you want to explore the details of a known retrosynthetic transformation.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Identify the template ID you want to retrieve, you can search the template catalog with `search_template_catalog`. \n2.  Use `get_template` to obtain the SMARTS representation of the template. \n3.  Use the retrieved template with `apply_template` to explore possible precursors for target molecules or validate retrosynthetic steps with `verify_step`.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a string representing the template ID as input.\n- It looks up the template ID in a predefined database or dictionary of retrosynthetic templates.\n- If the template ID exists, it retrieves and returns the corresponding SMARTS string.\n- If the template ID does not exist, it raises a ValueError indicating that the template was not found.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `get_template(\"123\")`,\n    `get_template(\"45\")`,\n    `get_template(\"7892\")`,\n    `get_template(\"001999\")`,\n    `get_template(\"9999999\")`,\n]",
+          "ARGS_BRIEF": "Identifier of the retrosynthetic template to retrieve.",
+          "ARGS_DETAILED": "The template ID corresponds to a specific retrosynthetic transformation that can be applied to molecules. The templates ids can be found in the template catalog.",
+          "ARGS_SYNTACTICAL": "Valid template ID string",
+          "ARGS_EXAMPLES": "\"template_123\", \"template_456\", \"template_789\"",
+          "RETURNS_BRIEF": "SMARTS string of the retrosynthetic template.",
+          "RETURNS_DETAILED": "The SMARTS string defines the chemical transformation represented by the retrosynthetic template. It can be used in various cheminformatics applications to apply the transformation to target molecules.",
+          "RETURNS_EXAMPLES": "\"[C:1][O:2]>>[C:1][C:2]\", \"[C:1][C:2]>>[C:1][O:2]\"",
+          "RAISES": "Exceptions:\n    ValueError:\n         Raised when the template ID is not found. \n         This occurs if the provided template ID does not correspond to any known retrosynthetic template in the database. \n         Ensure the template ID is correct and exists in the template catalog.",
+          "LIMITATIONS": "Known limitations:\n    - The function relies on the availability of the specified template in the template catalog.\n    - The SMARTS string must be valid and represent a real chemical transformation.\n    - The function may not account for all possible molecular variations and edge cases."
+        },
+        "args": [
+          {
+            "name": "template_id",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def get_template(template_id: str) -> str:\n    return str(search_by_template(template_id))"
+      },
+      {
+        "name": "get_available_functional_groups",
+        "sections": {
+          "BRIEF": "Returns a list of available functional groups for querying the database.",
+          "DETAILED": "This function provides a list of predefined functional groups that can be used to filter molecules in the database.\nThese functional groups are based on common chemical motifs and can aid in the identification and selection of relevant compounds for synthesis or analysis.",
+          "PROCEDURAL": "When to use this tool:\n- When you need to identify specific functional groups in a set of molecules.\n- When you want to filter molecules based on their functional group content.\n- When you are interested in exploring the chemical space around certain functional motifs.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Understand the functional groups relevant to your chemical analysis or synthesis planning. \n2.  Use `get_available_functional_groups` to retrieve the list of functional groups. \n3.  Use the retrieved functional groups to filter or search for molecules in the database using other tools or functions.",
+          "CONTEXTUAL": "How this tool works:\n- The function accesses a predefined list of functional groups stored in the retrosynthesis package.\n- It returns this list as a simple Python list of strings, each representing a functional group.\n- The functional groups are standardized and commonly used in cheminformatics for molecular characterization.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `get_available_functional_groups()`,\n]",
+          "RETURNS_BRIEF": "List of available functional groups.",
+          "RETURNS_DETAILED": "A list of strings, each representing a functional group that can be used for querying the database. These functional groups are based on common chemical motifs and are useful for filtering and identifying relevant compounds.",
+          "RETURNS_EXAMPLES": "[\"alcohol\", \"amine\", \"carboxylic_acid\"]",
+          "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the retrieval process. \n         This can occur due to various reasons, such as issues with the internal data structure or access permissions. \n         If the issue persists, let the user know and try another way of solving the task.",
+          "LIMITATIONS": "Known limitations:\n    - The list of functional groups is predefined and may not cover all possible functional groups found in chemical compounds.\n    - The function does not provide additional information about each functional group, such as its chemical properties or reactivity.\n    - The functional groups are based on common motifs and may not account for all variations or derivatives of these groups."
+        },
+        "args": [],
+        "returns": "str",
+        "code": "def get_available_functional_groups() -> str:\n    return str(FUNCTIONAL_GROUPS)"
+      },
+      {
+        "name": "apply_template",
+        "sections": {
+          "BRIEF": "Applies a retrosynthetic template to a molecule. If one template is applicable to different groups, all possible outcomes are returned.",
+          "DETAILED": "Given a molecule in SMILES format and a template ID, this function applies the retrosynthetic template to the molecule and returns a list of precursor SMILES strings.\nIf the template cannot be applied, it returns an empty list.\nThis function is useful for retrosynthetic analysis in computational chemistry and drug discovery.",
+          "PROCEDURAL": "When to use this tool:\n- When you have a target molecule and want to explore possible precursors using a specific retrosynthetic template.\n- When you need to generate a list of potential starting materials for a given molecule based on known reaction templates.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you have the template of the reaction you want to apply, you can search the template catalog with `search_template_catalog`. \n2.  Use `apply_template` to get possible precursors for your target molecule. \n3.  Validate the proposed precursors using `verify_step` to ensure the retrosynthetic step is chemically valid. Use `is_buyable` to check if the proposed precursors are commercially available.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string representing the target molecule and a template ID as inputs.\n- It applies the retrosynthetic template associated with the given ID to the molecule using the `rxnutils` package.\n- If the template is successfully applied, it returns a list of SMILES strings representing the precursor molecules.\n- If the template cannot be applied (e.g., due to incompatibility with the molecule structure), it returns an empty list.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `apply_template(\"CCO\", \"template_123\")`,\n    `apply_template(\"c1ccccc1O\", \"template_456\")`,\n    `apply_template(\"C1=CC=CC=C1\", \"template_789\")`,\n    `apply_template(\"C1=CC=CC=C1\", \"template_zzz\")`,\n    `apply_template(\"C1=CC=CC=C1C(=O)O\", \"template_131415\")`,\n]",
+          "ARGS_BRIEF": "Identifier of the retrosynthetic template to apply.",
+          "ARGS_DETAILED": "The template ID corresponds to a specific retrosynthetic transformation that can be applied to the target molecule. The templates ids can be found in the template catalog.",
+          "ARGS_SYNTACTICAL": "Valid template ID string",
+          "ARGS_EXAMPLES": "\"template_123\", \"template_456\", \"template_789\"",
+          "RETURNS_BRIEF": "Tuple of tuples representing precursor SMILES strings. Each tuple corresponds to one possible outcome.",
+          "RETURNS_DETAILED": "Each inner tuple contains SMILES strings of precursor molecules generated by applying the retrosynthetic template to the target molecule. If the template cannot be applied, an empty tuple is returned.",
+          "RETURNS_EXAMPLES": "((\"CCBr\", \"CO\"),), ()",
+          "RAISES": "Exceptions:\n    ValueError:\n         Raised when the template cannot be found. \n         This occurs if the provided template ID does not correspond to any known retrosynthetic template in the database. \n         Ensure the template ID is correct and exists in the template catalog. \n\n    Exception:\n         Raised for any unexpected errors during template application. \n         This will be most likely due to issues with the input SMILES string. \n         Check that the SMILES string being used is correct.",
+          "LIMITATIONS": "Known limitations:\n- The function relies on the availability and correctness of the retrosynthetic templates. If the template database is incomplete or contains errors, the results may be affected.\n- The function may not handle all edge cases in chemical structures, such as unusual bonding patterns or rare functional groups.\n- The accuracy of the retrosynthetic predictions is dependent on the quality of the underlying reaction templates and algorithms used in the `rxnutils` package."
+        },
+        "args": [
+          {
+            "name": "molecule_smiles",
+            "type": "str"
+          },
+          {
+            "name": "template_id",
+            "type": "str"
+          }
+        ],
+        "returns": "tuple[tuple[str, ...], ...]",
+        "code": "def apply_template(\n    return apply_template_retro(molecule_smiles, template_id)"
+      },
+      {
+        "name": "verify_step",
+        "sections": {
+          "BRIEF": "Verifies if a retrosynthetic step is valid. This tool might fail for intramolecular reactions.",
+          "DETAILED": "This function checks whether applying a given retrosynthetic template to a set of precursor molecules results in the target molecule.\nIt is used to validate retrosynthetic steps in a synthesis route.",
+          "PROCEDURAL": "When to use this tool:\n- When you have a proposed retrosynthetic step and want to confirm its validity.\n- When validating a synthesis route to ensure each step correctly leads to the intended product.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Identify the rethrosynthetic template to use and use `apply_template` to generate the precursors. \n2.  Use `verify_step` to check if the precursors lead to the target molecule when the template is applied. \n3.  If the step is valid, proceed with the next steps in the synthesis route. If invalid, reconsider the choice of precursors or template.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a target molecule in SMILES format, a retrosynthetic template, and a list of precursor SMILES strings.\n- It applies the retrosynthetic template to the precursors to generate a product.\n- It then compares the generated product to the target molecule to determine if they match.\n- If the generated product matches the target molecule, the function returns True, indicating a valid retrosynthetic step. Otherwise, it returns False.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `verify_step(\"CCO\", \"template_123\", [\"CCBr\", \"CO\"])`,\n    `verify_step(\"c1ccccc1O\", \"template_456\", [\"c1ccccc1Br\", \"CO\"])`,\n    `verify_step(\"C1=CC=CC=C1\", \"template_789\", [\"C1=CC=CC=C1Br\", \"H2O\"])`,\n    `verify_step(\"C1=CC=CC=C1\", \"template_zzz\", [\"C1=CC=CC=C1Br\", \"H2O\"])`,\n    `verify_step(\"C1=CC=CC=C1C(=O)O\", \"template_131415\", [\"C1=CC=CC=C1C(=O)Cl\", \"H2O\"])`,\n]",
+          "ARGS_BRIEF": "List of SMILES strings representing the precursor molecules.",
+          "ARGS_DETAILED": "A list of SMILES strings, each representing a precursor molecule that, when combined and transformed by the template, should yield the target molecule.",
+          "ARGS_SYNTACTICAL": "List of valid SMILES strings",
+          "ARGS_EXAMPLES": "[\"CCBr\", \"CO\"], [\"c1ccccc1Br\", \"CO\"]",
+          "RETURNS_BRIEF": "True if the retrosynthetic step is valid, False otherwise.",
+          "RETURNS_DETAILED": "The function returns True if applying the retrosynthetic template to the provided precursors results in the target molecule. If the generated product does not match the target molecule, it returns False.",
+          "RETURNS_EXAMPLES": "True, False",
+          "RAISES": "Exceptions:\n    ValueError:\n         Raised when the template is invalid or cannot be applied. \n         This occurs if the provided template is not a valid SMARTS string or if it cannot be applied to the given precursors. \n         Ensure the template is correct and compatible with the precursors.",
+          "LIMITATIONS": "Known limitations:\n- The function assumes that the input SMILES strings and template are valid and correctly formatted.\n- The accuracy of the verification depends on the correctness of the retrosynthetic template and its applicability to the given precursors.\n- The function may not handle all edge cases in chemical structures, such as stereochemistry or tautomers.\n- The function does not account for reaction conditions or other factors that may influence the outcome of a retrosynthetic step."
+        },
+        "args": [
+          {
+            "name": "molecule_smiles",
+            "type": "str"
+          },
+          {
+            "name": "template_id",
+            "type": "str"
+          },
+          {
+            "name": "precursors",
+            "type": "list[str]"
+          }
+        ],
+        "returns": "bool",
+        "code": "def verify_step(molecule_smiles: str, template_id: str, precursors: list[str]) -> bool:\n    reactants = \".\".join(precursors)\n    real_products = apply_template_forward(reactants, template_id)\n    return species_match([molecule_smiles], real_products) if real_products else False"
+      },
+      {
+        "name": "verify_route",
+        "sections": {
+          "BRIEF": "Verifies if a synthesis route follows the expected schema.",
+          "DETAILED": "This function checks whether a given synthesis route, represented as a JSON string, adheres to a predefined hierarchical schema.\nThe schema defines the structure and required fields for molecules and reactions in the route.",
+          "PROCEDURAL": "When to use this tool:\n- When you have a synthesis route and want to ensure it is correctly formatted before further processing.\n- When you need to validate a route before submitting it to a retrosynthesis planning system.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Construct or obtain a synthesis route in JSON format. \n2.  Use `verify_route` to validate the route structure. \n3.  If the route is valid, proceed with retrosynthesis planning, analysis or submit if the route is correct. You can check if the reactants are valid by checking if they are buyable using the tool `is_buyable`. If invalid, correct the structure based on the error message provided.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a JSON string representing a synthesis route as input.\n- It parses the JSON and checks that it conforms to a hierarchical schema where:\n  - The root is a molecule with required fields \"type\" and \"smiles\".\n  - Molecules can have children that are either reactions or other molecules.\n  - Reactions must have required fields \"type\", \"template_id\", and \"children\".\n  - Each reaction must have at least two children (reactants).\n- The function recursively validates each node in the hierarchy to ensure all required fields are present and correctly typed.\n- If the route adheres to the schema, it returns (True, \"The route is valid\"). If not, it returns (False, error_message) with a description of the first encountered error.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `verify_route('{\"type\": \"mol\", \"smiles\": \"CCO\", \"children\": [{\"type\": ...}]}')`,\n    `verify_route('{\"type\": \"mol\", \"smiles\": \"c1ccccc1O\", \"children\": [{\"type\": ...}]}')`,\n    `verify_route('{\"type\": \"mol\", \"smiles\": \"C1=CC=CC=C1\", \"children\": [{\"type\": ...}]}')`,\n    `verify_route('{\"type\": \"mol\", \"smiles\": \"C1=CC=CC=C1\", \"children\": [{\"type\": ...}]}')`,\n    `verify_route('{\"type\": \"mol\", \"smiles\": \"C1=CC=CC=C1C(=O)O\", \"children\": [{\"type\": ...}]}')`,\n]",
+          "ARGS_BRIEF": "JSON string representing the synthesis route.",
+          "ARGS_DETAILED": "A JSON-formatted string that encodes the hierarchical structure of a synthesis route, including molecules and reactions with their respective fields.",
+          "ARGS_SYNTACTICAL": "Valid JSON string",
+          "ARGS_EXAMPLES": "'{\"type\": \"mol\", \"smiles\": \"CCO\", \"children\": [{\"type\": ...}]}', '{\"type\": \"mol\", \"smiles\": \"c1ccccc1O\", \"children\": [{\"type\": ...}]}'",
+          "RETURNS_BRIEF": "(is_valid, error_message) where is_valid is True if the route is valid, False otherwise.",
+          "RETURNS_DETAILED": "A tuple where the first element is a boolean indicating whether the route is valid, and the second element is a string containing an error message if the route is invalid, or a success message if it is valid.",
+          "RETURNS_EXAMPLES": "(True, \"The route is valid\"), (False, \"Invalid JSON format: ...\")",
+          "RAISES": "Exceptions:\n    ValueError:\n         Raised when the input JSON is invalid or cannot be parsed. \n         This occurs if the provided string is not valid JSON format. \n         Ensure the input string is correctly formatted JSON.",
+          "LIMITATIONS": "Known limitations:\n- The function assumes that the input JSON string is well-formed and does not handle deeply nested structures beyond typical synthesis routes.\n- The validation focuses on structural correctness and does not verify the chemical validity of the molecules or reactions.\n- The function may not catch all possible schema violations, especially in complex or unconventional route representations.\n- Error messages may not always pinpoint the exact location of the error in deeply nested structures."
+        },
+        "args": [
+          {
+            "name": "route",
+            "type": "str"
+          }
+        ],
+        "returns": "tuple[bool, str]",
+        "code": "def verify_route(route: str) -> tuple[bool, str]:\n    try:\n        # Parse JSON string\n        data = json.loads(route)\n\n        # Root must be a molecule\n        is_valid, error = validate_molecule(data, \"root\")\n        if not is_valid:\n            return False, error\n\n        return True, \"The route is valid\"\n\n    except json.JSONDecodeError as e:\n        return False, f\"Invalid JSON format: {e!s}\"\n    except Exception as e:\n        return False, f\"Unexpected error: {e!s}\""
+      },
+      {
+        "name": "search_catalog_by_smiles",
+        "sections": {
+          "BRIEF": "Searches a catalog for available precursors.",
+          "DETAILED": "This function searches a chemical catalog using for a list of SMILES strings to find available precursor chemicals.\nIt returns a list of chemical information dictionaries if matches are found, or a message indicating no results were found.",
+          "PROCEDURAL": "When to use this tool:\n- When you have a list of SMILES strings and want to find corresponding chemicals in the catalog.\n- When validating the availability of a chemical precursor for synthesis planning.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES strings of the chemicals you want to search for. \n2.  Use `search_catalog_by_smiles` to look up the SMILES strings in the catalog. \n3.  If matches are found, review the chemical information for potential use in synthesis. If no matches are found, consider alternative chemicals or suppliers. You can also check if the molecule is buyable using the tool `is_buyable`.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a list of SMILES strings as input and queries some chemical catalogs for matching entries using the `chemprice` package.\n- It retrieves a list of chemicals that match the provided SMILES strings, each represented as a dictionary containing relevant chemical information.\n- If no matches are found, it returns a message indicating that no results were found.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `search_catalog_by_smiles([\"CCO\"], limit=10)`,\n    `search_catalog_by_smiles([\"c1ccccc1O\"])`,\n    `search_catalog_by_smiles([\"C1=CC=CC=C1\"], liimit=3)`,\n    `search_catalog_by_smiles([\"C1=CC=CC=C1C(=O)O\"])`,\n    `search_catalog_by_smiles([\"C1=CC=CC=C1C(=O)Cl\", \"CCO\"], limit=7)`,\n]",
+          "ARGS_BRIEF": "Maximum number of results to return. Default is 5.",
+          "ARGS_DETAILED": "An integer specifying the maximum number of matching chemicals to return from the catalog search. This helps to limit the output size.",
+          "ARGS_SYNTACTICAL": "Positive integer",
+          "ARGS_EXAMPLES": "5, 10, 3",
+          "RETURNS_BRIEF": "List of chemical info dicts or a not-found message.",
+          "RETURNS_DETAILED": "If matches are found, a list of dictionaries containing chemical information is returned. Each dictionary represents a chemical and includes details such as SMILES, amount, distributor or price. If no matches are found, a message indicating no results were found is returned.",
+          "RETURNS_EXAMPLES": "[{\"name\": \"Formaldehyde\", \"cas\": \"50-00-0\", ...}], \"No results found\"",
+          "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the catalog search. \n         This could be due to connectivity issues, invalid SMILES format, or server errors in the catalog service. \n         Verify the SMILES format if the error has to do with the SMILES representation. If the error comes from the catalog service, inform the user to try again later.",
+          "LIMITATIONS": "Known limitations:\n- The function limits the number of returned matches to prevent overwhelming the user with too many results.\n- The accuracy and completeness of the search results depend on the underlying chemical catalog being queried.\n- The function does not handle partial matches or synonyms; it strictly searches by the exact CAS number provided.\n- If the catalog service is down or unreachable, the function will not be able to return results."
+        },
+        "args": [
+          {
+            "name": "smiles_list",
+            "type": "list[str]"
+          },
+          {
+            "name": "limit",
+            "type": "int"
+          }
+        ],
+        "returns": "list[dict[str, Any]]",
+        "code": "def search_catalog_by_smiles(\n    sleep(60)\n    chemicals = check_price(smiles_list, limit)\n    return chemicals if chemicals else \"No results found\""
+      },
+      {
+        "name": "is_buyable",
+        "sections": {
+          "BRIEF": "Checks if a list of molecules are commercially available.",
+          "DETAILED": "This function determines whether some given molecules, represented by their SMILES notation, are commercially available for purchase.\nIt returns a list of boolean values indicating the availability of each molecule.",
+          "PROCEDURAL": "When to use this tool:\n- When you need to verify the availability of a chemical precursor for synthesis planning.\n- When deciding whether to include a specific molecule in a synthesis route based on its commercial availability.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES notation of the molecules you want to check. \n2.  Use `is_buyable` to check if the molecules are commercially available. \n3.  If a molecule is buyable, consider it for inclusion in your synthesis route. If not, look for alternative molecules, precursors or routes. You can use this tool for validation to check that all the reactants are buyable.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a list of SMILES as input and queries some chemical database using the `chemprice` package to check the commercial availability of each molecule.\n- It checks if the molecule associated with the provided SMILES is listed as available for purchase.\n- If the molecule is found to be commercially available, the function returns True for such molecule. If it is not available, it returns False.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `is_buyable([\"CCO\", \"c1ccccc1O\", \"C1=CC=CC=C1\"])`,\n    `is_buyable([\"C1=CC=CC=C1C(=O)O\", \"C1=CC=CC=C1C(=O)Cl\"])`,\n    `is_buyable([\"CNC\", \"CCN\", \"CCCN\"])`,\n    `is_buyable([\"CC(=O)O\", \"C1=CC=CC=C1C(=O)Cl\"])`,\n    `is_buyable([\"CC(=O)O\", \"C1=CC=CC=C1\"])`,\n]",
+          "ARGS_BRIEF": "List of SMILES strings representing the molecules to check.",
+          "ARGS_DETAILED": "A list of SMILES representations of all the molecules whose commercial availability is to be checked.",
+          "ARGS_SYNTACTICAL": "Valid SMILES strings",
+          "ARGS_EXAMPLES": "[\"CCO\"], [\"c1ccccc1O\"], [\"C1=CC=CC=C1\"]",
+          "RETURNS_BRIEF": "List of boolean values indicating the availability of each molecule.",
+          "RETURNS_DETAILED": "The function returns a list of boolean values, where each value corresponds to the availability of the molecule represented by the respective SMILES string in the input list.",
+          "RETURNS_EXAMPLES": "[True], [False]",
+          "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the availability check. \n         This could be due to connectivity issues, invalid SMILES format, or server errors in the availability service. \n         Verify the SMILES format if the error has to do with the SMILES. If the error comes from the availability service, inform the user to try again later, and you should workaround by checking alternative routes.",
+          "LIMITATIONS": "Known limitations:\n- The function relies on the accuracy and completeness of the underlying database or service used to check commercial availability.\n- The availability status may change over time, so the function's results may not always reflect the most current market conditions.\n- The function does not provide information on pricing, suppliers, or quantities available for purchase.\n- If the availability service is down or unreachable, the function will not be able to return results."
+        },
+        "args": [
+          {
+            "name": "smiles_list",
+            "type": "list[str]"
+          }
+        ],
+        "returns": "list[bool]",
+        "code": "def is_buyable(smiles_list: list[str]) -> list[bool]:\n    sleep(60)\n    return _is_buyable(smiles_list)"
+      },
+      {
+        "name": "smiles_to_cas",
+        "sections": {
+          "BRIEF": "Converts a SMILES string to a CAS number.",
+          "DETAILED": "This function takes a SMILES (Simplified Molecular Input Line Entry System) string as input and converts it to the corresponding CAS (Chemical Abstracts Service) number. The CAS number is a unique numerical identifier assigned to every chemical substance described in the open scientific literature.",
+          "PROCEDURAL": "When to use this tool:\n- When you have a SMILES representation of a molecule and need to find its CAS number.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES string of the molecule you want to convert. \n2.  Use `smiles_to_cas` to convert the SMILES string to a CAS number. \n3.  Use the obtained CAS number for further chemical information lookup, procurement, or documentation. You can also use the tool `search_catalog_by_cas` to find available precursors or `is_buyable` to check if the molecule is commercially available.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string as input and queries a chemical database or service that maps SMILES strings to CAS numbers.\n- The function first validates the SMILES string to ensure it represents a valid molecular structure.\n- It retrieves the CAS number associated with the provided SMILES string.\n- If a matching CAS number is found, it is returned as a string. If no match is found, an appropriate message or exception may be raised.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `smiles_to_cas(\"CCO\")`,\n    `smiles_to_cas(\"c1ccccc1O\")`,\n    `smiles_to_cas(\"C1=CC=CC=C1\")`,\n    `smiles_to_cas(\"C1=CC=CC=C1C(=O)O\")`,\n    `smiles_to_cas(\"C1=CC=CC=C1C(=O)Cl\")`,\n]",
+          "ARGS_BRIEF": "SMILES string of the molecule to convert.",
+          "ARGS_DETAILED": "A valid SMILES string of the molecule that you need the CAS number for.",
+          "ARGS_SYNTACTICAL": "Valid SMILES string",
+          "ARGS_EXAMPLES": "\"CCO\", \"c1ccccc1O\", \"C1=CC=CC=C1\"",
+          "RETURNS_BRIEF": "The corresponding CAS number as a string.",
+          "RETURNS_DETAILED": "The function returns the CAS number associated with the provided SMILES string. The CAS number is a unique identifier for chemical substances and is widely used in chemical databases and literature.",
+          "RETURNS_EXAMPLES": "\"50-00-0\", \"64-17-5\", \"67-56-1\"",
+          "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the conversion process. \n         This could be due to connectivity issues, or server errors in the conversion service. \n         If the error comes from the conversion service, being a server error or similar, inform the user to try again later, and you should go through a different route. \n\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Ensure the SMILES string is correctly formatted.",
+          "LIMITATIONS": "Known limitations:\n- The function relies on the accuracy and completeness of the underlying database or service used for the conversion.\n- Not all SMILES strings may have a corresponding CAS number, especially for novel or less common compounds.\n- The function does not handle stereochemistry or isotopic variations in the SMILES string.\n- If the conversion service is down or unreachable, the function will not be able to return results."
+        },
+        "args": [
+          {
+            "name": "molecule_smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def smiles_to_cas(molecule_smiles: str) -> str:\n    mol = Chem.MolFromSmiles(molecule_smiles)\n    if mol is None:\n        raise ValueError(f\"Invalid SMILES string: {molecule_smiles}\")\n    return remote_call(function_name=\"return_cas_number\", env_name=\"chemenv\")(\n        compound=molecule_smiles\n    )"
+      },
+      {
+        "name": "cas_to_smiles",
+        "sections": {
+          "BRIEF": "Converts a CAS number to an isomeric SMILES string.",
+          "DETAILED": "This function takes a CAS (Chemical Abstracts Service) number as input and converts it to the corresponding isomeric SMILES (Simplified Molecular Input Line Entry System) string.\nThe isomeric SMILES representation includes stereochemical information, making it more specific than standard SMILES.",
+          "PROCEDURAL": "When to use this tool:\n- When you have a CAS number and need to find the corresponding isomeric SMILES representation of the molecule.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the CAS number of the molecule you want to convert. You can obtain the CAS number for a chemical by using the tool `smiles_to_cas`. \n2.  Use `cas_to_smiles` to convert the CAS number to an isomeric SMILES string. \n3.  Use the obtained isomeric SMILES string for further chemical analysis, modeling, or synthesis planning. You can also use the tool `detect_functional_groups` to identify functional groups in the molecule.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a CAS number as input and queries a chemical database or service that maps CAS numbers to isomeric SMILES strings.\n- It retrieves the isomeric SMILES representation associated with the provided CAS number.\n- If a matching isomeric SMILES string is found, it is returned as a string. If no match is found, an appropriate message or exception may be raised.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `cas_to_smiles(\"50-00-0\")`,\n    `cas_to_smiles(\"64-17-5\")`,\n    `cas_to_smiles(\"67-56-1\")`,\n    `cas_to_smiles(\"000-00-0\")`,\n    `cas_to_smiles(\"999-99-9\")`,\n]",
+          "ARGS_BRIEF": "CAS number of the molecule to convert.",
+          "ARGS_DETAILED": "Valid CAS number string that corresponds to a specific chemical substance that you want to convert to SMILES.",
+          "ARGS_SYNTACTICAL": "Valid CAS number string",
+          "ARGS_EXAMPLES": "\"50-00-0\", \"64-17-5\", \"67-56-1\"",
+          "RETURNS_BRIEF": "The corresponding isomeric SMILES string.",
+          "RETURNS_DETAILED": "The function returns the isomeric SMILES representation associated with the provided CAS number. The isomeric SMILES includes stereochemical information, making it more specific than standard SMILES.",
+          "RETURNS_EXAMPLES": "\"C(CO)O\", \"CCO\", \"C1=CC=CC=C1\"",
+          "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the conversion process. \n         This could be due to connectivity issues, invalid CAS number format, or server errors in the conversion service. \n         Verify the CAS number format if the error has to do with the CAS number. If the error comes from the conversion service, inform the user to try again later.",
+          "LIMITATIONS": "Known limitations:\n- The function relies on the accuracy and completeness of the underlying database or service used for the conversion.\n- Not all CAS numbers may have a corresponding isomeric SMILES representation, especially for novel or less common compounds.\n- The function does not handle cases where multiple isomeric SMILES strings may correspond to the same CAS number.\n- If the conversion service is down or unreachable, the function will not be able to return results."
+        },
+        "args": [
+          {
+            "name": "cas_number",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def cas_to_smiles(cas_number: str) -> str:\n    return remote_call(function_name=\"get_isomeric_smiles_pubchem\", env_name=\"chemenv\")(\n        compound=cas_number\n    )"
+      },
+      {
+        "name": "deprotect_molecule",
+        "sections": {
+          "BRIEF": "Removes protecting groups from a molecule represented by a SMILES string.",
+          "DETAILED": "This function takes a SMILES (Simplified Molecular Input Line Entry System) string representing a molecule with protecting groups and removes those protecting groups to yield the deprotected molecule.\nProtecting groups are commonly used in synthetic chemistry to temporarily mask reactive sites on molecules during multi-step synthesis processes.",
+          "PROCEDURAL": "When to use this tool:\n- When you have a molecule with protecting groups and need to obtain the deprotected version of the molecule.\n- When analyzing a synthetic route and needing to understand the structure of the molecule without protecting groups.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES string of the molecule with protecting groups. You can use the tool `detect_protection_groups` to identify protecting groups in a molecule. \n2.  Use `deprotect_molecule` to remove the protecting groups and obtain the deprotected molecule. \n3.  Use the deprotected SMILES string for further chemical analysis, modeling, or synthesis planning. You can also use the tool `detect_functional_groups` to identify functional groups in the deprotected molecule.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string as input and uses RDKit's rdDeprotect module to identify and remove common protecting groups.\n- It processes the molecular structure to eliminate the protecting groups while preserving the core structure of the molecule.\n- The resulting deprotected molecule is then converted  back to a SMILES string and returned.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `deprotect_molecule(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `deprotect_molecule(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `deprotect_molecule(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `deprotect_molecule(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `deprotect_molecule(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n]",
+          "ARGS_BRIEF": "SMILES string of the molecule with protecting groups.",
+          "ARGS_DETAILED": "Valid SMILES string of the molecule that contains the protective groups that you want to detect and remove. Ensure that is a valid SMILES, otherwise an exception will be raised.",
+          "ARGS_SYNTACTICAL": "Valid SMILES string",
+          "ARGS_EXAMPLES": "\"CC(C)(OC(NCCOc1ccccc1)=O)C\", \"CC(C)(OC(NCCOc1ccccc1)=O)C\"",
+          "RETURNS_BRIEF": "The SMILES string of the deprotected molecule.",
+          "RETURNS_DETAILED": "The function returns the SMILES representation of the molecule after removing the protecting groups. This deprotected SMILES string represents the core structure of the molecule without any temporary modifications.",
+          "RETURNS_EXAMPLES": "\"CCO\", \"CCO\"",
+          "RAISES": "Exceptions:\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Ensure the SMILES string is correctly formatted.",
+          "LIMITATIONS": "Known limitations:\n- The function relies on RDKit's rdDeprotect module, which may not recognize all possible protecting groups.\n- The accuracy of the deprotection process depends on the quality of the input SMILES string.\n- The function may not handle complex molecules with multiple or overlapping protecting groups effectively.\n- The function does not provide information on the specific protecting groups that were removed or their positions in the original molecule."
+        },
+        "args": [
+          {
+            "name": "molecule_smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def deprotect_molecule(molecule_smiles: str) -> str:\n    mol = Chem.MolFromSmiles(molecule_smiles)\n    if mol is None:\n        raise ValueError(\"Invalid SMILES string provided.\")\n    return Deprotect(mol)"
+      },
+      {
+        "name": "detect_protection_groups",
+        "sections": {
+          "BRIEF": "Detects protecting groups in a molecule and their positions.",
+          "DETAILED": "This function identifies protecting groups present in a molecule represented by a SMILES (Simplified Molecular Input Line Entry System) string.\nIt returns a list of detected protecting groups along with their abbreviations, full names, classes, and the positions of the atoms involved in each protecting group.",
+          "PROCEDURAL": "When to use this tool:\n- When you need to identify protecting groups in a molecule for synthesis planning or analysis.\n- When you want to understand the locations of protecting groups within a molecular structure.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES string of the molecule you want to analyze. \n2.  Use `detect_protection_groups` to identify protecting groups and their positions in the molecule. \n3.  Use the information about protecting groups for synthesis planning, modification of the molecule, or further analysis. You can also use the tool `deprotect_molecule` to remove the identified protecting groups.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string as input and converts it to a molecular structure using RDKit.\n- It uses RDKit's rdDeprotect module to identify common protecting groups based on predefined reaction SMARTS patterns.\n- For each detected protecting group, it records the abbreviation, full name, class, and the positions of the atoms involved.\n- Uses other custom SMARTS patterns to enhance the detection process, searching also for those in the molecule.\n- The results are compiled into a structured dictionary that includes the input SMILES, a mapped SMILES for reference, and a list of detected protecting groups with their details.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `detect_protection_groups(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `detect_protection_groups(\"CCO\")`,\n    `detect_protection_groups(\"c1ccccc1O\")`,\n    `detect_protection_groups(\"C1=CC=CC=C1\")`,\n    `detect_protection_groups(\"C1=CC=CC=C1C(=O)O\")`,\n]",
+          "ARGS_BRIEF": "SMILES string of the molecule to analyze.",
+          "ARGS_DETAILED": "Valid SMILES string of the molecule that contains the protective groups that you want to detect.",
+          "ARGS_SYNTACTICAL": "Valid SMILES string",
+          "ARGS_EXAMPLES": "\"CC(C)(OC(NCCOc1ccccc1)=O)C\", \"CCO\", \"c1ccccc1O\"",
+          "RETURNS_BRIEF": "Dictionary containing input SMILES, mapped SMILES, and detected protecting groups.",
+          "RETURNS_DETAILED": "The function returns a dictionary with the following keys:\n            - \"input_smiles\": The original SMILES string provided as input.\n            - \"mapped_smiles\": A version of the SMILES string with atom-map numbers for reference.\n            - \"protecting_groups\": A list of dictionaries, each representing a detected protecting group with details such as abbreviation, full name, class, and atom positions.\n        This structured output provides comprehensive information about the protecting groups present in the molecule.",
+          "RETURNS_EXAMPLES": "{\n            \"input_smiles\": \"CC(C)(OC(NCCOc1ccccc1)=O)C\",\n            \"mapped_smiles\": \"CC(C)(OC(NCCOc1ccccc1)=O)C\",\n            \"protecting_groups\": [\n                {\"abbrev\": \"Boc\", \"name\": \"tert-Butyloxycarbonyl\", \"class\": \"amine\", \"positions\": [(0, 1, 2)]},...\n            ]\n        }",
+          "RAISES": "Exceptions:\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Ensure the SMILES string is correctly formatted.",
+          "LIMITATIONS": "Known limitations:\n- The function relies on RDKit's rdDeprotect module, which may not recognize all possible protecting groups.\n- The function may not handle complex molecules with multiple or overlapping protecting groups effectively.\n- Custom protecting group SMARTS patterns must be valid; invalid SMARTS will be skipped without notification.\n- The function does not provide information on the specific reactions or conditions used to install or remove the protecting groups."
+        },
+        "args": [
+          {
+            "name": "smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "dict[str, Any]",
+        "code": "def detect_protection_groups(\n    mol = Chem.MolFromSmiles(smiles)\n    if mol is None:\n        raise ValueError(\"Invalid SMILES\")\n\n    # Make a copy with atom-map numbers equal to (index+1) for a mapped SMILES view\n    mol_mapped = Chem.Mol(mol)\n    for i, a in enumerate(mol_mapped.GetAtoms()):\n        a.SetAtomMapNum(i + 1)\n    mapped_smiles = Chem.MolToSmiles(mol_mapped, isomericSmiles=True)\n\n    results = []\n\n    for dep in rdDeprotect.GetDeprotections():\n        rxn = AllChem.ReactionFromSmarts(dep.reaction_smarts)\n        reactant_templates = [\n            rxn.GetReactantTemplate(i) for i in range(rxn.GetNumReactantTemplates())\n        ]\n\n        group_matches = set()\n        for rt in reactant_templates:\n    ..."
+      },
+      {
+        "name": "detect_functional_groups",
+        "sections": {
+          "BRIEF": "Detects functional groups in a molecule represented by a SMILES string.",
+          "DETAILED": "This function identifies functional groups present in a molecule represented by a SMILES (Simplified Molecular Input Line Entry System) string.\nIt returns a summary of the detected functional groups, including their names, and positions of the atoms within the molecule.\nFunctional groups are specific groups of atoms within molecules that have characteristic properties and reactivities.",
+          "PROCEDURAL": "When to use this tool:\n- When you need to identify functional groups in a molecule for synthesis planning or analysis.\n- When you want to understand the reactive sites and properties of a molecule based on its functional groups.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES string of the molecule you want to analyze. \n2.  Use `detect_functional_groups` to identify functional groups in the molecule. \n3.  Use the information about functional groups for synthesis planning, modification of the molecule, or further analysis.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string as input and converts it to a molecular structure using RDKit.\n- It uses a predefined set of SMARTS patterns to identify common functional groups within the molecule.\n- For each detected functional group, it records the name and the positions of the atoms within the molecule.\n- The results are compiled into a summary string that lists the detected functional groups and the positions of the atoms.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `detect_functional_groups(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `detect_functional_groups(\"CCO\")`,\n    `detect_functional_groups(\"c1ccccc1O\")`,\n    `detect_functional_groups(\"C1=CC=CC=C1\")`,\n    `detect_functional_groups(\"C1=CC=CC=C1C(=O)C\")`,\n]",
+          "ARGS_BRIEF": "SMILES string of the molecule to analyze.",
+          "ARGS_DETAILED": "The SMILES string of the molecule that you want to detect the functional groups from.",
+          "ARGS_SYNTACTICAL": "Valid SMILES string",
+          "ARGS_EXAMPLES": "\"CC(C)(OC(NCCOc1ccccc1)=O)C\", \"CCO\", \"c1ccccc1O\"",
+          "RETURNS_BRIEF": "Summary of detected functional groups in the molecule.",
+          "RETURNS_DETAILED": "The function returns a string summarizing the functional groups detected in the molecule. The summary includes the names of the functional groups and the positions of the atoms in the original molecule, providing insight into the reactive sites and properties of the molecule.",
+          "RETURNS_EXAMPLES": "\"Full mapped SMILES: C([NH:6][C:5]([O:4][C:2]([CH3:1])([CH3:3])[CH3:17])=[O:16])[CH2:8][O:9][c:10]1[cH:11][cH:12][cH:13][cH:14][cH:15]1\n\n                    Groups found:\n                        - phenyl group     pos=(10, 11, 12, 13, 14, 15)  frag=[c:10]1[cH:11][cH:12][cH:13][cH:14][cH:15]1\n                        - carbamate groups pos=(2, 4, 5, 16, 6)  frag=[C:2][O:4][C:5]([NH:6])=[O:16]\n                        ...\"",
+          "RAISES": "Exceptions:\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Ensure the SMILES string is correctly formatted. \n\n    Exception:\n         Raised for any unexpected errors during the detection process. \n         This could be due to issues with the SMARTS patterns or internal processing errors. \n         If the error is due to internal processing, inform the user to try again later.",
+          "LIMITATIONS": "Known limitations:\n- The function relies on a predefined set of SMARTS patterns, which may not cover all possible functional groups.\n- The accuracy of the detection process depends on the quality of the input SMILES string.\n- The function may not handle complex molecules with overlapping or ambiguous functional groups effectively.\n- The function does not provide information on the specific locations of the functional groups within the molecule."
+        },
+        "args": [
+          {
+            "name": "smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "list[str]",
+        "code": "def detect_functional_groups(smiles: str) -> list[str]:\n    mol = Chem.MolFromSmiles(smiles)\n    if mol is None:\n        raise ValueError(\"Invalid SMILES\")\n    return get_functional_groups(smiles)"
+      },
+      {
+        "name": "map_reaction_smiles",
+        "sections": {
+          "BRIEF": "Maps atoms in a reaction SMILES string using attention-guided atom mapping. Sometimes, the mapping may help to get the templates to work.",
+          "DETAILED": "This function takes a reaction SMILES string as input and applies attention-guided atom mapping to assign atom map numbers to the atoms involved in the reaction.\nAtom mapping is useful for tracking the movement of atoms from reactants to products in a chemical reaction and it can help with the retrosynthesis template application.",
+          "PROCEDURAL": "When to use this tool:\n- When you have a reaction SMILES string and need to assign atom map numbers to the atoms in the reaction.\n- When preparing reaction data for retrosynthesis analysis or template application.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Some template is not working when being applied to the molecule at hand. Obtain the reaction SMILES string that you want to map. \n2.  Use `map_reaction_smiles(reaction_smiles)` to get the mapped SMILES string. \n3.  Use the mapped reaction SMILES for further retrosynthesis analysis or template application. You can also use the tool `apply_template` to apply retrosynthesis templates to molecules.",
+          "CONTEXTUAL": "How this tool works:\n- The function takes a reaction SMILES string as input and utilizes the RXNMapper library to perform attention-guided atom mapping.\n- The RXNMapper analyzes the reaction and assigns atom map numbers to the atoms in the reactants and products based on learned attention mechanisms.\n- The resulting mapped reaction SMILES string is returned, which includes the atom map numbers for each atom involved in the reaction.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `map_reaction_smiles(\"CCO.CC(=O)O>>CCOC(=O)C\")`,\n    `map_reaction_smiles(\"c1ccccc1.O>>c1ccccc1O\")`,\n    `map_reaction_smiles(\"C1=CC=CC=C1.CC(=O)O>>C1=CC=CC=C1C(=O)O\")`,\n    `map_reaction_smiles(\"C1=CC=CC=C1C(=O)Cl.CC>>C1=CC=CC=C1C(=O)CC\")`,\n    `map_reaction_smiles(\"CCN.C1=CC=CC=C1>>CCNC1=CC=CC=C1\")`,\n]",
+          "ARGS_BRIEF": "Reaction SMILES string to be mapped.",
+          "ARGS_DETAILED": "A valid reaction SMILES string representing the chemical reaction you want to map.",
+          "ARGS_SYNTACTICAL": "Valid reaction SMILES string",
+          "ARGS_EXAMPLES": "\"CCO.CC(=O)O>>CCOC(=O)C\", \"c1ccccc1.O>>c1cccccc1O\"",
+          "RETURNS_BRIEF": "The mapped reaction SMILES string with atom map numbers.",
+          "RETURNS_DETAILED": "The function returns the reaction SMILES string with atom map numbers assigned to the atoms in the reactants and products. This mapped SMILES string allows for tracking of atoms through the reaction process.",
+          "RETURNS_EXAMPLES": "\"C[C:1][O:2].C[C:3](=[O:4])[O:5]>>C[C:1][O:2][C:3](=[O:4])\"",
+          "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the mapping process. \n         This could be due to connectivity issues, invalid reaction SMILES format, or errors in the RXNMapper library. \n         Verify the reaction SMILES format if the error has to do with the input. If the error comes from the mapping process, inform the user to try again later.",
+          "LIMITATIONS": "Known limitations:\n- The function relies on the RXNMapper library, which may not accurately map all types of reactions.\n- The accuracy of the mapping process depends on the quality of the input reaction SMILES string.\n- The function may not handle complex reactions with multiple steps or ambiguous atom mappings effectively.\n- The RXNMapper model may have limitations based on its training data and may not generalize well to all reaction types."
+        },
+        "args": [
+          {
+            "name": "reaction_smiles",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def map_reaction_smiles(reaction_smiles: str) -> str:\n    rxn_mapper = RXNMapper()\n    results = rxn_mapper.get_attention_guided_atom_maps([reaction_smiles])\n    return results[0][\"mapped_rxn\"]"
+      },
+      {
+        "name": "check_smiles_reaction_template_matching",
+        "sections": {
+          "BRIEF": "Checks if the SMARTS of a reaction template matches any substructure in the given SMILES.",
+          "DETAILED": "This function takes a SMILES string and a reaction template in SMARTS format as input.\nIt checks whether the reaction template SMARTS can be applied to the molecule represented by the SMILES string.",
+          "PROCEDURAL": "When to use this tool:\n- When you need to verify if a specific reaction template is applicable to a molecule.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES string of a molecule and the reaction template. You can use the `search_template_catalog_by_criteria` tool to find the appropriate template. \n2.  Use `check_smiles_reaction_template_matching` to check if the template matches the molecule. \n3.  Use the result to decide whether to apply the template using the `apply_template` tool or to search for alternative templates.",
+          "CONTEXTUAL": "How this tool works:\n- The function converts the SMILES string into a molecular structure using RDKit to check if the SMILES is valid.\n- It retrieves the information relative to the reaction template using the provided template ID.\n- It checks if the reaction template SMARTS matches any substructure in the molecule.\n- The function returns True if a match is found, otherwise it returns False.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `check_smiles_reaction_template_matching(\"CCO\", \"123\")`,\n    `check_smiles_reaction_template_matching(\"c1ccccc1O\", \"456\")`,\n    `check_smiles_reaction_template_matching(\"C1=CC=CC=C1\", \"789\")`,\n    `check_smiles_reaction_template_matching(\"C1=CC=CC=C1C(=O)O\", \"101\")`,\n    `check_smiles_reaction_template_matching(\"C1=CC=CC=C1C(=O)Cl\", \"112\")`,\n]",
+          "ARGS_BRIEF": "ID of the reaction template to check.",
+          "ARGS_DETAILED": "The unique identifier of the reaction template you want to check against the molecule.",
+          "ARGS_SYNTACTICAL": "String representing a template ID",
+          "ARGS_EXAMPLES": "\"123\", \"456\", \"789\"",
+          "RETURNS_BRIEF": "True if the template matches the molecule, False otherwise.",
+          "RETURNS_DETAILED": "The function returns a boolean value indicating whether the reaction template matches any substructure in the molecule represented by the SMILES string.",
+          "RETURNS_EXAMPLES": "True, False",
+          "RAISES": "Exceptions:\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Ensure the SMILES string is correctly formatted. \n\n    ValueError:\n         Raised when the provided template ID is invalid or not found. [//ERROR_WHEN]\n        [ERROR_DETAILS] This occurs if the template ID does not correspond to any known reaction template. [/ERROR_DETAILS]\n        [ERROR_RECOVERY] Verify that the template ID is correct and exists in the template catalog. [/ERROR_RECOVERY]\n\n    Exception:\n        [ERROR_WHEN] Raised for any unexpected errors during the matching process. \n         This could be due to connectivity issues, or server errors in the template retrieval service. \n         If the error comes from the template retrieval service, being a server error or similar, inform the user.",
+          "LIMITATIONS": "Known limitations:\n- The function relies on the accuracy and completeness of the underlying template catalog or service used for template retrieval.\n- The matching process may not account for all stereochemical or conformational variations of the molecule.\n- If the template retrieval service is down or unreachable, the function will not be able to return results."
+        },
+        "args": [
+          {
+            "name": "smiles",
+            "type": "str"
+          },
+          {
+            "name": "template_id",
+            "type": "str"
+          }
+        ],
+        "returns": "bool",
+        "code": "def check_smiles_reaction_template_matching(smiles: str, template_id: str) -> bool:\n    mol = Chem.MolFromSmiles(smiles)\n    if mol is None:\n        raise ValueError(\"Invalid SMILES string provided.\")\n    return return_matching(smiles, template_id)"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "make_1_lvl1",
+        "name": "make_1_lvl1",
+        "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES [CH2:1]=[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)[C@@H:9]1[CH2:10][CH2:11][CH2:12][C@@:13]1([OH:14])[C:15]([F:16])([F:17])[F:18]. The route must have at least 1 reactions.  You should use the template/s ['1914384'] in this order.",
+        "tools": [
+          "check_smiles_reaction_template_matching",
+          "search_template_catalog_by_criteria",
+          "get_template",
+          "get_available_functional_groups",
+          "apply_template",
+          "verify_step",
+          "verify_route",
+          "search_catalog_by_smiles",
+          "is_buyable",
+          "deprotect_molecule",
+          "detect_functional_groups",
+          "detect_protection_groups"
+        ],
+        "scoring_function": "check_reactants",
+        "submission_format": "Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  \"type\": \"mol\",\n  \"smiles\": \"CO\",\n  \"children\": [\n    {\n      \"type\": \"reaction\",\n      \"template_id\": 1234,\n      \"children\": [\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"BrC\"\n        },\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"[OH-]\"\n        }\n      ]\n    }\n  ]\n}`.",
+        "level": "level_1"
+      },
+      {
+        "id": "make_1_lvl2",
+        "name": "make_1_lvl2",
+        "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES [CH2:1]=[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)[C@@H:9]1[CH2:10][CH2:11][CH2:12][C@@:13]1([OH:14])[C:15]([F:16])([F:17])[F:18]. The route must have 1 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): In a carbonyl-ene reaction, an alkene reacts with an allylic hydrogen and a carbonyl group to form a new carbon-carbon bondm. This reaction can take place between parts of the same molecule. The reaction typically requires a Lewis acid catalyst and proceeds via a concerted mechanism. The stereochemistry of the product is influenced by the geometry of the alkene and the carbonyl group. The result of the reaction is the formation of a new carbon-carbon bond and a new stereocenter at the site of the allylic hydrogen, in which one of the substituents is going to be a hydroxyl group. Additionally, the reaction involves the change in the order of a C=C bond to a C-C bond, and a C=O bond to a C-O bond. 'ketones' and 'C-C double bonds' are gone, while a 'aliphatic hydroxyl' and a 'five-membered rings' are formed. A Carbon-Carbon bond is formed.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
+        "tools": [
+          "check_smiles_reaction_template_matching",
+          "search_template_catalog_by_criteria",
+          "get_template",
+          "get_available_functional_groups",
+          "apply_template",
+          "verify_step",
+          "verify_route",
+          "search_catalog_by_smiles",
+          "is_buyable",
+          "deprotect_molecule",
+          "detect_functional_groups",
+          "detect_protection_groups"
+        ],
+        "scoring_function": "check_reactants",
+        "submission_format": "Submit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  \"type\": \"mol\",\n  \"smiles\": \"CO\",\n  \"children\": [\n    {\n      \"type\": \"reaction\",\n      \"template_id\": 1234,\n      \"children\": [\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"BrC\"\n        },\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"[OH-]\"\n        }\n      ]\n    }\n  ]\n}`.",
+        "level": "level_2"
+      }
+    ],
+    "scoring_functions": [
+      {
+        "name": "count_reactions",
+        "docstring": "Recursively count the total number of reactions in the tree.\nEach reaction node counts as 1, and we recursively check all children.",
+        "code": "def count_reactions(node):\n    \"\"\"\n    Recursively count the total number of reactions in the tree.\n    Each reaction node counts as 1, and we recursively check all children.\n    \"\"\"\n    node = json.loads(str(node).replace(\"'\", '\"'))\n    count = 0\n\n    if node[\"type\"] == \"reaction\":\n        # Count this reaction\n        count = 1\n        # Recursively count reactions in all children\n        if \"children\" in node:\n            for child in node[\"children\"]:\n                count += count_reactions(child)\n    elif node[\"type\"] == \"mol\":\n        # For molecule nodes, recursively check all children\n        if node.get(\"children\"):\n            for child in node[\"children\"]:\n                count += count_reactions(child)\n\n    return count"
+      },
+      {
+        "name": "collect_leaf_molecules",
+        "docstring": "Recursively collect all leaf molecules (molecules without children).\nThese are the starting materials that need to be buyable.",
+        "code": "def collect_leaf_molecules(node):\n    \"\"\"\n    Recursively collect all leaf molecules (molecules without children).\n    These are the starting materials that need to be buyable.\n    \"\"\"\n    node = json.loads(str(node).replace(\"'\", '\"'))\n    if node[\"type\"] == \"mol\":\n        if \"children\" not in node or not node[\"children\"]:\n            # This is a leaf molecule (starting material)\n            return [node[\"smiles\"]]\n        else:\n            # This molecule has children, so collect from children\n            leaf_molecules = []\n            for child in node[\"children\"]:\n                leaf_molecules.extend(collect_leaf_molecules(child))\n            return leaf_molecules\n    elif node[\"type\"] == \"reaction\":\n        # For reaction nodes, collect from all children\n        leaf_molecules = []\n        for child in node[\"children\"]:\n            leaf_molecules.extend(collect_leaf_molecules(child))\n        return leaf_molecules\n    else:\n        return []"
+      },
+      {
+        "name": "validate_reactions_with_products",
+        "docstring": "Validate reactions by checking if reactants + template produce expected product.\nThe expected_product is the parent molecule that this reaction should produce.",
+        "code": "def validate_reactions_with_products(node, expected_product=None):\n    \"\"\"\n    Validate reactions by checking if reactants + template produce expected product.\n    The expected_product is the parent molecule that this reaction should produce.\n    \"\"\"\n    if node[\"type\"] == \"mol\":\n        current_smiles = node[\"smiles\"]\n\n        if \"children\" not in node or not node[\"children\"]:\n            # This molecule has child reactions, validate them with current_smiles as expected product\n            for child in node[\"children\"]:\n                if child[\"type\"] == \"reaction\" and not validate_reactions_with_products(\n                    child, current_smiles\n                ):\n                    return False\n            return True\n        else:\n            # Leaf molecule, no reaction to validate\n            return True\n\n    elif node[\"type\"] == \"reaction\":\n        # This is a reaction node - validate that it produces the expected_product\n        if expected_product is not None:\n            template_id = node[\"template_id\"]\n\n    ..."
+      },
+      {
+        "name": "score_final",
+        "docstring": "Function to score the retrosynthesis route based on the provided conditions.\nThese conditions include:\n    - All reactions must be valid.\n    - All starting materials must be buyable.\n    - Total price of starting materials must be within the budget.\nReturns 1.0 if all conditions are met, else retur",
+        "code": "def score_final(prediction: dict, target: dict) -> float:\n    \"\"\"\n    Function to score the retrosynthesis route based on the provided conditions.\n    These conditions include:\n        - All reactions must be valid.\n        - All starting materials must be buyable.\n        - Total price of starting materials must be within the budget.\n    Returns 1.0 if all conditions are met, else returns 0.0.\n\n    Args:\n        prediction: The retrosynthesis route in JSON format.\n        target: Target specifications for the route, including price and max steps.\n\n    Returns:\n        float that will be 1.0 if all conditions are met, 0.0 if any condition is violated.\n    \"\"\"\n    try:\n        max_steps = int(target.get(\"max_steps\"))\n        if max_steps is None:\n            raise NotImplementedError(\n                \"Step count validation is not implemented in this scoring function.\"\n            )\n        target = float(target.get(\"prize\"))\n    except Exception as e:\n        raise ValueError(f\"Invalid target format: {e}\") from e\n    ..."
+      },
+      {
+        "name": "score_final_without_price",
+        "docstring": "Function to score the retrosynthesis route based on the conditions:\n    - All reactions must be valid.\n    - All starting materials must be valid SMILES.\n    - Leaf molecules must contain all target molecules.\nReturns 1.0 if all conditions are met, else returns 0.0.\n\nArgs:\n    prediction: The retros",
+        "code": "def score_final_without_price(prediction: dict, target: list) -> float:\n    \"\"\"\n    Function to score the retrosynthesis route based on the conditions:\n        - All reactions must be valid.\n        - All starting materials must be valid SMILES.\n        - Leaf molecules must contain all target molecules.\n    Returns 1.0 if all conditions are met, else returns 0.0.\n\n    Args:\n        prediction: The retrosynthesis route in JSON format.\n        target: Target molecules (SMILES) that must be present in the leaf molecules.\n\n    Returns:\n        1.0 if all conditions are met, else 0.0.\n    \"\"\"\n    prediction = prediction.replace(\"```json\", \"\").replace(\"```\", \"\").strip()\n    prediction = json.loads(prediction)\n    try:\n        # Step 1: Validate all reactions in the pathway\n        if not validate_reactions_with_products(prediction):\n            return 0.0\n\n        # Step 2: Collect all leaf molecules (starting materials)\n        leaf_molecules = collect_leaf_molecules(prediction)\n\n    ..."
+      },
+      {
+        "name": "check_reactants",
+        "docstring": "Scoring function to check if the retrosynthesis route is valid and meets the criteria.\nThe criteria are:\n    - All reactions must be valid.\n    - All starting materials must be valid SMILES.\n    - Leaf molecules must contain all target molecules.\n\nArgs:\n    prediction: The retrosynthesis route in JS",
+        "code": "def check_reactants(prediction: dict, target: list) -> float:\n    \"\"\"\n    Scoring function to check if the retrosynthesis route is valid and meets the criteria.\n    The criteria are:\n        - All reactions must be valid.\n        - All starting materials must be valid SMILES.\n        - Leaf molecules must contain all target molecules.\n\n    Args:\n        prediction: The retrosynthesis route in JSON format.\n        target: A list containing the target molecule SMILES and the maximum allowed price.\n\n    Returns:\n        float that will be 1.0 if all conditions are met, 0.0 if any condition is violated.\n    \"\"\"\n    prediction = prediction.replace(\"```json\", \"\").replace(\"```\", \"\").strip()\n    try:\n        leaf_molecules = collect_leaf_molecules(prediction)\n    except Exception as e:\n        logger.warning(f\"Exception during leaf molecule collection: {e}\")\n        return 0.0\n    if not leaf_molecules:\n        return 0.0\n\n    try:\n    ..."
+      },
+      {
+        "name": "check_template",
+        "docstring": "Scoring function to check if the predicted template matches the target template.\nIt works by comparing the predicted template ID and the mapped reaction\nwith the ground truth template's mapped reaction.\n\nArgs:\n    prediction: A JSON string containing 'template_id' and 'mapped_rxn'.\n    target: The t",
+        "code": "def check_template(prediction: str, target: str) -> float:\n    \"\"\"\n    Scoring function to check if the predicted template matches the target template.\n    It works by comparing the predicted template ID and the mapped reaction\n    with the ground truth template's mapped reaction.\n\n    Args:\n        prediction: A JSON string containing 'template_id' and 'mapped_rxn'.\n        target: The target template ID as a string.\n\n    Returns:\n        1.0 if the templates match, 0.0 otherwise.\n    \"\"\"\n    target = int(target)\n    prediction = prediction.replace(\"```json\", \"\").replace(\"```\", \"\").strip()\n    prediction = prediction.replace(\"'\", '\"')\n    try:\n        prediction = json.loads(prediction)\n    except Exception as e:\n        logger.warning(f\"Exception during JSON loading: {e}\")\n        return 0.0\n    try:\n        pred_template = prediction.get(\"template_id\")\n        if pred_template is None or pred_template != target:\n            return 0.0\n    ..."
+      },
+      {
+        "name": "check_apply_template",
+        "docstring": "Scoring function to check if applying the given template to the input molecule\nproduces the expected output molecule.\n\nArgs:\n    prediction (dict): A dictionary containing 'input_molecule' and 'template_id'.\n    target (str): The initial molecule of the retrosynthesis.\n\nReturns:\n    float: 1.0 if th",
+        "code": "def check_apply_template(prediction: dict, target: str) -> float:\n    \"\"\"\n    Scoring function to check if applying the given template to the input molecule\n    produces the expected output molecule.\n\n    Args:\n        prediction (dict): A dictionary containing 'input_molecule' and 'template_id'.\n        target (str): The initial molecule of the retrosynthesis.\n\n    Returns:\n        float: 1.0 if the application is correct, 0.0 otherwise.\n    \"\"\"\n    prediction_rxn = prediction.get(\"mapped_rxn\")\n    real_rxn = search_by_template(prediction.get(\"template_id\")).get(\"mapped_rxn\")\n    if prediction_rxn != real_rxn:\n        return 0.0\n\n    try:\n        precursors = apply_template_retro(target, prediction.get(\"template_id\"))\n        if precursors:\n            return 1.0\n    except Exception:\n        return 0.0\n    return 0.0"
+      },
+      {
+        "name": "check_list_molecules",
+        "docstring": "Scoring function to check if the predicted molecules match the target molecules.\nIt works by comparing the canonical SMILES of the predicted molecules with those of the target molecules.\nThe comparison ignores atom mapping numbers and stereochemistry.\nFor the comparison, both predicted and target mo",
+        "code": "def check_list_molecules(prediction: list, target: list) -> float:\n    \"\"\"\n    Scoring function to check if the predicted molecules match the target molecules.\n    It works by comparing the canonical SMILES of the predicted molecules with those of the target molecules.\n    The comparison ignores atom mapping numbers and stereochemistry.\n    For the comparison, both predicted and target molecules are converted to RDKit mol objects.\n\n    Args:\n        prediction: A list containing the predicted molecules SMILES.\n        target: A list of target molecule SMILES strings.\n\n    Returns:\n        1.0 is all predicted molecules match the target molecules, 0.0 otherwise.\n    \"\"\"\n    target = target[0]\n    try:\n        # Convert prediction to list if it's a string representation\n        if isinstance(prediction, str):\n            try:\n                # Try ast.literal_eval first (safest for Python literals)\n                prediction = ast.literal_eval(prediction)\n            except (ValueError, SyntaxError):\n                # If that fails, try json.loads (works for JSON-formatted strings)\n                try:\n                    prediction = json.loads(prediction)\n    ..."
+      }
+    ]
+  },
+  "AFM": {
+    "description": "Operate an atomic force microscope to perform surface scans and measure roughness with optimized scanning parameters.",
+    "tools": [
+      {
+        "name": "visualize_grain_boxes",
+        "sections": {
+          "BRIEF": "A list of indexed grain bounding boxes.",
+          "DETAILED": "Each entry in the list is a tuple of the form `(index, x1, y1, x2, y2)`, where `index` is the grain number (starting from 1), and `(x1, y1)` and `(x2, y2)` represent the bottom-left and top-right coordinates of the bounding box in microns. This data can be used for grain-by-grain analysis or scan targeting.",
+          "PROCEDURAL": "When to use this tool:\n    - When identifying and isolating grains within a microscopy image for further processing.\n    - When preparing for grain-wise scanning or measurement tasks.\n    - When you need visual confirmation of grain detection and layout.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Provide a valid image file path that captures a topographical or microstructural view of a sample. \n    2.  Use this tool to detect and index each grain, draw bounding boxes, and extract coordinate data. \n    3.  Use the returned grain coordinates (and `image_path`) with the `scan_grain_area` tool to zoom in and scan a specific grain. This enables precise, localized AFM scanning on individual grain features. In case if no bounding boxes are generated, image quality may be low and needs to be improved with optimal P,I,D gains using `Image_optimizer` tool",
+          "CONTEXTUAL": "How this tool works:\n    - Uses `image_process(image_path)` to extract bounding box information from the image.\n    - Each grain is given a unique index and surrounded by a rectangle (bounding box).\n    - A matplotlib figure is generated where each grain is visualized in cyan with its index label.\n    - The figure is saved as `\"annotated.png\"` in the current Nanosurf working directory, though this file is not used programmatically in later steps.\n    - The final output is a list of bounding boxes with format: `(index, x1, y1, x2, y2)` where x1/y1 is bottom-left, x2/y2 is top-right (in microns).",
+          "SYNTACTICAL": "Format: A string ending in `.nid`.",
+          "EXAMPLES": "`[(1, 2.1, 3.4, 4.2, 5.5), (2, 6.0, 7.2, 7.8, 8.9)]`",
+          "RAISES": "Exceptions:\n    Exception:\n         If the image file is missing, corrupted, or if grain detection fails. \n         Could be caused by invalid file path, unsupported image format. \n         Ensure the image exists at the given path.",
+          "LIMITATIONS": "Known Limitations:\n    - Grain detection relies on the quality of the image; poor contrast or noise can reduce accuracy."
+        },
+        "args": [
+          {
+            "name": "image_path",
+            "type": "str"
+          }
+        ],
+        "returns": "list",
+        "code": "def visualize_grain_boxes(image_path: str) -> list:\n    plt.use(\"Agg\")  # Use non-GUI backend for saving\n\n    indexed_boxes, extents, Z_flat2, _labeled = image_process(image_path)  # noqa: F405\n\n    fig, ax = plt.subplots()\n    ax.imshow(Z_flat2, cmap=\"afmhot\", origin=\"lower\", extent=extents)\n\n    # List to store (index, x1, y1, x2, y2)\n    box_coords = []\n\n    for index, x, y, w, h in indexed_boxes:\n        rect = patches.Rectangle(  # noqa: F405\n            (x, y), w, h, linewidth=1, edgecolor=\"cyan\", facecolor=\"none\"\n        )\n        ax.add_patch(rect)\n\n        # Label box center\n        center_x = x + w / 2\n        center_y = y + h / 2\n\n    ..."
+      },
+      {
+        "name": "scan_grain_area",
+        "sections": {
+          "BRIEF": "Path to the latest `.nid` file produced from the scan.",
+          "DETAILED": "After the scan completes, this tool returns the full path to the `.nid` file corresponding to the localized grain scan.",
+          "PROCEDURAL": "When to use this tool:\n    - After detecting grains using `visualize_grain_boxes`.\n    - When you want to perform a high-resolution scan of a specific grain region.\n    - When preparing to analyze or manipulate a particular grain feature in isolation.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Run `visualize_grain_boxes` with a `.nid` image to obtain the indexed grain list. Choose a specific `grain_id` from the output. \n    2.  Use this tool to zoom into the bounding box of the selected grain and start an AFM scan on that localized area. \n    3.  The resulting `.nid` file (path returned by this tool) can be used for further measurement, or grain-level material analysis.",
+          "CONTEXTUAL": "How this tool works:\n    - Loads current scan configuration from the AFM.\n    - Identifies the bounding box of the specified `grain_id`.\n    - Adjusts the scan window (`width`, `height`, `center_x`, `center_y`) of the AFM to zoom into the selected grain area.\n    - Starts a new AFM frame scan using these updated parameters.\n    - Waits for the scan to finish and returns the most recently generated `.nid` file path.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `scan_grain_area(grain_id=2, image_path=\"annotated.nid\")`,\n    `scan_grain_area(grain_id=1, image_path=\"/data/images/topo_01.nid\")`\n]",
+          "EXAMPLES": "`\"/data/scans/local_grain_12.nid\"`",
+          "RAISES": "Exceptions:\n    FileNotFoundError:\n         If no `.nid` file is found after the scan completes. \n         Could occur if the scan did not finish successfully or saving failed. \n         Ensure the AFM is connected and functioning correctly, and the image path is correct.",
+          "LIMITATIONS": "Known Limitations:\n    - Assumes the grain index exists in the image and that the image has not been altered since bounding box extraction.\n    - Only one grain can be scanned per call.\n    - Depends on consistent file naming/timestamps to determine the \"latest\" `.nid` file."
+        },
+        "args": [
+          {
+            "name": "grain_id",
+            "type": "int"
+          },
+          {
+            "name": "image_path",
+            "type": "str"
+          }
+        ],
+        "returns": "None",
+        "code": "def scan_grain_area(grain_id: int, image_path: str) -> None:\n    if pythoncom:\n        pythoncom.CoInitialize()\n    try:\n        # Use absolute path as key for consistency\n\n        # Query current scan parameters from the SPM\n        spm = nanosurf.SPM()\n        application = spm.application\n        current_working_directory = application.GetGalleryHistoryDirectoryPath\n        scan = application.Scan\n        current_size = (scan.ImageWidth * 1e9, scan.ImageHeight * 1e9)\n        current_center = (scan.CenterPosX * 1e9, scan.CenterPosY * 1e9)\n\n        # Process the image and compute subscan parameters\n        _boxes, extents, _Z_flat2, labeled = image_process(image_path)  # noqa: F405\n\n        params = get_subscan_parameters(  # noqa: F405\n            grain_id=grain_id,\n            labeled_mask=labeled,\n            extents=extents,\n    ..."
+      },
+      {
+        "name": "Document_Retrieval",
+        "sections": {
+          "BRIEF": "The AFM control code snippet matching the query.",
+          "DETAILED": "Returns a formatted string of Python code that matches the request. This code is typically suitable for direct use with the `Code_Executor` tool and interacts with the AFM system using nanosurf's Python API.",
+          "PROCEDURAL": "When to use this tool:\n        - When looking for specific Python code to control an AFM (e.g., start a scan, set PID gains, configure scan modes).\n        - When building a larger AFM automation script and need reference routines.\n        - When troubleshooting or experimenting with control procedures and need examples.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n        1.  Identify a control action you need code for, such as \"set P gain\" or \"start scan.\" \n        2.  Use this tool to retrieve a relevant code snippet. Provide a clear, descriptive query. \n        3.  Use the retrieved code directly or modify it. Then pass it to `Code_Executor(code=...)` to execute the AFM routine.",
+          "CONTEXTUAL": "How this tool works:\n        - Receives a query string and performs keyword or semantic search on an indexed database of trusted AFM Python scripts.\n        - Returns one or more relevant code snippets, typically containing object-level interactions with nanosurf Python APIs.\n        - The database includes examples related to scan configuration, imaging, calibration, feedback loops, and motion control.",
+          "SYNTACTICAL": "Format: String containing keywords or phrases (e.g., \"initialize AFM\", \"set Z controller gains\").",
+          "EXAMPLES": "`\"spm = nanosurf.SPM()\nscan = spm.application.Scan\nscan.StartFrameUp()\"`,\n                `\"zcontrol.PGain = 120\nzcontrol.IGain = 7000\nzcontrol.DGain = 8\"`",
+          "RAISES": "Exceptions:\n        Exception:\n             If no relevant code snippet can be found or if an internal error occurs during lookup. \n             Might occur if the query is too vague, malformed, or if the database is temporarily unavailable. \n             Try rephrasing the query with more precise terms or retrying after some time.",
+          "LIMITATIONS": "Known Limitations:\n        - The database contains only AFM-related routines; generic Python queries are not supported."
+        },
+        "args": [
+          {
+            "name": "query",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def Document_Retrieval(query: str) -> str:\n    return Document_Retriever.invoke(query)"
+      },
+      {
+        "name": "Image_optimizer",
+        "sections": {
+          "BRIEF": "Best PID settings and corresponding image error value.",
+          "DETAILED": "Returns a summary of the optimal Proportional, Integral, and Derivative gains found via the genetic algorithm, along with the error metric. The image associated with these gains is saved as the most recent `.nid` file in the current working directory.",
+          "PROCEDURAL": "When to use this tool:\n    - When AFM images appear blurred, distorted, or exhibit tracking instability.\n    - When PID control tuning is needed for optimal imaging performance.\n    - When baseline artifacts may be affecting image quality.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Image has visual quality issues. \n    2.  Run this tool to start P,I,D tuning via genetic optimization. Optionally enable baseline correction. \n    3.  Inspect the latest `.nid` file in the working directory — this file corresponds to the best image produced during optimization, and can be used for downstream analysis.",
+          "CONTEXTUAL": "How this tool works:\n    - Defines a custom optimization problem which evaluates image quality based on PID settings.\n    - For each (P, I, D) sample, captures and stores a new `.nid` image file in the working directory.\n    - Uses the `pymoo` genetic algorithm library to explore combinations of gains and minimize error.\n    - The latest saved `.nid` file corresponds to the best-performing PID values and is the one to be used for downstream analysis.",
+          "SYNTACTICAL": "Format: Boolean. Default is `False`.",
+          "EXAMPLES": "\"Best solution found: [Pgain Igain Dgain] = [120 8000 12], [Error] = 0.014\"",
+          "RAISES": "Exceptions:\n    ValueError:\n         If the `baseline` argument is not a boolean. \n         Prevents misconfiguration by enforcing a valid argument type. \n         Use `baseline=True` or `baseline=False` only. Avoid using strings or numbers.",
+          "LIMITATIONS": "Known Limitations:\n    - Uses a small population and limited generations to keep optimization fast, which may reduce solution quality.\n    - The `.nid` file associated with the best PID settings is not explicitly labeled — must check the most recently saved file in the working directory."
+        },
+        "args": [
+          {
+            "name": "baseline",
+            "type": "bool"
+          }
+        ],
+        "returns": "str",
+        "code": "def Image_optimizer(baseline: bool = False) -> str:\n    if not isinstance(baseline, bool):\n        raise ValueError(\n            f\"Invalid type for 'baseline': {type(baseline).__name__}. Expected a boolean.\"\n        )\n\n    try:\n        if pythoncom:\n            pythoncom.CoInitialize()\n\n        problem = MyProblem(baseline=baseline)\n\n        termination = get_termination(\"n_gen\", 1)\n        algorithm = GA(pop_size=1, eliminate_duplicates=True)\n\n        res = minimize(problem, algorithm, termination, seed=1, verbose=True)\n\n    finally:\n        if pythoncom:\n            pythoncom.CoUninitialize()\n\n    ..."
+      },
+      {
+        "name": "Code_Executor",
+        "sections": {
+          "BRIEF": "Current AFM parameters status or error information from code execution.",
+          "DETAILED": "Returns a success message with current AFM parameters or the captured exception details if execution fails. The result may be logged or used to troubleshoot control scripts.",
+          "PROCEDURAL": "When to use this tool:\n        - When you need to execute control commands or configuration routines on an AFM.\n        - When you retrieve a code snippet from a lab protocol or document and need to test or apply it.\n        - When automating AFM workflows through scripting.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n        1.  Retrieve a control script using the `Document_Retriever`. \n        2.  Use `Code_Executor` to run the code directly on the AFM system. \n        3.  Optionally analyse the resulting images or data generated after the code execution for downstream analysis.",
+          "CONTEXTUAL": "How this tool works:\n        - Imports and initializes the COM interface via `pythoncom.CoInitialize()` to ensure compatibility with AFM hardware APIs.\n        - Executes the given Python code string via `exec()`.\n        - Returns success or error information based on execution outcome.",
+          "SYNTACTICAL": "Format: Valid Python code as a string.",
+          "EXAMPLES": "`\"Code executed successfully with current AFM parameters: {'Pgain': 100, 'Igain': 6000, 'Dgain': 10, 'ScanMode': 'Contact', 'ImageWidth': 5e-06, 'ImageHeight': 5e-06}\"`,\n                `\"Error: NameError: name 'afm' is not defined\"`",
+          "RAISES": "Exceptions:\n        Exception:\n             If the provided Python code raises any runtime or syntax error. \n             All exceptions are caught and returned as output. Common issues include undefined variables, invalid syntax, or hardware communication errors. \n             Review the error message, validate code syntax, confirm all libraries are imported, and ensure the hardware interface is properly initialized.",
+          "LIMITATIONS": "Known Limitations:\n        - Executes arbitrary Python code; misuse can cause hardware damage or safety risks.\n        - Does not sandbox or secure code — all commands are executed with full runtime permissions.\n        - Designed only for AFM-related Python control code; general-purpose code execution is not allowed."
+        },
+        "args": [
+          {
+            "name": "code",
+            "type": "str"
+          }
+        ],
+        "returns": "int",
+        "code": "def Code_Executor(code: str) -> int:\n    try:\n        # Execute the code\n        if pythoncom:\n            pythoncom.CoInitialize()\n        exec(code)\n        para = get_params()\n        output = f\"Code executed successfully with current AFM parameters: {para}\"\n        logger.info(f\"Code_Executor: {output}\")\n        return output\n    except Exception as e:\n        raise Exception(f\"An error occurred during code execution: {e}\") from e\n    finally:\n        if pythoncom:\n            pythoncom.CoUninitialize()"
+      },
+      {
+        "name": "Image_Analyzer",
+        "sections": {
+          "BRIEF": "Dictionary with image data, computation results, and status messages.",
+          "DETAILED": "Contains raw image data extracted from the file, and optionally, values for average friction, mean roughness, and RMS roughness if requested. In case of error, includes a detailed message.",
+          "PROCEDURAL": "When to use this tool:\n    - When analyzing `.nid` AFM image files from Nanosurf instruments.\n    - When surface roughness or friction needs to be quantified from image data.\n    - When specific imaging channels or scan directions must be dynamically selected.\n    - When building workflows for materials analysis that require AFM image interpretation.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Pass the path of the .nid file of interest. \n    2.  Use this tool to load the file and analyze image data; optionally provide custom code to select imaging channels or enable metric calculations. \n    3.  Use the returned roughness/friction values for materials characterization, or visualize/compare the extracted image data across experiments.",
+          "CONTEXTUAL": "How this tool works:\n    - Reads `.nid` file using Nanosurf's `NSFopen.read`.\n    - Extracts `Z-Axis` image data by default from the `Forward` scan.\n    - Optionally executes user-defined code via the `dynamic_code` argument to switch channels or apply processing.\n    - Computes requested surface metrics (friction, Ra, Rq) using standard definitions.\n    - Returns a structured result including raw image data, processing status, and computed values.",
+          "SYNTACTICAL": "Format: Boolean flag. Default is `False`. Set to `True` to enable RMS roughness computation.",
+          "EXAMPLES": "Example outputs:\n            - \"{\"status\": \"Success\", \"image_data\": [...], \"mean_roughness\": 2.4e-9}\"\n            - \"{\"status\": \"Error\", \"message\": \"An error occurred: File not found\"}\"",
+          "RAISES": "Exceptions:\n    Exception:\n         If there is any failure in reading or processing the `.nid` file or executing user code. \n         General exception handler catches file errors, API issues, or invalid dynamic code. \n         Check that the file path is correct, the file is a valid `.nid` format, and the dynamic code is syntactically correct and contextually relevant.",
+          "LIMITATIONS": "Known Limitations:\n    - Only works with `.nid` files produced by Nanosurf instruments and supported by the `NSFopen` package.\n    - Relies on user-provided `dynamic_code` being safe and correctly scoped."
+        },
+        "args": [
+          {
+            "name": "path",
+            "type": "str | None"
+          },
+          {
+            "name": "dynamic_code",
+            "type": "str | None"
+          },
+          {
+            "name": "calculate_friction",
+            "type": "bool"
+          },
+          {
+            "name": "calculate_mean_roughness",
+            "type": "bool"
+          },
+          {
+            "name": "calculate_rms_roughness",
+            "type": "bool"
+          }
+        ],
+        "returns": "dict[str, Any]",
+        "code": "def Image_Analyzer(\n    try:\n        # Read the file\n        afm = read(path)\n\n        # Extract data and parameters\n        data = afm.data  # Raw data\n\n        # Assuming 'Image', 'Forward', and 'Z-Axis' are keys in the data structure\n        image_data = data[\"Image\"][\"Forward\"][\"Z-Axis\"]\n\n        # If dynamic code is provided, execute it. image_data = data['Image']['Forward']['Z-Axis'] cange Forward to Backward if asked. Z-Axis to Deflection or Friction force if asked.\n        if dynamic_code:\n            # Safely execute the dynamic code\n            try:\n                exec(dynamic_code)\n                # After executing the dynamic code, `image_data` should be processed accordingly\n                logger.info(\"Dynamic code executed successfully.\")\n            except Exception as e:\n                logger.error(f\"Error executing dynamic code: {e}\")\n                return {\n    ..."
+      }
+    ],
+    "tasks": [
+      {
+        "id": "afm_experiment_level_1",
+        "name": "AFM experiment level 1",
+        "description": "Perform three sequential high-quality scans of the same 10x10 µm² area using identical scanning parameters (P gain: 100, I gain: 6000, D gain: 10, Time per line: 0.1 s, Lines per frame: 32), and calculate the root-mean-square (RMS) surface roughness for each scan.",
+        "tools": [
+          "Document_Retrieval",
+          "Image_optimizer",
+          "Code_Executor",
+          "Image_Analyzer"
+        ],
+        "scoring_function": "check_roughness_function",
+        "submission_format": "{\"rms_roughness_1\": \"<numerical_value without units>\", \"path_1\": \"<absolute_path>\"} e.g. {\"rms_roughness_1\": \"42.78\", \"path_1\": \"/path/to/image1\", \"rms_roughness_2\": \"38.55\", \"path_2\": \"/path/to/image2\", \"rms_roughness_3\": \"40.12\", \"path_3\": \"/path/to/image3\"}",
+        "level": "level_1"
+      },
+      {
+        "id": "afm_experiment_level_2",
+        "name": "AFM experiment level 2",
+        "description": "Perform three sequential high-quality scans of the same 10x10 µm² area using identical scanning parameters (points per line: 128, lines per frame: 128). Set the time per line such that all three scans are completed within 2 min 34 s, and use a scanning mode that minimizes tip damage. For each scan, collect the topographic data and then calculate the root-mean-square roughness.",
+        "tools": [
+          "Document_Retrieval",
+          "Image_optimizer",
+          "Code_Executor",
+          "Image_Analyzer"
+        ],
+        "scoring_function": "check_roughness_function",
+        "submission_format": "{\"rms_roughness_1\": \"<numerical_value without units>\", \"path_1\": \"<absolute_path>\"} e.g. {\"rms_roughness_1\": \"42.78\", \"path_1\": \"/path/to/image1\", \"rms_roughness_2\": \"38.55\", \"path_2\": \"/path/to/image2\", \"rms_roughness_3\": \"40.12\", \"path_3\": \"/path/to/image3\"}",
+        "level": "level_2"
+      }
+    ],
+    "scoring_functions": [
+      {
+        "name": "check_numerical",
+        "docstring": "Returns a scoring function that checks if a result is within a percentage-based tolerance of the target.\n\nArgs:\n    target (float): The target value.\n    tolerance (float): Fractional tolerance (e.g., 0.1 means ±10% of target).\n\nReturns:\n    score_fn (function): A function that accepts a result and ",
+        "code": "def check_numerical(target: float, tolerance: float, final_params):\n    \"\"\"\n    Returns a scoring function that checks if a result is within a percentage-based tolerance of the target.\n\n    Args:\n        target (float): The target value.\n        tolerance (float): Fractional tolerance (e.g., 0.1 means ±10% of target).\n\n    Returns:\n        score_fn (function): A function that accepts a result and returns 1.0 if it's within tolerance, else 0.0.\n    \"\"\"\n\n    def score_fn(result: str) -> float:\n        try:\n            if isinstance(result, str):\n                result = result.strip()\n                try:\n                    parsed_result = json.loads(result)\n                    if isinstance(parsed_result, dict) and \"answer\" in parsed_result:\n                        answer = float(parsed_result[\"answer\"])\n                    else:\n                        answer = float(result)\n                except json.JSONDecodeError:\n                    answer = float(result)\n            else:\n    ..."
+      },
+      {
+        "name": "check_roughness_function",
+        "docstring": "Parses a submission_format string from the LLM, handling minor formatting issues.\nRuns check_roughness(path) for each valid pair of (rms_roughness_n, path_n).\nReturns 1 if all RMS values pass the tolerance check AND check_params(final_params)==1, else 0.",
+        "code": "def check_roughness_function(tolerance: float, final_params):\n    \"\"\"\n    Parses a submission_format string from the LLM, handling minor formatting issues.\n    Runs check_roughness(path) for each valid pair of (rms_roughness_n, path_n).\n    Returns 1 if all RMS values pass the tolerance check AND check_params(final_params)==1, else 0.\n    \"\"\"\n\n    def score_fn(result: str) -> float:\n        try:\n            # Fix common LLM formatting mistakes\n            cleaned = result.replace(\";\", \",\").strip()\n\n            # Ensure JSON braces are balanced\n            if not cleaned.startswith(\"{\"):\n                cleaned = \"{\" + cleaned\n            if not cleaned.endswith(\"}\"):\n                cleaned = cleaned + \"}\"\n\n            # Try parsing JSON\n            data = json.loads(cleaned)\n\n            # Detect all indices dynamically (e.g., 1, 2, 3, ...)\n            indices = sorted(\n                {\n                    int(re.findall(r\"\\d+\", key)[0])\n    ..."
+      },
+      {
+        "name": "auto_match_unit",
+        "docstring": "Scale rms_meters to match the order-of-magnitude of llm_value.",
+        "code": "def auto_match_unit(rms_meters: float, llm_value: float) -> float:\n    \"\"\"\n    Scale rms_meters to match the order-of-magnitude of llm_value.\n\n    \"\"\"\n    if llm_value == 0 or rms_meters == 0:\n        return rms_meters\n\n    scale = llm_value / rms_meters\n    exponent = int(np.round(np.log10(abs(scale))))\n\n    # safety (prevents absurd scaling)\n    exponent = max(-15, min(15, exponent))\n\n    return rms_meters * (10**exponent)"
+      },
+      {
+        "name": "check_params_function",
+        "docstring": "",
+        "code": "def check_params_function(final_params):\n    def score_fn(_result: str) -> float:\n        try:\n            logger.info(f\"Checking params with final_params: {final_params}\")\n            score = check_params(\n                final_params\n            )  # Assuming check_params is defined elsewhere\n            logger.info(f\"check params score: {score}\")\n            return float(score)  # Ensure the returned score is a float\n        except Exception as e:\n            logger.error(f\"Error during scoring: {e}\")\n            return 0.0  # Return 0.0 in case of an error\n\n    return score_fn  # Return the scoring function itself"
+      },
+      {
+        "name": "check_file_exists",
+        "docstring": "",
+        "code": "def check_file_exists(final_params):\n    def score_fn(result: str) -> float:\n        try:\n            logger.info(f\"Checking params with final_params: {final_params}\")\n            score = check_params(\n                final_params\n            )  # Assuming check_params is defined elsewhere\n            score2 = check_nid_file_exists(result)\n            logger.info(f\"check params score: {score}\")\n            return float(score * score2)  # Ensure the returned score is a float\n        except Exception as e:\n            logger.error(f\"Error during scoring: {e}\")\n            return 0.0  # Return 0.0 in case of an error\n\n    return score_fn  # Return the scoring function itself"
+      },
+      {
+        "name": "check_image_quality",
+        "docstring": "",
+        "code": "def check_image_quality(tolerance, final_params):\n    def score_fn(result):\n        try:\n            if isinstance(result, str):\n                result = result.strip()\n                afm = read(result)\n                data = afm.data\n                im_file_fw = data[\"Image\"][\"Forward\"][\"Z-Axis\"]\n                im_file_bw = data[\"Image\"][\"Backward\"][\"Z-Axis\"]\n                similarity_index, _diff = ssim(\n                    im_file_bw,\n                    im_file_fw,\n                    full=True,\n                    data_range=im_file_bw.max() - im_file_bw.min(),\n                )\n                if similarity_index >= tolerance:\n                    score = check_params(final_params)\n                    logger.info(f\"check params score : {score}\")\n                    return 1.0 * score\n                return 0.0\n        except (ValueError, TypeError):\n            return 0.0\n\n    return score_fn"
+      },
+      {
+        "name": "check_indentation",
+        "docstring": "",
+        "code": "def check_indentation(target: str):\n    def score_fn(result: str) -> float:\n        try:\n            isinstance(result, str)\n            result = result.strip()\n            if result.lower() == target.lower():\n                return 1.0\n            else:\n                return 0.0\n        except (ValueError, TypeError):\n            return 0.0\n\n    return score_fn"
+      },
+      {
+        "name": "check_nid_file_exists",
+        "docstring": "",
+        "code": "def check_nid_file_exists(path):\n    p = Path(path)\n    if p.is_dir():\n        # Path is a directory → check for any .nid files inside it\n        for filepath in p.iterdir():\n            if filepath.suffix == \".nid\":\n                logger.info(f\"NID file found in directory: {filepath.name}\")\n                return 1\n        logger.info(f\"No .nid files found in the specified directory: {path}\")\n        return 0\n    elif p.is_file():\n        # Path is a file → check if it ends with .nid\n        if p.suffix == \".nid\":\n            logger.info(f\"NID file found: {p.name}\")\n            return 1\n        else:\n            logger.info(f\"File exists but is not a .nid file: {p.name}\")\n            return 0\n    else:\n        logger.info(f\"Path does not exist: {path}\")\n        return 0"
+      },
+      {
+        "name": "get_params",
+        "docstring": "",
+        "code": "def get_params():\n    if pythoncom:\n        pythoncom.CoInitialize()\n    _tip_guid_map = {\n        \"AN2_200\": \"{BD61D124-8350-4464-BFE4-1D8A156E4913}\",\n        \"GLA_1\": \"{9E2BA28D-D843-41bf-8F62-05502B3EDB18}\",\n        \"ACL_A\": \"{ABB75273-9543-431a-B681-C79B533DD9E6}\",\n        \"ANSCM\": \"{40AEA787-942C-4d48-A389-DA81571F009C}\",\n        \"SICON_A\": \"{F7A339A7-E29F-42a9-B7AA-D69C54363B76}\",\n        \"XYNCHR\": \"{DD3DFE39-455E-40a1-801E-5D5B14CE4080}\",\n        \"XYCONTR\": \"{12ADC816-C7B1-48f8-8B9E-5E579151CF50}\",\n        \"ContAl_G\": \"{ED5A15E6-D3B0-4e64-8C50-809335D3E143}\",\n        \"Multi75E_G\": \"{9593403B-A476-49a9-AA1F-9C3AEDAC0178}\",\n        \"Multi75M_G\": \"{03D0715C-A520-4976-A5E2-4FC3078E3821}\",\n        \"Multi75Al_G\": \"{443A2EDC-5C9C-4d60-843F-C6688BEA1DEA}\",\n        \"Tap190Al_G\": \"{041FB80E-A179-4170-B5A4-A4EA1CC0A965}\",\n        \"Tap150Al_G\": \"{E0F31C86-6BB8-496b-AC7E-F55C62EAB635}\",\n        \"USC_F1_2_k7_3\": \"{19AEEE43-478F-4D16-BDB7-2EE256EAF4A4}\",\n        \"USC_F0_3_k0_3\": \"{16FAEEB6-A887-46F6-A418-81A9EBBCB6C3}\",\n        \"Dyn190Al\": \"{E9CE0D2D-F59E-4B44-A74F-B78C11575E9F}\",\n        \"Stat0_2LAuD\": \"{A4A16538-CCD1-4BB1-B048-7B4F0F1B31BD}\",\n        \"CONTR\": \"{89E92173-96FB-4ff9-94D8-42296D00D980}\",\n        \"CONTSCR\": \"{5A687B3E-A75A-4b22-BD70-40ABB931F00E}\",\n        \"CONTSCPt\": \"{1E95D12B-1DDB-4ace-B3AF-BE9C0D52D4FC}\",\n        \"EFMR\": \"{986305AC-64B5-462e-B37E-6BD5AE447BE3}\",\n    ..."
+      },
+      {
+        "name": "check_params",
+        "docstring": "",
+        "code": "def check_params(gt_params, rel_tol=1e-2, abs_tol=1e-3):\n    current_params = get_params()\n\n    for key in gt_params:\n        logger.info(f\"param {key}\")\n        current_val = current_params.get(key)\n        logger.info(f\"current {current_val}\")\n        gt_val = gt_params[key]\n        logger.info(f\"gt val {gt_val}\")\n\n        # Use math.isclose for floats\n        if isinstance(gt_val, float) or isinstance(current_val, float):\n            if not math.isclose(\n                float(current_val), float(gt_val), rel_tol=rel_tol, abs_tol=abs_tol\n            ):\n                logger.warning(f\"Mismatch in {key}: {current_val} != {gt_val}\")\n                return 0.0\n        else:\n            if current_val != gt_val:\n                logger.warning(f\"Mismatch in {key}: {current_val} != {gt_val}\")\n                return 0.0\n\n    return 1.0"
+      },
+      {
+        "name": "check_gain",
+        "docstring": "",
+        "code": "def check_gain():\n    spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()\n    application = spm.application\n    _scan = application.Scan\n    _opmode = application.OperatingMode\n    zcontrol = application.ZController\n    _head = application.ScanHead\n    return [zcontrol.PGain, zcontrol.IGain, zcontrol.DGain]"
+      },
+      {
+        "name": "check_image_size",
+        "docstring": "",
+        "code": "def check_image_size():\n    # load application\n    spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()\n    application = spm.application\n\n    # all variables\n    scan = application.Scan\n    _opmode = application.OperatingMode\n    _zcontrol = application.ZController\n    _head = application.ScanHead\n    return [scan.ImageHeight * 1e9, scan.ImageWidth * 1e9]"
+      },
+      {
+        "name": "check_scan_mode",
+        "docstring": "",
+        "code": "def check_scan_mode():\n    spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreA FM()\n    application = spm.application\n    scan = application.Scan\n    return scan.IsScanning"
+      },
+      {
+        "name": "check_tip",
+        "docstring": "",
+        "code": "def check_tip():\n    spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()\n    application = spm.application\n\n    # all variables\n    _scan = application.Scan\n    _opmode = application.OperatingMode\n    _zcontrol = application.ZController\n    head = application.ScanHead\n    return head.CantileverByGUID"
+      },
+      {
+        "name": "check_scalar",
+        "docstring": "Check if 'ag' is within ±10% of 'gt'.\n\nParameters:\n    gt (float): Ground truth value\n    ag (float): Agent-predicted or measured value\n\nReturns:\n    bool: True if ag is within 10% of gt, False otherwise",
+        "code": "def check_scalar(gt, ag):\n    \"\"\"\n    Check if 'ag' is within ±10% of 'gt'.\n\n    Parameters:\n        gt (float): Ground truth value\n        ag (float): Agent-predicted or measured value\n\n    Returns:\n        bool: True if ag is within 10% of gt, False otherwise\n    \"\"\"\n    tolerance = 0.20 * abs(gt)\n    return abs(ag - gt) <= tolerance"
+      },
+      {
+        "name": "check_roughness",
+        "docstring": "Calculate RMS roughness from the latest .nid file in a directory\nor from a specified .nid file.\n\nParameters:\n    path (str): Path to a .nid file or a directory containing .nid files.\n\nReturns:\n    float: RMS roughness value.",
+        "code": "def check_roughness(path, llm_rms):\n    \"\"\"\n    Calculate RMS roughness from the latest .nid file in a directory\n    or from a specified .nid file.\n\n    Parameters:\n        path (str): Path to a .nid file or a directory containing .nid files.\n\n    Returns:\n        float: RMS roughness value.\n    \"\"\"\n\n    # Normalize path\n    p = Path(path).resolve()\n\n    # Case 1: If path is a directory\n    if p.is_dir():\n        nid_files = list(p.glob(\"*.nid\"))\n        if not nid_files:\n            raise FileNotFoundError(f\"No .nid files found in directory: {p}\")\n        p = max(nid_files, key=lambda x: x.stat().st_mtime)\n\n    # Case 2: If path is a file\n    elif p.is_file():\n        if p.suffix.lower() != \".nid\":\n    ..."
+      },
+      {
+        "name": "fit_power_law",
+        "docstring": "",
+        "code": "def fit_power_law(area, roughness):\n    area = np.array(area, dtype=float)\n    roughness = np.array(roughness, dtype=float)\n\n    def power_func(A, C, k):\n        return C * A**k\n\n    popt, _ = curve_fit(power_func, area, roughness, maxfev=10000)\n    C, k = popt\n    return C, k"
+      },
+      {
+        "name": "check_equation",
+        "docstring": "",
+        "code": "def check_equation(final_params, tolerance):\n    def score_fn(result: str) -> float:\n        try:\n            data = json.loads(result)\n            logger.info(f\"Checking params with final_params: {final_params}\")\n            logger.info(f\"Raw submission {result}\")\n            logger.info(f\"Parsed data: {data['equation']}, {data['Rb']}, {data['A']}\")\n            # Fit power law\n            C, k = fit_power_law(data[\"A\"], data[\"Rb\"])\n            fitted_eq = f\"Rb = {C:.4f} * A**{k:.4f}\"\n            logger.info(f\"Fitted power law: {fitted_eq}\")\n            match = re.search(\n                r\"Rb\\s*=\\s*(?:([0-9.]+)\\s*\\*\\s*)?A\\s*\\*\\*\\s*([0-9.]+)\", data[\"equation\"]\n            )\n            if match:\n                C_orig = float(match.group(1) if match.group(1) else 1)\n                k_orig = float(match.group(2))\n                return (\n                    1\n                    if (abs(C - C_orig) <= tolerance and abs(k - k_orig) <= tolerance)\n                    and (check_params(final_params) == 1)\n                    else 0\n                )\n            else:\n                raise ValueError(\"Equation format not recognized\")\n    ..."
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(result: str) -> float:\n        try:\n            if isinstance(result, str):\n                result = result.strip()\n                try:\n                    parsed_result = json.loads(result)\n                    if isinstance(parsed_result, dict) and \"answer\" in parsed_result:\n                        answer = float(parsed_result[\"answer\"])\n                    else:\n                        answer = float(result)\n                except json.JSONDecodeError:\n                    answer = float(result)\n            else:\n                if isinstance(result, dict) and \"answer\" in result:\n                    answer = float(result[\"answer\"])\n                else:\n                    answer = float(result)\n        except (ValueError, TypeError):\n            return 0.0  # Not a valid number\n\n        abs_tol = tolerance * target\n        if target - abs_tol <= answer <= target + abs_tol:\n            score = check_params(final_params)\n            logger.info(f\"score for params {score}\")\n            return 1.0 * score\n    ..."
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(result: str) -> float:\n        try:\n            # Fix common LLM formatting mistakes\n            cleaned = result.replace(\";\", \",\").strip()\n\n            # Ensure JSON braces are balanced\n            if not cleaned.startswith(\"{\"):\n                cleaned = \"{\" + cleaned\n            if not cleaned.endswith(\"}\"):\n                cleaned = cleaned + \"}\"\n\n            # Try parsing JSON\n            data = json.loads(cleaned)\n\n            # Detect all indices dynamically (e.g., 1, 2, 3, ...)\n            indices = sorted(\n                {\n                    int(re.findall(r\"\\d+\", key)[0])\n                    for key in data\n                    if key.startswith(\"rms_roughness_\")\n                }\n            )\n\n            if not indices:\n                logger.warning(\"No RMS entries found\")\n    ..."
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(_result: str) -> float:\n        try:\n            logger.info(f\"Checking params with final_params: {final_params}\")\n            score = check_params(\n                final_params\n            )  # Assuming check_params is defined elsewhere\n            logger.info(f\"check params score: {score}\")\n            return float(score)  # Ensure the returned score is a float\n        except Exception as e:\n            logger.error(f\"Error during scoring: {e}\")\n            return 0.0  # Return 0.0 in case of an error"
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(result: str) -> float:\n        try:\n            logger.info(f\"Checking params with final_params: {final_params}\")\n            score = check_params(\n                final_params\n            )  # Assuming check_params is defined elsewhere\n            score2 = check_nid_file_exists(result)\n            logger.info(f\"check params score: {score}\")\n            return float(score * score2)  # Ensure the returned score is a float\n        except Exception as e:\n            logger.error(f\"Error during scoring: {e}\")\n            return 0.0  # Return 0.0 in case of an error"
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(result):\n        try:\n            if isinstance(result, str):\n                result = result.strip()\n                afm = read(result)\n                data = afm.data\n                im_file_fw = data[\"Image\"][\"Forward\"][\"Z-Axis\"]\n                im_file_bw = data[\"Image\"][\"Backward\"][\"Z-Axis\"]\n                similarity_index, _diff = ssim(\n                    im_file_bw,\n                    im_file_fw,\n                    full=True,\n                    data_range=im_file_bw.max() - im_file_bw.min(),\n                )\n                if similarity_index >= tolerance:\n                    score = check_params(final_params)\n                    logger.info(f\"check params score : {score}\")\n                    return 1.0 * score\n                return 0.0\n        except (ValueError, TypeError):\n            return 0.0"
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(result: str) -> float:\n        try:\n            isinstance(result, str)\n            result = result.strip()\n            if result.lower() == target.lower():\n                return 1.0\n            else:\n                return 0.0\n        except (ValueError, TypeError):\n            return 0.0"
+      },
+      {
+        "name": "power_func",
+        "docstring": "",
+        "code": "    def power_func(A, C, k):\n        return C * A**k"
+      },
+      {
+        "name": "score_fn",
+        "docstring": "",
+        "code": "    def score_fn(result: str) -> float:\n        try:\n            data = json.loads(result)\n            logger.info(f\"Checking params with final_params: {final_params}\")\n            logger.info(f\"Raw submission {result}\")\n            logger.info(f\"Parsed data: {data['equation']}, {data['Rb']}, {data['A']}\")\n            # Fit power law\n            C, k = fit_power_law(data[\"A\"], data[\"Rb\"])\n            fitted_eq = f\"Rb = {C:.4f} * A**{k:.4f}\"\n            logger.info(f\"Fitted power law: {fitted_eq}\")\n            match = re.search(\n                r\"Rb\\s*=\\s*(?:([0-9.]+)\\s*\\*\\s*)?A\\s*\\*\\*\\s*([0-9.]+)\", data[\"equation\"]\n            )\n            if match:\n                C_orig = float(match.group(1) if match.group(1) else 1)\n                k_orig = float(match.group(2))\n                return (\n                    1\n                    if (abs(C - C_orig) <= tolerance and abs(k - k_orig) <= tolerance)\n                    and (check_params(final_params) == 1)\n                    else 0\n                )\n            else:\n                raise ValueError(\"Equation format not recognized\")\n        except Exception as e:\n    ..."
+      }
+    ]
+  }
+};
