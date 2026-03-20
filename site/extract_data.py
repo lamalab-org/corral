@@ -197,9 +197,9 @@ def extract_tools_from_file(filepath: Path) -> list[dict]:
         def_line = lines[node.lineno - 1]
         end_line = node.end_lineno or body_start + 20
         body_lines = lines[body_start:end_line]
-        # Limit body to ~20 lines
-        if len(body_lines) > 20:
-            body_lines = body_lines[:20]
+        # Limit body to ~50 lines
+        if len(body_lines) > 50:
+            body_lines = body_lines[:50]
             body_lines.append("    ...")
         code_snippet = def_line + "\n" + "\n".join(body_lines)
 
@@ -238,7 +238,7 @@ def extract_scoring_functions(filepath: Path) -> list[dict]:
 
         docstring = ast.get_docstring(node) or ""
         start_line = node.lineno - 1
-        end_line = min(node.end_lineno or start_line + 25, start_line + 25)
+        end_line = min(node.end_lineno or start_line + 50, start_line + 50)
         code_lines = lines[start_line:end_line]
         code_snippet = "\n".join(code_lines)
         if end_line < (node.end_lineno or 0):
