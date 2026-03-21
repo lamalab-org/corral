@@ -1,11 +1,11 @@
 import os
+
 import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
-from corral.agents import ReActAgent
 from corral import CorralRouter, CorralRunner
-from corral.report import CorralWandbLogger
+from corral.agents import ReActAgent
 
 
 def setup_litellm():
@@ -19,12 +19,11 @@ def run_benchmark(
     temperature: float = 0.0,
     run_name: str = "corral_benchmark_run",
     verbose: str = "workflow",
-    session_id: str | None = None,
 ):
     """Run the benchmark with specified model and tasks"""
 
-    host = os.environ.get("CORRAL_HOST","0.0.0.0")
-    port = os.environ.get("CORRAL_PORT","8000")
+    host = os.environ.get("CORRAL_HOST", "0.0.0.0")
+    port = os.environ.get("CORRAL_PORT", "8000")
     interface = CorralRouter(base_url=f"http://{host}:{port}")
     # wandblogger = CorralWandbLogger(
     #     project="corral",
@@ -32,7 +31,7 @@ def run_benchmark(
     #     name=run_name,
     # )
     agent = ReActAgent(model=model, max_iterations=40, temperature=temperature)
-    runner = CorralRunner(interface, agent) #, logger=wandblogger)
+    runner = CorralRunner(interface, agent)  # , logger=wandblogger)
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
@@ -52,26 +51,22 @@ if __name__ == "__main__":
     setup_litellm()
 
     verbosities = [
-        #"brief",
-        #"workflow",
+        # "brief",
+        # "workflow",
         "comprehensive",
     ]
 
     model = "gpt-4o-2024-08-06"
     session_id = None
-    
+
     for verbosity in verbosities:
         logger.info(f"Running benchmark with verbosity: {verbosity}")
-        try: 
+        try:
             model_name = "gpt_4o"
             run_name = f"{model_name}-ReAct-WetLab_Level_1-Subtask-{verbosity}"
             run_benchmark(
-                  model=model,
-                  run_name=run_name,
-                  verbose=verbosity,
-                  session_id=session_id
+                model=model, run_name=run_name, verbose=verbosity, session_id=session_id
             )
-                            
 
         except Exception as e:
             logger.error(f"Benchmark failed: {e!s}")

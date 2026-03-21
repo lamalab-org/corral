@@ -1,11 +1,11 @@
 import os
+
 import litellm
 from dotenv import load_dotenv
 from loguru import logger
 
-from corral.agents import ToolCallingAgent
 from corral import CorralRouter, CorralRunner
-from corral.report import CorralWandbLogger
+from corral.agents import ToolCallingAgent
 
 
 def setup_litellm():
@@ -22,8 +22,8 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    host = os.environ.get("CORRAL_HOST","0.0.0.0")
-    port = os.environ.get("CORRAL_PORT","8000")
+    host = os.environ.get("CORRAL_HOST", "0.0.0.0")
+    port = os.environ.get("CORRAL_PORT", "8000")
     interface = CorralRouter(base_url=f"http://{host}:{port}")
     # wandblogger = CorralWandbLogger(
     #     project="corral",
@@ -31,7 +31,7 @@ def run_benchmark(
     #     name=run_name,
     # )
     agent = ToolCallingAgent(model=model, max_iterations=50, temperature=temperature)
-    runner = CorralRunner(interface, agent) #, logger=wandblogger)
+    runner = CorralRunner(interface, agent)  # , logger=wandblogger)
 
     # Run benchmark
     logger.info(f"Starting benchmark with model: {model}")
@@ -51,15 +51,15 @@ if __name__ == "__main__":
     setup_litellm()
 
     verbosities = [
-        #"brief",
-        #"workflow",
+        # "brief",
+        # "workflow",
         "comprehensive",
     ]
 
     model = "gpt-4o-2024-08-06"
     for verbosity in verbosities:
         logger.info(f"Running benchmark with verbosity: {verbosity}")
-        try: 
+        try:
             model_name = "gpt_4o"
             run_name = f"{model_name}-Tool_Calling-WetLab_Level_3-{verbosity}"
             run_benchmark(model=model, run_name=run_name, verbose=verbosity)
