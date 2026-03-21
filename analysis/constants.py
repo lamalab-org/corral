@@ -80,7 +80,6 @@ ENV_MAP: dict[str, str] = {
     "resistor_network": "resistor",
     "spectra": "spectra",
     "spectra_elucidation": "spectra",
-    "wetlab": "wetlab",
 }
 
 # Reports older than gpt-oss-120b used snake_case; newer reports already use

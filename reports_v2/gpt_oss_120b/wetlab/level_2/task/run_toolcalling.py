@@ -12,7 +12,8 @@ from corral import CorralRouter, CorralRunner
 from corral.agents import ToolCallingAgent
 from corral.agents.hooks import AgentHooks, HookPoint
 from corral.agents.hooks.core import HookContext
-#from corral.report import CorralWandbLogger
+
+# from corral.report import CorralWandbLogger
 
 
 def logprobs_hook(context: HookContext) -> None:
@@ -168,8 +169,8 @@ def run_benchmark(
 ):
     """Run the benchmark with specified model and tasks"""
 
-    host = os.environ.get("CORRAL_HOST","0.0.0.0")
-    port = os.environ.get("CORRAL_PORT","8000")
+    host = os.environ.get("CORRAL_HOST", "0.0.0.0")
+    port = os.environ.get("CORRAL_PORT", "8000")
     interface = CorralRouter(base_url=f"http://{host}:{port}")
     # wandblogger = CorralWandbLogger(
     #     project="corral_resistor_oss",
@@ -187,7 +188,7 @@ def run_benchmark(
     runner = CorralRunner(
         interface,
         agent,
-        #logger=wandblogger,
+        # logger=wandblogger,
     )
 
     # Run benchmark
@@ -213,17 +214,17 @@ def rename_output_dirs(verbosity: str, agent: str):
 
 
 if __name__ == "__main__":
-    load_dotenv()
+    load_dotenv("../../../../../.env", override=True)
     setup_litellm()
-    os.environ["OPENAI_API_KEY"] = os.getenv("BLABLADOR_API_KEY", "")
+    os.environ["OPENAI_API_KEY"] = os.getenv("BLABLADOR_API_KEY_TEST", "")
     agent_type = "ToolCalling"
-    
+
     verbosities = [
-        #"brief", 
-        #"workflow", 
-        "comprehensive"
+        "brief",
+        # "workflow",
+        # "comprehensive"
     ]
-    
+
     for verbosity in verbosities:
         hooks = AgentHooks()
         hooks.register(HookPoint.AFTER_ITERATION, logprobs_hook)
