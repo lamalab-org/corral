@@ -290,12 +290,7 @@ def convert_dict_arg(arg: dict) -> dict:
         prop["type"] = "array"
         prop["items"] = {
             "type": "array",
-            "items": {
-                "anyOf": [
-                    {"type": "string"},
-                    {"type": "number"}
-                ]
-            }
+            "items": {"anyOf": [{"type": "string"}, {"type": "number"}]},
         }
     else:
         json_type = TYPE_MAPPING.get(arg_type)
@@ -608,7 +603,7 @@ def count_tokens_and_add(
     """
     window = get_context_window(model=model)
     if window is None:
-        window = get_context_window(model=model.split("/")[-1])
+        window = get_context_window(model=model.rsplit("/", maxsplit=1)[-1])
 
     if window is None:
         window = 8192  # Default to 8k if unknown

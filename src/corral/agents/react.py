@@ -117,8 +117,10 @@ class ReActAgent(BaseAgent):
 
                 # Convert tuples to lists for color mixing in wetlab
                 if tool_name == "simulate_color_mixture":
-                    converted_input = converted_input.replace("(","[").replace(")", "]")
-                    
+                    converted_input = converted_input.replace("(", "[").replace(
+                        ")", "]"
+                    )
+
                 # Parse as JSON
                 arguments = json.loads(converted_input)
                 actions.append(Action(tool_name=tool_name, arguments=arguments))
@@ -184,7 +186,7 @@ class ReActAgent(BaseAgent):
             )
 
             # Parse response
-            thoughts, actions = self.parse_llm_response(llm_response)
+            _thoughts, actions = self.parse_llm_response(llm_response)
 
             # Check for surrender (XML format) if enabled
             if enable_surrender and (
