@@ -29,7 +29,8 @@ LABEL_SIZE = 10
 
 OUT_DIR = Path(__file__).parent / "results" / "figures" / "fig_4_app"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-OUT_FILE = OUT_DIR / "app_fig4_behavior_panel.pdf"
+OUT_FILE_1 = OUT_DIR / "app_fig4_behavior_panel_1.pdf"
+OUT_FILE_2 = OUT_DIR / "app_fig4_behavior_panel_2.pdf"
 
 
 def add_panel_label(ax, label: str, x: float = -0.18, y: float = 1.08) -> None:
@@ -625,10 +626,10 @@ def plot_tool_call_ridgeline_panel(
 
 
 def main() -> None:
-    """Build and save the combined environment-behavior panel.
+    """Build and save the two combined environment-behavior panels.
 
     Returns:
-        None: The function saves the panel PDF.
+        None: The function saves two panel PDFs.
     """
     reports_df = action_plots.load_reports_df()
     action_distribution_df, unknown_tools = action_plots.build_action_distribution_df(
@@ -642,31 +643,24 @@ def main() -> None:
             "No tool-level action data could be extracted from reports.jsonl"
         )
 
-    fig = plt.figure(figsize=(TWO_COL_WIDTH, 6.5 * ONE_COL_HEIGHT))
-    outer_grid = fig.add_gridspec(
-        5,
-        1,
-        height_ratios=[1.9, 1, 1, 1, 1],
-        hspace=0.65,
-    )
-    top_section_grid = outer_grid[0].subgridspec(
+    # Shared label-placement constants
+    X_PAD = 0.018
+    RIGHT_X_OFFSET = 0.1
+    Y_PAD_TOP = -0.005
+    Y_PAD_REST = -0.005
+
+    # ---- Figure 1: panels A and B (action distributions) ------------------
+    fig1 = plt.figure(figsize=(TWO_COL_WIDTH, 2.2 * ONE_COL_HEIGHT))
+    outer_grid1 = fig1.add_gridspec(
         2,
         1,
         height_ratios=[11.2, 0.2],
         hspace=0.45,
     )
-    top_grid = top_section_grid[0].subgridspec(1, 2, wspace=0.26)
-    token_dist_grid = outer_grid[2].subgridspec(1, 2, wspace=0.40)
-    ridge_grid = outer_grid[4].subgridspec(1, 2, wspace=0.42)
-
-    ax_action_agent = fig.add_subplot(top_grid[0, 0])
-    ax_action_model = fig.add_subplot(top_grid[0, 1])
-    ax_action_legend = fig.add_subplot(top_section_grid[1, 0])
-    ax_output_tokens = fig.add_subplot(outer_grid[1, 0])
-    ax_output_tokens_agent = fig.add_subplot(token_dist_grid[0, 0])
-    ax_output_tokens_model = fig.add_subplot(token_dist_grid[0, 1])
-    ax_tool_calls = fig.add_subplot(outer_grid[3, 0])
-
+    top_grid1 = outer_grid1[0].subgridspec(1, 2, wspace=0.26)
+    ax_action_agent = fig1.add_subplot(top_grid1[0, 0])
+    ax_action_model = fig1.add_subplot(top_grid1[0, 1])
+    ax_action_legend = fig1.add_subplot(outer_grid1[1, 0])
     ax_action_legend.axis("off")
 
     plot_action_distribution_panel(
@@ -691,6 +685,92 @@ def main() -> None:
         ],
         subgroup_labels=action_plots.MODEL_LABELS,
     )
+
+    category_handles = [
+        Patch(
+            facecolor=action_plots.ACTION_COLORS[action_category],
+            label=action_plots.ACTION_LABELS[action_category],
+        )
+        for action_category in action_plots.ACTION_ORDER
+    ]
+    ax_action_legend.legend(
+        handles=category_handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.6),
+        ncol=len(action_plots.ACTION_ORDER),
+        frameon=False,
+        title="Action Types",
+        fontsize=LABEL_SIZE,
+        title_fontsize=LABEL_SIZE,
+    )
+
+    for ax in fig1.get_axes():
+        ax.tick_params(axis="both", labelsize=LABEL_SIZE)
+
+    fig1.canvas.draw()
+    renderer1 = fig1.canvas.get_renderer()
+
+    def _tight_fig_bbox1(ax):
+        tb = ax.get_tightbbox(renderer1)
+        if tb is None:
+            return ax.get_position()
+        return tb.transformed(fig1.transFigure.inverted())
+
+    left_specs1 = [(ax_action_agent, "A")]
+    right_specs1 = [(ax_action_model, "B")]
+    left_bboxes1 = [_tight_fig_bbox1(ax) for ax, _ in left_specs1]
+    right_bboxes1 = [_tight_fig_bbox1(ax) for ax, _ in right_specs1]
+    left_x1 = min(bb.x0 for bb in left_bboxes1) - X_PAD
+    right_x1 = min(bb.x0 for bb in right_bboxes1) - X_PAD + RIGHT_X_OFFSET
+
+    for (_ax, label), bb in zip(left_specs1, left_bboxes1, strict=True):
+        fig1.text(
+            left_x1,
+            bb.y1 + Y_PAD_TOP,
+            label,
+            fontweight="bold",
+            fontsize=16,
+            color="black",
+            ha="right",
+            va="bottom",
+            clip_on=False,
+        )
+    for (_ax, label), bb in zip(right_specs1, right_bboxes1, strict=True):
+        fig1.text(
+            right_x1,
+            bb.y1 + Y_PAD_TOP,
+            label,
+            fontweight="bold",
+            fontsize=16,
+            color="black",
+            ha="right",
+            va="bottom",
+            clip_on=False,
+        )
+
+    logger.info(
+        f"Fig 1 label alignment -- left_x={left_x1:.4f}, right_x={right_x1:.4f}"
+    )
+    fig1.savefig(OUT_FILE_1, bbox_inches="tight")
+    plt.close(fig1)
+    logger.info(f"Saved figure 1 to {OUT_FILE_1}")
+
+    # ---- Figure 2: panels A-F (formerly C-H) ------------------------------
+    fig2 = plt.figure(figsize=(TWO_COL_WIDTH, 4.5 * ONE_COL_HEIGHT))
+    outer_grid2 = fig2.add_gridspec(
+        4,
+        1,
+        height_ratios=[1, 1, 1, 1],
+        hspace=0.65,
+    )
+    token_dist_grid2 = outer_grid2[1].subgridspec(1, 2, wspace=0.40)
+    ridge_grid2 = outer_grid2[3].subgridspec(1, 2, wspace=0.42)
+
+    ax_output_tokens = fig2.add_subplot(outer_grid2[0, 0])
+    ax_output_tokens_agent = fig2.add_subplot(token_dist_grid2[0, 0])
+    ax_output_tokens_model = fig2.add_subplot(token_dist_grid2[0, 1])
+    ax_tool_calls = fig2.add_subplot(outer_grid2[2, 0])
+
     plot_output_tokens_environment(ax_output_tokens, output_token_df)
     plot_output_token_distribution(
         ax_output_tokens_agent,
@@ -720,86 +800,61 @@ def main() -> None:
         box_color=tool_call_plots.PLOT_COLOR,
     )
     ridge_ax_agent = plot_tool_call_ridgeline_panel(
-        fig,
-        ridge_grid[0, 0],
+        fig2,
+        ridge_grid2[0, 0],
         tool_call_df,
         group_col="agent_type",
         label_map=action_plots.AGENT_TYPE_LABELS,
     )
     ridge_ax_model = plot_tool_call_ridgeline_panel(
-        fig,
-        ridge_grid[0, 1],
+        fig2,
+        ridge_grid2[0, 1],
         tool_call_df,
         group_col="model",
         label_map=action_plots.MODEL_LABELS,
     )
 
-    category_handles = [
-        Patch(
-            facecolor=action_plots.ACTION_COLORS[action_category],
-            label=action_plots.ACTION_LABELS[action_category],
-        )
-        for action_category in action_plots.ACTION_ORDER
-    ]
-    ax_action_legend.legend(
-        handles=category_handles,
-        loc="upper center",
-        bbox_to_anchor=(0.5, -0.6),
-        ncol=len(action_plots.ACTION_ORDER),
-        frameon=False,
-        title="Action Types",
-        fontsize=LABEL_SIZE,
-        title_fontsize=LABEL_SIZE,
-    )
-
-    # Unify tick label sizes across all axes
-    for ax in fig.get_axes():
+    for ax in fig2.get_axes():
         ax.tick_params(axis="both", labelsize=LABEL_SIZE)
 
-    # --- Place panel labels with pixel-perfect column alignment ------------
-    # Render once so all layout positions are finalised.
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
+    fig2.canvas.draw()
+    renderer2 = fig2.canvas.get_renderer()
 
-    def _tight_fig_bbox(ax):
-        """Return the tight bounding box of *ax* in figure coordinates."""
-        tb = ax.get_tightbbox(renderer)
+    def _tight_fig_bbox2(ax):
+        tb = ax.get_tightbbox(renderer2)
         if tb is None:
             return ax.get_position()
-        return tb.transformed(fig.transFigure.inverted())
+        return tb.transformed(fig2.transFigure.inverted())
 
-    # Define left-column and right-column label specifications.
-    left_specs = [
-        (ax_action_agent, "A"),
-        (ax_output_tokens, "C"),
-        (ax_output_tokens_agent, "D"),
-        (ax_tool_calls, "F"),
+    # A = output tokens by env (full-width, left label)
+    # B = output token dist by agent type (left col)
+    # C = output token dist by model (right col)
+    # D = tool calls by env (full-width, left label)
+    # E = ridgeline by agent type (left col)
+    # F = ridgeline by model (right col)
+    left_specs2 = [
+        (ax_output_tokens, "A"),
+        (ax_output_tokens_agent, "B"),
+        (ax_tool_calls, "D"),
     ]
-    right_specs = [
-        (ax_action_model, "B"),
-        (ax_output_tokens_model, "E"),
+    right_specs2 = [
+        (ax_output_tokens_model, "C"),
     ]
     if ridge_ax_agent is not None:
-        left_specs.append((ridge_ax_agent, "G"))
+        left_specs2.append((ridge_ax_agent, "E"))
     if ridge_ax_model is not None:
-        right_specs.append((ridge_ax_model, "H"))
+        right_specs2.append((ridge_ax_model, "F"))
 
-    left_bboxes = [_tight_fig_bbox(ax) for ax, _ in left_specs]
-    right_bboxes = [_tight_fig_bbox(ax) for ax, _ in right_specs]
+    left_bboxes2 = [_tight_fig_bbox2(ax) for ax, _ in left_specs2]
+    right_bboxes2 = [_tight_fig_bbox2(ax) for ax, _ in right_specs2]
+    top_labels2 = {"A"}
+    left_x2 = min(bb.x0 for bb in left_bboxes2) - X_PAD
+    right_x2 = min(bb.x0 for bb in right_bboxes2) - X_PAD + RIGHT_X_OFFSET
 
-    # Aligned x = leftmost tight-bbox edge in each column, minus padding.
-    X_PAD = 0.018
-    RIGHT_X_OFFSET = 0.1  # shift B, E, H a bit to the right
-    Y_PAD_TOP = 0.008  # y padding for A and B (top row)
-    Y_PAD_REST = 0.002  # y padding for C-H (lower rows, moved down)
-    left_x = min(bb.x0 for bb in left_bboxes) - X_PAD
-    right_x = min(bb.x0 for bb in right_bboxes) - X_PAD + RIGHT_X_OFFSET
-
-    top_labels = {"A", "B"}
-    for (_ax, label), bb in zip(left_specs, left_bboxes, strict=True):
-        y_pad = Y_PAD_TOP if label in top_labels else Y_PAD_REST
-        fig.text(
-            left_x,
+    for (_ax, label), bb in zip(left_specs2, left_bboxes2, strict=True):
+        y_pad = Y_PAD_TOP if label in top_labels2 else Y_PAD_REST
+        fig2.text(
+            left_x2,
             bb.y1 + y_pad,
             label,
             fontweight="bold",
@@ -809,10 +864,10 @@ def main() -> None:
             va="bottom",
             clip_on=False,
         )
-    for (_ax, label), bb in zip(right_specs, right_bboxes, strict=True):
-        y_pad = Y_PAD_TOP if label in top_labels else Y_PAD_REST
-        fig.text(
-            right_x,
+    for (_ax, label), bb in zip(right_specs2, right_bboxes2, strict=True):
+        y_pad = Y_PAD_TOP if label in top_labels2 else Y_PAD_REST
+        fig2.text(
+            right_x2,
             bb.y1 + y_pad,
             label,
             fontweight="bold",
@@ -823,12 +878,13 @@ def main() -> None:
             clip_on=False,
         )
 
-    logger.info(f"Label alignment -- left_x={left_x:.4f}, right_x={right_x:.4f}")
+    logger.info(
+        f"Fig 2 label alignment -- left_x={left_x2:.4f}, right_x={right_x2:.4f}"
+    )
+    fig2.savefig(OUT_FILE_2, bbox_inches="tight")
+    plt.close(fig2)
+    logger.info(f"Saved figure 2 to {OUT_FILE_2}")
 
-    fig.savefig(OUT_FILE, bbox_inches="tight")
-    plt.close(fig)
-
-    logger.info(f"Saved figure to {OUT_FILE}")
     logger.info(f"Skipped {skipped_output_trials} trials without message histories")
     logger.info(f"Skipped {skipped_tool_call_trials} trials without tool call counts")
     if unknown_tools:
