@@ -169,9 +169,6 @@ def extract_tools_from_file(filepath: Path) -> list[dict]:
         def_line = lines[node.lineno - 1]
         end_line = node.end_lineno or body_start + 20
         body_lines = lines[body_start:end_line]
-        if len(body_lines) > 50:
-            body_lines = body_lines[:50]
-            body_lines.append("    ...")
         code_snippet = def_line + "\n" + "\n".join(body_lines)
 
         tool_data = {
@@ -208,11 +205,9 @@ def extract_scoring_functions(filepath: Path) -> list[dict]:
 
         docstring = ast.get_docstring(node) or ""
         start_line = node.lineno - 1
-        end_line = min(node.end_lineno or start_line + 50, start_line + 50)
+        end_line = node.end_lineno or start_line + 50
         code_lines = lines[start_line:end_line]
         code_snippet = "\n".join(code_lines)
-        if end_line < (node.end_lineno or 0):
-            code_snippet += "\n    ..."
 
         functions.append(
             {
@@ -282,9 +277,10 @@ def load_tasks_and_subtasks(env_dir_name: str) -> dict:
         raw_tasks = load_entries_from_dir(tasks_dir)
         raw_subtasks = load_entries_from_dir(subtasks_dir)
 
-        # Normalize entries
+        # Normalize entries — _uid ensures uniqueness even when id repeats across files
         tasks = [
             {
+                "_uid": e.get("uuid", f"{level_name}-task-{i}"),
                 "id": e.get("id", e.get("name", "")),
                 "name": e.get("name", ""),
                 "description": e.get("description", ""),
@@ -293,10 +289,11 @@ def load_tasks_and_subtasks(env_dir_name: str) -> dict:
                 "submission_format": e.get("submission_format", ""),
                 "level": level_name,
             }
-            for e in raw_tasks
+            for i, e in enumerate(raw_tasks)
         ]
         subtasks = [
             {
+                "_uid": e.get("uuid", f"{level_name}-subtask-{i}"),
                 "id": e.get("id", e.get("name", "")),
                 "name": e.get("name", ""),
                 "description": e.get("description", ""),
@@ -305,7 +302,7 @@ def load_tasks_and_subtasks(env_dir_name: str) -> dict:
                 "submission_format": e.get("submission_format", ""),
                 "level": level_name,
             }
-            for e in raw_subtasks
+            for i, e in enumerate(raw_subtasks)
         ]
 
         levels[level_name] = {"tasks": tasks, "subtasks": subtasks}

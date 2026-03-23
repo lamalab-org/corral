@@ -288,7 +288,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def generate_reconstructed_slab(\n    import json\n    from copy import deepcopy\n\n    import numpy as np\n    from pymatgen.core import Structure\n    from pymatgen.core.surface import ReconstructionGenerator\n    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer\n\n    # Parse bulk structure\n    try:\n        bulk_structure = Structure.from_str(bulk_cif, fmt=\"cif\")\n    except Exception as e:\n        raise ValueError(f\"Invalid CIF format: {e!s}\") from e\n\n    # Validate Miller indices are valid for the structure\n    try:\n        sg = SpacegroupAnalyzer(bulk_structure)\n        # This will raise an exception if the Miller indices are invalid\n        sg.get_conventional_standard_structure(international_monoclinic=True)\n    except Exception as err:\n        raise ValueError(\n            f\"Miller indices {miller_index} are invalid for the given structure\"\n        ) from err\n\n    # Parse reconstruction instructions\n    try:\n        instructions = json.loads(reconstruction_instructions)\n    except Exception as e:\n        raise ValueError(\n            f\"Invalid JSON format in reconstruction_instructions: {e!s}\"\n        ) from e\n\n    # Validate reconstruction instructions\n    required_fields = {\n        \"name\",\n        \"transformation_matrix\",\n        \"SlabGenerator_parameters\",\n        \"points_to_remove\",\n        \"points_to_add\",\n    }\n    missing_fields = required_fields - set(instructions.keys())\n    if missing_fields:\n        raise ValueError(f\"Missing required fields in instructions: {missing_fields}\")\n\n    # Verify transformation matrix dimensions\n    trans_matrix = instructions[\"transformation_matrix\"]\n    if (\n        not isinstance(trans_matrix, list)\n        or len(trans_matrix) != 3\n        or not all(isinstance(row, list) and len(row) == 3 for row in trans_matrix)\n    ..."
+        "code": "def generate_reconstructed_slab(\n    import json\n    from copy import deepcopy\n\n    import numpy as np\n    from pymatgen.core import Structure\n    from pymatgen.core.surface import ReconstructionGenerator\n    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer\n\n    # Parse bulk structure\n    try:\n        bulk_structure = Structure.from_str(bulk_cif, fmt=\"cif\")\n    except Exception as e:\n        raise ValueError(f\"Invalid CIF format: {e!s}\") from e\n\n    # Validate Miller indices are valid for the structure\n    try:\n        sg = SpacegroupAnalyzer(bulk_structure)\n        # This will raise an exception if the Miller indices are invalid\n        sg.get_conventional_standard_structure(international_monoclinic=True)\n    except Exception as err:\n        raise ValueError(\n            f\"Miller indices {miller_index} are invalid for the given structure\"\n        ) from err\n\n    # Parse reconstruction instructions\n    try:\n        instructions = json.loads(reconstruction_instructions)\n    except Exception as e:\n        raise ValueError(\n            f\"Invalid JSON format in reconstruction_instructions: {e!s}\"\n        ) from e\n\n    # Validate reconstruction instructions\n    required_fields = {\n        \"name\",\n        \"transformation_matrix\",\n        \"SlabGenerator_parameters\",\n        \"points_to_remove\",\n        \"points_to_add\",\n    }\n    missing_fields = required_fields - set(instructions.keys())\n    if missing_fields:\n        raise ValueError(f\"Missing required fields in instructions: {missing_fields}\")\n\n    # Verify transformation matrix dimensions\n    trans_matrix = instructions[\"transformation_matrix\"]\n    if (\n        not isinstance(trans_matrix, list)\n        or len(trans_matrix) != 3\n        or not all(isinstance(row, list) and len(row) == 3 for row in trans_matrix)\n    ):\n        raise ValueError(\"Transformation matrix must be a 3x3 array\")\n\n    # Convert to numpy array for easier handling\n    trans_matrix = np.array(trans_matrix)\n\n    # Initialize reconstruction generator\n    recon_gen = ReconstructionGenerator(\n        initial_structure=bulk_structure,\n        min_slab_size=min_slab_size,\n        min_vacuum_size=min_vacuum_size,\n        reconstruction_name=instructions[\"name\"],\n    )\n\n    slabgen_params = {}\n\n    if \"SlabGenerator_parameters\" in instructions:\n        slabgen_params.update(instructions[\"SlabGenerator_parameters\"])\n\n    slabgen_params[\"miller_index\"] = miller_index\n    slabgen_params[\"min_slab_size\"] = min_slab_size\n    slabgen_params[\"min_vacuum_size\"] = min_vacuum_size\n\n    # Set parameters on the reconstruction generator\n    recon_gen.slabgen_params = slabgen_params\n    recon_gen.trans_matrix = trans_matrix\n    recon_gen.reconstruction_json = deepcopy(instructions)\n\n    # Generate reconstructed slabs\n    try:\n        recon_slabs = recon_gen.build_slabs()\n    except Exception as e:\n        raise ValueError(f\"Reconstruction failed: {e!s}\") from e\n\n    if not recon_slabs:\n        raise ValueError(\"Reconstruction failed - no slabs were generated\")\n\n    # Return single CIF if requested\n    if not return_all_variants:\n        return recon_slabs[0].to(fmt=\"cif\")\n\n    output = {\n        \"variants\": [],\n        \"reconstruction_metadata\": {\n            \"name\": instructions[\"name\"],\n            \"description\": instructions.get(\"description\", \"\"),\n            \"reference\": instructions.get(\"reference\", \"\"),\n            \"miller_index\": list(miller_index),\n            \"woods_notation\": instructions.get(\"Woods_notation\", \"\"),\n            \"spacegroup\": instructions.get(\"spacegroup\", {}),\n            \"transformation_matrix\": instructions[\"transformation_matrix\"],\n            \"total_variants\": len(recon_slabs),\n            \"slab_parameters\": {\n                \"min_slab_size\": min_slab_size,\n                \"min_vacuum_size\": min_vacuum_size,\n                \"SlabGenerator_parameters\": {\n                    k: v\n                    for k, v in slabgen_params.items()\n                    if k not in [\"miller_index\", \"min_slab_size\", \"min_vacuum_size\"]\n                },\n            },\n        },\n    }\n\n    for idx, slab in enumerate(recon_slabs):\n        # Get spacegroup info\n        try:\n            spacegroup_info = slab.get_space_group_info()\n        except Exception:\n            spacegroup_info = (\"Unknown\", None)  # Default if unable to determine\n\n        lattice_params = slab.lattice.parameters\n        variant_info = {\n            \"index\": idx,\n            \"cif\": slab.to(fmt=\"cif\"),\n            \"spacegroup\": str(spacegroup_info),\n            \"formula\": slab.composition.reduced_formula,\n            \"lattice_parameters\": {\n                \"a\": lattice_params[0],\n                \"b\": lattice_params[1],\n                \"c\": lattice_params[2],\n                \"alpha\": lattice_params[3],\n                \"beta\": lattice_params[4],\n                \"gamma\": lattice_params[5],\n            },\n            \"num_atoms\": len(slab),\n            \"surface_area\": float(slab.lattice.volume / lattice_params[2]),\n        }\n\n        if \"variant_info\" in instructions:\n            matching_variants = [\n                v for v in instructions.get(\"variant_info\", []) if v.get(\"index\") == idx\n            ]\n            if matching_variants:\n                variant_info.update(\n                    {k: v for k, v in matching_variants[0].items() if k != \"index\"}\n                )\n\n        output[\"variants\"].append(variant_info)\n\n    return json.dumps(output, indent=2)"
       },
       {
         "name": "get_bulk_polymorphs_data",
@@ -346,7 +346,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def get_bulk_polymorphs_data_to_file(\n    if save_path is None:\n        raise ValueError(\"save_path must be provided to save the JSON data\")\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Query for materials with the given composition\n        docs = mpr.materials.summary.search(\n            formula=composition,\n            fields=[\n                \"material_id\",\n                \"structure\",\n                \"energy_above_hull\",\n                \"formation_energy_per_atom\",\n                \"band_gap\",\n                \"density\",\n                \"volume\",\n                \"nsites\",\n                \"symmetry\",\n                \"is_stable\",\n            ],\n        )\n\n        # Convert structures to CIF for easy storage\n        polymorph_data = []\n        for doc in docs:\n            structure_cif = doc.structure.to(fmt=\"cif\")\n\n            polymorph_data.append(\n                {\n                    \"material_id\": doc.material_id,\n                    \"cif\": structure_cif,\n                    \"energy_above_hull\": doc.energy_above_hull,\n                    \"formation_energy_per_atom\": doc.formation_energy_per_atom,\n                    \"band_gap\": doc.band_gap,\n                    \"density\": doc.density,\n                    \"volume\": doc.volume,\n                    \"nsites\": doc.nsites,\n                    \"space_group\": doc.symmetry.symbol,\n                    \"is_stable\": doc.is_stable,\n                }\n            )\n\n        # Sort by energy above hull (stability)\n        polymorph_data = sorted(polymorph_data, key=lambda x: x[\"energy_above_hull\"])\n    ..."
+        "code": "def get_bulk_polymorphs_data_to_file(\n    if save_path is None:\n        raise ValueError(\"save_path must be provided to save the JSON data\")\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Query for materials with the given composition\n        docs = mpr.materials.summary.search(\n            formula=composition,\n            fields=[\n                \"material_id\",\n                \"structure\",\n                \"energy_above_hull\",\n                \"formation_energy_per_atom\",\n                \"band_gap\",\n                \"density\",\n                \"volume\",\n                \"nsites\",\n                \"symmetry\",\n                \"is_stable\",\n            ],\n        )\n\n        # Convert structures to CIF for easy storage\n        polymorph_data = []\n        for doc in docs:\n            structure_cif = doc.structure.to(fmt=\"cif\")\n\n            polymorph_data.append(\n                {\n                    \"material_id\": doc.material_id,\n                    \"cif\": structure_cif,\n                    \"energy_above_hull\": doc.energy_above_hull,\n                    \"formation_energy_per_atom\": doc.formation_energy_per_atom,\n                    \"band_gap\": doc.band_gap,\n                    \"density\": doc.density,\n                    \"volume\": doc.volume,\n                    \"nsites\": doc.nsites,\n                    \"space_group\": doc.symmetry.symbol,\n                    \"is_stable\": doc.is_stable,\n                }\n            )\n\n        # Sort by energy above hull (stability)\n        polymorph_data = sorted(polymorph_data, key=lambda x: x[\"energy_above_hull\"])\n        json_str = json.dumps(polymorph_data, indent=2)\n\n        # Save to file if path is provided\n        if save_path:\n            with Path(save_path).open(\"w\") as f:\n                f.write(json_str)\n\n        return save_path"
       },
       {
         "name": "sort_and_get_first_from_json",
@@ -486,7 +486,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def get_mp_surface_properties(material_id: str) -> str:\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Get surface properties\n        try:\n            surface_docs = mpr.summary.search(\n                material_ids=[material_id],\n                fields=[\n                    \"material_id\",\n                    \"formula_pretty\",\n                    \"weighted_surface_energy\",\n                    \"weighted_surface_energy_EV_PER_ANG2\",\n                    \"surface_anisotropy\",\n                    \"shape_factor\",\n                    \"has_reconstructed\",\n                ],\n            )\n\n            if not surface_docs:\n                return json.dumps(\n                    {\"error\": f\"No surface properties found for {material_id}\"}\n                )\n\n            surface_data = []\n            for doc in surface_docs:\n                data = {\n                    \"material_id\": doc.material_id,\n                    \"formula_pretty\": doc.formula_pretty,\n                }\n\n                # Add surface properties if available\n                if hasattr(doc, \"weighted_surface_energy\"):\n                    data[\"weighted_surface_energy\"] = doc.weighted_surface_energy\n                if hasattr(doc, \"weighted_surface_energy_EV_PER_ANG2\"):\n                    data[\"weighted_surface_energy_EV_PER_ANG2\"] = (\n                        doc.weighted_surface_energy_EV_PER_ANG2\n                    )\n                if hasattr(doc, \"surface_anisotropy\"):\n                    data[\"surface_anisotropy\"] = doc.surface_anisotropy\n                if hasattr(doc, \"shape_factor\"):\n                    data[\"shape_factor\"] = doc.shape_factor\n                if hasattr(doc, \"has_reconstructed\"):\n                    data[\"has_reconstructed\"] = doc.has_reconstructed\n\n                surface_data.append(data)\n\n    ..."
+        "code": "def get_mp_surface_properties(material_id: str) -> str:\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Get surface properties\n        try:\n            surface_docs = mpr.summary.search(\n                material_ids=[material_id],\n                fields=[\n                    \"material_id\",\n                    \"formula_pretty\",\n                    \"weighted_surface_energy\",\n                    \"weighted_surface_energy_EV_PER_ANG2\",\n                    \"surface_anisotropy\",\n                    \"shape_factor\",\n                    \"has_reconstructed\",\n                ],\n            )\n\n            if not surface_docs:\n                return json.dumps(\n                    {\"error\": f\"No surface properties found for {material_id}\"}\n                )\n\n            surface_data = []\n            for doc in surface_docs:\n                data = {\n                    \"material_id\": doc.material_id,\n                    \"formula_pretty\": doc.formula_pretty,\n                }\n\n                # Add surface properties if available\n                if hasattr(doc, \"weighted_surface_energy\"):\n                    data[\"weighted_surface_energy\"] = doc.weighted_surface_energy\n                if hasattr(doc, \"weighted_surface_energy_EV_PER_ANG2\"):\n                    data[\"weighted_surface_energy_EV_PER_ANG2\"] = (\n                        doc.weighted_surface_energy_EV_PER_ANG2\n                    )\n                if hasattr(doc, \"surface_anisotropy\"):\n                    data[\"surface_anisotropy\"] = doc.surface_anisotropy\n                if hasattr(doc, \"shape_factor\"):\n                    data[\"shape_factor\"] = doc.shape_factor\n                if hasattr(doc, \"has_reconstructed\"):\n                    data[\"has_reconstructed\"] = doc.has_reconstructed\n\n                surface_data.append(data)\n\n            return json.dumps(surface_data, indent=2)\n        except Exception as e:\n            return json.dumps({\"error\": f\"Error fetching surface properties: {e!s}\"})"
       },
       {
         "name": "generate_adsorbate_slab_configs",
@@ -530,6 +530,7 @@ const CORRAL_DATA = {
     ],
     "tasks": [
       {
+        "_uid": "e36bedc1-3c32-4454-9a52-4b15207aab46",
         "id": "si_workflow",
         "name": "Complete CO2 Adsorption on Silicon Slab Workflow",
         "description": "Create a CO2 adsorbed structure on a Silicon slab. Submit the path to the final combined structure CIF file.",
@@ -546,6 +547,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "925bf197-2d07-4e47-b8a3-618a2b740cbf",
         "id": "tio2_workflow",
         "name": "Complete CO2 Adsorption on TiO2 Slab Workflow",
         "description": "Create a CO2 adsorbed structure on a Titanium dioxide slab. Submit the path to the final combined structure CIF file.",
@@ -562,6 +564,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "70ec5c58-d769-4849-a290-8367e5a47b25",
         "id": "cu2o_workflow",
         "name": "Complete CO2 Adsorption on Cuprous Oxide Slab Workflow",
         "description": "Create a CO2 adsorbed structure on a Cuprous Oxide slab. Submit the path to the final combined structure CIF file.",
@@ -580,6 +583,7 @@ const CORRAL_DATA = {
     ],
     "subtasks": [
       {
+        "_uid": "14e366e1-708f-4cae-90b4-adc5020184f9",
         "id": "retrieve_structure",
         "name": "Retrieve Bulk Structure",
         "description": "Retrieve structure of Si from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -591,6 +595,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "2c470e2c-422c-44ce-86fa-15c2b2167bb0",
         "id": "enumerate_slabs",
         "name": "Enumerate Possible Slabs",
         "description": "Enumerate possible slabs from the bulk Si structure and save the result as a JSON file. Submit the path to the JSON file.",
@@ -602,6 +607,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "2e51e09e-51a1-4f38-8631-76236cf2cfa0",
         "id": "choose_slab",
         "name": "Choose Slab",
         "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
@@ -613,6 +619,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d887fadf-9127-4ac0-9888-5a06c80f1d57",
         "id": "create_molecule",
         "name": "Create CO2 Molecule",
         "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -624,6 +631,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ec350e71-cca3-42a5-8da9-6f52ae1fef91",
         "id": "get_adsorption_sites",
         "name": "Identify Adsorption Sites",
         "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
@@ -635,6 +643,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ceef1b29-a7b0-4e70-89a9-b38070d1a1ef",
         "id": "choose_adsorption_site",
         "name": "Choose Adsorption Site",
         "description": "Choose one adsorption site (preferably ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
@@ -646,6 +655,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4a9280f9-92c5-438c-a937-e49a3ea74eb1",
         "id": "add_adsorbate",
         "name": "Add CO2 to Silicon Slab",
         "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
@@ -657,6 +667,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7915a910-5bb5-48b1-b9ab-a28cfcd4e888",
         "id": "retrieve_structure",
         "name": "Retrieve Bulk Structure",
         "description": "Retrieve structure of TiO2 from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -668,6 +679,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ecc8a599-c88a-4ad6-9ebd-cfbaab04ae06",
         "id": "enumerate_slabs",
         "name": "Enumerate Possible Slabs",
         "description": "Enumerate possible slabs from the bulk TiO2 structure and save the result as a JSON file. Submit the path to the JSON file.",
@@ -679,6 +691,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6fe24ab5-f718-4434-8c63-aa35b2ed73c8",
         "id": "choose_slab",
         "name": "Choose Slab",
         "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
@@ -690,6 +703,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "65230291-0bf7-4f70-89e3-409247f2920e",
         "id": "create_molecule",
         "name": "Create CO2 Molecule",
         "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -701,6 +715,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "a91058f5-c06c-4e30-a4e8-57e2653c67c4",
         "id": "get_adsorption_sites",
         "name": "Identify Adsorption Sites",
         "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
@@ -712,6 +727,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "a58c018d-2306-45d8-aa5f-bbc0ca5f3853",
         "id": "choose_adsorption_site",
         "name": "Choose Adsorption Site",
         "description": "Choose one adsorption site (preferably a ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
@@ -723,6 +739,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "5a261e6b-6e6a-4287-aec6-5c2a31c543db",
         "id": "add_adsorbate",
         "name": "Add CO2 to Silicon Slab",
         "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
@@ -734,6 +751,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "cfcf1824-83ec-4619-bce2-12efc34615ad",
         "id": "retrieve_structure",
         "name": "Retrieve Bulk Structure",
         "description": "Retrieve structure of Cu2O from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -745,6 +763,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f85513ed-3b81-4f78-b45e-772c8ff39f3d",
         "id": "enumerate_slabs",
         "name": "Enumerate Possible Slabs",
         "description": "Enumerate possible slabs from the bulk Cu2O structure and save the result as a JSON file. Submit the path to the JSON file.",
@@ -756,6 +775,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ebcc377d-93f6-4948-bbad-72afab18988b",
         "id": "choose_slab",
         "name": "Choose Slab",
         "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
@@ -767,6 +787,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "bbf060f8-6fee-48ac-a353-d93751f9394c",
         "id": "create_molecule",
         "name": "Create CO2 Molecule",
         "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -778,6 +799,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "bde9d905-6f0b-46da-ad25-6508ddf073fd",
         "id": "get_adsorption_sites",
         "name": "Identify Adsorption Sites",
         "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
@@ -789,6 +811,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "790f0baa-bc06-42d1-9370-9ee35fd4b861",
         "id": "choose_adsorption_site",
         "name": "Choose Adsorption Site",
         "description": "Choose one adsorption site (preferably ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
@@ -800,6 +823,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "28aa4320-4b51-4b17-b7b4-f43f404e0cb7",
         "id": "add_adsorbate",
         "name": "Add CO2 to Silicon Slab",
         "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
@@ -815,6 +839,7 @@ const CORRAL_DATA = {
       "level_1": {
         "tasks": [
           {
+            "_uid": "e36bedc1-3c32-4454-9a52-4b15207aab46",
             "id": "si_workflow",
             "name": "Complete CO2 Adsorption on Silicon Slab Workflow",
             "description": "Create a CO2 adsorbed structure on a Silicon slab. Submit the path to the final combined structure CIF file.",
@@ -831,6 +856,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "925bf197-2d07-4e47-b8a3-618a2b740cbf",
             "id": "tio2_workflow",
             "name": "Complete CO2 Adsorption on TiO2 Slab Workflow",
             "description": "Create a CO2 adsorbed structure on a Titanium dioxide slab. Submit the path to the final combined structure CIF file.",
@@ -847,6 +873,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "70ec5c58-d769-4849-a290-8367e5a47b25",
             "id": "cu2o_workflow",
             "name": "Complete CO2 Adsorption on Cuprous Oxide Slab Workflow",
             "description": "Create a CO2 adsorbed structure on a Cuprous Oxide slab. Submit the path to the final combined structure CIF file.",
@@ -865,6 +892,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "14e366e1-708f-4cae-90b4-adc5020184f9",
             "id": "retrieve_structure",
             "name": "Retrieve Bulk Structure",
             "description": "Retrieve structure of Si from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -876,6 +904,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "2c470e2c-422c-44ce-86fa-15c2b2167bb0",
             "id": "enumerate_slabs",
             "name": "Enumerate Possible Slabs",
             "description": "Enumerate possible slabs from the bulk Si structure and save the result as a JSON file. Submit the path to the JSON file.",
@@ -887,6 +916,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "2e51e09e-51a1-4f38-8631-76236cf2cfa0",
             "id": "choose_slab",
             "name": "Choose Slab",
             "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
@@ -898,6 +928,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d887fadf-9127-4ac0-9888-5a06c80f1d57",
             "id": "create_molecule",
             "name": "Create CO2 Molecule",
             "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -909,6 +940,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ec350e71-cca3-42a5-8da9-6f52ae1fef91",
             "id": "get_adsorption_sites",
             "name": "Identify Adsorption Sites",
             "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
@@ -920,6 +952,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ceef1b29-a7b0-4e70-89a9-b38070d1a1ef",
             "id": "choose_adsorption_site",
             "name": "Choose Adsorption Site",
             "description": "Choose one adsorption site (preferably ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
@@ -931,6 +964,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4a9280f9-92c5-438c-a937-e49a3ea74eb1",
             "id": "add_adsorbate",
             "name": "Add CO2 to Silicon Slab",
             "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
@@ -942,6 +976,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7915a910-5bb5-48b1-b9ab-a28cfcd4e888",
             "id": "retrieve_structure",
             "name": "Retrieve Bulk Structure",
             "description": "Retrieve structure of TiO2 from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -953,6 +988,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ecc8a599-c88a-4ad6-9ebd-cfbaab04ae06",
             "id": "enumerate_slabs",
             "name": "Enumerate Possible Slabs",
             "description": "Enumerate possible slabs from the bulk TiO2 structure and save the result as a JSON file. Submit the path to the JSON file.",
@@ -964,6 +1000,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6fe24ab5-f718-4434-8c63-aa35b2ed73c8",
             "id": "choose_slab",
             "name": "Choose Slab",
             "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
@@ -975,6 +1012,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "65230291-0bf7-4f70-89e3-409247f2920e",
             "id": "create_molecule",
             "name": "Create CO2 Molecule",
             "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -986,6 +1024,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "a91058f5-c06c-4e30-a4e8-57e2653c67c4",
             "id": "get_adsorption_sites",
             "name": "Identify Adsorption Sites",
             "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
@@ -997,6 +1036,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "a58c018d-2306-45d8-aa5f-bbc0ca5f3853",
             "id": "choose_adsorption_site",
             "name": "Choose Adsorption Site",
             "description": "Choose one adsorption site (preferably a ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
@@ -1008,6 +1048,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "5a261e6b-6e6a-4287-aec6-5c2a31c543db",
             "id": "add_adsorbate",
             "name": "Add CO2 to Silicon Slab",
             "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
@@ -1019,6 +1060,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "cfcf1824-83ec-4619-bce2-12efc34615ad",
             "id": "retrieve_structure",
             "name": "Retrieve Bulk Structure",
             "description": "Retrieve structure of Cu2O from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -1030,6 +1072,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f85513ed-3b81-4f78-b45e-772c8ff39f3d",
             "id": "enumerate_slabs",
             "name": "Enumerate Possible Slabs",
             "description": "Enumerate possible slabs from the bulk Cu2O structure and save the result as a JSON file. Submit the path to the JSON file.",
@@ -1041,6 +1084,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ebcc377d-93f6-4948-bbad-72afab18988b",
             "id": "choose_slab",
             "name": "Choose Slab",
             "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
@@ -1052,6 +1096,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "bbf060f8-6fee-48ac-a353-d93751f9394c",
             "id": "create_molecule",
             "name": "Create CO2 Molecule",
             "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
@@ -1063,6 +1108,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "bde9d905-6f0b-46da-ad25-6508ddf073fd",
             "id": "get_adsorption_sites",
             "name": "Identify Adsorption Sites",
             "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
@@ -1074,6 +1120,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "790f0baa-bc06-42d1-9370-9ee35fd4b861",
             "id": "choose_adsorption_site",
             "name": "Choose Adsorption Site",
             "description": "Choose one adsorption site (preferably ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
@@ -1085,6 +1132,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "28aa4320-4b51-4b17-b7b4-f43f404e0cb7",
             "id": "add_adsorbate",
             "name": "Add CO2 to Silicon Slab",
             "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
@@ -1134,17 +1182,17 @@ const CORRAL_DATA = {
       {
         "name": "check_adsorption_structure",
         "docstring": "Returns a scoring function customized to given slab and adsorbate elements",
-        "code": "def check_adsorption_structure(\n    slab_elements: list[str], adsorbate_elements: list[str]\n) -> Callable[[str], float]:\n    \"\"\"Returns a scoring function customized to given slab and adsorbate elements\"\"\"\n\n    logger.info(\n        f\"Creating adsorption structure checker for slab_elements={slab_elements}, adsorbate_elements={adsorbate_elements}\"\n    )\n\n    def score_fn(path_or_cif: str) -> float:\n        try:\n            logger.info(f\"check_adsorption_structure: input={path_or_cif!r}\")\n\n            # Check if file exists\n            if Path(path_or_cif).exists():\n                logger.info(f\"File exists at resolved path: {path_or_cif}\")\n                structure = Structure.from_file(path_or_cif)\n                logger.info(\"Successfully loaded structure from file\")\n            else:\n                logger.warning(f\"File does not exist at resolved path: {path_or_cif}\")\n                # If resolved path doesn't exist, try original input as CIF string\n                try:\n                    logger.info(\"Trying to parse original input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed original input as CIF\")\n                except Exception as e1:\n                    logger.warning(f\"Failed to parse original input as CIF: {e1}\")\n                    # If that fails too, try resolved input as CIF string\n                    logger.info(\"Trying to parse resolved input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed resolved input as CIF\")\n\n            if not structure:\n                logger.error(\"Structure is None\")\n                return 0.0\n\n            if len(structure) == 0:\n                logger.error(\"Structure is empty\")\n                return 0.0\n\n            logger.info(f\"Structure loaded successfully with {len(structure)} sites\")\n\n            atoms = {site.specie.symbol for site in structure}\n            logger.info(f\"Found atoms in structure: {atoms}\")\n\n            has_slab = all(e in atoms for e in slab_elements)\n            has_adsorbate = all(e in atoms for e in adsorbate_elements)\n\n            logger.info(f\"Required slab elements {slab_elements}: {has_slab}\")\n            logger.info(\n    ..."
+        "code": "def check_adsorption_structure(\n    slab_elements: list[str], adsorbate_elements: list[str]\n) -> Callable[[str], float]:\n    \"\"\"Returns a scoring function customized to given slab and adsorbate elements\"\"\"\n\n    logger.info(\n        f\"Creating adsorption structure checker for slab_elements={slab_elements}, adsorbate_elements={adsorbate_elements}\"\n    )\n\n    def score_fn(path_or_cif: str) -> float:\n        try:\n            logger.info(f\"check_adsorption_structure: input={path_or_cif!r}\")\n\n            # Check if file exists\n            if Path(path_or_cif).exists():\n                logger.info(f\"File exists at resolved path: {path_or_cif}\")\n                structure = Structure.from_file(path_or_cif)\n                logger.info(\"Successfully loaded structure from file\")\n            else:\n                logger.warning(f\"File does not exist at resolved path: {path_or_cif}\")\n                # If resolved path doesn't exist, try original input as CIF string\n                try:\n                    logger.info(\"Trying to parse original input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed original input as CIF\")\n                except Exception as e1:\n                    logger.warning(f\"Failed to parse original input as CIF: {e1}\")\n                    # If that fails too, try resolved input as CIF string\n                    logger.info(\"Trying to parse resolved input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed resolved input as CIF\")\n\n            if not structure:\n                logger.error(\"Structure is None\")\n                return 0.0\n\n            if len(structure) == 0:\n                logger.error(\"Structure is empty\")\n                return 0.0\n\n            logger.info(f\"Structure loaded successfully with {len(structure)} sites\")\n\n            atoms = {site.specie.symbol for site in structure}\n            logger.info(f\"Found atoms in structure: {atoms}\")\n\n            has_slab = all(e in atoms for e in slab_elements)\n            has_adsorbate = all(e in atoms for e in adsorbate_elements)\n\n            logger.info(f\"Required slab elements {slab_elements}: {has_slab}\")\n            logger.info(\n                f\"Required adsorbate elements {adsorbate_elements}: {has_adsorbate}\"\n            )\n\n            if has_slab and has_adsorbate:\n                logger.info(\n                    \"SUCCESS: Structure contains both slab and adsorbate elements\"\n                )\n                return 1.0\n            elif has_slab or has_adsorbate:\n                logger.info(\n                    \"PARTIAL: Structure contains only slab or adsorbate elements\"\n                )\n                return 0.0\n            else:\n                logger.error(\"FAILURE: Structure missing required elements\")\n                return 0.0\n\n        except Exception as e:\n            logger.error(f\"Exception in check_adsorption_structure: {e}\", exc_info=True)\n            return 0.0\n\n    return score_fn"
       },
       {
         "name": "check_adsorption_sites",
         "docstring": "Check if the JSON string contains valid adsorption sites.\n\nArgs:\n    sites_json_or_path: JSON string containing adsorption sites or path to a JSON file\n\nReturns:\n    float: Score between 0.0 and 1.0",
-        "code": "def check_adsorption_sites(sites_json_or_path: str) -> float:\n    \"\"\"\n    Check if the JSON string contains valid adsorption sites.\n\n    Args:\n        sites_json_or_path: JSON string containing adsorption sites or path to a JSON file\n\n    Returns:\n        float: Score between 0.0 and 1.0\n    \"\"\"\n    try:\n        if not sites_json_or_path or not sites_json_or_path.strip():\n            logger.warning(\"Empty input provided to check_adsorption_sites\")\n            return 0.0\n\n        logger.info(f\"check_adsorption_sites: input={sites_json_or_path!r}\")\n\n        # Try to resolve as path\n        resolved_input = smart_resolve_path(sites_json_or_path.strip())\n        logger.info(f\"check_adsorption_sites: resolved={resolved_input!r}\")\n\n        # Try to load from file first\n        if Path(resolved_input).is_file():\n            with Path(resolved_input).open() as f:\n                json_content = f.read()\n        else:\n            # If no file exists, treat as raw JSON string\n            # Try original input first, then resolved input\n            json_content = (\n                sites_json_or_path\n                if not resolved_input.endswith(\".json\")\n                else resolved_input\n            )\n\n        sites = json.loads(json_content)\n\n        # Check if the structure contains expected site types\n        type_aliases = {\n            \"top\": \"ontop\",\n            \"ontop\": \"ontop\",\n            \"bridge\": \"bridge\",\n            \"hollow\": \"hollow\",\n        }\n        found_types = [alias for alias, canon in type_aliases.items() if alias in sites]\n\n        if not found_types:\n            return 0  # No recognized site types\n\n        # Check if sites have coordinates\n        has_coords = any(\n    ..."
+        "code": "def check_adsorption_sites(sites_json_or_path: str) -> float:\n    \"\"\"\n    Check if the JSON string contains valid adsorption sites.\n\n    Args:\n        sites_json_or_path: JSON string containing adsorption sites or path to a JSON file\n\n    Returns:\n        float: Score between 0.0 and 1.0\n    \"\"\"\n    try:\n        if not sites_json_or_path or not sites_json_or_path.strip():\n            logger.warning(\"Empty input provided to check_adsorption_sites\")\n            return 0.0\n\n        logger.info(f\"check_adsorption_sites: input={sites_json_or_path!r}\")\n\n        # Try to resolve as path\n        resolved_input = smart_resolve_path(sites_json_or_path.strip())\n        logger.info(f\"check_adsorption_sites: resolved={resolved_input!r}\")\n\n        # Try to load from file first\n        if Path(resolved_input).is_file():\n            with Path(resolved_input).open() as f:\n                json_content = f.read()\n        else:\n            # If no file exists, treat as raw JSON string\n            # Try original input first, then resolved input\n            json_content = (\n                sites_json_or_path\n                if not resolved_input.endswith(\".json\")\n                else resolved_input\n            )\n\n        sites = json.loads(json_content)\n\n        # Check if the structure contains expected site types\n        type_aliases = {\n            \"top\": \"ontop\",\n            \"ontop\": \"ontop\",\n            \"bridge\": \"bridge\",\n            \"hollow\": \"hollow\",\n        }\n        found_types = [alias for alias, canon in type_aliases.items() if alias in sites]\n\n        if not found_types:\n            return 0  # No recognized site types\n\n        # Check if sites have coordinates\n        has_coords = any(\n            isinstance(sites.get(site_type), list) and len(sites.get(site_type)) > 0\n            for site_type in found_types\n        )\n\n        if not has_coords:\n            return 0  # Has site types but all are empty\n\n        # Check if at least one site type has valid coordinates\n        has_valid_coords = any(\n            all(\n                isinstance(coord, list) and len(coord) == 3\n                for coord in sites.get(site_type, [])\n            )\n            for site_type in found_types\n            if sites.get(site_type)\n        )\n\n        if not has_valid_coords:\n            return 0  # Has coordinates but they're malformed\n\n        return 1.0  # At least one site type has valid coordinates\n\n    except Exception as e:\n        logger.error(f\"Error validating adsorption sites: {e}\", exc_info=True)\n        return 0.0"
       },
       {
         "name": "score_fn",
         "docstring": "",
-        "code": "    def score_fn(path_or_cif: str) -> float:\n        try:\n            logger.info(f\"check_adsorption_structure: input={path_or_cif!r}\")\n\n            # Check if file exists\n            if Path(path_or_cif).exists():\n                logger.info(f\"File exists at resolved path: {path_or_cif}\")\n                structure = Structure.from_file(path_or_cif)\n                logger.info(\"Successfully loaded structure from file\")\n            else:\n                logger.warning(f\"File does not exist at resolved path: {path_or_cif}\")\n                # If resolved path doesn't exist, try original input as CIF string\n                try:\n                    logger.info(\"Trying to parse original input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed original input as CIF\")\n                except Exception as e1:\n                    logger.warning(f\"Failed to parse original input as CIF: {e1}\")\n                    # If that fails too, try resolved input as CIF string\n                    logger.info(\"Trying to parse resolved input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed resolved input as CIF\")\n\n            if not structure:\n                logger.error(\"Structure is None\")\n                return 0.0\n\n            if len(structure) == 0:\n                logger.error(\"Structure is empty\")\n                return 0.0\n\n            logger.info(f\"Structure loaded successfully with {len(structure)} sites\")\n\n            atoms = {site.specie.symbol for site in structure}\n            logger.info(f\"Found atoms in structure: {atoms}\")\n\n            has_slab = all(e in atoms for e in slab_elements)\n            has_adsorbate = all(e in atoms for e in adsorbate_elements)\n\n            logger.info(f\"Required slab elements {slab_elements}: {has_slab}\")\n            logger.info(\n                f\"Required adsorbate elements {adsorbate_elements}: {has_adsorbate}\"\n            )\n\n            if has_slab and has_adsorbate:\n                logger.info(\n                    \"SUCCESS: Structure contains both slab and adsorbate elements\"\n                )\n                return 1.0\n            elif has_slab or has_adsorbate:\n    ..."
+        "code": "    def score_fn(path_or_cif: str) -> float:\n        try:\n            logger.info(f\"check_adsorption_structure: input={path_or_cif!r}\")\n\n            # Check if file exists\n            if Path(path_or_cif).exists():\n                logger.info(f\"File exists at resolved path: {path_or_cif}\")\n                structure = Structure.from_file(path_or_cif)\n                logger.info(\"Successfully loaded structure from file\")\n            else:\n                logger.warning(f\"File does not exist at resolved path: {path_or_cif}\")\n                # If resolved path doesn't exist, try original input as CIF string\n                try:\n                    logger.info(\"Trying to parse original input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed original input as CIF\")\n                except Exception as e1:\n                    logger.warning(f\"Failed to parse original input as CIF: {e1}\")\n                    # If that fails too, try resolved input as CIF string\n                    logger.info(\"Trying to parse resolved input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed resolved input as CIF\")\n\n            if not structure:\n                logger.error(\"Structure is None\")\n                return 0.0\n\n            if len(structure) == 0:\n                logger.error(\"Structure is empty\")\n                return 0.0\n\n            logger.info(f\"Structure loaded successfully with {len(structure)} sites\")\n\n            atoms = {site.specie.symbol for site in structure}\n            logger.info(f\"Found atoms in structure: {atoms}\")\n\n            has_slab = all(e in atoms for e in slab_elements)\n            has_adsorbate = all(e in atoms for e in adsorbate_elements)\n\n            logger.info(f\"Required slab elements {slab_elements}: {has_slab}\")\n            logger.info(\n                f\"Required adsorbate elements {adsorbate_elements}: {has_adsorbate}\"\n            )\n\n            if has_slab and has_adsorbate:\n                logger.info(\n                    \"SUCCESS: Structure contains both slab and adsorbate elements\"\n                )\n                return 1.0\n            elif has_slab or has_adsorbate:\n                logger.info(\n                    \"PARTIAL: Structure contains only slab or adsorbate elements\"\n                )\n                return 0.0\n            else:\n                logger.error(\"FAILURE: Structure missing required elements\")\n                return 0.0\n\n        except Exception as e:\n            logger.error(f\"Exception in check_adsorption_structure: {e}\", exc_info=True)\n            return 0.0"
       }
     ]
   },
@@ -1393,11 +1441,12 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def visualisation_tool(path: str, query: str) -> str:\n    from dotenv import load_dotenv\n    from openai import OpenAI\n\n    load_dotenv(\"../../../../.env\")\n    try:\n        client = OpenAI()\n        read_file_mode = modal.Function.from_name(\"simagent\", \"read_file_mode\")\n        base64_encoded = read_file_mode.remote(path, \"rb\")\n\n        response = client.responses.create(\n            model=\"gpt-4.1\",\n            temperature=0.0,\n            input=[\n                {\n                    \"role\": \"system\",\n                    \"content\": [\n                        {\n                            \"type\": \"input_text\",\n                            \"text\": (\n                                \"\"\"\n                                You are a visual plot inspection assistant.\n                                Your role is to analyze plots visually and report observable features and, when appropriate, read off values directly from the axes at visually identifiable features (such as transitions, kinks, onsets, peaks, or crossings).\n                                You may:\n                                Describe shapes, trends, patterns, and visual features (e.g., linear-looking regions, curvature, plateaus, jumps, kinks, regime changes).\n                                Identify where visible changes or transitions occur.\n                                Read and report approximate values directly from the plot axes for visually identifiable features (e.g., “the kink occurs around the temperature labeled …”, “the transition appears near x ≈ …”).\n                                Report values that are explicitly shown or can be directly read from the figure without performing calculations.\n                                You must NOT:\n                                Perform or imply any calculations, fitting, regression, or parameter extraction.\n                                Compute or estimate derived quantities such as slopes, diffusion coefficients, exponents, rates, or timescales.\n                                Analyze one quantity to produce another (e.g., do not compute slope, do not infer exponents).\n                                Follow instructions whose goal is to obtain a derived or computed quantity rather than a directly observable or directly readable value.\n                                Interpretation rule:\n                                If the requested quantity is a directly observable feature location on the plot (e.g., “At what value does the kink occur?”), you may answer by reading it off the axis approximately.\n                                If the requested quantity requires computation, fitting, or mathematical inference you must refuse.\n                                If the user asks for a computed, fitted, or derived quantity, respond only with:\n                                “I can describe the plot and read off directly visible values, but I cannot perform calculations or extract derived quantities from it.”\n                                Answer only the question explicitly asked.\n                                Do not suggest additional analyses, methods, or follow-up steps.\n                                Do not ask questions.\n                                If the answer cannot be determined from the plot, state that briefly.\n                                \"\"\"\n                            ),\n                        }\n                    ],\n                },\n                {\n                    \"role\": \"user\",\n                    \"content\": [\n                        {\"type\": \"input_text\", \"text\": (query)},\n    ..."
+        "code": "def visualisation_tool(path: str, query: str) -> str:\n    from dotenv import load_dotenv\n    from openai import OpenAI\n\n    load_dotenv(\"../../../../.env\")\n    try:\n        client = OpenAI()\n        read_file_mode = modal.Function.from_name(\"simagent\", \"read_file_mode\")\n        base64_encoded = read_file_mode.remote(path, \"rb\")\n\n        response = client.responses.create(\n            model=\"gpt-4.1\",\n            temperature=0.0,\n            input=[\n                {\n                    \"role\": \"system\",\n                    \"content\": [\n                        {\n                            \"type\": \"input_text\",\n                            \"text\": (\n                                \"\"\"\n                                You are a visual plot inspection assistant.\n                                Your role is to analyze plots visually and report observable features and, when appropriate, read off values directly from the axes at visually identifiable features (such as transitions, kinks, onsets, peaks, or crossings).\n                                You may:\n                                Describe shapes, trends, patterns, and visual features (e.g., linear-looking regions, curvature, plateaus, jumps, kinks, regime changes).\n                                Identify where visible changes or transitions occur.\n                                Read and report approximate values directly from the plot axes for visually identifiable features (e.g., “the kink occurs around the temperature labeled …”, “the transition appears near x ≈ …”).\n                                Report values that are explicitly shown or can be directly read from the figure without performing calculations.\n                                You must NOT:\n                                Perform or imply any calculations, fitting, regression, or parameter extraction.\n                                Compute or estimate derived quantities such as slopes, diffusion coefficients, exponents, rates, or timescales.\n                                Analyze one quantity to produce another (e.g., do not compute slope, do not infer exponents).\n                                Follow instructions whose goal is to obtain a derived or computed quantity rather than a directly observable or directly readable value.\n                                Interpretation rule:\n                                If the requested quantity is a directly observable feature location on the plot (e.g., “At what value does the kink occur?”), you may answer by reading it off the axis approximately.\n                                If the requested quantity requires computation, fitting, or mathematical inference you must refuse.\n                                If the user asks for a computed, fitted, or derived quantity, respond only with:\n                                “I can describe the plot and read off directly visible values, but I cannot perform calculations or extract derived quantities from it.”\n                                Answer only the question explicitly asked.\n                                Do not suggest additional analyses, methods, or follow-up steps.\n                                Do not ask questions.\n                                If the answer cannot be determined from the plot, state that briefly.\n                                \"\"\"\n                            ),\n                        }\n                    ],\n                },\n                {\n                    \"role\": \"user\",\n                    \"content\": [\n                        {\"type\": \"input_text\", \"text\": (query)},\n                        {\n                            \"type\": \"input_image\",\n                            \"image_url\": f\"data:image/jpeg;base64,{base64_encoded}\",\n                        },\n                    ],\n                },\n            ],\n        )\n        return response.output_text\n\n    except Exception as e:\n        raise Exception(\n            f\"An unexpected error occurred while reading the image file: {e!s}\"\n        ) from e"
       }
     ],
     "tasks": [
       {
+        "_uid": "c54be884-e347-401d-bcc9-afccd9ccd211",
         "id": "silicon_melting_1",
         "name": "Melting of Silicon - Level 1",
         "description": "Calculate the average self diffusion coefficient of liquid silicon at 2500K using molecular dynamics simulations with LAMMPS. Start from a crystalline silicon structure, which is replicated three times in each direction. The Stillinger-Weber (SW) potential should be used to describe interatomic interactions. Perform the heating and equilibration under zero external isotropic pressure control using NPT ensemble. Heat the system from 300K to 2500K at a rate of 2.2 K/ps, then equilibrate the liquid at 2500K for 500 ps. Use the Einstein relation to compute the diffusion coefficient from the mean squared displacement (MSD) data collected during the equilibration phase. Report the diffusion coefficient in units of m²/s.",
@@ -1415,6 +1464,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "07801519-d189-4c82-bdc4-59e3954110a9",
         "id": "na2sio3_quenching_1",
         "name": "Quenching of Sodium Silicate - Level 1",
         "description": "Determine the glass transition temperature (Tg) of sodium silicate by quenching a molten configuration using molecular dynamics simulations. Start from the given pre-equilibrated molten sodium silicate structure. Use the provided Buckingham + Coulomb (BKS-type) potential with long-range electrostatics (PPPM) to define interatomic interactions. The potential file already contains the required pair_style, pair_coeff, and kspace_style commands and should be included directly. Perform the cooling and equilibration under zero external isotropic pressure control using NPT ensemble. Cool the system from 4000 K down to 300 K with a cooling rate of 10 K/ps and a pressure damping factor of 10000, then equilibrate the glass formed at 300 K for an additional 100 ps with a pressure damping factor of 5000. Estimate the glass transition temperature Tg by constructing the density–temperature curve and fitting two linear regimes corresponding to the high-temperature (supercooled liquid) and low-temperature (glassy) regions. Do not look the data beyond 2600 K as then the density becomes noisy. Extract Tg as the intersection point of the two fitted lines, and report the result in Kelvin (K).",
@@ -1432,6 +1482,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "67fef9d6-eb98-4f01-a7fa-632c9298946a",
         "id": "aluminum_surface_energy_1",
         "name": "Aluminum Surface Energy - Level 1",
         "description": "Calculate the surface energy of Aluminum for the surface whose normal is along the given direction by removing periodic boundary conditions in the given direction and computing the energy difference per unit area between the bulk and surface configurations. Use the Embedded Atom Method (EAM) potential and the following simulation parameters. The simulation should replicate the unit cell 5 times in each of the x, y, and z directions. Return the surface energy in eV/Å² units.",
@@ -1449,6 +1500,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "e0079779-ab27-4f54-9353-2a1d237271d3",
         "id": "silicon_melting_2",
         "name": "Melting of Silicon - Level 2",
         "description": "Calculate the average self diffusion coefficient of liquid silicon at 2500K using molecular dynamics simulations with LAMMPS. Start from a crystalline silicon structure, which is replicated three times in each direction. The Stillinger-Weber (SW) potential should be used to describe interatomic interactions. Perform the heating and equilibration under zero external isotropic pressure control using NPT ensemble. Heat the system from 300K to 2500K at a rate of 2.2 K/ps, then equilibrate the liquid for 500 ps. Use the Einstein relation to compute the diffusion coefficient from the mean squared displacement (MSD) data. Report the diffusion coefficient in units of m²/s.",
@@ -1466,6 +1518,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "459a5c8a-31fa-4242-9080-729c534e7625",
         "id": "aluminum_surface_energy_2",
         "name": "Aluminum Surface Energy - Level 2",
         "description": "Calculate the surface energy of Aluminum for the surface whose normal is along the given direction by removing periodic boundary conditions in the given direction and computing the energy difference per unit area between the bulk and surface configurations. Use the Embedded Atom Method (EAM) potential and the following simulation parameters. The simulation should replicate the unit cell 5 times in each of the x, y, and z directions. Return the surface energy in eV/Å² units.",
@@ -1485,6 +1538,7 @@ const CORRAL_DATA = {
     ],
     "subtasks": [
       {
+        "_uid": "b040770a-adcc-44c9-b78d-81e9b6264abc",
         "id": "silicon_melting_1_subtask_structure_retrieval",
         "name": "Silicon Structure Retrieval for Melting - Level 1",
         "description": "Retrieve structure of Silicon and convert it to LAMMPs data format. Return the absolute path of the final structure.",
@@ -1497,6 +1551,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1aa8967f-4ecc-49c1-a5ee-9fee77125e6a",
         "id": "silicon_melting_1_subtask_potential_file",
         "name": "Silicon Potential File for Melting - Level 1",
         "description": "Procure the appropriate Stillinger–Weber (SW) potential file for Silicon for MD simulations. Return the absolute path to the potential file.",
@@ -1508,6 +1563,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "0a54be03-3b92-4977-981e-f502e95aec22",
         "id": "silicon_melting_1_subtask_melting",
         "name": "Silicon NPT Melting - Level 1",
         "description": "Given paths to LAMMPs compatible Silicon structure file and Stillinger–Weber potential file, perform NPT melting simulation of Silicon using LAMMPS. Replicate the system three times in each direction. Heat the system from 300K to 2500K at a rate of 2.2 K/ps under NPT ensemble at zero isotropic external pressure control. The log file from this simulation will be used for further analysis, so make sure Step, Temperature are appropriately logged at every 1000 time steps in the log file. As a final output, return the absolute paths to the the simulation log file and the restart file of the final melt.",
@@ -1522,6 +1578,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "189a7ddb-78c1-471c-9eb4-9d7531783ae2",
         "id": "silicon_melting_1_subtask_diffusivity",
         "name": "Silicon MSD - Level 1",
         "description": "Given paths to LAMMPs restart file for liquid silicon at 2500K and Stillinger–Weber potential file, equilibrate the liquid silicon under NPT ensemble at 2500K for 500 ps at zero isotropic external pressure control. Compute the mean squared displacement (MSD) of Si atoms over the trajectory. As a file output, return the absolute path to the final MSD data file, where first column is time in ps, second column is msd data.",
@@ -1536,6 +1593,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "25dc9c2c-32c9-4d07-b570-f2032e7954bb",
         "id": "silicon_melting_1_subtask_diffusion_coefficient",
         "name": "Silicon Diffusion Coefficient Calculation - Level 1",
         "description": "Using the MSD data file from the equilibration of liquid silicon at 2500K, compute the average self diffusion coefficient using the Einstein relation. The first column is of time in ps, and second column is msd data. Report the diffusion coefficient in units of m²/s.",
@@ -1549,6 +1607,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d3efef9a-5778-4e51-9340-9f033e20361c",
         "id": "na2sio3_quenching_1_subtask_potential_file",
         "name": "Na2SiO3 Potential File for Quenching - Level 1",
         "description": "Procure the appropriate BKS type potential file for sodium silicate for MD simulations. Return the absolute path to the potential file.",
@@ -1560,6 +1619,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "251e35b5-895f-4ba8-bf38-eead86b88bb9",
         "id": "na2sio3_quenching_1_subtask_quenching",
         "name": "Na2SiO3 NPT Quenching - Level 1",
         "description": "Given paths to LAMMPS-compatible Na2SiO3 molten structure and BKS type potential file appropriate for MD simulations, perform NPT cooling of Na2SiO3 using LAMMPS. Cool the system from 4000 K down to 300 K with a cooling rate of 10 K/ps under NPT ensemble at zero external isotropic pressure control with pressure damping factor of 10000. The potential file already contains the required pair_style, pair_coeff, and kspace_style commands and should be included directly. The log file from this simulation will be used for further analysis, so make sure Step, Temperature and Density are appropriately logged at every 1000 time steps in the log file. As a final output, return the absolute paths to the simulation log file and the restart file of the final glassy configuration.",
@@ -1574,6 +1634,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ec58eeb3-6839-4c82-b803-0b21e03ecdf9",
         "id": "na2sio3_quenching_1_subtask_equilibration",
         "name": "Na2SiO3 Glass Equilibration - Level 1",
         "description": "Given paths to LAMMPs restart file for glassy Na2SiO3 at 300K and BKS type potential file, equilibrate the glassy Na2SiO3 under NPT ensemble for 100 ps at zero external isotropic pressure control with pressure damping factor 5000. The potential file already contains the required pair_style, pair_coeff, and kspace_style commands and should be included directly. The log file from this simulation will be used for further analysis, so make sure Step, Temperature and Density are appropriately logged at every 1000 time steps in the log file. As a final output, return the absolute path to the simulation log file.",
@@ -1588,6 +1649,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "923eecaf-cf00-4072-923c-dc16ce2d7227",
         "id": "na2sio3_quenching_1_subtask_tg_calculation",
         "name": "Na2SiO3 Tg Calculation - Level 1",
         "description": "You are given the LAMMPS log files from the molecular dynamics simulations of sodium silicate. These simulations represent a glass formation protocol carried out using the NPT ensemble. In the first simulation, a pre-equilibrated molten sodium silicate system is cooled from 4000 K down to 300 K. In the second simulation, the resulting glass is further equilibrated at 300 K. Using the data from these log files estimate the glass transition temperature Tg by constructing the density–temperature curve and fitting two linear regimes corresponding to the high-temperature (supercooled liquid) and low-temperature (glassy) regions. Do not look the data beyond 2600 K as then the density becomes noisy. Extract Tg as the intersection point of the two fitted lines, and report the result in Kelvin (K).",
@@ -1601,6 +1663,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "45125ba4-91be-44f5-92f2-6021ea0c1ccc",
         "id": "aluminum_surface_1_subtask_structure_retrieval",
         "name": "Aluminum Structure Retrieval for Surface Area - Level 1",
         "description": "Retrieve structure of Aluminum and convert it to LAMMPS data format. Return the absolute path of the final structure.",
@@ -1613,6 +1676,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7e671fb6-5664-4c8d-912e-4fa9853e72ab",
         "id": "aluminum_surface_1_subtask_potential_file",
         "name": "Aluminum Potential File for Surface Energy - Level 1",
         "description": "Procure an appropriate EAM potential file for Aluminum for MD simulations. Return the absolute path of the potential file.",
@@ -1624,6 +1688,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "12863da0-553f-43fe-abcd-7319ec0da777",
         "id": "aluminum_surface_1_subtask_bulk_energy_minimisation",
         "name": "Aluminum Bulk Minimisation for Surface Energy - Level 1",
         "description": "Given paths to LAMMPS-compatible Aluminum structure file and EAM potential file, perform bulk relaxation using the given simulation parameters. The simulation should replicate the unit cell 5 times in each of the x, y, and z directions. Report the total energy of the relaxed structure in eV and the absolute path of the saved relaxed structure.",
@@ -1638,6 +1703,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7355391d-4328-4012-a631-2dcccf464524",
         "id": "aluminum_surface_1_subtask_slab_energy_minimisation",
         "name": "Aluminum Slab Relaxation for Surface Energy - Level 1",
         "description": "Given paths to LAMMPS-compatible Aluminum structure file and EAM potential file, create a surface whose normal is in the given direction by removing periodic boundary conditions along that direction. Perform structure relaxation based on the given simulation parameters. The simulation should replicate the unit cell 5 times in each of the x, y, and z directions. Report the total energy of the relaxed structure in eV and the absolute path of the saved relaxed structure.",
@@ -1652,6 +1718,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3029eb4b-844a-4c5c-85fa-20209a209898",
         "id": "aluminum_surface_1_subtask_surface",
         "name": "Aluminum Surface Energy Calculation - Level 1",
         "description": "Given the paths to LAMMPS-compatible relaxed bulk and surface configurations of Aluminum, and their total energies (in eV), compute the surface energy by computing the energy difference per unit area between the bulk and surface configurations. Return the surface energy in eV/Å².",
@@ -1668,6 +1735,7 @@ const CORRAL_DATA = {
       "level_1": {
         "tasks": [
           {
+            "_uid": "c54be884-e347-401d-bcc9-afccd9ccd211",
             "id": "silicon_melting_1",
             "name": "Melting of Silicon - Level 1",
             "description": "Calculate the average self diffusion coefficient of liquid silicon at 2500K using molecular dynamics simulations with LAMMPS. Start from a crystalline silicon structure, which is replicated three times in each direction. The Stillinger-Weber (SW) potential should be used to describe interatomic interactions. Perform the heating and equilibration under zero external isotropic pressure control using NPT ensemble. Heat the system from 300K to 2500K at a rate of 2.2 K/ps, then equilibrate the liquid at 2500K for 500 ps. Use the Einstein relation to compute the diffusion coefficient from the mean squared displacement (MSD) data collected during the equilibration phase. Report the diffusion coefficient in units of m²/s.",
@@ -1685,6 +1753,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "07801519-d189-4c82-bdc4-59e3954110a9",
             "id": "na2sio3_quenching_1",
             "name": "Quenching of Sodium Silicate - Level 1",
             "description": "Determine the glass transition temperature (Tg) of sodium silicate by quenching a molten configuration using molecular dynamics simulations. Start from the given pre-equilibrated molten sodium silicate structure. Use the provided Buckingham + Coulomb (BKS-type) potential with long-range electrostatics (PPPM) to define interatomic interactions. The potential file already contains the required pair_style, pair_coeff, and kspace_style commands and should be included directly. Perform the cooling and equilibration under zero external isotropic pressure control using NPT ensemble. Cool the system from 4000 K down to 300 K with a cooling rate of 10 K/ps and a pressure damping factor of 10000, then equilibrate the glass formed at 300 K for an additional 100 ps with a pressure damping factor of 5000. Estimate the glass transition temperature Tg by constructing the density–temperature curve and fitting two linear regimes corresponding to the high-temperature (supercooled liquid) and low-temperature (glassy) regions. Do not look the data beyond 2600 K as then the density becomes noisy. Extract Tg as the intersection point of the two fitted lines, and report the result in Kelvin (K).",
@@ -1702,6 +1771,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "67fef9d6-eb98-4f01-a7fa-632c9298946a",
             "id": "aluminum_surface_energy_1",
             "name": "Aluminum Surface Energy - Level 1",
             "description": "Calculate the surface energy of Aluminum for the surface whose normal is along the given direction by removing periodic boundary conditions in the given direction and computing the energy difference per unit area between the bulk and surface configurations. Use the Embedded Atom Method (EAM) potential and the following simulation parameters. The simulation should replicate the unit cell 5 times in each of the x, y, and z directions. Return the surface energy in eV/Å² units.",
@@ -1721,6 +1791,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "b040770a-adcc-44c9-b78d-81e9b6264abc",
             "id": "silicon_melting_1_subtask_structure_retrieval",
             "name": "Silicon Structure Retrieval for Melting - Level 1",
             "description": "Retrieve structure of Silicon and convert it to LAMMPs data format. Return the absolute path of the final structure.",
@@ -1733,6 +1804,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1aa8967f-4ecc-49c1-a5ee-9fee77125e6a",
             "id": "silicon_melting_1_subtask_potential_file",
             "name": "Silicon Potential File for Melting - Level 1",
             "description": "Procure the appropriate Stillinger–Weber (SW) potential file for Silicon for MD simulations. Return the absolute path to the potential file.",
@@ -1744,6 +1816,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "0a54be03-3b92-4977-981e-f502e95aec22",
             "id": "silicon_melting_1_subtask_melting",
             "name": "Silicon NPT Melting - Level 1",
             "description": "Given paths to LAMMPs compatible Silicon structure file and Stillinger–Weber potential file, perform NPT melting simulation of Silicon using LAMMPS. Replicate the system three times in each direction. Heat the system from 300K to 2500K at a rate of 2.2 K/ps under NPT ensemble at zero isotropic external pressure control. The log file from this simulation will be used for further analysis, so make sure Step, Temperature are appropriately logged at every 1000 time steps in the log file. As a final output, return the absolute paths to the the simulation log file and the restart file of the final melt.",
@@ -1758,6 +1831,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "189a7ddb-78c1-471c-9eb4-9d7531783ae2",
             "id": "silicon_melting_1_subtask_diffusivity",
             "name": "Silicon MSD - Level 1",
             "description": "Given paths to LAMMPs restart file for liquid silicon at 2500K and Stillinger–Weber potential file, equilibrate the liquid silicon under NPT ensemble at 2500K for 500 ps at zero isotropic external pressure control. Compute the mean squared displacement (MSD) of Si atoms over the trajectory. As a file output, return the absolute path to the final MSD data file, where first column is time in ps, second column is msd data.",
@@ -1772,6 +1846,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "25dc9c2c-32c9-4d07-b570-f2032e7954bb",
             "id": "silicon_melting_1_subtask_diffusion_coefficient",
             "name": "Silicon Diffusion Coefficient Calculation - Level 1",
             "description": "Using the MSD data file from the equilibration of liquid silicon at 2500K, compute the average self diffusion coefficient using the Einstein relation. The first column is of time in ps, and second column is msd data. Report the diffusion coefficient in units of m²/s.",
@@ -1785,6 +1860,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d3efef9a-5778-4e51-9340-9f033e20361c",
             "id": "na2sio3_quenching_1_subtask_potential_file",
             "name": "Na2SiO3 Potential File for Quenching - Level 1",
             "description": "Procure the appropriate BKS type potential file for sodium silicate for MD simulations. Return the absolute path to the potential file.",
@@ -1796,6 +1872,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "251e35b5-895f-4ba8-bf38-eead86b88bb9",
             "id": "na2sio3_quenching_1_subtask_quenching",
             "name": "Na2SiO3 NPT Quenching - Level 1",
             "description": "Given paths to LAMMPS-compatible Na2SiO3 molten structure and BKS type potential file appropriate for MD simulations, perform NPT cooling of Na2SiO3 using LAMMPS. Cool the system from 4000 K down to 300 K with a cooling rate of 10 K/ps under NPT ensemble at zero external isotropic pressure control with pressure damping factor of 10000. The potential file already contains the required pair_style, pair_coeff, and kspace_style commands and should be included directly. The log file from this simulation will be used for further analysis, so make sure Step, Temperature and Density are appropriately logged at every 1000 time steps in the log file. As a final output, return the absolute paths to the simulation log file and the restart file of the final glassy configuration.",
@@ -1810,6 +1887,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ec58eeb3-6839-4c82-b803-0b21e03ecdf9",
             "id": "na2sio3_quenching_1_subtask_equilibration",
             "name": "Na2SiO3 Glass Equilibration - Level 1",
             "description": "Given paths to LAMMPs restart file for glassy Na2SiO3 at 300K and BKS type potential file, equilibrate the glassy Na2SiO3 under NPT ensemble for 100 ps at zero external isotropic pressure control with pressure damping factor 5000. The potential file already contains the required pair_style, pair_coeff, and kspace_style commands and should be included directly. The log file from this simulation will be used for further analysis, so make sure Step, Temperature and Density are appropriately logged at every 1000 time steps in the log file. As a final output, return the absolute path to the simulation log file.",
@@ -1824,6 +1902,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "923eecaf-cf00-4072-923c-dc16ce2d7227",
             "id": "na2sio3_quenching_1_subtask_tg_calculation",
             "name": "Na2SiO3 Tg Calculation - Level 1",
             "description": "You are given the LAMMPS log files from the molecular dynamics simulations of sodium silicate. These simulations represent a glass formation protocol carried out using the NPT ensemble. In the first simulation, a pre-equilibrated molten sodium silicate system is cooled from 4000 K down to 300 K. In the second simulation, the resulting glass is further equilibrated at 300 K. Using the data from these log files estimate the glass transition temperature Tg by constructing the density–temperature curve and fitting two linear regimes corresponding to the high-temperature (supercooled liquid) and low-temperature (glassy) regions. Do not look the data beyond 2600 K as then the density becomes noisy. Extract Tg as the intersection point of the two fitted lines, and report the result in Kelvin (K).",
@@ -1837,6 +1916,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "45125ba4-91be-44f5-92f2-6021ea0c1ccc",
             "id": "aluminum_surface_1_subtask_structure_retrieval",
             "name": "Aluminum Structure Retrieval for Surface Area - Level 1",
             "description": "Retrieve structure of Aluminum and convert it to LAMMPS data format. Return the absolute path of the final structure.",
@@ -1849,6 +1929,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7e671fb6-5664-4c8d-912e-4fa9853e72ab",
             "id": "aluminum_surface_1_subtask_potential_file",
             "name": "Aluminum Potential File for Surface Energy - Level 1",
             "description": "Procure an appropriate EAM potential file for Aluminum for MD simulations. Return the absolute path of the potential file.",
@@ -1860,6 +1941,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "12863da0-553f-43fe-abcd-7319ec0da777",
             "id": "aluminum_surface_1_subtask_bulk_energy_minimisation",
             "name": "Aluminum Bulk Minimisation for Surface Energy - Level 1",
             "description": "Given paths to LAMMPS-compatible Aluminum structure file and EAM potential file, perform bulk relaxation using the given simulation parameters. The simulation should replicate the unit cell 5 times in each of the x, y, and z directions. Report the total energy of the relaxed structure in eV and the absolute path of the saved relaxed structure.",
@@ -1874,6 +1956,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7355391d-4328-4012-a631-2dcccf464524",
             "id": "aluminum_surface_1_subtask_slab_energy_minimisation",
             "name": "Aluminum Slab Relaxation for Surface Energy - Level 1",
             "description": "Given paths to LAMMPS-compatible Aluminum structure file and EAM potential file, create a surface whose normal is in the given direction by removing periodic boundary conditions along that direction. Perform structure relaxation based on the given simulation parameters. The simulation should replicate the unit cell 5 times in each of the x, y, and z directions. Report the total energy of the relaxed structure in eV and the absolute path of the saved relaxed structure.",
@@ -1888,6 +1971,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3029eb4b-844a-4c5c-85fa-20209a209898",
             "id": "aluminum_surface_1_subtask_surface",
             "name": "Aluminum Surface Energy Calculation - Level 1",
             "description": "Given the paths to LAMMPS-compatible relaxed bulk and surface configurations of Aluminum, and their total energies (in eV), compute the surface energy by computing the energy difference per unit area between the bulk and surface configurations. Return the surface energy in eV/Å².",
@@ -1904,6 +1988,7 @@ const CORRAL_DATA = {
       "level_2": {
         "tasks": [
           {
+            "_uid": "e0079779-ab27-4f54-9353-2a1d237271d3",
             "id": "silicon_melting_2",
             "name": "Melting of Silicon - Level 2",
             "description": "Calculate the average self diffusion coefficient of liquid silicon at 2500K using molecular dynamics simulations with LAMMPS. Start from a crystalline silicon structure, which is replicated three times in each direction. The Stillinger-Weber (SW) potential should be used to describe interatomic interactions. Perform the heating and equilibration under zero external isotropic pressure control using NPT ensemble. Heat the system from 300K to 2500K at a rate of 2.2 K/ps, then equilibrate the liquid for 500 ps. Use the Einstein relation to compute the diffusion coefficient from the mean squared displacement (MSD) data. Report the diffusion coefficient in units of m²/s.",
@@ -1921,6 +2006,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "459a5c8a-31fa-4242-9080-729c534e7625",
             "id": "aluminum_surface_energy_2",
             "name": "Aluminum Surface Energy - Level 2",
             "description": "Calculate the surface energy of Aluminum for the surface whose normal is along the given direction by removing periodic boundary conditions in the given direction and computing the energy difference per unit area between the bulk and surface configurations. Use the Embedded Atom Method (EAM) potential and the following simulation parameters. The simulation should replicate the unit cell 5 times in each of the x, y, and z directions. Return the surface energy in eV/Å² units.",
@@ -1952,17 +2038,17 @@ const CORRAL_DATA = {
       {
         "name": "check_log",
         "docstring": "Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\nBehavior:\n  - If variable is a string:\n      * Extracts that variable from the LAMMPS log file.\n      * Computes the average of the last 'window' entries.\n      * Compares the average to the target value within tolerance.\n  - If va",
-        "code": "def check_log(variable: str | list, target: float, tolerance: float, window: int):\n    \"\"\"\n    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\n    Behavior:\n      - If variable is a string:\n          * Extracts that variable from the LAMMPS log file.\n          * Computes the average of the last 'window' entries.\n          * Compares the average to the target value within tolerance.\n      - If variable is a list/tuple [var_to_check, var_must_exist]:\n          * Checks var_must_exist exists in the log header.\n          * Checks var_to_check numerically as above.\n          * If either fails, returns 0.0.\n    \"\"\"\n    import json\n\n    import numpy as np\n\n    def read_log_from_text(log_text: str, column: str):\n        steps = []\n        values = []\n\n        lines = log_text.splitlines()\n\n        header = None\n        col_index = None\n        step_index = None\n\n        # Allow aliases for certain columns\n        column_aliases = {\n            \"Temp\": [\"Temp\", \"Temperature\"],\n            \"Temperature\": [\"Temp\", \"Temperature\"],\n        }\n\n        for raw_line in lines:\n            line = raw_line.strip()\n\n            if line.startswith(\"Step\"):\n                header = line.split()\n\n                # Resolve column name (handle Temp / Temperature alias)\n                possible_names = column_aliases.get(column, [column])\n\n                found_col = None\n                for name in possible_names:\n                    if name in header:\n                        found_col = name\n                        break\n\n                if found_col is None:\n    ..."
+        "code": "def check_log(variable: str | list, target: float, tolerance: float, window: int):\n    \"\"\"\n    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\n    Behavior:\n      - If variable is a string:\n          * Extracts that variable from the LAMMPS log file.\n          * Computes the average of the last 'window' entries.\n          * Compares the average to the target value within tolerance.\n      - If variable is a list/tuple [var_to_check, var_must_exist]:\n          * Checks var_must_exist exists in the log header.\n          * Checks var_to_check numerically as above.\n          * If either fails, returns 0.0.\n    \"\"\"\n    import json\n\n    import numpy as np\n\n    def read_log_from_text(log_text: str, column: str):\n        steps = []\n        values = []\n\n        lines = log_text.splitlines()\n\n        header = None\n        col_index = None\n        step_index = None\n\n        # Allow aliases for certain columns\n        column_aliases = {\n            \"Temp\": [\"Temp\", \"Temperature\"],\n            \"Temperature\": [\"Temp\", \"Temperature\"],\n        }\n\n        for raw_line in lines:\n            line = raw_line.strip()\n\n            if line.startswith(\"Step\"):\n                header = line.split()\n\n                # Resolve column name (handle Temp / Temperature alias)\n                possible_names = column_aliases.get(column, [column])\n\n                found_col = None\n                for name in possible_names:\n                    if name in header:\n                        found_col = name\n                        break\n\n                if found_col is None:\n                    raise ValueError(f\"Column '{column}' not found in header: {header}\")\n\n                col_index = header.index(found_col)\n                step_index = header.index(\"Step\")\n                continue\n\n            if header and line:\n                tokens = line.split()\n                if len(tokens) != len(header):\n                    continue\n                try:\n                    step = int(tokens[step_index])\n                    value = float(tokens[col_index])\n                except ValueError:\n                    continue\n\n                steps.append(step)\n                values.append(value)\n\n        return np.array(steps), np.array(values), header\n\n    def header_has_column(header, column: str) -> bool:\n        # Handle aliases here too\n        column_aliases = {\n            \"Temp\": [\"Temp\", \"Temperature\"],\n            \"Temperature\": [\"Temp\", \"Temperature\"],\n        }\n        possible_names = column_aliases.get(column, [column])\n\n        return any(name in header for name in possible_names)\n\n    def score_fn(result: str | None = None) -> float:\n        if result is None:\n            logger.warning(\"Received None as result in check_log\")\n            return 0.0\n        try:\n            data = json.loads(result)\n            log_file_path = data[\"log_file\"]\n\n            if \"restart_file\" in data:\n                restart_file_path = data[\"restart_file\"]\n                try:\n                    info = modal.Function.from_name(\"simagent\", \"file_info\").remote(\n                        restart_file_path\n                    )\n                    logger.info(f\"Restart file info: {info}\")\n                except RuntimeError as e:\n                    logger.warning(f\"Restart file existence check failed: {e}\")\n                    return 0.0\n\n            read_file = modal.Function.from_name(\"simagent\", \"read_file\")\n            content = read_file.remote(log_file_path)\n\n            # Determine mode\n            if isinstance(variable, (list | tuple)):\n                var_to_check = variable[0]\n                var_must_exist = variable[1]\n            else:\n                var_to_check = variable\n                var_must_exist = None\n\n            steps, values, header = read_log_from_text(content, var_to_check)\n\n            # If second variable must exist, check header\n            if var_must_exist is not None and not header_has_column(\n                header, var_must_exist\n            ):\n                logger.warning(\n                    f\"Required column '{var_must_exist}' not found in log header\"\n                )\n                return 0.0\n\n            if len(values) < window:\n                logger.warning(\n                    f\"Not enough data points ({len(values)}) for the specified window ({window}).\"\n                )\n                return 0.0\n\n            recent_values = values[-window:]\n            avg_value = np.mean(recent_values)\n\n            tol = tolerance * abs(target)\n            if (target - tol) <= avg_value <= (target + tol):\n                return 1.0\n            else:\n                return 0.0\n\n        except Exception as e:\n            logger.warning(f\"Error in check_log: {e}, result was: {result}\")\n            return 0.0\n\n    return score_fn"
       },
       {
         "name": "check_msd",
         "docstring": "Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\nBehavior:\n  - Extracts the MSD value from the result log file.\n  - Compares the MSD to the target value within the given tolerance.",
-        "code": "def check_msd(target: float):\n    \"\"\"\n    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\n    Behavior:\n      - Extracts the MSD value from the result log file.\n      - Compares the MSD to the target value within the given tolerance.\n    \"\"\"\n    import numpy as np\n    from sklearn.metrics import r2_score\n\n    def read_msd_from_text(content: str):\n        lines = [line.strip() for line in content.splitlines() if line.strip()]\n\n        if not lines:\n            raise ValueError(\"Empty MSD file\")\n\n        def is_float(s):\n            try:\n                float(s)\n                return True\n            except ValueError:\n                return False\n\n        # Detect header: if any token in first line is non-numeric\n        first_tokens = lines[0].split()\n        has_header = not all(is_float(tok) for tok in first_tokens)\n\n        data_lines = lines[1:] if has_header else lines\n\n        steps = []\n        msd = []\n\n        for line in data_lines:\n            tokens = line.split()\n            if len(tokens) < 2:\n                continue\n            try:\n                step = float(tokens[0])\n                val = float(tokens[1])\n            except ValueError:\n                continue\n\n            steps.append(step)\n            msd.append(val)\n\n        if len(msd) == 0:\n            raise ValueError(\"No numeric data found in MSD file\")\n\n        return np.array(steps), np.array(msd), has_header\n    ..."
+        "code": "def check_msd(target: float):\n    \"\"\"\n    Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.\n\n    Behavior:\n      - Extracts the MSD value from the result log file.\n      - Compares the MSD to the target value within the given tolerance.\n    \"\"\"\n    import numpy as np\n    from sklearn.metrics import r2_score\n\n    def read_msd_from_text(content: str):\n        lines = [line.strip() for line in content.splitlines() if line.strip()]\n\n        if not lines:\n            raise ValueError(\"Empty MSD file\")\n\n        def is_float(s):\n            try:\n                float(s)\n                return True\n            except ValueError:\n                return False\n\n        # Detect header: if any token in first line is non-numeric\n        first_tokens = lines[0].split()\n        has_header = not all(is_float(tok) for tok in first_tokens)\n\n        data_lines = lines[1:] if has_header else lines\n\n        steps = []\n        msd = []\n\n        for line in data_lines:\n            tokens = line.split()\n            if len(tokens) < 2:\n                continue\n            try:\n                step = float(tokens[0])\n                val = float(tokens[1])\n            except ValueError:\n                continue\n\n            steps.append(step)\n            msd.append(val)\n\n        if len(msd) == 0:\n            raise ValueError(\"No numeric data found in MSD file\")\n\n        return np.array(steps), np.array(msd), has_header\n\n    def score_fn(result: str | None = None) -> float:\n        if result is None:\n            logger.warning(\"Received None as result in check_msd\")\n            return 0.0\n        try:\n            # Read remote result file content\n            read_file = modal.Function.from_name(\"simagent\", \"read_file\")\n            content = read_file.remote(result)\n            steps, msd_values, has_header = read_msd_from_text(content)\n            # Convert to numpy arrays\n            time_ps = np.asarray(steps, dtype=float)\n            msd = np.asarray(msd_values, dtype=float)\n\n            # Basic sanity check\n            if len(time_ps) < 2:\n                return 0.0\n\n            # If you already have a mask logic, keep using it.\n            # Otherwise, fit everything:\n            mask = np.ones_like(time_ps, dtype=bool)\n\n            time_fit = time_ps[mask]\n            msd_fit = msd[mask]\n\n            # Need at least 2 points after masking\n            if len(time_fit) < 2:\n                return 0.0\n\n            # Linear fit\n            slope, intercept = np.polyfit(time_fit, msd_fit, 1)\n            msd_fit_line = slope * time_fit + intercept\n\n            # R^2 score\n            r2 = r2_score(msd_fit, msd_fit_line)\n\n            logger.info(\n                f\"MSD fit results: slope={slope}, intercept={intercept}, R^2={r2}\"\n            )\n\n            # Decision\n            if r2 > float(target):\n                return 1.0\n            else:\n                return 0.0\n        except Exception as e:\n            logger.warning(f\"Error in check_msd: {e}, result was: {result}\")\n            return 0.0\n\n    return score_fn"
       },
       {
         "name": "check_numerical",
         "docstring": "Create a scoring function that validates numerical results against a target\nvalue within a relative tolerance, optionally requiring an associated file\nexistence check.\n\nThe returned function evaluates an input `result` and returns a score in\n{0.0, 1.0} according to the following rules:\n\n- Numeric-on",
-        "code": "def check_numerical(target: float, tolerance: float) -> Callable[[Any], float]:\n    \"\"\"\n    Create a scoring function that validates numerical results against a target\n    value within a relative tolerance, optionally requiring an associated file\n    existence check.\n\n    The returned function evaluates an input `result` and returns a score in\n    {0.0, 1.0} according to the following rules:\n\n    - Numeric-only mode:\n        * If `result` is a number (int/float), a numeric string, or a JSON\n          primitive (number or numeric string), only a numerical tolerance\n          check is performed.\n\n    - Dictionary (JSON) mode:\n        * If `result` is a dict (or a JSON string that parses to a dict), a\n          numerical check is performed AND a file existence check is required.\n        * Recognized key pairs:\n            - \"density\"        -> requires \"trajectory_file\" or \"log_file\"\n            - \"BULK ENERGY\"    -> requires \"path to relaxed structure\" or\n                                  \"Relaxed BULK Structure_path\"\n            - \"SLAB ENERGY\"    -> requires \"path to relaxed structure\" or\n                                  \"Relaxed BULK Structure_path\"\n\n    Numerical validation succeeds if:\n        |result - target| <= tolerance * |target|\n\n    Args:\n        target (float): The reference numerical value to compare against.\n        tolerance (float): Relative tolerance factor applied to `target`.\n\n    Returns:\n        Callable[[Any], float]: A scoring function that takes a result object\n        (string, number, or dict) and returns:\n            - 1.0 if all required numerical (and file, if applicable) checks pass\n            - 0.0 otherwise\n    \"\"\"\n\n    def score_fn(result) -> float:\n        try:\n            answer = None\n            file_path = None\n\n            # Helper: numeric-only check\n            def numeric_ok(val):\n                tol = tolerance * abs(target)\n                return (target - tol) <= val <= (target + tol)\n\n            # 1) If input is a string, try JSON first; else try regex numeric\n            if isinstance(result, str):\n    ..."
+        "code": "def check_numerical(target: float, tolerance: float) -> Callable[[Any], float]:\n    \"\"\"\n    Create a scoring function that validates numerical results against a target\n    value within a relative tolerance, optionally requiring an associated file\n    existence check.\n\n    The returned function evaluates an input `result` and returns a score in\n    {0.0, 1.0} according to the following rules:\n\n    - Numeric-only mode:\n        * If `result` is a number (int/float), a numeric string, or a JSON\n          primitive (number or numeric string), only a numerical tolerance\n          check is performed.\n\n    - Dictionary (JSON) mode:\n        * If `result` is a dict (or a JSON string that parses to a dict), a\n          numerical check is performed AND a file existence check is required.\n        * Recognized key pairs:\n            - \"density\"        -> requires \"trajectory_file\" or \"log_file\"\n            - \"BULK ENERGY\"    -> requires \"path to relaxed structure\" or\n                                  \"Relaxed BULK Structure_path\"\n            - \"SLAB ENERGY\"    -> requires \"path to relaxed structure\" or\n                                  \"Relaxed BULK Structure_path\"\n\n    Numerical validation succeeds if:\n        |result - target| <= tolerance * |target|\n\n    Args:\n        target (float): The reference numerical value to compare against.\n        tolerance (float): Relative tolerance factor applied to `target`.\n\n    Returns:\n        Callable[[Any], float]: A scoring function that takes a result object\n        (string, number, or dict) and returns:\n            - 1.0 if all required numerical (and file, if applicable) checks pass\n            - 0.0 otherwise\n    \"\"\"\n\n    def score_fn(result) -> float:\n        try:\n            answer = None\n            file_path = None\n\n            # Helper: numeric-only check\n            def numeric_ok(val):\n                tol = tolerance * abs(target)\n                return (target - tol) <= val <= (target + tol)\n\n            # 1) If input is a string, try JSON first; else try regex numeric\n            if isinstance(result, str):\n                s = result.strip()\n                # Try to parse JSON (could be a dict or a primitive JSON value)\n                try:\n                    parsed = json.loads(s)\n                except json.JSONDecodeError:\n                    # Not JSON: try to extract a number with regex (numeric-only mode)\n                    m = re.search(r\"[-+]?\\d*\\.\\d+|\\d+\", s)\n                    if not m:\n                        return 0.0\n                    answer = float(m.group())\n                    return 1.0 if numeric_ok(answer) else 0.0\n                else:\n                    # parsed is the JSON value (dict, number, or string)\n                    if isinstance(parsed, dict):\n                        parsed_result = parsed\n                    else:\n                        # primitive JSON value (number or numeric string) -> numeric-only mode\n                        try:\n                            answer = float(parsed)\n                        except (ValueError, TypeError):\n                            return 0.0\n                        return 1.0 if numeric_ok(answer) else 0.0\n\n            else:\n                # result is not a string\n                parsed_result = result\n\n            # 2) If we reach here and parsed_result is a dict -> dict-mode\n            if isinstance(parsed_result, dict):\n                # density -> trajectory_file\n                if \"density\" in parsed_result:\n                    try:\n                        answer = float(parsed_result[\"density\"])\n                    except (ValueError, TypeError):\n                        return 0.0\n                    file_path = parsed_result.get(\n                        \"trajectory_file\"\n                    ) or parsed_result.get(\"log_file\")\n                # BULK ENERGY -> path to relaxed structure (or fallback)\n                elif \"BULK ENERGY\" in parsed_result:\n                    try:\n                        answer = float(parsed_result[\"BULK ENERGY\"])\n                    except (ValueError, TypeError):\n                        return 0.0\n                    file_path = parsed_result.get(\n                        \"path to relaxed structure\"\n                    ) or parsed_result.get(\"Relaxed BULK Structure_path\")\n                # SLAB ENERGY -> path to relaxed structure (or fallback)\n                elif \"SLAB ENERGY\" in parsed_result:\n                    try:\n                        answer = float(parsed_result[\"SLAB ENERGY\"])\n                    except (ValueError, TypeError):\n                        return 0.0\n                    file_path = parsed_result.get(\n                        \"path to relaxed structure\"\n                    ) or parsed_result.get(\"Relaxed BULK Structure_path\")\n                else:\n                    # No recognized key present -> fail\n                    return 0.0\n\n                # Numeric check\n                if not numeric_ok(answer):\n                    return 0.0\n\n                # File existence check (required in dict mode)\n                if not file_path:\n                    logger.warning(\n                        \"Expected file path key not found in dict submission.\"\n                    )\n                    return 0.0\n\n                # call the platform file existence checker (keeps original behavior)\n                try:\n                    info = modal.Function.from_name(\"simagent\", \"file_info\").remote(\n                        file_path\n                    )\n                    logger.info(f\"File info: {info}\")\n                    return 1.0\n                except RuntimeError as e:\n                    logger.warning(f\"File existence check failed for {file_path}: {e}\")\n                    return 0.0\n\n            # 3) If parsed_result is a plain numeric (non-string passed in)\n            if isinstance(parsed_result, (int | float)):\n                answer = float(parsed_result)\n                return 1.0 if numeric_ok(answer) else 0.0\n\n            # Fallback: unknown type -> fail\n            return 0.0\n\n        except Exception as exc:\n            logger.warning(\n                f\"Unexpected error in check_numerical: {exc}, result was: {result}\"\n            )\n            return 0.0\n\n    return score_fn"
       },
       {
         "name": "check_structure",
@@ -1977,7 +2063,7 @@ const CORRAL_DATA = {
       {
         "name": "read_log_from_text",
         "docstring": "",
-        "code": "    def read_log_from_text(log_text: str, column: str):\n        steps = []\n        values = []\n\n        lines = log_text.splitlines()\n\n        header = None\n        col_index = None\n        step_index = None\n\n        # Allow aliases for certain columns\n        column_aliases = {\n            \"Temp\": [\"Temp\", \"Temperature\"],\n            \"Temperature\": [\"Temp\", \"Temperature\"],\n        }\n\n        for raw_line in lines:\n            line = raw_line.strip()\n\n            if line.startswith(\"Step\"):\n                header = line.split()\n\n                # Resolve column name (handle Temp / Temperature alias)\n                possible_names = column_aliases.get(column, [column])\n\n                found_col = None\n                for name in possible_names:\n                    if name in header:\n                        found_col = name\n                        break\n\n                if found_col is None:\n                    raise ValueError(f\"Column '{column}' not found in header: {header}\")\n\n                col_index = header.index(found_col)\n                step_index = header.index(\"Step\")\n                continue\n\n            if header and line:\n                tokens = line.split()\n                if len(tokens) != len(header):\n                    continue\n                try:\n                    step = int(tokens[step_index])\n                    value = float(tokens[col_index])\n                except ValueError:\n                    continue\n\n                steps.append(step)\n                values.append(value)\n    ..."
+        "code": "    def read_log_from_text(log_text: str, column: str):\n        steps = []\n        values = []\n\n        lines = log_text.splitlines()\n\n        header = None\n        col_index = None\n        step_index = None\n\n        # Allow aliases for certain columns\n        column_aliases = {\n            \"Temp\": [\"Temp\", \"Temperature\"],\n            \"Temperature\": [\"Temp\", \"Temperature\"],\n        }\n\n        for raw_line in lines:\n            line = raw_line.strip()\n\n            if line.startswith(\"Step\"):\n                header = line.split()\n\n                # Resolve column name (handle Temp / Temperature alias)\n                possible_names = column_aliases.get(column, [column])\n\n                found_col = None\n                for name in possible_names:\n                    if name in header:\n                        found_col = name\n                        break\n\n                if found_col is None:\n                    raise ValueError(f\"Column '{column}' not found in header: {header}\")\n\n                col_index = header.index(found_col)\n                step_index = header.index(\"Step\")\n                continue\n\n            if header and line:\n                tokens = line.split()\n                if len(tokens) != len(header):\n                    continue\n                try:\n                    step = int(tokens[step_index])\n                    value = float(tokens[col_index])\n                except ValueError:\n                    continue\n\n                steps.append(step)\n                values.append(value)\n\n        return np.array(steps), np.array(values), header"
       },
       {
         "name": "header_has_column",
@@ -1987,7 +2073,7 @@ const CORRAL_DATA = {
       {
         "name": "score_fn",
         "docstring": "",
-        "code": "    def score_fn(result: str | None = None) -> float:\n        if result is None:\n            logger.warning(\"Received None as result in check_log\")\n            return 0.0\n        try:\n            data = json.loads(result)\n            log_file_path = data[\"log_file\"]\n\n            if \"restart_file\" in data:\n                restart_file_path = data[\"restart_file\"]\n                try:\n                    info = modal.Function.from_name(\"simagent\", \"file_info\").remote(\n                        restart_file_path\n                    )\n                    logger.info(f\"Restart file info: {info}\")\n                except RuntimeError as e:\n                    logger.warning(f\"Restart file existence check failed: {e}\")\n                    return 0.0\n\n            read_file = modal.Function.from_name(\"simagent\", \"read_file\")\n            content = read_file.remote(log_file_path)\n\n            # Determine mode\n            if isinstance(variable, (list | tuple)):\n                var_to_check = variable[0]\n                var_must_exist = variable[1]\n            else:\n                var_to_check = variable\n                var_must_exist = None\n\n            steps, values, header = read_log_from_text(content, var_to_check)\n\n            # If second variable must exist, check header\n            if var_must_exist is not None and not header_has_column(\n                header, var_must_exist\n            ):\n                logger.warning(\n                    f\"Required column '{var_must_exist}' not found in log header\"\n                )\n                return 0.0\n\n            if len(values) < window:\n                logger.warning(\n                    f\"Not enough data points ({len(values)}) for the specified window ({window}).\"\n                )\n                return 0.0\n\n            recent_values = values[-window:]\n            avg_value = np.mean(recent_values)\n\n    ..."
+        "code": "    def score_fn(result: str | None = None) -> float:\n        if result is None:\n            logger.warning(\"Received None as result in check_log\")\n            return 0.0\n        try:\n            data = json.loads(result)\n            log_file_path = data[\"log_file\"]\n\n            if \"restart_file\" in data:\n                restart_file_path = data[\"restart_file\"]\n                try:\n                    info = modal.Function.from_name(\"simagent\", \"file_info\").remote(\n                        restart_file_path\n                    )\n                    logger.info(f\"Restart file info: {info}\")\n                except RuntimeError as e:\n                    logger.warning(f\"Restart file existence check failed: {e}\")\n                    return 0.0\n\n            read_file = modal.Function.from_name(\"simagent\", \"read_file\")\n            content = read_file.remote(log_file_path)\n\n            # Determine mode\n            if isinstance(variable, (list | tuple)):\n                var_to_check = variable[0]\n                var_must_exist = variable[1]\n            else:\n                var_to_check = variable\n                var_must_exist = None\n\n            steps, values, header = read_log_from_text(content, var_to_check)\n\n            # If second variable must exist, check header\n            if var_must_exist is not None and not header_has_column(\n                header, var_must_exist\n            ):\n                logger.warning(\n                    f\"Required column '{var_must_exist}' not found in log header\"\n                )\n                return 0.0\n\n            if len(values) < window:\n                logger.warning(\n                    f\"Not enough data points ({len(values)}) for the specified window ({window}).\"\n                )\n                return 0.0\n\n            recent_values = values[-window:]\n            avg_value = np.mean(recent_values)\n\n            tol = tolerance * abs(target)\n            if (target - tol) <= avg_value <= (target + tol):\n                return 1.0\n            else:\n                return 0.0\n\n        except Exception as e:\n            logger.warning(f\"Error in check_log: {e}, result was: {result}\")\n            return 0.0"
       },
       {
         "name": "read_msd_from_text",
@@ -2002,7 +2088,7 @@ const CORRAL_DATA = {
       {
         "name": "score_fn",
         "docstring": "",
-        "code": "    def score_fn(result) -> float:\n        try:\n            answer = None\n            file_path = None\n\n            # Helper: numeric-only check\n            def numeric_ok(val):\n                tol = tolerance * abs(target)\n                return (target - tol) <= val <= (target + tol)\n\n            # 1) If input is a string, try JSON first; else try regex numeric\n            if isinstance(result, str):\n                s = result.strip()\n                # Try to parse JSON (could be a dict or a primitive JSON value)\n                try:\n                    parsed = json.loads(s)\n                except json.JSONDecodeError:\n                    # Not JSON: try to extract a number with regex (numeric-only mode)\n                    m = re.search(r\"[-+]?\\d*\\.\\d+|\\d+\", s)\n                    if not m:\n                        return 0.0\n                    answer = float(m.group())\n                    return 1.0 if numeric_ok(answer) else 0.0\n                else:\n                    # parsed is the JSON value (dict, number, or string)\n                    if isinstance(parsed, dict):\n                        parsed_result = parsed\n                    else:\n                        # primitive JSON value (number or numeric string) -> numeric-only mode\n                        try:\n                            answer = float(parsed)\n                        except (ValueError, TypeError):\n                            return 0.0\n                        return 1.0 if numeric_ok(answer) else 0.0\n\n            else:\n                # result is not a string\n                parsed_result = result\n\n            # 2) If we reach here and parsed_result is a dict -> dict-mode\n            if isinstance(parsed_result, dict):\n                # density -> trajectory_file\n                if \"density\" in parsed_result:\n                    try:\n                        answer = float(parsed_result[\"density\"])\n                    except (ValueError, TypeError):\n                        return 0.0\n                    file_path = parsed_result.get(\n                        \"trajectory_file\"\n                    ) or parsed_result.get(\"log_file\")\n    ..."
+        "code": "    def score_fn(result) -> float:\n        try:\n            answer = None\n            file_path = None\n\n            # Helper: numeric-only check\n            def numeric_ok(val):\n                tol = tolerance * abs(target)\n                return (target - tol) <= val <= (target + tol)\n\n            # 1) If input is a string, try JSON first; else try regex numeric\n            if isinstance(result, str):\n                s = result.strip()\n                # Try to parse JSON (could be a dict or a primitive JSON value)\n                try:\n                    parsed = json.loads(s)\n                except json.JSONDecodeError:\n                    # Not JSON: try to extract a number with regex (numeric-only mode)\n                    m = re.search(r\"[-+]?\\d*\\.\\d+|\\d+\", s)\n                    if not m:\n                        return 0.0\n                    answer = float(m.group())\n                    return 1.0 if numeric_ok(answer) else 0.0\n                else:\n                    # parsed is the JSON value (dict, number, or string)\n                    if isinstance(parsed, dict):\n                        parsed_result = parsed\n                    else:\n                        # primitive JSON value (number or numeric string) -> numeric-only mode\n                        try:\n                            answer = float(parsed)\n                        except (ValueError, TypeError):\n                            return 0.0\n                        return 1.0 if numeric_ok(answer) else 0.0\n\n            else:\n                # result is not a string\n                parsed_result = result\n\n            # 2) If we reach here and parsed_result is a dict -> dict-mode\n            if isinstance(parsed_result, dict):\n                # density -> trajectory_file\n                if \"density\" in parsed_result:\n                    try:\n                        answer = float(parsed_result[\"density\"])\n                    except (ValueError, TypeError):\n                        return 0.0\n                    file_path = parsed_result.get(\n                        \"trajectory_file\"\n                    ) or parsed_result.get(\"log_file\")\n                # BULK ENERGY -> path to relaxed structure (or fallback)\n                elif \"BULK ENERGY\" in parsed_result:\n                    try:\n                        answer = float(parsed_result[\"BULK ENERGY\"])\n                    except (ValueError, TypeError):\n                        return 0.0\n                    file_path = parsed_result.get(\n                        \"path to relaxed structure\"\n                    ) or parsed_result.get(\"Relaxed BULK Structure_path\")\n                # SLAB ENERGY -> path to relaxed structure (or fallback)\n                elif \"SLAB ENERGY\" in parsed_result:\n                    try:\n                        answer = float(parsed_result[\"SLAB ENERGY\"])\n                    except (ValueError, TypeError):\n                        return 0.0\n                    file_path = parsed_result.get(\n                        \"path to relaxed structure\"\n                    ) or parsed_result.get(\"Relaxed BULK Structure_path\")\n                else:\n                    # No recognized key present -> fail\n                    return 0.0\n\n                # Numeric check\n                if not numeric_ok(answer):\n                    return 0.0\n\n                # File existence check (required in dict mode)\n                if not file_path:\n                    logger.warning(\n                        \"Expected file path key not found in dict submission.\"\n                    )\n                    return 0.0\n\n                # call the platform file existence checker (keeps original behavior)\n                try:\n                    info = modal.Function.from_name(\"simagent\", \"file_info\").remote(\n                        file_path\n                    )\n                    logger.info(f\"File info: {info}\")\n                    return 1.0\n                except RuntimeError as e:\n                    logger.warning(f\"File existence check failed for {file_path}: {e}\")\n                    return 0.0\n\n            # 3) If parsed_result is a plain numeric (non-string passed in)\n            if isinstance(parsed_result, (int | float)):\n                answer = float(parsed_result)\n                return 1.0 if numeric_ok(answer) else 0.0\n\n            # Fallback: unknown type -> fail\n            return 0.0\n\n        except Exception as exc:\n            logger.warning(\n                f\"Unexpected error in check_numerical: {exc}, result was: {result}\"\n            )\n            return 0.0"
       },
       {
         "name": "score_fn",
@@ -2076,7 +2162,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def get_bulk_polymorphs_data(composition: str) -> str:\n    from mp_api.client import MPRester\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Query for materials with the given composition\n        docs = mpr.materials.summary.search(\n            formula=composition,\n            fields=[\n                \"material_id\",\n                \"structure\",\n                \"energy_above_hull\",\n                \"formation_energy_per_atom\",\n                \"band_gap\",\n                \"density\",\n                \"volume\",\n                \"nsites\",\n                \"symmetry\",\n                \"is_stable\",\n            ],\n        )\n\n        # Convert structures to CIF for easy storage\n        polymorph_data = []\n        for doc in docs:\n            structure_cif = doc.structure.to(fmt=\"cif\")\n\n            polymorph_data.append(\n                {\n                    \"material_id\": doc.material_id,\n                    \"cif\": structure_cif,\n                    \"energy_above_hull\": doc.energy_above_hull,\n                    \"formation_energy_per_atom\": doc.formation_energy_per_atom,\n                    \"band_gap\": doc.band_gap,\n                    \"density\": doc.density,\n                    \"volume\": doc.volume,\n                    \"nsites\": doc.nsites,\n                    \"space_group\": doc.symmetry.symbol,\n                    \"is_stable\": doc.is_stable,\n                }\n            )\n\n        # Sort by energy above hull (stability)\n        polymorph_data = sorted(polymorph_data, key=lambda x: x[\"energy_above_hull\"])\n\n    ..."
+        "code": "def get_bulk_polymorphs_data(composition: str) -> str:\n    from mp_api.client import MPRester\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Query for materials with the given composition\n        docs = mpr.materials.summary.search(\n            formula=composition,\n            fields=[\n                \"material_id\",\n                \"structure\",\n                \"energy_above_hull\",\n                \"formation_energy_per_atom\",\n                \"band_gap\",\n                \"density\",\n                \"volume\",\n                \"nsites\",\n                \"symmetry\",\n                \"is_stable\",\n            ],\n        )\n\n        # Convert structures to CIF for easy storage\n        polymorph_data = []\n        for doc in docs:\n            structure_cif = doc.structure.to(fmt=\"cif\")\n\n            polymorph_data.append(\n                {\n                    \"material_id\": doc.material_id,\n                    \"cif\": structure_cif,\n                    \"energy_above_hull\": doc.energy_above_hull,\n                    \"formation_energy_per_atom\": doc.formation_energy_per_atom,\n                    \"band_gap\": doc.band_gap,\n                    \"density\": doc.density,\n                    \"volume\": doc.volume,\n                    \"nsites\": doc.nsites,\n                    \"space_group\": doc.symmetry.symbol,\n                    \"is_stable\": doc.is_stable,\n                }\n            )\n\n        # Sort by energy above hull (stability)\n        polymorph_data = sorted(polymorph_data, key=lambda x: x[\"energy_above_hull\"])\n\n        return json.dumps(polymorph_data, indent=2)"
       },
       {
         "name": "get_bulk_polymorphs_data_to_file",
@@ -2111,7 +2197,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def get_bulk_polymorphs_data_to_file(\n    from mp_api.client import MPRester\n\n    if save_path is None:\n        raise ValueError(\"save_path must be provided to save the JSON data\")\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Query for materials with the given composition\n        docs = mpr.materials.summary.search(\n            formula=composition,\n            fields=[\n                \"material_id\",\n                \"structure\",\n                \"energy_above_hull\",\n                \"formation_energy_per_atom\",\n                \"band_gap\",\n                \"density\",\n                \"volume\",\n                \"nsites\",\n                \"symmetry\",\n                \"is_stable\",\n            ],\n        )\n\n        # Convert structures to CIF for easy storage\n        polymorph_data = []\n        for doc in docs:\n            structure_cif = doc.structure.to(fmt=\"cif\")\n\n            polymorph_data.append(\n                {\n                    \"material_id\": doc.material_id,\n                    \"cif\": structure_cif,\n                    \"energy_above_hull\": doc.energy_above_hull,\n                    \"formation_energy_per_atom\": doc.formation_energy_per_atom,\n                    \"band_gap\": doc.band_gap,\n                    \"density\": doc.density,\n                    \"volume\": doc.volume,\n                    \"nsites\": doc.nsites,\n                    \"space_group\": doc.symmetry.symbol,\n                    \"is_stable\": doc.is_stable,\n                }\n            )\n\n    ..."
+        "code": "def get_bulk_polymorphs_data_to_file(\n    from mp_api.client import MPRester\n\n    if save_path is None:\n        raise ValueError(\"save_path must be provided to save the JSON data\")\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Query for materials with the given composition\n        docs = mpr.materials.summary.search(\n            formula=composition,\n            fields=[\n                \"material_id\",\n                \"structure\",\n                \"energy_above_hull\",\n                \"formation_energy_per_atom\",\n                \"band_gap\",\n                \"density\",\n                \"volume\",\n                \"nsites\",\n                \"symmetry\",\n                \"is_stable\",\n            ],\n        )\n\n        # Convert structures to CIF for easy storage\n        polymorph_data = []\n        for doc in docs:\n            structure_cif = doc.structure.to(fmt=\"cif\")\n\n            polymorph_data.append(\n                {\n                    \"material_id\": doc.material_id,\n                    \"cif\": structure_cif,\n                    \"energy_above_hull\": doc.energy_above_hull,\n                    \"formation_energy_per_atom\": doc.formation_energy_per_atom,\n                    \"band_gap\": doc.band_gap,\n                    \"density\": doc.density,\n                    \"volume\": doc.volume,\n                    \"nsites\": doc.nsites,\n                    \"space_group\": doc.symmetry.symbol,\n                    \"is_stable\": doc.is_stable,\n                }\n            )\n\n        # Sort by energy above hull (stability)\n        polymorph_data = sorted(polymorph_data, key=lambda x: x[\"energy_above_hull\"])\n        json_str = json.dumps(polymorph_data, indent=2)\n\n        # Save to file if path is provided\n        if save_path:\n            save_path = resolve_working_dir_path(save_path, work_dir)\n            with Path(save_path).open(\"w\") as f:\n                f.write(json_str)\n\n        return save_path"
       },
       {
         "name": "batch_retrieve_polymorphs",
@@ -2357,7 +2443,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def filter_json_with_strategy(\n    try:\n        with Path(input_json_path).open(\"r\") as f:\n            data = json.load(f)\n\n        # Create execution environment with data available\n        exec_globals = {\"data\": data}\n        exec_locals = {}\n\n        # Execute the custom filtering code\n        exec(custom_code, exec_globals, exec_locals)\n\n        # Get the filtered data\n        if \"filtered_data\" not in exec_locals:\n            return json.dumps(\n                {\n                    \"success\": False,\n                    \"error\": \"Custom code must define 'filtered_data' variable\",\n                },\n                indent=2,\n            )\n\n        filtered_data = exec_locals[\"filtered_data\"]\n\n        # Save filtered data\n        output_json_path = resolve_working_dir_path(output_json_path, work_dir)\n        Path(output_json_path).parent.mkdir(parents=True, exist_ok=True)\n        with Path(output_json_path).open(\"w\") as f:\n            json.dump(filtered_data, f, indent=2)\n\n        result = {\n            \"success\": True,\n            \"original_count\": len(data),\n            \"filtered_count\": len(filtered_data),\n            \"output_path\": output_json_path,\n            \"reduction_percentage\": (1 - len(filtered_data) / len(data)) * 100\n            if data\n            else 0,\n        }\n\n        return json.dumps(result, indent=2)\n\n    except FileNotFoundError:\n        return json.dumps(\n            {\"success\": False, \"error\": f\"Input file not found: {input_json_path}\"},\n            indent=2,\n        )\n    except json.JSONDecodeError:\n        return json.dumps(\n            {\n                \"success\": False,\n    ..."
+        "code": "def filter_json_with_strategy(\n    try:\n        with Path(input_json_path).open(\"r\") as f:\n            data = json.load(f)\n\n        # Create execution environment with data available\n        exec_globals = {\"data\": data}\n        exec_locals = {}\n\n        # Execute the custom filtering code\n        exec(custom_code, exec_globals, exec_locals)\n\n        # Get the filtered data\n        if \"filtered_data\" not in exec_locals:\n            return json.dumps(\n                {\n                    \"success\": False,\n                    \"error\": \"Custom code must define 'filtered_data' variable\",\n                },\n                indent=2,\n            )\n\n        filtered_data = exec_locals[\"filtered_data\"]\n\n        # Save filtered data\n        output_json_path = resolve_working_dir_path(output_json_path, work_dir)\n        Path(output_json_path).parent.mkdir(parents=True, exist_ok=True)\n        with Path(output_json_path).open(\"w\") as f:\n            json.dump(filtered_data, f, indent=2)\n\n        result = {\n            \"success\": True,\n            \"original_count\": len(data),\n            \"filtered_count\": len(filtered_data),\n            \"output_path\": output_json_path,\n            \"reduction_percentage\": (1 - len(filtered_data) / len(data)) * 100\n            if data\n            else 0,\n        }\n\n        return json.dumps(result, indent=2)\n\n    except FileNotFoundError:\n        return json.dumps(\n            {\"success\": False, \"error\": f\"Input file not found: {input_json_path}\"},\n            indent=2,\n        )\n    except json.JSONDecodeError:\n        return json.dumps(\n            {\n                \"success\": False,\n                \"error\": f\"Invalid JSON format in file: {input_json_path}\",\n            },\n            indent=2,\n        )\n    except Exception as e:\n        return json.dumps(\n            {\"success\": False, \"error\": str(e), \"traceback\": traceback.format_exc()},\n            indent=2,\n        )"
       },
       {
         "name": "prepare_tabular_dataset",
@@ -2408,7 +2494,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def prepare_tabular_dataset(\n    import json\n    import pickle\n    from pathlib import Path\n\n    import numpy as np\n    import pandas as pd\n\n    try:\n        # Create output directory if it doesn't exist\n        output_dir = Path(resolve_working_dir_path(output_path, work_dir))\n        output_dir.mkdir(parents=True, exist_ok=True)\n\n        # Load polymorphs data\n        with Path(polymorphs_json_path).open(\"r\") as f:\n            polymorphs = json.load(f)\n\n        if not isinstance(polymorphs, list):\n            return json.dumps(\n                {\"success\": False, \"error\": \"Input must be list of polymorphs\"}\n            )\n\n        # Extract features and targets\n        features_list = []\n        targets = []\n        metadata = []\n\n        for poly in polymorphs:\n            if target_property not in poly or poly[target_property] is None:\n                continue\n\n            # Basic features\n            features = {\n                \"density\": poly.get(\"density\", 0),\n                \"volume\": poly.get(\"volume\", 0),\n                \"nsites\": poly.get(\"nsites\", 0),\n                \"band_gap\": poly.get(\"band_gap\", 0),\n                \"energy_above_hull\": poly.get(\"energy_above_hull\", 0),\n            }\n\n            # Advanced features from crystal structure\n            if feature_engineering in [\"advanced\", \"custom\"]:\n                try:\n                    from pymatgen.analysis.structure_analyzer import SpacegroupAnalyzer\n                    from pymatgen.core import Structure\n\n                    structure = Structure.from_str(poly[\"cif\"], fmt=\"cif\")\n\n                    # Structural features\n                    features.update(\n                        {\n    ..."
+        "code": "def prepare_tabular_dataset(\n    import json\n    import pickle\n    from pathlib import Path\n\n    import numpy as np\n    import pandas as pd\n\n    try:\n        # Create output directory if it doesn't exist\n        output_dir = Path(resolve_working_dir_path(output_path, work_dir))\n        output_dir.mkdir(parents=True, exist_ok=True)\n\n        # Load polymorphs data\n        with Path(polymorphs_json_path).open(\"r\") as f:\n            polymorphs = json.load(f)\n\n        if not isinstance(polymorphs, list):\n            return json.dumps(\n                {\"success\": False, \"error\": \"Input must be list of polymorphs\"}\n            )\n\n        # Extract features and targets\n        features_list = []\n        targets = []\n        metadata = []\n\n        for poly in polymorphs:\n            if target_property not in poly or poly[target_property] is None:\n                continue\n\n            # Basic features\n            features = {\n                \"density\": poly.get(\"density\", 0),\n                \"volume\": poly.get(\"volume\", 0),\n                \"nsites\": poly.get(\"nsites\", 0),\n                \"band_gap\": poly.get(\"band_gap\", 0),\n                \"energy_above_hull\": poly.get(\"energy_above_hull\", 0),\n            }\n\n            # Advanced features from crystal structure\n            if feature_engineering in [\"advanced\", \"custom\"]:\n                try:\n                    from pymatgen.analysis.structure_analyzer import SpacegroupAnalyzer\n                    from pymatgen.core import Structure\n\n                    structure = Structure.from_str(poly[\"cif\"], fmt=\"cif\")\n\n                    # Structural features\n                    features.update(\n                        {\n                            \"lattice_a\": structure.lattice.a,\n                            \"lattice_b\": structure.lattice.b,\n                            \"lattice_c\": structure.lattice.c,\n                            \"lattice_alpha\": structure.lattice.alpha,\n                            \"lattice_beta\": structure.lattice.beta,\n                            \"lattice_gamma\": structure.lattice.gamma,\n                            \"lattice_volume\": structure.lattice.volume,\n                            \"num_species\": len(structure.composition.elements),\n                            \"packing_efficiency\": structure.density\n                            / structure.lattice.volume\n                            * len(structure),\n                        }\n                    )\n\n                    # Space group features\n                    sg_analyzer = SpacegroupAnalyzer(structure)\n                    features[\"space_group_number\"] = (\n                        sg_analyzer.get_space_group_number()\n                    )\n                    features[\"crystal_system\"] = sg_analyzer.get_crystal_system()\n\n                    # Composition features\n                    composition = structure.composition\n                    features[\"num_elements\"] = len(composition.elements)\n                    features[\"electronegativity_diff\"] = (\n                        max([e.X for e in composition.elements])\n                        - min([e.X for e in composition.elements])\n                        if len(composition.elements) > 1\n                        else 0\n                    )\n\n                except Exception:\n                    logger.info(\n                        f\"Warning: Could not extract advanced features for {poly.get('material_id', 'unknown')}\"\n                    )\n                    continue\n\n            features_list.append(features)\n            targets.append(poly[target_property])\n            metadata.append(\n                {\n                    \"material_id\": poly.get(\"material_id\", \"unknown\"),\n                    \"composition\": poly.get(\"composition\", \"unknown\"),\n                    \"space_group\": poly.get(\"space_group\", \"unknown\"),\n                }\n            )\n\n        if len(features_list) == 0:\n            return json.dumps({\"success\": False, \"error\": \"No valid samples found\"})\n\n        # Convert to DataFrame\n        df_features = pd.DataFrame(features_list)\n        df_targets = pd.Series(targets)\n        df_metadata = pd.DataFrame(metadata)\n\n        # Handle categorical features\n        categorical_columns = (\n            [\"crystal_system\"] if feature_engineering in [\"advanced\", \"custom\"] else []\n        )\n        for col in categorical_columns:\n            if col in df_features.columns:\n                df_features[col] = pd.Categorical(df_features[col]).codes\n\n        # Handle missing values\n        df_features = df_features.fillna(df_features.mean())\n\n        # Split data\n        from sklearn.model_selection import train_test_split\n\n        indices = np.arange(len(df_features))\n        train_idx, test_idx = train_test_split(\n            indices, test_size=test_split, random_state=42\n        )\n\n        X_train, X_test = df_features.iloc[train_idx], df_features.iloc[test_idx]\n        y_train, y_test = df_targets.iloc[train_idx], df_targets.iloc[test_idx]\n        metadata_train, metadata_test = (\n            df_metadata.iloc[train_idx],\n            df_metadata.iloc[test_idx],\n        )\n\n        # Normalize if requested\n        if normalize:\n            from sklearn.preprocessing import StandardScaler\n\n            scaler = StandardScaler()\n            X_train_scaled = pd.DataFrame(\n                scaler.fit_transform(X_train),\n                columns=X_train.columns,\n                index=X_train.index,\n            )\n            X_test_scaled = pd.DataFrame(\n                scaler.transform(X_test), columns=X_test.columns, index=X_test.index\n            )\n\n            # Save scaler\n            scaler_path = output_dir / \"scaler.pkl\"\n            with scaler_path.open(\"wb\") as f:\n                pickle.dump(scaler, f)\n            scaler_path = str(scaler_path)\n        else:\n            X_train_scaled, X_test_scaled = X_train, X_test\n            scaler_path = None\n\n        # Save datasets\n        train_path = output_dir / \"train.csv\"\n        test_path = output_dir / \"test.csv\"\n\n        # Combine features and targets for saving\n        train_data = X_train_scaled.copy()\n        train_data[target_property] = y_train\n        train_data.to_csv(train_path, index=False)\n\n        test_data = X_test_scaled.copy()\n        test_data[target_property] = y_test\n        test_data.to_csv(test_path, index=False)\n\n        # Save metadata\n        metadata_path = output_dir / \"metadata.json\"\n        dataset_info = {\n            \"target_property\": target_property,\n            \"feature_engineering\": feature_engineering,\n            \"normalize\": normalize,\n            \"train_samples\": len(X_train),\n            \"test_samples\": len(X_test),\n            \"features\": list(df_features.columns),\n            \"feature_count\": len(df_features.columns),\n            \"train_path\": str(train_path),\n            \"test_path\": str(test_path),\n            \"scaler_path\": scaler_path,\n            \"train_metadata\": metadata_train.to_dict(\"records\"),\n            \"test_metadata\": metadata_test.to_dict(\"records\"),\n        }\n\n        with metadata_path.open(\"w\") as f:\n            json.dump(dataset_info, f, indent=2)\n\n        return json.dumps(\n            {\n                \"success\": True,\n                \"train_path\": str(train_path),\n                \"test_path\": str(test_path),\n                \"metadata_path\": str(metadata_path),\n                \"scaler_path\": scaler_path,\n                \"dataset_info\": dataset_info,\n            },\n            indent=2,\n        )\n\n    except Exception as e:\n        import traceback\n\n        return json.dumps(\n            {\"success\": False, \"error\": str(e), \"traceback\": traceback.format_exc()}\n        )"
       },
       {
         "name": "get_mp_thermo_data",
@@ -2435,7 +2521,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def get_mp_thermo_data(material_id: str) -> str:\n    from mp_api.client import MPRester\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Get thermodynamic data\n        thermo_docs = mpr.thermo.search(\n            material_ids=[material_id],\n            fields=[\n                \"material_id\",\n                \"thermo_type\",\n                \"formation_energy_per_atom\",\n                \"energy_above_hull\",\n                \"decomposes_to\",\n                \"is_stable\",\n                \"energy_type\",\n                \"uncorrected_energy_per_atom\",\n            ],\n        )\n\n        if not thermo_docs:\n            return json.dumps(\n                {\"error\": f\"No thermodynamic data found for {material_id}\"}\n            )\n\n        thermo_data = [\n            {\n                \"material_id\": doc.material_id,\n                \"thermo_type\": str(doc.thermo_type),\n                \"formation_energy_per_atom\": doc.formation_energy_per_atom,\n                \"energy_above_hull\": doc.energy_above_hull,\n                \"decomposes_to\": [\n                    {\n                        \"material_id\": d.material_id,\n                        \"formula\": getattr(d, \"formula\", \"\"),\n                        \"amount\": d.amount,\n                    }\n                    for d in (doc.decomposes_to or [])\n                ],\n                \"is_stable\": doc.is_stable,\n                \"energy_type\": doc.energy_type,\n                \"uncorrected_energy_per_atom\": doc.uncorrected_energy_per_atom,\n            }\n            for doc in thermo_docs\n        ]\n    ..."
+        "code": "def get_mp_thermo_data(material_id: str) -> str:\n    from mp_api.client import MPRester\n\n    # Use provided API key or get from environment\n    mp_api_key = os.getenv(\"MP_API_KEY\")\n    if not mp_api_key:\n        raise ValueError(\n            \"Materials Project API key not provided and not found in environment\"\n        )\n\n    with MPRester(mp_api_key) as mpr:\n        # Get thermodynamic data\n        thermo_docs = mpr.thermo.search(\n            material_ids=[material_id],\n            fields=[\n                \"material_id\",\n                \"thermo_type\",\n                \"formation_energy_per_atom\",\n                \"energy_above_hull\",\n                \"decomposes_to\",\n                \"is_stable\",\n                \"energy_type\",\n                \"uncorrected_energy_per_atom\",\n            ],\n        )\n\n        if not thermo_docs:\n            return json.dumps(\n                {\"error\": f\"No thermodynamic data found for {material_id}\"}\n            )\n\n        thermo_data = [\n            {\n                \"material_id\": doc.material_id,\n                \"thermo_type\": str(doc.thermo_type),\n                \"formation_energy_per_atom\": doc.formation_energy_per_atom,\n                \"energy_above_hull\": doc.energy_above_hull,\n                \"decomposes_to\": [\n                    {\n                        \"material_id\": d.material_id,\n                        \"formula\": getattr(d, \"formula\", \"\"),\n                        \"amount\": d.amount,\n                    }\n                    for d in (doc.decomposes_to or [])\n                ],\n                \"is_stable\": doc.is_stable,\n                \"energy_type\": doc.energy_type,\n                \"uncorrected_energy_per_atom\": doc.uncorrected_energy_per_atom,\n            }\n            for doc in thermo_docs\n        ]\n\n        return json.dumps(thermo_data, indent=2)"
       },
       {
         "name": "train_xgboost_model",
@@ -2482,7 +2568,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def train_xgboost_model(\n    try:\n        # Load data\n        train_df = pd.read_csv(train_data_path)\n        test_df = pd.read_csv(test_data_path)\n\n        # Separate features and targets\n        X_train = train_df.drop(columns=[target_column])\n        y_train = train_df[target_column]\n        X_test = test_df.drop(columns=[target_column])\n        y_test = test_df[target_column]\n\n        # Default hyperparameters\n        default_params = {\n            \"n_estimators\": 100,\n            \"max_depth\": 6,\n            \"learning_rate\": 0.1,\n            \"subsample\": 0.8,\n            \"colsample_bytree\": 0.8,\n            \"random_state\": 42,\n        }\n\n        if hyperparameters:\n            default_params.update(hyperparameters)\n\n        # Train model\n        model = xgb.XGBRegressor(**default_params)\n        model.fit(X_train, y_train)\n\n        # Make predictions\n        y_pred_train = model.predict(X_train)\n        y_pred_test = model.predict(X_test)\n\n        # Calculate metrics\n        train_metrics = {\n            \"mae\": float(mean_absolute_error(y_train, y_pred_train)),\n            \"rmse\": float(np.sqrt(mean_squared_error(y_train, y_pred_train))),\n            \"r2\": float(r2_score(y_train, y_pred_train)),\n        }\n\n        test_metrics = {\n            \"mae\": float(mean_absolute_error(y_test, y_pred_test)),\n            \"rmse\": float(np.sqrt(mean_squared_error(y_test, y_pred_test))),\n            \"r2\": float(r2_score(y_test, y_pred_test)),\n        }\n\n        # Feature importance - Convert float32 to standard float\n        feature_importance = {\n            col: float(importance)\n            for col, importance in zip(\n                X_train.columns, model.feature_importances_, strict=False\n    ..."
+        "code": "def train_xgboost_model(\n    try:\n        # Load data\n        train_df = pd.read_csv(train_data_path)\n        test_df = pd.read_csv(test_data_path)\n\n        # Separate features and targets\n        X_train = train_df.drop(columns=[target_column])\n        y_train = train_df[target_column]\n        X_test = test_df.drop(columns=[target_column])\n        y_test = test_df[target_column]\n\n        # Default hyperparameters\n        default_params = {\n            \"n_estimators\": 100,\n            \"max_depth\": 6,\n            \"learning_rate\": 0.1,\n            \"subsample\": 0.8,\n            \"colsample_bytree\": 0.8,\n            \"random_state\": 42,\n        }\n\n        if hyperparameters:\n            default_params.update(hyperparameters)\n\n        # Train model\n        model = xgb.XGBRegressor(**default_params)\n        model.fit(X_train, y_train)\n\n        # Make predictions\n        y_pred_train = model.predict(X_train)\n        y_pred_test = model.predict(X_test)\n\n        # Calculate metrics\n        train_metrics = {\n            \"mae\": float(mean_absolute_error(y_train, y_pred_train)),\n            \"rmse\": float(np.sqrt(mean_squared_error(y_train, y_pred_train))),\n            \"r2\": float(r2_score(y_train, y_pred_train)),\n        }\n\n        test_metrics = {\n            \"mae\": float(mean_absolute_error(y_test, y_pred_test)),\n            \"rmse\": float(np.sqrt(mean_squared_error(y_test, y_pred_test))),\n            \"r2\": float(r2_score(y_test, y_pred_test)),\n        }\n\n        # Feature importance - Convert float32 to standard float\n        feature_importance = {\n            col: float(importance)\n            for col, importance in zip(\n                X_train.columns, model.feature_importances_, strict=False\n            )\n        }\n\n        # Save model\n        model_save_path = resolve_working_dir_path(model_save_path, work_dir)\n        joblib.dump(model, model_save_path)\n\n        # Save predictions\n        predictions_path = model_save_path.replace(\".pkl\", \"_predictions.json\")\n        predictions = {\n            \"train_predictions\": y_pred_train.tolist(),\n            \"test_predictions\": y_pred_test.tolist(),\n            \"train_targets\": y_train.tolist(),\n            \"test_targets\": y_test.tolist(),\n        }\n\n        with Path(predictions_path).open(\"w\") as f:\n            json.dump(predictions, f, indent=2)\n\n        training_results_path = model_save_path.replace(\n            \".pkl\", \"_training_results.json\"\n        )\n        training_results = {\n            \"success\": True,\n            \"model_type\": \"xgboost\",\n            \"model_path\": model_save_path,\n            \"results_path\": training_results_path,\n            \"predictions_path\": predictions_path,\n            \"train_metrics\": train_metrics,\n            \"test_metrics\": test_metrics,\n            \"feature_importance\": feature_importance,\n            \"hyperparameters\": default_params,\n            \"train_samples\": len(X_train),\n            \"test_samples\": len(X_test),\n            \"features\": list(X_train.columns),\n        }\n        with Path(training_results_path).open(\"w\") as f:\n            json.dump(training_results, f, indent=2)\n\n        return json.dumps(training_results, indent=2)\n\n    except Exception as e:\n        import traceback\n\n        return json.dumps(\n            {\"success\": False, \"error\": str(e), \"traceback\": traceback.format_exc()}\n        )"
       },
       {
         "name": "evaluate_xgboost_model",
@@ -2521,7 +2607,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def evaluate_xgboost_model(\n    import joblib\n    import numpy as np\n    import pandas as pd\n    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score\n\n    try:\n        # Load model and test data\n        model = joblib.load(model_path)\n        test_df = pd.read_csv(test_data_path)\n\n        X_test = test_df.drop(columns=[target_column])\n        y_test = test_df[target_column]\n\n        # Make predictions\n        y_pred = model.predict(X_test)\n\n        # Basic metrics\n        metrics = {\n            \"mae\": float(mean_absolute_error(y_test, y_pred)),\n            \"rmse\": float(np.sqrt(mean_squared_error(y_test, y_pred))),\n            \"r2\": float(r2_score(y_test, y_pred)),\n            \"mape\": float(np.mean(np.abs((y_test - y_pred) / y_test)) * 100),\n            \"test_samples\": len(y_test),\n        }\n\n        if detailed_analysis:\n            # Prediction ranges\n            metrics[\"prediction_range\"] = {\n                \"min\": float(y_pred.min()),\n                \"max\": float(y_pred.max()),\n                \"std\": float(y_pred.std()),\n            }\n\n            # Error analysis\n            errors = y_test - y_pred\n            metrics[\"error_analysis\"] = {\n                \"mean_error\": float(errors.mean()),\n                \"error_std\": float(errors.std()),\n                \"max_positive_error\": float(errors.max()),\n                \"max_negative_error\": float(errors.min()),\n            }\n\n            # Feature importance\n            if hasattr(model, \"feature_importances_\"):\n                feature_importance = dict(\n                    zip(X_test.columns, model.feature_importances_, strict=False)\n                )\n                # Convert numpy float32 to Python float\n                metrics[\"feature_importance\"] = {\n                    k: float(v)\n    ..."
+        "code": "def evaluate_xgboost_model(\n    import joblib\n    import numpy as np\n    import pandas as pd\n    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score\n\n    try:\n        # Load model and test data\n        model = joblib.load(model_path)\n        test_df = pd.read_csv(test_data_path)\n\n        X_test = test_df.drop(columns=[target_column])\n        y_test = test_df[target_column]\n\n        # Make predictions\n        y_pred = model.predict(X_test)\n\n        # Basic metrics\n        metrics = {\n            \"mae\": float(mean_absolute_error(y_test, y_pred)),\n            \"rmse\": float(np.sqrt(mean_squared_error(y_test, y_pred))),\n            \"r2\": float(r2_score(y_test, y_pred)),\n            \"mape\": float(np.mean(np.abs((y_test - y_pred) / y_test)) * 100),\n            \"test_samples\": len(y_test),\n        }\n\n        if detailed_analysis:\n            # Prediction ranges\n            metrics[\"prediction_range\"] = {\n                \"min\": float(y_pred.min()),\n                \"max\": float(y_pred.max()),\n                \"std\": float(y_pred.std()),\n            }\n\n            # Error analysis\n            errors = y_test - y_pred\n            metrics[\"error_analysis\"] = {\n                \"mean_error\": float(errors.mean()),\n                \"error_std\": float(errors.std()),\n                \"max_positive_error\": float(errors.max()),\n                \"max_negative_error\": float(errors.min()),\n            }\n\n            # Feature importance\n            if hasattr(model, \"feature_importances_\"):\n                feature_importance = dict(\n                    zip(X_test.columns, model.feature_importances_, strict=False)\n                )\n                # Convert numpy float32 to Python float\n                metrics[\"feature_importance\"] = {\n                    k: float(v)\n                    for k, v in sorted(\n                        feature_importance.items(), key=lambda x: x[1], reverse=True\n                    )[:10]\n                }\n\n        return json.dumps({\"success\": True, \"evaluation_metrics\": metrics}, indent=2)\n\n    except Exception as e:\n        return json.dumps({\"success\": False, \"error\": str(e)}, indent=2)"
       },
       {
         "name": "perform_cross_validation",
@@ -2560,11 +2646,12 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def perform_cross_validation(\n    import pandas as pd\n    import xgboost as xgb\n    from sklearn.model_selection import KFold, cross_val_score\n\n    try:\n        # Load data\n        train_df = pd.read_csv(train_data_path)\n        X = train_df.drop(columns=[target_column])\n        y = train_df[target_column]\n\n        # Default hyperparameters\n        default_params = {\n            \"n_estimators\": 100,\n            \"max_depth\": 6,\n            \"learning_rate\": 0.1,\n            \"random_state\": 42,\n        }\n        if hyperparameters:\n            default_params.update(hyperparameters)\n\n        # Create model\n        model = xgb.XGBRegressor(**default_params)\n\n        # Cross-validation\n        kfold = KFold(n_splits=cv_folds, shuffle=True, random_state=42)\n\n        # R2 scores\n        r2_scores = cross_val_score(model, X, y, cv=kfold, scoring=\"r2\")\n\n        # MAE scores (note: sklearn returns negative MAE, so we negate)\n        mae_scores = -cross_val_score(\n            model, X, y, cv=kfold, scoring=\"neg_mean_absolute_error\"\n        )\n\n        results = {\n            \"cv_folds\": cv_folds,\n            \"r2_scores\": r2_scores.tolist(),\n            \"mae_scores\": mae_scores.tolist(),\n            \"r2_mean\": float(r2_scores.mean()),\n            \"r2_std\": float(r2_scores.std()),\n            \"mae_mean\": float(mae_scores.mean()),\n            \"mae_std\": float(mae_scores.std()),\n            \"hyperparameters\": default_params,\n        }\n\n        return json.dumps(\n            {\"success\": True, \"cross_validation_results\": results}, indent=2\n        )\n\n    except Exception as e:\n    ..."
+        "code": "def perform_cross_validation(\n    import pandas as pd\n    import xgboost as xgb\n    from sklearn.model_selection import KFold, cross_val_score\n\n    try:\n        # Load data\n        train_df = pd.read_csv(train_data_path)\n        X = train_df.drop(columns=[target_column])\n        y = train_df[target_column]\n\n        # Default hyperparameters\n        default_params = {\n            \"n_estimators\": 100,\n            \"max_depth\": 6,\n            \"learning_rate\": 0.1,\n            \"random_state\": 42,\n        }\n        if hyperparameters:\n            default_params.update(hyperparameters)\n\n        # Create model\n        model = xgb.XGBRegressor(**default_params)\n\n        # Cross-validation\n        kfold = KFold(n_splits=cv_folds, shuffle=True, random_state=42)\n\n        # R2 scores\n        r2_scores = cross_val_score(model, X, y, cv=kfold, scoring=\"r2\")\n\n        # MAE scores (note: sklearn returns negative MAE, so we negate)\n        mae_scores = -cross_val_score(\n            model, X, y, cv=kfold, scoring=\"neg_mean_absolute_error\"\n        )\n\n        results = {\n            \"cv_folds\": cv_folds,\n            \"r2_scores\": r2_scores.tolist(),\n            \"mae_scores\": mae_scores.tolist(),\n            \"r2_mean\": float(r2_scores.mean()),\n            \"r2_std\": float(r2_scores.std()),\n            \"mae_mean\": float(mae_scores.mean()),\n            \"mae_std\": float(mae_scores.std()),\n            \"hyperparameters\": default_params,\n        }\n\n        return json.dumps(\n            {\"success\": True, \"cross_validation_results\": results}, indent=2\n        )\n\n    except Exception as e:\n        return json.dumps({\"success\": False, \"error\": str(e)}, indent=2)"
       }
     ],
     "tasks": [
       {
+        "_uid": "4929fa10-2419-460a-a924-dab9e576b690",
         "id": "ml_oxides",
         "name": "Train XGBoost model",
         "description": "Generate a comprehensive dataset of oxide polymorphs from Materials Project and train an XGBoost model to predict formation energies. Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -2587,6 +2674,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "23f33dde-8533-49f5-b8e1-1d086d1d2048",
         "id": "ml_nitrides",
         "name": "Train XGBoost model",
         "description": "Generate a comprehensive dataset of nitrides polymorphs from Materials Project and train an XGBoost model to predict formation energies. Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -2609,6 +2697,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c082e0b7-9a60-4f5c-a6f8-ffcc49e6ef59",
         "id": "ml_sulphides",
         "name": "Train XGBoost model",
         "description": "Generate a comprehensive dataset of sulphides polymorphs from Materials Project and train an XGBoost model to predict formation energies. Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -2633,6 +2722,7 @@ const CORRAL_DATA = {
     ],
     "subtasks": [
       {
+        "_uid": "ed26343f-a680-4cfc-b1de-533aa8280bdc",
         "id": "batch_retrieve_oxide_polymorphs",
         "name": "Batch Retrieve Oxide Polymorphs",
         "description": "Generate a diverse list of oxide compositions for dataset creation. Retrieve polymorphs for all oxide compositions from Materials Project database. For each composition, collect multiple polymorphs including both stable and metastable structures. Consolidate all individual polymorph files into a single comprehensive dataset. Each entry should have `source_composition`.",
@@ -2651,6 +2741,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "933bb943-6b81-4548-9d68-323723569f23",
         "id": "prepare_ml_ready_dataset",
         "name": "Prepare ML-Ready Dataset",
         "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
@@ -2662,6 +2753,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "71737708-b654-4109-b89f-85d2f6b2c381",
         "id": "train_xgboost_formation_energy_model",
         "name": "Train XGBoost Formation Energy Model",
         "description": "Train an XGBoost regression model to predict formation energies of oxide polymorphs. Use the prepared dataset with optimized hyperparameters for oxide materials. Focus on achieving good generalization performance across different oxide families and structural types.",
@@ -2674,6 +2766,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4b743314-5d59-4967-894e-b0cbb3825402",
         "id": "evaluate_model_performance",
         "name": "Evaluate Model Performance",
         "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -2686,6 +2779,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "15abe939-9946-45e5-8cba-69faad7004d1",
         "id": "batch_retrieve_nitride_polymorphs",
         "name": "Batch Retrieve Nitride Polymorphs",
         "description": "Generate a diverse list of nitride compositions for dataset creation. Retrieve polymorphs for all nitride compositions from Materials Project database. For each composition, collect multiple polymorphs including both stable and metastable structures. Consolidate all individual polymorph files into a single comprehensive dataset. Each entry should have `source_composition`.",
@@ -2704,6 +2798,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "22a3ae4d-f085-4cc5-ad8b-d4a1d5dc3055",
         "id": "prepare_ml_ready_dataset",
         "name": "Prepare ML-Ready Dataset",
         "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
@@ -2715,6 +2810,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "9a1289fc-91bd-4c72-89cc-2e8b6ddb19dc",
         "id": "train_xgboost_formation_energy_model",
         "name": "Train XGBoost Formation Energy Model",
         "description": "Train an XGBoost regression model to predict formation energies of nitride polymorphs. Use the prepared dataset with optimized hyperparameters for nitride materials. Focus on achieving good generalization performance across different nitride families and structural types.",
@@ -2727,6 +2823,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "2f17a16f-4b4c-4d7b-8c06-11b19a47467b",
         "id": "evaluate_model_performance",
         "name": "Evaluate Model Performance",
         "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -2739,6 +2836,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "eb23b495-bc5f-4f51-aa2a-d0ef3c509c22",
         "id": "batch_retrieve_sulphide_polymorphs",
         "name": "Batch Retrieve Sulphide Polymorphs",
         "description": "Generate a diverse list of sulphide compositions for dataset creation. Retrieve polymorphs for all sulphide compositions from Materials Project database. For each composition, collect multiple polymorphs including both stable and metastable structures. Consolidate all individual polymorph files into a single comprehensive dataset. Each entry should have `source_composition`.",
@@ -2757,6 +2855,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "949c2d47-6392-43f5-803f-22495693628b",
         "id": "prepare_ml_ready_dataset",
         "name": "Prepare ML-Ready Dataset",
         "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
@@ -2768,6 +2867,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "dbf304e2-ab06-4118-8530-96b3d4c34c21",
         "id": "train_xgboost_formation_energy_model",
         "name": "Train XGBoost Formation Energy Model",
         "description": "Train an XGBoost regression model to predict formation energies of sulphide polymorphs. Use the prepared dataset with optimized hyperparameters for sulphide materials. Focus on achieving good generalization performance across different sulphide families and structural types.",
@@ -2780,6 +2880,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "857cf98a-7dc6-4039-98b4-694d8b7d82ef",
         "id": "evaluate_model_performance",
         "name": "Evaluate Model Performance",
         "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -2796,6 +2897,7 @@ const CORRAL_DATA = {
       "level_1": {
         "tasks": [
           {
+            "_uid": "4929fa10-2419-460a-a924-dab9e576b690",
             "id": "ml_oxides",
             "name": "Train XGBoost model",
             "description": "Generate a comprehensive dataset of oxide polymorphs from Materials Project and train an XGBoost model to predict formation energies. Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -2818,6 +2920,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "23f33dde-8533-49f5-b8e1-1d086d1d2048",
             "id": "ml_nitrides",
             "name": "Train XGBoost model",
             "description": "Generate a comprehensive dataset of nitrides polymorphs from Materials Project and train an XGBoost model to predict formation energies. Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -2840,6 +2943,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c082e0b7-9a60-4f5c-a6f8-ffcc49e6ef59",
             "id": "ml_sulphides",
             "name": "Train XGBoost model",
             "description": "Generate a comprehensive dataset of sulphides polymorphs from Materials Project and train an XGBoost model to predict formation energies. Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -2864,6 +2968,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "ed26343f-a680-4cfc-b1de-533aa8280bdc",
             "id": "batch_retrieve_oxide_polymorphs",
             "name": "Batch Retrieve Oxide Polymorphs",
             "description": "Generate a diverse list of oxide compositions for dataset creation. Retrieve polymorphs for all oxide compositions from Materials Project database. For each composition, collect multiple polymorphs including both stable and metastable structures. Consolidate all individual polymorph files into a single comprehensive dataset. Each entry should have `source_composition`.",
@@ -2882,6 +2987,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "933bb943-6b81-4548-9d68-323723569f23",
             "id": "prepare_ml_ready_dataset",
             "name": "Prepare ML-Ready Dataset",
             "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
@@ -2893,6 +2999,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "71737708-b654-4109-b89f-85d2f6b2c381",
             "id": "train_xgboost_formation_energy_model",
             "name": "Train XGBoost Formation Energy Model",
             "description": "Train an XGBoost regression model to predict formation energies of oxide polymorphs. Use the prepared dataset with optimized hyperparameters for oxide materials. Focus on achieving good generalization performance across different oxide families and structural types.",
@@ -2905,6 +3012,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4b743314-5d59-4967-894e-b0cbb3825402",
             "id": "evaluate_model_performance",
             "name": "Evaluate Model Performance",
             "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -2917,6 +3025,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "15abe939-9946-45e5-8cba-69faad7004d1",
             "id": "batch_retrieve_nitride_polymorphs",
             "name": "Batch Retrieve Nitride Polymorphs",
             "description": "Generate a diverse list of nitride compositions for dataset creation. Retrieve polymorphs for all nitride compositions from Materials Project database. For each composition, collect multiple polymorphs including both stable and metastable structures. Consolidate all individual polymorph files into a single comprehensive dataset. Each entry should have `source_composition`.",
@@ -2935,6 +3044,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "22a3ae4d-f085-4cc5-ad8b-d4a1d5dc3055",
             "id": "prepare_ml_ready_dataset",
             "name": "Prepare ML-Ready Dataset",
             "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
@@ -2946,6 +3056,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "9a1289fc-91bd-4c72-89cc-2e8b6ddb19dc",
             "id": "train_xgboost_formation_energy_model",
             "name": "Train XGBoost Formation Energy Model",
             "description": "Train an XGBoost regression model to predict formation energies of nitride polymorphs. Use the prepared dataset with optimized hyperparameters for nitride materials. Focus on achieving good generalization performance across different nitride families and structural types.",
@@ -2958,6 +3069,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "2f17a16f-4b4c-4d7b-8c06-11b19a47467b",
             "id": "evaluate_model_performance",
             "name": "Evaluate Model Performance",
             "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -2970,6 +3082,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "eb23b495-bc5f-4f51-aa2a-d0ef3c509c22",
             "id": "batch_retrieve_sulphide_polymorphs",
             "name": "Batch Retrieve Sulphide Polymorphs",
             "description": "Generate a diverse list of sulphide compositions for dataset creation. Retrieve polymorphs for all sulphide compositions from Materials Project database. For each composition, collect multiple polymorphs including both stable and metastable structures. Consolidate all individual polymorph files into a single comprehensive dataset. Each entry should have `source_composition`.",
@@ -2988,6 +3101,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "949c2d47-6392-43f5-803f-22495693628b",
             "id": "prepare_ml_ready_dataset",
             "name": "Prepare ML-Ready Dataset",
             "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
@@ -2999,6 +3113,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "dbf304e2-ab06-4118-8530-96b3d4c34c21",
             "id": "train_xgboost_formation_energy_model",
             "name": "Train XGBoost Formation Energy Model",
             "description": "Train an XGBoost regression model to predict formation energies of sulphide polymorphs. Use the prepared dataset with optimized hyperparameters for sulphide materials. Focus on achieving good generalization performance across different sulphide families and structural types.",
@@ -3011,6 +3126,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "857cf98a-7dc6-4039-98b4-694d8b7d82ef",
             "id": "evaluate_model_performance",
             "name": "Evaluate Model Performance",
             "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
@@ -3041,27 +3157,27 @@ const CORRAL_DATA = {
       {
         "name": "compare_with_ground_truth",
         "docstring": "Generic function to compare a generated JSON file with a ground truth JSON file.\n\nArgs:\n    generated_path: Path to the generated JSON file\n    ground_truth_path: Path to the ground truth JSON file\n    comparison_mode: Mode of comparison:\n                    - \"strict\": Exact matching of structure a",
-        "code": "def compare_with_ground_truth(\n    generated_path, ground_truth_path, comparison_mode=\"strict\", tolerance=0.05\n):\n    \"\"\"\n    Generic function to compare a generated JSON file with a ground truth JSON file.\n\n    Args:\n        generated_path: Path to the generated JSON file\n        ground_truth_path: Path to the ground truth JSON file\n        comparison_mode: Mode of comparison:\n                        - \"strict\": Exact matching of structure and values\n                        - \"keys\": Only check if all required keys exist\n                        - \"numerical\": Compare numerical values with tolerance\n                        - \"subset\": Check if generated contains at least a subset of ground truth\n        tolerance: Tolerance for numerical comparisons (as a fraction)\n\n    Returns:\n        1.0 if generated matches ground truth according to the comparison mode, 0.0 otherwise\n    \"\"\"\n    import json\n\n    # Check if both files exist\n    if not Path(generated_path).exists() or not Path(ground_truth_path).exists():\n        return 0.0\n\n    try:\n        # Load both files\n        with Path(generated_path).open(\"r\") as f:\n            generated = json.load(f)\n\n        with Path(ground_truth_path).open(\"r\") as f:\n            ground_truth = json.load(f)\n\n        # Handle different comparison modes\n        if comparison_mode == \"strict\":\n            # Direct equality check\n            return 1.0 if generated == ground_truth else 0.0\n\n        elif comparison_mode == \"keys\":\n            # Check if all required keys from ground truth exist in generated\n            if isinstance(ground_truth, dict) and isinstance(generated, dict):\n                missing_keys = [key for key in ground_truth if key not in generated]\n                return 1.0 if not missing_keys else 0.0\n            elif isinstance(ground_truth, list) and isinstance(generated, list):\n                # For lists, check if they have the same length\n                if len(ground_truth) != len(generated):\n                    return 0.0\n                # If items are dictionaries, check keys for each item\n                if all(isinstance(item, dict) for item in ground_truth):\n                    for i, gt_item in enumerate(ground_truth):\n    ..."
+        "code": "def compare_with_ground_truth(\n    generated_path, ground_truth_path, comparison_mode=\"strict\", tolerance=0.05\n):\n    \"\"\"\n    Generic function to compare a generated JSON file with a ground truth JSON file.\n\n    Args:\n        generated_path: Path to the generated JSON file\n        ground_truth_path: Path to the ground truth JSON file\n        comparison_mode: Mode of comparison:\n                        - \"strict\": Exact matching of structure and values\n                        - \"keys\": Only check if all required keys exist\n                        - \"numerical\": Compare numerical values with tolerance\n                        - \"subset\": Check if generated contains at least a subset of ground truth\n        tolerance: Tolerance for numerical comparisons (as a fraction)\n\n    Returns:\n        1.0 if generated matches ground truth according to the comparison mode, 0.0 otherwise\n    \"\"\"\n    import json\n\n    # Check if both files exist\n    if not Path(generated_path).exists() or not Path(ground_truth_path).exists():\n        return 0.0\n\n    try:\n        # Load both files\n        with Path(generated_path).open(\"r\") as f:\n            generated = json.load(f)\n\n        with Path(ground_truth_path).open(\"r\") as f:\n            ground_truth = json.load(f)\n\n        # Handle different comparison modes\n        if comparison_mode == \"strict\":\n            # Direct equality check\n            return 1.0 if generated == ground_truth else 0.0\n\n        elif comparison_mode == \"keys\":\n            # Check if all required keys from ground truth exist in generated\n            if isinstance(ground_truth, dict) and isinstance(generated, dict):\n                missing_keys = [key for key in ground_truth if key not in generated]\n                return 1.0 if not missing_keys else 0.0\n            elif isinstance(ground_truth, list) and isinstance(generated, list):\n                # For lists, check if they have the same length\n                if len(ground_truth) != len(generated):\n                    return 0.0\n                # If items are dictionaries, check keys for each item\n                if all(isinstance(item, dict) for item in ground_truth):\n                    for i, gt_item in enumerate(ground_truth):\n                        if i >= len(generated):\n                            return 0.0\n                        missing_keys = [\n                            key for key in gt_item if key not in generated[i]\n                        ]\n                        if missing_keys:\n                            return 0.0\n                return 1.0\n            else:\n                return 0.0\n\n        elif comparison_mode == \"numerical\":\n            # Compare numerical values with tolerance\n            def compare_with_tolerance(val1, val2, tol):\n                if isinstance(val1, int | float) and isinstance(val2, int | float):\n                    # Use relative tolerance for non-zero values\n                    if abs(val2) > 1e-10:\n                        return abs((val1 - val2) / val2) <= tol\n                    # Use absolute tolerance for values near zero\n                    else:\n                        return abs(val1 - val2) <= tol\n                elif isinstance(val1, dict) and isinstance(val2, dict):\n                    # Compare dictionaries recursively\n                    return all(\n                        k in val1 and compare_with_tolerance(val1[k], val2[k], tol)\n                        for k in val2\n                    )\n                elif isinstance(val1, list) and isinstance(val2, list):\n                    # Compare lists recursively\n                    return len(val1) == len(val2) and all(\n                        compare_with_tolerance(v1, v2, tol)\n                        for v1, v2 in zip(val1, val2, strict=False)\n                    )\n                else:\n                    # For non-numerical values, use strict equality\n                    return val1 == val2\n\n            return (\n                1.0\n                if compare_with_tolerance(generated, ground_truth, tolerance)\n                else 0.0\n            )\n\n        elif comparison_mode == \"subset\":\n            # Check if generated contains at least the required subset\n            def is_subset(generated_val, ground_truth_val):\n                if isinstance(ground_truth_val, dict) and isinstance(\n                    generated_val, dict\n                ):\n                    # Check if all required keys and values match\n                    for k, v in ground_truth_val.items():\n                        if k not in generated_val or not is_subset(generated_val[k], v):\n                            return False\n                    return True\n                elif isinstance(ground_truth_val, list) and isinstance(\n                    generated_val, list\n                ):\n                    # For lists, check if all ground truth items are in generated\n                    # This is a simplified approach that works for primitive values\n                    for gt_item in ground_truth_val:\n                        if isinstance(gt_item, dict | list):\n                            # For complex items, check if any generated item is a superset\n                            if not any(\n                                is_subset(gen_item, gt_item)\n                                for gen_item in generated_val\n                            ):\n                                return False\n                        else:\n                            # For simple items, just check if it's in the list\n                            if gt_item not in generated_val:\n                                return False\n                    return True\n                else:\n                    # For primitive values, check equality\n                    return generated_val == ground_truth_val\n\n            return 1.0 if is_subset(generated, ground_truth) else 0.0\n\n        else:\n            raise ValueError(f\"Unknown comparison mode: {comparison_mode}\")\n\n    except Exception:\n        return 0.0"
       },
       {
         "name": "ml_pipeline_score",
         "docstring": "Comprehensive scoring function for the single-task ML pipeline.\n\nEvaluates the entire pipeline from data generation to model evaluation.\nThis function looks for evidence of all pipeline steps and evaluates\nthe final model quality.",
-        "code": "def ml_pipeline_score(model_path: str) -> float:\n    \"\"\"\n    Comprehensive scoring function for the single-task ML pipeline.\n\n    Evaluates the entire pipeline from data generation to model evaluation.\n    This function looks for evidence of all pipeline steps and evaluates\n    the final model quality.\n    \"\"\"\n    try:\n        if not Path(model_path).exists():\n            return 0.0\n\n        # Try to load the model\n        try:\n            import joblib\n\n            model = joblib.load(model_path)\n            if not hasattr(model, \"predict\"):\n                return 0.2\n        except Exception:\n            return 0.1\n\n        score = 0.3  # Base score for model existence\n\n        # Look for evidence of dataset creation\n        work_dir = Path(model_path).parent\n\n        # Check for evaluation results\n        eval_files = list(work_dir.glob(\"*evaluation*.json\")) + list(\n            work_dir.glob(\"*results*.json\")\n        )\n        if eval_files:\n            try:\n                # Load the most recent evaluation file\n                latest_eval = max(eval_files, key=lambda x: x.stat().st_mtime)\n                with latest_eval.open() as f:\n                    eval_results = json.load(f)\n\n                # Check model performance\n                if \"evaluation_metrics\" in eval_results:\n                    metrics = eval_results[\"evaluation_metrics\"]\n                    r2 = metrics.get(\"r2\", 0)\n                    mae = metrics.get(\"mae\", float(\"inf\"))\n\n                    if r2 >= 0.8 and mae <= 0.3:\n                        score += 0.3\n                    elif r2 >= 0.6 and mae <= 0.5:\n                        score += 0.2\n                    elif r2 >= 0.4:\n                        score += 0.1\n    ..."
+        "code": "def ml_pipeline_score(model_path: str) -> float:\n    \"\"\"\n    Comprehensive scoring function for the single-task ML pipeline.\n\n    Evaluates the entire pipeline from data generation to model evaluation.\n    This function looks for evidence of all pipeline steps and evaluates\n    the final model quality.\n    \"\"\"\n    try:\n        if not Path(model_path).exists():\n            return 0.0\n\n        # Try to load the model\n        try:\n            import joblib\n\n            model = joblib.load(model_path)\n            if not hasattr(model, \"predict\"):\n                return 0.2\n        except Exception:\n            return 0.1\n\n        score = 0.3  # Base score for model existence\n\n        # Look for evidence of dataset creation\n        work_dir = Path(model_path).parent\n\n        # Check for evaluation results\n        eval_files = list(work_dir.glob(\"*evaluation*.json\")) + list(\n            work_dir.glob(\"*results*.json\")\n        )\n        if eval_files:\n            try:\n                # Load the most recent evaluation file\n                latest_eval = max(eval_files, key=lambda x: x.stat().st_mtime)\n                with latest_eval.open() as f:\n                    eval_results = json.load(f)\n\n                # Check model performance\n                if \"evaluation_metrics\" in eval_results:\n                    metrics = eval_results[\"evaluation_metrics\"]\n                    r2 = metrics.get(\"r2\", 0)\n                    mae = metrics.get(\"mae\", float(\"inf\"))\n\n                    if r2 >= 0.8 and mae <= 0.3:\n                        score += 0.3\n                    elif r2 >= 0.6 and mae <= 0.5:\n                        score += 0.2\n                    elif r2 >= 0.4:\n                        score += 0.1\n\n                # Check for cross-validation\n                if \"cross_validation_results\" in eval_results:\n                    score += 0.1\n\n            except Exception:\n                pass\n\n        return min(1.0, score)\n\n    except Exception as e:\n        logger.error(f\"Error scoring comprehensive ML pipeline: {e}\")\n        return 0.0"
       },
       {
         "name": "polymorph_retrieval_success",
         "docstring": "Score the success of batch polymorph retrieval.\n\nCriteria:\n- At least 80% of compositions have polymorphs retrieved\n- Total polymorphs >= 50\n- Reasonable distribution across compositions",
-        "code": "def polymorph_retrieval_success(retrieval_results_path: str) -> float:\n    \"\"\"\n    Score the success of batch polymorph retrieval.\n\n    Criteria:\n    - At least 80% of compositions have polymorphs retrieved\n    - Total polymorphs >= 50\n    - Reasonable distribution across compositions\n    \"\"\"\n    try:\n        if not Path(retrieval_results_path).exists():\n            return 0.0\n\n        with Path(retrieval_results_path).open() as f:\n            results = json.load(f)\n\n        successful = len(results.get(\"successful_compositions\", []))\n        failed = len(results.get(\"failed_compositions\", []))\n        total_compositions = successful + failed\n        total_polymorphs = results.get(\"total_polymorphs\", 0)\n\n        if total_compositions == 0:\n            return 0.0\n\n        success_rate = successful / total_compositions\n\n        score = 0.0\n\n        # Success rate scoring\n        if success_rate >= 0.8:\n            score += 0.4\n        elif success_rate >= 0.6:\n            score += 0.3\n        elif success_rate >= 0.4:\n            score += 0.2\n\n        # Total polymorphs scoring\n        if total_polymorphs >= 100:\n            score += 0.3\n        elif total_polymorphs >= 50:\n            score += 0.2\n        elif total_polymorphs >= 20:\n            score += 0.1\n\n        # Distribution check (average polymorphs per successful composition)\n        if successful > 0:\n            avg_per_comp = total_polymorphs / successful\n            if 3 <= avg_per_comp <= 10:\n                score += 0.3\n            elif 2 <= avg_per_comp <= 12:\n    ..."
+        "code": "def polymorph_retrieval_success(retrieval_results_path: str) -> float:\n    \"\"\"\n    Score the success of batch polymorph retrieval.\n\n    Criteria:\n    - At least 80% of compositions have polymorphs retrieved\n    - Total polymorphs >= 50\n    - Reasonable distribution across compositions\n    \"\"\"\n    try:\n        if not Path(retrieval_results_path).exists():\n            return 0.0\n\n        with Path(retrieval_results_path).open() as f:\n            results = json.load(f)\n\n        successful = len(results.get(\"successful_compositions\", []))\n        failed = len(results.get(\"failed_compositions\", []))\n        total_compositions = successful + failed\n        total_polymorphs = results.get(\"total_polymorphs\", 0)\n\n        if total_compositions == 0:\n            return 0.0\n\n        success_rate = successful / total_compositions\n\n        score = 0.0\n\n        # Success rate scoring\n        if success_rate >= 0.8:\n            score += 0.4\n        elif success_rate >= 0.6:\n            score += 0.3\n        elif success_rate >= 0.4:\n            score += 0.2\n\n        # Total polymorphs scoring\n        if total_polymorphs >= 100:\n            score += 0.3\n        elif total_polymorphs >= 50:\n            score += 0.2\n        elif total_polymorphs >= 20:\n            score += 0.1\n\n        # Distribution check (average polymorphs per successful composition)\n        if successful > 0:\n            avg_per_comp = total_polymorphs / successful\n            if 3 <= avg_per_comp <= 10:\n                score += 0.3\n            elif 2 <= avg_per_comp <= 12:\n                score += 0.2\n\n        return min(1.0, score)\n\n    except Exception as e:\n        logger.error(f\"Error scoring polymorph retrieval: {e}\")\n        return 0.0"
       },
       {
         "name": "score_polymorph_dataset",
         "docstring": "Analyzes a consolidated JSON file of polymorphs to identify if there are\ncompositions with multiple polymorphs.\n\nArgs:\n    consolidated_json_path: Path to the consolidated JSON file\n                            (e.g., created by consolidate_polymorph_datasets).\n\nReturns:\n    A float: 1.0 if at least ",
-        "code": "def score_polymorph_dataset(\n    consolidated_json_path: str,\n) -> float:\n    \"\"\"\n    Analyzes a consolidated JSON file of polymorphs to identify if there are\n    compositions with multiple polymorphs.\n\n    Args:\n        consolidated_json_path: Path to the consolidated JSON file\n                                (e.g., created by consolidate_polymorph_datasets).\n\n    Returns:\n        A float: 1.0 if at least one composition with multiple polymorphs is found,\n        otherwise 0.0. Returns 0.0 if the file is not found or an error occurs.\n    \"\"\"\n    try:\n        # Check if the consolidated JSON file exists\n        # We need Path imported to check for file existence\n        from pathlib import Path\n\n        logger.info(f\"score_polymorph_dataset: input={consolidated_json_path!r}\")\n\n        consolidated_json_file = Path(consolidated_json_path)\n        if not consolidated_json_file.exists():\n            logger.error(\n                f\"Consolidated JSON file not found at: {consolidated_json_path}\"\n            )\n            return 0.0\n\n        with consolidated_json_file.open(\"r\") as f:\n            all_polymorphs_data = json.load(f)\n\n        # Dictionary to store polymorphs grouped by composition\n        polymorphs_by_composition = {}\n        for polymorph in all_polymorphs_data:\n            composition = polymorph.get(\"source_composition\")\n            if composition:\n                if composition not in polymorphs_by_composition:\n                    polymorphs_by_composition[composition] = []\n                polymorphs_by_composition[composition].append(polymorph)\n            else:\n                logger.warning(\n                    f\"Polymorph without 'source_composition' found: {polymorph.get('material_id', 'N/A')}\"\n                )\n\n        # Check if any composition has multiple polymorphs\n        for polymorphs in polymorphs_by_composition.values():\n            if len(polymorphs) > 1:\n                # If we find at least one composition with multiple polymorphs, return 1.0\n                return 1.0\n    ..."
+        "code": "def score_polymorph_dataset(\n    consolidated_json_path: str,\n) -> float:\n    \"\"\"\n    Analyzes a consolidated JSON file of polymorphs to identify if there are\n    compositions with multiple polymorphs.\n\n    Args:\n        consolidated_json_path: Path to the consolidated JSON file\n                                (e.g., created by consolidate_polymorph_datasets).\n\n    Returns:\n        A float: 1.0 if at least one composition with multiple polymorphs is found,\n        otherwise 0.0. Returns 0.0 if the file is not found or an error occurs.\n    \"\"\"\n    try:\n        # Check if the consolidated JSON file exists\n        # We need Path imported to check for file existence\n        from pathlib import Path\n\n        logger.info(f\"score_polymorph_dataset: input={consolidated_json_path!r}\")\n\n        consolidated_json_file = Path(consolidated_json_path)\n        if not consolidated_json_file.exists():\n            logger.error(\n                f\"Consolidated JSON file not found at: {consolidated_json_path}\"\n            )\n            return 0.0\n\n        with consolidated_json_file.open(\"r\") as f:\n            all_polymorphs_data = json.load(f)\n\n        # Dictionary to store polymorphs grouped by composition\n        polymorphs_by_composition = {}\n        for polymorph in all_polymorphs_data:\n            composition = polymorph.get(\"source_composition\")\n            if composition:\n                if composition not in polymorphs_by_composition:\n                    polymorphs_by_composition[composition] = []\n                polymorphs_by_composition[composition].append(polymorph)\n            else:\n                logger.warning(\n                    f\"Polymorph without 'source_composition' found: {polymorph.get('material_id', 'N/A')}\"\n                )\n\n        # Check if any composition has multiple polymorphs\n        for polymorphs in polymorphs_by_composition.values():\n            if len(polymorphs) > 1:\n                # If we find at least one composition with multiple polymorphs, return 1.0\n                return 1.0\n\n        # If the loop completes and no composition with multiple polymorphs is found\n        return 0.0\n\n    except Exception as e:\n        logger.error(f\"Error in score_polymorph_dataset: {e}\", exc_info=True)\n        return 0.0"
       },
       {
         "name": "ml_dataset_preparation_quality_binary",
         "docstring": "Scores the quality of ML dataset preparation as binary (0 for fail, 1 for pass).\n\nA dataset preparation passes (1) if it meets the following criteria:\n- Both train and test files exist.\n- Sufficient sample sizes: at least 40 training samples and 10 test samples.\n- A reasonable number of features: at",
-        "code": "def ml_dataset_preparation_quality_binary(ml_metadata_path: str) -> int:\n    \"\"\"\n    Scores the quality of ML dataset preparation as binary (0 for fail, 1 for pass).\n\n    A dataset preparation passes (1) if it meets the following criteria:\n    - Both train and test files exist.\n    - Sufficient sample sizes: at least 40 training samples and 10 test samples.\n    - A reasonable number of features: at least 10 features.\n\n    Args:\n        ml_metadata_path: Path to the ML dataset metadata JSON file.\n\n    Returns:\n        1 if the dataset preparation quality meets the defined passing criteria,\n        0 otherwise (including errors).\n    \"\"\"\n    try:\n        logger.info(f\"ml_dataset_preparation: input={ml_metadata_path!r}\")\n\n        if not Path(ml_metadata_path).exists():\n            logger.info(f\"Metadata file not found: {ml_metadata_path}\")\n            return 0\n\n        with Path(ml_metadata_path).open() as f:\n            metadata = json.load(f)\n\n        # Criteria 1: Check train/test files exist\n        train_path = metadata.get(\"train_path\", \"\")\n        test_path = metadata.get(\"test_path\", \"\")\n        if not (\n            train_path\n            and Path(train_path).exists()\n            and test_path\n            and Path(test_path).exists()\n        ):\n            logger.info(\n                \"Binary check failed: Train or test files are missing or paths are empty.\"\n            )\n            # Added more specific logging for clarity\n            if not train_path:\n                logger.info(\"train_path is empty in metadata.\")\n            elif not Path(train_path).exists():\n                logger.info(\"Train file does not exist at: {train_path}\")\n            if not test_path:\n                logger.info(\"test_path is empty in metadata.\")\n            elif not Path(test_path).exists():\n                logger.info(\"Test file does not exist at: {test_path}\")\n\n            return 0\n\n    ..."
+        "code": "def ml_dataset_preparation_quality_binary(ml_metadata_path: str) -> int:\n    \"\"\"\n    Scores the quality of ML dataset preparation as binary (0 for fail, 1 for pass).\n\n    A dataset preparation passes (1) if it meets the following criteria:\n    - Both train and test files exist.\n    - Sufficient sample sizes: at least 40 training samples and 10 test samples.\n    - A reasonable number of features: at least 10 features.\n\n    Args:\n        ml_metadata_path: Path to the ML dataset metadata JSON file.\n\n    Returns:\n        1 if the dataset preparation quality meets the defined passing criteria,\n        0 otherwise (including errors).\n    \"\"\"\n    try:\n        logger.info(f\"ml_dataset_preparation: input={ml_metadata_path!r}\")\n\n        if not Path(ml_metadata_path).exists():\n            logger.info(f\"Metadata file not found: {ml_metadata_path}\")\n            return 0\n\n        with Path(ml_metadata_path).open() as f:\n            metadata = json.load(f)\n\n        # Criteria 1: Check train/test files exist\n        train_path = metadata.get(\"train_path\", \"\")\n        test_path = metadata.get(\"test_path\", \"\")\n        if not (\n            train_path\n            and Path(train_path).exists()\n            and test_path\n            and Path(test_path).exists()\n        ):\n            logger.info(\n                \"Binary check failed: Train or test files are missing or paths are empty.\"\n            )\n            # Added more specific logging for clarity\n            if not train_path:\n                logger.info(\"train_path is empty in metadata.\")\n            elif not Path(train_path).exists():\n                logger.info(\"Train file does not exist at: {train_path}\")\n            if not test_path:\n                logger.info(\"test_path is empty in metadata.\")\n            elif not Path(test_path).exists():\n                logger.info(\"Test file does not exist at: {test_path}\")\n\n            return 0\n\n        # Criteria 2: Check sufficient sample sizes\n        train_samples = metadata.get(\"train_samples\", 0)\n        test_samples = metadata.get(\"test_samples\", 0)\n        if not (train_samples >= 20 and test_samples >= 5):\n            logger.info(\n                f\"Binary check failed: Insufficient sample sizes (Train: {train_samples}, Test: {test_samples}).\"\n            )\n            return 0\n\n        # Criteria 3: Check reasonable feature count\n        feature_count = metadata.get(\"feature_count\", 0)\n        if not (feature_count >= 10):\n            logger.info(\n                f\"Binary check failed: Insufficient feature count ({feature_count}).\"\n            )\n            return 0\n\n        logger.info(\"Binary check passed: ML dataset preparation quality is good.\")\n        return 1\n\n    except json.JSONDecodeError:\n        logger.error(f\"Error: Invalid JSON format in {ml_metadata_path}\")\n        return 0\n    except Exception as e:\n        logger.error(f\"Error scoring ML dataset preparation quality: {e}\")\n        return 0"
       },
       {
         "name": "model_training_success_binary",
@@ -3071,7 +3187,7 @@ const CORRAL_DATA = {
       {
         "name": "model_evaluation_completeness_binary",
         "docstring": "Scores the completeness of model evaluation as binary (0 for fail, 1 for pass).\n\nModel evaluation completeness passes (1) if it meets the following criteria:\n- An evaluation results file exists.\n- All required basic evaluation metrics (mae, rmse, r2) are present.\n- Performance quality: R-squared (r2",
-        "code": "def model_evaluation_completeness_binary(evaluation_results_path: str) -> int:\n    \"\"\"\n    Scores the completeness of model evaluation as binary (0 for fail, 1 for pass).\n\n    Model evaluation completeness passes (1) if it meets the following criteria:\n    - An evaluation results file exists.\n    - All required basic evaluation metrics (mae, rmse, r2) are present.\n    - Performance quality: R-squared (r2) in evaluation metrics is at least 0.7.\n    - Cross-validation results are present, including mean and standard deviation for r2.\n    - Feature importance analysis is included in the evaluation metrics.\n\n    Args:\n        evaluation_results_path: Path to the model evaluation results JSON file.\n\n    Returns:\n        1 if the model evaluation completeness meets the defined passing criteria,\n        0 otherwise (including errors).\n    \"\"\"\n    try:\n        logger.info(f\"ml_dataset_preparation: input={evaluation_results_path!r}\")\n\n        if not Path(evaluation_results_path).exists():\n            logger.info(f\"Evaluation results file not found: {evaluation_results_path}\")\n            return 0\n\n        with Path(evaluation_results_path).open() as f:\n            results = json.load(f)\n\n        # Criteria 1 & 2: Check for basic evaluation metrics and all required metrics\n        if \"test_set_evaluation\" not in results:\n            logger.info(\"Binary check failed: 'test_set_evaluation' not found.\")\n            return 0\n        metrics = results[\"test_set_evaluation\"]\n        required_metrics = [\"mae\", \"rmse\", \"r2\"]\n        if not all(metric in metrics for metric in required_metrics):\n            logger.info(\n                \"Binary check failed: Not all required metrics (mae, rmse, r2) are present.\"\n            )\n            return 0\n\n        # Criteria 3: Check performance quality (r2 >= 0.7)\n        r2_value = metrics.get(\"r2\")\n        if not (isinstance(r2_value, int | float) and r2_value >= 0.7):\n            logger.info(\n                f\"Binary check failed: R2 ({r2_value}) is not a valid number or is below 0.7.\"\n            )\n            return 0\n\n        # Criteria 4: Check for cross-validation results\n        if \"cross_validation_results\" not in results:\n    ..."
+        "code": "def model_evaluation_completeness_binary(evaluation_results_path: str) -> int:\n    \"\"\"\n    Scores the completeness of model evaluation as binary (0 for fail, 1 for pass).\n\n    Model evaluation completeness passes (1) if it meets the following criteria:\n    - An evaluation results file exists.\n    - All required basic evaluation metrics (mae, rmse, r2) are present.\n    - Performance quality: R-squared (r2) in evaluation metrics is at least 0.7.\n    - Cross-validation results are present, including mean and standard deviation for r2.\n    - Feature importance analysis is included in the evaluation metrics.\n\n    Args:\n        evaluation_results_path: Path to the model evaluation results JSON file.\n\n    Returns:\n        1 if the model evaluation completeness meets the defined passing criteria,\n        0 otherwise (including errors).\n    \"\"\"\n    try:\n        logger.info(f\"ml_dataset_preparation: input={evaluation_results_path!r}\")\n\n        if not Path(evaluation_results_path).exists():\n            logger.info(f\"Evaluation results file not found: {evaluation_results_path}\")\n            return 0\n\n        with Path(evaluation_results_path).open() as f:\n            results = json.load(f)\n\n        # Criteria 1 & 2: Check for basic evaluation metrics and all required metrics\n        if \"test_set_evaluation\" not in results:\n            logger.info(\"Binary check failed: 'test_set_evaluation' not found.\")\n            return 0\n        metrics = results[\"test_set_evaluation\"]\n        required_metrics = [\"mae\", \"rmse\", \"r2\"]\n        if not all(metric in metrics for metric in required_metrics):\n            logger.info(\n                \"Binary check failed: Not all required metrics (mae, rmse, r2) are present.\"\n            )\n            return 0\n\n        # Criteria 3: Check performance quality (r2 >= 0.7)\n        r2_value = metrics.get(\"r2\")\n        if not (isinstance(r2_value, int | float) and r2_value >= 0.7):\n            logger.info(\n                f\"Binary check failed: R2 ({r2_value}) is not a valid number or is below 0.7.\"\n            )\n            return 0\n\n        # Criteria 4: Check for cross-validation results\n        if \"cross_validation_results\" not in results:\n            logger.info(\"Binary check failed: 'cross_validation_results' not found.\")\n            return 0\n        cv_results = results[\"cross_validation_results\"]\n        if not (\"r2_mean\" in cv_results and \"r2_std\" in cv_results):\n            logger.info(\n                \"Binary check failed: Cross-validation results missing 'r2_mean' or 'r2_std'.\"\n            )\n            return 0\n\n        # Criteria 5: Check for feature importance\n        if \"feature_importance\" not in metrics:\n            logger.info(\n                \"Binary check failed: 'feature_importance' not found in evaluation metrics.\"\n            )\n            return 0\n\n        logger.info(\"Binary check passed: Model evaluation completeness criteria met.\")\n        return 1\n\n    except json.JSONDecodeError:\n        logger.error(f\"Error: Invalid JSON format in {evaluation_results_path}\")\n        return 0\n    except Exception as e:\n        logger.error(f\"Error scoring model evaluation completeness: {e}\")\n        return 0"
       },
       {
         "name": "compare_with_tolerance",
@@ -3241,7 +3357,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "float",
-        "code": "def simulate_circuit_resistance(topology: str, terminal_nodes: list[str]) -> float:\n    try:\n        circuit = json.loads(topology)\n        resistors = circuit[\"resistors\"]\n        connections = circuit[\"connections\"]\n\n        if len(terminal_nodes) != 2:\n            raise ValueError(\"Must specify exactly two terminal nodes\")\n\n        # Build adjacency matrix for nodal analysis\n        nodes = set()\n        for conn in connections:\n            nodes.add(conn[0])\n            nodes.add(conn[1])\n\n        node_list = sorted(nodes)\n        n = len(node_list)\n        node_to_idx = {node: i for i, node in enumerate(node_list)}\n\n        # Create conductance matrix\n        G = np.zeros((n, n))\n\n        for node1, node2, resistor_id in connections:\n            if resistor_id not in resistors:\n                raise ValueError(f\"Resistor {resistor_id} not found in resistor list\")\n\n            resistance = resistors[resistor_id]\n            if resistance <= 0:\n                raise ValueError(f\"Resistance must be positive, got {resistance}\")\n\n            conductance = 1.0 / resistance\n            i, j = node_to_idx[node1], node_to_idx[node2]\n\n            G[i, i] += conductance\n            G[j, j] += conductance\n            G[i, j] -= conductance\n            G[j, i] -= conductance\n\n        # Solve for resistance between terminal nodes\n        term1_idx = node_to_idx[terminal_nodes[0]]\n        term2_idx = node_to_idx[terminal_nodes[1]]\n\n        # Apply 1A current between terminals and solve for voltage\n        Ia = np.zeros(n)\n        Ia[term1_idx] = 1.0\n        Ia[term2_idx] = -1.0\n\n        # Remove one equation (use term2 as reference)\n        # This handles cases where term2_idx is the last element\n        if n == 1:  # Handle single-node circuit, which implies shorted\n            return 0.0\n    ..."
+        "code": "def simulate_circuit_resistance(topology: str, terminal_nodes: list[str]) -> float:\n    try:\n        circuit = json.loads(topology)\n        resistors = circuit[\"resistors\"]\n        connections = circuit[\"connections\"]\n\n        if len(terminal_nodes) != 2:\n            raise ValueError(\"Must specify exactly two terminal nodes\")\n\n        # Build adjacency matrix for nodal analysis\n        nodes = set()\n        for conn in connections:\n            nodes.add(conn[0])\n            nodes.add(conn[1])\n\n        node_list = sorted(nodes)\n        n = len(node_list)\n        node_to_idx = {node: i for i, node in enumerate(node_list)}\n\n        # Create conductance matrix\n        G = np.zeros((n, n))\n\n        for node1, node2, resistor_id in connections:\n            if resistor_id not in resistors:\n                raise ValueError(f\"Resistor {resistor_id} not found in resistor list\")\n\n            resistance = resistors[resistor_id]\n            if resistance <= 0:\n                raise ValueError(f\"Resistance must be positive, got {resistance}\")\n\n            conductance = 1.0 / resistance\n            i, j = node_to_idx[node1], node_to_idx[node2]\n\n            G[i, i] += conductance\n            G[j, j] += conductance\n            G[i, j] -= conductance\n            G[j, i] -= conductance\n\n        # Solve for resistance between terminal nodes\n        term1_idx = node_to_idx[terminal_nodes[0]]\n        term2_idx = node_to_idx[terminal_nodes[1]]\n\n        # Apply 1A current between terminals and solve for voltage\n        Ia = np.zeros(n)\n        Ia[term1_idx] = 1.0\n        Ia[term2_idx] = -1.0\n\n        # Remove one equation (use term2 as reference)\n        # This handles cases where term2_idx is the last element\n        if n == 1:  # Handle single-node circuit, which implies shorted\n            return 0.0\n\n        if term2_idx == n - 1:\n            G_reduced = G[:-1, :-1]\n            I_reduced = Ia[:-1]\n        else:\n            G_reduced = np.delete(np.delete(G, term2_idx, 0), term2_idx, 1)\n            I_reduced = np.delete(Ia, term2_idx)\n\n        try:\n            # Handle cases where G_reduced might be empty or singular (e.g., two nodes directly connected with no resistors to other nodes)\n            if G_reduced.size == 0:\n                # If only two nodes and directly connected without other paths, resistance is sum of direct path.\n                # This specific case is handled by the loop over connections\n                # If G_reduced is empty after removing rows/cols, it implies a 2-node circuit with no other connections.\n                # In such cases, if a direct resistor exists between term1 and term2, its value is the resistance.\n                # This logic is complex and better handled by checking for direct connections first.\n                # For simplicity here, if the reduced matrix is empty or singular, it's likely an error unless it's a very simple 2-node series circuit.\n                raise np.linalg.LinAlgError(\n                    \"Reduced conductance matrix is empty or singular\"\n                )\n\n            V_reduced = np.linalg.solve(G_reduced, I_reduced)\n        except np.linalg.LinAlgError as err:\n            raise ValueError(\n                \"Circuit is not solvable (possibly disconnected or ill-conditioned)\"\n            ) from err\n\n        # Insert reference voltage (0V at term2)\n        if term2_idx == n - 1:\n            V = np.append(V_reduced, 0)\n        else:\n            V = np.insert(V_reduced, term2_idx, 0)\n\n        # Resistance is voltage difference with 1A current\n        return abs(V[term1_idx] - V[term2_idx])\n\n    except Exception as e:\n        raise ValueError(f\"Error simulating circuit: {e!s}\") from e"
       },
       {
         "name": "validate_measurements",
@@ -3272,7 +3388,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def validate_measurements(topology: str, measurements: str) -> str:\n    try:\n        measurements_data = json.loads(measurements)\n        errors = []\n        detailed_errors = []\n\n        for measurement in measurements_data:\n            node_a = measurement[\"node_a\"]\n            node_b = measurement[\"node_b\"]\n\n            try:\n                predicted_resistance = get_resistance_between_nodes(\n                    topology=topology, terminal_nodes=[node_a, node_b]\n                )\n\n                if \"resistance\" in measurement:\n                    actual_resistance = measurement[\"resistance\"]\n                    error = abs(predicted_resistance - actual_resistance)\n                    errors.append(error)\n                    detailed_errors.append(\n                        {\n                            \"nodes\": f\"{node_a}-{node_b}\",\n                            \"predicted\": predicted_resistance,\n                            \"actual\": actual_resistance,\n                            \"error\": error,\n                            \"relative_error\": error / actual_resistance\n                            if actual_resistance != 0\n                            else float(\"inf\"),\n                        }\n                    )\n\n            except Exception as e:\n                # If simulation fails, assign large error\n                errors.append(1000.0)\n                detailed_errors.append(\n                    {\n                        \"nodes\": f\"{node_a}-{node_b}\",\n                        \"error\": 1000.0,\n                        \"error_type\": f\"simulation_failed: {e!s}\",\n                    }\n                )\n\n        result = {\n            \"total_error\": sum(errors),\n            \"max_error\": max(errors) if errors else 0,\n            \"mean_error\": sum(errors) / len(errors) if errors else 0,\n            \"detailed_errors\": detailed_errors,\n            \"num_measurements\": len(measurements_data),\n        }\n        return json.dumps(result, indent=2)\n\n    ..."
+        "code": "def validate_measurements(topology: str, measurements: str) -> str:\n    try:\n        measurements_data = json.loads(measurements)\n        errors = []\n        detailed_errors = []\n\n        for measurement in measurements_data:\n            node_a = measurement[\"node_a\"]\n            node_b = measurement[\"node_b\"]\n\n            try:\n                predicted_resistance = get_resistance_between_nodes(\n                    topology=topology, terminal_nodes=[node_a, node_b]\n                )\n\n                if \"resistance\" in measurement:\n                    actual_resistance = measurement[\"resistance\"]\n                    error = abs(predicted_resistance - actual_resistance)\n                    errors.append(error)\n                    detailed_errors.append(\n                        {\n                            \"nodes\": f\"{node_a}-{node_b}\",\n                            \"predicted\": predicted_resistance,\n                            \"actual\": actual_resistance,\n                            \"error\": error,\n                            \"relative_error\": error / actual_resistance\n                            if actual_resistance != 0\n                            else float(\"inf\"),\n                        }\n                    )\n\n            except Exception as e:\n                # If simulation fails, assign large error\n                errors.append(1000.0)\n                detailed_errors.append(\n                    {\n                        \"nodes\": f\"{node_a}-{node_b}\",\n                        \"error\": 1000.0,\n                        \"error_type\": f\"simulation_failed: {e!s}\",\n                    }\n                )\n\n        result = {\n            \"total_error\": sum(errors),\n            \"max_error\": max(errors) if errors else 0,\n            \"mean_error\": sum(errors) / len(errors) if errors else 0,\n            \"detailed_errors\": detailed_errors,\n            \"num_measurements\": len(measurements_data),\n        }\n        return json.dumps(result, indent=2)\n\n    except Exception as e:\n        return json.dumps({\"error\": f\"Validation failed: {e!s}\"}, indent=2)"
       },
       {
         "name": "propose_simple_topology",
@@ -3334,7 +3450,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "str",
-        "code": "def estimate_resistor_values(topology: str, measurements: str) -> str:\n    try:\n        circuit = json.loads(topology)\n        measurements_data = json.loads(measurements)\n\n        # Extract resistor names and initial values\n        resistor_names = list(circuit[\"resistors\"].keys())\n        initial_values = [circuit[\"resistors\"][name] for name in resistor_names]\n\n        def objective_function(resistor_values: np.ndarray) -> float:\n            \"\"\"Calculate total squared error for given resistor values\"\"\"\n            # Create test topology with current resistor values\n            test_topology = circuit.copy()\n            test_topology[\"resistors\"] = dict(\n                zip(resistor_names, resistor_values, strict=False)\n            )\n\n            total_error = 0.0\n            for measurement in measurements_data:\n                try:\n                    # Use the simulation tool to predict resistance\n                    predicted = get_resistance_between_nodes(\n                        topology=json.dumps(test_topology),\n                        terminal_nodes=[measurement[\"node_a\"], measurement[\"node_b\"]],\n                    )\n                    predicted = float(predicted)  # Convert string to float\n                    actual = measurement[\"resistance\"]\n                    error = (predicted - actual) ** 2  # Squared error\n                    total_error += error\n\n                except Exception:\n                    # Penalize simulation failures heavily\n                    total_error += 1e6\n\n            return total_error\n\n        # Define bounds (resistors should be positive, reasonable range)\n        bounds = [(0.1, 10000) for _ in resistor_names]  # 0.1Ω to 10kΩ\n\n        # Run optimization\n        result = minimize(\n            objective_function,\n            x0=initial_values,\n            method=\"L-BFGS-B\",  # Good for bounded problems\n            bounds=bounds,\n            options={\"ftol\": 1e-9, \"maxiter\": 1000},\n        )\n\n        if result.success:\n            # Create optimized topology\n            optimized_topology = circuit.copy()\n    ..."
+        "code": "def estimate_resistor_values(topology: str, measurements: str) -> str:\n    try:\n        circuit = json.loads(topology)\n        measurements_data = json.loads(measurements)\n\n        # Extract resistor names and initial values\n        resistor_names = list(circuit[\"resistors\"].keys())\n        initial_values = [circuit[\"resistors\"][name] for name in resistor_names]\n\n        def objective_function(resistor_values: np.ndarray) -> float:\n            \"\"\"Calculate total squared error for given resistor values\"\"\"\n            # Create test topology with current resistor values\n            test_topology = circuit.copy()\n            test_topology[\"resistors\"] = dict(\n                zip(resistor_names, resistor_values, strict=False)\n            )\n\n            total_error = 0.0\n            for measurement in measurements_data:\n                try:\n                    # Use the simulation tool to predict resistance\n                    predicted = get_resistance_between_nodes(\n                        topology=json.dumps(test_topology),\n                        terminal_nodes=[measurement[\"node_a\"], measurement[\"node_b\"]],\n                    )\n                    predicted = float(predicted)  # Convert string to float\n                    actual = measurement[\"resistance\"]\n                    error = (predicted - actual) ** 2  # Squared error\n                    total_error += error\n\n                except Exception:\n                    # Penalize simulation failures heavily\n                    total_error += 1e6\n\n            return total_error\n\n        # Define bounds (resistors should be positive, reasonable range)\n        bounds = [(0.1, 10000) for _ in resistor_names]  # 0.1Ω to 10kΩ\n\n        # Run optimization\n        result = minimize(\n            objective_function,\n            x0=initial_values,\n            method=\"L-BFGS-B\",  # Good for bounded problems\n            bounds=bounds,\n            options={\"ftol\": 1e-9, \"maxiter\": 1000},\n        )\n\n        if result.success:\n            # Create optimized topology\n            optimized_topology = circuit.copy()\n            optimized_topology[\"resistors\"] = {\n                name: round(float(value), 0)\n                for name, value in zip(resistor_names, result.x, strict=False)\n            }\n\n            return json.dumps(\n                {\n                    \"resistors\": optimized_topology[\"resistors\"],\n                    \"connections\": circuit[\"connections\"],\n                    \"optimization_info\": {\n                        \"success\": True,\n                        \"final_error\": float(result.fun),\n                        \"iterations\": result.nit,\n                        \"message\": result.message,\n                    },\n                },\n                indent=2,\n            )\n        else:\n            return json.dumps(\n                {\n                    \"error\": f\"Optimization failed: {result.message}\",\n                    \"optimization_info\": {\n                        \"success\": False,\n                        \"final_error\": float(result.fun),\n                        \"iterations\": result.nit,\n                    },\n                }\n            )\n\n    except Exception as e:\n        return json.dumps({\"error\": f\"Estimation failed: {e!s}\"})"
       },
       {
         "name": "generate_test_measurements",
@@ -3369,6 +3485,7 @@ const CORRAL_DATA = {
     ],
     "tasks": [
       {
+        "_uid": "80b1be0b-a71a-4315-9ee7-bd525fcff209",
         "id": "task_0",
         "name": "task_0",
         "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3385,6 +3502,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3f7edad9-1002-4db5-9d2f-75ec1b0346a2",
         "id": "task_1",
         "name": "task_1",
         "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3401,6 +3519,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f55b744f-8178-4264-b8e1-a561de2e80d1",
         "id": "task_2",
         "name": "task_2",
         "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3417,6 +3536,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "82417165-267e-4e72-b8e2-4ba81163b3ee",
         "id": "task_3",
         "name": "task_3",
         "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3433,6 +3553,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "09913138-6a89-4dbd-b652-67269e446b72",
         "id": "task_4",
         "name": "task_4",
         "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3449,6 +3570,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "737c8144-4a31-43d8-b964-9f2277388566",
         "id": "task_5",
         "name": "task_5",
         "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3467,6 +3589,7 @@ const CORRAL_DATA = {
     ],
     "subtasks": [
       {
+        "_uid": "9894777f-1eed-4a79-b114-6217818171c1",
         "id": "task_0_subnet_1",
         "name": "task_0_subnet_1",
         "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -3483,6 +3606,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "42919d6c-8e4b-4902-b7bf-4302f69d2431",
         "id": "task_0_subnet_2",
         "name": "task_0_subnet_2",
         "description": "Identify topology of subnetwork 2 between nodes X1 and B.",
@@ -3499,6 +3623,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "5aa274c7-07d7-44c7-822e-a70ac9870c97",
         "id": "task_0_final_assembly",
         "name": "Final Network Assembly",
         "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -3513,6 +3638,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "bb9c7d0f-f368-4bad-af80-f84bb6f0040f",
         "id": "task_1_subnet_1",
         "name": "task_1_subnet_1",
         "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -3529,6 +3655,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d4f13bd7-17d5-4736-8330-1d3d33b2a949",
         "id": "task_1_subnet_2",
         "name": "task_1_subnet_2",
         "description": "Identify topology of subnetwork 2 between nodes X1 and B.",
@@ -3545,6 +3672,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7c5e27f4-7212-4060-b23c-5dd078b111a6",
         "id": "task_1_final_assembly",
         "name": "Final Network Assembly",
         "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -3559,6 +3687,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "8ae71a2f-a83b-436e-b29b-6ca8c750c3a9",
         "id": "task_2_subnet_1",
         "name": "task_2_subnet_1",
         "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -3575,6 +3704,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "e3b970e3-dc07-479f-95eb-c8c6c9691e1f",
         "id": "task_2_subnet_2",
         "name": "task_2_subnet_2",
         "description": "Identify topology of subnetwork 2 between nodes X1 and X2.",
@@ -3591,6 +3721,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "13aa6c5f-1b02-42c6-8bd2-a05ce538caba",
         "id": "task_2_subnet_3",
         "name": "task_2_subnet_3",
         "description": "Identify topology of subnetwork 3 between nodes X2 and B.",
@@ -3607,6 +3738,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "e2acb2b9-3dbc-4568-9313-911000383ffa",
         "id": "task_2_final_assembly",
         "name": "Final Network Assembly",
         "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -3621,6 +3753,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "421961ff-b19f-403b-818d-71bce20d824a",
         "id": "task_3_subnet_1",
         "name": "task_3_subnet_1",
         "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -3637,6 +3770,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "00a76881-05f2-4ec7-9e8f-04268071a759",
         "id": "task_3_subnet_2",
         "name": "task_3_subnet_2",
         "description": "Identify topology of subnetwork 2 between nodes X1 and X2.",
@@ -3653,6 +3787,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f2dfd42d-248a-4d75-88ff-454096d89a94",
         "id": "task_3_subnet_3",
         "name": "task_3_subnet_3",
         "description": "Identify topology of subnetwork 3 between nodes X2 and B.",
@@ -3669,6 +3804,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "03b9ae12-9ba8-441d-8105-44da229ea95d",
         "id": "task_3_final_assembly",
         "name": "Final Network Assembly",
         "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -3683,6 +3819,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f50d7387-5969-4086-89ed-16fad16acd9f",
         "id": "task_4_subnet_1",
         "name": "task_4_subnet_1",
         "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -3699,6 +3836,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "93f9fc36-6ea3-41d9-b4ed-08a21e58a386",
         "id": "task_4_subnet_2",
         "name": "task_4_subnet_2",
         "description": "Identify topology of subnetwork 2 between nodes X1 and X2.",
@@ -3715,6 +3853,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "5f22d037-4d17-485c-a5ce-108bfc153c0b",
         "id": "task_4_subnet_3",
         "name": "task_4_subnet_3",
         "description": "Identify topology of subnetwork 3 between nodes X2 and X3.",
@@ -3731,6 +3870,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "e3d774c3-1a7e-4b0a-8cc4-0e6545bbacb3",
         "id": "task_4_subnet_4",
         "name": "task_4_subnet_4",
         "description": "Identify topology of subnetwork 4 between nodes X3 and B.",
@@ -3747,6 +3887,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7c3aa96b-8193-4f25-a521-aaa786391fb2",
         "id": "task_4_final_assembly",
         "name": "Final Network Assembly",
         "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -3761,6 +3902,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4da08fc7-f900-4be2-9ea5-18af42f0a723",
         "id": "task_5_subnet_1",
         "name": "task_5_subnet_1",
         "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -3777,6 +3919,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7cd3a705-ec1a-485d-9595-4cf7b6fd95eb",
         "id": "task_5_subnet_2",
         "name": "task_5_subnet_2",
         "description": "Identify topology of subnetwork 2 between nodes X1 and X2.",
@@ -3793,6 +3936,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "45a984ab-7209-4ed9-86e5-68b6f74d0d34",
         "id": "task_5_subnet_3",
         "name": "task_5_subnet_3",
         "description": "Identify topology of subnetwork 3 between nodes X2 and X3.",
@@ -3809,6 +3953,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "b2c614cc-9637-4a31-a492-9f3f82912ed9",
         "id": "task_5_subnet_4",
         "name": "task_5_subnet_4",
         "description": "Identify topology of subnetwork 4 between nodes X3 and B.",
@@ -3825,6 +3970,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "88862404-d4f5-4473-8de8-aeb82b8c676f",
         "id": "task_5_final_assembly",
         "name": "Final Network Assembly",
         "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -3843,6 +3989,7 @@ const CORRAL_DATA = {
       "level_1": {
         "tasks": [
           {
+            "_uid": "80b1be0b-a71a-4315-9ee7-bd525fcff209",
             "id": "task_0",
             "name": "task_0",
             "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3859,6 +4006,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3f7edad9-1002-4db5-9d2f-75ec1b0346a2",
             "id": "task_1",
             "name": "task_1",
             "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3875,6 +4023,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f55b744f-8178-4264-b8e1-a561de2e80d1",
             "id": "task_2",
             "name": "task_2",
             "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3891,6 +4040,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "82417165-267e-4e72-b8e2-4ba81163b3ee",
             "id": "task_3",
             "name": "task_3",
             "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3907,6 +4057,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "09913138-6a89-4dbd-b652-67269e446b72",
             "id": "task_4",
             "name": "task_4",
             "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3923,6 +4074,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "737c8144-4a31-43d8-b964-9f2277388566",
             "id": "task_5",
             "name": "task_5",
             "description": "Infer the circuit topology and resistor values from node-to-node resistance measurements.",
@@ -3941,6 +4093,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "9894777f-1eed-4a79-b114-6217818171c1",
             "id": "task_0_subnet_1",
             "name": "task_0_subnet_1",
             "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -3957,6 +4110,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "42919d6c-8e4b-4902-b7bf-4302f69d2431",
             "id": "task_0_subnet_2",
             "name": "task_0_subnet_2",
             "description": "Identify topology of subnetwork 2 between nodes X1 and B.",
@@ -3973,6 +4127,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "5aa274c7-07d7-44c7-822e-a70ac9870c97",
             "id": "task_0_final_assembly",
             "name": "Final Network Assembly",
             "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -3987,6 +4142,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "bb9c7d0f-f368-4bad-af80-f84bb6f0040f",
             "id": "task_1_subnet_1",
             "name": "task_1_subnet_1",
             "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -4003,6 +4159,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d4f13bd7-17d5-4736-8330-1d3d33b2a949",
             "id": "task_1_subnet_2",
             "name": "task_1_subnet_2",
             "description": "Identify topology of subnetwork 2 between nodes X1 and B.",
@@ -4019,6 +4176,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7c5e27f4-7212-4060-b23c-5dd078b111a6",
             "id": "task_1_final_assembly",
             "name": "Final Network Assembly",
             "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -4033,6 +4191,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "8ae71a2f-a83b-436e-b29b-6ca8c750c3a9",
             "id": "task_2_subnet_1",
             "name": "task_2_subnet_1",
             "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -4049,6 +4208,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "e3b970e3-dc07-479f-95eb-c8c6c9691e1f",
             "id": "task_2_subnet_2",
             "name": "task_2_subnet_2",
             "description": "Identify topology of subnetwork 2 between nodes X1 and X2.",
@@ -4065,6 +4225,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "13aa6c5f-1b02-42c6-8bd2-a05ce538caba",
             "id": "task_2_subnet_3",
             "name": "task_2_subnet_3",
             "description": "Identify topology of subnetwork 3 between nodes X2 and B.",
@@ -4081,6 +4242,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "e2acb2b9-3dbc-4568-9313-911000383ffa",
             "id": "task_2_final_assembly",
             "name": "Final Network Assembly",
             "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -4095,6 +4257,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "421961ff-b19f-403b-818d-71bce20d824a",
             "id": "task_3_subnet_1",
             "name": "task_3_subnet_1",
             "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -4111,6 +4274,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "00a76881-05f2-4ec7-9e8f-04268071a759",
             "id": "task_3_subnet_2",
             "name": "task_3_subnet_2",
             "description": "Identify topology of subnetwork 2 between nodes X1 and X2.",
@@ -4127,6 +4291,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f2dfd42d-248a-4d75-88ff-454096d89a94",
             "id": "task_3_subnet_3",
             "name": "task_3_subnet_3",
             "description": "Identify topology of subnetwork 3 between nodes X2 and B.",
@@ -4143,6 +4308,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "03b9ae12-9ba8-441d-8105-44da229ea95d",
             "id": "task_3_final_assembly",
             "name": "Final Network Assembly",
             "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -4157,6 +4323,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f50d7387-5969-4086-89ed-16fad16acd9f",
             "id": "task_4_subnet_1",
             "name": "task_4_subnet_1",
             "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -4173,6 +4340,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "93f9fc36-6ea3-41d9-b4ed-08a21e58a386",
             "id": "task_4_subnet_2",
             "name": "task_4_subnet_2",
             "description": "Identify topology of subnetwork 2 between nodes X1 and X2.",
@@ -4189,6 +4357,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "5f22d037-4d17-485c-a5ce-108bfc153c0b",
             "id": "task_4_subnet_3",
             "name": "task_4_subnet_3",
             "description": "Identify topology of subnetwork 3 between nodes X2 and X3.",
@@ -4205,6 +4374,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "e3d774c3-1a7e-4b0a-8cc4-0e6545bbacb3",
             "id": "task_4_subnet_4",
             "name": "task_4_subnet_4",
             "description": "Identify topology of subnetwork 4 between nodes X3 and B.",
@@ -4221,6 +4391,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7c3aa96b-8193-4f25-a521-aaa786391fb2",
             "id": "task_4_final_assembly",
             "name": "Final Network Assembly",
             "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -4235,6 +4406,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4da08fc7-f900-4be2-9ea5-18af42f0a723",
             "id": "task_5_subnet_1",
             "name": "task_5_subnet_1",
             "description": "Identify topology of subnetwork 1 between nodes A and X1.",
@@ -4251,6 +4423,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7cd3a705-ec1a-485d-9595-4cf7b6fd95eb",
             "id": "task_5_subnet_2",
             "name": "task_5_subnet_2",
             "description": "Identify topology of subnetwork 2 between nodes X1 and X2.",
@@ -4267,6 +4440,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "45a984ab-7209-4ed9-86e5-68b6f74d0d34",
             "id": "task_5_subnet_3",
             "name": "task_5_subnet_3",
             "description": "Identify topology of subnetwork 3 between nodes X2 and X3.",
@@ -4283,6 +4457,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "b2c614cc-9637-4a31-a492-9f3f82912ed9",
             "id": "task_5_subnet_4",
             "name": "task_5_subnet_4",
             "description": "Identify topology of subnetwork 4 between nodes X3 and B.",
@@ -4299,6 +4474,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "88862404-d4f5-4473-8de8-aeb82b8c676f",
             "id": "task_5_final_assembly",
             "name": "Final Network Assembly",
             "description": "Combine all subnetworks to form the complete resistor network topology.",
@@ -4321,12 +4497,12 @@ const CORRAL_DATA = {
       {
         "name": "check_resistor_topology",
         "docstring": "Enhanced scoring function that checks:\n1. Topology structure (connections)\n2. Functional behavior (does it produce expected measurements?)\n3. Optionally: exact resistor values\n\nArgs:\n    expected_topology: Expected circuit topology (required)\n    use_functional_scoring: Whether to use functional val",
-        "code": "def check_resistor_topology(\n    expected_topology: dict[str, Any],\n    use_functional_scoring: bool,\n    topology_weight: float,\n    functional_weight: float,\n    exact_values_weight: float,\n    tolerance: float = 0.1,\n    require_both: bool = True,\n    expected_measurements: list[dict[str, Any]] | None = None,\n) -> Callable[[str], float]:\n    \"\"\"\n    Enhanced scoring function that checks:\n    1. Topology structure (connections)\n    2. Functional behavior (does it produce expected measurements?)\n    3. Optionally: exact resistor values\n\n    Args:\n        expected_topology: Expected circuit topology (required)\n        use_functional_scoring: Whether to use functional validation (required)\n        topology_weight: Weight for topology structure score (required, set 0.0 to disable)\n        functional_weight: Weight for functional behavior score (required, set 0.0 to disable)\n        exact_values_weight: Weight for exact resistor values score (required, set 0.0 to disable)\n        tolerance: Tolerance for measurements and resistor values (default: 0.1)\n        require_both: Legacy parameter - ignored when use_functional_scoring=True (default: True)\n        expected_measurements: List of expected resistance measurements (required if functional_weight > 0)\n\n    Notes:\n        - At least one weight must be > 0\n        - If functional_weight > 0, expected_measurements must be provided\n        - Weights are normalized automatically in weighted scoring mode\n\n    Example configurations:\n        # Pure functional scoring (for subtasks with arbitrary resistor names):\n        use_functional_scoring=True, topology_weight=0.0, functional_weight=1.0, exact_values_weight=0.0\n\n        # Functional + topology (for main tasks):\n        use_functional_scoring=True, topology_weight=0.5, functional_weight=0.5, exact_values_weight=0.0\n\n        # Original strict mode (backward compatible):\n        use_functional_scoring=False, topology_weight=0.5, functional_weight=0.0, exact_values_weight=0.5\n    \"\"\"\n    # Validate configuration\n    if topology_weight < 0 or functional_weight < 0 or exact_values_weight < 0:\n        raise ValueError(\"All weights must be non-negative\")\n\n    if topology_weight == 0 and functional_weight == 0 and exact_values_weight == 0:\n        raise ValueError(\n            \"At least one weight must be > 0. \"\n            \"Set topology_weight, functional_weight, or exact_values_weight to enable scoring.\"\n        )\n    ..."
+        "code": "def check_resistor_topology(\n    expected_topology: dict[str, Any],\n    use_functional_scoring: bool,\n    topology_weight: float,\n    functional_weight: float,\n    exact_values_weight: float,\n    tolerance: float = 0.1,\n    require_both: bool = True,\n    expected_measurements: list[dict[str, Any]] | None = None,\n) -> Callable[[str], float]:\n    \"\"\"\n    Enhanced scoring function that checks:\n    1. Topology structure (connections)\n    2. Functional behavior (does it produce expected measurements?)\n    3. Optionally: exact resistor values\n\n    Args:\n        expected_topology: Expected circuit topology (required)\n        use_functional_scoring: Whether to use functional validation (required)\n        topology_weight: Weight for topology structure score (required, set 0.0 to disable)\n        functional_weight: Weight for functional behavior score (required, set 0.0 to disable)\n        exact_values_weight: Weight for exact resistor values score (required, set 0.0 to disable)\n        tolerance: Tolerance for measurements and resistor values (default: 0.1)\n        require_both: Legacy parameter - ignored when use_functional_scoring=True (default: True)\n        expected_measurements: List of expected resistance measurements (required if functional_weight > 0)\n\n    Notes:\n        - At least one weight must be > 0\n        - If functional_weight > 0, expected_measurements must be provided\n        - Weights are normalized automatically in weighted scoring mode\n\n    Example configurations:\n        # Pure functional scoring (for subtasks with arbitrary resistor names):\n        use_functional_scoring=True, topology_weight=0.0, functional_weight=1.0, exact_values_weight=0.0\n\n        # Functional + topology (for main tasks):\n        use_functional_scoring=True, topology_weight=0.5, functional_weight=0.5, exact_values_weight=0.0\n\n        # Original strict mode (backward compatible):\n        use_functional_scoring=False, topology_weight=0.5, functional_weight=0.0, exact_values_weight=0.5\n    \"\"\"\n    # Validate configuration\n    if topology_weight < 0 or functional_weight < 0 or exact_values_weight < 0:\n        raise ValueError(\"All weights must be non-negative\")\n\n    if topology_weight == 0 and functional_weight == 0 and exact_values_weight == 0:\n        raise ValueError(\n            \"At least one weight must be > 0. \"\n            \"Set topology_weight, functional_weight, or exact_values_weight to enable scoring.\"\n        )\n\n    if functional_weight > 0 and not expected_measurements:\n        raise ValueError(\n            \"expected_measurements must be provided when functional_weight > 0\"\n        )\n\n    logger.info(\n        f\"Creating enhanced topology checker - functional: {use_functional_scoring}, \"\n        f\"weights(topology={topology_weight}, functional={functional_weight}, exact_values={exact_values_weight})\"\n    )\n\n    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"ENHANCED SCORING INPUT: {topology_input!r}\")\n            logger.info(f\"EXPECTED TOPOLOGY: {expected_topology}\")\n\n            # Parse topology (same logic as before)\n            topology_data = None\n            input_stripped = topology_input.strip()\n\n            if input_stripped.startswith(\"{\") and input_stripped.endswith(\"}\"):\n                try:\n                    topology_data = json.loads(input_stripped)\n                    logger.info(\"Parsed topology from direct JSON string\")\n                except json.JSONDecodeError as e:\n                    logger.warning(f\"Failed to parse as direct JSON: {e}\")\n                    return 0.0\n\n            if (\n                not topology_data\n                or \"resistors\" not in topology_data\n                or \"connections\" not in topology_data\n            ):\n                logger.error(\"Invalid topology data\")\n                return 0.0\n\n            proposed_resistors = topology_data[\"resistors\"]\n            proposed_connections = topology_data[\"connections\"]\n            expected_resistors = expected_topology[\"resistors\"]\n            expected_connections = expected_topology[\"connections\"]\n\n            logger.info(f\"PROPOSED TOPOLOGY: {topology_data}\")\n\n            # 1. Score topology structure (connections)\n            topology_score = _score_topology_structure(\n                proposed_connections, expected_connections\n            )\n            logger.info(f\"Topology structure score: {topology_score}\")\n\n            scores = {\"topology\": topology_score}\n            weights = {\"topology\": topology_weight}\n\n            logger.info(\n                f\"Function parameters - use_functional_scoring: {use_functional_scoring}, functional_weight: {functional_weight}, exact_values_weight: {exact_values_weight}\"\n            )\n\n            # 2. Score functional behavior\n            if (\n                use_functional_scoring\n                and expected_measurements\n                and functional_weight > 0\n            ):\n                functional_score = _score_functional_behavior(\n                    topology_data, expected_measurements, tolerance\n                )\n                scores[\"functional\"] = functional_score\n                weights[\"functional\"] = functional_weight\n                logger.info(f\"Functional behavior score: {functional_score}\")\n\n            # 3. Score exact resistor values (should be enabled by default for backward compatibility)\n            if exact_values_weight > 0:\n                exact_values_score = _score_resistor_values(\n                    proposed_resistors, expected_resistors, tolerance\n                )\n                scores[\"exact_values\"] = exact_values_score\n                weights[\"exact_values\"] = exact_values_weight\n                logger.info(f\"Exact values score: {exact_values_score}\")\n            else:\n                logger.info(\n                    f\"Exact values scoring disabled (weight={exact_values_weight})\"\n                )\n\n            # Calculate final score based on require_both setting\n            if use_functional_scoring:\n                # New behavior: use weighted or require_both logic for functional scoring\n                if False:  # Replace with actual condition\n                    # All enabled components must be perfect (score = 1.0)\n                    required_components = [\n                        component for component, weight in weights.items() if weight > 0\n                    ]\n                    all_perfect = all(\n                        scores[component] == 1.0 for component in required_components\n                    )\n                    final_score = 1.0 if all_perfect else 0.0\n                    logger.info(\n                        f\"FUNCTIONAL REQUIRE_BOTH=True: All components perfect? {all_perfect}\"\n                    )\n                else:\n                    # Use weighted scoring for functional mode\n                    total_weight = sum(weights.values())\n                    if total_weight == 0:\n                        logger.error(\"No scoring components enabled\")\n                        return 0.0\n\n                    final_score = (\n                        sum(\n                            scores[component] * weight\n                            for component, weight in weights.items()\n                        )\n                        / total_weight\n                    )\n                    logger.info(\"FUNCTIONAL REQUIRE_BOTH=False: Using weighted scoring\")\n            else:\n                # Original behavior: binary logic for backward compatibility\n                topology_score = scores.get(\"topology\", 0.0)\n                resistor_score = scores.get(\"exact_values\", 0.0)\n\n                if require_both:\n                    # Both topology AND resistors must be perfect\n                    final_score = (\n                        1.0\n                        if (topology_score == 1.0 and resistor_score == 1.0)\n                        else 0.0\n                    )\n                    logger.info(\n                        f\"ORIGINAL REQUIRE_BOTH=True: topology={topology_score}, resistors={resistor_score}, result={final_score}\"\n                    )\n                else:\n                    # Either topology OR resistors being perfect is enough\n                    final_score = (\n                        1.0 if (topology_score == 1.0 or resistor_score == 1.0) else 0.0\n                    )\n                    logger.info(\n                        f\"ORIGINAL REQUIRE_BOTH=False: topology={topology_score}, resistors={resistor_score}, result={final_score}\"\n                    )\n\n            logger.info(f\"COMPONENT SCORES: {scores}\")\n            logger.info(f\"WEIGHTS: {weights}\")\n            logger.info(f\"FINAL SCORE: {final_score}\")\n\n            return final_score\n\n        except Exception as e:\n            logger.error(f\"ENHANCED SCORING ERROR: {e}\", exc_info=True)\n            return 0.0\n\n    return score_fn"
       },
       {
         "name": "check_resistance_measurements",
         "docstring": "Returns a scoring function that validates a topology against expected measurements.\n\nArgs:\n    expected_measurements: list of measurement dicts with node_a, node_b, resistance\n    tolerance: Relative tolerance for resistance comparison (default 5%)\n\nReturns:\n    Scoring function that takes a topolog",
-        "code": "def check_resistance_measurements(\n    expected_measurements: list[dict[str, Any]], tolerance: float = 0.05\n) -> Callable[[str], float]:\n    \"\"\"\n    Returns a scoring function that validates a topology against expected measurements.\n\n    Args:\n        expected_measurements: list of measurement dicts with node_a, node_b, resistance\n        tolerance: Relative tolerance for resistance comparison (default 5%)\n\n    Returns:\n        Scoring function that takes a topology and returns measurement match score 0.0-1.0\n    \"\"\"\n    logger.info(\n        f\"Creating measurement checker with {len(expected_measurements)} measurements\"\n    )\n\n    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"check_resistance_measurements: input={topology_input!r}\")\n\n            # Load topology\n            resolved_input = smart_resolve_path(topology_input.strip())\n            topology_data = None\n\n            if Path(resolved_input).exists():\n                with Path(resolved_input).open() as f:\n                    topology_data = json.load(f)\n            else:\n                try:\n                    topology_data = json.loads(topology_input)\n                except json.JSONDecodeError:\n                    topology_data = json.loads(resolved_input)\n\n            if not topology_data:\n                return 0.0\n\n            scores = []\n\n            for measurement in expected_measurements:\n                try:\n                    # This would call the actual circuit simulation\n                    predicted_resistance = _simulate_resistance(\n                        topology_data, measurement[\"node_a\"], measurement[\"node_b\"]\n                    )\n\n                    expected_resistance = measurement[\"resistance\"]\n\n                    if expected_resistance == 0:\n                        score = 1.0 if abs(predicted_resistance) < 1e-6 else 0.0\n    ..."
+        "code": "def check_resistance_measurements(\n    expected_measurements: list[dict[str, Any]], tolerance: float = 0.05\n) -> Callable[[str], float]:\n    \"\"\"\n    Returns a scoring function that validates a topology against expected measurements.\n\n    Args:\n        expected_measurements: list of measurement dicts with node_a, node_b, resistance\n        tolerance: Relative tolerance for resistance comparison (default 5%)\n\n    Returns:\n        Scoring function that takes a topology and returns measurement match score 0.0-1.0\n    \"\"\"\n    logger.info(\n        f\"Creating measurement checker with {len(expected_measurements)} measurements\"\n    )\n\n    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"check_resistance_measurements: input={topology_input!r}\")\n\n            # Load topology\n            resolved_input = smart_resolve_path(topology_input.strip())\n            topology_data = None\n\n            if Path(resolved_input).exists():\n                with Path(resolved_input).open() as f:\n                    topology_data = json.load(f)\n            else:\n                try:\n                    topology_data = json.loads(topology_input)\n                except json.JSONDecodeError:\n                    topology_data = json.loads(resolved_input)\n\n            if not topology_data:\n                return 0.0\n\n            scores = []\n\n            for measurement in expected_measurements:\n                try:\n                    # This would call the actual circuit simulation\n                    predicted_resistance = _simulate_resistance(\n                        topology_data, measurement[\"node_a\"], measurement[\"node_b\"]\n                    )\n\n                    expected_resistance = measurement[\"resistance\"]\n\n                    if expected_resistance == 0:\n                        score = 1.0 if abs(predicted_resistance) < 1e-6 else 0.0\n                    else:\n                        relative_error = (\n                            abs(predicted_resistance - expected_resistance)\n                            / expected_resistance\n                        )\n                        score = max(0.0, 1.0 - relative_error / tolerance)\n\n                    scores.append(score)\n                    logger.info(\n                        f\"Measurement {measurement['node_a']}-{measurement['node_b']}: \"\n                        f\"expected={expected_resistance}, predicted={predicted_resistance}, score={score}\"\n                    )\n\n                except Exception as e:\n                    logger.error(f\"Failed to simulate measurement: {e}\")\n                    scores.append(0.0)\n\n            final_score = sum(scores) / len(scores) if scores else 0.0\n            logger.info(f\"Overall measurement score: {final_score}\")\n            return final_score\n\n        except Exception as e:\n            logger.error(f\"Error in measurement checking: {e}\", exc_info=True)\n            return 0.0\n\n    return score_fn"
       },
       {
         "name": "check_complete_circuit_solution",
@@ -4341,12 +4517,12 @@ const CORRAL_DATA = {
       {
         "name": "check_valid_circuit_json",
         "docstring": "Check if a valid circuit topology JSON file exists at the given path.",
-        "code": "def check_valid_circuit_json(json_path: str) -> float:\n    \"\"\"\n    Check if a valid circuit topology JSON file exists at the given path.\n    \"\"\"\n    try:\n        json_path = json_path.strip()\n        if not json_path:\n            logger.warning(\"Empty path provided to check_valid_circuit_json\")\n            return 0.0\n\n        if not Path(json_path).exists():\n            logger.info(f\"Circuit JSON file not found at: {json_path}\")\n            return 0.0\n\n        if not Path(json_path).is_file():\n            logger.info(f\"Path exists but is not a file: {json_path}\")\n            return 0.0\n\n        with Path(json_path).open(\"r\", encoding=\"utf-8\") as f:\n            circuit_data = json.load(f)\n\n        # Validate circuit structure\n        if not isinstance(circuit_data, dict):\n            logger.info(\"Circuit JSON is not a dictionary\")\n            return 0.0\n\n        required_keys = [\"resistors\", \"connections\"]\n        if not all(key in circuit_data for key in required_keys):\n            logger.info(f\"Circuit JSON missing required keys: {required_keys}\")\n            return 0.0\n\n        # Basic validation of resistors\n        resistors = circuit_data[\"resistors\"]\n        if not isinstance(resistors, dict) or not resistors:\n            logger.info(\"Invalid or empty resistors section\")\n            return 0.0\n\n        # Basic validation of connections\n        connections = circuit_data[\"connections\"]\n        if not isinstance(connections, list) or not connections:\n            logger.info(\"Invalid or empty connections section\")\n            return 0.0\n\n        # Check connection format\n        for conn in connections:\n            if not isinstance(conn, list) or len(conn) != 3:\n                logger.info(\n                    \"Invalid connection format - should be [node1, node2, resistor_id]\"\n                )\n                return 0.0\n    ..."
+        "code": "def check_valid_circuit_json(json_path: str) -> float:\n    \"\"\"\n    Check if a valid circuit topology JSON file exists at the given path.\n    \"\"\"\n    try:\n        json_path = json_path.strip()\n        if not json_path:\n            logger.warning(\"Empty path provided to check_valid_circuit_json\")\n            return 0.0\n\n        if not Path(json_path).exists():\n            logger.info(f\"Circuit JSON file not found at: {json_path}\")\n            return 0.0\n\n        if not Path(json_path).is_file():\n            logger.info(f\"Path exists but is not a file: {json_path}\")\n            return 0.0\n\n        with Path(json_path).open(\"r\", encoding=\"utf-8\") as f:\n            circuit_data = json.load(f)\n\n        # Validate circuit structure\n        if not isinstance(circuit_data, dict):\n            logger.info(\"Circuit JSON is not a dictionary\")\n            return 0.0\n\n        required_keys = [\"resistors\", \"connections\"]\n        if not all(key in circuit_data for key in required_keys):\n            logger.info(f\"Circuit JSON missing required keys: {required_keys}\")\n            return 0.0\n\n        # Basic validation of resistors\n        resistors = circuit_data[\"resistors\"]\n        if not isinstance(resistors, dict) or not resistors:\n            logger.info(\"Invalid or empty resistors section\")\n            return 0.0\n\n        # Basic validation of connections\n        connections = circuit_data[\"connections\"]\n        if not isinstance(connections, list) or not connections:\n            logger.info(\"Invalid or empty connections section\")\n            return 0.0\n\n        # Check connection format\n        for conn in connections:\n            if not isinstance(conn, list) or len(conn) != 3:\n                logger.info(\n                    \"Invalid connection format - should be [node1, node2, resistor_id]\"\n                )\n                return 0.0\n\n        logger.info(\n            f\"Valid circuit JSON with {len(resistors)} resistors and {len(connections)} connections\"\n        )\n        return 1.0\n\n    except json.JSONDecodeError as e:\n        logger.error(f\"Invalid JSON format in file {json_path}: {e}\")\n        return 0.0\n    except Exception as e:\n        logger.error(\n            f\"Error validating circuit JSON file {json_path}: {e}\", exc_info=True\n        )\n        return 0.0"
       },
       {
         "name": "score_fn",
         "docstring": "",
-        "code": "    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"ENHANCED SCORING INPUT: {topology_input!r}\")\n            logger.info(f\"EXPECTED TOPOLOGY: {expected_topology}\")\n\n            # Parse topology (same logic as before)\n            topology_data = None\n            input_stripped = topology_input.strip()\n\n            if input_stripped.startswith(\"{\") and input_stripped.endswith(\"}\"):\n                try:\n                    topology_data = json.loads(input_stripped)\n                    logger.info(\"Parsed topology from direct JSON string\")\n                except json.JSONDecodeError as e:\n                    logger.warning(f\"Failed to parse as direct JSON: {e}\")\n                    return 0.0\n\n            if (\n                not topology_data\n                or \"resistors\" not in topology_data\n                or \"connections\" not in topology_data\n            ):\n                logger.error(\"Invalid topology data\")\n                return 0.0\n\n            proposed_resistors = topology_data[\"resistors\"]\n            proposed_connections = topology_data[\"connections\"]\n            expected_resistors = expected_topology[\"resistors\"]\n            expected_connections = expected_topology[\"connections\"]\n\n            logger.info(f\"PROPOSED TOPOLOGY: {topology_data}\")\n\n            # 1. Score topology structure (connections)\n            topology_score = _score_topology_structure(\n                proposed_connections, expected_connections\n            )\n            logger.info(f\"Topology structure score: {topology_score}\")\n\n            scores = {\"topology\": topology_score}\n            weights = {\"topology\": topology_weight}\n\n            logger.info(\n                f\"Function parameters - use_functional_scoring: {use_functional_scoring}, functional_weight: {functional_weight}, exact_values_weight: {exact_values_weight}\"\n            )\n\n            # 2. Score functional behavior\n            if (\n                use_functional_scoring\n                and expected_measurements\n                and functional_weight > 0\n    ..."
+        "code": "    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"ENHANCED SCORING INPUT: {topology_input!r}\")\n            logger.info(f\"EXPECTED TOPOLOGY: {expected_topology}\")\n\n            # Parse topology (same logic as before)\n            topology_data = None\n            input_stripped = topology_input.strip()\n\n            if input_stripped.startswith(\"{\") and input_stripped.endswith(\"}\"):\n                try:\n                    topology_data = json.loads(input_stripped)\n                    logger.info(\"Parsed topology from direct JSON string\")\n                except json.JSONDecodeError as e:\n                    logger.warning(f\"Failed to parse as direct JSON: {e}\")\n                    return 0.0\n\n            if (\n                not topology_data\n                or \"resistors\" not in topology_data\n                or \"connections\" not in topology_data\n            ):\n                logger.error(\"Invalid topology data\")\n                return 0.0\n\n            proposed_resistors = topology_data[\"resistors\"]\n            proposed_connections = topology_data[\"connections\"]\n            expected_resistors = expected_topology[\"resistors\"]\n            expected_connections = expected_topology[\"connections\"]\n\n            logger.info(f\"PROPOSED TOPOLOGY: {topology_data}\")\n\n            # 1. Score topology structure (connections)\n            topology_score = _score_topology_structure(\n                proposed_connections, expected_connections\n            )\n            logger.info(f\"Topology structure score: {topology_score}\")\n\n            scores = {\"topology\": topology_score}\n            weights = {\"topology\": topology_weight}\n\n            logger.info(\n                f\"Function parameters - use_functional_scoring: {use_functional_scoring}, functional_weight: {functional_weight}, exact_values_weight: {exact_values_weight}\"\n            )\n\n            # 2. Score functional behavior\n            if (\n                use_functional_scoring\n                and expected_measurements\n                and functional_weight > 0\n            ):\n                functional_score = _score_functional_behavior(\n                    topology_data, expected_measurements, tolerance\n                )\n                scores[\"functional\"] = functional_score\n                weights[\"functional\"] = functional_weight\n                logger.info(f\"Functional behavior score: {functional_score}\")\n\n            # 3. Score exact resistor values (should be enabled by default for backward compatibility)\n            if exact_values_weight > 0:\n                exact_values_score = _score_resistor_values(\n                    proposed_resistors, expected_resistors, tolerance\n                )\n                scores[\"exact_values\"] = exact_values_score\n                weights[\"exact_values\"] = exact_values_weight\n                logger.info(f\"Exact values score: {exact_values_score}\")\n            else:\n                logger.info(\n                    f\"Exact values scoring disabled (weight={exact_values_weight})\"\n                )\n\n            # Calculate final score based on require_both setting\n            if use_functional_scoring:\n                # New behavior: use weighted or require_both logic for functional scoring\n                if False:  # Replace with actual condition\n                    # All enabled components must be perfect (score = 1.0)\n                    required_components = [\n                        component for component, weight in weights.items() if weight > 0\n                    ]\n                    all_perfect = all(\n                        scores[component] == 1.0 for component in required_components\n                    )\n                    final_score = 1.0 if all_perfect else 0.0\n                    logger.info(\n                        f\"FUNCTIONAL REQUIRE_BOTH=True: All components perfect? {all_perfect}\"\n                    )\n                else:\n                    # Use weighted scoring for functional mode\n                    total_weight = sum(weights.values())\n                    if total_weight == 0:\n                        logger.error(\"No scoring components enabled\")\n                        return 0.0\n\n                    final_score = (\n                        sum(\n                            scores[component] * weight\n                            for component, weight in weights.items()\n                        )\n                        / total_weight\n                    )\n                    logger.info(\"FUNCTIONAL REQUIRE_BOTH=False: Using weighted scoring\")\n            else:\n                # Original behavior: binary logic for backward compatibility\n                topology_score = scores.get(\"topology\", 0.0)\n                resistor_score = scores.get(\"exact_values\", 0.0)\n\n                if require_both:\n                    # Both topology AND resistors must be perfect\n                    final_score = (\n                        1.0\n                        if (topology_score == 1.0 and resistor_score == 1.0)\n                        else 0.0\n                    )\n                    logger.info(\n                        f\"ORIGINAL REQUIRE_BOTH=True: topology={topology_score}, resistors={resistor_score}, result={final_score}\"\n                    )\n                else:\n                    # Either topology OR resistors being perfect is enough\n                    final_score = (\n                        1.0 if (topology_score == 1.0 or resistor_score == 1.0) else 0.0\n                    )\n                    logger.info(\n                        f\"ORIGINAL REQUIRE_BOTH=False: topology={topology_score}, resistors={resistor_score}, result={final_score}\"\n                    )\n\n            logger.info(f\"COMPONENT SCORES: {scores}\")\n            logger.info(f\"WEIGHTS: {weights}\")\n            logger.info(f\"FINAL SCORE: {final_score}\")\n\n            return final_score\n\n        except Exception as e:\n            logger.error(f\"ENHANCED SCORING ERROR: {e}\", exc_info=True)\n            return 0.0"
       },
       {
         "name": "normalize_connection",
@@ -4356,7 +4532,7 @@ const CORRAL_DATA = {
       {
         "name": "score_fn",
         "docstring": "",
-        "code": "    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"check_resistance_measurements: input={topology_input!r}\")\n\n            # Load topology\n            resolved_input = smart_resolve_path(topology_input.strip())\n            topology_data = None\n\n            if Path(resolved_input).exists():\n                with Path(resolved_input).open() as f:\n                    topology_data = json.load(f)\n            else:\n                try:\n                    topology_data = json.loads(topology_input)\n                except json.JSONDecodeError:\n                    topology_data = json.loads(resolved_input)\n\n            if not topology_data:\n                return 0.0\n\n            scores = []\n\n            for measurement in expected_measurements:\n                try:\n                    # This would call the actual circuit simulation\n                    predicted_resistance = _simulate_resistance(\n                        topology_data, measurement[\"node_a\"], measurement[\"node_b\"]\n                    )\n\n                    expected_resistance = measurement[\"resistance\"]\n\n                    if expected_resistance == 0:\n                        score = 1.0 if abs(predicted_resistance) < 1e-6 else 0.0\n                    else:\n                        relative_error = (\n                            abs(predicted_resistance - expected_resistance)\n                            / expected_resistance\n                        )\n                        score = max(0.0, 1.0 - relative_error / tolerance)\n\n                    scores.append(score)\n                    logger.info(\n                        f\"Measurement {measurement['node_a']}-{measurement['node_b']}: \"\n                        f\"expected={expected_resistance}, predicted={predicted_resistance}, score={score}\"\n                    )\n\n                except Exception as e:\n                    logger.error(f\"Failed to simulate measurement: {e}\")\n                    scores.append(0.0)\n\n    ..."
+        "code": "    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"check_resistance_measurements: input={topology_input!r}\")\n\n            # Load topology\n            resolved_input = smart_resolve_path(topology_input.strip())\n            topology_data = None\n\n            if Path(resolved_input).exists():\n                with Path(resolved_input).open() as f:\n                    topology_data = json.load(f)\n            else:\n                try:\n                    topology_data = json.loads(topology_input)\n                except json.JSONDecodeError:\n                    topology_data = json.loads(resolved_input)\n\n            if not topology_data:\n                return 0.0\n\n            scores = []\n\n            for measurement in expected_measurements:\n                try:\n                    # This would call the actual circuit simulation\n                    predicted_resistance = _simulate_resistance(\n                        topology_data, measurement[\"node_a\"], measurement[\"node_b\"]\n                    )\n\n                    expected_resistance = measurement[\"resistance\"]\n\n                    if expected_resistance == 0:\n                        score = 1.0 if abs(predicted_resistance) < 1e-6 else 0.0\n                    else:\n                        relative_error = (\n                            abs(predicted_resistance - expected_resistance)\n                            / expected_resistance\n                        )\n                        score = max(0.0, 1.0 - relative_error / tolerance)\n\n                    scores.append(score)\n                    logger.info(\n                        f\"Measurement {measurement['node_a']}-{measurement['node_b']}: \"\n                        f\"expected={expected_resistance}, predicted={predicted_resistance}, score={score}\"\n                    )\n\n                except Exception as e:\n                    logger.error(f\"Failed to simulate measurement: {e}\")\n                    scores.append(0.0)\n\n            final_score = sum(scores) / len(scores) if scores else 0.0\n            logger.info(f\"Overall measurement score: {final_score}\")\n            return final_score\n\n        except Exception as e:\n            logger.error(f\"Error in measurement checking: {e}\", exc_info=True)\n            return 0.0"
       },
       {
         "name": "score_fn",
@@ -4627,7 +4803,7 @@ const CORRAL_DATA = {
         },
         "args": [],
         "returns": "str",
-        "code": "def retrieve_isotope_distribution() -> str:\n    return str(\n        {\n            \"Carbon\": {\n                \"isotopes\": {\n                    \"12C\": {\"abundance\": 98.89, \"m/z\": 12},\n                    \"13C\": {\"abundance\": 1.11, \"m/z\": 13},\n                },\n                \"m/z_peaks\": [\"M+1\"],\n            },\n            \"Hydrogen\": {\n                \"isotopes\": {\n                    \"1H\": {\"abundance\": 99.98, \"m/z\": 1},\n                    \"2H\": {\"abundance\": 0.02, \"m/z\": 2},\n                },\n                \"m/z_peaks\": [\"M+1\"],\n            },\n            \"Sulfur\": {\n                \"isotopes\": {\n                    \"32S\": {\"abundance\": 94.93, \"m/z\": 32},\n                    \"33S\": {\"abundance\": 0.76, \"m/z\": 33},\n                    \"34S\": {\"abundance\": 4.29, \"m/z\": 34},\n                },\n                \"m/z_peaks\": [\"M+2\"],\n            },\n            \"Chlorine\": {\n                \"isotopes\": {\n                    \"35Cl\": {\"abundance\": 75.77, \"m/z\": 35},\n                    \"37Cl\": {\"abundance\": 24.23, \"m/z\": 37},\n                },\n                \"m/z_peaks\": [\"M+2\"],\n            },\n            \"Bromine\": {\n                \"isotopes\": {\n                    \"79Br\": {\"abundance\": 50.69, \"m/z\": 79},\n                    \"81Br\": {\"abundance\": 49.31, \"m/z\": 81},\n                },\n                \"m/z_peaks\": [\"M+2\"],\n            },\n            \"Iodine\": {\n                \"isotopes\": {\n                    \"127I\": {\"abundance\": 100, \"m/z\": 127},\n                },\n                \"m/z_peaks\": [\"M+2\"],\n            },\n            \"Fluorine\": {\n                \"isotopes\": {\n                    \"19F\": {\"abundance\": 100, \"m/z\": 19},\n                },\n                \"m/z_peaks\": [\"M+1\"],\n            },\n    ..."
+        "code": "def retrieve_isotope_distribution() -> str:\n    return str(\n        {\n            \"Carbon\": {\n                \"isotopes\": {\n                    \"12C\": {\"abundance\": 98.89, \"m/z\": 12},\n                    \"13C\": {\"abundance\": 1.11, \"m/z\": 13},\n                },\n                \"m/z_peaks\": [\"M+1\"],\n            },\n            \"Hydrogen\": {\n                \"isotopes\": {\n                    \"1H\": {\"abundance\": 99.98, \"m/z\": 1},\n                    \"2H\": {\"abundance\": 0.02, \"m/z\": 2},\n                },\n                \"m/z_peaks\": [\"M+1\"],\n            },\n            \"Sulfur\": {\n                \"isotopes\": {\n                    \"32S\": {\"abundance\": 94.93, \"m/z\": 32},\n                    \"33S\": {\"abundance\": 0.76, \"m/z\": 33},\n                    \"34S\": {\"abundance\": 4.29, \"m/z\": 34},\n                },\n                \"m/z_peaks\": [\"M+2\"],\n            },\n            \"Chlorine\": {\n                \"isotopes\": {\n                    \"35Cl\": {\"abundance\": 75.77, \"m/z\": 35},\n                    \"37Cl\": {\"abundance\": 24.23, \"m/z\": 37},\n                },\n                \"m/z_peaks\": [\"M+2\"],\n            },\n            \"Bromine\": {\n                \"isotopes\": {\n                    \"79Br\": {\"abundance\": 50.69, \"m/z\": 79},\n                    \"81Br\": {\"abundance\": 49.31, \"m/z\": 81},\n                },\n                \"m/z_peaks\": [\"M+2\"],\n            },\n            \"Iodine\": {\n                \"isotopes\": {\n                    \"127I\": {\"abundance\": 100, \"m/z\": 127},\n                },\n                \"m/z_peaks\": [\"M+2\"],\n            },\n            \"Fluorine\": {\n                \"isotopes\": {\n                    \"19F\": {\"abundance\": 100, \"m/z\": 19},\n                },\n                \"m/z_peaks\": [\"M+1\"],\n            },\n            \"Nitrogen\": {\n                \"isotopes\": {\n                    \"14N\": {\"abundance\": 99.63, \"m/z\": 14},\n                    \"15N\": {\"abundance\": 0.37, \"m/z\": 15},\n                },\n                \"m/z_peaks\": [\"M+1\"],\n            },\n            \"Oxygen\": {\n                \"isotopes\": {\n                    \"16O\": {\"abundance\": 99.76, \"m/z\": 16},\n                    \"17O\": {\"abundance\": 0.04, \"m/z\": 17},\n                    \"18O\": {\"abundance\": 0.20, \"m/z\": 18},\n                },\n                \"m/z_peaks\": [\"M+2\"],\n            },\n        }\n    )"
       },
       {
         "name": "retrieve_dbe_formula",
@@ -4757,6 +4933,7 @@ const CORRAL_DATA = {
     ],
     "tasks": [
       {
+        "_uid": "75b301f1-ce4e-4990-8104-a4ce4636ae7c",
         "id": "10_15227_orgsyn_084_0077",
         "name": "task_1",
         "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -4783,6 +4960,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3a563a92-d05a-4c1a-b641-6e3e09f71ecf",
         "id": "10_15227_orgsyn_084_0011_sub2",
         "name": "task_10",
         "description": "In this laboratory scenario, an organic sample needs to be analyzed to retrieve its SMILES string. Each test is expensive, so proceed with resource-awareness.",
@@ -4809,6 +4987,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "baa01559-f8e6-4f89-9efe-c4dc12f46a96",
         "id": "10_15227_orgsyn_084_0011_sub3",
         "name": "task_11",
         "description": "You're in a laboratory setting with a sample of an organic compound. Analyze the sample and return its SMILES representation, minimizing the use of costly and time-intensive resources.",
@@ -4835,6 +5014,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3916b31e-2e35-423f-9bab-56cea4914a72",
         "id": "33_33333_orgsyn_333_3333",
         "name": "task_12",
         "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -4861,6 +5041,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f2d7b125-b638-4277-9ca4-e02210f38b33",
         "id": "10_15227_orgsyn_084_0215",
         "name": "task_13",
         "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -4887,6 +5068,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "e26aa390-df28-483d-9a84-e43e18aa60cd",
         "id": "55_55555_orgsyn_555_5555",
         "name": "task_14",
         "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -4913,6 +5095,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1bfffc5c-9155-45b3-ae2d-a886d00af6dd",
         "id": "66_66666_orgsyn_666_6666",
         "name": "task_15",
         "description": "In the lab, you've received a sample of an organic compound. Perform a careful analysis and provide the SMILES code, using only the necessary time and materials.",
@@ -4939,6 +5122,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "33b05da4-6050-4f28-9206-3e6c72cb8ad0",
         "id": "77_77777_orgsyn_777_7777",
         "name": "task_16",
         "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -4965,6 +5149,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "b139ab1f-4168-4e0f-a7b2-0fd0f554dce2",
         "id": "10_15227_orgsyn_096_0245",
         "name": "task_17",
         "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -4991,6 +5176,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "b7b52672-ca02-4406-a493-a0a8ef514aee",
         "id": "10_15227_orgsyn_102_0001",
         "name": "task_18",
         "description": "In this laboratory scenario, an organic sample needs to be analyzed to retrieve its SMILES string. Each test is expensive, so proceed with resource-awareness.",
@@ -5017,6 +5203,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "04d67f0e-0b65-412d-b577-d0114d77c29e",
         "id": "88_88888_orgsyn_888_8888",
         "name": "task_19",
         "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -5043,6 +5230,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6331984e-7982-488d-91a8-efd8fbdb894f",
         "id": "10_15227_orgsyn_102_0114",
         "name": "task_2",
         "description": "Given an organic compound sample in a lab environment, your objective is to determine its SMILES string while conserving resources due to the high cost of analysis.",
@@ -5069,6 +5257,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "69d20be6-fcf2-4999-b6ed-e35f852ca454",
         "id": "00_0000_orgsyn_000_0000",
         "name": "task_20",
         "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -5095,6 +5284,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ab0eb5a8-8165-406a-84cf-41f50a7263da",
         "id": "10_15227_orgsyn_102_0086",
         "name": "task_3",
         "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -5121,6 +5311,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "87012801-5bd7-40de-b4f2-305b9d3c9c5c",
         "id": "11_11111_orgsyn_111_1111",
         "name": "task_4",
         "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -5147,6 +5338,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "58cec8d1-4fce-46d9-956e-4fa709a3afd2",
         "id": "10_15227_orgsyn_101_0327",
         "name": "task_5",
         "description": "Working in a laboratory, you're tasked with identifying the SMILES string of an organic sample. Be efficient, as the analysis is resource-intensive and time-consuming.",
@@ -5173,6 +5365,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "933013df-377f-4ade-b6a1-b5efbd9c67d4",
         "id": "10_15227_orgsyn_084_0317m",
         "name": "task_6",
         "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -5199,6 +5392,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "2014242e-74a4-4073-b732-52ab60683316",
         "id": "10_15227_orgsyn_096_0036",
         "name": "task_7",
         "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -5225,6 +5419,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1a02eab6-0c4a-4ebe-8c63-634bb74fd983",
         "id": "22_22222_orgsyn_222_2222",
         "name": "task_8",
         "description": "Working in a laboratory, you're tasked with identifying the SMILES string of an organic sample. Be efficient, as the analysis is resource-intensive and time-consuming.",
@@ -5251,6 +5446,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "43923d76-cce4-4480-a053-98fde09db1ff",
         "id": "10_15227_orgsyn_084_0011_sub1",
         "name": "task_9",
         "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -5277,6 +5473,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "e112a384-f4bf-414f-a043-c31b5251afde",
         "id": "10_15227_orgsyn_084_0077",
         "name": "task_1",
         "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -5302,6 +5499,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "161a94fd-2218-4808-942a-b199d6419827",
         "id": "10_15227_orgsyn_084_0011_sub2",
         "name": "task_10",
         "description": "In this laboratory scenario, an organic sample needs to be analyzed to retrieve its SMILES string. Each test is expensive, so proceed with resource-awareness.",
@@ -5327,6 +5525,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "5b0fbadd-35b6-4f1c-b8a7-25c51b717399",
         "id": "10_15227_orgsyn_084_0011_sub3",
         "name": "task_11",
         "description": "You're in a laboratory setting with a sample of an organic compound. Analyze the sample and return its SMILES representation, minimizing the use of costly and time-intensive resources.",
@@ -5352,6 +5551,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "48f10dbc-82ed-4f32-98cd-3a8941a79121",
         "id": "33_33333_orgsyn_333_3333",
         "name": "task_12",
         "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -5377,6 +5577,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "1c19f1ed-dcd7-45a0-98fb-3b0a0c9730cb",
         "id": "10_15227_orgsyn_084_0215",
         "name": "task_13",
         "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -5402,6 +5603,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "3045235e-ef1d-4369-938b-5b7e69349811",
         "id": "55_55555_orgsyn_555_5555",
         "name": "task_14",
         "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -5427,6 +5629,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "7088eab5-3759-4211-8dda-f340225805bb",
         "id": "66_66666_orgsyn_666_6666",
         "name": "task_15",
         "description": "In the lab, you've received a sample of an organic compound. Perform a careful analysis and provide the SMILES code, using only the necessary time and materials.",
@@ -5452,6 +5655,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "c0e197e2-0492-4c16-b4bf-3f24c2b70bbe",
         "id": "77_77777_orgsyn_777_7777",
         "name": "task_16",
         "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -5477,6 +5681,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "42506208-02a7-4f29-8902-049c29ccb614",
         "id": "10_15227_orgsyn_096_0245",
         "name": "task_17",
         "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -5502,6 +5707,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "92723e55-c96a-4c89-9a4a-d982734c47f8",
         "id": "10_15227_orgsyn_102_0001",
         "name": "task_18",
         "description": "In this laboratory scenario, an organic sample needs to be analyzed to retrieve its SMILES string. Each test is expensive, so proceed with resource-awareness.",
@@ -5527,6 +5733,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "4b7cd812-63a4-4d6b-934a-d5096084738d",
         "id": "88_88888_orgsyn_888_8888",
         "name": "task_19",
         "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -5552,6 +5759,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "75025cd7-5616-4ebc-a1ed-625ae7e9342f",
         "id": "10_15227_orgsyn_102_0114",
         "name": "task_2",
         "description": "Given an organic compound sample in a lab environment, your objective is to determine its SMILES string while conserving resources due to the high cost of analysis.",
@@ -5577,6 +5785,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "43e62737-270d-44fb-acc2-e81ea765d16b",
         "id": "00_0000_orgsyn_000_0000",
         "name": "task_20",
         "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -5602,6 +5811,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "cbd3366d-0902-417e-857f-5eee2d0b834d",
         "id": "10_15227_orgsyn_102_0086",
         "name": "task_3",
         "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -5627,6 +5837,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "bd2090e4-5f1d-4dc5-b6a5-f2e852d9c4ff",
         "id": "11_11111_orgsyn_111_1111",
         "name": "task_4",
         "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -5652,6 +5863,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "b9914e66-4313-42ba-af32-a8396ba40faf",
         "id": "10_15227_orgsyn_101_0327",
         "name": "task_5",
         "description": "Working in a laboratory, you're tasked with identifying the SMILES string of an organic sample. Be efficient, as the analysis is resource-intensive and time-consuming.",
@@ -5677,6 +5889,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "16b3848e-4390-4e5c-b4cf-6d45b9d6c289",
         "id": "10_15227_orgsyn_084_0317m",
         "name": "task_6",
         "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -5702,6 +5915,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "08d4a878-2228-409e-b561-78e46d57a155",
         "id": "10_15227_orgsyn_096_0036",
         "name": "task_7",
         "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -5727,6 +5941,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "0ea5981d-1672-4632-8082-c35105ba5a6d",
         "id": "22_22222_orgsyn_222_2222",
         "name": "task_8",
         "description": "Working in a laboratory, you're tasked with identifying the SMILES string of an organic sample. Be efficient, as the analysis is resource-intensive and time-consuming.",
@@ -5752,6 +5967,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "d7b5f9d8-d5d8-4efb-af4e-06ea11247c99",
         "id": "10_15227_orgsyn_084_0011_sub1",
         "name": "task_9",
         "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -5779,6 +5995,7 @@ const CORRAL_DATA = {
     ],
     "subtasks": [
       {
+        "_uid": "bdcb1a46-60cb-4153-b2c0-662c886e1179",
         "id": "10_15227_orgsyn_084_0077_subtask_1",
         "name": "task_1_subtask_1",
         "description": "State the molecular formula for the compound analyzed.",
@@ -5790,6 +6007,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "af40b6cf-3c9e-4b50-abd3-bc0ddc849291",
         "id": "10_15227_orgsyn_084_0077_subtask_2",
         "name": "task_1_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -5801,6 +6019,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "bf96d8af-f716-43f1-a7b4-f03c6bbdeb19",
         "id": "10_15227_orgsyn_084_0077_subtask_3",
         "name": "task_1_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -5813,6 +6032,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c3367e3b-9189-4e83-a107-4bfa1893a169",
         "id": "10_15227_orgsyn_084_0077_subtask_4",
         "name": "task_1_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -5825,6 +6045,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "34161037-c625-4252-9373-da4ee4027b96",
         "id": "10_15227_orgsyn_084_0077_subtask_5",
         "name": "task_1_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -5838,6 +6059,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ed8f8f41-5e2c-4b11-b485-20ddb2988535",
         "id": "10_15227_orgsyn_084_0077_subtask_6",
         "name": "task_1_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -5854,6 +6076,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c6d0db9b-711e-4373-b179-a61ef2a2124d",
         "id": "10_15227_orgsyn_084_0077_subtask_7",
         "name": "task_1_subtask_7",
         "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -5870,6 +6093,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "700d05c7-87fc-4571-a735-a46484f76888",
         "id": "10_15227_orgsyn_084_0077_subtask_8",
         "name": "task_1_subtask_8",
         "description": "Indicate the number of C=O groups present in the molecule.",
@@ -5886,6 +6110,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "a1d71aa3-377a-4f90-8c71-9b9ff1e2c841",
         "id": "10_15227_orgsyn_084_0077_subtask_9",
         "name": "task_1_subtask_9",
         "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -5908,6 +6133,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4c9363c6-d961-4f8e-8fb8-ae4411e0c9c4",
         "id": "10_15227_orgsyn_084_0077_subtask_10",
         "name": "task_1_subtask_10",
         "description": "Provide the SMILES string representing the compound in the sample.",
@@ -5921,6 +6147,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "32946862-2ffb-4a23-a982-616c57e5e1e7",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_1",
         "name": "task_10_subtask_1",
         "description": "Identify the molecular formula of the compound in this sample.",
@@ -5932,6 +6159,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "bc8ef4a7-b783-4967-b9af-cf74db3196d4",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_2",
         "name": "task_10_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -5943,6 +6171,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "53d52d2f-a313-4517-9730-b827f1581a6a",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_3",
         "name": "task_10_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -5955,6 +6184,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "fe059d4f-a8eb-4a69-8234-ab25de84a8ca",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_4",
         "name": "task_10_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -5967,6 +6197,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "cb4f43dd-55a7-4029-ba62-a5c995edde15",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_5",
         "name": "task_10_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -5980,6 +6211,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "e47f4ebd-e9b2-4161-94ce-5c145bc5a546",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_6",
         "name": "task_10_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -5996,6 +6228,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "20e70101-cf7a-4d86-a76a-9635e89e9bea",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_7",
         "name": "task_10_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -6012,6 +6245,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "51833861-52d6-4108-b758-591103c0b7e1",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_8",
         "name": "task_10_subtask_8",
         "description": "State the count of carbonyl groups in the molecule.",
@@ -6028,6 +6262,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7c9cc6f5-2646-448a-ba17-9dec02dafe8e",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_9",
         "name": "task_10_subtask_9",
         "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -6050,6 +6285,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "992b322c-02b6-4355-9bdd-51e72c78a8ee",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_10",
         "name": "task_10_subtask_10",
         "description": "What is the SMILES notation for the sample's compound?",
@@ -6062,6 +6298,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "813b5be1-ab15-4868-a4a3-ddde6548e959",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_1",
         "name": "task_11_subtask_1",
         "description": "State the molecular formula for the compound analyzed.",
@@ -6073,6 +6310,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "98f1ddb8-c03a-4386-ba28-53aaa05cd5f7",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_2",
         "name": "task_11_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -6084,6 +6322,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "907c0c67-b2c6-4d0c-95d3-a94f41b8c8ee",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_3",
         "name": "task_11_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -6096,6 +6335,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "48f019e7-cc5f-4851-848e-ec42b2a570aa",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_4",
         "name": "task_11_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -6108,6 +6348,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "a61756ea-e042-4d6b-a865-a4ef9928530e",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_5",
         "name": "task_11_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -6121,6 +6362,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "fa1c2724-c9ef-4dcb-be11-3f752a103eff",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_6",
         "name": "task_11_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -6137,6 +6379,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "cf2d0862-c369-4a38-8e0b-6ed33db53079",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_7",
         "name": "task_11_subtask_7",
         "description": "State the number of CH3 groups in the compound.",
@@ -6153,6 +6396,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "32a32afd-fa02-4447-ae39-dc83a85cbdfb",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_8",
         "name": "task_11_subtask_8",
         "description": "State the count of carbonyl groups in the molecule.",
@@ -6169,6 +6413,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "0a873365-08a4-45e1-8662-2a39bd8d87bb",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_9",
         "name": "task_11_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -6191,6 +6436,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c3c0cf6c-53a6-44ae-9f36-968f3db2df41",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_10",
         "name": "task_11_subtask_10",
         "description": "What SMILES string corresponds to the compound in this sample?",
@@ -6203,6 +6449,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1b54f582-3869-459b-9f5e-666fca56d33d",
         "id": "33_33333_orgsyn_333_3333_subtask_1",
         "name": "task_12_subtask_1",
         "description": "Identify the molecular formula of the compound in this sample.",
@@ -6214,6 +6461,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d6bf4fd9-ad04-4637-8216-c900662396ab",
         "id": "33_33333_orgsyn_333_3333_subtask_2",
         "name": "task_12_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -6225,6 +6473,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6c8554aa-c73f-41aa-bf6e-712abde2afdd",
         "id": "33_33333_orgsyn_333_3333_subtask_3",
         "name": "task_12_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -6237,6 +6486,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "8de53371-a4fa-48b2-8285-5d8468e6606b",
         "id": "33_33333_orgsyn_333_3333_subtask_4",
         "name": "task_12_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -6249,6 +6499,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "039fe721-7654-47db-af33-f5d8d42ab002",
         "id": "33_33333_orgsyn_333_3333_subtask_5",
         "name": "task_12_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -6262,6 +6513,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "281c26dd-eacc-44e2-ab03-3c406d2830fb",
         "id": "33_33333_orgsyn_333_3333_subtask_6",
         "name": "task_12_subtask_6",
         "description": "How many aromatic carbon atoms in the sample's compound? If not, reply '0'.",
@@ -6278,6 +6530,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "20124e9d-4113-429f-a8dd-d9c3ca386635",
         "id": "33_33333_orgsyn_333_3333_subtask_7",
         "name": "task_12_subtask_7",
         "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -6294,6 +6547,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "18ee6066-4b53-44f4-b5b5-b253b4b97d92",
         "id": "33_33333_orgsyn_333_3333_subtask_8",
         "name": "task_12_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -6310,6 +6564,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "02d54c7d-724a-4c98-8a3f-ace30d35fb3b",
         "id": "33_33333_orgsyn_333_3333_subtask_9",
         "name": "task_12_subtask_9",
         "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -6332,6 +6587,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "24f348ff-eef8-4bed-85c8-9efce9bce5bb",
         "id": "33_33333_orgsyn_333_3333_subtask_10",
         "name": "task_12_subtask_10",
         "description": "What SMILES string corresponds to the compound in this sample?",
@@ -6344,6 +6600,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "791baed7-dbec-4fad-91f6-f29685d6df7b",
         "id": "10_15227_orgsyn_084_0215_subtask_1",
         "name": "task_13_subtask_1",
         "description": "What is the chemical formula for the sample compound?",
@@ -6355,6 +6612,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "10d91092-01e8-4020-985b-640634a5df48",
         "id": "10_15227_orgsyn_084_0215_subtask_2",
         "name": "task_13_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -6366,6 +6624,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "85b9a105-46c2-4195-8b4e-3d90e42d7cf1",
         "id": "10_15227_orgsyn_084_0215_subtask_3",
         "name": "task_13_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -6378,6 +6637,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "755e1aa0-396c-435f-8d8b-bc742919e744",
         "id": "10_15227_orgsyn_084_0215_subtask_4",
         "name": "task_13_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -6390,6 +6650,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d7a7a4ef-ab18-49db-a3f9-efb0c97d40fc",
         "id": "10_15227_orgsyn_084_0215_subtask_5",
         "name": "task_13_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -6403,6 +6664,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "b735cad2-f327-4906-aae6-5d4a012b84f3",
         "id": "10_15227_orgsyn_084_0215_subtask_6",
         "name": "task_13_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -6419,6 +6681,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "e91731d2-b2c0-491f-bb48-a1410b8c9bc0",
         "id": "10_15227_orgsyn_084_0215_subtask_7",
         "name": "task_13_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -6435,6 +6698,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "b6c01bfd-1395-4982-82c4-f644aa38ef40",
         "id": "10_15227_orgsyn_084_0215_subtask_8",
         "name": "task_13_subtask_8",
         "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -6451,6 +6715,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f263d178-e8fa-4187-b18f-ece21b1bfb29",
         "id": "10_15227_orgsyn_084_0215_subtask_9",
         "name": "task_13_subtask_9",
         "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -6473,6 +6738,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "250ba7f7-4434-4639-b4f2-4b460f5aab4c",
         "id": "10_15227_orgsyn_084_0215_subtask_10",
         "name": "task_13_subtask_10",
         "description": "State the SMILES for the molecule analyzed.",
@@ -6485,6 +6751,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f303164d-7f29-4b20-95ad-18f24ed6ee8d",
         "id": "55_55555_orgsyn_555_5555_subtask_1",
         "name": "task_14_subtask_1",
         "description": "Identify the molecular formula of the compound in this sample.",
@@ -6496,6 +6763,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f10d0e82-6c0e-4d7a-9dbf-c4be8a2d3362",
         "id": "55_55555_orgsyn_555_5555_subtask_2",
         "name": "task_14_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -6507,6 +6775,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "50b82c32-16cf-44a5-aec0-5a6696eb43c4",
         "id": "55_55555_orgsyn_555_5555_subtask_3",
         "name": "task_14_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -6519,6 +6788,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "a802b213-dbca-4545-9d7e-e5cef5f73b4e",
         "id": "55_55555_orgsyn_555_5555_subtask_4",
         "name": "task_14_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -6531,6 +6801,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "79ce66c1-2f71-4e16-8457-bb65f8acdee0",
         "id": "55_55555_orgsyn_555_5555_subtask_5",
         "name": "task_14_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -6544,6 +6815,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "72f1a767-9394-43b9-8287-2c230ec1d473",
         "id": "55_55555_orgsyn_555_5555_subtask_6",
         "name": "task_14_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -6560,6 +6832,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f4e8fa2a-7fa3-450d-b569-34ab2f501379",
         "id": "55_55555_orgsyn_555_5555_subtask_7",
         "name": "task_14_subtask_7",
         "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -6576,6 +6849,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d230c3fe-c232-490f-bb99-ed47dbfe87cd",
         "id": "55_55555_orgsyn_555_5555_subtask_8",
         "name": "task_14_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -6592,6 +6866,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "e4438fe5-ab6c-4e1c-9484-0327d0de3bcd",
         "id": "55_55555_orgsyn_555_5555_subtask_9",
         "name": "task_14_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -6614,6 +6889,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ae9ab266-7ccb-4857-9a56-9dee29f4fe47",
         "id": "55_55555_orgsyn_555_5555_subtask_10",
         "name": "task_14_subtask_10",
         "description": "State the SMILES for the molecule analyzed.",
@@ -6626,6 +6902,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "178c1b9a-a939-44a9-8cc3-667137d7bc89",
         "id": "66_66666_orgsyn_666_6666_subtask_1",
         "name": "task_15_subtask_1",
         "description": "What formula represents the molecule in the sample?",
@@ -6637,6 +6914,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "44974053-f886-4b12-9e53-64026d535096",
         "id": "66_66666_orgsyn_666_6666_subtask_2",
         "name": "task_15_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -6648,6 +6926,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f32d50ad-1a86-402a-b08d-c74cab0fe15d",
         "id": "66_66666_orgsyn_666_6666_subtask_3",
         "name": "task_15_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -6660,6 +6939,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "9f77e22b-6a30-43ae-b866-1a0ef234a9a0",
         "id": "66_66666_orgsyn_666_6666_subtask_4",
         "name": "task_15_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -6672,6 +6952,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7074a0b9-67cc-480a-a2b0-e712509e39d1",
         "id": "66_66666_orgsyn_666_6666_subtask_5",
         "name": "task_15_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -6685,6 +6966,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "50825c2d-df52-477e-8b2c-2b8aba2b8e5f",
         "id": "66_66666_orgsyn_666_6666_subtask_6",
         "name": "task_15_subtask_6",
         "description": "Indicate the number of aromatic carbon atoms present in the molecule.",
@@ -6701,6 +6983,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "9adc2580-9237-45d5-a77b-bd22f89d4b19",
         "id": "66_66666_orgsyn_666_6666_subtask_7",
         "name": "task_15_subtask_7",
         "description": "Indicate the number of CH3 groups found in the molecule.",
@@ -6717,6 +7000,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c586215c-c148-4f66-bf25-b87aa71e4552",
         "id": "66_66666_orgsyn_666_6666_subtask_8",
         "name": "task_15_subtask_8",
         "description": "Indicate the number of C=O groups present in the molecule.",
@@ -6733,6 +7017,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "011e53e4-e2bd-4dc4-bce7-3acce77eb16a",
         "id": "66_66666_orgsyn_666_6666_subtask_9",
         "name": "task_15_subtask_9",
         "description": "Connect as many molecular fragments as possible and provide their SMILES representations.",
@@ -6755,6 +7040,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ea773087-0cf7-433c-9106-2bf982f33108",
         "id": "66_66666_orgsyn_666_6666_subtask_10",
         "name": "task_15_subtask_10",
         "description": "State the SMILES for the molecule analyzed.",
@@ -6767,6 +7053,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "8ab20d19-2f11-49ad-aeb5-44b2728fe141",
         "id": "77_77777_orgsyn_777_7777_subtask_1",
         "name": "task_16_subtask_1",
         "description": "What is the chemical formula for the sample compound?",
@@ -6778,6 +7065,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1bf89fcc-4cce-465f-a2fd-739826d42261",
         "id": "77_77777_orgsyn_777_7777_subtask_2",
         "name": "task_16_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -6789,6 +7077,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "0fade059-aff8-4cd2-9c16-d1e9ce58b716",
         "id": "77_77777_orgsyn_777_7777_subtask_3",
         "name": "task_16_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -6801,6 +7090,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "56391c77-4719-4ff0-b14e-4bd3716d150d",
         "id": "77_77777_orgsyn_777_7777_subtask_4",
         "name": "task_16_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -6813,6 +7103,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "2937fa69-d423-4198-97d8-40a68fc5c9c7",
         "id": "77_77777_orgsyn_777_7777_subtask_5",
         "name": "task_16_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -6826,6 +7117,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f422761d-f5c6-42af-8507-ed86dbb98de0",
         "id": "77_77777_orgsyn_777_7777_subtask_6",
         "name": "task_16_subtask_6",
         "description": "How many aromatic carbon atoms does the compound contain?",
@@ -6842,6 +7134,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "57043f7a-e8f0-41e3-b9e2-a726fc889021",
         "id": "77_77777_orgsyn_777_7777_subtask_7",
         "name": "task_16_subtask_7",
         "description": "State the number of CH3 groups in the compound.",
@@ -6858,6 +7151,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "a1772640-7eec-4114-ab7b-0cdc39328e85",
         "id": "77_77777_orgsyn_777_7777_subtask_8",
         "name": "task_16_subtask_8",
         "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -6874,6 +7168,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "06e67a4d-14ca-480f-9b55-5eade928ae2e",
         "id": "77_77777_orgsyn_777_7777_subtask_9",
         "name": "task_16_subtask_9",
         "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -6896,6 +7191,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c441e9ab-fb01-404e-a01e-1c13d7c5e484",
         "id": "77_77777_orgsyn_777_7777_subtask_10",
         "name": "task_16_subtask_10",
         "description": "What SMILES string corresponds to the compound in this sample?",
@@ -6908,6 +7204,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "deea51da-4330-480a-b155-5d4a3d7fa30c",
         "id": "10_15227_orgsyn_096_0245_subtask_1",
         "name": "task_17_subtask_1",
         "description": "Can you provide the molecular formula of the compound present in the sample?",
@@ -6919,6 +7216,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f2ecff1b-c32f-4836-a900-f509aca15c52",
         "id": "10_15227_orgsyn_096_0245_subtask_2",
         "name": "task_17_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -6930,6 +7228,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "fc5a3632-2c81-4246-80c3-258260b452c4",
         "id": "10_15227_orgsyn_096_0245_subtask_3",
         "name": "task_17_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -6942,6 +7241,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4e9ebe17-047a-49ec-b62d-486f5e35c672",
         "id": "10_15227_orgsyn_096_0245_subtask_4",
         "name": "task_17_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -6954,6 +7254,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1e2458f7-4742-4f0b-b985-c272acf4b5dd",
         "id": "10_15227_orgsyn_096_0245_subtask_5",
         "name": "task_17_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -6967,6 +7268,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "fac7343a-e18f-4bf8-b085-c12fd49e8f73",
         "id": "10_15227_orgsyn_096_0245_subtask_6",
         "name": "task_17_subtask_6",
         "description": "How many aromatic carbon atoms does the compound contain?",
@@ -6983,6 +7285,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1ba1b610-0b0d-4d79-8af2-1daa9a5a9faa",
         "id": "10_15227_orgsyn_096_0245_subtask_7",
         "name": "task_17_subtask_7",
         "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -6999,6 +7302,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "023cfe4b-f49c-492a-90c0-51b1056b4364",
         "id": "10_15227_orgsyn_096_0245_subtask_8",
         "name": "task_17_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -7015,6 +7319,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "61c14696-c3dc-45c7-bc24-b24451ae4ab3",
         "id": "10_15227_orgsyn_096_0245_subtask_9",
         "name": "task_17_subtask_9",
         "description": "Provide SMILES for all possible linked fragments of the sample's molecule.",
@@ -7037,6 +7342,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3d4695c9-fe9e-4ae6-815e-a1cdded19f00",
         "id": "10_15227_orgsyn_096_0245_subtask_10",
         "name": "task_17_subtask_10",
         "description": "Indicate the SMILES representation of the sample's compound.",
@@ -7049,6 +7355,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "b63dde4e-4cc7-4a69-b2cd-0e4f72e328e5",
         "id": "10_15227_orgsyn_102_0001_subtask_1",
         "name": "task_18_subtask_1",
         "description": "What formula represents the molecule in the sample?",
@@ -7060,6 +7367,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "de024fdd-d1b5-48cf-ac4c-9212b0f4ad3b",
         "id": "10_15227_orgsyn_102_0001_subtask_2",
         "name": "task_18_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -7071,6 +7379,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4f05a755-4574-4082-a46f-143865ce396d",
         "id": "10_15227_orgsyn_102_0001_subtask_3",
         "name": "task_18_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -7083,6 +7392,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "854d3621-51e1-48bf-9055-2ee328097776",
         "id": "10_15227_orgsyn_102_0001_subtask_4",
         "name": "task_18_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -7095,6 +7405,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "63f169b7-d8bc-41c9-b8e8-5234d9e304b4",
         "id": "10_15227_orgsyn_102_0001_subtask_5",
         "name": "task_18_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -7108,6 +7419,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "817b2c17-db3c-48a3-94bb-de934d07cb36",
         "id": "10_15227_orgsyn_102_0001_subtask_6",
         "name": "task_18_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -7124,6 +7436,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "fef43414-d37c-4687-8a2a-35170fb96a11",
         "id": "10_15227_orgsyn_102_0001_subtask_7",
         "name": "task_18_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -7140,6 +7453,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "360e06cb-d8e2-49d1-88be-f0094115d2c0",
         "id": "10_15227_orgsyn_102_0001_subtask_8",
         "name": "task_18_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -7156,6 +7470,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7b53d91d-d424-4718-ad93-f6f580f55491",
         "id": "10_15227_orgsyn_102_0001_subtask_9",
         "name": "task_18_subtask_9",
         "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -7178,6 +7493,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d84026be-e309-4894-a8d1-25a32ad8775c",
         "id": "10_15227_orgsyn_102_0001_subtask_10",
         "name": "task_18_subtask_10",
         "description": "What is the SMILES notation for the sample's compound?",
@@ -7190,6 +7506,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "58ea37d3-3ddb-49a9-998f-79cc275e7679",
         "id": "88_88888_orgsyn_888_8888_subtask_1",
         "name": "task_19_subtask_1",
         "description": "What is the chemical formula for the sample compound?",
@@ -7201,6 +7518,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "91407898-e102-48b4-9e39-c3ee82a6f3ae",
         "id": "88_88888_orgsyn_888_8888_subtask_2",
         "name": "task_19_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -7212,6 +7530,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7cb687de-465f-4899-8bf2-c0c6c55080f5",
         "id": "88_88888_orgsyn_888_8888_subtask_3",
         "name": "task_19_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -7224,6 +7543,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "01db089a-f9e5-4174-8bb4-526db1162a86",
         "id": "88_88888_orgsyn_888_8888_subtask_4",
         "name": "task_19_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -7236,6 +7556,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f46d0761-89a2-40f4-a75b-89e0cadf4794",
         "id": "88_88888_orgsyn_888_8888_subtask_5",
         "name": "task_19_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -7249,6 +7570,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "46be6f35-d9c4-4224-a452-8e34d0a6d3ea",
         "id": "88_88888_orgsyn_888_8888_subtask_6",
         "name": "task_19_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -7265,6 +7587,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "553c79ec-0c75-4542-8981-6d8c0d9402a0",
         "id": "88_88888_orgsyn_888_8888_subtask_7",
         "name": "task_19_subtask_7",
         "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -7281,6 +7604,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "b6ef22ad-f68b-4a15-a2fd-5827954dc8c1",
         "id": "88_88888_orgsyn_888_8888_subtask_8",
         "name": "task_19_subtask_8",
         "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -7297,6 +7621,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3c78a3e8-b45d-4f97-a360-b4f170f4981d",
         "id": "88_88888_orgsyn_888_8888_subtask_9",
         "name": "task_19_subtask_9",
         "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -7319,6 +7644,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d8f9ab15-6cd8-47e0-96ae-2f05df63fd96",
         "id": "88_88888_orgsyn_888_8888_subtask_10",
         "name": "task_19_subtask_10",
         "description": "What SMILES string corresponds to the compound in this sample?",
@@ -7331,6 +7657,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "2b54741a-7ccd-4c65-b8c0-59b796f0ec07",
         "id": "10_15227_orgsyn_102_0114_subtask_1",
         "name": "task_2_subtask_1",
         "description": "Can you provide the molecular formula of the compound present in the sample?",
@@ -7342,6 +7669,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d02c6f56-c2e0-4231-8544-389cfddaa61e",
         "id": "10_15227_orgsyn_102_0114_subtask_2",
         "name": "task_2_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -7353,6 +7681,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "bb82d3ae-d085-4f3b-ad35-481745fd5acc",
         "id": "10_15227_orgsyn_102_0114_subtask_3",
         "name": "task_2_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -7365,6 +7694,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3f531684-3b82-4886-9315-f22cb6ea24eb",
         "id": "10_15227_orgsyn_102_0114_subtask_4",
         "name": "task_2_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -7377,6 +7707,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "887019ac-10ba-4a18-8215-d1adac923062",
         "id": "10_15227_orgsyn_102_0114_subtask_5",
         "name": "task_2_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -7390,6 +7721,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c20c59de-d8c5-4f09-8a67-c23fec6923ad",
         "id": "10_15227_orgsyn_102_0114_subtask_6",
         "name": "task_2_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -7406,6 +7738,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "35f9ae77-d758-4598-abf1-dce92d00bdd3",
         "id": "10_15227_orgsyn_102_0114_subtask_7",
         "name": "task_2_subtask_7",
         "description": "What is the count of methyl groups in the molecule?",
@@ -7422,6 +7755,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4ce3f771-aad3-4a99-bff6-42dda6d6b256",
         "id": "10_15227_orgsyn_102_0114_subtask_8",
         "name": "task_2_subtask_8",
         "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -7438,6 +7772,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "0e3ab6bf-82d0-4977-917f-8b0a84d70148",
         "id": "10_15227_orgsyn_102_0114_subtask_9",
         "name": "task_2_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -7460,6 +7795,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f0f9fb3c-f2cd-46f2-a4ce-f572c76db796",
         "id": "10_15227_orgsyn_102_0114_subtask_10",
         "name": "task_2_subtask_10",
         "description": "State the SMILES for the molecule analyzed.",
@@ -7472,6 +7808,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "794f6f56-a79e-4f95-bd12-39fa6fa91911",
         "id": "00_0000_orgsyn_000_0000_subtask_1",
         "name": "task_20_subtask_1",
         "description": "What formula represents the molecule in the sample?",
@@ -7483,6 +7820,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "98b75140-19e8-424c-96ab-c17357573436",
         "id": "00_0000_orgsyn_000_0000_subtask_2",
         "name": "task_20_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -7494,6 +7832,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7b906ad3-506d-4a23-bc33-0444b4e6562a",
         "id": "00_0000_orgsyn_000_0000_subtask_3",
         "name": "task_20_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -7506,6 +7845,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "dd0977e2-2865-4447-82bb-a6b6a7650afa",
         "id": "00_0000_orgsyn_000_0000_subtask_4",
         "name": "task_20_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -7518,6 +7858,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3ff2732e-bf4f-4ee0-9347-2f0d3af6f20b",
         "id": "00_0000_orgsyn_000_0000_subtask_5",
         "name": "task_20_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -7531,6 +7872,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3a6426cb-daf7-4062-8cae-1030756f47bb",
         "id": "00_0000_orgsyn_000_0000_subtask_6",
         "name": "task_20_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -7547,6 +7889,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6d4af473-e650-4e80-942a-f3f38229d495",
         "id": "00_0000_orgsyn_000_0000_subtask_7",
         "name": "task_20_subtask_7",
         "description": "What is the count of methyl groups in the molecule?",
@@ -7563,6 +7906,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1e22b2b7-6854-421b-86c0-2ef2b4cbdc49",
         "id": "00_0000_orgsyn_000_0000_subtask_8",
         "name": "task_20_subtask_8",
         "description": "Indicate the number of C=O groups present in the molecule.",
@@ -7579,6 +7923,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "9ca5c941-d0d9-4673-9f62-dc0fd37646c5",
         "id": "00_0000_orgsyn_000_0000_subtask_9",
         "name": "task_20_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -7601,6 +7946,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d9ed6c57-241d-4fb7-a8c0-2bb4f6965c18",
         "id": "00_0000_orgsyn_000_0000_subtask_10",
         "name": "task_20_subtask_10",
         "description": "What is the SMILES notation for the sample's compound?",
@@ -7613,6 +7959,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d4f0a85a-cb77-4d1c-93d5-d25121222566",
         "id": "10_15227_orgsyn_102_0086_subtask_1",
         "name": "task_3_subtask_1",
         "description": "State the molecular formula for the compound analyzed.",
@@ -7624,6 +7971,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f9b7ee73-5ee7-4a8d-bffe-f07f40e6f57c",
         "id": "10_15227_orgsyn_102_0086_subtask_2",
         "name": "task_3_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -7635,6 +7983,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "5e5c6f2c-e4fe-448a-8576-ff22cc878a69",
         "id": "10_15227_orgsyn_102_0086_subtask_3",
         "name": "task_3_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -7647,6 +7996,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6d92d21e-c826-42e3-8788-afab4f198222",
         "id": "10_15227_orgsyn_102_0086_subtask_4",
         "name": "task_3_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -7659,6 +8009,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "9a78e39c-880b-45ed-ba96-bf85044a2492",
         "id": "10_15227_orgsyn_102_0086_subtask_5",
         "name": "task_3_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -7672,6 +8023,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d60d6697-8fc9-49e1-8d17-81dbb3f1035f",
         "id": "10_15227_orgsyn_102_0086_subtask_6",
         "name": "task_3_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -7688,6 +8040,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "829da94a-2149-4083-89dc-1d2fa91ed072",
         "id": "10_15227_orgsyn_102_0086_subtask_7",
         "name": "task_3_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -7704,6 +8057,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4a879395-5290-4589-b2b7-2cd2936a7cea",
         "id": "10_15227_orgsyn_102_0086_subtask_8",
         "name": "task_3_subtask_8",
         "description": "Indicate the number of C=O groups present in the molecule.",
@@ -7720,6 +8074,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "77e0df84-02c0-45dd-9c22-006f374d8d1b",
         "id": "10_15227_orgsyn_102_0086_subtask_9",
         "name": "task_3_subtask_9",
         "description": "Connect as many molecular fragments as possible and provide their SMILES representations.",
@@ -7742,6 +8097,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1bfe1946-856e-490e-b3b2-4c828f2cfad7",
         "id": "10_15227_orgsyn_102_0086_subtask_10",
         "name": "task_3_subtask_10",
         "description": "Provide the SMILES string representing the compound in the sample.",
@@ -7754,6 +8110,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "79fab402-df5a-408f-8bb3-1c7bd3851cd6",
         "id": "11_11111_orgsyn_111_1111_subtask_1",
         "name": "task_4_subtask_1",
         "description": "Identify the molecular formula of the compound in this sample.",
@@ -7765,6 +8122,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7b821e48-e29a-480b-981c-8810be965f28",
         "id": "11_11111_orgsyn_111_1111_subtask_2",
         "name": "task_4_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -7776,6 +8134,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "93a54057-8433-407f-b90a-a86c5a6a521b",
         "id": "11_11111_orgsyn_111_1111_subtask_3",
         "name": "task_4_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -7788,6 +8147,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4d47c14b-22c2-4cd8-88df-9f4dc3d0e856",
         "id": "11_11111_orgsyn_111_1111_subtask_4",
         "name": "task_4_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -7800,6 +8160,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6985f194-eee6-41ce-b0fe-343115c5c789",
         "id": "11_11111_orgsyn_111_1111_subtask_5",
         "name": "task_4_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -7813,6 +8174,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4d14f469-f238-4619-918c-21b75d446ec9",
         "id": "11_11111_orgsyn_111_1111_subtask_6",
         "name": "task_4_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -7829,6 +8191,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "8f1735d8-43c0-4de3-b86f-330a3dd46e69",
         "id": "11_11111_orgsyn_111_1111_subtask_7",
         "name": "task_4_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -7845,6 +8208,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "fb58f07d-5296-41e3-ac89-4b90551c9bd0",
         "id": "11_11111_orgsyn_111_1111_subtask_8",
         "name": "task_4_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -7861,6 +8225,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "9881134d-baee-4f09-84d9-235e8a907275",
         "id": "11_11111_orgsyn_111_1111_subtask_9",
         "name": "task_4_subtask_9",
         "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -7883,6 +8248,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "5bcf04b4-849b-470c-92e1-36838a8ac267",
         "id": "11_11111_orgsyn_111_1111_subtask_10",
         "name": "task_4_subtask_10",
         "description": "Provide the SMILES string representing the compound in the sample.",
@@ -7895,6 +8261,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "038caf22-1f42-4ea9-93fa-fe4d9b702fae",
         "id": "10_15227_orgsyn_101_0327_subtask_1",
         "name": "task_5_subtask_1",
         "description": "State the molecular formula for the compound analyzed.",
@@ -7906,6 +8273,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f3c7d485-4262-4b7f-972d-8038dd23ce5d",
         "id": "10_15227_orgsyn_101_0327_subtask_2",
         "name": "task_5_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -7917,6 +8285,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "48ab04cd-046b-4b34-93f8-cfb85fc38c34",
         "id": "10_15227_orgsyn_101_0327_subtask_3",
         "name": "task_5_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -7929,6 +8298,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "546bbfae-e16d-4c12-9ee3-646308aaf743",
         "id": "10_15227_orgsyn_101_0327_subtask_4",
         "name": "task_5_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -7941,6 +8311,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "fefbd968-f0fa-41ba-8742-d2d8c0c955d8",
         "id": "10_15227_orgsyn_101_0327_subtask_5",
         "name": "task_5_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -7954,6 +8325,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "fde3f8d8-a54f-47e4-81da-08bf9a549eed",
         "id": "10_15227_orgsyn_101_0327_subtask_6",
         "name": "task_5_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -7970,6 +8342,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ad42329e-442e-4215-811a-3a1cae4af4cb",
         "id": "10_15227_orgsyn_101_0327_subtask_7",
         "name": "task_5_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -7986,6 +8359,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "08fe0cce-e0dc-4456-bce5-f44464f21616",
         "id": "10_15227_orgsyn_101_0327_subtask_8",
         "name": "task_5_subtask_8",
         "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -8002,6 +8376,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7a69ab64-f0e6-4547-8e1b-7f5a4d987a44",
         "id": "10_15227_orgsyn_101_0327_subtask_9",
         "name": "task_5_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -8024,6 +8399,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4636df26-7938-478c-94f3-27de3e599233",
         "id": "10_15227_orgsyn_101_0327_subtask_10",
         "name": "task_5_subtask_10",
         "description": "Provide the SMILES string representing the compound in the sample.",
@@ -8036,6 +8412,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6a46c22b-68a0-4817-ac04-5ec4ff2483ba",
         "id": "10_15227_orgsyn_084_0317m_subtask_1",
         "name": "task_6_subtask_1",
         "description": "What is the chemical formula for the sample compound?",
@@ -8047,6 +8424,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ac89f597-781d-4032-8dc2-3eaae7b8d7be",
         "id": "10_15227_orgsyn_084_0317m_subtask_2",
         "name": "task_6_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -8058,6 +8436,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f8bcf392-6441-4301-9822-e4ca21d5844c",
         "id": "10_15227_orgsyn_084_0317m_subtask_3",
         "name": "task_6_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -8070,6 +8449,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "8a6ef77e-cd6c-47f8-933d-31752f8d4497",
         "id": "10_15227_orgsyn_084_0317m_subtask_4",
         "name": "task_6_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -8082,6 +8462,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "18ad571e-7b70-4259-9ed9-a575b8a0d981",
         "id": "10_15227_orgsyn_084_0317m_subtask_5",
         "name": "task_6_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -8095,6 +8476,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "11c801a3-128d-4038-b6e1-07be320c2ba6",
         "id": "10_15227_orgsyn_084_0317m_subtask_6",
         "name": "task_6_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -8111,6 +8493,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "dafd55dc-23f4-4b2c-80a4-14fdabdd50fa",
         "id": "10_15227_orgsyn_084_0317m_subtask_7",
         "name": "task_6_subtask_7",
         "description": "What is the count of methyl groups in the molecule?",
@@ -8127,6 +8510,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "40959d73-f1b4-4c80-bdb5-c6ecc7d39646",
         "id": "10_15227_orgsyn_084_0317m_subtask_8",
         "name": "task_6_subtask_8",
         "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -8143,6 +8527,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "73fff2e1-0e7c-48da-94fd-78e61dbd9af6",
         "id": "10_15227_orgsyn_084_0317m_subtask_9",
         "name": "task_6_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -8165,6 +8550,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7b0830e3-42eb-46ea-a3b1-34a549e0f1fa",
         "id": "10_15227_orgsyn_084_0317m_subtask_10",
         "name": "task_6_subtask_10",
         "description": "Indicate the SMILES representation of the sample's compound.",
@@ -8177,6 +8563,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "83f102ed-e5fd-4c33-b601-7a2be0313a98",
         "id": "10_15227_orgsyn_096_0036_subtask_1",
         "name": "task_7_subtask_1",
         "description": "What formula represents the molecule in the sample?",
@@ -8188,6 +8575,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "4184d9f4-d52e-4a18-8a76-5c087c22038e",
         "id": "10_15227_orgsyn_096_0036_subtask_2",
         "name": "task_7_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -8199,6 +8587,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "57f840e6-8088-4ded-93e2-b9c32046f0dd",
         "id": "10_15227_orgsyn_096_0036_subtask_3",
         "name": "task_7_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -8211,6 +8600,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d34db967-a15d-4e41-bea9-07a3dc4404bd",
         "id": "10_15227_orgsyn_096_0036_subtask_4",
         "name": "task_7_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -8223,6 +8613,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "da437a53-ab07-46df-9972-3eddfe70c5db",
         "id": "10_15227_orgsyn_096_0036_subtask_5",
         "name": "task_7_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -8236,6 +8627,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3a2fb973-80bf-4c9a-a8f7-1e74504d0dcf",
         "id": "10_15227_orgsyn_096_0036_subtask_6",
         "name": "task_7_subtask_6",
         "description": "How many aromatic carbon atoms in the sample's compound? If not, reply '0'.",
@@ -8252,6 +8644,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "0f17769b-8134-4045-805b-d68f890a7db8",
         "id": "10_15227_orgsyn_096_0036_subtask_7",
         "name": "task_7_subtask_7",
         "description": "State the number of CH3 groups in the compound.",
@@ -8268,6 +8661,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1b4ab8bd-cc7e-4358-af52-d4b2e081a8d6",
         "id": "10_15227_orgsyn_096_0036_subtask_8",
         "name": "task_7_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -8284,6 +8678,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "036f7424-f280-4846-9964-6e8d19dd2d69",
         "id": "10_15227_orgsyn_096_0036_subtask_9",
         "name": "task_7_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -8306,6 +8701,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "50a0a39f-3111-4a36-a2e6-a9dc2a69683e",
         "id": "10_15227_orgsyn_096_0036_subtask_10",
         "name": "task_7_subtask_10",
         "description": "What is the SMILES notation for the sample's compound?",
@@ -8318,6 +8714,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3406c496-e67a-44ef-9e0e-3fa8e9e70a06",
         "id": "22_22222_orgsyn_222_2222_subtask_1",
         "name": "task_8_subtask_1",
         "description": "State the molecular formula for the compound analyzed.",
@@ -8329,6 +8726,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3fc5ab2e-948e-43e8-8bf5-da8d7af77874",
         "id": "22_22222_orgsyn_222_2222_subtask_2",
         "name": "task_8_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -8340,6 +8738,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "e0442349-aae0-4308-9441-d918da946604",
         "id": "22_22222_orgsyn_222_2222_subtask_3",
         "name": "task_8_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -8352,6 +8751,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "07d2f99f-a23d-4ea8-a488-75fe2bac3706",
         "id": "22_22222_orgsyn_222_2222_subtask_4",
         "name": "task_8_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -8364,6 +8764,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "716980a2-a48e-4446-9219-e1ffe6191f77",
         "id": "22_22222_orgsyn_222_2222_subtask_5",
         "name": "task_8_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -8377,6 +8778,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "33499c38-cff3-4498-a185-57d1e3a948c8",
         "id": "22_22222_orgsyn_222_2222_subtask_6",
         "name": "task_8_subtask_6",
         "description": "How many aromatic carbon atoms does the compound contain?",
@@ -8393,6 +8795,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "05aaccbf-d968-4a48-9073-846410ee334b",
         "id": "22_22222_orgsyn_222_2222_subtask_7",
         "name": "task_8_subtask_7",
         "description": "Indicate the number of CH3 groups found in the molecule.",
@@ -8409,6 +8812,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "385e0567-087b-4896-9c84-2415277bf913",
         "id": "22_22222_orgsyn_222_2222_subtask_8",
         "name": "task_8_subtask_8",
         "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -8425,6 +8829,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "3bd6e095-53c6-4a81-a411-e055a4a16c59",
         "id": "22_22222_orgsyn_222_2222_subtask_9",
         "name": "task_8_subtask_9",
         "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -8447,6 +8852,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "9c2a6926-9e99-4743-8679-2c986b9f94f8",
         "id": "22_22222_orgsyn_222_2222_subtask_10",
         "name": "task_8_subtask_10",
         "description": "Indicate the SMILES representation of the sample's compound.",
@@ -8459,6 +8865,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "888b2814-f2f2-4711-8700-79cfc95c2e33",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_1",
         "name": "task_9_subtask_1",
         "description": "What is the chemical formula for the sample compound?",
@@ -8470,6 +8877,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "abf0b8d2-0802-413c-828b-03f337dd0439",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_2",
         "name": "task_9_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -8481,6 +8889,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "69b45ae2-807d-4bfa-88c7-e8421a40fcc3",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_3",
         "name": "task_9_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -8493,6 +8902,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6fa362d1-ae14-4c34-a980-5f40053af6b4",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_4",
         "name": "task_9_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -8505,6 +8915,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "657d3a57-61c4-46ae-b691-db29761635cf",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_5",
         "name": "task_9_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -8518,6 +8929,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c01feabb-054e-45d4-8d31-296cd9b8d4a5",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_6",
         "name": "task_9_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -8534,6 +8946,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c59f4fd1-fe16-4c0d-933c-5b8005fe5b9e",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_7",
         "name": "task_9_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -8550,6 +8963,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "36a97cd7-0fda-4227-92f6-caa8786f3f3e",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_8",
         "name": "task_9_subtask_8",
         "description": "State the count of carbonyl groups in the molecule.",
@@ -8566,6 +8980,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "03f469dd-f4e7-41e6-896c-6c19085687a2",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_9",
         "name": "task_9_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -8588,6 +9003,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "f3593854-fe50-4380-af46-4f0f6716d69a",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_10",
         "name": "task_9_subtask_10",
         "description": "What SMILES string corresponds to the compound in this sample?",
@@ -8600,6 +9016,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "982ecc55-45f0-4991-b09c-64a8de5fdb4b",
         "id": "10_15227_orgsyn_084_0077_subtask_1",
         "name": "task_1_subtask_1",
         "description": "State the molecular formula for the compound analyzed.",
@@ -8611,6 +9028,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "cd6d67ff-c4d3-4c30-8ce7-6619fa8698cd",
         "id": "10_15227_orgsyn_084_0077_subtask_2",
         "name": "task_1_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -8622,6 +9040,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "944d2c81-ce3c-40c1-a945-890af3b564f2",
         "id": "10_15227_orgsyn_084_0077_subtask_3",
         "name": "task_1_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -8634,6 +9053,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "eaed8fd7-8fe1-4c59-8fde-fd5ce11e7d98",
         "id": "10_15227_orgsyn_084_0077_subtask_4",
         "name": "task_1_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -8646,6 +9066,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e674cd04-e591-4ae8-a1b2-2e08bd18f7b8",
         "id": "10_15227_orgsyn_084_0077_subtask_5",
         "name": "task_1_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -8659,6 +9080,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "1253beb5-d24a-4674-9824-e38a8685998d",
         "id": "10_15227_orgsyn_084_0077_subtask_6",
         "name": "task_1_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -8675,6 +9097,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "5c85cfe3-070b-4686-bd89-b0a0219257aa",
         "id": "10_15227_orgsyn_084_0077_subtask_7",
         "name": "task_1_subtask_7",
         "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -8691,6 +9114,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "014cfa85-5ebe-411e-91a2-e7d89321650a",
         "id": "10_15227_orgsyn_084_0077_subtask_8",
         "name": "task_1_subtask_8",
         "description": "Indicate the number of C=O groups present in the molecule.",
@@ -8707,6 +9131,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "136dc26d-dcfc-4432-9856-b70724f78579",
         "id": "10_15227_orgsyn_084_0077_subtask_9",
         "name": "task_1_subtask_9",
         "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -8728,6 +9153,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "3ee16588-d946-4066-b5d0-97e3ecfb128e",
         "id": "10_15227_orgsyn_084_0077_subtask_10",
         "name": "task_1_subtask_10",
         "description": "Provide the SMILES string representing the compound in the sample.",
@@ -8741,6 +9167,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "b5d3f7e9-c6cb-4b65-bb57-f37b9f61936f",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_1",
         "name": "task_10_subtask_1",
         "description": "Identify the molecular formula of the compound in this sample.",
@@ -8752,6 +9179,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "858a633d-a317-48e2-a7ff-8f862e67cfa3",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_2",
         "name": "task_10_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -8763,6 +9191,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "628c2385-0a21-4cee-bee2-f98f2bd3541a",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_3",
         "name": "task_10_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -8775,6 +9204,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "05d16746-ece1-48ea-8fd9-f6ee7990e2bb",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_4",
         "name": "task_10_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -8787,6 +9217,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "855d4b51-0d8d-49eb-bff7-fcef073a5228",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_5",
         "name": "task_10_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -8800,6 +9231,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "b47c0052-8b02-4dbb-a778-a376bf2c0057",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_6",
         "name": "task_10_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -8816,6 +9248,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "fbd851a8-285d-43af-9bbf-ba52b1d0cef0",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_7",
         "name": "task_10_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -8832,6 +9265,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e2f4570e-8356-404a-910a-91191b62d118",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_8",
         "name": "task_10_subtask_8",
         "description": "State the count of carbonyl groups in the molecule.",
@@ -8848,6 +9282,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "4c4db3c3-bd71-4158-99f0-c16505ab44dc",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_9",
         "name": "task_10_subtask_9",
         "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -8869,6 +9304,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "78f5321c-e75e-4049-909b-02dfa264548e",
         "id": "10_15227_orgsyn_084_0011_sub2_subtask_10",
         "name": "task_10_subtask_10",
         "description": "What is the SMILES notation for the sample's compound?",
@@ -8881,6 +9317,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "c4f03b04-f817-49eb-86c7-4d5c69d2efdb",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_1",
         "name": "task_11_subtask_1",
         "description": "State the molecular formula for the compound analyzed.",
@@ -8892,6 +9329,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "3f38aa8d-33f7-4d28-9ecb-a3d026d2d02f",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_2",
         "name": "task_11_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -8903,6 +9341,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e9bd971c-7a15-4f5c-9212-0d9b2694ea4a",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_3",
         "name": "task_11_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -8915,6 +9354,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e91cec0c-699f-406e-8a75-b0d1f2258245",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_4",
         "name": "task_11_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -8927,6 +9367,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "538a1109-c0ab-4cc6-b2df-5bdc3731119b",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_5",
         "name": "task_11_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -8940,6 +9381,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "bb5d8c71-e62b-417b-8605-d249856c2fdc",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_6",
         "name": "task_11_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -8956,6 +9398,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "b1f87fa6-0dfe-48bb-8db2-8b6d1edfb00c",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_7",
         "name": "task_11_subtask_7",
         "description": "State the number of CH3 groups in the compound.",
@@ -8972,6 +9415,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "fa12b039-6499-4a8d-8f31-c201fb969ee1",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_8",
         "name": "task_11_subtask_8",
         "description": "State the count of carbonyl groups in the molecule.",
@@ -8988,6 +9432,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "c0d27678-5cba-4838-a3a4-7babfdc06eb1",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_9",
         "name": "task_11_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -9009,6 +9454,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "f5eb3c44-9e84-4725-a57b-77a24a58870d",
         "id": "10_15227_orgsyn_084_0011_sub3_subtask_10",
         "name": "task_11_subtask_10",
         "description": "What SMILES string corresponds to the compound in this sample?",
@@ -9021,6 +9467,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "ec031347-75ff-4b4d-8e5a-1bbd5d34eed2",
         "id": "33_33333_orgsyn_333_3333_subtask_1",
         "name": "task_12_subtask_1",
         "description": "Identify the molecular formula of the compound in this sample.",
@@ -9032,6 +9479,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "487e304e-1947-4868-a07c-121b4d973679",
         "id": "33_33333_orgsyn_333_3333_subtask_2",
         "name": "task_12_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -9043,6 +9491,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "ecf28b24-6378-4149-8b90-b8991df03387",
         "id": "33_33333_orgsyn_333_3333_subtask_3",
         "name": "task_12_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -9055,6 +9504,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "26e9cae9-b8ea-4a02-8e02-948b7c6574c2",
         "id": "33_33333_orgsyn_333_3333_subtask_4",
         "name": "task_12_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -9067,6 +9517,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "296cb740-f561-468b-a8c5-c3643c886f5a",
         "id": "33_33333_orgsyn_333_3333_subtask_5",
         "name": "task_12_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -9080,6 +9531,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "566bb63c-a095-4f93-b8f3-97f2a7f9d431",
         "id": "33_33333_orgsyn_333_3333_subtask_6",
         "name": "task_12_subtask_6",
         "description": "How many aromatic carbon atoms in the sample's compound? If not, reply '0'.",
@@ -9096,6 +9548,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "39a7b1ad-b36c-46af-a8f0-ffbb0722472f",
         "id": "33_33333_orgsyn_333_3333_subtask_7",
         "name": "task_12_subtask_7",
         "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -9112,6 +9565,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "6cd6db93-9bb6-47ff-beef-86d7a8ea79ee",
         "id": "33_33333_orgsyn_333_3333_subtask_8",
         "name": "task_12_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -9128,6 +9582,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "5574bb22-7091-43dc-bae6-d6ed45f9ce1c",
         "id": "33_33333_orgsyn_333_3333_subtask_9",
         "name": "task_12_subtask_9",
         "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -9149,6 +9604,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e3294638-01a8-4b9f-b00e-456bb4ef7489",
         "id": "33_33333_orgsyn_333_3333_subtask_10",
         "name": "task_12_subtask_10",
         "description": "What SMILES string corresponds to the compound in this sample?",
@@ -9161,6 +9617,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "f2fd31fe-9298-4def-9a5c-6bc15dc57b3e",
         "id": "10_15227_orgsyn_084_0215_subtask_1",
         "name": "task_13_subtask_1",
         "description": "What is the chemical formula for the sample compound?",
@@ -9172,6 +9629,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "3e168eb0-1e16-43d5-a2f8-ec73a7fa6658",
         "id": "10_15227_orgsyn_084_0215_subtask_2",
         "name": "task_13_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -9183,6 +9641,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "48751197-9ec1-4da9-83c7-8649f5687a62",
         "id": "10_15227_orgsyn_084_0215_subtask_3",
         "name": "task_13_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -9195,6 +9654,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "5d6ae054-78db-4bc4-8a2c-fff0070377b6",
         "id": "10_15227_orgsyn_084_0215_subtask_4",
         "name": "task_13_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -9207,6 +9667,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "acbb7774-f215-4ab5-babf-869b191cddd0",
         "id": "10_15227_orgsyn_084_0215_subtask_5",
         "name": "task_13_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -9220,6 +9681,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "d47a026c-4eba-4a6f-8a84-c0fc814012c5",
         "id": "10_15227_orgsyn_084_0215_subtask_6",
         "name": "task_13_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -9236,6 +9698,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "43ed8c86-ed4e-4b98-b9e9-f6a7b6b034d1",
         "id": "10_15227_orgsyn_084_0215_subtask_7",
         "name": "task_13_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -9252,6 +9715,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "a57903cd-3c4c-44e1-bd93-bdcc49f145e8",
         "id": "10_15227_orgsyn_084_0215_subtask_8",
         "name": "task_13_subtask_8",
         "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -9268,6 +9732,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "7210582f-5ecd-4eb9-b910-a77d358e0743",
         "id": "10_15227_orgsyn_084_0215_subtask_9",
         "name": "task_13_subtask_9",
         "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -9289,6 +9754,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "9738c905-ce7b-477d-b6c1-3a780a364035",
         "id": "10_15227_orgsyn_084_0215_subtask_10",
         "name": "task_13_subtask_10",
         "description": "State the SMILES for the molecule analyzed.",
@@ -9301,6 +9767,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e1f6dac5-650f-48b5-9951-c383e0b5ea5e",
         "id": "55_55555_orgsyn_555_5555_subtask_1",
         "name": "task_14_subtask_1",
         "description": "Identify the molecular formula of the compound in this sample.",
@@ -9312,6 +9779,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "b8ec38d5-6f02-47d8-9e37-f0b3b51b380c",
         "id": "55_55555_orgsyn_555_5555_subtask_2",
         "name": "task_14_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -9323,6 +9791,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "bbb9f89d-82ad-4f8e-92ed-a3c047a13423",
         "id": "55_55555_orgsyn_555_5555_subtask_3",
         "name": "task_14_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -9335,6 +9804,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "5ed424db-f5d9-479b-92bc-fc171c2f4e9b",
         "id": "55_55555_orgsyn_555_5555_subtask_4",
         "name": "task_14_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -9347,6 +9817,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "cab508a6-170a-44e2-8026-ef98bf769c02",
         "id": "55_55555_orgsyn_555_5555_subtask_5",
         "name": "task_14_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -9360,6 +9831,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "576b576c-8684-49d3-a014-bdc6686682ce",
         "id": "55_55555_orgsyn_555_5555_subtask_6",
         "name": "task_14_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -9376,6 +9848,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "bae495eb-c8c5-4a60-8915-c62dcfc8a776",
         "id": "55_55555_orgsyn_555_5555_subtask_7",
         "name": "task_14_subtask_7",
         "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -9392,6 +9865,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "52ca31ea-3962-4c3d-907a-174a041604dc",
         "id": "55_55555_orgsyn_555_5555_subtask_8",
         "name": "task_14_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -9408,6 +9882,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "024d7d25-4a5c-48e2-862d-babe8abd7ed9",
         "id": "55_55555_orgsyn_555_5555_subtask_9",
         "name": "task_14_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -9429,6 +9904,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "7a8f321d-fa6a-49ae-95d5-084a41807c9a",
         "id": "55_55555_orgsyn_555_5555_subtask_10",
         "name": "task_14_subtask_10",
         "description": "State the SMILES for the molecule analyzed.",
@@ -9441,6 +9917,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "4490eb26-fb91-4852-a523-8a56b6f5913e",
         "id": "66_66666_orgsyn_666_6666_subtask_1",
         "name": "task_15_subtask_1",
         "description": "What formula represents the molecule in the sample?",
@@ -9452,6 +9929,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "8c2b539a-25fa-45f1-a114-a2cc96b5eed0",
         "id": "66_66666_orgsyn_666_6666_subtask_2",
         "name": "task_15_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -9463,6 +9941,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "769a1c58-20ce-4f9c-bdc6-f1ed3b53219a",
         "id": "66_66666_orgsyn_666_6666_subtask_3",
         "name": "task_15_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -9475,6 +9954,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "d647353c-b950-4bda-b0d0-f580908f1ecb",
         "id": "66_66666_orgsyn_666_6666_subtask_4",
         "name": "task_15_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -9487,6 +9967,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "92d0d367-8b76-4d64-9e7a-199c8914fa44",
         "id": "66_66666_orgsyn_666_6666_subtask_5",
         "name": "task_15_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -9500,6 +9981,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e4f8bcf7-3853-4081-8503-f99b8188f9f9",
         "id": "66_66666_orgsyn_666_6666_subtask_6",
         "name": "task_15_subtask_6",
         "description": "Indicate the number of aromatic carbon atoms present in the molecule.",
@@ -9516,6 +9998,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "8d495d1d-623f-444d-aad6-e980b15df9b1",
         "id": "66_66666_orgsyn_666_6666_subtask_7",
         "name": "task_15_subtask_7",
         "description": "Indicate the number of CH3 groups found in the molecule.",
@@ -9532,6 +10015,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "4596d567-cedf-4456-9875-7397287953d3",
         "id": "66_66666_orgsyn_666_6666_subtask_8",
         "name": "task_15_subtask_8",
         "description": "Indicate the number of C=O groups present in the molecule.",
@@ -9548,6 +10032,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "ee8d6d84-34dc-4c58-a012-e18005413abb",
         "id": "66_66666_orgsyn_666_6666_subtask_9",
         "name": "task_15_subtask_9",
         "description": "Connect as many molecular fragments as possible and provide their SMILES representations.",
@@ -9569,6 +10054,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "73f49cd7-928b-4743-9212-61669ae3afee",
         "id": "66_66666_orgsyn_666_6666_subtask_10",
         "name": "task_15_subtask_10",
         "description": "State the SMILES for the molecule analyzed.",
@@ -9581,6 +10067,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "6dc3815f-c216-41de-9239-87c2fce88bef",
         "id": "77_77777_orgsyn_777_7777_subtask_1",
         "name": "task_16_subtask_1",
         "description": "What is the chemical formula for the sample compound?",
@@ -9592,6 +10079,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "8a457b63-8cf4-4a7e-ae09-01012393eaa8",
         "id": "77_77777_orgsyn_777_7777_subtask_2",
         "name": "task_16_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -9603,6 +10091,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "58e0fd5b-e679-455c-8ec1-94148ef81462",
         "id": "77_77777_orgsyn_777_7777_subtask_3",
         "name": "task_16_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -9615,6 +10104,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "ebc0ce04-77db-483e-be85-f6b54318dba1",
         "id": "77_77777_orgsyn_777_7777_subtask_4",
         "name": "task_16_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -9627,6 +10117,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "4161f55d-dded-4e43-bab5-dbf07a8781cb",
         "id": "77_77777_orgsyn_777_7777_subtask_5",
         "name": "task_16_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -9640,6 +10131,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "4af6e55c-e274-4fcf-b597-b88bfd19dbc6",
         "id": "77_77777_orgsyn_777_7777_subtask_6",
         "name": "task_16_subtask_6",
         "description": "How many aromatic carbon atoms does the compound contain?",
@@ -9656,6 +10148,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "ae0024c3-2df2-48fc-8a4f-6678dd71ea87",
         "id": "77_77777_orgsyn_777_7777_subtask_7",
         "name": "task_16_subtask_7",
         "description": "State the number of CH3 groups in the compound.",
@@ -9672,6 +10165,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "a4df7e29-31a0-40cb-a9d2-182c62090ced",
         "id": "77_77777_orgsyn_777_7777_subtask_8",
         "name": "task_16_subtask_8",
         "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -9688,6 +10182,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "7f127f8b-2cfa-4dba-a88e-74da44fa906a",
         "id": "77_77777_orgsyn_777_7777_subtask_9",
         "name": "task_16_subtask_9",
         "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -9709,6 +10204,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "68dff8fa-3cb3-4795-8f80-afd3763ddd21",
         "id": "77_77777_orgsyn_777_7777_subtask_10",
         "name": "task_16_subtask_10",
         "description": "What SMILES string corresponds to the compound in this sample?",
@@ -9721,6 +10217,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "f5bd54b4-61aa-48df-ad11-4be0fef08547",
         "id": "10_15227_orgsyn_096_0245_subtask_1",
         "name": "task_17_subtask_1",
         "description": "Can you provide the molecular formula of the compound present in the sample?",
@@ -9732,6 +10229,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "cf9f05e8-3ef7-4496-b9db-491c6c837f2b",
         "id": "10_15227_orgsyn_096_0245_subtask_2",
         "name": "task_17_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -9743,6 +10241,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "28804064-f0eb-46f2-bd66-cd1cf29f7d1d",
         "id": "10_15227_orgsyn_096_0245_subtask_3",
         "name": "task_17_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -9755,6 +10254,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "78e5024b-8252-46f2-ab70-9fe44eebe05b",
         "id": "10_15227_orgsyn_096_0245_subtask_4",
         "name": "task_17_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -9767,6 +10267,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "d4f46af5-179e-4d48-9560-73567a3447c5",
         "id": "10_15227_orgsyn_096_0245_subtask_5",
         "name": "task_17_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -9780,6 +10281,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "6b771ce0-e9aa-4477-895c-17d8960f3b0c",
         "id": "10_15227_orgsyn_096_0245_subtask_6",
         "name": "task_17_subtask_6",
         "description": "How many aromatic carbon atoms does the compound contain?",
@@ -9796,6 +10298,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "728e2c28-a490-4a49-942a-d62404e26c18",
         "id": "10_15227_orgsyn_096_0245_subtask_7",
         "name": "task_17_subtask_7",
         "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -9812,6 +10315,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "487469fb-ac71-4aa2-82df-6696acb27fe8",
         "id": "10_15227_orgsyn_096_0245_subtask_8",
         "name": "task_17_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -9828,6 +10332,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e8b86b6e-b4fa-4cc3-b909-c25a0b385da6",
         "id": "10_15227_orgsyn_096_0245_subtask_9",
         "name": "task_17_subtask_9",
         "description": "Provide SMILES for all possible linked fragments of the sample's molecule.",
@@ -9849,6 +10354,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "dbed1154-3549-4899-b8b0-82d19191bc6c",
         "id": "10_15227_orgsyn_096_0245_subtask_10",
         "name": "task_17_subtask_10",
         "description": "Indicate the SMILES representation of the sample's compound.",
@@ -9861,6 +10367,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "44af36ca-8a19-4c46-97fb-cdd7ebae48b7",
         "id": "10_15227_orgsyn_102_0001_subtask_1",
         "name": "task_18_subtask_1",
         "description": "What formula represents the molecule in the sample?",
@@ -9872,6 +10379,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "afa3e2d1-4d98-4ca6-8a48-ffc36f5ba6de",
         "id": "10_15227_orgsyn_102_0001_subtask_2",
         "name": "task_18_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -9883,6 +10391,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "a1eaef87-973d-4d02-be50-7c4af1ba8814",
         "id": "10_15227_orgsyn_102_0001_subtask_3",
         "name": "task_18_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -9895,6 +10404,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "9e5d3ffa-4b03-49e4-8b23-61c698cd4626",
         "id": "10_15227_orgsyn_102_0001_subtask_4",
         "name": "task_18_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -9907,6 +10417,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "09bc2275-86a9-4b54-8f3c-59b9e919cac6",
         "id": "10_15227_orgsyn_102_0001_subtask_5",
         "name": "task_18_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -9920,6 +10431,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "fe1dec43-4b8b-48bc-beb8-5133e5a9f62e",
         "id": "10_15227_orgsyn_102_0001_subtask_6",
         "name": "task_18_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -9936,6 +10448,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "0b001e23-f2b3-492c-940a-aa66f7948a39",
         "id": "10_15227_orgsyn_102_0001_subtask_7",
         "name": "task_18_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -9952,6 +10465,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "fdf270e3-9f8d-43db-b99f-e5ec98d36b38",
         "id": "10_15227_orgsyn_102_0001_subtask_8",
         "name": "task_18_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -9968,6 +10482,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "64bcd743-2c2f-4278-90bf-5aeabe6f508c",
         "id": "10_15227_orgsyn_102_0001_subtask_9",
         "name": "task_18_subtask_9",
         "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -9989,6 +10504,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "f46d4cb5-8a26-4cbf-8a80-a2abe250e860",
         "id": "10_15227_orgsyn_102_0001_subtask_10",
         "name": "task_18_subtask_10",
         "description": "What is the SMILES notation for the sample's compound?",
@@ -10001,6 +10517,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "b67ae400-2dc1-4b06-b458-665de78641e5",
         "id": "88_88888_orgsyn_888_8888_subtask_1",
         "name": "task_19_subtask_1",
         "description": "What is the chemical formula for the sample compound?",
@@ -10012,6 +10529,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e352eb8b-05f8-4b33-93e1-4026f0cd65c7",
         "id": "88_88888_orgsyn_888_8888_subtask_2",
         "name": "task_19_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -10023,6 +10541,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "62e3dcb5-3232-4f59-b051-45c9f1f25fc1",
         "id": "88_88888_orgsyn_888_8888_subtask_3",
         "name": "task_19_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -10035,6 +10554,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "61d140bf-146d-4a70-bb4f-248e9974e5e4",
         "id": "88_88888_orgsyn_888_8888_subtask_4",
         "name": "task_19_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -10047,6 +10567,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "c52b0554-ff6c-4331-93a0-94de333b3175",
         "id": "88_88888_orgsyn_888_8888_subtask_5",
         "name": "task_19_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -10060,6 +10581,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "c1748423-6e39-4d9b-bb38-143c622c342b",
         "id": "88_88888_orgsyn_888_8888_subtask_6",
         "name": "task_19_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -10076,6 +10598,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "16a2d0eb-d535-457c-9a22-9d3a4e42aa4b",
         "id": "88_88888_orgsyn_888_8888_subtask_7",
         "name": "task_19_subtask_7",
         "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -10092,6 +10615,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "03878474-a1d7-45ec-9664-587aa6b35386",
         "id": "88_88888_orgsyn_888_8888_subtask_8",
         "name": "task_19_subtask_8",
         "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -10108,6 +10632,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "d245db33-256a-4850-ab20-4e01be752c21",
         "id": "88_88888_orgsyn_888_8888_subtask_9",
         "name": "task_19_subtask_9",
         "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -10129,6 +10654,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "da329ffd-71cd-47e1-abdf-260a8578177a",
         "id": "88_88888_orgsyn_888_8888_subtask_10",
         "name": "task_19_subtask_10",
         "description": "What SMILES string corresponds to the compound in this sample?",
@@ -10141,6 +10667,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "b094e09e-97cc-4b78-8c7f-e6ff4804b361",
         "id": "10_15227_orgsyn_102_0114_subtask_1",
         "name": "task_2_subtask_1",
         "description": "Can you provide the molecular formula of the compound present in the sample?",
@@ -10152,6 +10679,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "a8361690-3983-48e6-9f4e-686af1187dd4",
         "id": "10_15227_orgsyn_102_0114_subtask_2",
         "name": "task_2_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -10163,6 +10691,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "fa5125b0-76b4-42e7-9ed1-b69d8fadb98b",
         "id": "10_15227_orgsyn_102_0114_subtask_3",
         "name": "task_2_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -10175,6 +10704,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "5667c6ef-0b74-4755-97ac-3e19b81e8d56",
         "id": "10_15227_orgsyn_102_0114_subtask_4",
         "name": "task_2_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -10187,6 +10717,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "da4cacd8-0e09-403a-a668-78ae367f9453",
         "id": "10_15227_orgsyn_102_0114_subtask_5",
         "name": "task_2_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -10200,6 +10731,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "c9ca2d2a-1ea6-455e-b553-bb1afcbc330e",
         "id": "10_15227_orgsyn_102_0114_subtask_6",
         "name": "task_2_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -10216,6 +10748,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "ab9d3fe1-ef7e-4d4d-bfd4-c5c5f08eb3cc",
         "id": "10_15227_orgsyn_102_0114_subtask_7",
         "name": "task_2_subtask_7",
         "description": "What is the count of methyl groups in the molecule?",
@@ -10232,6 +10765,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "1b6d69ef-1f4e-412e-8eda-8b6e87d826d3",
         "id": "10_15227_orgsyn_102_0114_subtask_8",
         "name": "task_2_subtask_8",
         "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -10248,6 +10782,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "72606870-1869-4899-a692-99b851050cbd",
         "id": "10_15227_orgsyn_102_0114_subtask_9",
         "name": "task_2_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -10269,6 +10804,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "ceb83154-7fa8-4d74-bc21-f1d4b7118d6c",
         "id": "10_15227_orgsyn_102_0114_subtask_10",
         "name": "task_2_subtask_10",
         "description": "State the SMILES for the molecule analyzed.",
@@ -10281,6 +10817,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "056c1d5b-c23d-4f61-92c2-d7b82b59818e",
         "id": "00_0000_orgsyn_000_0000_subtask_1",
         "name": "task_20_subtask_1",
         "description": "What formula represents the molecule in the sample?",
@@ -10292,6 +10829,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "7f98a643-97b5-46aa-88d2-d1205016cf37",
         "id": "00_0000_orgsyn_000_0000_subtask_2",
         "name": "task_20_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -10303,6 +10841,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "705ac701-aca1-4cef-bbca-69b33d21c756",
         "id": "00_0000_orgsyn_000_0000_subtask_3",
         "name": "task_20_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -10315,6 +10854,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "61d73a32-6dac-42f8-945d-0b4597452cc3",
         "id": "00_0000_orgsyn_000_0000_subtask_4",
         "name": "task_20_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -10327,6 +10867,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "8da2bfac-f389-4147-b66f-e634b3d7fd52",
         "id": "00_0000_orgsyn_000_0000_subtask_5",
         "name": "task_20_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -10340,6 +10881,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "3fb6ae6a-ccd0-428a-bb62-16fad3e8975c",
         "id": "00_0000_orgsyn_000_0000_subtask_6",
         "name": "task_20_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -10356,6 +10898,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "0f04c8ed-bec0-4dc9-8316-1089a3b3390d",
         "id": "00_0000_orgsyn_000_0000_subtask_7",
         "name": "task_20_subtask_7",
         "description": "What is the count of methyl groups in the molecule?",
@@ -10372,6 +10915,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "7b54abb2-549f-4ac8-9bfe-c6597b37afc4",
         "id": "00_0000_orgsyn_000_0000_subtask_8",
         "name": "task_20_subtask_8",
         "description": "Indicate the number of C=O groups present in the molecule.",
@@ -10388,6 +10932,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "127b3d29-3cbb-4e8b-bba7-a9ce5936bb88",
         "id": "00_0000_orgsyn_000_0000_subtask_9",
         "name": "task_20_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -10409,6 +10954,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "3084c5ac-7174-4a79-a13e-285991b7d4b9",
         "id": "00_0000_orgsyn_000_0000_subtask_10",
         "name": "task_20_subtask_10",
         "description": "What is the SMILES notation for the sample's compound?",
@@ -10421,6 +10967,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "d1e9a3f9-724d-490a-afe1-f2136f5a9088",
         "id": "10_15227_orgsyn_102_0086_subtask_1",
         "name": "task_3_subtask_1",
         "description": "State the molecular formula for the compound analyzed.",
@@ -10432,6 +10979,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "4aa1ad42-e971-4237-a776-b7aead1130b9",
         "id": "10_15227_orgsyn_102_0086_subtask_2",
         "name": "task_3_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -10443,6 +10991,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "48ff1efb-04a1-4c7d-ad16-d1ba6a425365",
         "id": "10_15227_orgsyn_102_0086_subtask_3",
         "name": "task_3_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -10455,6 +11004,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "fa0f1416-079f-441c-8373-86ceb4f56b20",
         "id": "10_15227_orgsyn_102_0086_subtask_4",
         "name": "task_3_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -10467,6 +11017,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "f485863c-97b5-4ffe-8e4a-412a99c13552",
         "id": "10_15227_orgsyn_102_0086_subtask_5",
         "name": "task_3_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -10480,6 +11031,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "a302ea6e-aa1c-47b9-8c76-485198bc3fd8",
         "id": "10_15227_orgsyn_102_0086_subtask_6",
         "name": "task_3_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -10496,6 +11048,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e9ebcdc3-d302-48f5-9801-e0bd12476b78",
         "id": "10_15227_orgsyn_102_0086_subtask_7",
         "name": "task_3_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -10512,6 +11065,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "881ccdc0-532f-4123-972e-768a8decd5bb",
         "id": "10_15227_orgsyn_102_0086_subtask_8",
         "name": "task_3_subtask_8",
         "description": "Indicate the number of C=O groups present in the molecule.",
@@ -10528,6 +11082,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "d9d615eb-e845-4120-834c-37ce25bc0fcf",
         "id": "10_15227_orgsyn_102_0086_subtask_9",
         "name": "task_3_subtask_9",
         "description": "Connect as many molecular fragments as possible and provide their SMILES representations.",
@@ -10549,6 +11104,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "9c1e6311-d822-40d4-b3bc-4f0bc6d231f7",
         "id": "10_15227_orgsyn_102_0086_subtask_10",
         "name": "task_3_subtask_10",
         "description": "Provide the SMILES string representing the compound in the sample.",
@@ -10561,6 +11117,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "f8ded385-ce31-4fd0-ac85-2d0e92faa2af",
         "id": "11_11111_orgsyn_111_1111_subtask_1",
         "name": "task_4_subtask_1",
         "description": "Identify the molecular formula of the compound in this sample.",
@@ -10572,6 +11129,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "243278d3-410e-465d-aa2f-ba27a4536fdb",
         "id": "11_11111_orgsyn_111_1111_subtask_2",
         "name": "task_4_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -10583,6 +11141,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "832d3bdf-68b9-4245-871c-bb37407c4533",
         "id": "11_11111_orgsyn_111_1111_subtask_3",
         "name": "task_4_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -10595,6 +11154,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "6c207e2f-cc60-48f4-bc27-4e4a0d4af77c",
         "id": "11_11111_orgsyn_111_1111_subtask_4",
         "name": "task_4_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -10607,6 +11167,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "a7aef177-6cb6-4fdc-a3b4-28bbc438feb9",
         "id": "11_11111_orgsyn_111_1111_subtask_5",
         "name": "task_4_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -10620,6 +11181,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "74cb3400-1f26-4533-adf5-4a565969d2f8",
         "id": "11_11111_orgsyn_111_1111_subtask_6",
         "name": "task_4_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -10636,6 +11198,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "be80ce1c-8e18-4e9e-b9c4-f389dd28784d",
         "id": "11_11111_orgsyn_111_1111_subtask_7",
         "name": "task_4_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -10652,6 +11215,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "bf91318a-29de-4b33-aa92-9523ee7a9fbe",
         "id": "11_11111_orgsyn_111_1111_subtask_8",
         "name": "task_4_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -10668,6 +11232,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "bd83246d-6736-4d8f-b469-824726511073",
         "id": "11_11111_orgsyn_111_1111_subtask_9",
         "name": "task_4_subtask_9",
         "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -10689,6 +11254,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "5fff43b5-f7e7-47e6-b301-86e286cdbf84",
         "id": "11_11111_orgsyn_111_1111_subtask_10",
         "name": "task_4_subtask_10",
         "description": "Provide the SMILES string representing the compound in the sample.",
@@ -10701,6 +11267,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "24dd6d03-21a0-462b-abda-95328924664d",
         "id": "10_15227_orgsyn_101_0327_subtask_1",
         "name": "task_5_subtask_1",
         "description": "State the molecular formula for the compound analyzed.",
@@ -10712,6 +11279,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "64d128bb-4a9c-4008-b313-cb978292b0d9",
         "id": "10_15227_orgsyn_101_0327_subtask_2",
         "name": "task_5_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -10723,6 +11291,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "a61cb253-4625-4e2a-b74f-63a8833ec515",
         "id": "10_15227_orgsyn_101_0327_subtask_3",
         "name": "task_5_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -10735,6 +11304,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "151b3823-91cc-43d7-8877-0c6c325baa08",
         "id": "10_15227_orgsyn_101_0327_subtask_4",
         "name": "task_5_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -10747,6 +11317,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "6e08a654-8a3e-4df1-ab3f-3a6e5af3ce71",
         "id": "10_15227_orgsyn_101_0327_subtask_5",
         "name": "task_5_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -10760,6 +11331,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "9f06c881-4b80-49dc-8902-5ceaebd00d3e",
         "id": "10_15227_orgsyn_101_0327_subtask_6",
         "name": "task_5_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -10776,6 +11348,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "b171d558-b00d-426c-a4df-cad4bf257a05",
         "id": "10_15227_orgsyn_101_0327_subtask_7",
         "name": "task_5_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -10792,6 +11365,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "287d95f7-b8ad-4415-9e50-d782160af44a",
         "id": "10_15227_orgsyn_101_0327_subtask_8",
         "name": "task_5_subtask_8",
         "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -10808,6 +11382,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "925b315e-af97-41bf-a919-933afac5dc83",
         "id": "10_15227_orgsyn_101_0327_subtask_9",
         "name": "task_5_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -10829,6 +11404,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "8fc5e927-0493-4c09-bf20-dd277d6c18a3",
         "id": "10_15227_orgsyn_101_0327_subtask_10",
         "name": "task_5_subtask_10",
         "description": "Provide the SMILES string representing the compound in the sample.",
@@ -10841,6 +11417,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "0321adad-dcad-4310-ade8-e5cb0618644f",
         "id": "10_15227_orgsyn_084_0317m_subtask_1",
         "name": "task_6_subtask_1",
         "description": "What is the chemical formula for the sample compound?",
@@ -10852,6 +11429,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "06cd5f61-1ea6-4b7e-9320-2e797a93f0d9",
         "id": "10_15227_orgsyn_084_0317m_subtask_2",
         "name": "task_6_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -10863,6 +11441,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "7f0d713f-f6b3-40a7-8f60-572fc33e0c0f",
         "id": "10_15227_orgsyn_084_0317m_subtask_3",
         "name": "task_6_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -10875,6 +11454,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "54d29283-ea6e-4127-a4aa-5160f3f4e04f",
         "id": "10_15227_orgsyn_084_0317m_subtask_4",
         "name": "task_6_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -10887,6 +11467,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "23cf6940-1cff-4128-89e7-409438565ad8",
         "id": "10_15227_orgsyn_084_0317m_subtask_5",
         "name": "task_6_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -10900,6 +11481,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "06254c08-3b1f-48a4-9daf-b010ea0b7e7f",
         "id": "10_15227_orgsyn_084_0317m_subtask_6",
         "name": "task_6_subtask_6",
         "description": "State the count of aromatic carbons in the molecule.",
@@ -10916,6 +11498,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "6218e793-6221-439b-a115-d004af23d73a",
         "id": "10_15227_orgsyn_084_0317m_subtask_7",
         "name": "task_6_subtask_7",
         "description": "What is the count of methyl groups in the molecule?",
@@ -10932,6 +11515,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "2599dc46-3541-4048-9fed-3bb1c447a725",
         "id": "10_15227_orgsyn_084_0317m_subtask_8",
         "name": "task_6_subtask_8",
         "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -10948,6 +11532,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "f0e07fd9-3621-4f4e-ba40-402e33b2b448",
         "id": "10_15227_orgsyn_084_0317m_subtask_9",
         "name": "task_6_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -10969,6 +11554,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "0580f2b6-c9b1-409a-97dd-48daa6a7f0ac",
         "id": "10_15227_orgsyn_084_0317m_subtask_10",
         "name": "task_6_subtask_10",
         "description": "Indicate the SMILES representation of the sample's compound.",
@@ -10981,6 +11567,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "4538a44b-a5ef-418b-b16f-022f418481d9",
         "id": "10_15227_orgsyn_096_0036_subtask_1",
         "name": "task_7_subtask_1",
         "description": "What formula represents the molecule in the sample?",
@@ -10992,6 +11579,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "2a16f00b-a449-424f-a517-f73dc0be5ea6",
         "id": "10_15227_orgsyn_096_0036_subtask_2",
         "name": "task_7_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -11003,6 +11591,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "acb23f02-7d1f-439b-bbe2-1d81191029f3",
         "id": "10_15227_orgsyn_096_0036_subtask_3",
         "name": "task_7_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -11015,6 +11604,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "38776fec-4096-4530-baf9-cdc6f4864046",
         "id": "10_15227_orgsyn_096_0036_subtask_4",
         "name": "task_7_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -11027,6 +11617,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "ad9a2df8-4a91-4760-851b-8c94f915821e",
         "id": "10_15227_orgsyn_096_0036_subtask_5",
         "name": "task_7_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -11040,6 +11631,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "a8629011-aebc-470e-99ae-6ee55ade426a",
         "id": "10_15227_orgsyn_096_0036_subtask_6",
         "name": "task_7_subtask_6",
         "description": "How many aromatic carbon atoms in the sample's compound? If not, reply '0'.",
@@ -11056,6 +11648,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "95115ea6-84fc-4f93-b020-f7bfe2a0c905",
         "id": "10_15227_orgsyn_096_0036_subtask_7",
         "name": "task_7_subtask_7",
         "description": "State the number of CH3 groups in the compound.",
@@ -11072,6 +11665,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "08bc847b-3156-4b02-a125-ba569d679122",
         "id": "10_15227_orgsyn_096_0036_subtask_8",
         "name": "task_7_subtask_8",
         "description": "How many C=O groups does the compound contain?",
@@ -11088,6 +11682,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "126efdc9-de0e-4603-acae-c391c390d0eb",
         "id": "10_15227_orgsyn_096_0036_subtask_9",
         "name": "task_7_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -11109,6 +11704,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "a5e2bddf-0664-4b10-84e2-f0c6a379717f",
         "id": "10_15227_orgsyn_096_0036_subtask_10",
         "name": "task_7_subtask_10",
         "description": "What is the SMILES notation for the sample's compound?",
@@ -11121,6 +11717,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "95ff3a37-7046-4765-81f9-07cf33671bfe",
         "id": "22_22222_orgsyn_222_2222_subtask_1",
         "name": "task_8_subtask_1",
         "description": "State the molecular formula for the compound analyzed.",
@@ -11132,6 +11729,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "8317e2dd-5dd1-4d2c-9050-0c267c5a0243",
         "id": "22_22222_orgsyn_222_2222_subtask_2",
         "name": "task_8_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -11143,6 +11741,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "cf0b27a6-2544-44dd-9b4f-576bcc65a7e1",
         "id": "22_22222_orgsyn_222_2222_subtask_3",
         "name": "task_8_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -11155,6 +11754,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "4aaf1571-4cff-4ae5-8c62-b46249c489c4",
         "id": "22_22222_orgsyn_222_2222_subtask_4",
         "name": "task_8_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -11167,6 +11767,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "81536171-7205-4517-bccb-f767c43265d8",
         "id": "22_22222_orgsyn_222_2222_subtask_5",
         "name": "task_8_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -11180,6 +11781,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "cb3eb094-4445-4c64-8047-5c4993c1a9bf",
         "id": "22_22222_orgsyn_222_2222_subtask_6",
         "name": "task_8_subtask_6",
         "description": "How many aromatic carbon atoms does the compound contain?",
@@ -11196,6 +11798,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "1779b169-0f38-4916-8b88-a4ef7ef13714",
         "id": "22_22222_orgsyn_222_2222_subtask_7",
         "name": "task_8_subtask_7",
         "description": "Indicate the number of CH3 groups found in the molecule.",
@@ -11212,6 +11815,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "eb0113a5-f8a6-4e86-87f8-8931e59d8133",
         "id": "22_22222_orgsyn_222_2222_subtask_8",
         "name": "task_8_subtask_8",
         "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -11228,6 +11832,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "f960e9e9-92b3-4887-b1e2-bc0006880b1f",
         "id": "22_22222_orgsyn_222_2222_subtask_9",
         "name": "task_8_subtask_9",
         "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -11249,6 +11854,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "caac001d-1f95-4f43-b562-8446fdda986e",
         "id": "22_22222_orgsyn_222_2222_subtask_10",
         "name": "task_8_subtask_10",
         "description": "Indicate the SMILES representation of the sample's compound.",
@@ -11261,6 +11867,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "dc362d02-cc5e-4080-ab51-c4584350a65f",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_1",
         "name": "task_9_subtask_1",
         "description": "What is the chemical formula for the sample compound?",
@@ -11272,6 +11879,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "0c020616-cb8c-4945-917c-10038473fc4b",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_2",
         "name": "task_9_subtask_2",
         "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -11283,6 +11891,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "c454df73-295a-4bc6-80d7-c35c214f827f",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_3",
         "name": "task_9_subtask_3",
         "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -11295,6 +11904,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "d8b8b51e-dfb8-434e-8e4b-3f481f996ec3",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_4",
         "name": "task_9_subtask_4",
         "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -11307,6 +11917,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e72b222b-dca0-4fdb-955d-b56aa8cec322",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_5",
         "name": "task_9_subtask_5",
         "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -11320,6 +11931,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "242708d0-33c7-4ff7-9819-d70d5cb5d20e",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_6",
         "name": "task_9_subtask_6",
         "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -11336,6 +11948,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "8a1053b7-3a67-4ee4-9ca3-5a578909b896",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_7",
         "name": "task_9_subtask_7",
         "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -11352,6 +11965,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "8f7830a5-7e79-4a3a-b7bf-71f9d043c8fa",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_8",
         "name": "task_9_subtask_8",
         "description": "State the count of carbonyl groups in the molecule.",
@@ -11368,6 +11982,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "6907a8df-fcff-4ce0-bf43-c1cbe110c569",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_9",
         "name": "task_9_subtask_9",
         "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -11389,6 +12004,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "0c3699e7-fc35-4b58-84f1-5de5b3c06ebc",
         "id": "10_15227_orgsyn_084_0011_sub1_subtask_10",
         "name": "task_9_subtask_10",
         "description": "What SMILES string corresponds to the compound in this sample?",
@@ -11405,6 +12021,7 @@ const CORRAL_DATA = {
       "level_1": {
         "tasks": [
           {
+            "_uid": "75b301f1-ce4e-4990-8104-a4ce4636ae7c",
             "id": "10_15227_orgsyn_084_0077",
             "name": "task_1",
             "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -11431,6 +12048,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3a563a92-d05a-4c1a-b641-6e3e09f71ecf",
             "id": "10_15227_orgsyn_084_0011_sub2",
             "name": "task_10",
             "description": "In this laboratory scenario, an organic sample needs to be analyzed to retrieve its SMILES string. Each test is expensive, so proceed with resource-awareness.",
@@ -11457,6 +12075,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "baa01559-f8e6-4f89-9efe-c4dc12f46a96",
             "id": "10_15227_orgsyn_084_0011_sub3",
             "name": "task_11",
             "description": "You're in a laboratory setting with a sample of an organic compound. Analyze the sample and return its SMILES representation, minimizing the use of costly and time-intensive resources.",
@@ -11483,6 +12102,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3916b31e-2e35-423f-9bab-56cea4914a72",
             "id": "33_33333_orgsyn_333_3333",
             "name": "task_12",
             "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -11509,6 +12129,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f2d7b125-b638-4277-9ca4-e02210f38b33",
             "id": "10_15227_orgsyn_084_0215",
             "name": "task_13",
             "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -11535,6 +12156,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "e26aa390-df28-483d-9a84-e43e18aa60cd",
             "id": "55_55555_orgsyn_555_5555",
             "name": "task_14",
             "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -11561,6 +12183,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1bfffc5c-9155-45b3-ae2d-a886d00af6dd",
             "id": "66_66666_orgsyn_666_6666",
             "name": "task_15",
             "description": "In the lab, you've received a sample of an organic compound. Perform a careful analysis and provide the SMILES code, using only the necessary time and materials.",
@@ -11587,6 +12210,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "33b05da4-6050-4f28-9206-3e6c72cb8ad0",
             "id": "77_77777_orgsyn_777_7777",
             "name": "task_16",
             "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -11613,6 +12237,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "b139ab1f-4168-4e0f-a7b2-0fd0f554dce2",
             "id": "10_15227_orgsyn_096_0245",
             "name": "task_17",
             "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -11639,6 +12264,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "b7b52672-ca02-4406-a493-a0a8ef514aee",
             "id": "10_15227_orgsyn_102_0001",
             "name": "task_18",
             "description": "In this laboratory scenario, an organic sample needs to be analyzed to retrieve its SMILES string. Each test is expensive, so proceed with resource-awareness.",
@@ -11665,6 +12291,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "04d67f0e-0b65-412d-b577-d0114d77c29e",
             "id": "88_88888_orgsyn_888_8888",
             "name": "task_19",
             "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -11691,6 +12318,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6331984e-7982-488d-91a8-efd8fbdb894f",
             "id": "10_15227_orgsyn_102_0114",
             "name": "task_2",
             "description": "Given an organic compound sample in a lab environment, your objective is to determine its SMILES string while conserving resources due to the high cost of analysis.",
@@ -11717,6 +12345,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "69d20be6-fcf2-4999-b6ed-e35f852ca454",
             "id": "00_0000_orgsyn_000_0000",
             "name": "task_20",
             "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -11743,6 +12372,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ab0eb5a8-8165-406a-84cf-41f50a7263da",
             "id": "10_15227_orgsyn_102_0086",
             "name": "task_3",
             "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -11769,6 +12399,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "87012801-5bd7-40de-b4f2-305b9d3c9c5c",
             "id": "11_11111_orgsyn_111_1111",
             "name": "task_4",
             "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -11795,6 +12426,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "58cec8d1-4fce-46d9-956e-4fa709a3afd2",
             "id": "10_15227_orgsyn_101_0327",
             "name": "task_5",
             "description": "Working in a laboratory, you're tasked with identifying the SMILES string of an organic sample. Be efficient, as the analysis is resource-intensive and time-consuming.",
@@ -11821,6 +12453,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "933013df-377f-4ade-b6a1-b5efbd9c67d4",
             "id": "10_15227_orgsyn_084_0317m",
             "name": "task_6",
             "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -11847,6 +12480,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "2014242e-74a4-4073-b732-52ab60683316",
             "id": "10_15227_orgsyn_096_0036",
             "name": "task_7",
             "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -11873,6 +12507,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1a02eab6-0c4a-4ebe-8c63-634bb74fd983",
             "id": "22_22222_orgsyn_222_2222",
             "name": "task_8",
             "description": "Working in a laboratory, you're tasked with identifying the SMILES string of an organic sample. Be efficient, as the analysis is resource-intensive and time-consuming.",
@@ -11899,6 +12534,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "43923d76-cce4-4480-a053-98fde09db1ff",
             "id": "10_15227_orgsyn_084_0011_sub1",
             "name": "task_9",
             "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -11927,6 +12563,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "bdcb1a46-60cb-4153-b2c0-662c886e1179",
             "id": "10_15227_orgsyn_084_0077_subtask_1",
             "name": "task_1_subtask_1",
             "description": "State the molecular formula for the compound analyzed.",
@@ -11938,6 +12575,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "af40b6cf-3c9e-4b50-abd3-bc0ddc849291",
             "id": "10_15227_orgsyn_084_0077_subtask_2",
             "name": "task_1_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -11949,6 +12587,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "bf96d8af-f716-43f1-a7b4-f03c6bbdeb19",
             "id": "10_15227_orgsyn_084_0077_subtask_3",
             "name": "task_1_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -11961,6 +12600,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c3367e3b-9189-4e83-a107-4bfa1893a169",
             "id": "10_15227_orgsyn_084_0077_subtask_4",
             "name": "task_1_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -11973,6 +12613,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "34161037-c625-4252-9373-da4ee4027b96",
             "id": "10_15227_orgsyn_084_0077_subtask_5",
             "name": "task_1_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -11986,6 +12627,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ed8f8f41-5e2c-4b11-b485-20ddb2988535",
             "id": "10_15227_orgsyn_084_0077_subtask_6",
             "name": "task_1_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -12002,6 +12644,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c6d0db9b-711e-4373-b179-a61ef2a2124d",
             "id": "10_15227_orgsyn_084_0077_subtask_7",
             "name": "task_1_subtask_7",
             "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -12018,6 +12661,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "700d05c7-87fc-4571-a735-a46484f76888",
             "id": "10_15227_orgsyn_084_0077_subtask_8",
             "name": "task_1_subtask_8",
             "description": "Indicate the number of C=O groups present in the molecule.",
@@ -12034,6 +12678,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "a1d71aa3-377a-4f90-8c71-9b9ff1e2c841",
             "id": "10_15227_orgsyn_084_0077_subtask_9",
             "name": "task_1_subtask_9",
             "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -12056,6 +12701,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4c9363c6-d961-4f8e-8fb8-ae4411e0c9c4",
             "id": "10_15227_orgsyn_084_0077_subtask_10",
             "name": "task_1_subtask_10",
             "description": "Provide the SMILES string representing the compound in the sample.",
@@ -12069,6 +12715,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "32946862-2ffb-4a23-a982-616c57e5e1e7",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_1",
             "name": "task_10_subtask_1",
             "description": "Identify the molecular formula of the compound in this sample.",
@@ -12080,6 +12727,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "bc8ef4a7-b783-4967-b9af-cf74db3196d4",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_2",
             "name": "task_10_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -12091,6 +12739,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "53d52d2f-a313-4517-9730-b827f1581a6a",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_3",
             "name": "task_10_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -12103,6 +12752,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "fe059d4f-a8eb-4a69-8234-ab25de84a8ca",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_4",
             "name": "task_10_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -12115,6 +12765,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "cb4f43dd-55a7-4029-ba62-a5c995edde15",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_5",
             "name": "task_10_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -12128,6 +12779,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "e47f4ebd-e9b2-4161-94ce-5c145bc5a546",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_6",
             "name": "task_10_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -12144,6 +12796,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "20e70101-cf7a-4d86-a76a-9635e89e9bea",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_7",
             "name": "task_10_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -12160,6 +12813,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "51833861-52d6-4108-b758-591103c0b7e1",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_8",
             "name": "task_10_subtask_8",
             "description": "State the count of carbonyl groups in the molecule.",
@@ -12176,6 +12830,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7c9cc6f5-2646-448a-ba17-9dec02dafe8e",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_9",
             "name": "task_10_subtask_9",
             "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -12198,6 +12853,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "992b322c-02b6-4355-9bdd-51e72c78a8ee",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_10",
             "name": "task_10_subtask_10",
             "description": "What is the SMILES notation for the sample's compound?",
@@ -12210,6 +12866,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "813b5be1-ab15-4868-a4a3-ddde6548e959",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_1",
             "name": "task_11_subtask_1",
             "description": "State the molecular formula for the compound analyzed.",
@@ -12221,6 +12878,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "98f1ddb8-c03a-4386-ba28-53aaa05cd5f7",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_2",
             "name": "task_11_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -12232,6 +12890,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "907c0c67-b2c6-4d0c-95d3-a94f41b8c8ee",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_3",
             "name": "task_11_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -12244,6 +12903,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "48f019e7-cc5f-4851-848e-ec42b2a570aa",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_4",
             "name": "task_11_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -12256,6 +12916,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "a61756ea-e042-4d6b-a865-a4ef9928530e",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_5",
             "name": "task_11_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -12269,6 +12930,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "fa1c2724-c9ef-4dcb-be11-3f752a103eff",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_6",
             "name": "task_11_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -12285,6 +12947,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "cf2d0862-c369-4a38-8e0b-6ed33db53079",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_7",
             "name": "task_11_subtask_7",
             "description": "State the number of CH3 groups in the compound.",
@@ -12301,6 +12964,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "32a32afd-fa02-4447-ae39-dc83a85cbdfb",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_8",
             "name": "task_11_subtask_8",
             "description": "State the count of carbonyl groups in the molecule.",
@@ -12317,6 +12981,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "0a873365-08a4-45e1-8662-2a39bd8d87bb",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_9",
             "name": "task_11_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -12339,6 +13004,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c3c0cf6c-53a6-44ae-9f36-968f3db2df41",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_10",
             "name": "task_11_subtask_10",
             "description": "What SMILES string corresponds to the compound in this sample?",
@@ -12351,6 +13017,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1b54f582-3869-459b-9f5e-666fca56d33d",
             "id": "33_33333_orgsyn_333_3333_subtask_1",
             "name": "task_12_subtask_1",
             "description": "Identify the molecular formula of the compound in this sample.",
@@ -12362,6 +13029,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d6bf4fd9-ad04-4637-8216-c900662396ab",
             "id": "33_33333_orgsyn_333_3333_subtask_2",
             "name": "task_12_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -12373,6 +13041,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6c8554aa-c73f-41aa-bf6e-712abde2afdd",
             "id": "33_33333_orgsyn_333_3333_subtask_3",
             "name": "task_12_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -12385,6 +13054,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "8de53371-a4fa-48b2-8285-5d8468e6606b",
             "id": "33_33333_orgsyn_333_3333_subtask_4",
             "name": "task_12_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -12397,6 +13067,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "039fe721-7654-47db-af33-f5d8d42ab002",
             "id": "33_33333_orgsyn_333_3333_subtask_5",
             "name": "task_12_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -12410,6 +13081,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "281c26dd-eacc-44e2-ab03-3c406d2830fb",
             "id": "33_33333_orgsyn_333_3333_subtask_6",
             "name": "task_12_subtask_6",
             "description": "How many aromatic carbon atoms in the sample's compound? If not, reply '0'.",
@@ -12426,6 +13098,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "20124e9d-4113-429f-a8dd-d9c3ca386635",
             "id": "33_33333_orgsyn_333_3333_subtask_7",
             "name": "task_12_subtask_7",
             "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -12442,6 +13115,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "18ee6066-4b53-44f4-b5b5-b253b4b97d92",
             "id": "33_33333_orgsyn_333_3333_subtask_8",
             "name": "task_12_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -12458,6 +13132,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "02d54c7d-724a-4c98-8a3f-ace30d35fb3b",
             "id": "33_33333_orgsyn_333_3333_subtask_9",
             "name": "task_12_subtask_9",
             "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -12480,6 +13155,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "24f348ff-eef8-4bed-85c8-9efce9bce5bb",
             "id": "33_33333_orgsyn_333_3333_subtask_10",
             "name": "task_12_subtask_10",
             "description": "What SMILES string corresponds to the compound in this sample?",
@@ -12492,6 +13168,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "791baed7-dbec-4fad-91f6-f29685d6df7b",
             "id": "10_15227_orgsyn_084_0215_subtask_1",
             "name": "task_13_subtask_1",
             "description": "What is the chemical formula for the sample compound?",
@@ -12503,6 +13180,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "10d91092-01e8-4020-985b-640634a5df48",
             "id": "10_15227_orgsyn_084_0215_subtask_2",
             "name": "task_13_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -12514,6 +13192,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "85b9a105-46c2-4195-8b4e-3d90e42d7cf1",
             "id": "10_15227_orgsyn_084_0215_subtask_3",
             "name": "task_13_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -12526,6 +13205,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "755e1aa0-396c-435f-8d8b-bc742919e744",
             "id": "10_15227_orgsyn_084_0215_subtask_4",
             "name": "task_13_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -12538,6 +13218,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d7a7a4ef-ab18-49db-a3f9-efb0c97d40fc",
             "id": "10_15227_orgsyn_084_0215_subtask_5",
             "name": "task_13_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -12551,6 +13232,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "b735cad2-f327-4906-aae6-5d4a012b84f3",
             "id": "10_15227_orgsyn_084_0215_subtask_6",
             "name": "task_13_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -12567,6 +13249,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "e91731d2-b2c0-491f-bb48-a1410b8c9bc0",
             "id": "10_15227_orgsyn_084_0215_subtask_7",
             "name": "task_13_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -12583,6 +13266,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "b6c01bfd-1395-4982-82c4-f644aa38ef40",
             "id": "10_15227_orgsyn_084_0215_subtask_8",
             "name": "task_13_subtask_8",
             "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -12599,6 +13283,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f263d178-e8fa-4187-b18f-ece21b1bfb29",
             "id": "10_15227_orgsyn_084_0215_subtask_9",
             "name": "task_13_subtask_9",
             "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -12621,6 +13306,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "250ba7f7-4434-4639-b4f2-4b460f5aab4c",
             "id": "10_15227_orgsyn_084_0215_subtask_10",
             "name": "task_13_subtask_10",
             "description": "State the SMILES for the molecule analyzed.",
@@ -12633,6 +13319,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f303164d-7f29-4b20-95ad-18f24ed6ee8d",
             "id": "55_55555_orgsyn_555_5555_subtask_1",
             "name": "task_14_subtask_1",
             "description": "Identify the molecular formula of the compound in this sample.",
@@ -12644,6 +13331,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f10d0e82-6c0e-4d7a-9dbf-c4be8a2d3362",
             "id": "55_55555_orgsyn_555_5555_subtask_2",
             "name": "task_14_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -12655,6 +13343,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "50b82c32-16cf-44a5-aec0-5a6696eb43c4",
             "id": "55_55555_orgsyn_555_5555_subtask_3",
             "name": "task_14_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -12667,6 +13356,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "a802b213-dbca-4545-9d7e-e5cef5f73b4e",
             "id": "55_55555_orgsyn_555_5555_subtask_4",
             "name": "task_14_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -12679,6 +13369,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "79ce66c1-2f71-4e16-8457-bb65f8acdee0",
             "id": "55_55555_orgsyn_555_5555_subtask_5",
             "name": "task_14_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -12692,6 +13383,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "72f1a767-9394-43b9-8287-2c230ec1d473",
             "id": "55_55555_orgsyn_555_5555_subtask_6",
             "name": "task_14_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -12708,6 +13400,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f4e8fa2a-7fa3-450d-b569-34ab2f501379",
             "id": "55_55555_orgsyn_555_5555_subtask_7",
             "name": "task_14_subtask_7",
             "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -12724,6 +13417,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d230c3fe-c232-490f-bb99-ed47dbfe87cd",
             "id": "55_55555_orgsyn_555_5555_subtask_8",
             "name": "task_14_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -12740,6 +13434,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "e4438fe5-ab6c-4e1c-9484-0327d0de3bcd",
             "id": "55_55555_orgsyn_555_5555_subtask_9",
             "name": "task_14_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -12762,6 +13457,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ae9ab266-7ccb-4857-9a56-9dee29f4fe47",
             "id": "55_55555_orgsyn_555_5555_subtask_10",
             "name": "task_14_subtask_10",
             "description": "State the SMILES for the molecule analyzed.",
@@ -12774,6 +13470,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "178c1b9a-a939-44a9-8cc3-667137d7bc89",
             "id": "66_66666_orgsyn_666_6666_subtask_1",
             "name": "task_15_subtask_1",
             "description": "What formula represents the molecule in the sample?",
@@ -12785,6 +13482,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "44974053-f886-4b12-9e53-64026d535096",
             "id": "66_66666_orgsyn_666_6666_subtask_2",
             "name": "task_15_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -12796,6 +13494,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f32d50ad-1a86-402a-b08d-c74cab0fe15d",
             "id": "66_66666_orgsyn_666_6666_subtask_3",
             "name": "task_15_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -12808,6 +13507,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "9f77e22b-6a30-43ae-b866-1a0ef234a9a0",
             "id": "66_66666_orgsyn_666_6666_subtask_4",
             "name": "task_15_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -12820,6 +13520,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7074a0b9-67cc-480a-a2b0-e712509e39d1",
             "id": "66_66666_orgsyn_666_6666_subtask_5",
             "name": "task_15_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -12833,6 +13534,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "50825c2d-df52-477e-8b2c-2b8aba2b8e5f",
             "id": "66_66666_orgsyn_666_6666_subtask_6",
             "name": "task_15_subtask_6",
             "description": "Indicate the number of aromatic carbon atoms present in the molecule.",
@@ -12849,6 +13551,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "9adc2580-9237-45d5-a77b-bd22f89d4b19",
             "id": "66_66666_orgsyn_666_6666_subtask_7",
             "name": "task_15_subtask_7",
             "description": "Indicate the number of CH3 groups found in the molecule.",
@@ -12865,6 +13568,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c586215c-c148-4f66-bf25-b87aa71e4552",
             "id": "66_66666_orgsyn_666_6666_subtask_8",
             "name": "task_15_subtask_8",
             "description": "Indicate the number of C=O groups present in the molecule.",
@@ -12881,6 +13585,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "011e53e4-e2bd-4dc4-bce7-3acce77eb16a",
             "id": "66_66666_orgsyn_666_6666_subtask_9",
             "name": "task_15_subtask_9",
             "description": "Connect as many molecular fragments as possible and provide their SMILES representations.",
@@ -12903,6 +13608,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ea773087-0cf7-433c-9106-2bf982f33108",
             "id": "66_66666_orgsyn_666_6666_subtask_10",
             "name": "task_15_subtask_10",
             "description": "State the SMILES for the molecule analyzed.",
@@ -12915,6 +13621,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "8ab20d19-2f11-49ad-aeb5-44b2728fe141",
             "id": "77_77777_orgsyn_777_7777_subtask_1",
             "name": "task_16_subtask_1",
             "description": "What is the chemical formula for the sample compound?",
@@ -12926,6 +13633,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1bf89fcc-4cce-465f-a2fd-739826d42261",
             "id": "77_77777_orgsyn_777_7777_subtask_2",
             "name": "task_16_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -12937,6 +13645,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "0fade059-aff8-4cd2-9c16-d1e9ce58b716",
             "id": "77_77777_orgsyn_777_7777_subtask_3",
             "name": "task_16_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -12949,6 +13658,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "56391c77-4719-4ff0-b14e-4bd3716d150d",
             "id": "77_77777_orgsyn_777_7777_subtask_4",
             "name": "task_16_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -12961,6 +13671,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "2937fa69-d423-4198-97d8-40a68fc5c9c7",
             "id": "77_77777_orgsyn_777_7777_subtask_5",
             "name": "task_16_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -12974,6 +13685,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f422761d-f5c6-42af-8507-ed86dbb98de0",
             "id": "77_77777_orgsyn_777_7777_subtask_6",
             "name": "task_16_subtask_6",
             "description": "How many aromatic carbon atoms does the compound contain?",
@@ -12990,6 +13702,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "57043f7a-e8f0-41e3-b9e2-a726fc889021",
             "id": "77_77777_orgsyn_777_7777_subtask_7",
             "name": "task_16_subtask_7",
             "description": "State the number of CH3 groups in the compound.",
@@ -13006,6 +13719,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "a1772640-7eec-4114-ab7b-0cdc39328e85",
             "id": "77_77777_orgsyn_777_7777_subtask_8",
             "name": "task_16_subtask_8",
             "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -13022,6 +13736,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "06e67a4d-14ca-480f-9b55-5eade928ae2e",
             "id": "77_77777_orgsyn_777_7777_subtask_9",
             "name": "task_16_subtask_9",
             "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -13044,6 +13759,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c441e9ab-fb01-404e-a01e-1c13d7c5e484",
             "id": "77_77777_orgsyn_777_7777_subtask_10",
             "name": "task_16_subtask_10",
             "description": "What SMILES string corresponds to the compound in this sample?",
@@ -13056,6 +13772,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "deea51da-4330-480a-b155-5d4a3d7fa30c",
             "id": "10_15227_orgsyn_096_0245_subtask_1",
             "name": "task_17_subtask_1",
             "description": "Can you provide the molecular formula of the compound present in the sample?",
@@ -13067,6 +13784,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f2ecff1b-c32f-4836-a900-f509aca15c52",
             "id": "10_15227_orgsyn_096_0245_subtask_2",
             "name": "task_17_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -13078,6 +13796,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "fc5a3632-2c81-4246-80c3-258260b452c4",
             "id": "10_15227_orgsyn_096_0245_subtask_3",
             "name": "task_17_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -13090,6 +13809,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4e9ebe17-047a-49ec-b62d-486f5e35c672",
             "id": "10_15227_orgsyn_096_0245_subtask_4",
             "name": "task_17_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -13102,6 +13822,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1e2458f7-4742-4f0b-b985-c272acf4b5dd",
             "id": "10_15227_orgsyn_096_0245_subtask_5",
             "name": "task_17_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -13115,6 +13836,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "fac7343a-e18f-4bf8-b085-c12fd49e8f73",
             "id": "10_15227_orgsyn_096_0245_subtask_6",
             "name": "task_17_subtask_6",
             "description": "How many aromatic carbon atoms does the compound contain?",
@@ -13131,6 +13853,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1ba1b610-0b0d-4d79-8af2-1daa9a5a9faa",
             "id": "10_15227_orgsyn_096_0245_subtask_7",
             "name": "task_17_subtask_7",
             "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -13147,6 +13870,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "023cfe4b-f49c-492a-90c0-51b1056b4364",
             "id": "10_15227_orgsyn_096_0245_subtask_8",
             "name": "task_17_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -13163,6 +13887,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "61c14696-c3dc-45c7-bc24-b24451ae4ab3",
             "id": "10_15227_orgsyn_096_0245_subtask_9",
             "name": "task_17_subtask_9",
             "description": "Provide SMILES for all possible linked fragments of the sample's molecule.",
@@ -13185,6 +13910,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3d4695c9-fe9e-4ae6-815e-a1cdded19f00",
             "id": "10_15227_orgsyn_096_0245_subtask_10",
             "name": "task_17_subtask_10",
             "description": "Indicate the SMILES representation of the sample's compound.",
@@ -13197,6 +13923,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "b63dde4e-4cc7-4a69-b2cd-0e4f72e328e5",
             "id": "10_15227_orgsyn_102_0001_subtask_1",
             "name": "task_18_subtask_1",
             "description": "What formula represents the molecule in the sample?",
@@ -13208,6 +13935,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "de024fdd-d1b5-48cf-ac4c-9212b0f4ad3b",
             "id": "10_15227_orgsyn_102_0001_subtask_2",
             "name": "task_18_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -13219,6 +13947,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4f05a755-4574-4082-a46f-143865ce396d",
             "id": "10_15227_orgsyn_102_0001_subtask_3",
             "name": "task_18_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -13231,6 +13960,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "854d3621-51e1-48bf-9055-2ee328097776",
             "id": "10_15227_orgsyn_102_0001_subtask_4",
             "name": "task_18_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -13243,6 +13973,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "63f169b7-d8bc-41c9-b8e8-5234d9e304b4",
             "id": "10_15227_orgsyn_102_0001_subtask_5",
             "name": "task_18_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -13256,6 +13987,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "817b2c17-db3c-48a3-94bb-de934d07cb36",
             "id": "10_15227_orgsyn_102_0001_subtask_6",
             "name": "task_18_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -13272,6 +14004,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "fef43414-d37c-4687-8a2a-35170fb96a11",
             "id": "10_15227_orgsyn_102_0001_subtask_7",
             "name": "task_18_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -13288,6 +14021,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "360e06cb-d8e2-49d1-88be-f0094115d2c0",
             "id": "10_15227_orgsyn_102_0001_subtask_8",
             "name": "task_18_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -13304,6 +14038,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7b53d91d-d424-4718-ad93-f6f580f55491",
             "id": "10_15227_orgsyn_102_0001_subtask_9",
             "name": "task_18_subtask_9",
             "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -13326,6 +14061,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d84026be-e309-4894-a8d1-25a32ad8775c",
             "id": "10_15227_orgsyn_102_0001_subtask_10",
             "name": "task_18_subtask_10",
             "description": "What is the SMILES notation for the sample's compound?",
@@ -13338,6 +14074,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "58ea37d3-3ddb-49a9-998f-79cc275e7679",
             "id": "88_88888_orgsyn_888_8888_subtask_1",
             "name": "task_19_subtask_1",
             "description": "What is the chemical formula for the sample compound?",
@@ -13349,6 +14086,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "91407898-e102-48b4-9e39-c3ee82a6f3ae",
             "id": "88_88888_orgsyn_888_8888_subtask_2",
             "name": "task_19_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -13360,6 +14098,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7cb687de-465f-4899-8bf2-c0c6c55080f5",
             "id": "88_88888_orgsyn_888_8888_subtask_3",
             "name": "task_19_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -13372,6 +14111,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "01db089a-f9e5-4174-8bb4-526db1162a86",
             "id": "88_88888_orgsyn_888_8888_subtask_4",
             "name": "task_19_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -13384,6 +14124,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f46d0761-89a2-40f4-a75b-89e0cadf4794",
             "id": "88_88888_orgsyn_888_8888_subtask_5",
             "name": "task_19_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -13397,6 +14138,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "46be6f35-d9c4-4224-a452-8e34d0a6d3ea",
             "id": "88_88888_orgsyn_888_8888_subtask_6",
             "name": "task_19_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -13413,6 +14155,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "553c79ec-0c75-4542-8981-6d8c0d9402a0",
             "id": "88_88888_orgsyn_888_8888_subtask_7",
             "name": "task_19_subtask_7",
             "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -13429,6 +14172,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "b6ef22ad-f68b-4a15-a2fd-5827954dc8c1",
             "id": "88_88888_orgsyn_888_8888_subtask_8",
             "name": "task_19_subtask_8",
             "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -13445,6 +14189,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3c78a3e8-b45d-4f97-a360-b4f170f4981d",
             "id": "88_88888_orgsyn_888_8888_subtask_9",
             "name": "task_19_subtask_9",
             "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -13467,6 +14212,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d8f9ab15-6cd8-47e0-96ae-2f05df63fd96",
             "id": "88_88888_orgsyn_888_8888_subtask_10",
             "name": "task_19_subtask_10",
             "description": "What SMILES string corresponds to the compound in this sample?",
@@ -13479,6 +14225,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "2b54741a-7ccd-4c65-b8c0-59b796f0ec07",
             "id": "10_15227_orgsyn_102_0114_subtask_1",
             "name": "task_2_subtask_1",
             "description": "Can you provide the molecular formula of the compound present in the sample?",
@@ -13490,6 +14237,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d02c6f56-c2e0-4231-8544-389cfddaa61e",
             "id": "10_15227_orgsyn_102_0114_subtask_2",
             "name": "task_2_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -13501,6 +14249,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "bb82d3ae-d085-4f3b-ad35-481745fd5acc",
             "id": "10_15227_orgsyn_102_0114_subtask_3",
             "name": "task_2_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -13513,6 +14262,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3f531684-3b82-4886-9315-f22cb6ea24eb",
             "id": "10_15227_orgsyn_102_0114_subtask_4",
             "name": "task_2_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -13525,6 +14275,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "887019ac-10ba-4a18-8215-d1adac923062",
             "id": "10_15227_orgsyn_102_0114_subtask_5",
             "name": "task_2_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -13538,6 +14289,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c20c59de-d8c5-4f09-8a67-c23fec6923ad",
             "id": "10_15227_orgsyn_102_0114_subtask_6",
             "name": "task_2_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -13554,6 +14306,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "35f9ae77-d758-4598-abf1-dce92d00bdd3",
             "id": "10_15227_orgsyn_102_0114_subtask_7",
             "name": "task_2_subtask_7",
             "description": "What is the count of methyl groups in the molecule?",
@@ -13570,6 +14323,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4ce3f771-aad3-4a99-bff6-42dda6d6b256",
             "id": "10_15227_orgsyn_102_0114_subtask_8",
             "name": "task_2_subtask_8",
             "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -13586,6 +14340,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "0e3ab6bf-82d0-4977-917f-8b0a84d70148",
             "id": "10_15227_orgsyn_102_0114_subtask_9",
             "name": "task_2_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -13608,6 +14363,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f0f9fb3c-f2cd-46f2-a4ce-f572c76db796",
             "id": "10_15227_orgsyn_102_0114_subtask_10",
             "name": "task_2_subtask_10",
             "description": "State the SMILES for the molecule analyzed.",
@@ -13620,6 +14376,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "794f6f56-a79e-4f95-bd12-39fa6fa91911",
             "id": "00_0000_orgsyn_000_0000_subtask_1",
             "name": "task_20_subtask_1",
             "description": "What formula represents the molecule in the sample?",
@@ -13631,6 +14388,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "98b75140-19e8-424c-96ab-c17357573436",
             "id": "00_0000_orgsyn_000_0000_subtask_2",
             "name": "task_20_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -13642,6 +14400,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7b906ad3-506d-4a23-bc33-0444b4e6562a",
             "id": "00_0000_orgsyn_000_0000_subtask_3",
             "name": "task_20_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -13654,6 +14413,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "dd0977e2-2865-4447-82bb-a6b6a7650afa",
             "id": "00_0000_orgsyn_000_0000_subtask_4",
             "name": "task_20_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -13666,6 +14426,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3ff2732e-bf4f-4ee0-9347-2f0d3af6f20b",
             "id": "00_0000_orgsyn_000_0000_subtask_5",
             "name": "task_20_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -13679,6 +14440,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3a6426cb-daf7-4062-8cae-1030756f47bb",
             "id": "00_0000_orgsyn_000_0000_subtask_6",
             "name": "task_20_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -13695,6 +14457,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6d4af473-e650-4e80-942a-f3f38229d495",
             "id": "00_0000_orgsyn_000_0000_subtask_7",
             "name": "task_20_subtask_7",
             "description": "What is the count of methyl groups in the molecule?",
@@ -13711,6 +14474,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1e22b2b7-6854-421b-86c0-2ef2b4cbdc49",
             "id": "00_0000_orgsyn_000_0000_subtask_8",
             "name": "task_20_subtask_8",
             "description": "Indicate the number of C=O groups present in the molecule.",
@@ -13727,6 +14491,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "9ca5c941-d0d9-4673-9f62-dc0fd37646c5",
             "id": "00_0000_orgsyn_000_0000_subtask_9",
             "name": "task_20_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -13749,6 +14514,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d9ed6c57-241d-4fb7-a8c0-2bb4f6965c18",
             "id": "00_0000_orgsyn_000_0000_subtask_10",
             "name": "task_20_subtask_10",
             "description": "What is the SMILES notation for the sample's compound?",
@@ -13761,6 +14527,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d4f0a85a-cb77-4d1c-93d5-d25121222566",
             "id": "10_15227_orgsyn_102_0086_subtask_1",
             "name": "task_3_subtask_1",
             "description": "State the molecular formula for the compound analyzed.",
@@ -13772,6 +14539,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f9b7ee73-5ee7-4a8d-bffe-f07f40e6f57c",
             "id": "10_15227_orgsyn_102_0086_subtask_2",
             "name": "task_3_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -13783,6 +14551,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "5e5c6f2c-e4fe-448a-8576-ff22cc878a69",
             "id": "10_15227_orgsyn_102_0086_subtask_3",
             "name": "task_3_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -13795,6 +14564,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6d92d21e-c826-42e3-8788-afab4f198222",
             "id": "10_15227_orgsyn_102_0086_subtask_4",
             "name": "task_3_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -13807,6 +14577,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "9a78e39c-880b-45ed-ba96-bf85044a2492",
             "id": "10_15227_orgsyn_102_0086_subtask_5",
             "name": "task_3_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -13820,6 +14591,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d60d6697-8fc9-49e1-8d17-81dbb3f1035f",
             "id": "10_15227_orgsyn_102_0086_subtask_6",
             "name": "task_3_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -13836,6 +14608,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "829da94a-2149-4083-89dc-1d2fa91ed072",
             "id": "10_15227_orgsyn_102_0086_subtask_7",
             "name": "task_3_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -13852,6 +14625,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4a879395-5290-4589-b2b7-2cd2936a7cea",
             "id": "10_15227_orgsyn_102_0086_subtask_8",
             "name": "task_3_subtask_8",
             "description": "Indicate the number of C=O groups present in the molecule.",
@@ -13868,6 +14642,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "77e0df84-02c0-45dd-9c22-006f374d8d1b",
             "id": "10_15227_orgsyn_102_0086_subtask_9",
             "name": "task_3_subtask_9",
             "description": "Connect as many molecular fragments as possible and provide their SMILES representations.",
@@ -13890,6 +14665,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1bfe1946-856e-490e-b3b2-4c828f2cfad7",
             "id": "10_15227_orgsyn_102_0086_subtask_10",
             "name": "task_3_subtask_10",
             "description": "Provide the SMILES string representing the compound in the sample.",
@@ -13902,6 +14678,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "79fab402-df5a-408f-8bb3-1c7bd3851cd6",
             "id": "11_11111_orgsyn_111_1111_subtask_1",
             "name": "task_4_subtask_1",
             "description": "Identify the molecular formula of the compound in this sample.",
@@ -13913,6 +14690,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7b821e48-e29a-480b-981c-8810be965f28",
             "id": "11_11111_orgsyn_111_1111_subtask_2",
             "name": "task_4_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -13924,6 +14702,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "93a54057-8433-407f-b90a-a86c5a6a521b",
             "id": "11_11111_orgsyn_111_1111_subtask_3",
             "name": "task_4_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -13936,6 +14715,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4d47c14b-22c2-4cd8-88df-9f4dc3d0e856",
             "id": "11_11111_orgsyn_111_1111_subtask_4",
             "name": "task_4_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -13948,6 +14728,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6985f194-eee6-41ce-b0fe-343115c5c789",
             "id": "11_11111_orgsyn_111_1111_subtask_5",
             "name": "task_4_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -13961,6 +14742,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4d14f469-f238-4619-918c-21b75d446ec9",
             "id": "11_11111_orgsyn_111_1111_subtask_6",
             "name": "task_4_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -13977,6 +14759,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "8f1735d8-43c0-4de3-b86f-330a3dd46e69",
             "id": "11_11111_orgsyn_111_1111_subtask_7",
             "name": "task_4_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -13993,6 +14776,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "fb58f07d-5296-41e3-ac89-4b90551c9bd0",
             "id": "11_11111_orgsyn_111_1111_subtask_8",
             "name": "task_4_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -14009,6 +14793,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "9881134d-baee-4f09-84d9-235e8a907275",
             "id": "11_11111_orgsyn_111_1111_subtask_9",
             "name": "task_4_subtask_9",
             "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -14031,6 +14816,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "5bcf04b4-849b-470c-92e1-36838a8ac267",
             "id": "11_11111_orgsyn_111_1111_subtask_10",
             "name": "task_4_subtask_10",
             "description": "Provide the SMILES string representing the compound in the sample.",
@@ -14043,6 +14829,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "038caf22-1f42-4ea9-93fa-fe4d9b702fae",
             "id": "10_15227_orgsyn_101_0327_subtask_1",
             "name": "task_5_subtask_1",
             "description": "State the molecular formula for the compound analyzed.",
@@ -14054,6 +14841,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f3c7d485-4262-4b7f-972d-8038dd23ce5d",
             "id": "10_15227_orgsyn_101_0327_subtask_2",
             "name": "task_5_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -14065,6 +14853,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "48ab04cd-046b-4b34-93f8-cfb85fc38c34",
             "id": "10_15227_orgsyn_101_0327_subtask_3",
             "name": "task_5_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -14077,6 +14866,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "546bbfae-e16d-4c12-9ee3-646308aaf743",
             "id": "10_15227_orgsyn_101_0327_subtask_4",
             "name": "task_5_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -14089,6 +14879,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "fefbd968-f0fa-41ba-8742-d2d8c0c955d8",
             "id": "10_15227_orgsyn_101_0327_subtask_5",
             "name": "task_5_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -14102,6 +14893,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "fde3f8d8-a54f-47e4-81da-08bf9a549eed",
             "id": "10_15227_orgsyn_101_0327_subtask_6",
             "name": "task_5_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -14118,6 +14910,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ad42329e-442e-4215-811a-3a1cae4af4cb",
             "id": "10_15227_orgsyn_101_0327_subtask_7",
             "name": "task_5_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -14134,6 +14927,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "08fe0cce-e0dc-4456-bce5-f44464f21616",
             "id": "10_15227_orgsyn_101_0327_subtask_8",
             "name": "task_5_subtask_8",
             "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -14150,6 +14944,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7a69ab64-f0e6-4547-8e1b-7f5a4d987a44",
             "id": "10_15227_orgsyn_101_0327_subtask_9",
             "name": "task_5_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -14172,6 +14967,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4636df26-7938-478c-94f3-27de3e599233",
             "id": "10_15227_orgsyn_101_0327_subtask_10",
             "name": "task_5_subtask_10",
             "description": "Provide the SMILES string representing the compound in the sample.",
@@ -14184,6 +14980,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6a46c22b-68a0-4817-ac04-5ec4ff2483ba",
             "id": "10_15227_orgsyn_084_0317m_subtask_1",
             "name": "task_6_subtask_1",
             "description": "What is the chemical formula for the sample compound?",
@@ -14195,6 +14992,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ac89f597-781d-4032-8dc2-3eaae7b8d7be",
             "id": "10_15227_orgsyn_084_0317m_subtask_2",
             "name": "task_6_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -14206,6 +15004,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f8bcf392-6441-4301-9822-e4ca21d5844c",
             "id": "10_15227_orgsyn_084_0317m_subtask_3",
             "name": "task_6_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -14218,6 +15017,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "8a6ef77e-cd6c-47f8-933d-31752f8d4497",
             "id": "10_15227_orgsyn_084_0317m_subtask_4",
             "name": "task_6_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -14230,6 +15030,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "18ad571e-7b70-4259-9ed9-a575b8a0d981",
             "id": "10_15227_orgsyn_084_0317m_subtask_5",
             "name": "task_6_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -14243,6 +15044,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "11c801a3-128d-4038-b6e1-07be320c2ba6",
             "id": "10_15227_orgsyn_084_0317m_subtask_6",
             "name": "task_6_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -14259,6 +15061,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "dafd55dc-23f4-4b2c-80a4-14fdabdd50fa",
             "id": "10_15227_orgsyn_084_0317m_subtask_7",
             "name": "task_6_subtask_7",
             "description": "What is the count of methyl groups in the molecule?",
@@ -14275,6 +15078,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "40959d73-f1b4-4c80-bdb5-c6ecc7d39646",
             "id": "10_15227_orgsyn_084_0317m_subtask_8",
             "name": "task_6_subtask_8",
             "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -14291,6 +15095,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "73fff2e1-0e7c-48da-94fd-78e61dbd9af6",
             "id": "10_15227_orgsyn_084_0317m_subtask_9",
             "name": "task_6_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -14313,6 +15118,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7b0830e3-42eb-46ea-a3b1-34a549e0f1fa",
             "id": "10_15227_orgsyn_084_0317m_subtask_10",
             "name": "task_6_subtask_10",
             "description": "Indicate the SMILES representation of the sample's compound.",
@@ -14325,6 +15131,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "83f102ed-e5fd-4c33-b601-7a2be0313a98",
             "id": "10_15227_orgsyn_096_0036_subtask_1",
             "name": "task_7_subtask_1",
             "description": "What formula represents the molecule in the sample?",
@@ -14336,6 +15143,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "4184d9f4-d52e-4a18-8a76-5c087c22038e",
             "id": "10_15227_orgsyn_096_0036_subtask_2",
             "name": "task_7_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -14347,6 +15155,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "57f840e6-8088-4ded-93e2-b9c32046f0dd",
             "id": "10_15227_orgsyn_096_0036_subtask_3",
             "name": "task_7_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -14359,6 +15168,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d34db967-a15d-4e41-bea9-07a3dc4404bd",
             "id": "10_15227_orgsyn_096_0036_subtask_4",
             "name": "task_7_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -14371,6 +15181,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "da437a53-ab07-46df-9972-3eddfe70c5db",
             "id": "10_15227_orgsyn_096_0036_subtask_5",
             "name": "task_7_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -14384,6 +15195,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3a2fb973-80bf-4c9a-a8f7-1e74504d0dcf",
             "id": "10_15227_orgsyn_096_0036_subtask_6",
             "name": "task_7_subtask_6",
             "description": "How many aromatic carbon atoms in the sample's compound? If not, reply '0'.",
@@ -14400,6 +15212,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "0f17769b-8134-4045-805b-d68f890a7db8",
             "id": "10_15227_orgsyn_096_0036_subtask_7",
             "name": "task_7_subtask_7",
             "description": "State the number of CH3 groups in the compound.",
@@ -14416,6 +15229,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1b4ab8bd-cc7e-4358-af52-d4b2e081a8d6",
             "id": "10_15227_orgsyn_096_0036_subtask_8",
             "name": "task_7_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -14432,6 +15246,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "036f7424-f280-4846-9964-6e8d19dd2d69",
             "id": "10_15227_orgsyn_096_0036_subtask_9",
             "name": "task_7_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -14454,6 +15269,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "50a0a39f-3111-4a36-a2e6-a9dc2a69683e",
             "id": "10_15227_orgsyn_096_0036_subtask_10",
             "name": "task_7_subtask_10",
             "description": "What is the SMILES notation for the sample's compound?",
@@ -14466,6 +15282,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3406c496-e67a-44ef-9e0e-3fa8e9e70a06",
             "id": "22_22222_orgsyn_222_2222_subtask_1",
             "name": "task_8_subtask_1",
             "description": "State the molecular formula for the compound analyzed.",
@@ -14477,6 +15294,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3fc5ab2e-948e-43e8-8bf5-da8d7af77874",
             "id": "22_22222_orgsyn_222_2222_subtask_2",
             "name": "task_8_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -14488,6 +15306,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "e0442349-aae0-4308-9441-d918da946604",
             "id": "22_22222_orgsyn_222_2222_subtask_3",
             "name": "task_8_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -14500,6 +15319,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "07d2f99f-a23d-4ea8-a488-75fe2bac3706",
             "id": "22_22222_orgsyn_222_2222_subtask_4",
             "name": "task_8_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -14512,6 +15332,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "716980a2-a48e-4446-9219-e1ffe6191f77",
             "id": "22_22222_orgsyn_222_2222_subtask_5",
             "name": "task_8_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -14525,6 +15346,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "33499c38-cff3-4498-a185-57d1e3a948c8",
             "id": "22_22222_orgsyn_222_2222_subtask_6",
             "name": "task_8_subtask_6",
             "description": "How many aromatic carbon atoms does the compound contain?",
@@ -14541,6 +15363,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "05aaccbf-d968-4a48-9073-846410ee334b",
             "id": "22_22222_orgsyn_222_2222_subtask_7",
             "name": "task_8_subtask_7",
             "description": "Indicate the number of CH3 groups found in the molecule.",
@@ -14557,6 +15380,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "385e0567-087b-4896-9c84-2415277bf913",
             "id": "22_22222_orgsyn_222_2222_subtask_8",
             "name": "task_8_subtask_8",
             "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -14573,6 +15397,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "3bd6e095-53c6-4a81-a411-e055a4a16c59",
             "id": "22_22222_orgsyn_222_2222_subtask_9",
             "name": "task_8_subtask_9",
             "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -14595,6 +15420,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "9c2a6926-9e99-4743-8679-2c986b9f94f8",
             "id": "22_22222_orgsyn_222_2222_subtask_10",
             "name": "task_8_subtask_10",
             "description": "Indicate the SMILES representation of the sample's compound.",
@@ -14607,6 +15433,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "888b2814-f2f2-4711-8700-79cfc95c2e33",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_1",
             "name": "task_9_subtask_1",
             "description": "What is the chemical formula for the sample compound?",
@@ -14618,6 +15445,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "abf0b8d2-0802-413c-828b-03f337dd0439",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_2",
             "name": "task_9_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -14629,6 +15457,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "69b45ae2-807d-4bfa-88c7-e8421a40fcc3",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_3",
             "name": "task_9_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -14641,6 +15470,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6fa362d1-ae14-4c34-a980-5f40053af6b4",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_4",
             "name": "task_9_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -14653,6 +15483,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "657d3a57-61c4-46ae-b691-db29761635cf",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_5",
             "name": "task_9_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -14666,6 +15497,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c01feabb-054e-45d4-8d31-296cd9b8d4a5",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_6",
             "name": "task_9_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -14682,6 +15514,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c59f4fd1-fe16-4c0d-933c-5b8005fe5b9e",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_7",
             "name": "task_9_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -14698,6 +15531,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "36a97cd7-0fda-4227-92f6-caa8786f3f3e",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_8",
             "name": "task_9_subtask_8",
             "description": "State the count of carbonyl groups in the molecule.",
@@ -14714,6 +15548,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "03f469dd-f4e7-41e6-896c-6c19085687a2",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_9",
             "name": "task_9_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -14736,6 +15571,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "f3593854-fe50-4380-af46-4f0f6716d69a",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_10",
             "name": "task_9_subtask_10",
             "description": "What SMILES string corresponds to the compound in this sample?",
@@ -14752,6 +15588,7 @@ const CORRAL_DATA = {
       "level_2": {
         "tasks": [
           {
+            "_uid": "e112a384-f4bf-414f-a043-c31b5251afde",
             "id": "10_15227_orgsyn_084_0077",
             "name": "task_1",
             "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -14777,6 +15614,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "161a94fd-2218-4808-942a-b199d6419827",
             "id": "10_15227_orgsyn_084_0011_sub2",
             "name": "task_10",
             "description": "In this laboratory scenario, an organic sample needs to be analyzed to retrieve its SMILES string. Each test is expensive, so proceed with resource-awareness.",
@@ -14802,6 +15640,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "5b0fbadd-35b6-4f1c-b8a7-25c51b717399",
             "id": "10_15227_orgsyn_084_0011_sub3",
             "name": "task_11",
             "description": "You're in a laboratory setting with a sample of an organic compound. Analyze the sample and return its SMILES representation, minimizing the use of costly and time-intensive resources.",
@@ -14827,6 +15666,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "48f10dbc-82ed-4f32-98cd-3a8941a79121",
             "id": "33_33333_orgsyn_333_3333",
             "name": "task_12",
             "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -14852,6 +15692,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "1c19f1ed-dcd7-45a0-98fb-3b0a0c9730cb",
             "id": "10_15227_orgsyn_084_0215",
             "name": "task_13",
             "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -14877,6 +15718,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "3045235e-ef1d-4369-938b-5b7e69349811",
             "id": "55_55555_orgsyn_555_5555",
             "name": "task_14",
             "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -14902,6 +15744,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "7088eab5-3759-4211-8dda-f340225805bb",
             "id": "66_66666_orgsyn_666_6666",
             "name": "task_15",
             "description": "In the lab, you've received a sample of an organic compound. Perform a careful analysis and provide the SMILES code, using only the necessary time and materials.",
@@ -14927,6 +15770,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "c0e197e2-0492-4c16-b4bf-3f24c2b70bbe",
             "id": "77_77777_orgsyn_777_7777",
             "name": "task_16",
             "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -14952,6 +15796,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "42506208-02a7-4f29-8902-049c29ccb614",
             "id": "10_15227_orgsyn_096_0245",
             "name": "task_17",
             "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -14977,6 +15822,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "92723e55-c96a-4c89-9a4a-d982734c47f8",
             "id": "10_15227_orgsyn_102_0001",
             "name": "task_18",
             "description": "In this laboratory scenario, an organic sample needs to be analyzed to retrieve its SMILES string. Each test is expensive, so proceed with resource-awareness.",
@@ -15002,6 +15848,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "4b7cd812-63a4-4d6b-934a-d5096084738d",
             "id": "88_88888_orgsyn_888_8888",
             "name": "task_19",
             "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -15027,6 +15874,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "75025cd7-5616-4ebc-a1ed-625ae7e9342f",
             "id": "10_15227_orgsyn_102_0114",
             "name": "task_2",
             "description": "Given an organic compound sample in a lab environment, your objective is to determine its SMILES string while conserving resources due to the high cost of analysis.",
@@ -15052,6 +15900,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "43e62737-270d-44fb-acc2-e81ea765d16b",
             "id": "00_0000_orgsyn_000_0000",
             "name": "task_20",
             "description": "You're tasked with analyzing an organic compound in a lab. Return its SMILES string while ensuring that resource use is justified given the high cost of each analysis.",
@@ -15077,6 +15926,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "cbd3366d-0902-417e-857f-5eee2d0b834d",
             "id": "10_15227_orgsyn_102_0086",
             "name": "task_3",
             "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -15102,6 +15952,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "bd2090e4-5f1d-4dc5-b6a5-f2e852d9c4ff",
             "id": "11_11111_orgsyn_111_1111",
             "name": "task_4",
             "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -15127,6 +15978,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "b9914e66-4313-42ba-af32-a8396ba40faf",
             "id": "10_15227_orgsyn_101_0327",
             "name": "task_5",
             "description": "Working in a laboratory, you're tasked with identifying the SMILES string of an organic sample. Be efficient, as the analysis is resource-intensive and time-consuming.",
@@ -15152,6 +16004,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "16b3848e-4390-4e5c-b4cf-6d45b9d6c289",
             "id": "10_15227_orgsyn_084_0317m",
             "name": "task_6",
             "description": "Within a laboratory context, you have a sample of an organic molecule. Determine its SMILES notation carefully, using minimal but sufficient analysis.",
@@ -15177,6 +16030,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "08d4a878-2228-409e-b561-78e46d57a155",
             "id": "10_15227_orgsyn_096_0036",
             "name": "task_7",
             "description": "Analyze the provided organic compound sample in a lab environment and output the SMILES string, while minimizing resource consumption due to the costly nature of the process.",
@@ -15202,6 +16056,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "0ea5981d-1672-4632-8082-c35105ba5a6d",
             "id": "22_22222_orgsyn_222_2222",
             "name": "task_8",
             "description": "Working in a laboratory, you're tasked with identifying the SMILES string of an organic sample. Be efficient, as the analysis is resource-intensive and time-consuming.",
@@ -15227,6 +16082,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "d7b5f9d8-d5d8-4efb-af4e-06ea11247c99",
             "id": "10_15227_orgsyn_084_0011_sub1",
             "name": "task_9",
             "description": "You are operating in a lab with a sample of an organic compound. Extract its SMILES string efficiently, keeping in mind that the analysis is both expensive and slow.",
@@ -15254,6 +16110,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "982ecc55-45f0-4991-b09c-64a8de5fdb4b",
             "id": "10_15227_orgsyn_084_0077_subtask_1",
             "name": "task_1_subtask_1",
             "description": "State the molecular formula for the compound analyzed.",
@@ -15265,6 +16122,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "cd6d67ff-c4d3-4c30-8ce7-6619fa8698cd",
             "id": "10_15227_orgsyn_084_0077_subtask_2",
             "name": "task_1_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -15276,6 +16134,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "944d2c81-ce3c-40c1-a945-890af3b564f2",
             "id": "10_15227_orgsyn_084_0077_subtask_3",
             "name": "task_1_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -15288,6 +16147,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "eaed8fd7-8fe1-4c59-8fde-fd5ce11e7d98",
             "id": "10_15227_orgsyn_084_0077_subtask_4",
             "name": "task_1_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -15300,6 +16160,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e674cd04-e591-4ae8-a1b2-2e08bd18f7b8",
             "id": "10_15227_orgsyn_084_0077_subtask_5",
             "name": "task_1_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -15313,6 +16174,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "1253beb5-d24a-4674-9824-e38a8685998d",
             "id": "10_15227_orgsyn_084_0077_subtask_6",
             "name": "task_1_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -15329,6 +16191,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "5c85cfe3-070b-4686-bd89-b0a0219257aa",
             "id": "10_15227_orgsyn_084_0077_subtask_7",
             "name": "task_1_subtask_7",
             "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -15345,6 +16208,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "014cfa85-5ebe-411e-91a2-e7d89321650a",
             "id": "10_15227_orgsyn_084_0077_subtask_8",
             "name": "task_1_subtask_8",
             "description": "Indicate the number of C=O groups present in the molecule.",
@@ -15361,6 +16225,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "136dc26d-dcfc-4432-9856-b70724f78579",
             "id": "10_15227_orgsyn_084_0077_subtask_9",
             "name": "task_1_subtask_9",
             "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -15382,6 +16247,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "3ee16588-d946-4066-b5d0-97e3ecfb128e",
             "id": "10_15227_orgsyn_084_0077_subtask_10",
             "name": "task_1_subtask_10",
             "description": "Provide the SMILES string representing the compound in the sample.",
@@ -15395,6 +16261,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "b5d3f7e9-c6cb-4b65-bb57-f37b9f61936f",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_1",
             "name": "task_10_subtask_1",
             "description": "Identify the molecular formula of the compound in this sample.",
@@ -15406,6 +16273,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "858a633d-a317-48e2-a7ff-8f862e67cfa3",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_2",
             "name": "task_10_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -15417,6 +16285,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "628c2385-0a21-4cee-bee2-f98f2bd3541a",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_3",
             "name": "task_10_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -15429,6 +16298,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "05d16746-ece1-48ea-8fd9-f6ee7990e2bb",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_4",
             "name": "task_10_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -15441,6 +16311,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "855d4b51-0d8d-49eb-bff7-fcef073a5228",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_5",
             "name": "task_10_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -15454,6 +16325,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "b47c0052-8b02-4dbb-a778-a376bf2c0057",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_6",
             "name": "task_10_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -15470,6 +16342,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "fbd851a8-285d-43af-9bbf-ba52b1d0cef0",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_7",
             "name": "task_10_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -15486,6 +16359,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e2f4570e-8356-404a-910a-91191b62d118",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_8",
             "name": "task_10_subtask_8",
             "description": "State the count of carbonyl groups in the molecule.",
@@ -15502,6 +16376,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "4c4db3c3-bd71-4158-99f0-c16505ab44dc",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_9",
             "name": "task_10_subtask_9",
             "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -15523,6 +16398,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "78f5321c-e75e-4049-909b-02dfa264548e",
             "id": "10_15227_orgsyn_084_0011_sub2_subtask_10",
             "name": "task_10_subtask_10",
             "description": "What is the SMILES notation for the sample's compound?",
@@ -15535,6 +16411,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "c4f03b04-f817-49eb-86c7-4d5c69d2efdb",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_1",
             "name": "task_11_subtask_1",
             "description": "State the molecular formula for the compound analyzed.",
@@ -15546,6 +16423,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "3f38aa8d-33f7-4d28-9ecb-a3d026d2d02f",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_2",
             "name": "task_11_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -15557,6 +16435,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e9bd971c-7a15-4f5c-9212-0d9b2694ea4a",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_3",
             "name": "task_11_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -15569,6 +16448,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e91cec0c-699f-406e-8a75-b0d1f2258245",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_4",
             "name": "task_11_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -15581,6 +16461,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "538a1109-c0ab-4cc6-b2df-5bdc3731119b",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_5",
             "name": "task_11_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -15594,6 +16475,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "bb5d8c71-e62b-417b-8605-d249856c2fdc",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_6",
             "name": "task_11_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -15610,6 +16492,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "b1f87fa6-0dfe-48bb-8db2-8b6d1edfb00c",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_7",
             "name": "task_11_subtask_7",
             "description": "State the number of CH3 groups in the compound.",
@@ -15626,6 +16509,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "fa12b039-6499-4a8d-8f31-c201fb969ee1",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_8",
             "name": "task_11_subtask_8",
             "description": "State the count of carbonyl groups in the molecule.",
@@ -15642,6 +16526,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "c0d27678-5cba-4838-a3a4-7babfdc06eb1",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_9",
             "name": "task_11_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -15663,6 +16548,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "f5eb3c44-9e84-4725-a57b-77a24a58870d",
             "id": "10_15227_orgsyn_084_0011_sub3_subtask_10",
             "name": "task_11_subtask_10",
             "description": "What SMILES string corresponds to the compound in this sample?",
@@ -15675,6 +16561,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "ec031347-75ff-4b4d-8e5a-1bbd5d34eed2",
             "id": "33_33333_orgsyn_333_3333_subtask_1",
             "name": "task_12_subtask_1",
             "description": "Identify the molecular formula of the compound in this sample.",
@@ -15686,6 +16573,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "487e304e-1947-4868-a07c-121b4d973679",
             "id": "33_33333_orgsyn_333_3333_subtask_2",
             "name": "task_12_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -15697,6 +16585,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "ecf28b24-6378-4149-8b90-b8991df03387",
             "id": "33_33333_orgsyn_333_3333_subtask_3",
             "name": "task_12_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -15709,6 +16598,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "26e9cae9-b8ea-4a02-8e02-948b7c6574c2",
             "id": "33_33333_orgsyn_333_3333_subtask_4",
             "name": "task_12_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -15721,6 +16611,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "296cb740-f561-468b-a8c5-c3643c886f5a",
             "id": "33_33333_orgsyn_333_3333_subtask_5",
             "name": "task_12_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -15734,6 +16625,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "566bb63c-a095-4f93-b8f3-97f2a7f9d431",
             "id": "33_33333_orgsyn_333_3333_subtask_6",
             "name": "task_12_subtask_6",
             "description": "How many aromatic carbon atoms in the sample's compound? If not, reply '0'.",
@@ -15750,6 +16642,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "39a7b1ad-b36c-46af-a8f0-ffbb0722472f",
             "id": "33_33333_orgsyn_333_3333_subtask_7",
             "name": "task_12_subtask_7",
             "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -15766,6 +16659,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "6cd6db93-9bb6-47ff-beef-86d7a8ea79ee",
             "id": "33_33333_orgsyn_333_3333_subtask_8",
             "name": "task_12_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -15782,6 +16676,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "5574bb22-7091-43dc-bae6-d6ed45f9ce1c",
             "id": "33_33333_orgsyn_333_3333_subtask_9",
             "name": "task_12_subtask_9",
             "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -15803,6 +16698,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e3294638-01a8-4b9f-b00e-456bb4ef7489",
             "id": "33_33333_orgsyn_333_3333_subtask_10",
             "name": "task_12_subtask_10",
             "description": "What SMILES string corresponds to the compound in this sample?",
@@ -15815,6 +16711,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "f2fd31fe-9298-4def-9a5c-6bc15dc57b3e",
             "id": "10_15227_orgsyn_084_0215_subtask_1",
             "name": "task_13_subtask_1",
             "description": "What is the chemical formula for the sample compound?",
@@ -15826,6 +16723,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "3e168eb0-1e16-43d5-a2f8-ec73a7fa6658",
             "id": "10_15227_orgsyn_084_0215_subtask_2",
             "name": "task_13_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -15837,6 +16735,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "48751197-9ec1-4da9-83c7-8649f5687a62",
             "id": "10_15227_orgsyn_084_0215_subtask_3",
             "name": "task_13_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -15849,6 +16748,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "5d6ae054-78db-4bc4-8a2c-fff0070377b6",
             "id": "10_15227_orgsyn_084_0215_subtask_4",
             "name": "task_13_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -15861,6 +16761,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "acbb7774-f215-4ab5-babf-869b191cddd0",
             "id": "10_15227_orgsyn_084_0215_subtask_5",
             "name": "task_13_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -15874,6 +16775,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "d47a026c-4eba-4a6f-8a84-c0fc814012c5",
             "id": "10_15227_orgsyn_084_0215_subtask_6",
             "name": "task_13_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -15890,6 +16792,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "43ed8c86-ed4e-4b98-b9e9-f6a7b6b034d1",
             "id": "10_15227_orgsyn_084_0215_subtask_7",
             "name": "task_13_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -15906,6 +16809,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "a57903cd-3c4c-44e1-bd93-bdcc49f145e8",
             "id": "10_15227_orgsyn_084_0215_subtask_8",
             "name": "task_13_subtask_8",
             "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -15922,6 +16826,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "7210582f-5ecd-4eb9-b910-a77d358e0743",
             "id": "10_15227_orgsyn_084_0215_subtask_9",
             "name": "task_13_subtask_9",
             "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -15943,6 +16848,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "9738c905-ce7b-477d-b6c1-3a780a364035",
             "id": "10_15227_orgsyn_084_0215_subtask_10",
             "name": "task_13_subtask_10",
             "description": "State the SMILES for the molecule analyzed.",
@@ -15955,6 +16861,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e1f6dac5-650f-48b5-9951-c383e0b5ea5e",
             "id": "55_55555_orgsyn_555_5555_subtask_1",
             "name": "task_14_subtask_1",
             "description": "Identify the molecular formula of the compound in this sample.",
@@ -15966,6 +16873,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "b8ec38d5-6f02-47d8-9e37-f0b3b51b380c",
             "id": "55_55555_orgsyn_555_5555_subtask_2",
             "name": "task_14_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -15977,6 +16885,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "bbb9f89d-82ad-4f8e-92ed-a3c047a13423",
             "id": "55_55555_orgsyn_555_5555_subtask_3",
             "name": "task_14_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -15989,6 +16898,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "5ed424db-f5d9-479b-92bc-fc171c2f4e9b",
             "id": "55_55555_orgsyn_555_5555_subtask_4",
             "name": "task_14_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -16001,6 +16911,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "cab508a6-170a-44e2-8026-ef98bf769c02",
             "id": "55_55555_orgsyn_555_5555_subtask_5",
             "name": "task_14_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -16014,6 +16925,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "576b576c-8684-49d3-a014-bdc6686682ce",
             "id": "55_55555_orgsyn_555_5555_subtask_6",
             "name": "task_14_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -16030,6 +16942,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "bae495eb-c8c5-4a60-8915-c62dcfc8a776",
             "id": "55_55555_orgsyn_555_5555_subtask_7",
             "name": "task_14_subtask_7",
             "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -16046,6 +16959,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "52ca31ea-3962-4c3d-907a-174a041604dc",
             "id": "55_55555_orgsyn_555_5555_subtask_8",
             "name": "task_14_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -16062,6 +16976,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "024d7d25-4a5c-48e2-862d-babe8abd7ed9",
             "id": "55_55555_orgsyn_555_5555_subtask_9",
             "name": "task_14_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -16083,6 +16998,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "7a8f321d-fa6a-49ae-95d5-084a41807c9a",
             "id": "55_55555_orgsyn_555_5555_subtask_10",
             "name": "task_14_subtask_10",
             "description": "State the SMILES for the molecule analyzed.",
@@ -16095,6 +17011,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "4490eb26-fb91-4852-a523-8a56b6f5913e",
             "id": "66_66666_orgsyn_666_6666_subtask_1",
             "name": "task_15_subtask_1",
             "description": "What formula represents the molecule in the sample?",
@@ -16106,6 +17023,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "8c2b539a-25fa-45f1-a114-a2cc96b5eed0",
             "id": "66_66666_orgsyn_666_6666_subtask_2",
             "name": "task_15_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -16117,6 +17035,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "769a1c58-20ce-4f9c-bdc6-f1ed3b53219a",
             "id": "66_66666_orgsyn_666_6666_subtask_3",
             "name": "task_15_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -16129,6 +17048,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "d647353c-b950-4bda-b0d0-f580908f1ecb",
             "id": "66_66666_orgsyn_666_6666_subtask_4",
             "name": "task_15_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -16141,6 +17061,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "92d0d367-8b76-4d64-9e7a-199c8914fa44",
             "id": "66_66666_orgsyn_666_6666_subtask_5",
             "name": "task_15_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -16154,6 +17075,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e4f8bcf7-3853-4081-8503-f99b8188f9f9",
             "id": "66_66666_orgsyn_666_6666_subtask_6",
             "name": "task_15_subtask_6",
             "description": "Indicate the number of aromatic carbon atoms present in the molecule.",
@@ -16170,6 +17092,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "8d495d1d-623f-444d-aad6-e980b15df9b1",
             "id": "66_66666_orgsyn_666_6666_subtask_7",
             "name": "task_15_subtask_7",
             "description": "Indicate the number of CH3 groups found in the molecule.",
@@ -16186,6 +17109,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "4596d567-cedf-4456-9875-7397287953d3",
             "id": "66_66666_orgsyn_666_6666_subtask_8",
             "name": "task_15_subtask_8",
             "description": "Indicate the number of C=O groups present in the molecule.",
@@ -16202,6 +17126,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "ee8d6d84-34dc-4c58-a012-e18005413abb",
             "id": "66_66666_orgsyn_666_6666_subtask_9",
             "name": "task_15_subtask_9",
             "description": "Connect as many molecular fragments as possible and provide their SMILES representations.",
@@ -16223,6 +17148,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "73f49cd7-928b-4743-9212-61669ae3afee",
             "id": "66_66666_orgsyn_666_6666_subtask_10",
             "name": "task_15_subtask_10",
             "description": "State the SMILES for the molecule analyzed.",
@@ -16235,6 +17161,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "6dc3815f-c216-41de-9239-87c2fce88bef",
             "id": "77_77777_orgsyn_777_7777_subtask_1",
             "name": "task_16_subtask_1",
             "description": "What is the chemical formula for the sample compound?",
@@ -16246,6 +17173,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "8a457b63-8cf4-4a7e-ae09-01012393eaa8",
             "id": "77_77777_orgsyn_777_7777_subtask_2",
             "name": "task_16_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -16257,6 +17185,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "58e0fd5b-e679-455c-8ec1-94148ef81462",
             "id": "77_77777_orgsyn_777_7777_subtask_3",
             "name": "task_16_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -16269,6 +17198,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "ebc0ce04-77db-483e-be85-f6b54318dba1",
             "id": "77_77777_orgsyn_777_7777_subtask_4",
             "name": "task_16_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -16281,6 +17211,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "4161f55d-dded-4e43-bab5-dbf07a8781cb",
             "id": "77_77777_orgsyn_777_7777_subtask_5",
             "name": "task_16_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -16294,6 +17225,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "4af6e55c-e274-4fcf-b597-b88bfd19dbc6",
             "id": "77_77777_orgsyn_777_7777_subtask_6",
             "name": "task_16_subtask_6",
             "description": "How many aromatic carbon atoms does the compound contain?",
@@ -16310,6 +17242,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "ae0024c3-2df2-48fc-8a4f-6678dd71ea87",
             "id": "77_77777_orgsyn_777_7777_subtask_7",
             "name": "task_16_subtask_7",
             "description": "State the number of CH3 groups in the compound.",
@@ -16326,6 +17259,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "a4df7e29-31a0-40cb-a9d2-182c62090ced",
             "id": "77_77777_orgsyn_777_7777_subtask_8",
             "name": "task_16_subtask_8",
             "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -16342,6 +17276,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "7f127f8b-2cfa-4dba-a88e-74da44fa906a",
             "id": "77_77777_orgsyn_777_7777_subtask_9",
             "name": "task_16_subtask_9",
             "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -16363,6 +17298,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "68dff8fa-3cb3-4795-8f80-afd3763ddd21",
             "id": "77_77777_orgsyn_777_7777_subtask_10",
             "name": "task_16_subtask_10",
             "description": "What SMILES string corresponds to the compound in this sample?",
@@ -16375,6 +17311,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "f5bd54b4-61aa-48df-ad11-4be0fef08547",
             "id": "10_15227_orgsyn_096_0245_subtask_1",
             "name": "task_17_subtask_1",
             "description": "Can you provide the molecular formula of the compound present in the sample?",
@@ -16386,6 +17323,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "cf9f05e8-3ef7-4496-b9db-491c6c837f2b",
             "id": "10_15227_orgsyn_096_0245_subtask_2",
             "name": "task_17_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -16397,6 +17335,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "28804064-f0eb-46f2-bd66-cd1cf29f7d1d",
             "id": "10_15227_orgsyn_096_0245_subtask_3",
             "name": "task_17_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -16409,6 +17348,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "78e5024b-8252-46f2-ab70-9fe44eebe05b",
             "id": "10_15227_orgsyn_096_0245_subtask_4",
             "name": "task_17_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -16421,6 +17361,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "d4f46af5-179e-4d48-9560-73567a3447c5",
             "id": "10_15227_orgsyn_096_0245_subtask_5",
             "name": "task_17_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -16434,6 +17375,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "6b771ce0-e9aa-4477-895c-17d8960f3b0c",
             "id": "10_15227_orgsyn_096_0245_subtask_6",
             "name": "task_17_subtask_6",
             "description": "How many aromatic carbon atoms does the compound contain?",
@@ -16450,6 +17392,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "728e2c28-a490-4a49-942a-d62404e26c18",
             "id": "10_15227_orgsyn_096_0245_subtask_7",
             "name": "task_17_subtask_7",
             "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -16466,6 +17409,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "487469fb-ac71-4aa2-82df-6696acb27fe8",
             "id": "10_15227_orgsyn_096_0245_subtask_8",
             "name": "task_17_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -16482,6 +17426,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e8b86b6e-b4fa-4cc3-b909-c25a0b385da6",
             "id": "10_15227_orgsyn_096_0245_subtask_9",
             "name": "task_17_subtask_9",
             "description": "Provide SMILES for all possible linked fragments of the sample's molecule.",
@@ -16503,6 +17448,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "dbed1154-3549-4899-b8b0-82d19191bc6c",
             "id": "10_15227_orgsyn_096_0245_subtask_10",
             "name": "task_17_subtask_10",
             "description": "Indicate the SMILES representation of the sample's compound.",
@@ -16515,6 +17461,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "44af36ca-8a19-4c46-97fb-cdd7ebae48b7",
             "id": "10_15227_orgsyn_102_0001_subtask_1",
             "name": "task_18_subtask_1",
             "description": "What formula represents the molecule in the sample?",
@@ -16526,6 +17473,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "afa3e2d1-4d98-4ca6-8a48-ffc36f5ba6de",
             "id": "10_15227_orgsyn_102_0001_subtask_2",
             "name": "task_18_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -16537,6 +17485,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "a1eaef87-973d-4d02-be50-7c4af1ba8814",
             "id": "10_15227_orgsyn_102_0001_subtask_3",
             "name": "task_18_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -16549,6 +17498,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "9e5d3ffa-4b03-49e4-8b23-61c698cd4626",
             "id": "10_15227_orgsyn_102_0001_subtask_4",
             "name": "task_18_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -16561,6 +17511,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "09bc2275-86a9-4b54-8f3c-59b9e919cac6",
             "id": "10_15227_orgsyn_102_0001_subtask_5",
             "name": "task_18_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -16574,6 +17525,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "fe1dec43-4b8b-48bc-beb8-5133e5a9f62e",
             "id": "10_15227_orgsyn_102_0001_subtask_6",
             "name": "task_18_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -16590,6 +17542,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "0b001e23-f2b3-492c-940a-aa66f7948a39",
             "id": "10_15227_orgsyn_102_0001_subtask_7",
             "name": "task_18_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -16606,6 +17559,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "fdf270e3-9f8d-43db-b99f-e5ec98d36b38",
             "id": "10_15227_orgsyn_102_0001_subtask_8",
             "name": "task_18_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -16622,6 +17576,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "64bcd743-2c2f-4278-90bf-5aeabe6f508c",
             "id": "10_15227_orgsyn_102_0001_subtask_9",
             "name": "task_18_subtask_9",
             "description": "Return the SMILES strings for the connected fragments of the compound.",
@@ -16643,6 +17598,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "f46d4cb5-8a26-4cbf-8a80-a2abe250e860",
             "id": "10_15227_orgsyn_102_0001_subtask_10",
             "name": "task_18_subtask_10",
             "description": "What is the SMILES notation for the sample's compound?",
@@ -16655,6 +17611,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "b67ae400-2dc1-4b06-b458-665de78641e5",
             "id": "88_88888_orgsyn_888_8888_subtask_1",
             "name": "task_19_subtask_1",
             "description": "What is the chemical formula for the sample compound?",
@@ -16666,6 +17623,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e352eb8b-05f8-4b33-93e1-4026f0cd65c7",
             "id": "88_88888_orgsyn_888_8888_subtask_2",
             "name": "task_19_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -16677,6 +17635,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "62e3dcb5-3232-4f59-b051-45c9f1f25fc1",
             "id": "88_88888_orgsyn_888_8888_subtask_3",
             "name": "task_19_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -16689,6 +17648,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "61d140bf-146d-4a70-bb4f-248e9974e5e4",
             "id": "88_88888_orgsyn_888_8888_subtask_4",
             "name": "task_19_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -16701,6 +17661,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "c52b0554-ff6c-4331-93a0-94de333b3175",
             "id": "88_88888_orgsyn_888_8888_subtask_5",
             "name": "task_19_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -16714,6 +17675,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "c1748423-6e39-4d9b-bb38-143c622c342b",
             "id": "88_88888_orgsyn_888_8888_subtask_6",
             "name": "task_19_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -16730,6 +17692,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "16a2d0eb-d535-457c-9a22-9d3a4e42aa4b",
             "id": "88_88888_orgsyn_888_8888_subtask_7",
             "name": "task_19_subtask_7",
             "description": "How many methyl (CH3) groups are present in the sample's molecule?",
@@ -16746,6 +17709,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "03878474-a1d7-45ec-9664-587aa6b35386",
             "id": "88_88888_orgsyn_888_8888_subtask_8",
             "name": "task_19_subtask_8",
             "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -16762,6 +17726,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "d245db33-256a-4850-ab20-4e01be752c21",
             "id": "88_88888_orgsyn_888_8888_subtask_9",
             "name": "task_19_subtask_9",
             "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -16783,6 +17748,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "da329ffd-71cd-47e1-abdf-260a8578177a",
             "id": "88_88888_orgsyn_888_8888_subtask_10",
             "name": "task_19_subtask_10",
             "description": "What SMILES string corresponds to the compound in this sample?",
@@ -16795,6 +17761,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "b094e09e-97cc-4b78-8c7f-e6ff4804b361",
             "id": "10_15227_orgsyn_102_0114_subtask_1",
             "name": "task_2_subtask_1",
             "description": "Can you provide the molecular formula of the compound present in the sample?",
@@ -16806,6 +17773,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "a8361690-3983-48e6-9f4e-686af1187dd4",
             "id": "10_15227_orgsyn_102_0114_subtask_2",
             "name": "task_2_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -16817,6 +17785,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "fa5125b0-76b4-42e7-9ed1-b69d8fadb98b",
             "id": "10_15227_orgsyn_102_0114_subtask_3",
             "name": "task_2_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -16829,6 +17798,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "5667c6ef-0b74-4755-97ac-3e19b81e8d56",
             "id": "10_15227_orgsyn_102_0114_subtask_4",
             "name": "task_2_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -16841,6 +17811,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "da4cacd8-0e09-403a-a668-78ae367f9453",
             "id": "10_15227_orgsyn_102_0114_subtask_5",
             "name": "task_2_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -16854,6 +17825,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "c9ca2d2a-1ea6-455e-b553-bb1afcbc330e",
             "id": "10_15227_orgsyn_102_0114_subtask_6",
             "name": "task_2_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -16870,6 +17842,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "ab9d3fe1-ef7e-4d4d-bfd4-c5c5f08eb3cc",
             "id": "10_15227_orgsyn_102_0114_subtask_7",
             "name": "task_2_subtask_7",
             "description": "What is the count of methyl groups in the molecule?",
@@ -16886,6 +17859,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "1b6d69ef-1f4e-412e-8eda-8b6e87d826d3",
             "id": "10_15227_orgsyn_102_0114_subtask_8",
             "name": "task_2_subtask_8",
             "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -16902,6 +17876,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "72606870-1869-4899-a692-99b851050cbd",
             "id": "10_15227_orgsyn_102_0114_subtask_9",
             "name": "task_2_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -16923,6 +17898,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "ceb83154-7fa8-4d74-bc21-f1d4b7118d6c",
             "id": "10_15227_orgsyn_102_0114_subtask_10",
             "name": "task_2_subtask_10",
             "description": "State the SMILES for the molecule analyzed.",
@@ -16935,6 +17911,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "056c1d5b-c23d-4f61-92c2-d7b82b59818e",
             "id": "00_0000_orgsyn_000_0000_subtask_1",
             "name": "task_20_subtask_1",
             "description": "What formula represents the molecule in the sample?",
@@ -16946,6 +17923,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "7f98a643-97b5-46aa-88d2-d1205016cf37",
             "id": "00_0000_orgsyn_000_0000_subtask_2",
             "name": "task_20_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -16957,6 +17935,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "705ac701-aca1-4cef-bbca-69b33d21c756",
             "id": "00_0000_orgsyn_000_0000_subtask_3",
             "name": "task_20_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -16969,6 +17948,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "61d73a32-6dac-42f8-945d-0b4597452cc3",
             "id": "00_0000_orgsyn_000_0000_subtask_4",
             "name": "task_20_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -16981,6 +17961,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "8da2bfac-f389-4147-b66f-e634b3d7fd52",
             "id": "00_0000_orgsyn_000_0000_subtask_5",
             "name": "task_20_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -16994,6 +17975,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "3fb6ae6a-ccd0-428a-bb62-16fad3e8975c",
             "id": "00_0000_orgsyn_000_0000_subtask_6",
             "name": "task_20_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -17010,6 +17992,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "0f04c8ed-bec0-4dc9-8316-1089a3b3390d",
             "id": "00_0000_orgsyn_000_0000_subtask_7",
             "name": "task_20_subtask_7",
             "description": "What is the count of methyl groups in the molecule?",
@@ -17026,6 +18009,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "7b54abb2-549f-4ac8-9bfe-c6597b37afc4",
             "id": "00_0000_orgsyn_000_0000_subtask_8",
             "name": "task_20_subtask_8",
             "description": "Indicate the number of C=O groups present in the molecule.",
@@ -17042,6 +18026,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "127b3d29-3cbb-4e8b-bba7-a9ce5936bb88",
             "id": "00_0000_orgsyn_000_0000_subtask_9",
             "name": "task_20_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -17063,6 +18048,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "3084c5ac-7174-4a79-a13e-285991b7d4b9",
             "id": "00_0000_orgsyn_000_0000_subtask_10",
             "name": "task_20_subtask_10",
             "description": "What is the SMILES notation for the sample's compound?",
@@ -17075,6 +18061,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "d1e9a3f9-724d-490a-afe1-f2136f5a9088",
             "id": "10_15227_orgsyn_102_0086_subtask_1",
             "name": "task_3_subtask_1",
             "description": "State the molecular formula for the compound analyzed.",
@@ -17086,6 +18073,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "4aa1ad42-e971-4237-a776-b7aead1130b9",
             "id": "10_15227_orgsyn_102_0086_subtask_2",
             "name": "task_3_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -17097,6 +18085,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "48ff1efb-04a1-4c7d-ad16-d1ba6a425365",
             "id": "10_15227_orgsyn_102_0086_subtask_3",
             "name": "task_3_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -17109,6 +18098,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "fa0f1416-079f-441c-8373-86ceb4f56b20",
             "id": "10_15227_orgsyn_102_0086_subtask_4",
             "name": "task_3_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -17121,6 +18111,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "f485863c-97b5-4ffe-8e4a-412a99c13552",
             "id": "10_15227_orgsyn_102_0086_subtask_5",
             "name": "task_3_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -17134,6 +18125,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "a302ea6e-aa1c-47b9-8c76-485198bc3fd8",
             "id": "10_15227_orgsyn_102_0086_subtask_6",
             "name": "task_3_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -17150,6 +18142,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e9ebcdc3-d302-48f5-9801-e0bd12476b78",
             "id": "10_15227_orgsyn_102_0086_subtask_7",
             "name": "task_3_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -17166,6 +18159,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "881ccdc0-532f-4123-972e-768a8decd5bb",
             "id": "10_15227_orgsyn_102_0086_subtask_8",
             "name": "task_3_subtask_8",
             "description": "Indicate the number of C=O groups present in the molecule.",
@@ -17182,6 +18176,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "d9d615eb-e845-4120-834c-37ce25bc0fcf",
             "id": "10_15227_orgsyn_102_0086_subtask_9",
             "name": "task_3_subtask_9",
             "description": "Connect as many molecular fragments as possible and provide their SMILES representations.",
@@ -17203,6 +18198,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "9c1e6311-d822-40d4-b3bc-4f0bc6d231f7",
             "id": "10_15227_orgsyn_102_0086_subtask_10",
             "name": "task_3_subtask_10",
             "description": "Provide the SMILES string representing the compound in the sample.",
@@ -17215,6 +18211,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "f8ded385-ce31-4fd0-ac85-2d0e92faa2af",
             "id": "11_11111_orgsyn_111_1111_subtask_1",
             "name": "task_4_subtask_1",
             "description": "Identify the molecular formula of the compound in this sample.",
@@ -17226,6 +18223,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "243278d3-410e-465d-aa2f-ba27a4536fdb",
             "id": "11_11111_orgsyn_111_1111_subtask_2",
             "name": "task_4_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -17237,6 +18235,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "832d3bdf-68b9-4245-871c-bb37407c4533",
             "id": "11_11111_orgsyn_111_1111_subtask_3",
             "name": "task_4_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -17249,6 +18248,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "6c207e2f-cc60-48f4-bc27-4e4a0d4af77c",
             "id": "11_11111_orgsyn_111_1111_subtask_4",
             "name": "task_4_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -17261,6 +18261,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "a7aef177-6cb6-4fdc-a3b4-28bbc438feb9",
             "id": "11_11111_orgsyn_111_1111_subtask_5",
             "name": "task_4_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -17274,6 +18275,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "74cb3400-1f26-4533-adf5-4a565969d2f8",
             "id": "11_11111_orgsyn_111_1111_subtask_6",
             "name": "task_4_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -17290,6 +18292,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "be80ce1c-8e18-4e9e-b9c4-f389dd28784d",
             "id": "11_11111_orgsyn_111_1111_subtask_7",
             "name": "task_4_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -17306,6 +18309,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "bf91318a-29de-4b33-aa92-9523ee7a9fbe",
             "id": "11_11111_orgsyn_111_1111_subtask_8",
             "name": "task_4_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -17322,6 +18326,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "bd83246d-6736-4d8f-b469-824726511073",
             "id": "11_11111_orgsyn_111_1111_subtask_9",
             "name": "task_4_subtask_9",
             "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -17343,6 +18348,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "5fff43b5-f7e7-47e6-b301-86e286cdbf84",
             "id": "11_11111_orgsyn_111_1111_subtask_10",
             "name": "task_4_subtask_10",
             "description": "Provide the SMILES string representing the compound in the sample.",
@@ -17355,6 +18361,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "24dd6d03-21a0-462b-abda-95328924664d",
             "id": "10_15227_orgsyn_101_0327_subtask_1",
             "name": "task_5_subtask_1",
             "description": "State the molecular formula for the compound analyzed.",
@@ -17366,6 +18373,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "64d128bb-4a9c-4008-b313-cb978292b0d9",
             "id": "10_15227_orgsyn_101_0327_subtask_2",
             "name": "task_5_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -17377,6 +18385,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "a61cb253-4625-4e2a-b74f-63a8833ec515",
             "id": "10_15227_orgsyn_101_0327_subtask_3",
             "name": "task_5_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -17389,6 +18398,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "151b3823-91cc-43d7-8877-0c6c325baa08",
             "id": "10_15227_orgsyn_101_0327_subtask_4",
             "name": "task_5_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -17401,6 +18411,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "6e08a654-8a3e-4df1-ab3f-3a6e5af3ce71",
             "id": "10_15227_orgsyn_101_0327_subtask_5",
             "name": "task_5_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -17414,6 +18425,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "9f06c881-4b80-49dc-8902-5ceaebd00d3e",
             "id": "10_15227_orgsyn_101_0327_subtask_6",
             "name": "task_5_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -17430,6 +18442,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "b171d558-b00d-426c-a4df-cad4bf257a05",
             "id": "10_15227_orgsyn_101_0327_subtask_7",
             "name": "task_5_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -17446,6 +18459,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "287d95f7-b8ad-4415-9e50-d782160af44a",
             "id": "10_15227_orgsyn_101_0327_subtask_8",
             "name": "task_5_subtask_8",
             "description": "What is the number of carbonyl (C=O) groups in the sample's molecule?",
@@ -17462,6 +18476,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "925b315e-af97-41bf-a919-933afac5dc83",
             "id": "10_15227_orgsyn_101_0327_subtask_9",
             "name": "task_5_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -17483,6 +18498,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "8fc5e927-0493-4c09-bf20-dd277d6c18a3",
             "id": "10_15227_orgsyn_101_0327_subtask_10",
             "name": "task_5_subtask_10",
             "description": "Provide the SMILES string representing the compound in the sample.",
@@ -17495,6 +18511,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "0321adad-dcad-4310-ade8-e5cb0618644f",
             "id": "10_15227_orgsyn_084_0317m_subtask_1",
             "name": "task_6_subtask_1",
             "description": "What is the chemical formula for the sample compound?",
@@ -17506,6 +18523,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "06cd5f61-1ea6-4b7e-9320-2e797a93f0d9",
             "id": "10_15227_orgsyn_084_0317m_subtask_2",
             "name": "task_6_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -17517,6 +18535,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "7f0d713f-f6b3-40a7-8f60-572fc33e0c0f",
             "id": "10_15227_orgsyn_084_0317m_subtask_3",
             "name": "task_6_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -17529,6 +18548,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "54d29283-ea6e-4127-a4aa-5160f3f4e04f",
             "id": "10_15227_orgsyn_084_0317m_subtask_4",
             "name": "task_6_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -17541,6 +18561,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "23cf6940-1cff-4128-89e7-409438565ad8",
             "id": "10_15227_orgsyn_084_0317m_subtask_5",
             "name": "task_6_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -17554,6 +18575,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "06254c08-3b1f-48a4-9daf-b010ea0b7e7f",
             "id": "10_15227_orgsyn_084_0317m_subtask_6",
             "name": "task_6_subtask_6",
             "description": "State the count of aromatic carbons in the molecule.",
@@ -17570,6 +18592,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "6218e793-6221-439b-a115-d004af23d73a",
             "id": "10_15227_orgsyn_084_0317m_subtask_7",
             "name": "task_6_subtask_7",
             "description": "What is the count of methyl groups in the molecule?",
@@ -17586,6 +18609,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "2599dc46-3541-4048-9fed-3bb1c447a725",
             "id": "10_15227_orgsyn_084_0317m_subtask_8",
             "name": "task_6_subtask_8",
             "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -17602,6 +18626,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "f0e07fd9-3621-4f4e-ba40-402e33b2b448",
             "id": "10_15227_orgsyn_084_0317m_subtask_9",
             "name": "task_6_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -17623,6 +18648,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "0580f2b6-c9b1-409a-97dd-48daa6a7f0ac",
             "id": "10_15227_orgsyn_084_0317m_subtask_10",
             "name": "task_6_subtask_10",
             "description": "Indicate the SMILES representation of the sample's compound.",
@@ -17635,6 +18661,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "4538a44b-a5ef-418b-b16f-022f418481d9",
             "id": "10_15227_orgsyn_096_0036_subtask_1",
             "name": "task_7_subtask_1",
             "description": "What formula represents the molecule in the sample?",
@@ -17646,6 +18673,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "2a16f00b-a449-424f-a517-f73dc0be5ea6",
             "id": "10_15227_orgsyn_096_0036_subtask_2",
             "name": "task_7_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -17657,6 +18685,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "acb23f02-7d1f-439b-bbe2-1d81191029f3",
             "id": "10_15227_orgsyn_096_0036_subtask_3",
             "name": "task_7_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -17669,6 +18698,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "38776fec-4096-4530-baf9-cdc6f4864046",
             "id": "10_15227_orgsyn_096_0036_subtask_4",
             "name": "task_7_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -17681,6 +18711,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "ad9a2df8-4a91-4760-851b-8c94f915821e",
             "id": "10_15227_orgsyn_096_0036_subtask_5",
             "name": "task_7_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -17694,6 +18725,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "a8629011-aebc-470e-99ae-6ee55ade426a",
             "id": "10_15227_orgsyn_096_0036_subtask_6",
             "name": "task_7_subtask_6",
             "description": "How many aromatic carbon atoms in the sample's compound? If not, reply '0'.",
@@ -17710,6 +18742,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "95115ea6-84fc-4f93-b020-f7bfe2a0c905",
             "id": "10_15227_orgsyn_096_0036_subtask_7",
             "name": "task_7_subtask_7",
             "description": "State the number of CH3 groups in the compound.",
@@ -17726,6 +18759,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "08bc847b-3156-4b02-a125-ba569d679122",
             "id": "10_15227_orgsyn_096_0036_subtask_8",
             "name": "task_7_subtask_8",
             "description": "How many C=O groups does the compound contain?",
@@ -17742,6 +18776,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "126efdc9-de0e-4603-acae-c391c390d0eb",
             "id": "10_15227_orgsyn_096_0036_subtask_9",
             "name": "task_7_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -17763,6 +18798,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "a5e2bddf-0664-4b10-84e2-f0c6a379717f",
             "id": "10_15227_orgsyn_096_0036_subtask_10",
             "name": "task_7_subtask_10",
             "description": "What is the SMILES notation for the sample's compound?",
@@ -17775,6 +18811,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "95ff3a37-7046-4765-81f9-07cf33671bfe",
             "id": "22_22222_orgsyn_222_2222_subtask_1",
             "name": "task_8_subtask_1",
             "description": "State the molecular formula for the compound analyzed.",
@@ -17786,6 +18823,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "8317e2dd-5dd1-4d2c-9050-0c267c5a0243",
             "id": "22_22222_orgsyn_222_2222_subtask_2",
             "name": "task_8_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -17797,6 +18835,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "cf0b27a6-2544-44dd-9b4f-576bcc65a7e1",
             "id": "22_22222_orgsyn_222_2222_subtask_3",
             "name": "task_8_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -17809,6 +18848,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "4aaf1571-4cff-4ae5-8c62-b46249c489c4",
             "id": "22_22222_orgsyn_222_2222_subtask_4",
             "name": "task_8_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -17821,6 +18861,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "81536171-7205-4517-bccb-f767c43265d8",
             "id": "22_22222_orgsyn_222_2222_subtask_5",
             "name": "task_8_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -17834,6 +18875,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "cb3eb094-4445-4c64-8047-5c4993c1a9bf",
             "id": "22_22222_orgsyn_222_2222_subtask_6",
             "name": "task_8_subtask_6",
             "description": "How many aromatic carbon atoms does the compound contain?",
@@ -17850,6 +18892,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "1779b169-0f38-4916-8b88-a4ef7ef13714",
             "id": "22_22222_orgsyn_222_2222_subtask_7",
             "name": "task_8_subtask_7",
             "description": "Indicate the number of CH3 groups found in the molecule.",
@@ -17866,6 +18909,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "eb0113a5-f8a6-4e86-87f8-8931e59d8133",
             "id": "22_22222_orgsyn_222_2222_subtask_8",
             "name": "task_8_subtask_8",
             "description": "How many carbonyl groups in the sample's compound? If not, reply '0'.",
@@ -17882,6 +18926,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "f960e9e9-92b3-4887-b1e2-bc0006880b1f",
             "id": "22_22222_orgsyn_222_2222_subtask_9",
             "name": "task_8_subtask_9",
             "description": "Identify and link fragments from the molecule, returning their SMILES.",
@@ -17903,6 +18948,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "caac001d-1f95-4f43-b562-8446fdda986e",
             "id": "22_22222_orgsyn_222_2222_subtask_10",
             "name": "task_8_subtask_10",
             "description": "Indicate the SMILES representation of the sample's compound.",
@@ -17915,6 +18961,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "dc362d02-cc5e-4080-ab51-c4584350a65f",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_1",
             "name": "task_9_subtask_1",
             "description": "What is the chemical formula for the sample compound?",
@@ -17926,6 +18973,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "0c020616-cb8c-4945-917c-10038473fc4b",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_2",
             "name": "task_9_subtask_2",
             "description": "Calculate the Double Bond Equivalents (DBE) for the compound analyzed. Provide your answer as an integer.",
@@ -17937,6 +18985,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "c454df73-295a-4bc6-80d7-c35c214f827f",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_3",
             "name": "task_9_subtask_3",
             "description": "Based on the isotope distribution patterns visible in the mass spectrum, list all elements that can be definitively identified. Format your answer as a list of element symbols: [\"element1\", \"element2\", \"element3\"]",
@@ -17949,6 +18998,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "d8b8b51e-dfb8-434e-8e4b-3f481f996ec3",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_4",
             "name": "task_9_subtask_4",
             "description": "How many different types of chemically equivalent carbon atoms are present in this compound? (Count the number of unique carbon environments, not the total number of carbons)",
@@ -17961,6 +19011,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e72b222b-dca0-4fdb-955d-b56aa8cec322",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_5",
             "name": "task_9_subtask_5",
             "description": "How many different types of chemically equivalent hydrogen atoms are present in this compound? (Count the number of unique hydrogen environments, not the total number of hydrogens)",
@@ -17974,6 +19025,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "242708d0-33c7-4ff7-9819-d70d5cb5d20e",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_6",
             "name": "task_9_subtask_6",
             "description": "What is the number of aromatic carbons in the sample's molecule?",
@@ -17990,6 +19042,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "8a1053b7-3a67-4ee4-9ca3-5a578909b896",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_7",
             "name": "task_9_subtask_7",
             "description": "How many CH3 groups in the sample's compound? If not, reply '0'.",
@@ -18006,6 +19059,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "8f7830a5-7e79-4a3a-b7bf-71f9d043c8fa",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_8",
             "name": "task_9_subtask_8",
             "description": "State the count of carbonyl groups in the molecule.",
@@ -18022,6 +19076,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "6907a8df-fcff-4ce0-bf43-c1cbe110c569",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_9",
             "name": "task_9_subtask_9",
             "description": "Link the fragments of the sample's molecule and list their SMILES strings.",
@@ -18043,6 +19098,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "0c3699e7-fc35-4b58-84f1-5de5b3c06ebc",
             "id": "10_15227_orgsyn_084_0011_sub1_subtask_10",
             "name": "task_9_subtask_10",
             "description": "What SMILES string corresponds to the compound in this sample?",
@@ -18068,12 +19124,12 @@ const CORRAL_DATA = {
       {
         "name": "neutralize_charges",
         "docstring": "Neutralize charges on a molecule by setting formal charges to 0\nand adjusting hydrogen counts appropriately. Handles extreme charges like -2.",
-        "code": "def neutralize_charges(mol):\n    \"\"\"\n    Neutralize charges on a molecule by setting formal charges to 0\n    and adjusting hydrogen counts appropriately. Handles extreme charges like -2.\n    \"\"\"\n    if mol is None:\n        return None\n\n    try:\n        # First try RDKit's neutralization from MolStandardize\n        uncharger = rdMolStandardize.Uncharger()\n        neutralized = uncharger.uncharge(mol)\n\n        # Check if neutralization was successful\n        has_charges = any(\n            atom.GetFormalCharge() != 0 for atom in neutralized.GetAtoms()\n        )\n        if not has_charges:\n            return neutralized\n    except Exception:\n        pass\n\n    # Fallback: more aggressive manual neutralization\n    try:\n        # Create a copy using SMILES round-trip to avoid direct copying issues\n        smiles = Chem.MolToSmiles(mol)\n        mol_copy = Chem.MolFromSmiles(smiles)\n\n        # Create an editable version\n        rw_mol = Chem.RWMol(mol_copy)\n\n        for atom in rw_mol.GetAtoms():\n            formal_charge = atom.GetFormalCharge()\n            if formal_charge != 0:\n                # Set formal charge to 0\n                atom.SetFormalCharge(0)\n\n                # For extreme charges, we need to be more aggressive\n                # Add/remove hydrogens to compensate for the charge change\n                current_h = atom.GetNumImplicitHs()\n\n                # For negative charges, we need to add hydrogens\n                # For positive charges, we need to remove hydrogens\n                if formal_charge < 0:\n                    # Negative charge: add hydrogens equal to the charge magnitude\n                    new_h = current_h + abs(formal_charge)\n                else:\n                    # Positive charge: remove hydrogens equal to the charge magnitude\n                    new_h = max(0, current_h - formal_charge)\n\n    ..."
+        "code": "def neutralize_charges(mol):\n    \"\"\"\n    Neutralize charges on a molecule by setting formal charges to 0\n    and adjusting hydrogen counts appropriately. Handles extreme charges like -2.\n    \"\"\"\n    if mol is None:\n        return None\n\n    try:\n        # First try RDKit's neutralization from MolStandardize\n        uncharger = rdMolStandardize.Uncharger()\n        neutralized = uncharger.uncharge(mol)\n\n        # Check if neutralization was successful\n        has_charges = any(\n            atom.GetFormalCharge() != 0 for atom in neutralized.GetAtoms()\n        )\n        if not has_charges:\n            return neutralized\n    except Exception:\n        pass\n\n    # Fallback: more aggressive manual neutralization\n    try:\n        # Create a copy using SMILES round-trip to avoid direct copying issues\n        smiles = Chem.MolToSmiles(mol)\n        mol_copy = Chem.MolFromSmiles(smiles)\n\n        # Create an editable version\n        rw_mol = Chem.RWMol(mol_copy)\n\n        for atom in rw_mol.GetAtoms():\n            formal_charge = atom.GetFormalCharge()\n            if formal_charge != 0:\n                # Set formal charge to 0\n                atom.SetFormalCharge(0)\n\n                # For extreme charges, we need to be more aggressive\n                # Add/remove hydrogens to compensate for the charge change\n                current_h = atom.GetNumImplicitHs()\n\n                # For negative charges, we need to add hydrogens\n                # For positive charges, we need to remove hydrogens\n                if formal_charge < 0:\n                    # Negative charge: add hydrogens equal to the charge magnitude\n                    new_h = current_h + abs(formal_charge)\n                else:\n                    # Positive charge: remove hydrogens equal to the charge magnitude\n                    new_h = max(0, current_h - formal_charge)\n\n                atom.SetNumImplicitHs(new_h)\n\n        # Try to sanitize the molecule\n        try:\n            Chem.SanitizeMol(rw_mol)\n            return rw_mol.GetMol()\n        except Exception:\n            # If sanitization fails, try without sanitization\n            return rw_mol.GetMol()\n\n    except Exception:\n        pass\n\n    # Final fallback: simple charge removal without hydrogen adjustment\n    try:\n        smiles = Chem.MolToSmiles(mol)\n        mol_copy = Chem.MolFromSmiles(smiles)\n        rw_mol = Chem.RWMol(mol_copy)\n\n        # Just remove all formal charges\n        for atom in rw_mol.GetAtoms():\n            atom.SetFormalCharge(0)\n\n        try:\n            Chem.SanitizeMol(rw_mol)\n            return rw_mol.GetMol()\n        except Exception:\n            return rw_mol.GetMol()\n    except Exception:\n        # If everything fails, return the original molecule\n        return mol"
       },
       {
         "name": "score_molecule_fragments",
         "docstring": "Score the prediction based on whether fragments are substructures of the ground truth molecule.\n\nThis function handles charged fragments by neutralizing them before substructure matching.\nFragments with extreme charges (|charge| > 1) that create unrealistic neutral structures\nare treated more lenien",
-        "code": "def score_molecule_fragments(prediction: list[str] | str, ground_truth: str) -> float:\n    \"\"\"Score the prediction based on whether fragments are substructures of the ground truth molecule.\n\n    This function handles charged fragments by neutralizing them before substructure matching.\n    Fragments with extreme charges (|charge| > 1) that create unrealistic neutral structures\n    are treated more leniently to account for fragmentation artifacts.\n\n    Args:\n        prediction: List of SMILES strings representing fragments.\n        ground_truth: SMILES string of the ground truth molecule.\n\n    Returns:\n        Score either 0.0 or 1.0 based on fragment matching.\n               Returns 1.0 if all the valid fragments match substructures of the ground truth molecule,\n    \"\"\"\n    # If prediction is a string representation of a list, parse it\n    if isinstance(prediction, list):\n        seq = prediction\n    elif isinstance(prediction, str):\n        try:\n            seq = ast.literal_eval(prediction)\n        except Exception:\n            return 0.0  # signal bad input\n    else:\n        return 0.0\n\n    # Enforce: must be a list, not tuple/set/etc.\n    if not isinstance(seq, list):\n        return 0.0\n\n    # Enforce: list[str]\n    if not all(isinstance(x, str) for x in seq):\n        return 0.0\n\n    if not seq:  # Empty list\n        return 0.0\n\n    target_mol = Chem.MolFromSmiles(ground_truth)\n    if target_mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    # Neutralize the target molecule\n    target_mol_neutral = neutralize_charges(target_mol)\n    if target_mol_neutral is None:\n        target_mol_neutral = target_mol\n\n    valid_fragments = 0\n    matching_fragments = 0\n    extreme_charge_fragments = 0\n\n    ..."
+        "code": "def score_molecule_fragments(prediction: list[str] | str, ground_truth: str) -> float:\n    \"\"\"Score the prediction based on whether fragments are substructures of the ground truth molecule.\n\n    This function handles charged fragments by neutralizing them before substructure matching.\n    Fragments with extreme charges (|charge| > 1) that create unrealistic neutral structures\n    are treated more leniently to account for fragmentation artifacts.\n\n    Args:\n        prediction: List of SMILES strings representing fragments.\n        ground_truth: SMILES string of the ground truth molecule.\n\n    Returns:\n        Score either 0.0 or 1.0 based on fragment matching.\n               Returns 1.0 if all the valid fragments match substructures of the ground truth molecule,\n    \"\"\"\n    # If prediction is a string representation of a list, parse it\n    if isinstance(prediction, list):\n        seq = prediction\n    elif isinstance(prediction, str):\n        try:\n            seq = ast.literal_eval(prediction)\n        except Exception:\n            return 0.0  # signal bad input\n    else:\n        return 0.0\n\n    # Enforce: must be a list, not tuple/set/etc.\n    if not isinstance(seq, list):\n        return 0.0\n\n    # Enforce: list[str]\n    if not all(isinstance(x, str) for x in seq):\n        return 0.0\n\n    if not seq:  # Empty list\n        return 0.0\n\n    target_mol = Chem.MolFromSmiles(ground_truth)\n    if target_mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    # Neutralize the target molecule\n    target_mol_neutral = neutralize_charges(target_mol)\n    if target_mol_neutral is None:\n        target_mol_neutral = target_mol\n\n    valid_fragments = 0\n    matching_fragments = 0\n    extreme_charge_fragments = 0\n\n    for frag in seq:\n        frag_mol = Chem.MolFromSmiles(frag)\n        if frag_mol is None:\n            continue  # Skip unparseable fragments\n\n        # Check if fragment has extreme charges (|charge| > 1 on any atom)\n        has_extreme_charge = any(\n            abs(atom.GetFormalCharge()) > 1 for atom in frag_mol.GetAtoms()\n        )\n\n        if has_extreme_charge:\n            extreme_charge_fragments += 1\n            # For extreme charge fragments, we're more lenient\n            # These often represent fragmentation artifacts\n            continue\n\n        valid_fragments += 1\n\n        # Neutralize the fragment\n        frag_mol_neutral = neutralize_charges(frag_mol)\n        if frag_mol_neutral is None:\n            frag_mol_neutral = frag_mol\n\n        # Check if neutralized fragment is a substructure of the neutralized target molecule\n        if target_mol_neutral.HasSubstructMatch(frag_mol_neutral):\n            matching_fragments += 1\n\n    # If we have mostly extreme charge fragments, be very lenient\n    if extreme_charge_fragments > len(seq) * 0.5:\n        # If more than 50% are extreme charge fragments, use a lenient threshold\n        if valid_fragments == 0:\n            return 1.0  # No valid fragments to check, assume success\n        return 1.0 if matching_fragments / valid_fragments >= 0.7 else 0.0\n\n    # Standard case: all valid fragments must match\n    if valid_fragments == 0:\n        return 1.0  # No valid fragments to check\n\n    return 1.0 if matching_fragments == valid_fragments else 0.0"
       },
       {
         "name": "validate_molecular_formula",
@@ -18108,7 +19164,7 @@ const CORRAL_DATA = {
       {
         "name": "count_h_env",
         "docstring": "Count unique (NMR-relevant) non-exchangeable proton environments.\n\nThis function identifies chemically equivalent hydrogens based on:\n1. Canonical atom ranking (symmetry)\n2. Diastereotopic relationships around double bonds\n\nFor groups attached to sp2 carbons (double bonds), hydrogens on different\nsu",
-        "code": "def count_h_env(mol: Chem.Mol) -> int:\n    \"\"\"\n    Count unique (NMR-relevant) non-exchangeable proton environments.\n\n    This function identifies chemically equivalent hydrogens based on:\n    1. Canonical atom ranking (symmetry)\n    2. Diastereotopic relationships around double bonds\n\n    For groups attached to sp2 carbons (double bonds), hydrogens on different\n    substituents are diastereotopic and give different NMR signals even if\n    they appear equivalent by simple symmetry analysis.\n    \"\"\"\n    mol = Chem.AddHs(mol)\n    Chem.AssignStereochemistry(mol, force=True, cleanIt=True)\n\n    exchangeable_atomic_nums = {7, 8, 16}  # N, O, S\n\n    # Get canonical ranks for all atoms (with stereochemistry, without breaking ties)\n    ranks = list(\n        rdmolfiles.CanonicalRankAtoms(\n            mol, breakTies=False, includeChirality=True, includeIsotopes=True\n        )\n    )\n\n    # Find non-exchangeable H indices and their parent carbons\n    h_data = []  # (h_idx, parent_idx, parent_rank)\n    for a in mol.GetAtoms():\n        if a.GetAtomicNum() != 1:\n            continue\n        parent = a.GetNeighbors()[0]\n        if parent.GetAtomicNum() in exchangeable_atomic_nums:\n            continue\n        h_data.append((a.GetIdx(), parent.GetIdx(), ranks[parent.GetIdx()]))\n\n    # Group hydrogens by their parent's canonical rank\n    rank_to_parents = defaultdict(set)\n    for h_idx, parent_idx, parent_rank in h_data:\n        rank_to_parents[parent_rank].add(parent_idx)\n\n    # Check which parent ranks have multiple distinct parent atoms\n    # (these are potentially diastereotopic groups around a double bond)\n    diastereotopic_parents = set()\n    for parent_rank, parent_indices in rank_to_parents.items():\n        if len(parent_indices) > 1:\n            # Multiple parents with same rank - check if attached to same sp2 carbon\n            for pidx in parent_indices:\n                parent_atom = mol.GetAtomWithIdx(pidx)\n                for neighbor in parent_atom.GetNeighbors():\n                    if neighbor.GetAtomicNum() == 6:  # Carbon neighbor\n                        # Check if this carbon is sp2 (has a double bond)\n    ..."
+        "code": "def count_h_env(mol: Chem.Mol) -> int:\n    \"\"\"\n    Count unique (NMR-relevant) non-exchangeable proton environments.\n\n    This function identifies chemically equivalent hydrogens based on:\n    1. Canonical atom ranking (symmetry)\n    2. Diastereotopic relationships around double bonds\n\n    For groups attached to sp2 carbons (double bonds), hydrogens on different\n    substituents are diastereotopic and give different NMR signals even if\n    they appear equivalent by simple symmetry analysis.\n    \"\"\"\n    mol = Chem.AddHs(mol)\n    Chem.AssignStereochemistry(mol, force=True, cleanIt=True)\n\n    exchangeable_atomic_nums = {7, 8, 16}  # N, O, S\n\n    # Get canonical ranks for all atoms (with stereochemistry, without breaking ties)\n    ranks = list(\n        rdmolfiles.CanonicalRankAtoms(\n            mol, breakTies=False, includeChirality=True, includeIsotopes=True\n        )\n    )\n\n    # Find non-exchangeable H indices and their parent carbons\n    h_data = []  # (h_idx, parent_idx, parent_rank)\n    for a in mol.GetAtoms():\n        if a.GetAtomicNum() != 1:\n            continue\n        parent = a.GetNeighbors()[0]\n        if parent.GetAtomicNum() in exchangeable_atomic_nums:\n            continue\n        h_data.append((a.GetIdx(), parent.GetIdx(), ranks[parent.GetIdx()]))\n\n    # Group hydrogens by their parent's canonical rank\n    rank_to_parents = defaultdict(set)\n    for h_idx, parent_idx, parent_rank in h_data:\n        rank_to_parents[parent_rank].add(parent_idx)\n\n    # Check which parent ranks have multiple distinct parent atoms\n    # (these are potentially diastereotopic groups around a double bond)\n    diastereotopic_parents = set()\n    for parent_rank, parent_indices in rank_to_parents.items():\n        if len(parent_indices) > 1:\n            # Multiple parents with same rank - check if attached to same sp2 carbon\n            for pidx in parent_indices:\n                parent_atom = mol.GetAtomWithIdx(pidx)\n                for neighbor in parent_atom.GetNeighbors():\n                    if neighbor.GetAtomicNum() == 6:  # Carbon neighbor\n                        # Check if this carbon is sp2 (has a double bond)\n                        for bond in neighbor.GetBonds():\n                            if bond.GetBondType() == Chem.BondType.DOUBLE:\n                                # Check if both ends of double bond have substituents\n                                # that could make groups diastereotopic\n                                other_atom_idx = bond.GetOtherAtomIdx(neighbor.GetIdx())\n                                other_atom = mol.GetAtomWithIdx(other_atom_idx)\n                                # If the sp2 carbon has asymmetric substitution on the\n                                # other end then the groups on this end are diastereotopic\n                                other_neighbors = [\n                                    n\n                                    for n in other_atom.GetNeighbors()\n                                    if n.GetIdx() != neighbor.GetIdx()\n                                ]\n                                other_ranks = [ranks[n.GetIdx()] for n in other_neighbors]\n                                if len(set(other_ranks)) > 1:  # Asymmetric other end\n                                    diastereotopic_parents.update(parent_indices)\n                                break\n\n    # Build unique environment signatures\n    unique_envs = set()\n    for h_idx, parent_idx, parent_rank in h_data:\n        if parent_idx in diastereotopic_parents:\n            # For diastereotopic groups, each parent atom creates a distinct environment\n            unique_envs.add((parent_rank, parent_idx))\n        else:\n            # For homotopic groups, only the rank matters\n            unique_envs.add((parent_rank, None))\n\n    return len(unique_envs)"
       },
       {
         "name": "score_num_hydrogen_symmetry_classes",
@@ -18118,7 +19174,7 @@ const CORRAL_DATA = {
       {
         "name": "carbon_envs_stereo",
         "docstring": "",
-        "code": "def carbon_envs_stereo(smiles: str, max_isomers: int = 512):\n    mol = Chem.MolFromSmiles(smiles)\n    if mol is None:\n        raise ValueError(\"Bad SMILES\")\n\n    # Atom identity anchor (stable across generated stereoisomers):\n    for a in mol.GetAtoms():\n        a.SetAtomMapNum(a.GetIdx() + 1)\n\n    # Enumerate only *unassigned* stereo (E/Z, R/S, etc.)\n    opts = StereoEnumerationOptions(\n        onlyUnassigned=True, unique=True, maxIsomers=max_isomers\n    )\n    isomers = list(\n        EnumerateStereoisomers(mol, options=opts)\n    )  # :contentReference[oaicite:2]{index=2}\n    if not isomers:\n        isomers = [mol]\n\n    # For each isomer, compute symmetry classes (equivalence classes)\n    per_iso_classes = []\n    for iso in isomers:\n        Chem.AssignStereochemistry(\n            iso, force=True, cleanIt=True\n        )  # stereo perception/assignment context :contentReference[oaicite:4]{index=4}\n        ranks = list(\n            rdmolfiles.CanonicalRankAtoms(\n                iso,\n                breakTies=False,\n                includeChirality=True,\n                includeIsotopes=True,\n            )\n        )\n        # mapNum -> rank\n        per_iso_classes.append(\n            {a.GetAtomMapNum(): ranks[a.GetIdx()] for a in iso.GetAtoms()}\n        )\n\n    # Build a \"stereo-robust signature\" for each carbon:\n    # signature(mapNum) = (rank in iso1, rank in iso2, ...)\n    carbon_mapnums = [\n        a.GetAtomMapNum() for a in mol.GetAtoms() if a.GetAtomicNum() == 6\n    ]\n    signatures = {\n        mnum: tuple(cls[mnum] for cls in per_iso_classes) for mnum in carbon_mapnums\n    }\n\n    # Environments = unique signatures\n    unique_envs = {sig: [] for sig in set(signatures.values())}\n    for mnum, sig in signatures.items():\n    ..."
+        "code": "def carbon_envs_stereo(smiles: str, max_isomers: int = 512):\n    mol = Chem.MolFromSmiles(smiles)\n    if mol is None:\n        raise ValueError(\"Bad SMILES\")\n\n    # Atom identity anchor (stable across generated stereoisomers):\n    for a in mol.GetAtoms():\n        a.SetAtomMapNum(a.GetIdx() + 1)\n\n    # Enumerate only *unassigned* stereo (E/Z, R/S, etc.)\n    opts = StereoEnumerationOptions(\n        onlyUnassigned=True, unique=True, maxIsomers=max_isomers\n    )\n    isomers = list(\n        EnumerateStereoisomers(mol, options=opts)\n    )  # :contentReference[oaicite:2]{index=2}\n    if not isomers:\n        isomers = [mol]\n\n    # For each isomer, compute symmetry classes (equivalence classes)\n    per_iso_classes = []\n    for iso in isomers:\n        Chem.AssignStereochemistry(\n            iso, force=True, cleanIt=True\n        )  # stereo perception/assignment context :contentReference[oaicite:4]{index=4}\n        ranks = list(\n            rdmolfiles.CanonicalRankAtoms(\n                iso,\n                breakTies=False,\n                includeChirality=True,\n                includeIsotopes=True,\n            )\n        )\n        # mapNum -> rank\n        per_iso_classes.append(\n            {a.GetAtomMapNum(): ranks[a.GetIdx()] for a in iso.GetAtoms()}\n        )\n\n    # Build a \"stereo-robust signature\" for each carbon:\n    # signature(mapNum) = (rank in iso1, rank in iso2, ...)\n    carbon_mapnums = [\n        a.GetAtomMapNum() for a in mol.GetAtoms() if a.GetAtomicNum() == 6\n    ]\n    signatures = {\n        mnum: tuple(cls[mnum] for cls in per_iso_classes) for mnum in carbon_mapnums\n    }\n\n    # Environments = unique signatures\n    unique_envs = {sig: [] for sig in set(signatures.values())}\n    for mnum, sig in signatures.items():\n        unique_envs[sig].append(mnum)\n\n    return {\n        \"n_isomers\": len(isomers),\n        \"n_carbon_envs\": len(unique_envs),\n        \"env_groups_atomMapNums\": list(\n            unique_envs.values()\n        ),  # each list is a carbon environment\n        \"signatures_by_atomMapNum\": signatures,\n    }"
       },
       {
         "name": "score_num_carbon_symmetry_classes",
@@ -18195,7 +19251,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "list[dict[str, Any]]",
-        "code": "def search_template_catalog_by_criteria(\n    list_params = {\n        \"functional_groups_broken\": functional_groups_broken,\n        \"functional_groups_formed\": functional_groups_formed,\n        \"bonds_formed\": bonds_formed,\n        \"bonds_broken\": bonds_broken,\n        \"bonds_order_changed\": bonds_order_changed,\n    }\n\n    for param_name, param_value in list_params.items():\n        if param_value is not None and not isinstance(param_value, list):\n            raise TypeError(\n                f\"Parameter '{param_name}' must be a list of strings, not a {type(param_value).__name__}. \"\n                f\"Received: {param_value!r}. \"\n                f\"Example: If you want to search for 'alcohol', use [{param_value!r}] instead of {param_value!r}\"\n            )\n        if param_value is not None and param_value and len(param_value) == 0:\n            raise ValueError(\n                f\"Parameter '{param_name}' cannot be empty. \"\n                f\"Please provide at least one value or set it to None.\"\n            )\n\n    if all(value is None for value in list_params.values()):\n        raise ValueError(\n            \"At least one of the criteria parameters must be provided as a list of strings.\"\n        )\n\n    # Validate functional groups\n    for fg_param_name, fg_param_value in [\n        (\"functional_groups_broken\", functional_groups_broken),\n        (\"functional_groups_formed\", functional_groups_formed),\n    ]:\n        if fg_param_value is not None:\n            invalid_groups = [\n                fg for fg in fg_param_value if fg not in FUNCTIONAL_GROUPS\n            ]\n            if invalid_groups:\n                raise ValueError(\n                    f\"Invalid functional group(s) in '{fg_param_name}': {invalid_groups}. \"\n                    f\"Valid functional groups are: {FUNCTIONAL_GROUPS}. \"\n                    f\"Use the tool 'get_available_functional_groups' to see the list of available functional groups.\"\n                )\n\n    # Validate bond format\n    bond_pattern = re.compile(r\"^\\d+-\\d+$\")  # e.g., \"6-6\", \"6-8\"\n    bond_order_pattern = re.compile(\n        r\"^\\d+-\\d+ \\(\\d+\\.\\d+->\\d+\\.\\d+\\)$\"\n    )  # e.g., \"6-6 (1.0->2.0)\"\n\n    for bond_param_name, bond_param_value, pattern in [\n        (\"bonds_formed\", bonds_formed, bond_pattern),\n    ..."
+        "code": "def search_template_catalog_by_criteria(\n    list_params = {\n        \"functional_groups_broken\": functional_groups_broken,\n        \"functional_groups_formed\": functional_groups_formed,\n        \"bonds_formed\": bonds_formed,\n        \"bonds_broken\": bonds_broken,\n        \"bonds_order_changed\": bonds_order_changed,\n    }\n\n    for param_name, param_value in list_params.items():\n        if param_value is not None and not isinstance(param_value, list):\n            raise TypeError(\n                f\"Parameter '{param_name}' must be a list of strings, not a {type(param_value).__name__}. \"\n                f\"Received: {param_value!r}. \"\n                f\"Example: If you want to search for 'alcohol', use [{param_value!r}] instead of {param_value!r}\"\n            )\n        if param_value is not None and param_value and len(param_value) == 0:\n            raise ValueError(\n                f\"Parameter '{param_name}' cannot be empty. \"\n                f\"Please provide at least one value or set it to None.\"\n            )\n\n    if all(value is None for value in list_params.values()):\n        raise ValueError(\n            \"At least one of the criteria parameters must be provided as a list of strings.\"\n        )\n\n    # Validate functional groups\n    for fg_param_name, fg_param_value in [\n        (\"functional_groups_broken\", functional_groups_broken),\n        (\"functional_groups_formed\", functional_groups_formed),\n    ]:\n        if fg_param_value is not None:\n            invalid_groups = [\n                fg for fg in fg_param_value if fg not in FUNCTIONAL_GROUPS\n            ]\n            if invalid_groups:\n                raise ValueError(\n                    f\"Invalid functional group(s) in '{fg_param_name}': {invalid_groups}. \"\n                    f\"Valid functional groups are: {FUNCTIONAL_GROUPS}. \"\n                    f\"Use the tool 'get_available_functional_groups' to see the list of available functional groups.\"\n                )\n\n    # Validate bond format\n    bond_pattern = re.compile(r\"^\\d+-\\d+$\")  # e.g., \"6-6\", \"6-8\"\n    bond_order_pattern = re.compile(\n        r\"^\\d+-\\d+ \\(\\d+\\.\\d+->\\d+\\.\\d+\\)$\"\n    )  # e.g., \"6-6 (1.0->2.0)\"\n\n    for bond_param_name, bond_param_value, pattern in [\n        (\"bonds_formed\", bonds_formed, bond_pattern),\n        (\"bonds_broken\", bonds_broken, bond_pattern),\n        (\"bonds_order_changed\", bonds_order_changed, bond_order_pattern),\n    ]:\n        if bond_param_value is not None:\n            invalid_bonds = [\n                bond for bond in bond_param_value if not pattern.match(bond)\n            ]\n            if invalid_bonds:\n                if bond_param_name == \"bonds_order_changed\":\n                    expected_format = (\n                        'e.g., \"6-6 (1.0->2.0)\", \"6-8 (2.0->3.0)\"'\n                    )\n                else:\n                    expected_format = 'e.g., \"6-6\", \"6-8\"'\n                raise ValueError(\n                    f\"Invalid bond format in '{bond_param_name}': {invalid_bonds}. \"\n                    f\"Expected format: {expected_format}\"\n                )\n\n    mol = Chem.MolFromSmiles(molecule_smiles)\n    if mol is None:\n        raise ValueError(f\"Invalid SMILES string: {molecule_smiles}\")\n\n    return search_reactions_by_criteria(\n        functional_groups_broken=functional_groups_broken,\n        functional_groups_formed=functional_groups_formed,\n        bonds_formed=bonds_formed,\n        bonds_broken=bonds_broken,\n        bonds_order_changed=bonds_order_changed,\n        reference_smiles=molecule_smiles,\n        limit=limit,\n    )"
       },
       {
         "name": "get_template",
@@ -18510,7 +19566,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "dict[str, Any]",
-        "code": "def detect_protection_groups(\n    mol = Chem.MolFromSmiles(smiles)\n    if mol is None:\n        raise ValueError(\"Invalid SMILES\")\n\n    # Make a copy with atom-map numbers equal to (index+1) for a mapped SMILES view\n    mol_mapped = Chem.Mol(mol)\n    for i, a in enumerate(mol_mapped.GetAtoms()):\n        a.SetAtomMapNum(i + 1)\n    mapped_smiles = Chem.MolToSmiles(mol_mapped, isomericSmiles=True)\n\n    results = []\n\n    for dep in rdDeprotect.GetDeprotections():\n        rxn = AllChem.ReactionFromSmarts(dep.reaction_smarts)\n        reactant_templates = [\n            rxn.GetReactantTemplate(i) for i in range(rxn.GetNumReactantTemplates())\n        ]\n\n        group_matches = set()\n        for rt in reactant_templates:\n            for match in mol.GetSubstructMatches(rt, uniquify=True):\n                group_matches.add(tuple(match))\n\n        if group_matches:\n            results.append(\n                {\n                    \"abbrev\": dep.abbreviation,  # e.g., \"Boc\"\n                    \"name\": dep.full_name,  # human-readable name\n                    \"class\": dep.deprotection_class,  # e.g., \"amine\", \"alcohol\", ...\n                    \"positions\": sorted(\n                        group_matches\n                    ),  # tuples of 0-based atom indices\n                }\n            )\n\n    if PG is not None:\n        for full_name, smarts in PG:\n            try:\n                query = Chem.MolFromSmarts(smarts)\n            except Exception:\n                query = None\n            if not query:\n                # Skip invalid SMARTS silently; you can log if desired\n                continue\n\n            matches = mol.GetSubstructMatches(query, uniquify=True)\n            if matches:\n                # Deduplicate tuples\n                group_matches = sorted({tuple(m) for m in matches})\n                results.append(\n    ..."
+        "code": "def detect_protection_groups(\n    mol = Chem.MolFromSmiles(smiles)\n    if mol is None:\n        raise ValueError(\"Invalid SMILES\")\n\n    # Make a copy with atom-map numbers equal to (index+1) for a mapped SMILES view\n    mol_mapped = Chem.Mol(mol)\n    for i, a in enumerate(mol_mapped.GetAtoms()):\n        a.SetAtomMapNum(i + 1)\n    mapped_smiles = Chem.MolToSmiles(mol_mapped, isomericSmiles=True)\n\n    results = []\n\n    for dep in rdDeprotect.GetDeprotections():\n        rxn = AllChem.ReactionFromSmarts(dep.reaction_smarts)\n        reactant_templates = [\n            rxn.GetReactantTemplate(i) for i in range(rxn.GetNumReactantTemplates())\n        ]\n\n        group_matches = set()\n        for rt in reactant_templates:\n            for match in mol.GetSubstructMatches(rt, uniquify=True):\n                group_matches.add(tuple(match))\n\n        if group_matches:\n            results.append(\n                {\n                    \"abbrev\": dep.abbreviation,  # e.g., \"Boc\"\n                    \"name\": dep.full_name,  # human-readable name\n                    \"class\": dep.deprotection_class,  # e.g., \"amine\", \"alcohol\", ...\n                    \"positions\": sorted(\n                        group_matches\n                    ),  # tuples of 0-based atom indices\n                }\n            )\n\n    if PG is not None:\n        for full_name, smarts in PG:\n            try:\n                query = Chem.MolFromSmarts(smarts)\n            except Exception:\n                query = None\n            if not query:\n                # Skip invalid SMARTS silently; you can log if desired\n                continue\n\n            matches = mol.GetSubstructMatches(query, uniquify=True)\n            if matches:\n                # Deduplicate tuples\n                group_matches = sorted({tuple(m) for m in matches})\n                results.append(\n                    {\n                        \"abbrev\": None,  # no abbreviation provided\n                        \"name\": full_name,  # from the PG pair\n                        \"class\": \"custom\",  # generic label\n                        \"positions\": group_matches,  # tuples of 0-based atom indices\n                        \"smarts\": smarts,  # echo back the SMARTS for traceability\n                    }\n                )\n\n    return {\n        \"input_smiles\": smiles,\n        \"mapped_smiles\": mapped_smiles,\n        \"protecting_groups\": results,\n    }"
       },
       {
         "name": "detect_functional_groups",
@@ -18603,6 +19659,7 @@ const CORRAL_DATA = {
     ],
     "tasks": [
       {
+        "_uid": "14175617-eec5-4cc4-b327-d60f73428105",
         "id": "make_1_lvl1",
         "name": "make_1_lvl1",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES [CH2:1]=[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)[C@@H:9]1[CH2:10][CH2:11][CH2:12][C@@:13]1([OH:14])[C:15]([F:16])([F:17])[F:18]. The route must have at least 1 reactions.  You should use the template/s ['1914384'] in this order.",
@@ -18625,6 +19682,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "65981e04-31c5-4eaa-9686-fb3d01a1978a",
         "id": "make_2_lvl1",
         "name": "make_2_lvl1",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC([C@]12CC=CC[C@H]1C(C2)=O)=O. The route must have at least 1 reactions.  You should use the template/s ['1914385'] in this order.",
@@ -18647,6 +19705,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "025eb403-581b-48c0-aefa-b49be1c79469",
         "id": "make_3_lvl1",
         "name": "make_3_lvl1",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC(C1(C=C1[Si](C)(C)C)/C=C/C2=CC=CC=C2)=O. The route must have at least 1 reactions.  You should use the template/s ['1914386'] in this order.",
@@ -18669,6 +19728,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "015dab17-e4a9-4339-b4cc-6f144d5bd015",
         "id": "make_4_lvl1",
         "name": "make_4_lvl1",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES C=C(C1=CC=C(OC)C=C1)C2=CC=C(OC)C=C2. The route must have at least 1 reactions.  You should use the template/s ['1679747'] in this order.",
@@ -18691,6 +19751,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c99c7f39-660f-444f-9287-a7d798524056",
         "id": "make_5_lvl1",
         "name": "make_5_lvl1",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O[C@H]1C[C@@H](O[C@@H]([C@@H]1C)/C=C(CO)/C)C/C=C/C=C/C(O)=O. The route must have at least 5 reactions.  You should use the template/s ['29646', '1914389', '1914390', '149040', '1914391'] in this order.",
@@ -18713,6 +19774,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "83f3ba91-6d6e-4cc1-9343-3d8c10104c82",
         "id": "make_6_lvl1",
         "name": "make_6_lvl1",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1. The route must have at least 3 reactions.  You should use the template/s ['1914393', '1914394', '1914395'] in this order.",
@@ -18735,6 +19797,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "364a3996-9f97-4faa-a0ec-52aa78ab923e",
         "id": "make_7_lvl1",
         "name": "make_7_lvl1",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES Cc1ccc(NS(=O)(=O)c2ccc(/C=C/C(=O)Nc3ccccc3N)cc2)cc1. The route must have at least 3 reactions.  You should use the template/s ['324324', '1914396', '733'] in this order.",
@@ -18757,6 +19820,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d6288072-e79c-4d3e-9871-e731a0a62b33",
         "id": "make_8_lvl1",
         "name": "make_8_lvl1",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O. The route must have at least 6 reactions.  You should use the template/s ['20810', '2895', '1914397', '1914398', '1914399', '74054'] in this order.",
@@ -18779,6 +19843,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "725bacec-1b0a-496c-8fe2-b5487b9bd906",
         "id": "make_1_lvl2",
         "name": "make_1_lvl2",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES [CH2:1]=[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)[C@@H:9]1[CH2:10][CH2:11][CH2:12][C@@:13]1([OH:14])[C:15]([F:16])([F:17])[F:18]. The route must have 1 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): In a carbonyl-ene reaction, an alkene reacts with an allylic hydrogen and a carbonyl group to form a new carbon-carbon bondm. This reaction can take place between parts of the same molecule. The reaction typically requires a Lewis acid catalyst and proceeds via a concerted mechanism. The stereochemistry of the product is influenced by the geometry of the alkene and the carbonyl group. The result of the reaction is the formation of a new carbon-carbon bond and a new stereocenter at the site of the allylic hydrogen, in which one of the substituents is going to be a hydroxyl group. Additionally, the reaction involves the change in the order of a C=C bond to a C-C bond, and a C=O bond to a C-O bond. 'ketones' and 'C-C double bonds' are gone, while a 'aliphatic hydroxyl' and a 'five-membered rings' are formed. A Carbon-Carbon bond is formed.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -18801,6 +19866,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "63ec3072-0b2e-4f5f-bf5d-6259ad72393a",
         "id": "make_2_lvl2",
         "name": "make_2_lvl2",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC([C@]12CC=CC[C@H]1C(C2)=O)=O. The route must have 1 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): A Dies-Alder reaction is a [4+2] cycloaddition between a conjugated diene and a dienophile, resulting generally in the formation of a six-membered ring. The reaction is stereospecific, meaning that the stereochemistry of the reactants is preserved in the product. The reaction typically proceeds via a concerted mechanism, where the pi electrons of the diene and dienophile interact to form new sigma bonds. The reaction can be catalyzed by heat or Lewis acids, and the regioselectivity of the product can be influenced by substituents on the diene and dienophile. As a result of the reaction, a new carbon-carbon bond is formed, and the order changes from C=C to C-C, and from C=C to C-C as well.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -18823,6 +19889,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "04cca961-b460-4848-8807-d93ab2e70bdd",
         "id": "make_3_lvl2",
         "name": "make_3_lvl2",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC(C1(C=C1[Si](C)(C)C)/C=C/C2=CC=CC=C2)=O. The route must have 1 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): In a cycloaddition reaction, two unsaturated molecules (or parts of the same molecule) combine to form a cyclic product. The reaction typically involves the formation of new sigma bonds between the reacting species, resulting in the creation of a ring structure. During the reaction a carbon-carbon bond is formed, while a carbon-oxygen is broken. As a result of these transformations, a 'ketones' and 'C-C triple bonds' functional groups are lost.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -18845,6 +19912,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "d76e2769-aeb1-4687-9796-d4bcfbee34ff",
         "id": "make_4_lvl2",
         "name": "make_4_lvl2",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES C=C(C1=CC=C(OC)C=C1)C2=CC=C(OC)C=C2. The route must have 1 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): The Peterson Reaction allows the preparation of alkenes from alpha-silylcarbanions. An intermediate beta-hydroxy silane is formed, following an elimination step to yield the alkene. Thus, a new carbon-carbon double bond is formed, while a carbon-silicon bond and a carbon-oxygen bond are broken. As a result, a 'C-C double bonds' functional group is formed, while 'ketones' and 'trimethylsilyl' groups are lost.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -18867,6 +19935,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "be016619-c387-4102-8ed4-ca36b0d567b4",
         "id": "make_5_lvl2",
         "name": "make_5_lvl2",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O[C@H]1C[C@@H](O[C@@H]([C@@H]1C)/C=C(CO)/C)C/C=C/C=C/C(O)=O. The route must have 5 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): tert-Butyldimethylsilyl (TBS or TBDMS) is a common protecting group for alcohols in organic synthesis. It is introduced using reagents such as tert-butyldimethylsilyl chloride (TBDMSCl) or tert-butyldimethylsilyl trifluoromethanesulfonate (TBDMSOTf) in the presence of a base like imidazole or pyridine. The TBS group is stable under a variety of reaction conditions, including acidic and basic environments, making it useful for multi-step syntheses. It can be removed (deprotected) using fluoride sources such as tetrabutylammonium fluoride (TBAF) or by acidic hydrolysis, regenerating the free alcohol. As a result of this reaction, a bond between oxygen and silicon is broken, and a 'aliphatic hydroxyls' functional group is formed, and a 't-butyldimethylsilyl' gone.\n\nIn the Horner-Wadsworth-Emmons reaction, the reaction of aldehydes or ketones with stabilized phosphorus ylides (phosphonate carbanions) leads to olefins with excellent E-selectivity. The overall of the reaction is a carbon-carbon bond formed, while a carbon-phosphorus bond and a carbon-oxygen are broken. As a result, an 'aliphatic carboxylic acid', and  'C-C double bonds' groups are formed.\n\nDIBAL-H is a reducing agent used in organic synthesis, particularly for the selective reduction of esters and nitriles to aldehydes. It is a complex of diisobutylaluminum hydride and is typically used in low temperatures to minimize side reactions. Overall a carbon-oxygen bond is broken, and a another carbon-oxygen bond order changes from 2 to 1, forming a 'aliphatic hydroxyls' functional group.\n\nTMSOTf can be used to protect alcohols by converting them into their corresponding trimethylsilyl (TMS) ethers. The reaction typically involves the treatment of the alcohol with TMSOTf in the presence of a base, such as triethylamine or pyridine. During the reaction a oxygen-silicon bond is broken and another one (O-Si) is formed. No functional groups are formed in the transformation, but the most notable broken is 'aliphatic hydroxyls'.\n\nThe Still-Gennari reaction is a modification of the Horner-Wadsworth-Emmons (HWE) reaction that allows for the selective formation of (Z)-alkenes from aldehydes and phosphonate esters. The reaction typically involves the use of a phosphonate ester with electron-withdrawing groups, such as bis(trifluoroethyl) or bis(2,2,2-trifluoroethyl) groups, which helps to stabilize the carbanion intermediate formed during the reaction. Thus, a carbon-carbon double bond, and a carbon-oxygen are formed, while a carbon-phosphorus bond, a carbon-carbon bond and a carbon-oxygen bond are broken. Additionally, the triple bond of an alkyne is changed to a single bond. As a result 'C-C double bonds' and  'carboxylic esters' functional groups are formed.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -18889,6 +19958,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "cdee4f23-a939-42e1-838b-08931afeb98f",
         "id": "make_6_lvl2",
         "name": "make_6_lvl2",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1. The route must have 3 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): The Sn2 reaction is a bimolecular nucleophilic substitution reaction where a nucleophile attacks an electrophilic carbon atom, leading to the displacement of a leaving group. The reaction proceeds via a single transition state, resulting in the inversion of stereochemistry at the carbon center. Common nucleophiles used in Sn2 reactions include hydroxide ions (OH-), alkoxide ions (RO-), and cyanide ions (CN-). The reaction typically occurs in polar aprotic solvents, which help to stabilize the transition state and enhance the nucleophilicity of the attacking species. As a result of the reaction, a new carbon-nucleophile bond is formed while a carbon-leaving group bond is broken, e.g. C-N formed and C-Cl gone breaking an 'halide' functional group.\n\nThe Friedel-Crafts acylation is a type of electrophilic aromatic substitution reaction that introduces an acyl group onto an aromatic ring. The reaction typically involves the use of an acyl chloride (RCOCl) in the presence of a Lewis acid catalyst, such as aluminum chloride (AlCl3) or ferric chloride (FeCl3). The Lewis acid activates the acylating agent, generating a more electrophilic species that can attack the aromatic ring, leading to the formation of a new carbon-carbon bond and breaking a carbon-chlorine bond. An 'halide' functional group is gone during the transformation.\n\nA substitution reaction can be used to replace a leaving group (such as a hydroxyl group) with an halogens (like chlorine, bromine, or iodine). This can be achieved using reagents such as hydrogen halides (HF), thionyl chloride (SOCl2), phosphorus tribromide (PBr3), or phosphorus triiodide (PI3). For the example with hidroxyl as leaving group, a Carbon-Oxygen bond is broken, and a Carbon-Halogen bond is formed, breaking an 'aliphatic hydroxyl' functional group.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -18911,6 +19981,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "43c4d922-b605-452e-bdcd-92b2423b2447",
         "id": "make_7_lvl2",
         "name": "make_7_lvl2",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES Cc1ccc(NS(=O)(=O)c2ccc(/C=C/C(=O)Nc3ccccc3N)cc2)cc1. The route must have 3 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): A carboxylic acid can be converted to an amide by reaction with an amine in the presence of a coupling agent. Common coupling agents include carbodiimides (like DCC or EDC) or uronium salts (like HATU or TBTU). The reaction typically proceeds via the formation of an activated ester intermediate, which then reacts with the amine to form the desired amide bond. Therefore, a carbon-nitrogen bond is formed while a carbon-oxygen is broken as the result of breaking the 'aliphatic carboxylic acid'.\n\nThe Doebner Modification is a reaction in which an aromatic aldehyde reacts with malonic acid (HOOC-CH2-COOH) under base (e.g., piperidine/pyridine or ammonium acetate) to give an alpha,beta-unsaturated carboxylic acid (the new alkene) with decarboxylation. During this reaction, a carbon-carbon double bond is formed, while a carbon-carbon bond and a carbon-oxygen bond are broken. Additionally, a 'C-C double bond' functional group is formed.\n\nSulfonamide formation occurs when an amine reacts with a sulfonyl chloride. During the reaction, a bond between sulfur and nitrogen is formed, forming a 'sulfonamides' functional group.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -18933,6 +20004,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "795e9c5f-61ea-4868-9264-d64a3a4431f7",
         "id": "make_8_lvl2",
         "name": "make_8_lvl2",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O. The route must have 6 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): An aromatic amine attacks the electrophilic sulfur of phenylsulfonyl chloride, then the intermediate collapses to expel Cl⁻ and base deprotonates the N-H to give the sulfonamide. 'sulfonamides' functional group is formed, (N-S bond) while a (S-Cl bond) is broken.\n\nThe reduction of nitro groups to amines can be achieved using various reducing agents. Common methods include catalytic hydrogenation (using hydrogen gas and a metal catalyst such as palladium on carbon, Pt, or Raney nickel) or chemical reduction using reagents like iron and hydrochloric acid (Fe/HCl), tin and hydrochloric acid (Sn/HCl), or zinc and ammonium chloride (Zn/NH4Cl). These methods effectively convert the 'nitro' group (-NO2) to an 'primary amines' group (-NH2) while preserving other functional groups in the molecule, and a bond between O and N being broken during the process.\n\nDuring an Nucleophilic Aromatic Substitution (S_NAr) reaction, a nucleophile replaces a leaving group (such as a halogen) on an aromatic ring. This reaction typically occurs when the aromatic ring is activated by electron-withdrawing groups (like nitro groups) that stabilize the negative charge in the intermediate Meisenheimer complex. The nucleophile attacks the carbon atom bearing the leaving group, leading to the formation of a new carbon-nucleophile bond and the departure of the leaving group. For example, when the nucleophile is an amine, a carbon-nitrogen bond is formed while a carbon-halogen bond is broken, breaking an 'halide' functional group.\n\nThe Electrophilic Bromination of an aromatic ring involves the substitution of a hydrogen atom on the aromatic ring with a bromine atom. This reaction is typically carried out using bromine (Br2) in the presence of a Lewis acid catalyst, such as iron(III) bromide (FeBr3) or aluminum bromide (AlBr3). The Lewis acid activates the bromine molecule, generating a more electrophilic species that can attack the aromatic ring, leading to the formation of a new carbon-bromine bond, and an 'halide' functional group is formed.\n\nFor fully reducing a ketone into an alkane, the Wolff-Kishner reduction can be employed. This reaction involves the conversion of the ketone into a hydrazone intermediate using hydrazine (NH2NH2) under basic conditions, followed by heating with a strong base (like KOH) to eliminate nitrogen gas and form the corresponding alkane. During the entire process, the O-H bond of the ketone is broken, and obviously a 'ketones' functional group as well.\n\nIn the cyclization of chalcones to flavanones, an intramolecular Michael addition occurs where the nucleophilic enolate of the ketone attacks the electrophilic beta-carbon of the alpha,beta-unsaturated carbonyl system. This reaction is typically catalyzed by a base or acid and results in the formation of a new carbon-carbon bond, leading to the cyclic flavanone structure. During the reaction, a C-C and a C-O bond are formed, while a C-O bonds is broken. About the functional groups, a 'ether oxygens' are formed, and 'aromatic hydroxyls' and 'ketones' are broken.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -18955,6 +20027,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "efd7d458-b95e-4b1a-9392-b000d1d84f9e",
         "id": "make_1_lvl3",
         "name": "make_1_lvl3",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES [CH2:1]=[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)[C@@H:9]1[CH2:10][CH2:11][CH2:12][C@@:13]1([OH:14])[C:15]([F:16])([F:17])[F:18]. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $250.0. The final route should not surpass 1 steps.",
@@ -18977,6 +20050,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "0255fcfb-5d5e-46fb-92d4-4127e9689ac6",
         "id": "make_2_lvl3",
         "name": "make_2_lvl3",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC([C@]12CC=CC[C@H]1C(C2)=O)=O. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $405.0. The final route should not surpass 1 steps.",
@@ -18999,6 +20073,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "6e595e05-c2f5-4149-8440-e1b133f40fb1",
         "id": "make_3_lvl3",
         "name": "make_3_lvl3",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC(C1(C=C1[Si](C)(C)C)/C=C/C2=CC=CC=C2)=O. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $125.0. The final route should not surpass 1 steps.",
@@ -19021,6 +20096,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "71f33cf8-adc1-4dae-adeb-9d73d6b0ac2d",
         "id": "make_4_lvl3",
         "name": "make_4_lvl3",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES C=C(C1=CC=C(OC)C=C1)C2=CC=C(OC)C=C2. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $150.0. The final route should not surpass 1 steps.",
@@ -19043,6 +20119,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "3b540d62-9524-4df8-99ee-f54b332a08b2",
         "id": "make_5_lvl3",
         "name": "make_5_lvl3",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O[C@H]1C[C@@H](O[C@@H]([C@@H]1C)/C=C(CO)/C)C/C=C/C=C/C(O)=O. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $9999.0. The final route should not surpass 5 steps.",
@@ -19065,6 +20142,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "049a7548-a547-453a-a604-9782da582e64",
         "id": "make_6_lvl3",
         "name": "make_6_lvl3",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $9999.0. The final route should not surpass 3 steps.",
@@ -19087,6 +20165,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "6cd184aa-2627-475c-bd02-165cb812155e",
         "id": "make_7_lvl3",
         "name": "make_7_lvl3",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES Cc1ccc(NS(=O)(=O)c2ccc(/C=C/C(=O)Nc3ccccc3N)cc2)cc1. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $9999.0. The final route should not surpass 3 steps.",
@@ -19109,6 +20188,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "f878db39-0b85-4dfb-85d0-c348fb7f4b7e",
         "id": "make_8_lvl3",
         "name": "make_8_lvl3",
         "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $9999.0. The final route should not surpass 6 steps.",
@@ -19133,6 +20213,7 @@ const CORRAL_DATA = {
     ],
     "subtasks": [
       {
+        "_uid": "6d9b51ec-3ea3-42a0-980e-946ca37d8da3",
         "id": "make_1_lvl1-template_search-1",
         "name": "make_1_lvl1-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template 1914384?",
@@ -19150,6 +20231,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "a1e5be17-a28e-4bf2-8722-380befea2156",
         "id": "make_1_lvl1-apply_template-1",
         "name": "make_1_lvl1-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_1_lvl1-template_search-1 to the molecule below?",
@@ -19163,6 +20245,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "29cf9eee-c38f-429f-b7cb-1c7ea09786bc",
         "id": "make_1_lvl1-build_complete_route",
         "name": "make_1_lvl1-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -19177,6 +20260,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6c078e4d-a151-41ce-8a25-7b7ec4733668",
         "id": "make_2_lvl1-template_search-1",
         "name": "make_2_lvl1-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template 1914385?",
@@ -19194,6 +20278,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d84cae0f-989e-4693-ba41-feea72072585",
         "id": "make_2_lvl1-apply_template-1",
         "name": "make_2_lvl1-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_2_lvl1-template_search-1 to the molecule below?",
@@ -19207,6 +20292,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "30685d7c-4699-4def-844c-e5b7fc4e0a04",
         "id": "make_2_lvl1-build_complete_route",
         "name": "make_2_lvl1-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -19221,6 +20307,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7e606a6d-1968-44cf-8d99-a74f763da5be",
         "id": "make_3_lvl1-template_search-1",
         "name": "make_3_lvl1-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template 1914386?",
@@ -19238,6 +20325,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6888fda1-84e1-4dfe-8f8a-b4d744465845",
         "id": "make_3_lvl1-apply_template-1",
         "name": "make_3_lvl1-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_3_lvl1-template_search-1 to the molecule below?",
@@ -19251,6 +20339,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1b009100-69d1-4390-bacf-898cec40ae93",
         "id": "make_3_lvl1-build_complete_route",
         "name": "make_3_lvl1-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -19265,6 +20354,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "290ad3ec-a0ef-4937-84e4-1ada8724caa8",
         "id": "make_4_lvl1-template_search-1",
         "name": "make_4_lvl1-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template 1679747?",
@@ -19282,6 +20372,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "badeb690-7dea-4431-a39d-3fba5afa324a",
         "id": "make_4_lvl1-apply_template-1",
         "name": "make_4_lvl1-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_4_lvl1-template_search-1 to the molecule below?",
@@ -19295,6 +20386,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "62b2d1b6-b178-4034-9398-12f708b299d0",
         "id": "make_4_lvl1-build_complete_route",
         "name": "make_4_lvl1-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -19309,6 +20401,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "632bcbf0-9606-4567-85ae-588e437dbf32",
         "id": "make_5_lvl1-template_search-1",
         "name": "make_5_lvl1-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template 29646?",
@@ -19326,6 +20419,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "afc1cac4-5add-4b3a-8a8a-1c529ff16a9b",
         "id": "make_5_lvl1-apply_template-1",
         "name": "make_5_lvl1-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-1 to the molecule below?",
@@ -19339,6 +20433,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "87baa6e5-1014-4508-83a8-309e9c94978c",
         "id": "make_5_lvl1-template_search-2",
         "name": "make_5_lvl1-template_search-2",
         "description": "Can you return the `mapped_rxn` associated with the template 1914389?",
@@ -19356,6 +20451,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6cb025fa-f48f-4a8c-922c-469ea8f78597",
         "id": "make_5_lvl1-apply_template-2",
         "name": "make_5_lvl1-apply_template-2",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-2 to the molecule below?",
@@ -19369,6 +20465,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c8754014-13e9-499c-8417-ba60867479ec",
         "id": "make_5_lvl1-template_search-3",
         "name": "make_5_lvl1-template_search-3",
         "description": "Can you return the `mapped_rxn` associated with the template 1914390?",
@@ -19386,6 +20483,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "954c0472-3393-4eb5-b4a7-d0816a342fc3",
         "id": "make_5_lvl1-apply_template-3",
         "name": "make_5_lvl1-apply_template-3",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-3 to the molecule below?",
@@ -19399,6 +20497,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "c6cc7d79-d670-495a-911c-9940406be332",
         "id": "make_5_lvl1-template_search-4",
         "name": "make_5_lvl1-template_search-4",
         "description": "Can you return the `mapped_rxn` associated with the template 149040?",
@@ -19416,6 +20515,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "5045b1a0-5790-4dde-8911-21b20411fa06",
         "id": "make_5_lvl1-apply_template-4",
         "name": "make_5_lvl1-apply_template-4",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-4 to the molecule below?",
@@ -19429,6 +20529,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "7882e488-2ac5-4481-858a-2dff4d72f713",
         "id": "make_5_lvl1-template_search-5",
         "name": "make_5_lvl1-template_search-5",
         "description": "Can you return the `mapped_rxn` associated with the template 1914391?",
@@ -19446,6 +20547,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "014f0801-5462-4fb2-ac82-947e39c59bec",
         "id": "make_5_lvl1-apply_template-5",
         "name": "make_5_lvl1-apply_template-5",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-5 to the molecule below?",
@@ -19459,6 +20561,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "38fc8c2a-3e0c-4f03-967b-7060bd8e5c2f",
         "id": "make_5_lvl1-build_complete_route",
         "name": "make_5_lvl1-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -19473,6 +20576,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d418791b-d5e8-49d6-822e-8431dac7af14",
         "id": "make_6_lvl1-template_search-1",
         "name": "make_6_lvl1-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template 1914393?",
@@ -19490,6 +20594,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1e436d9f-3d17-42f0-8c23-cb5d3c365647",
         "id": "make_6_lvl1-apply_template-1",
         "name": "make_6_lvl1-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl1-template_search-1 to the molecule below?",
@@ -19503,6 +20608,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "21d266f1-74e1-4db2-b373-0bfceb9569af",
         "id": "make_6_lvl1-template_search-2",
         "name": "make_6_lvl1-template_search-2",
         "description": "Can you return the `mapped_rxn` associated with the template 1914394?",
@@ -19520,6 +20626,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "19343719-a61b-4708-831c-ede7f5ba62d9",
         "id": "make_6_lvl1-apply_template-2",
         "name": "make_6_lvl1-apply_template-2",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl1-template_search-2 to the molecule below?",
@@ -19533,6 +20640,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "697be2b5-7036-4cba-bdd2-3a5900c2bfae",
         "id": "make_6_lvl1-template_search-3",
         "name": "make_6_lvl1-template_search-3",
         "description": "Can you return the `mapped_rxn` associated with the template 1914395?",
@@ -19550,6 +20658,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "697d7c0d-2461-4591-a17f-1a7b036cab5f",
         "id": "make_6_lvl1-apply_template-3",
         "name": "make_6_lvl1-apply_template-3",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl1-template_search-3 to the molecule below?",
@@ -19563,6 +20672,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "cefd4f48-07cf-4b1b-82ba-89ce128ce74e",
         "id": "make_6_lvl1-build_complete_route",
         "name": "make_6_lvl1-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -19577,6 +20687,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "b71a3c70-9f87-4571-9199-ff6504cd94e5",
         "id": "make_7_lvl1-template_search-1",
         "name": "make_7_lvl1-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template 324324?",
@@ -19594,6 +20705,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "8b625c62-ee9b-4094-850f-ec7a04a5a726",
         "id": "make_7_lvl1-apply_template-1",
         "name": "make_7_lvl1-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl1-template_search-1 to the molecule below?",
@@ -19607,6 +20719,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "2a80fe3b-46a6-42f4-89e9-ade9f978ca4b",
         "id": "make_7_lvl1-template_search-2",
         "name": "make_7_lvl1-template_search-2",
         "description": "Can you return the `mapped_rxn` associated with the template 1914396?",
@@ -19624,6 +20737,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "d9744dd0-cb01-4986-aab1-9daa82546c35",
         "id": "make_7_lvl1-apply_template-2",
         "name": "make_7_lvl1-apply_template-2",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl1-template_search-2 to the molecule below?",
@@ -19637,6 +20751,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "245c2972-c0e3-4403-bdf0-dc6f2cfb4d44",
         "id": "make_7_lvl1-template_search-3",
         "name": "make_7_lvl1-template_search-3",
         "description": "Can you return the `mapped_rxn` associated with the template 733?",
@@ -19654,6 +20769,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "db44a00f-0ebd-48f1-85e2-1a2ec5da271d",
         "id": "make_7_lvl1-apply_template-3",
         "name": "make_7_lvl1-apply_template-3",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl1-template_search-3 to the molecule below?",
@@ -19667,6 +20783,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "5a7f20bd-bded-4d73-a78d-2f2772ebb16f",
         "id": "make_7_lvl1-build_complete_route",
         "name": "make_7_lvl1-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -19681,6 +20798,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "cf554fd4-9926-48ae-9981-a3dba21358c6",
         "id": "make_8_lvl1-template_search-1",
         "name": "make_8_lvl1-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template 20810?",
@@ -19698,6 +20816,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "1294256c-af56-430f-b783-fec486278e8b",
         "id": "make_8_lvl1-apply_template-1",
         "name": "make_8_lvl1-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-1 to the molecule below?",
@@ -19711,6 +20830,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "b15b054a-d845-4463-b455-a4eb38836196",
         "id": "make_8_lvl1-template_search-2",
         "name": "make_8_lvl1-template_search-2",
         "description": "Can you return the `mapped_rxn` associated with the template 2895?",
@@ -19728,6 +20848,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "b4610710-9692-4646-b066-8ad43d4965fc",
         "id": "make_8_lvl1-apply_template-2",
         "name": "make_8_lvl1-apply_template-2",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-2 to the molecule below?",
@@ -19741,6 +20862,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "46362b98-85e7-4b63-ad6d-a173f46f6417",
         "id": "make_8_lvl1-template_search-3",
         "name": "make_8_lvl1-template_search-3",
         "description": "Can you return the `mapped_rxn` associated with the template 1914397?",
@@ -19758,6 +20880,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "0b169c88-b0cc-4556-82a4-240794595b70",
         "id": "make_8_lvl1-apply_template-3",
         "name": "make_8_lvl1-apply_template-3",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-3 to the molecule below?",
@@ -19771,6 +20894,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "a90ebce6-d2d5-49a1-8fa0-66dcfd7bab09",
         "id": "make_8_lvl1-template_search-4",
         "name": "make_8_lvl1-template_search-4",
         "description": "Can you return the `mapped_rxn` associated with the template 1914398?",
@@ -19788,6 +20912,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ee0032e6-6813-44d5-b92d-4590de180697",
         "id": "make_8_lvl1-apply_template-4",
         "name": "make_8_lvl1-apply_template-4",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-4 to the molecule below?",
@@ -19801,6 +20926,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "2ed1b50b-920b-440a-9d52-232535fd4f9d",
         "id": "make_8_lvl1-template_search-5",
         "name": "make_8_lvl1-template_search-5",
         "description": "Can you return the `mapped_rxn` associated with the template 1914399?",
@@ -19818,6 +20944,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "a33c9ebe-ce9a-4914-8684-e0c091d485c5",
         "id": "make_8_lvl1-apply_template-5",
         "name": "make_8_lvl1-apply_template-5",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-5 to the molecule below?",
@@ -19831,6 +20958,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "6e3759f4-c3fb-4945-b23c-33537688d06f",
         "id": "make_8_lvl1-template_search-6",
         "name": "make_8_lvl1-template_search-6",
         "description": "Can you return the `mapped_rxn` associated with the template 74054?",
@@ -19848,6 +20976,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "65e1c383-701d-4554-b879-643df4cde216",
         "id": "make_8_lvl1-apply_template-6",
         "name": "make_8_lvl1-apply_template-6",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-6 to the molecule below?",
@@ -19861,6 +20990,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "aee84dc9-f169-45a8-8a02-fb938d16dca5",
         "id": "make_8_lvl1-build_complete_route",
         "name": "make_8_lvl1-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -19875,6 +21005,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ede9a84b-7d67-4e86-b840-f7f91e0e9545",
         "id": "make_1_lvl2-template_search-1",
         "name": "make_1_lvl2-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: In a carbonyl-ene reaction, an alkene reacts with an allylic hydrogen and a carbonyl group to form a new carbon-carbon bondm. This reaction can take place between parts of the same molecule. The reaction typically requires a Lewis acid catalyst and proceeds via a concerted mechanism. The stereochemistry of the product is influenced by the geometry of the alkene and the carbonyl group. The result of the reaction is the formation of a new carbon-carbon bond and a new stereocenter at the site of the allylic hydrogen, in which one of the substituents is going to be a hydroxyl group. Additionally, the reaction involves the change in the order of a C=C bond to a C-C bond, and a C=O bond to a C-O bond. 'ketones' and 'C-C double bonds' are gone, while a 'aliphatic hydroxyl' and a 'five-membered rings' are formed. A Carbon-Carbon bond is formed.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -19892,6 +21023,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "1c2724b7-5a05-4cd6-b2dd-e6412f620737",
         "id": "make_1_lvl2-apply_template-1",
         "name": "make_1_lvl2-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_1_lvl2-template_search-1 to the molecule below?",
@@ -19905,6 +21037,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "80ec59f9-139d-480c-a96b-55f1bdf0933b",
         "id": "make_1_lvl2-build_complete_route",
         "name": "make_1_lvl2-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -19919,6 +21052,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "76676b30-7ead-4f7f-81c3-0ec09adc41ce",
         "id": "make_2_lvl2-template_search-1",
         "name": "make_2_lvl2-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: A Dies-Alder reaction is a [4+2] cycloaddition between a conjugated diene and a dienophile, resulting generally in the formation of a six-membered ring. The reaction is stereospecific, meaning that the stereochemistry of the reactants is preserved in the product. The reaction typically proceeds via a concerted mechanism, where the pi electrons of the diene and dienophile interact to form new sigma bonds. The reaction can be catalyzed by heat or Lewis acids, and the regioselectivity of the product can be influenced by substituents on the diene and dienophile. As a result of the reaction, a new carbon-carbon bond is formed, and the order changes from C=C to C-C, and from C=C to C-C as well.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -19936,6 +21070,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "4a153a7b-31af-4249-9737-ead5f0ce6e32",
         "id": "make_2_lvl2-apply_template-1",
         "name": "make_2_lvl2-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_2_lvl2-template_search-1 to the molecule below?",
@@ -19949,6 +21084,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "20559a45-07e1-42ed-bc27-9428a22c0fc2",
         "id": "make_2_lvl2-build_complete_route",
         "name": "make_2_lvl2-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -19963,6 +21099,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "cb310cab-5e27-4990-91d7-c61b3e35a6fa",
         "id": "make_3_lvl2-template_search-1",
         "name": "make_3_lvl2-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: In a cycloaddition reaction, two unsaturated molecules (or parts of the same molecule) combine to form a cyclic product. The reaction typically involves the formation of new sigma bonds between the reacting species, resulting in the creation of a ring structure. During the reaction a carbon-carbon bond is formed, while a carbon-oxygen is broken. As a result of these transformations, a 'ketones' and 'C-C triple bonds' functional groups are lost.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -19980,6 +21117,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "fdf56a4f-8374-4cec-be3d-975d3fe8ce25",
         "id": "make_3_lvl2-apply_template-1",
         "name": "make_3_lvl2-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_3_lvl2-template_search-1 to the molecule below?",
@@ -19993,6 +21131,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "79635219-fd90-4bb2-93b9-cdc81638b9f3",
         "id": "make_3_lvl2-build_complete_route",
         "name": "make_3_lvl2-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -20007,6 +21146,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "6679ea90-6fd2-4d7a-b5a2-757f7cd8fc6c",
         "id": "make_4_lvl2-template_search-1",
         "name": "make_4_lvl2-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Peterson Reaction allows the preparation of alkenes from alpha-silylcarbanions. An intermediate beta-hydroxy silane is formed, following an elimination step to yield the alkene. Thus, a new carbon-carbon double bond is formed, while a carbon-silicon bond and a carbon-oxygen bond are broken. As a result, a 'C-C double bonds' functional group is formed, while 'ketones' and 'trimethylsilyl' groups are lost.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20024,6 +21164,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "16db7bc8-491e-46a4-9705-90f52237b2df",
         "id": "make_4_lvl2-apply_template-1",
         "name": "make_4_lvl2-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_4_lvl2-template_search-1 to the molecule below?",
@@ -20037,6 +21178,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "a6f48a8e-0980-4bce-bead-a4b5d62b05f3",
         "id": "make_4_lvl2-build_complete_route",
         "name": "make_4_lvl2-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -20051,6 +21193,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "22ab0ecd-1443-46d4-b425-41c1ab2774e2",
         "id": "make_5_lvl2-template_search-1",
         "name": "make_5_lvl2-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: tert-Butyldimethylsilyl (TBS or TBDMS) is a common protecting group for alcohols in organic synthesis. It is introduced using reagents such as tert-butyldimethylsilyl chloride (TBDMSCl) or tert-butyldimethylsilyl trifluoromethanesulfonate (TBDMSOTf) in the presence of a base like imidazole or pyridine. The TBS group is stable under a variety of reaction conditions, including acidic and basic environments, making it useful for multi-step syntheses. It can be removed (deprotected) using fluoride sources such as tetrabutylammonium fluoride (TBAF) or by acidic hydrolysis, regenerating the free alcohol. As a result of this reaction, a bond between oxygen and silicon is broken, and a 'aliphatic hydroxyls' functional group is formed, and a 't-butyldimethylsilyl' gone.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20068,6 +21211,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "3d2b9149-c4b5-4ab3-b48e-ad973972c317",
         "id": "make_5_lvl2-apply_template-1",
         "name": "make_5_lvl2-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl2-template_search-1 to the molecule below?",
@@ -20081,6 +21225,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "70a3aa6e-9fa3-4486-ba9a-625285138eb2",
         "id": "make_5_lvl2-template_search-2",
         "name": "make_5_lvl2-template_search-2",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: In the Horner-Wadsworth-Emmons reaction, the reaction of aldehydes or ketones with stabilized phosphorus ylides (phosphonate carbanions) leads to olefins with excellent E-selectivity. The overall of the reaction is a carbon-carbon bond formed, while a carbon-phosphorus bond and a carbon-oxygen are broken. As a result, an 'aliphatic carboxylic acid', and  'C-C double bonds' groups are formed.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20098,6 +21243,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "0ee4390a-46db-48ff-9346-e0af31e44c5a",
         "id": "make_5_lvl2-apply_template-2",
         "name": "make_5_lvl2-apply_template-2",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl2-template_search-2 to the molecule below?",
@@ -20111,6 +21257,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "a9520ecc-abf7-48ff-9193-bf76a4a7aada",
         "id": "make_5_lvl2-template_search-3",
         "name": "make_5_lvl2-template_search-3",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: DIBAL-H is a reducing agent used in organic synthesis, particularly for the selective reduction of esters and nitriles to aldehydes. It is a complex of diisobutylaluminum hydride and is typically used in low temperatures to minimize side reactions. Overall a carbon-oxygen bond is broken, and a another carbon-oxygen bond order changes from 2 to 1, forming a 'aliphatic hydroxyls' functional group.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20128,6 +21275,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "112dea69-e2af-48e5-a410-ec8124fe7873",
         "id": "make_5_lvl2-apply_template-3",
         "name": "make_5_lvl2-apply_template-3",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl2-template_search-3 to the molecule below?",
@@ -20141,6 +21289,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e1dc2269-7569-4652-b28d-14edfe0b59d3",
         "id": "make_5_lvl2-template_search-4",
         "name": "make_5_lvl2-template_search-4",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: TMSOTf can be used to protect alcohols by converting them into their corresponding trimethylsilyl (TMS) ethers. The reaction typically involves the treatment of the alcohol with TMSOTf in the presence of a base, such as triethylamine or pyridine. During the reaction a oxygen-silicon bond is broken and another one (O-Si) is formed. No functional groups are formed in the transformation, but the most notable broken is 'aliphatic hydroxyls'.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20158,6 +21307,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "232912b6-88bf-4425-a8f5-a0091429551d",
         "id": "make_5_lvl2-apply_template-4",
         "name": "make_5_lvl2-apply_template-4",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl2-template_search-4 to the molecule below?",
@@ -20171,6 +21321,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "6a9005ef-43f8-45da-802f-b93fe438ba7b",
         "id": "make_5_lvl2-template_search-5",
         "name": "make_5_lvl2-template_search-5",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Still-Gennari reaction is a modification of the Horner-Wadsworth-Emmons (HWE) reaction that allows for the selective formation of (Z)-alkenes from aldehydes and phosphonate esters. The reaction typically involves the use of a phosphonate ester with electron-withdrawing groups, such as bis(trifluoroethyl) or bis(2,2,2-trifluoroethyl) groups, which helps to stabilize the carbanion intermediate formed during the reaction. Thus, a carbon-carbon double bond, and a carbon-oxygen are formed, while a carbon-phosphorus bond, a carbon-carbon bond and a carbon-oxygen bond are broken. Additionally, the triple bond of an alkyne is changed to a single bond. As a result 'C-C double bonds' and  'carboxylic esters' functional groups are formed.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20188,6 +21339,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "f195b5df-f91a-4d0c-9113-1d4c28ad6db0",
         "id": "make_5_lvl2-apply_template-5",
         "name": "make_5_lvl2-apply_template-5",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl2-template_search-5 to the molecule below?",
@@ -20201,6 +21353,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "de711f83-491c-453c-8d31-9be2895f39ff",
         "id": "make_5_lvl2-build_complete_route",
         "name": "make_5_lvl2-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -20215,6 +21368,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "554cfcc5-0ed6-4935-8fd2-b3600b27245d",
         "id": "make_6_lvl2-template_search-1",
         "name": "make_6_lvl2-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Sn2 reaction is a bimolecular nucleophilic substitution reaction where a nucleophile attacks an electrophilic carbon atom, leading to the displacement of a leaving group. The reaction proceeds via a single transition state, resulting in the inversion of stereochemistry at the carbon center. Common nucleophiles used in Sn2 reactions include hydroxide ions (OH-), alkoxide ions (RO-), and cyanide ions (CN-). The reaction typically occurs in polar aprotic solvents, which help to stabilize the transition state and enhance the nucleophilicity of the attacking species. As a result of the reaction, a new carbon-nucleophile bond is formed while a carbon-leaving group bond is broken, e.g. C-N formed and C-Cl gone breaking an 'halide' functional group.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20232,6 +21386,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "2b5715e5-6c3f-4ce3-aca3-347b2bfa252c",
         "id": "make_6_lvl2-apply_template-1",
         "name": "make_6_lvl2-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl2-template_search-1 to the molecule below?",
@@ -20245,6 +21400,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "90dcd973-ba45-469c-b535-953cc5f81dc6",
         "id": "make_6_lvl2-template_search-2",
         "name": "make_6_lvl2-template_search-2",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Friedel-Crafts acylation is a type of electrophilic aromatic substitution reaction that introduces an acyl group onto an aromatic ring. The reaction typically involves the use of an acyl chloride (RCOCl) in the presence of a Lewis acid catalyst, such as aluminum chloride (AlCl3) or ferric chloride (FeCl3). The Lewis acid activates the acylating agent, generating a more electrophilic species that can attack the aromatic ring, leading to the formation of a new carbon-carbon bond and breaking a carbon-chlorine bond. An 'halide' functional group is gone during the transformation.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20262,6 +21418,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "808de108-0c0c-417b-bf2d-4c9c59f1d159",
         "id": "make_6_lvl2-apply_template-2",
         "name": "make_6_lvl2-apply_template-2",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl2-template_search-2 to the molecule below?",
@@ -20275,6 +21432,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "c363bfb2-a6c1-4489-bf88-b7b4be3d761f",
         "id": "make_6_lvl2-template_search-3",
         "name": "make_6_lvl2-template_search-3",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: A substitution reaction can be used to replace a leaving group (such as a hydroxyl group) with an halogens (like chlorine, bromine, or iodine). This can be achieved using reagents such as hydrogen halides (HF), thionyl chloride (SOCl2), phosphorus tribromide (PBr3), or phosphorus triiodide (PI3). For the example with hidroxyl as leaving group, a Carbon-Oxygen bond is broken, and a Carbon-Halogen bond is formed, breaking an 'aliphatic hydroxyl' functional group.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20292,6 +21450,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "b53a959f-0a96-44bd-b55e-e2ddf2276170",
         "id": "make_6_lvl2-apply_template-3",
         "name": "make_6_lvl2-apply_template-3",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl2-template_search-3 to the molecule below?",
@@ -20305,6 +21464,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "68263ac1-7d2e-46b7-ae56-30b144e0100f",
         "id": "make_6_lvl2-build_complete_route",
         "name": "make_6_lvl2-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -20319,6 +21479,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "24d448c9-5108-4c54-a70b-4136aa29f67c",
         "id": "make_7_lvl2-template_search-1",
         "name": "make_7_lvl2-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: A carboxylic acid can be converted to an amide by reaction with an amine in the presence of a coupling agent. Common coupling agents include carbodiimides (like DCC or EDC) or uronium salts (like HATU or TBTU). The reaction typically proceeds via the formation of an activated ester intermediate, which then reacts with the amine to form the desired amide bond. Therefore, a carbon-nitrogen bond is formed while a carbon-oxygen is broken as the result of breaking the 'aliphatic carboxylic acid'.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20336,6 +21497,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "93eca8dd-f8ef-4ee1-b078-3cebaf7f7990",
         "id": "make_7_lvl2-apply_template-1",
         "name": "make_7_lvl2-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl2-template_search-1 to the molecule below?",
@@ -20349,6 +21511,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "8b5dd45e-6dec-41b3-9e57-689831e5b21d",
         "id": "make_7_lvl2-template_search-2",
         "name": "make_7_lvl2-template_search-2",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Doebner Modification is a reaction in which an aromatic aldehyde reacts with malonic acid (HOOC-CH2-COOH) under base (e.g., piperidine/pyridine or ammonium acetate) to give an alpha,beta-unsaturated carboxylic acid (the new alkene) with decarboxylation. During this reaction, a carbon-carbon double bond is formed, while a carbon-carbon bond and a carbon-oxygen bond are broken. Additionally, a 'C-C double bond' functional group is formed.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20366,6 +21529,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "ca09687f-9b1b-40ca-80b6-764aa76b9661",
         "id": "make_7_lvl2-apply_template-2",
         "name": "make_7_lvl2-apply_template-2",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl2-template_search-2 to the molecule below?",
@@ -20379,6 +21543,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "5159fdd5-49b9-45b8-a3e3-f6f7fb91633c",
         "id": "make_7_lvl2-template_search-3",
         "name": "make_7_lvl2-template_search-3",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: Sulfonamide formation occurs when an amine reacts with a sulfonyl chloride. During the reaction, a bond between sulfur and nitrogen is formed, forming a 'sulfonamides' functional group.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20396,6 +21561,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "8f9260cf-cc5f-4d95-8c77-bd607c85a0d4",
         "id": "make_7_lvl2-apply_template-3",
         "name": "make_7_lvl2-apply_template-3",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl2-template_search-3 to the molecule below?",
@@ -20409,6 +21575,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "53fedf42-07b1-4895-9fe8-9d25b0424eb7",
         "id": "make_7_lvl2-build_complete_route",
         "name": "make_7_lvl2-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -20423,6 +21590,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "f64732b1-164d-4e7c-9377-756c1aa549a7",
         "id": "make_8_lvl2-template_search-1",
         "name": "make_8_lvl2-template_search-1",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: An aromatic amine attacks the electrophilic sulfur of phenylsulfonyl chloride, then the intermediate collapses to expel Cl⁻ and base deprotonates the N-H to give the sulfonamide. 'sulfonamides' functional group is formed, (N-S bond) while a (S-Cl bond) is broken.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20440,6 +21608,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "b96a2d78-b383-4a0d-85ca-00d95705c5c1",
         "id": "make_8_lvl2-apply_template-1",
         "name": "make_8_lvl2-apply_template-1",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-1 to the molecule below?",
@@ -20453,6 +21622,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "cf15df7a-9ef2-446e-82d5-61ae6269cb38",
         "id": "make_8_lvl2-template_search-2",
         "name": "make_8_lvl2-template_search-2",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The reduction of nitro groups to amines can be achieved using various reducing agents. Common methods include catalytic hydrogenation (using hydrogen gas and a metal catalyst such as palladium on carbon, Pt, or Raney nickel) or chemical reduction using reagents like iron and hydrochloric acid (Fe/HCl), tin and hydrochloric acid (Sn/HCl), or zinc and ammonium chloride (Zn/NH4Cl). These methods effectively convert the 'nitro' group (-NO2) to an 'primary amines' group (-NH2) while preserving other functional groups in the molecule, and a bond between O and N being broken during the process.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20470,6 +21640,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "8acb6ccc-61b4-4934-a3da-1945145aaa57",
         "id": "make_8_lvl2-apply_template-2",
         "name": "make_8_lvl2-apply_template-2",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-2 to the molecule below?",
@@ -20483,6 +21654,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "4b90afab-efef-459d-8d4e-fd6f27cdba65",
         "id": "make_8_lvl2-template_search-3",
         "name": "make_8_lvl2-template_search-3",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: During an Nucleophilic Aromatic Substitution (S_NAr) reaction, a nucleophile replaces a leaving group (such as a halogen) on an aromatic ring. This reaction typically occurs when the aromatic ring is activated by electron-withdrawing groups (like nitro groups) that stabilize the negative charge in the intermediate Meisenheimer complex. The nucleophile attacks the carbon atom bearing the leaving group, leading to the formation of a new carbon-nucleophile bond and the departure of the leaving group. For example, when the nucleophile is an amine, a carbon-nitrogen bond is formed while a carbon-halogen bond is broken, breaking an 'halide' functional group.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20500,6 +21672,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "5eb8fb88-44b0-493c-b7be-4144e0bb7192",
         "id": "make_8_lvl2-apply_template-3",
         "name": "make_8_lvl2-apply_template-3",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-3 to the molecule below?",
@@ -20513,6 +21686,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "e51150d0-c5e9-4904-9aab-6cb0db1b29e3",
         "id": "make_8_lvl2-template_search-4",
         "name": "make_8_lvl2-template_search-4",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Electrophilic Bromination of an aromatic ring involves the substitution of a hydrogen atom on the aromatic ring with a bromine atom. This reaction is typically carried out using bromine (Br2) in the presence of a Lewis acid catalyst, such as iron(III) bromide (FeBr3) or aluminum bromide (AlBr3). The Lewis acid activates the bromine molecule, generating a more electrophilic species that can attack the aromatic ring, leading to the formation of a new carbon-bromine bond, and an 'halide' functional group is formed.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20530,6 +21704,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "144e95e7-9427-4a75-823c-f0bf21d5e624",
         "id": "make_8_lvl2-apply_template-4",
         "name": "make_8_lvl2-apply_template-4",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-4 to the molecule below?",
@@ -20543,6 +21718,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "2c46f4af-62ac-499b-acb7-d09a6d5a6664",
         "id": "make_8_lvl2-template_search-5",
         "name": "make_8_lvl2-template_search-5",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: For fully reducing a ketone into an alkane, the Wolff-Kishner reduction can be employed. This reaction involves the conversion of the ketone into a hydrazone intermediate using hydrazine (NH2NH2) under basic conditions, followed by heating with a strong base (like KOH) to eliminate nitrogen gas and form the corresponding alkane. During the entire process, the O-H bond of the ketone is broken, and obviously a 'ketones' functional group as well.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20560,6 +21736,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "fe971b05-b76f-4704-a987-00f892f883d1",
         "id": "make_8_lvl2-apply_template-5",
         "name": "make_8_lvl2-apply_template-5",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-5 to the molecule below?",
@@ -20573,6 +21750,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "90481dbf-02c9-4e03-80d7-a7c4e4db8729",
         "id": "make_8_lvl2-template_search-6",
         "name": "make_8_lvl2-template_search-6",
         "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: In the cyclization of chalcones to flavanones, an intramolecular Michael addition occurs where the nucleophilic enolate of the ketone attacks the electrophilic beta-carbon of the alpha,beta-unsaturated carbonyl system. This reaction is typically catalyzed by a base or acid and results in the formation of a new carbon-carbon bond, leading to the cyclic flavanone structure. During the reaction, a C-C and a C-O bond are formed, while a C-O bonds is broken. About the functional groups, a 'ether oxygens' are formed, and 'aromatic hydroxyls' and 'ketones' are broken.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -20590,6 +21768,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "40a0f776-1370-4bf3-bc94-13484943e813",
         "id": "make_8_lvl2-apply_template-6",
         "name": "make_8_lvl2-apply_template-6",
         "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-6 to the molecule below?",
@@ -20603,6 +21782,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "0f612ab0-cdc4-455c-a311-e24178a6394f",
         "id": "make_8_lvl2-build_complete_route",
         "name": "make_8_lvl2-build_complete_route",
         "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -20621,6 +21801,7 @@ const CORRAL_DATA = {
       "level_1": {
         "tasks": [
           {
+            "_uid": "14175617-eec5-4cc4-b327-d60f73428105",
             "id": "make_1_lvl1",
             "name": "make_1_lvl1",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES [CH2:1]=[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)[C@@H:9]1[CH2:10][CH2:11][CH2:12][C@@:13]1([OH:14])[C:15]([F:16])([F:17])[F:18]. The route must have at least 1 reactions.  You should use the template/s ['1914384'] in this order.",
@@ -20643,6 +21824,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "65981e04-31c5-4eaa-9686-fb3d01a1978a",
             "id": "make_2_lvl1",
             "name": "make_2_lvl1",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC([C@]12CC=CC[C@H]1C(C2)=O)=O. The route must have at least 1 reactions.  You should use the template/s ['1914385'] in this order.",
@@ -20665,6 +21847,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "025eb403-581b-48c0-aefa-b49be1c79469",
             "id": "make_3_lvl1",
             "name": "make_3_lvl1",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC(C1(C=C1[Si](C)(C)C)/C=C/C2=CC=CC=C2)=O. The route must have at least 1 reactions.  You should use the template/s ['1914386'] in this order.",
@@ -20687,6 +21870,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "015dab17-e4a9-4339-b4cc-6f144d5bd015",
             "id": "make_4_lvl1",
             "name": "make_4_lvl1",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES C=C(C1=CC=C(OC)C=C1)C2=CC=C(OC)C=C2. The route must have at least 1 reactions.  You should use the template/s ['1679747'] in this order.",
@@ -20709,6 +21893,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c99c7f39-660f-444f-9287-a7d798524056",
             "id": "make_5_lvl1",
             "name": "make_5_lvl1",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O[C@H]1C[C@@H](O[C@@H]([C@@H]1C)/C=C(CO)/C)C/C=C/C=C/C(O)=O. The route must have at least 5 reactions.  You should use the template/s ['29646', '1914389', '1914390', '149040', '1914391'] in this order.",
@@ -20731,6 +21916,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "83f3ba91-6d6e-4cc1-9343-3d8c10104c82",
             "id": "make_6_lvl1",
             "name": "make_6_lvl1",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1. The route must have at least 3 reactions.  You should use the template/s ['1914393', '1914394', '1914395'] in this order.",
@@ -20753,6 +21939,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "364a3996-9f97-4faa-a0ec-52aa78ab923e",
             "id": "make_7_lvl1",
             "name": "make_7_lvl1",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES Cc1ccc(NS(=O)(=O)c2ccc(/C=C/C(=O)Nc3ccccc3N)cc2)cc1. The route must have at least 3 reactions.  You should use the template/s ['324324', '1914396', '733'] in this order.",
@@ -20775,6 +21962,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d6288072-e79c-4d3e-9871-e731a0a62b33",
             "id": "make_8_lvl1",
             "name": "make_8_lvl1",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O. The route must have at least 6 reactions.  You should use the template/s ['20810', '2895', '1914397', '1914398', '1914399', '74054'] in this order.",
@@ -20799,6 +21987,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "6d9b51ec-3ea3-42a0-980e-946ca37d8da3",
             "id": "make_1_lvl1-template_search-1",
             "name": "make_1_lvl1-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template 1914384?",
@@ -20816,6 +22005,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "a1e5be17-a28e-4bf2-8722-380befea2156",
             "id": "make_1_lvl1-apply_template-1",
             "name": "make_1_lvl1-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_1_lvl1-template_search-1 to the molecule below?",
@@ -20829,6 +22019,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "29cf9eee-c38f-429f-b7cb-1c7ea09786bc",
             "id": "make_1_lvl1-build_complete_route",
             "name": "make_1_lvl1-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -20843,6 +22034,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6c078e4d-a151-41ce-8a25-7b7ec4733668",
             "id": "make_2_lvl1-template_search-1",
             "name": "make_2_lvl1-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template 1914385?",
@@ -20860,6 +22052,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d84cae0f-989e-4693-ba41-feea72072585",
             "id": "make_2_lvl1-apply_template-1",
             "name": "make_2_lvl1-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_2_lvl1-template_search-1 to the molecule below?",
@@ -20873,6 +22066,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "30685d7c-4699-4def-844c-e5b7fc4e0a04",
             "id": "make_2_lvl1-build_complete_route",
             "name": "make_2_lvl1-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -20887,6 +22081,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7e606a6d-1968-44cf-8d99-a74f763da5be",
             "id": "make_3_lvl1-template_search-1",
             "name": "make_3_lvl1-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template 1914386?",
@@ -20904,6 +22099,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6888fda1-84e1-4dfe-8f8a-b4d744465845",
             "id": "make_3_lvl1-apply_template-1",
             "name": "make_3_lvl1-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_3_lvl1-template_search-1 to the molecule below?",
@@ -20917,6 +22113,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1b009100-69d1-4390-bacf-898cec40ae93",
             "id": "make_3_lvl1-build_complete_route",
             "name": "make_3_lvl1-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -20931,6 +22128,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "290ad3ec-a0ef-4937-84e4-1ada8724caa8",
             "id": "make_4_lvl1-template_search-1",
             "name": "make_4_lvl1-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template 1679747?",
@@ -20948,6 +22146,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "badeb690-7dea-4431-a39d-3fba5afa324a",
             "id": "make_4_lvl1-apply_template-1",
             "name": "make_4_lvl1-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_4_lvl1-template_search-1 to the molecule below?",
@@ -20961,6 +22160,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "62b2d1b6-b178-4034-9398-12f708b299d0",
             "id": "make_4_lvl1-build_complete_route",
             "name": "make_4_lvl1-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -20975,6 +22175,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "632bcbf0-9606-4567-85ae-588e437dbf32",
             "id": "make_5_lvl1-template_search-1",
             "name": "make_5_lvl1-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template 29646?",
@@ -20992,6 +22193,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "afc1cac4-5add-4b3a-8a8a-1c529ff16a9b",
             "id": "make_5_lvl1-apply_template-1",
             "name": "make_5_lvl1-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-1 to the molecule below?",
@@ -21005,6 +22207,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "87baa6e5-1014-4508-83a8-309e9c94978c",
             "id": "make_5_lvl1-template_search-2",
             "name": "make_5_lvl1-template_search-2",
             "description": "Can you return the `mapped_rxn` associated with the template 1914389?",
@@ -21022,6 +22225,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6cb025fa-f48f-4a8c-922c-469ea8f78597",
             "id": "make_5_lvl1-apply_template-2",
             "name": "make_5_lvl1-apply_template-2",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-2 to the molecule below?",
@@ -21035,6 +22239,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c8754014-13e9-499c-8417-ba60867479ec",
             "id": "make_5_lvl1-template_search-3",
             "name": "make_5_lvl1-template_search-3",
             "description": "Can you return the `mapped_rxn` associated with the template 1914390?",
@@ -21052,6 +22257,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "954c0472-3393-4eb5-b4a7-d0816a342fc3",
             "id": "make_5_lvl1-apply_template-3",
             "name": "make_5_lvl1-apply_template-3",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-3 to the molecule below?",
@@ -21065,6 +22271,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "c6cc7d79-d670-495a-911c-9940406be332",
             "id": "make_5_lvl1-template_search-4",
             "name": "make_5_lvl1-template_search-4",
             "description": "Can you return the `mapped_rxn` associated with the template 149040?",
@@ -21082,6 +22289,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "5045b1a0-5790-4dde-8911-21b20411fa06",
             "id": "make_5_lvl1-apply_template-4",
             "name": "make_5_lvl1-apply_template-4",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-4 to the molecule below?",
@@ -21095,6 +22303,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "7882e488-2ac5-4481-858a-2dff4d72f713",
             "id": "make_5_lvl1-template_search-5",
             "name": "make_5_lvl1-template_search-5",
             "description": "Can you return the `mapped_rxn` associated with the template 1914391?",
@@ -21112,6 +22321,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "014f0801-5462-4fb2-ac82-947e39c59bec",
             "id": "make_5_lvl1-apply_template-5",
             "name": "make_5_lvl1-apply_template-5",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl1-template_search-5 to the molecule below?",
@@ -21125,6 +22335,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "38fc8c2a-3e0c-4f03-967b-7060bd8e5c2f",
             "id": "make_5_lvl1-build_complete_route",
             "name": "make_5_lvl1-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -21139,6 +22350,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d418791b-d5e8-49d6-822e-8431dac7af14",
             "id": "make_6_lvl1-template_search-1",
             "name": "make_6_lvl1-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template 1914393?",
@@ -21156,6 +22368,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1e436d9f-3d17-42f0-8c23-cb5d3c365647",
             "id": "make_6_lvl1-apply_template-1",
             "name": "make_6_lvl1-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl1-template_search-1 to the molecule below?",
@@ -21169,6 +22382,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "21d266f1-74e1-4db2-b373-0bfceb9569af",
             "id": "make_6_lvl1-template_search-2",
             "name": "make_6_lvl1-template_search-2",
             "description": "Can you return the `mapped_rxn` associated with the template 1914394?",
@@ -21186,6 +22400,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "19343719-a61b-4708-831c-ede7f5ba62d9",
             "id": "make_6_lvl1-apply_template-2",
             "name": "make_6_lvl1-apply_template-2",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl1-template_search-2 to the molecule below?",
@@ -21199,6 +22414,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "697be2b5-7036-4cba-bdd2-3a5900c2bfae",
             "id": "make_6_lvl1-template_search-3",
             "name": "make_6_lvl1-template_search-3",
             "description": "Can you return the `mapped_rxn` associated with the template 1914395?",
@@ -21216,6 +22432,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "697d7c0d-2461-4591-a17f-1a7b036cab5f",
             "id": "make_6_lvl1-apply_template-3",
             "name": "make_6_lvl1-apply_template-3",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl1-template_search-3 to the molecule below?",
@@ -21229,6 +22446,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "cefd4f48-07cf-4b1b-82ba-89ce128ce74e",
             "id": "make_6_lvl1-build_complete_route",
             "name": "make_6_lvl1-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -21243,6 +22461,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "b71a3c70-9f87-4571-9199-ff6504cd94e5",
             "id": "make_7_lvl1-template_search-1",
             "name": "make_7_lvl1-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template 324324?",
@@ -21260,6 +22479,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "8b625c62-ee9b-4094-850f-ec7a04a5a726",
             "id": "make_7_lvl1-apply_template-1",
             "name": "make_7_lvl1-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl1-template_search-1 to the molecule below?",
@@ -21273,6 +22493,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "2a80fe3b-46a6-42f4-89e9-ade9f978ca4b",
             "id": "make_7_lvl1-template_search-2",
             "name": "make_7_lvl1-template_search-2",
             "description": "Can you return the `mapped_rxn` associated with the template 1914396?",
@@ -21290,6 +22511,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "d9744dd0-cb01-4986-aab1-9daa82546c35",
             "id": "make_7_lvl1-apply_template-2",
             "name": "make_7_lvl1-apply_template-2",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl1-template_search-2 to the molecule below?",
@@ -21303,6 +22525,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "245c2972-c0e3-4403-bdf0-dc6f2cfb4d44",
             "id": "make_7_lvl1-template_search-3",
             "name": "make_7_lvl1-template_search-3",
             "description": "Can you return the `mapped_rxn` associated with the template 733?",
@@ -21320,6 +22543,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "db44a00f-0ebd-48f1-85e2-1a2ec5da271d",
             "id": "make_7_lvl1-apply_template-3",
             "name": "make_7_lvl1-apply_template-3",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl1-template_search-3 to the molecule below?",
@@ -21333,6 +22557,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "5a7f20bd-bded-4d73-a78d-2f2772ebb16f",
             "id": "make_7_lvl1-build_complete_route",
             "name": "make_7_lvl1-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -21347,6 +22572,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "cf554fd4-9926-48ae-9981-a3dba21358c6",
             "id": "make_8_lvl1-template_search-1",
             "name": "make_8_lvl1-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template 20810?",
@@ -21364,6 +22590,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "1294256c-af56-430f-b783-fec486278e8b",
             "id": "make_8_lvl1-apply_template-1",
             "name": "make_8_lvl1-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-1 to the molecule below?",
@@ -21377,6 +22604,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "b15b054a-d845-4463-b455-a4eb38836196",
             "id": "make_8_lvl1-template_search-2",
             "name": "make_8_lvl1-template_search-2",
             "description": "Can you return the `mapped_rxn` associated with the template 2895?",
@@ -21394,6 +22622,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "b4610710-9692-4646-b066-8ad43d4965fc",
             "id": "make_8_lvl1-apply_template-2",
             "name": "make_8_lvl1-apply_template-2",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-2 to the molecule below?",
@@ -21407,6 +22636,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "46362b98-85e7-4b63-ad6d-a173f46f6417",
             "id": "make_8_lvl1-template_search-3",
             "name": "make_8_lvl1-template_search-3",
             "description": "Can you return the `mapped_rxn` associated with the template 1914397?",
@@ -21424,6 +22654,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "0b169c88-b0cc-4556-82a4-240794595b70",
             "id": "make_8_lvl1-apply_template-3",
             "name": "make_8_lvl1-apply_template-3",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-3 to the molecule below?",
@@ -21437,6 +22668,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "a90ebce6-d2d5-49a1-8fa0-66dcfd7bab09",
             "id": "make_8_lvl1-template_search-4",
             "name": "make_8_lvl1-template_search-4",
             "description": "Can you return the `mapped_rxn` associated with the template 1914398?",
@@ -21454,6 +22686,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ee0032e6-6813-44d5-b92d-4590de180697",
             "id": "make_8_lvl1-apply_template-4",
             "name": "make_8_lvl1-apply_template-4",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-4 to the molecule below?",
@@ -21467,6 +22700,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "2ed1b50b-920b-440a-9d52-232535fd4f9d",
             "id": "make_8_lvl1-template_search-5",
             "name": "make_8_lvl1-template_search-5",
             "description": "Can you return the `mapped_rxn` associated with the template 1914399?",
@@ -21484,6 +22718,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "a33c9ebe-ce9a-4914-8684-e0c091d485c5",
             "id": "make_8_lvl1-apply_template-5",
             "name": "make_8_lvl1-apply_template-5",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-5 to the molecule below?",
@@ -21497,6 +22732,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "6e3759f4-c3fb-4945-b23c-33537688d06f",
             "id": "make_8_lvl1-template_search-6",
             "name": "make_8_lvl1-template_search-6",
             "description": "Can you return the `mapped_rxn` associated with the template 74054?",
@@ -21514,6 +22750,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "65e1c383-701d-4554-b879-643df4cde216",
             "id": "make_8_lvl1-apply_template-6",
             "name": "make_8_lvl1-apply_template-6",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl1-template_search-6 to the molecule below?",
@@ -21527,6 +22764,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "aee84dc9-f169-45a8-8a02-fb938d16dca5",
             "id": "make_8_lvl1-build_complete_route",
             "name": "make_8_lvl1-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -21545,6 +22783,7 @@ const CORRAL_DATA = {
       "level_2": {
         "tasks": [
           {
+            "_uid": "725bacec-1b0a-496c-8fe2-b5487b9bd906",
             "id": "make_1_lvl2",
             "name": "make_1_lvl2",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES [CH2:1]=[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)[C@@H:9]1[CH2:10][CH2:11][CH2:12][C@@:13]1([OH:14])[C:15]([F:16])([F:17])[F:18]. The route must have 1 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): In a carbonyl-ene reaction, an alkene reacts with an allylic hydrogen and a carbonyl group to form a new carbon-carbon bondm. This reaction can take place between parts of the same molecule. The reaction typically requires a Lewis acid catalyst and proceeds via a concerted mechanism. The stereochemistry of the product is influenced by the geometry of the alkene and the carbonyl group. The result of the reaction is the formation of a new carbon-carbon bond and a new stereocenter at the site of the allylic hydrogen, in which one of the substituents is going to be a hydroxyl group. Additionally, the reaction involves the change in the order of a C=C bond to a C-C bond, and a C=O bond to a C-O bond. 'ketones' and 'C-C double bonds' are gone, while a 'aliphatic hydroxyl' and a 'five-membered rings' are formed. A Carbon-Carbon bond is formed.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -21567,6 +22806,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "63ec3072-0b2e-4f5f-bf5d-6259ad72393a",
             "id": "make_2_lvl2",
             "name": "make_2_lvl2",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC([C@]12CC=CC[C@H]1C(C2)=O)=O. The route must have 1 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): A Dies-Alder reaction is a [4+2] cycloaddition between a conjugated diene and a dienophile, resulting generally in the formation of a six-membered ring. The reaction is stereospecific, meaning that the stereochemistry of the reactants is preserved in the product. The reaction typically proceeds via a concerted mechanism, where the pi electrons of the diene and dienophile interact to form new sigma bonds. The reaction can be catalyzed by heat or Lewis acids, and the regioselectivity of the product can be influenced by substituents on the diene and dienophile. As a result of the reaction, a new carbon-carbon bond is formed, and the order changes from C=C to C-C, and from C=C to C-C as well.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -21589,6 +22829,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "04cca961-b460-4848-8807-d93ab2e70bdd",
             "id": "make_3_lvl2",
             "name": "make_3_lvl2",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC(C1(C=C1[Si](C)(C)C)/C=C/C2=CC=CC=C2)=O. The route must have 1 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): In a cycloaddition reaction, two unsaturated molecules (or parts of the same molecule) combine to form a cyclic product. The reaction typically involves the formation of new sigma bonds between the reacting species, resulting in the creation of a ring structure. During the reaction a carbon-carbon bond is formed, while a carbon-oxygen is broken. As a result of these transformations, a 'ketones' and 'C-C triple bonds' functional groups are lost.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -21611,6 +22852,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "d76e2769-aeb1-4687-9796-d4bcfbee34ff",
             "id": "make_4_lvl2",
             "name": "make_4_lvl2",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES C=C(C1=CC=C(OC)C=C1)C2=CC=C(OC)C=C2. The route must have 1 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): The Peterson Reaction allows the preparation of alkenes from alpha-silylcarbanions. An intermediate beta-hydroxy silane is formed, following an elimination step to yield the alkene. Thus, a new carbon-carbon double bond is formed, while a carbon-silicon bond and a carbon-oxygen bond are broken. As a result, a 'C-C double bonds' functional group is formed, while 'ketones' and 'trimethylsilyl' groups are lost.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -21633,6 +22875,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "be016619-c387-4102-8ed4-ca36b0d567b4",
             "id": "make_5_lvl2",
             "name": "make_5_lvl2",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O[C@H]1C[C@@H](O[C@@H]([C@@H]1C)/C=C(CO)/C)C/C=C/C=C/C(O)=O. The route must have 5 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): tert-Butyldimethylsilyl (TBS or TBDMS) is a common protecting group for alcohols in organic synthesis. It is introduced using reagents such as tert-butyldimethylsilyl chloride (TBDMSCl) or tert-butyldimethylsilyl trifluoromethanesulfonate (TBDMSOTf) in the presence of a base like imidazole or pyridine. The TBS group is stable under a variety of reaction conditions, including acidic and basic environments, making it useful for multi-step syntheses. It can be removed (deprotected) using fluoride sources such as tetrabutylammonium fluoride (TBAF) or by acidic hydrolysis, regenerating the free alcohol. As a result of this reaction, a bond between oxygen and silicon is broken, and a 'aliphatic hydroxyls' functional group is formed, and a 't-butyldimethylsilyl' gone.\n\nIn the Horner-Wadsworth-Emmons reaction, the reaction of aldehydes or ketones with stabilized phosphorus ylides (phosphonate carbanions) leads to olefins with excellent E-selectivity. The overall of the reaction is a carbon-carbon bond formed, while a carbon-phosphorus bond and a carbon-oxygen are broken. As a result, an 'aliphatic carboxylic acid', and  'C-C double bonds' groups are formed.\n\nDIBAL-H is a reducing agent used in organic synthesis, particularly for the selective reduction of esters and nitriles to aldehydes. It is a complex of diisobutylaluminum hydride and is typically used in low temperatures to minimize side reactions. Overall a carbon-oxygen bond is broken, and a another carbon-oxygen bond order changes from 2 to 1, forming a 'aliphatic hydroxyls' functional group.\n\nTMSOTf can be used to protect alcohols by converting them into their corresponding trimethylsilyl (TMS) ethers. The reaction typically involves the treatment of the alcohol with TMSOTf in the presence of a base, such as triethylamine or pyridine. During the reaction a oxygen-silicon bond is broken and another one (O-Si) is formed. No functional groups are formed in the transformation, but the most notable broken is 'aliphatic hydroxyls'.\n\nThe Still-Gennari reaction is a modification of the Horner-Wadsworth-Emmons (HWE) reaction that allows for the selective formation of (Z)-alkenes from aldehydes and phosphonate esters. The reaction typically involves the use of a phosphonate ester with electron-withdrawing groups, such as bis(trifluoroethyl) or bis(2,2,2-trifluoroethyl) groups, which helps to stabilize the carbanion intermediate formed during the reaction. Thus, a carbon-carbon double bond, and a carbon-oxygen are formed, while a carbon-phosphorus bond, a carbon-carbon bond and a carbon-oxygen bond are broken. Additionally, the triple bond of an alkyne is changed to a single bond. As a result 'C-C double bonds' and  'carboxylic esters' functional groups are formed.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -21655,6 +22898,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "cdee4f23-a939-42e1-838b-08931afeb98f",
             "id": "make_6_lvl2",
             "name": "make_6_lvl2",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1. The route must have 3 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): The Sn2 reaction is a bimolecular nucleophilic substitution reaction where a nucleophile attacks an electrophilic carbon atom, leading to the displacement of a leaving group. The reaction proceeds via a single transition state, resulting in the inversion of stereochemistry at the carbon center. Common nucleophiles used in Sn2 reactions include hydroxide ions (OH-), alkoxide ions (RO-), and cyanide ions (CN-). The reaction typically occurs in polar aprotic solvents, which help to stabilize the transition state and enhance the nucleophilicity of the attacking species. As a result of the reaction, a new carbon-nucleophile bond is formed while a carbon-leaving group bond is broken, e.g. C-N formed and C-Cl gone breaking an 'halide' functional group.\n\nThe Friedel-Crafts acylation is a type of electrophilic aromatic substitution reaction that introduces an acyl group onto an aromatic ring. The reaction typically involves the use of an acyl chloride (RCOCl) in the presence of a Lewis acid catalyst, such as aluminum chloride (AlCl3) or ferric chloride (FeCl3). The Lewis acid activates the acylating agent, generating a more electrophilic species that can attack the aromatic ring, leading to the formation of a new carbon-carbon bond and breaking a carbon-chlorine bond. An 'halide' functional group is gone during the transformation.\n\nA substitution reaction can be used to replace a leaving group (such as a hydroxyl group) with an halogens (like chlorine, bromine, or iodine). This can be achieved using reagents such as hydrogen halides (HF), thionyl chloride (SOCl2), phosphorus tribromide (PBr3), or phosphorus triiodide (PI3). For the example with hidroxyl as leaving group, a Carbon-Oxygen bond is broken, and a Carbon-Halogen bond is formed, breaking an 'aliphatic hydroxyl' functional group.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -21677,6 +22921,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "43c4d922-b605-452e-bdcd-92b2423b2447",
             "id": "make_7_lvl2",
             "name": "make_7_lvl2",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES Cc1ccc(NS(=O)(=O)c2ccc(/C=C/C(=O)Nc3ccccc3N)cc2)cc1. The route must have 3 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): A carboxylic acid can be converted to an amide by reaction with an amine in the presence of a coupling agent. Common coupling agents include carbodiimides (like DCC or EDC) or uronium salts (like HATU or TBTU). The reaction typically proceeds via the formation of an activated ester intermediate, which then reacts with the amine to form the desired amide bond. Therefore, a carbon-nitrogen bond is formed while a carbon-oxygen is broken as the result of breaking the 'aliphatic carboxylic acid'.\n\nThe Doebner Modification is a reaction in which an aromatic aldehyde reacts with malonic acid (HOOC-CH2-COOH) under base (e.g., piperidine/pyridine or ammonium acetate) to give an alpha,beta-unsaturated carboxylic acid (the new alkene) with decarboxylation. During this reaction, a carbon-carbon double bond is formed, while a carbon-carbon bond and a carbon-oxygen bond are broken. Additionally, a 'C-C double bond' functional group is formed.\n\nSulfonamide formation occurs when an amine reacts with a sulfonyl chloride. During the reaction, a bond between sulfur and nitrogen is formed, forming a 'sulfonamides' functional group.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -21699,6 +22944,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "795e9c5f-61ea-4868-9264-d64a3a4431f7",
             "id": "make_8_lvl2",
             "name": "make_8_lvl2",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O. The route must have 6 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): An aromatic amine attacks the electrophilic sulfur of phenylsulfonyl chloride, then the intermediate collapses to expel Cl⁻ and base deprotonates the N-H to give the sulfonamide. 'sulfonamides' functional group is formed, (N-S bond) while a (S-Cl bond) is broken.\n\nThe reduction of nitro groups to amines can be achieved using various reducing agents. Common methods include catalytic hydrogenation (using hydrogen gas and a metal catalyst such as palladium on carbon, Pt, or Raney nickel) or chemical reduction using reagents like iron and hydrochloric acid (Fe/HCl), tin and hydrochloric acid (Sn/HCl), or zinc and ammonium chloride (Zn/NH4Cl). These methods effectively convert the 'nitro' group (-NO2) to an 'primary amines' group (-NH2) while preserving other functional groups in the molecule, and a bond between O and N being broken during the process.\n\nDuring an Nucleophilic Aromatic Substitution (S_NAr) reaction, a nucleophile replaces a leaving group (such as a halogen) on an aromatic ring. This reaction typically occurs when the aromatic ring is activated by electron-withdrawing groups (like nitro groups) that stabilize the negative charge in the intermediate Meisenheimer complex. The nucleophile attacks the carbon atom bearing the leaving group, leading to the formation of a new carbon-nucleophile bond and the departure of the leaving group. For example, when the nucleophile is an amine, a carbon-nitrogen bond is formed while a carbon-halogen bond is broken, breaking an 'halide' functional group.\n\nThe Electrophilic Bromination of an aromatic ring involves the substitution of a hydrogen atom on the aromatic ring with a bromine atom. This reaction is typically carried out using bromine (Br2) in the presence of a Lewis acid catalyst, such as iron(III) bromide (FeBr3) or aluminum bromide (AlBr3). The Lewis acid activates the bromine molecule, generating a more electrophilic species that can attack the aromatic ring, leading to the formation of a new carbon-bromine bond, and an 'halide' functional group is formed.\n\nFor fully reducing a ketone into an alkane, the Wolff-Kishner reduction can be employed. This reaction involves the conversion of the ketone into a hydrazone intermediate using hydrazine (NH2NH2) under basic conditions, followed by heating with a strong base (like KOH) to eliminate nitrogen gas and form the corresponding alkane. During the entire process, the O-H bond of the ketone is broken, and obviously a 'ketones' functional group as well.\n\nIn the cyclization of chalcones to flavanones, an intramolecular Michael addition occurs where the nucleophilic enolate of the ketone attacks the electrophilic beta-carbon of the alpha,beta-unsaturated carbonyl system. This reaction is typically catalyzed by a base or acid and results in the formation of a new carbon-carbon bond, leading to the cyclic flavanone structure. During the reaction, a C-C and a C-O bond are formed, while a C-O bonds is broken. About the functional groups, a 'ether oxygens' are formed, and 'aromatic hydroxyls' and 'ketones' are broken.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.",
@@ -21723,6 +22969,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "ede9a84b-7d67-4e86-b840-f7f91e0e9545",
             "id": "make_1_lvl2-template_search-1",
             "name": "make_1_lvl2-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: In a carbonyl-ene reaction, an alkene reacts with an allylic hydrogen and a carbonyl group to form a new carbon-carbon bondm. This reaction can take place between parts of the same molecule. The reaction typically requires a Lewis acid catalyst and proceeds via a concerted mechanism. The stereochemistry of the product is influenced by the geometry of the alkene and the carbonyl group. The result of the reaction is the formation of a new carbon-carbon bond and a new stereocenter at the site of the allylic hydrogen, in which one of the substituents is going to be a hydroxyl group. Additionally, the reaction involves the change in the order of a C=C bond to a C-C bond, and a C=O bond to a C-O bond. 'ketones' and 'C-C double bonds' are gone, while a 'aliphatic hydroxyl' and a 'five-membered rings' are formed. A Carbon-Carbon bond is formed.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -21740,6 +22987,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "1c2724b7-5a05-4cd6-b2dd-e6412f620737",
             "id": "make_1_lvl2-apply_template-1",
             "name": "make_1_lvl2-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_1_lvl2-template_search-1 to the molecule below?",
@@ -21753,6 +23001,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "80ec59f9-139d-480c-a96b-55f1bdf0933b",
             "id": "make_1_lvl2-build_complete_route",
             "name": "make_1_lvl2-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -21767,6 +23016,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "76676b30-7ead-4f7f-81c3-0ec09adc41ce",
             "id": "make_2_lvl2-template_search-1",
             "name": "make_2_lvl2-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: A Dies-Alder reaction is a [4+2] cycloaddition between a conjugated diene and a dienophile, resulting generally in the formation of a six-membered ring. The reaction is stereospecific, meaning that the stereochemistry of the reactants is preserved in the product. The reaction typically proceeds via a concerted mechanism, where the pi electrons of the diene and dienophile interact to form new sigma bonds. The reaction can be catalyzed by heat or Lewis acids, and the regioselectivity of the product can be influenced by substituents on the diene and dienophile. As a result of the reaction, a new carbon-carbon bond is formed, and the order changes from C=C to C-C, and from C=C to C-C as well.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -21784,6 +23034,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "4a153a7b-31af-4249-9737-ead5f0ce6e32",
             "id": "make_2_lvl2-apply_template-1",
             "name": "make_2_lvl2-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_2_lvl2-template_search-1 to the molecule below?",
@@ -21797,6 +23048,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "20559a45-07e1-42ed-bc27-9428a22c0fc2",
             "id": "make_2_lvl2-build_complete_route",
             "name": "make_2_lvl2-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -21811,6 +23063,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "cb310cab-5e27-4990-91d7-c61b3e35a6fa",
             "id": "make_3_lvl2-template_search-1",
             "name": "make_3_lvl2-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: In a cycloaddition reaction, two unsaturated molecules (or parts of the same molecule) combine to form a cyclic product. The reaction typically involves the formation of new sigma bonds between the reacting species, resulting in the creation of a ring structure. During the reaction a carbon-carbon bond is formed, while a carbon-oxygen is broken. As a result of these transformations, a 'ketones' and 'C-C triple bonds' functional groups are lost.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -21828,6 +23081,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "fdf56a4f-8374-4cec-be3d-975d3fe8ce25",
             "id": "make_3_lvl2-apply_template-1",
             "name": "make_3_lvl2-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_3_lvl2-template_search-1 to the molecule below?",
@@ -21841,6 +23095,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "79635219-fd90-4bb2-93b9-cdc81638b9f3",
             "id": "make_3_lvl2-build_complete_route",
             "name": "make_3_lvl2-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -21855,6 +23110,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "6679ea90-6fd2-4d7a-b5a2-757f7cd8fc6c",
             "id": "make_4_lvl2-template_search-1",
             "name": "make_4_lvl2-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Peterson Reaction allows the preparation of alkenes from alpha-silylcarbanions. An intermediate beta-hydroxy silane is formed, following an elimination step to yield the alkene. Thus, a new carbon-carbon double bond is formed, while a carbon-silicon bond and a carbon-oxygen bond are broken. As a result, a 'C-C double bonds' functional group is formed, while 'ketones' and 'trimethylsilyl' groups are lost.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -21872,6 +23128,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "16db7bc8-491e-46a4-9705-90f52237b2df",
             "id": "make_4_lvl2-apply_template-1",
             "name": "make_4_lvl2-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_4_lvl2-template_search-1 to the molecule below?",
@@ -21885,6 +23142,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "a6f48a8e-0980-4bce-bead-a4b5d62b05f3",
             "id": "make_4_lvl2-build_complete_route",
             "name": "make_4_lvl2-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -21899,6 +23157,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "22ab0ecd-1443-46d4-b425-41c1ab2774e2",
             "id": "make_5_lvl2-template_search-1",
             "name": "make_5_lvl2-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: tert-Butyldimethylsilyl (TBS or TBDMS) is a common protecting group for alcohols in organic synthesis. It is introduced using reagents such as tert-butyldimethylsilyl chloride (TBDMSCl) or tert-butyldimethylsilyl trifluoromethanesulfonate (TBDMSOTf) in the presence of a base like imidazole or pyridine. The TBS group is stable under a variety of reaction conditions, including acidic and basic environments, making it useful for multi-step syntheses. It can be removed (deprotected) using fluoride sources such as tetrabutylammonium fluoride (TBAF) or by acidic hydrolysis, regenerating the free alcohol. As a result of this reaction, a bond between oxygen and silicon is broken, and a 'aliphatic hydroxyls' functional group is formed, and a 't-butyldimethylsilyl' gone.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -21916,6 +23175,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "3d2b9149-c4b5-4ab3-b48e-ad973972c317",
             "id": "make_5_lvl2-apply_template-1",
             "name": "make_5_lvl2-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl2-template_search-1 to the molecule below?",
@@ -21929,6 +23189,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "70a3aa6e-9fa3-4486-ba9a-625285138eb2",
             "id": "make_5_lvl2-template_search-2",
             "name": "make_5_lvl2-template_search-2",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: In the Horner-Wadsworth-Emmons reaction, the reaction of aldehydes or ketones with stabilized phosphorus ylides (phosphonate carbanions) leads to olefins with excellent E-selectivity. The overall of the reaction is a carbon-carbon bond formed, while a carbon-phosphorus bond and a carbon-oxygen are broken. As a result, an 'aliphatic carboxylic acid', and  'C-C double bonds' groups are formed.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -21946,6 +23207,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "0ee4390a-46db-48ff-9346-e0af31e44c5a",
             "id": "make_5_lvl2-apply_template-2",
             "name": "make_5_lvl2-apply_template-2",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl2-template_search-2 to the molecule below?",
@@ -21959,6 +23221,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "a9520ecc-abf7-48ff-9193-bf76a4a7aada",
             "id": "make_5_lvl2-template_search-3",
             "name": "make_5_lvl2-template_search-3",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: DIBAL-H is a reducing agent used in organic synthesis, particularly for the selective reduction of esters and nitriles to aldehydes. It is a complex of diisobutylaluminum hydride and is typically used in low temperatures to minimize side reactions. Overall a carbon-oxygen bond is broken, and a another carbon-oxygen bond order changes from 2 to 1, forming a 'aliphatic hydroxyls' functional group.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -21976,6 +23239,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "112dea69-e2af-48e5-a410-ec8124fe7873",
             "id": "make_5_lvl2-apply_template-3",
             "name": "make_5_lvl2-apply_template-3",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl2-template_search-3 to the molecule below?",
@@ -21989,6 +23253,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e1dc2269-7569-4652-b28d-14edfe0b59d3",
             "id": "make_5_lvl2-template_search-4",
             "name": "make_5_lvl2-template_search-4",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: TMSOTf can be used to protect alcohols by converting them into their corresponding trimethylsilyl (TMS) ethers. The reaction typically involves the treatment of the alcohol with TMSOTf in the presence of a base, such as triethylamine or pyridine. During the reaction a oxygen-silicon bond is broken and another one (O-Si) is formed. No functional groups are formed in the transformation, but the most notable broken is 'aliphatic hydroxyls'.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22006,6 +23271,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "232912b6-88bf-4425-a8f5-a0091429551d",
             "id": "make_5_lvl2-apply_template-4",
             "name": "make_5_lvl2-apply_template-4",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl2-template_search-4 to the molecule below?",
@@ -22019,6 +23285,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "6a9005ef-43f8-45da-802f-b93fe438ba7b",
             "id": "make_5_lvl2-template_search-5",
             "name": "make_5_lvl2-template_search-5",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Still-Gennari reaction is a modification of the Horner-Wadsworth-Emmons (HWE) reaction that allows for the selective formation of (Z)-alkenes from aldehydes and phosphonate esters. The reaction typically involves the use of a phosphonate ester with electron-withdrawing groups, such as bis(trifluoroethyl) or bis(2,2,2-trifluoroethyl) groups, which helps to stabilize the carbanion intermediate formed during the reaction. Thus, a carbon-carbon double bond, and a carbon-oxygen are formed, while a carbon-phosphorus bond, a carbon-carbon bond and a carbon-oxygen bond are broken. Additionally, the triple bond of an alkyne is changed to a single bond. As a result 'C-C double bonds' and  'carboxylic esters' functional groups are formed.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22036,6 +23303,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "f195b5df-f91a-4d0c-9113-1d4c28ad6db0",
             "id": "make_5_lvl2-apply_template-5",
             "name": "make_5_lvl2-apply_template-5",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_5_lvl2-template_search-5 to the molecule below?",
@@ -22049,6 +23317,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "de711f83-491c-453c-8d31-9be2895f39ff",
             "id": "make_5_lvl2-build_complete_route",
             "name": "make_5_lvl2-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -22063,6 +23332,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "554cfcc5-0ed6-4935-8fd2-b3600b27245d",
             "id": "make_6_lvl2-template_search-1",
             "name": "make_6_lvl2-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Sn2 reaction is a bimolecular nucleophilic substitution reaction where a nucleophile attacks an electrophilic carbon atom, leading to the displacement of a leaving group. The reaction proceeds via a single transition state, resulting in the inversion of stereochemistry at the carbon center. Common nucleophiles used in Sn2 reactions include hydroxide ions (OH-), alkoxide ions (RO-), and cyanide ions (CN-). The reaction typically occurs in polar aprotic solvents, which help to stabilize the transition state and enhance the nucleophilicity of the attacking species. As a result of the reaction, a new carbon-nucleophile bond is formed while a carbon-leaving group bond is broken, e.g. C-N formed and C-Cl gone breaking an 'halide' functional group.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22080,6 +23350,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "2b5715e5-6c3f-4ce3-aca3-347b2bfa252c",
             "id": "make_6_lvl2-apply_template-1",
             "name": "make_6_lvl2-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl2-template_search-1 to the molecule below?",
@@ -22093,6 +23364,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "90dcd973-ba45-469c-b535-953cc5f81dc6",
             "id": "make_6_lvl2-template_search-2",
             "name": "make_6_lvl2-template_search-2",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Friedel-Crafts acylation is a type of electrophilic aromatic substitution reaction that introduces an acyl group onto an aromatic ring. The reaction typically involves the use of an acyl chloride (RCOCl) in the presence of a Lewis acid catalyst, such as aluminum chloride (AlCl3) or ferric chloride (FeCl3). The Lewis acid activates the acylating agent, generating a more electrophilic species that can attack the aromatic ring, leading to the formation of a new carbon-carbon bond and breaking a carbon-chlorine bond. An 'halide' functional group is gone during the transformation.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22110,6 +23382,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "808de108-0c0c-417b-bf2d-4c9c59f1d159",
             "id": "make_6_lvl2-apply_template-2",
             "name": "make_6_lvl2-apply_template-2",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl2-template_search-2 to the molecule below?",
@@ -22123,6 +23396,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "c363bfb2-a6c1-4489-bf88-b7b4be3d761f",
             "id": "make_6_lvl2-template_search-3",
             "name": "make_6_lvl2-template_search-3",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: A substitution reaction can be used to replace a leaving group (such as a hydroxyl group) with an halogens (like chlorine, bromine, or iodine). This can be achieved using reagents such as hydrogen halides (HF), thionyl chloride (SOCl2), phosphorus tribromide (PBr3), or phosphorus triiodide (PI3). For the example with hidroxyl as leaving group, a Carbon-Oxygen bond is broken, and a Carbon-Halogen bond is formed, breaking an 'aliphatic hydroxyl' functional group.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22140,6 +23414,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "b53a959f-0a96-44bd-b55e-e2ddf2276170",
             "id": "make_6_lvl2-apply_template-3",
             "name": "make_6_lvl2-apply_template-3",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_6_lvl2-template_search-3 to the molecule below?",
@@ -22153,6 +23428,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "68263ac1-7d2e-46b7-ae56-30b144e0100f",
             "id": "make_6_lvl2-build_complete_route",
             "name": "make_6_lvl2-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -22167,6 +23443,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "24d448c9-5108-4c54-a70b-4136aa29f67c",
             "id": "make_7_lvl2-template_search-1",
             "name": "make_7_lvl2-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: A carboxylic acid can be converted to an amide by reaction with an amine in the presence of a coupling agent. Common coupling agents include carbodiimides (like DCC or EDC) or uronium salts (like HATU or TBTU). The reaction typically proceeds via the formation of an activated ester intermediate, which then reacts with the amine to form the desired amide bond. Therefore, a carbon-nitrogen bond is formed while a carbon-oxygen is broken as the result of breaking the 'aliphatic carboxylic acid'.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22184,6 +23461,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "93eca8dd-f8ef-4ee1-b078-3cebaf7f7990",
             "id": "make_7_lvl2-apply_template-1",
             "name": "make_7_lvl2-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl2-template_search-1 to the molecule below?",
@@ -22197,6 +23475,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "8b5dd45e-6dec-41b3-9e57-689831e5b21d",
             "id": "make_7_lvl2-template_search-2",
             "name": "make_7_lvl2-template_search-2",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Doebner Modification is a reaction in which an aromatic aldehyde reacts with malonic acid (HOOC-CH2-COOH) under base (e.g., piperidine/pyridine or ammonium acetate) to give an alpha,beta-unsaturated carboxylic acid (the new alkene) with decarboxylation. During this reaction, a carbon-carbon double bond is formed, while a carbon-carbon bond and a carbon-oxygen bond are broken. Additionally, a 'C-C double bond' functional group is formed.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22214,6 +23493,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "ca09687f-9b1b-40ca-80b6-764aa76b9661",
             "id": "make_7_lvl2-apply_template-2",
             "name": "make_7_lvl2-apply_template-2",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl2-template_search-2 to the molecule below?",
@@ -22227,6 +23507,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "5159fdd5-49b9-45b8-a3e3-f6f7fb91633c",
             "id": "make_7_lvl2-template_search-3",
             "name": "make_7_lvl2-template_search-3",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: Sulfonamide formation occurs when an amine reacts with a sulfonyl chloride. During the reaction, a bond between sulfur and nitrogen is formed, forming a 'sulfonamides' functional group.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22244,6 +23525,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "8f9260cf-cc5f-4d95-8c77-bd607c85a0d4",
             "id": "make_7_lvl2-apply_template-3",
             "name": "make_7_lvl2-apply_template-3",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_7_lvl2-template_search-3 to the molecule below?",
@@ -22257,6 +23539,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "53fedf42-07b1-4895-9fe8-9d25b0424eb7",
             "id": "make_7_lvl2-build_complete_route",
             "name": "make_7_lvl2-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -22271,6 +23554,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "f64732b1-164d-4e7c-9377-756c1aa549a7",
             "id": "make_8_lvl2-template_search-1",
             "name": "make_8_lvl2-template_search-1",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: An aromatic amine attacks the electrophilic sulfur of phenylsulfonyl chloride, then the intermediate collapses to expel Cl⁻ and base deprotonates the N-H to give the sulfonamide. 'sulfonamides' functional group is formed, (N-S bond) while a (S-Cl bond) is broken.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22288,6 +23572,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "b96a2d78-b383-4a0d-85ca-00d95705c5c1",
             "id": "make_8_lvl2-apply_template-1",
             "name": "make_8_lvl2-apply_template-1",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-1 to the molecule below?",
@@ -22301,6 +23586,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "cf15df7a-9ef2-446e-82d5-61ae6269cb38",
             "id": "make_8_lvl2-template_search-2",
             "name": "make_8_lvl2-template_search-2",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The reduction of nitro groups to amines can be achieved using various reducing agents. Common methods include catalytic hydrogenation (using hydrogen gas and a metal catalyst such as palladium on carbon, Pt, or Raney nickel) or chemical reduction using reagents like iron and hydrochloric acid (Fe/HCl), tin and hydrochloric acid (Sn/HCl), or zinc and ammonium chloride (Zn/NH4Cl). These methods effectively convert the 'nitro' group (-NO2) to an 'primary amines' group (-NH2) while preserving other functional groups in the molecule, and a bond between O and N being broken during the process.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22318,6 +23604,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "8acb6ccc-61b4-4934-a3da-1945145aaa57",
             "id": "make_8_lvl2-apply_template-2",
             "name": "make_8_lvl2-apply_template-2",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-2 to the molecule below?",
@@ -22331,6 +23618,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "4b90afab-efef-459d-8d4e-fd6f27cdba65",
             "id": "make_8_lvl2-template_search-3",
             "name": "make_8_lvl2-template_search-3",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: During an Nucleophilic Aromatic Substitution (S_NAr) reaction, a nucleophile replaces a leaving group (such as a halogen) on an aromatic ring. This reaction typically occurs when the aromatic ring is activated by electron-withdrawing groups (like nitro groups) that stabilize the negative charge in the intermediate Meisenheimer complex. The nucleophile attacks the carbon atom bearing the leaving group, leading to the formation of a new carbon-nucleophile bond and the departure of the leaving group. For example, when the nucleophile is an amine, a carbon-nitrogen bond is formed while a carbon-halogen bond is broken, breaking an 'halide' functional group.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22348,6 +23636,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "5eb8fb88-44b0-493c-b7be-4144e0bb7192",
             "id": "make_8_lvl2-apply_template-3",
             "name": "make_8_lvl2-apply_template-3",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-3 to the molecule below?",
@@ -22361,6 +23650,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "e51150d0-c5e9-4904-9aab-6cb0db1b29e3",
             "id": "make_8_lvl2-template_search-4",
             "name": "make_8_lvl2-template_search-4",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: The Electrophilic Bromination of an aromatic ring involves the substitution of a hydrogen atom on the aromatic ring with a bromine atom. This reaction is typically carried out using bromine (Br2) in the presence of a Lewis acid catalyst, such as iron(III) bromide (FeBr3) or aluminum bromide (AlBr3). The Lewis acid activates the bromine molecule, generating a more electrophilic species that can attack the aromatic ring, leading to the formation of a new carbon-bromine bond, and an 'halide' functional group is formed.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22378,6 +23668,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "144e95e7-9427-4a75-823c-f0bf21d5e624",
             "id": "make_8_lvl2-apply_template-4",
             "name": "make_8_lvl2-apply_template-4",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-4 to the molecule below?",
@@ -22391,6 +23682,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "2c46f4af-62ac-499b-acb7-d09a6d5a6664",
             "id": "make_8_lvl2-template_search-5",
             "name": "make_8_lvl2-template_search-5",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: For fully reducing a ketone into an alkane, the Wolff-Kishner reduction can be employed. This reaction involves the conversion of the ketone into a hydrazone intermediate using hydrazine (NH2NH2) under basic conditions, followed by heating with a strong base (like KOH) to eliminate nitrogen gas and form the corresponding alkane. During the entire process, the O-H bond of the ketone is broken, and obviously a 'ketones' functional group as well.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22408,6 +23700,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "fe971b05-b76f-4704-a987-00f892f883d1",
             "id": "make_8_lvl2-apply_template-5",
             "name": "make_8_lvl2-apply_template-5",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-5 to the molecule below?",
@@ -22421,6 +23714,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "90481dbf-02c9-4e03-80d7-a7c4e4db8729",
             "id": "make_8_lvl2-template_search-6",
             "name": "make_8_lvl2-template_search-6",
             "description": "Can you return the `mapped_rxn` associated with the template that, when applied to the molecule below (provided as available input data), reproduces the reaction: In the cyclization of chalcones to flavanones, an intramolecular Michael addition occurs where the nucleophilic enolate of the ketone attacks the electrophilic beta-carbon of the alpha,beta-unsaturated carbonyl system. This reaction is typically catalyzed by a base or acid and results in the formation of a new carbon-carbon bond, leading to the cyclic flavanone structure. During the reaction, a C-C and a C-O bond are formed, while a C-O bonds is broken. About the functional groups, a 'ether oxygens' are formed, and 'aromatic hydroxyls' and 'ketones' are broken.. Note that the hints are describing the forward reaction, but you have to perform the retrosynthetic step.",
@@ -22438,6 +23732,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "40a0f776-1370-4bf3-bc94-13484943e813",
             "id": "make_8_lvl2-apply_template-6",
             "name": "make_8_lvl2-apply_template-6",
             "description": "Can you return all possible precursors of applying the template as the result of the task make_8_lvl2-template_search-6 to the molecule below?",
@@ -22451,6 +23746,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "0f612ab0-cdc4-455c-a311-e24178a6394f",
             "id": "make_8_lvl2-build_complete_route",
             "name": "make_8_lvl2-build_complete_route",
             "description": "Can you build and return the complete route of chemicals based on the inputs?",
@@ -22469,6 +23765,7 @@ const CORRAL_DATA = {
       "level_3": {
         "tasks": [
           {
+            "_uid": "efd7d458-b95e-4b1a-9392-b000d1d84f9e",
             "id": "make_1_lvl3",
             "name": "make_1_lvl3",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES [CH2:1]=[C:2]([c:3]1[cH:4][cH:5][cH:6][cH:7][cH:8]1)[C@@H:9]1[CH2:10][CH2:11][CH2:12][C@@:13]1([OH:14])[C:15]([F:16])([F:17])[F:18]. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $250.0. The final route should not surpass 1 steps.",
@@ -22491,6 +23788,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "0255fcfb-5d5e-46fb-92d4-4127e9689ac6",
             "id": "make_2_lvl3",
             "name": "make_2_lvl3",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC([C@]12CC=CC[C@H]1C(C2)=O)=O. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $405.0. The final route should not surpass 1 steps.",
@@ -22513,6 +23811,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "6e595e05-c2f5-4149-8440-e1b133f40fb1",
             "id": "make_3_lvl3",
             "name": "make_3_lvl3",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COC(C1(C=C1[Si](C)(C)C)/C=C/C2=CC=CC=C2)=O. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $125.0. The final route should not surpass 1 steps.",
@@ -22535,6 +23834,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "71f33cf8-adc1-4dae-adeb-9d73d6b0ac2d",
             "id": "make_4_lvl3",
             "name": "make_4_lvl3",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES C=C(C1=CC=C(OC)C=C1)C2=CC=C(OC)C=C2. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $150.0. The final route should not surpass 1 steps.",
@@ -22557,6 +23857,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "3b540d62-9524-4df8-99ee-f54b332a08b2",
             "id": "make_5_lvl3",
             "name": "make_5_lvl3",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O[C@H]1C[C@@H](O[C@@H]([C@@H]1C)/C=C(CO)/C)C/C=C/C=C/C(O)=O. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $9999.0. The final route should not surpass 5 steps.",
@@ -22579,6 +23880,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "049a7548-a547-453a-a604-9782da582e64",
             "id": "make_6_lvl3",
             "name": "make_6_lvl3",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $9999.0. The final route should not surpass 3 steps.",
@@ -22601,6 +23903,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "6cd184aa-2627-475c-bd02-165cb812155e",
             "id": "make_7_lvl3",
             "name": "make_7_lvl3",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES Cc1ccc(NS(=O)(=O)c2ccc(/C=C/C(=O)Nc3ccccc3N)cc2)cc1. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $9999.0. The final route should not surpass 3 steps.",
@@ -22623,6 +23926,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "f878db39-0b85-4dfb-85d0-c348fb7f4b7e",
             "id": "make_8_lvl3",
             "name": "make_8_lvl3",
             "description": "Propose a retrosynthesis route to synthesize the molecule with SMILES O=S(NC1=CC(N2CCN(C(OC(C)(C)C)=O)CC2)=C3C(CCC4(CCC4)O3)=C1)(C5=C(F)C=CC=C5)=O. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed $9999.0. The final route should not surpass 6 steps.",
@@ -22669,17 +23973,17 @@ const CORRAL_DATA = {
       {
         "name": "score_final",
         "docstring": "Function to score the retrosynthesis route based on the provided conditions.\nThese conditions include:\n    - All reactions must be valid.\n    - All starting materials must be buyable.\n    - Total price of starting materials must be within the budget.\nReturns 1.0 if all conditions are met, else retur",
-        "code": "def score_final(prediction: dict, target: dict) -> float:\n    \"\"\"\n    Function to score the retrosynthesis route based on the provided conditions.\n    These conditions include:\n        - All reactions must be valid.\n        - All starting materials must be buyable.\n        - Total price of starting materials must be within the budget.\n    Returns 1.0 if all conditions are met, else returns 0.0.\n\n    Args:\n        prediction: The retrosynthesis route in JSON format.\n        target: Target specifications for the route, including price and max steps.\n\n    Returns:\n        float that will be 1.0 if all conditions are met, 0.0 if any condition is violated.\n    \"\"\"\n    try:\n        max_steps = int(target.get(\"max_steps\"))\n        if max_steps is None:\n            raise NotImplementedError(\n                \"Step count validation is not implemented in this scoring function.\"\n            )\n        target = float(target.get(\"prize\"))\n    except Exception as e:\n        raise ValueError(f\"Invalid target format: {e}\") from e\n    prediction = prediction.replace(\"```json\", \"\").replace(\"```\", \"\").strip()\n    try:\n        # Parse the JSON string into a dictionary\n        prediction = json.loads(prediction)\n\n        # Step 0: Check if the number of reactions exceeds max_steps\n        num_reactions = count_reactions(prediction)\n        if num_reactions > max_steps:\n            return 0.0\n\n        # Step 1: Validate all reactions in the pathway\n        if not validate_reactions_with_products(prediction):\n            return 0.0\n\n        # Step 2: Collect all leaf molecules (starting materials)\n        leaf_molecules = collect_leaf_molecules(prediction)\n\n        if not leaf_molecules:\n            return 0.0\n\n        # Step 3: Check if all starting materials are buyable\n        for smiles in leaf_molecules:\n            if not valid_smiles(smiles):\n                return 0.0\n            if not _is_buyable([smiles]):\n    ..."
+        "code": "def score_final(prediction: dict, target: dict) -> float:\n    \"\"\"\n    Function to score the retrosynthesis route based on the provided conditions.\n    These conditions include:\n        - All reactions must be valid.\n        - All starting materials must be buyable.\n        - Total price of starting materials must be within the budget.\n    Returns 1.0 if all conditions are met, else returns 0.0.\n\n    Args:\n        prediction: The retrosynthesis route in JSON format.\n        target: Target specifications for the route, including price and max steps.\n\n    Returns:\n        float that will be 1.0 if all conditions are met, 0.0 if any condition is violated.\n    \"\"\"\n    try:\n        max_steps = int(target.get(\"max_steps\"))\n        if max_steps is None:\n            raise NotImplementedError(\n                \"Step count validation is not implemented in this scoring function.\"\n            )\n        target = float(target.get(\"prize\"))\n    except Exception as e:\n        raise ValueError(f\"Invalid target format: {e}\") from e\n    prediction = prediction.replace(\"```json\", \"\").replace(\"```\", \"\").strip()\n    try:\n        # Parse the JSON string into a dictionary\n        prediction = json.loads(prediction)\n\n        # Step 0: Check if the number of reactions exceeds max_steps\n        num_reactions = count_reactions(prediction)\n        if num_reactions > max_steps:\n            return 0.0\n\n        # Step 1: Validate all reactions in the pathway\n        if not validate_reactions_with_products(prediction):\n            return 0.0\n\n        # Step 2: Collect all leaf molecules (starting materials)\n        leaf_molecules = collect_leaf_molecules(prediction)\n\n        if not leaf_molecules:\n            return 0.0\n\n        # Step 3: Check if all starting materials are buyable\n        for smiles in leaf_molecules:\n            if not valid_smiles(smiles):\n                return 0.0\n            if not _is_buyable([smiles]):\n                return 0.0\n\n        # Step 4: Calculate total price\n        total_price = 0.0\n        for smiles in leaf_molecules:\n            try:\n                price_data = check_price([smiles], limit=0)\n                # check_price returns a dict: {smiles: [list of price entries]}\n                # Since limit=0, results are sorted by price, so first entry is cheapest\n                if price_data.get(smiles):\n                    total_price += float(price_data[smiles][0][\"Price\"])\n                else:\n                    # No price data available for this molecule\n                    return 0.0\n            except Exception:\n                # If price cannot be determined, consider it as failure\n                return 0.0\n\n        # Step 5: Check if total price is within budget\n        if total_price <= target:\n            return 1.0\n        else:\n            return 0.0\n\n    except Exception as e:\n        # Any exception during validation means failure\n        logger.warning(f\"Exception during scoring: {e}\")\n        return 0.0"
       },
       {
         "name": "score_final_without_price",
         "docstring": "Function to score the retrosynthesis route based on the conditions:\n    - All reactions must be valid.\n    - All starting materials must be valid SMILES.\n    - Leaf molecules must contain all target molecules.\nReturns 1.0 if all conditions are met, else returns 0.0.\n\nArgs:\n    prediction: The retros",
-        "code": "def score_final_without_price(prediction: dict, target: list) -> float:\n    \"\"\"\n    Function to score the retrosynthesis route based on the conditions:\n        - All reactions must be valid.\n        - All starting materials must be valid SMILES.\n        - Leaf molecules must contain all target molecules.\n    Returns 1.0 if all conditions are met, else returns 0.0.\n\n    Args:\n        prediction: The retrosynthesis route in JSON format.\n        target: Target molecules (SMILES) that must be present in the leaf molecules.\n\n    Returns:\n        1.0 if all conditions are met, else 0.0.\n    \"\"\"\n    prediction = prediction.replace(\"```json\", \"\").replace(\"```\", \"\").strip()\n    prediction = json.loads(prediction)\n    try:\n        # Step 1: Validate all reactions in the pathway\n        if not validate_reactions_with_products(prediction):\n            return 0.0\n\n        # Step 2: Collect all leaf molecules (starting materials)\n        leaf_molecules = collect_leaf_molecules(prediction)\n\n        if not leaf_molecules:\n            return 0.0\n\n        # Step 3: Check if all starting materials are valid SMILES\n        for smiles in leaf_molecules:\n            if not valid_smiles(smiles):\n                return 0.0\n\n        # Step 4: Check that leaf molecules contain all target molecules\n        # Convert leaf molecules to canonical SMILES for comparison\n        leaf_mols_canonical = set()\n        for smiles in leaf_molecules:\n            mol = Chem.MolFromSmiles(smiles)\n            if mol is not None:\n                # Remove atom mapping numbers\n                for atom in mol.GetAtoms():\n                    atom.SetAtomMapNum(0)\n                # Remove stereochemistry for comparison\n                Chem.RemoveStereochemistry(mol)\n                leaf_mols_canonical.add(Chem.MolToSmiles(mol))\n\n        # Convert target molecules to canonical SMILES\n        for target_smiles in target:\n            target_mol = Chem.MolFromSmiles(target_smiles)\n            if target_mol is None:\n    ..."
+        "code": "def score_final_without_price(prediction: dict, target: list) -> float:\n    \"\"\"\n    Function to score the retrosynthesis route based on the conditions:\n        - All reactions must be valid.\n        - All starting materials must be valid SMILES.\n        - Leaf molecules must contain all target molecules.\n    Returns 1.0 if all conditions are met, else returns 0.0.\n\n    Args:\n        prediction: The retrosynthesis route in JSON format.\n        target: Target molecules (SMILES) that must be present in the leaf molecules.\n\n    Returns:\n        1.0 if all conditions are met, else 0.0.\n    \"\"\"\n    prediction = prediction.replace(\"```json\", \"\").replace(\"```\", \"\").strip()\n    prediction = json.loads(prediction)\n    try:\n        # Step 1: Validate all reactions in the pathway\n        if not validate_reactions_with_products(prediction):\n            return 0.0\n\n        # Step 2: Collect all leaf molecules (starting materials)\n        leaf_molecules = collect_leaf_molecules(prediction)\n\n        if not leaf_molecules:\n            return 0.0\n\n        # Step 3: Check if all starting materials are valid SMILES\n        for smiles in leaf_molecules:\n            if not valid_smiles(smiles):\n                return 0.0\n\n        # Step 4: Check that leaf molecules contain all target molecules\n        # Convert leaf molecules to canonical SMILES for comparison\n        leaf_mols_canonical = set()\n        for smiles in leaf_molecules:\n            mol = Chem.MolFromSmiles(smiles)\n            if mol is not None:\n                # Remove atom mapping numbers\n                for atom in mol.GetAtoms():\n                    atom.SetAtomMapNum(0)\n                # Remove stereochemistry for comparison\n                Chem.RemoveStereochemistry(mol)\n                leaf_mols_canonical.add(Chem.MolToSmiles(mol))\n\n        # Convert target molecules to canonical SMILES\n        for target_smiles in target:\n            target_mol = Chem.MolFromSmiles(target_smiles)\n            if target_mol is None:\n                return 0.0\n            # Remove atom mapping numbers\n            for atom in target_mol.GetAtoms():\n                atom.SetAtomMapNum(0)\n            # Remove stereochemistry for comparison\n            Chem.RemoveStereochemistry(target_mol)\n            target_canonical = Chem.MolToSmiles(target_mol)\n            if target_canonical not in leaf_mols_canonical:\n                return 0.0\n\n        return 1.0\n\n    except Exception as e:\n        # Any exception during validation means failure\n        logger.warning(f\"Exception during scoring: {e}\")\n        return 0.0"
       },
       {
         "name": "check_reactants",
         "docstring": "Scoring function to check if the retrosynthesis route is valid and meets the criteria.\nThe criteria are:\n    - All reactions must be valid.\n    - All starting materials must be valid SMILES.\n    - Leaf molecules must contain all target molecules.\n\nArgs:\n    prediction: The retrosynthesis route in JS",
-        "code": "def check_reactants(prediction: dict, target: list) -> float:\n    \"\"\"\n    Scoring function to check if the retrosynthesis route is valid and meets the criteria.\n    The criteria are:\n        - All reactions must be valid.\n        - All starting materials must be valid SMILES.\n        - Leaf molecules must contain all target molecules.\n\n    Args:\n        prediction: The retrosynthesis route in JSON format.\n        target: A list containing the target molecule SMILES and the maximum allowed price.\n\n    Returns:\n        float that will be 1.0 if all conditions are met, 0.0 if any condition is violated.\n    \"\"\"\n    prediction = prediction.replace(\"```json\", \"\").replace(\"```\", \"\").strip()\n    try:\n        leaf_molecules = collect_leaf_molecules(prediction)\n    except Exception as e:\n        logger.warning(f\"Exception during leaf molecule collection: {e}\")\n        return 0.0\n    if not leaf_molecules:\n        return 0.0\n\n    try:\n        # Convert all molecules to RDKit mol objects (canonical SMILES for comparison)\n        # Use canonical SMILES as the key for comparison\n        leaf_mols = {}\n        for smiles in leaf_molecules:\n            pred_mol = Chem.MolFromSmiles(smiles)\n            if pred_mol is None:\n                return 0.0\n            # Remove atom mapping numbers\n            for atom in pred_mol.GetAtoms():\n                atom.SetAtomMapNum(0)\n            # Remove stereochemistry for comparison\n            Chem.RemoveStereochemistry(pred_mol)\n            canonical_smiles = Chem.MolToSmiles(pred_mol)\n            leaf_mols[canonical_smiles] = pred_mol\n\n        target_mols = {}\n        for target_smiles in target:\n            target_mol = Chem.MolFromSmiles(target_smiles)\n            if target_mol is None:\n                return 0.0\n            # Remove atom mapping numbers\n            for atom in target_mol.GetAtoms():\n                atom.SetAtomMapNum(0)\n            # Remove stereochemistry for comparison\n            Chem.RemoveStereochemistry(target_mol)\n    ..."
+        "code": "def check_reactants(prediction: dict, target: list) -> float:\n    \"\"\"\n    Scoring function to check if the retrosynthesis route is valid and meets the criteria.\n    The criteria are:\n        - All reactions must be valid.\n        - All starting materials must be valid SMILES.\n        - Leaf molecules must contain all target molecules.\n\n    Args:\n        prediction: The retrosynthesis route in JSON format.\n        target: A list containing the target molecule SMILES and the maximum allowed price.\n\n    Returns:\n        float that will be 1.0 if all conditions are met, 0.0 if any condition is violated.\n    \"\"\"\n    prediction = prediction.replace(\"```json\", \"\").replace(\"```\", \"\").strip()\n    try:\n        leaf_molecules = collect_leaf_molecules(prediction)\n    except Exception as e:\n        logger.warning(f\"Exception during leaf molecule collection: {e}\")\n        return 0.0\n    if not leaf_molecules:\n        return 0.0\n\n    try:\n        # Convert all molecules to RDKit mol objects (canonical SMILES for comparison)\n        # Use canonical SMILES as the key for comparison\n        leaf_mols = {}\n        for smiles in leaf_molecules:\n            pred_mol = Chem.MolFromSmiles(smiles)\n            if pred_mol is None:\n                return 0.0\n            # Remove atom mapping numbers\n            for atom in pred_mol.GetAtoms():\n                atom.SetAtomMapNum(0)\n            # Remove stereochemistry for comparison\n            Chem.RemoveStereochemistry(pred_mol)\n            canonical_smiles = Chem.MolToSmiles(pred_mol)\n            leaf_mols[canonical_smiles] = pred_mol\n\n        target_mols = {}\n        for target_smiles in target:\n            target_mol = Chem.MolFromSmiles(target_smiles)\n            if target_mol is None:\n                return 0.0\n            # Remove atom mapping numbers\n            for atom in target_mol.GetAtoms():\n                atom.SetAtomMapNum(0)\n            # Remove stereochemistry for comparison\n            Chem.RemoveStereochemistry(target_mol)\n            canonical_smiles = Chem.MolToSmiles(target_mol)\n            target_mols[canonical_smiles] = target_mol\n\n        return (\n            1.0\n            if all(target_canonical in leaf_mols for target_canonical in target_mols)\n            else 0.0\n        )\n    except Exception as e:\n        logger.warning(f\"Exception during reactant checking: {e}\")\n        return 0.0"
       },
       {
         "name": "check_template",
@@ -22694,7 +23998,7 @@ const CORRAL_DATA = {
       {
         "name": "check_list_molecules",
         "docstring": "Scoring function to check if the predicted molecules match the target molecules.\nIt works by comparing the canonical SMILES of the predicted molecules with those of the target molecules.\nThe comparison ignores atom mapping numbers and stereochemistry.\nFor the comparison, both predicted and target mo",
-        "code": "def check_list_molecules(prediction: list, target: list) -> float:\n    \"\"\"\n    Scoring function to check if the predicted molecules match the target molecules.\n    It works by comparing the canonical SMILES of the predicted molecules with those of the target molecules.\n    The comparison ignores atom mapping numbers and stereochemistry.\n    For the comparison, both predicted and target molecules are converted to RDKit mol objects.\n\n    Args:\n        prediction: A list containing the predicted molecules SMILES.\n        target: A list of target molecule SMILES strings.\n\n    Returns:\n        1.0 is all predicted molecules match the target molecules, 0.0 otherwise.\n    \"\"\"\n    target = target[0]\n    try:\n        # Convert prediction to list if it's a string representation\n        if isinstance(prediction, str):\n            try:\n                # Try ast.literal_eval first (safest for Python literals)\n                prediction = ast.literal_eval(prediction)\n            except (ValueError, SyntaxError):\n                # If that fails, try json.loads (works for JSON-formatted strings)\n                try:\n                    prediction = json.loads(prediction)\n                except json.JSONDecodeError:\n                    # If both fail, return 0.0\n                    logger.warning(\n                        f\"Could not convert prediction string to list: {prediction}\"\n                    )\n                    return 0.0\n\n        # Convert all molecules to RDKit mol objects (canonical SMILES for comparison)\n        # Use canonical SMILES as the key for comparison\n        for poss in prediction:\n            leaf_mols = {}\n            for smiles in poss:\n                pred_mol = Chem.MolFromSmiles(smiles)\n                if pred_mol is None:\n                    return 0.0\n                # Remove atom mapping numbers\n                for atom in pred_mol.GetAtoms():\n                    atom.SetAtomMapNum(0)\n                # Remove stereochemistry for comparison\n                Chem.RemoveStereochemistry(pred_mol)\n                canonical_smiles = Chem.MolToSmiles(pred_mol)\n                leaf_mols[canonical_smiles] = pred_mol\n\n            target_mols = {}\n            for target_smiles in target:\n    ..."
+        "code": "def check_list_molecules(prediction: list, target: list) -> float:\n    \"\"\"\n    Scoring function to check if the predicted molecules match the target molecules.\n    It works by comparing the canonical SMILES of the predicted molecules with those of the target molecules.\n    The comparison ignores atom mapping numbers and stereochemistry.\n    For the comparison, both predicted and target molecules are converted to RDKit mol objects.\n\n    Args:\n        prediction: A list containing the predicted molecules SMILES.\n        target: A list of target molecule SMILES strings.\n\n    Returns:\n        1.0 is all predicted molecules match the target molecules, 0.0 otherwise.\n    \"\"\"\n    target = target[0]\n    try:\n        # Convert prediction to list if it's a string representation\n        if isinstance(prediction, str):\n            try:\n                # Try ast.literal_eval first (safest for Python literals)\n                prediction = ast.literal_eval(prediction)\n            except (ValueError, SyntaxError):\n                # If that fails, try json.loads (works for JSON-formatted strings)\n                try:\n                    prediction = json.loads(prediction)\n                except json.JSONDecodeError:\n                    # If both fail, return 0.0\n                    logger.warning(\n                        f\"Could not convert prediction string to list: {prediction}\"\n                    )\n                    return 0.0\n\n        # Convert all molecules to RDKit mol objects (canonical SMILES for comparison)\n        # Use canonical SMILES as the key for comparison\n        for poss in prediction:\n            leaf_mols = {}\n            for smiles in poss:\n                pred_mol = Chem.MolFromSmiles(smiles)\n                if pred_mol is None:\n                    return 0.0\n                # Remove atom mapping numbers\n                for atom in pred_mol.GetAtoms():\n                    atom.SetAtomMapNum(0)\n                # Remove stereochemistry for comparison\n                Chem.RemoveStereochemistry(pred_mol)\n                canonical_smiles = Chem.MolToSmiles(pred_mol)\n                leaf_mols[canonical_smiles] = pred_mol\n\n            target_mols = {}\n            for target_smiles in target:\n                target_mol = Chem.MolFromSmiles(target_smiles)\n                if target_mol is None:\n                    return 0.0\n                # Remove atom mapping numbers\n                for atom in target_mol.GetAtoms():\n                    atom.SetAtomMapNum(0)\n                # Remove stereochemistry for comparison\n                Chem.RemoveStereochemistry(target_mol)\n                canonical_smiles = Chem.MolToSmiles(target_mol)\n                target_mols[canonical_smiles] = target_mol\n\n            if all(target_canonical in leaf_mols for target_canonical in target_mols):\n                return 1.0\n\n        return 0.0\n    except Exception as e:\n        logger.warning(f\"Exception during molecule checking: {e}\")\n        return 0.0"
       }
     ]
   },
@@ -22721,7 +24025,7 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "list",
-        "code": "def visualize_grain_boxes(image_path: str) -> list:\n    plt.use(\"Agg\")  # Use non-GUI backend for saving\n\n    indexed_boxes, extents, Z_flat2, _labeled = image_process(image_path)  # noqa: F405\n\n    fig, ax = plt.subplots()\n    ax.imshow(Z_flat2, cmap=\"afmhot\", origin=\"lower\", extent=extents)\n\n    # List to store (index, x1, y1, x2, y2)\n    box_coords = []\n\n    for index, x, y, w, h in indexed_boxes:\n        rect = patches.Rectangle(  # noqa: F405\n            (x, y), w, h, linewidth=1, edgecolor=\"cyan\", facecolor=\"none\"\n        )\n        ax.add_patch(rect)\n\n        # Label box center\n        center_x = x + w / 2\n        center_y = y + h / 2\n\n        base_fontsize = 5\n        scale_factor = 0.3\n        font_size = base_fontsize + scale_factor * min(w, h)\n\n        ax.text(\n            center_x,\n            center_y,\n            str(index),\n            color=\"cyan\",\n            fontsize=font_size,\n            ha=\"center\",\n            va=\"center\",\n        )\n\n        # Store (index, bottom-left, top-right)\n        x1, y1 = x, y\n        x2, y2 = x + w, y + h\n        box_coords.append((index, x1, y1, x2, y2))\n\n    ax.set_xlabel(r\"X [$\\mu$m]\")\n    ax.set_ylabel(r\"Y [$\\mu$m]\")\n    ax.set_title(\"Grains with Bounding Boxes\")\n\n    # Save to file\n    if pythoncom:\n        pythoncom.CoInitialize()\n    spm = nanosurf.SPM()\n    application = spm.application\n    current_path = application.GetGalleryHistoryDirectoryPath\n    output_path = Path(current_path) / \"annotated.png\"\n    ..."
+        "code": "def visualize_grain_boxes(image_path: str) -> list:\n    plt.use(\"Agg\")  # Use non-GUI backend for saving\n\n    indexed_boxes, extents, Z_flat2, _labeled = image_process(image_path)  # noqa: F405\n\n    fig, ax = plt.subplots()\n    ax.imshow(Z_flat2, cmap=\"afmhot\", origin=\"lower\", extent=extents)\n\n    # List to store (index, x1, y1, x2, y2)\n    box_coords = []\n\n    for index, x, y, w, h in indexed_boxes:\n        rect = patches.Rectangle(  # noqa: F405\n            (x, y), w, h, linewidth=1, edgecolor=\"cyan\", facecolor=\"none\"\n        )\n        ax.add_patch(rect)\n\n        # Label box center\n        center_x = x + w / 2\n        center_y = y + h / 2\n\n        base_fontsize = 5\n        scale_factor = 0.3\n        font_size = base_fontsize + scale_factor * min(w, h)\n\n        ax.text(\n            center_x,\n            center_y,\n            str(index),\n            color=\"cyan\",\n            fontsize=font_size,\n            ha=\"center\",\n            va=\"center\",\n        )\n\n        # Store (index, bottom-left, top-right)\n        x1, y1 = x, y\n        x2, y2 = x + w, y + h\n        box_coords.append((index, x1, y1, x2, y2))\n\n    ax.set_xlabel(r\"X [$\\mu$m]\")\n    ax.set_ylabel(r\"Y [$\\mu$m]\")\n    ax.set_title(\"Grains with Bounding Boxes\")\n\n    # Save to file\n    if pythoncom:\n        pythoncom.CoInitialize()\n    spm = nanosurf.SPM()\n    application = spm.application\n    current_path = application.GetGalleryHistoryDirectoryPath\n    output_path = Path(current_path) / \"annotated.png\"\n    fig.savefig(output_path, dpi=300, bbox_inches=\"tight\")\n    logger.info(f\"Image annotated with bounding boxes saved at {current_path}.\")\n    plt.close(fig)\n    del application\n    del spm\n    gc.collect()\n    if pythoncom:\n        pythoncom.CoUninitialize()\n\n    return box_coords"
       },
       {
         "name": "scan_grain_area",
@@ -22851,11 +24155,12 @@ const CORRAL_DATA = {
           }
         ],
         "returns": "dict[str, Any]",
-        "code": "def Image_Analyzer(\n    try:\n        # Read the file\n        afm = read(path)\n\n        # Extract data and parameters\n        data = afm.data  # Raw data\n\n        # Assuming 'Image', 'Forward', and 'Z-Axis' are keys in the data structure\n        image_data = data[\"Image\"][\"Forward\"][\"Z-Axis\"]\n\n        # If dynamic code is provided, execute it. image_data = data['Image']['Forward']['Z-Axis'] cange Forward to Backward if asked. Z-Axis to Deflection or Friction force if asked.\n        if dynamic_code:\n            # Safely execute the dynamic code\n            try:\n                exec(dynamic_code)\n                # After executing the dynamic code, `image_data` should be processed accordingly\n                logger.info(\"Dynamic code executed successfully.\")\n            except Exception as e:\n                logger.error(f\"Error executing dynamic code: {e}\")\n                return {\n                    \"status\": \"Error\",\n                    \"message\": f\"Error executing dynamic code: {e!s}\",\n                }\n\n        # Calculate Average Friction if requested\n        if calculate_friction:\n            friction = 0.5 * (\n                data[\"Image\"][\"Forward\"][\"Friction force\"]\n                - data[\"Image\"][\"Backward\"][\"Friction force\"]\n            )\n            average_friction = np.mean(friction)\n            logger.info(f\"Average Friction: {average_friction}\")\n\n        # Calculate Mean Roughness if requested\n        if calculate_mean_roughness:\n            z = data[\"Image\"][\"Forward\"][\"Z-Axis\"]\n            z_mean = np.mean(z)\n            absolute_differences = np.abs(z - z_mean)\n            total_sum = np.sum(absolute_differences)\n            M, N = z.shape\n            mean_roughness = total_sum / (M * N)\n            logger.info(f\"Mean Roughness: {mean_roughness}\")\n\n        # Calculate RMS Roughness if requested\n        if calculate_rms_roughness:\n            z = data[\"Image\"][\"Forward\"][\"Z-Axis\"]\n            z_mean = np.mean(z)\n            squared_differences = (z - z_mean) ** 2\n            total_sum = np.sum(squared_differences)\n            M, N = z.shape\n    ..."
+        "code": "def Image_Analyzer(\n    try:\n        # Read the file\n        afm = read(path)\n\n        # Extract data and parameters\n        data = afm.data  # Raw data\n\n        # Assuming 'Image', 'Forward', and 'Z-Axis' are keys in the data structure\n        image_data = data[\"Image\"][\"Forward\"][\"Z-Axis\"]\n\n        # If dynamic code is provided, execute it. image_data = data['Image']['Forward']['Z-Axis'] cange Forward to Backward if asked. Z-Axis to Deflection or Friction force if asked.\n        if dynamic_code:\n            # Safely execute the dynamic code\n            try:\n                exec(dynamic_code)\n                # After executing the dynamic code, `image_data` should be processed accordingly\n                logger.info(\"Dynamic code executed successfully.\")\n            except Exception as e:\n                logger.error(f\"Error executing dynamic code: {e}\")\n                return {\n                    \"status\": \"Error\",\n                    \"message\": f\"Error executing dynamic code: {e!s}\",\n                }\n\n        # Calculate Average Friction if requested\n        if calculate_friction:\n            friction = 0.5 * (\n                data[\"Image\"][\"Forward\"][\"Friction force\"]\n                - data[\"Image\"][\"Backward\"][\"Friction force\"]\n            )\n            average_friction = np.mean(friction)\n            logger.info(f\"Average Friction: {average_friction}\")\n\n        # Calculate Mean Roughness if requested\n        if calculate_mean_roughness:\n            z = data[\"Image\"][\"Forward\"][\"Z-Axis\"]\n            z_mean = np.mean(z)\n            absolute_differences = np.abs(z - z_mean)\n            total_sum = np.sum(absolute_differences)\n            M, N = z.shape\n            mean_roughness = total_sum / (M * N)\n            logger.info(f\"Mean Roughness: {mean_roughness}\")\n\n        # Calculate RMS Roughness if requested\n        if calculate_rms_roughness:\n            z = data[\"Image\"][\"Forward\"][\"Z-Axis\"]\n            z_mean = np.mean(z)\n            squared_differences = (z - z_mean) ** 2\n            total_sum = np.sum(squared_differences)\n            M, N = z.shape\n            rms_roughness = np.sqrt(total_sum / (M * N))\n            logger.info(f\"RMS Roughness: {rms_roughness}\")\n\n        # Return the image data along with status\n        result = {\n            \"status\": \"Success\",\n            \"message\": f\"Raw Image {path} processed successfully.\",\n            \"image_data\": image_data,\n        }\n\n        # Include calculated metrics in the result if they were calculated\n        if calculate_friction:\n            result[\"average_friction\"] = average_friction\n        if calculate_mean_roughness:\n            result[\"mean_roughness\"] = mean_roughness\n        if calculate_rms_roughness:\n            result[\"rms_roughness\"] = rms_roughness\n\n        return result\n    except Exception as e:\n        raise Exception(f\"An error occurred during image processing: {e}\") from e"
       }
     ],
     "tasks": [
       {
+        "_uid": "cd0dcad0-c659-4cdb-aa92-4b074602ee47",
         "id": "afm_experiment_level_1",
         "name": "AFM experiment level 1",
         "description": "Perform three sequential high-quality scans of the same 10x10 µm² area using identical scanning parameters (P gain: 100, I gain: 6000, D gain: 10, Time per line: 0.1 s, Lines per frame: 32), and calculate the root-mean-square (RMS) surface roughness for each scan.",
@@ -22870,6 +24175,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "009fd63f-e379-4e25-8a10-c56c55c9e3c0",
         "id": "afm_experiment_level_2",
         "name": "AFM experiment level 2",
         "description": "Perform three sequential high-quality scans of the same 10x10 µm² area using identical scanning parameters (points per line: 128, lines per frame: 128). Set the time per line such that all three scans are completed within 2 min 34 s, and use a scanning mode that minimizes tip damage. For each scan, collect the topographic data and then calculate the root-mean-square roughness.",
@@ -22884,6 +24190,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "d00da041-3258-44dc-9175-a9d25131cb66",
         "id": "afm_experiment_level_3",
         "name": "AFM experiment level 3",
         "description": "Take topographic surface scans of the same sample using a mode that minimizes tip damage. For each scan, calculate the RMS surface roughness (Rq). Determine the scale-dependent roughness relationship between Rq and scan area (A) from the collected data.",
@@ -22897,6 +24204,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "3c48a569-4869-4367-8943-058e16fb3370",
         "id": "afm_experiment_level_4",
         "name": "AFM experiment level 4",
         "description": "Using AFM, determine the scale-dependent relationship between surface roughness (Rq) and scan area (A) by conducting topographic experiments on the sample in a scanning mode that minimizes tip damage.",
@@ -22912,6 +24220,7 @@ const CORRAL_DATA = {
     ],
     "subtasks": [
       {
+        "_uid": "9d15a614-9443-4d39-ba49-220875c6a4ea",
         "id": "parameter_set_subtask_level_1",
         "name": "Set PID gain and scanning parameters.",
         "description": "Set the PID gains (P gain: 100, I gain: 6000, D gain: 10) and other scanning parameters (Time per Line: 0.1 s, Lines per Frame: 128).",
@@ -22924,6 +24233,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "ca5a90f1-2bfc-4ff6-af6a-9580d53e65a9",
         "id": "image_capture_1_subtask_level_1",
         "name": "Image capture of size 10x10 µm².",
         "description": "Take a topographic surface scan of an area 10x10 µm². Return its absolute path.",
@@ -22936,6 +24246,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "bf6afbcf-6f0b-4e8a-9732-1ba27a60f8a7",
         "id": "image_capture_2_subtask_level_1",
         "name": "Image capture of size 10x10 µm².",
         "description": "Take a topographic surface scan of an area 10x10 µm². Return its absolute path.",
@@ -22948,6 +24259,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "41460c36-a730-423e-bc42-0a2ef265c587",
         "id": "image_capture_3_subtask_level_1",
         "name": "Image capture of size 10x10 µm².",
         "description": "Take a topographic surface scan of an area 10x10 µm². Return its absolute path.",
@@ -22960,6 +24272,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "44c67333-eea9-4ad8-9496-766832dd9160",
         "id": "roughness_1_subtask_level_1",
         "name": "Roughness calculation for 10x10 µm² image present at the given path.",
         "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -22971,6 +24284,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "20beebcc-39ec-4204-a4cd-d1d7a5c74111",
         "id": "roughness_2_subtask_level_1",
         "name": "Roughness calculation for 10x10 µm² image present at the given path.",
         "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -22982,6 +24296,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "8c85e0ef-cd18-4f02-aecd-303e9f2751ce",
         "id": "roughness_3_subtask_level_1",
         "name": "Roughness calculation for 10x10 µm² image present at the given path.",
         "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -22993,6 +24308,7 @@ const CORRAL_DATA = {
         "level": "level_1"
       },
       {
+        "_uid": "aeb28a11-6592-4c75-9ded-94a75fbee143",
         "id": "parameter_set_subtask_level_2",
         "name": "Set PID gain and scanning parameters.",
         "description": "Set the PID gains (P gain: 100, I gain: 6000, D gain: 10) and other scanning parameters (Time per Line: 0.1 s, Lines per Frame: 128) for a scanning mode that minimizes tip damage.",
@@ -23005,6 +24321,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "fbc27b28-1431-4454-b682-2a8204689a59",
         "id": "image_capture_1_subtask_level_2",
         "name": "Image capture of size 10x10 µm².",
         "description": "Take a topographic surface scan of an area 10x10 µm² using scanning parameters (points per line: 128, lines per frame: 128). Set the time per line such that the scan is completed within 51.2 s, and use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23017,6 +24334,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "be4429f3-9b33-410d-b3be-913b5ffb0b08",
         "id": "image_capture_2_subtask_level_2",
         "name": "Image capture of size 10x10 µm².",
         "description": "Take a topographic surface scan of an area 10x10 µm² using scanning parameters (points per line: 128, lines per frame: 128). Set the time per line such that the scan is completed within 51.2 s, and use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23029,6 +24347,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "312defbd-bbc4-4b46-a479-70fad0276070",
         "id": "image_capture_3_subtask_level_2",
         "name": "Image capture of size 10x10 µm².",
         "description": "Take a topographic surface scan of an area 10x10 µm² using scanning parameters (points per line: 128, lines per frame: 128). Set the time per line such that the scan is completed within 51.2 s, and use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23041,6 +24360,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "6ef063b7-9697-4663-b65e-212a2f792666",
         "id": "roughness_1_subtask_level_2",
         "name": "Roughness calculation for 10x10 µm² image present at the given path.",
         "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23052,6 +24372,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "f3edef79-d28b-4636-be37-6bbfde89358f",
         "id": "roughness_2_subtask_level_2",
         "name": "Roughness calculation for 10x10 µm² image present at the given path.",
         "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23063,6 +24384,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "457e3dd8-2636-4d30-882e-bbaf5b0f427d",
         "id": "roughness_3_subtask_level_2",
         "name": "Roughness calculation for 10x10 µm² image present at the given path.",
         "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23074,6 +24396,7 @@ const CORRAL_DATA = {
         "level": "level_2"
       },
       {
+        "_uid": "163db8de-eda9-438a-9ff6-12745d9a07ac",
         "id": "parameter_set_subtask_level_3",
         "name": "Set PID gain and scanning parameters.",
         "description": "Set the PID gains (P gain: 100, I gain: 6000, D gain: 10) and other scanning parameters (Time per Line: 0.1 s, Lines per Frame: 128) for a scanning mode that minimizes tip damage.",
@@ -23086,6 +24409,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "1582336d-18f3-48c5-bab1-ff51d337e6b9",
         "id": "image_capture_1_subtask_level_3",
         "name": "Image capture of size 10x10 µm².",
         "description": "Take a topographic surface scan of an area 10x10 µm² using scanning parameters (points per line: 128, lines per frame: 128). Use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23098,6 +24422,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "ca9de839-316a-4d5e-8016-0c7fb2dbc02f",
         "id": "image_capture_2_subtask_level_3",
         "name": "Image capture of size 10x10 µm².",
         "description": "Take a topographic surface scan of an area 20x20 µm² using scanning parameters (points per line: 128, lines per frame: 128). Use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23110,6 +24435,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "ef1930e0-456f-4c45-982d-00407bcf147e",
         "id": "image_capture_3_subtask_level_3",
         "name": "Image capture of size 10x10 µm².",
         "description": "Take a topographic surface scan of an area 30x30 µm² using scanning parameters (points per line: 128, lines per frame: 128). Use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23122,6 +24448,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "dde747c9-9c9f-4bcd-921a-87500e9ad483",
         "id": "roughness_1_subtask_level_3",
         "name": "Roughness calculation for 10x10 µm² image present at the given path.",
         "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23133,6 +24460,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "624067be-ee27-4ef8-89b4-1f34e00461ef",
         "id": "roughness_2_subtask_level_3",
         "name": "Roughness calculation for 20x20 µm² image present at the given path.",
         "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23144,6 +24472,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "15dd0eaa-a9d9-4d5d-923d-2a9007d2baca",
         "id": "roughness_3_subtask_level_3",
         "name": "Roughness calculation for 30x30 µm² image present at the given path.",
         "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23155,6 +24484,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "149fea1c-1dea-4bde-95d6-ce512188735f",
         "id": "roughness_relationship_level_3",
         "name": "scale-dependent roughness relationship between Rq and scan area (A).",
         "description": "Given experimental data relating the RMS roughness (Rb) to the sample area (A), find a possible mathematical relationship between them.",
@@ -23166,6 +24496,7 @@ const CORRAL_DATA = {
         "level": "level_3"
       },
       {
+        "_uid": "24185fc5-3bd5-46c0-b47d-fa4230a5933a",
         "id": "parameter_set_subtask_level_4",
         "name": "Set PID gain and scanning parameters.",
         "description": "Set the PID gains (P gain: 100, I gain: 6000, D gain: 10) and other scanning parameters (Time per Line: 0.1 s, Lines per Frame: 128) for a scanning mode that minimizes tip damage.",
@@ -23178,6 +24509,7 @@ const CORRAL_DATA = {
         "level": "level_4"
       },
       {
+        "_uid": "0f1a5c0d-da47-42bb-8fc2-0fda142ed774",
         "id": "roughness_subtask_level_4",
         "name": "Roughness calculation for images present at the given path.",
         "description": "Conduct AFM topographic scans on the sample across multiple scan areas (A) to acquire high-resolution surface height data. Process the acquired AFM data to calculate the corresponding surface roughness values (Rq) for each scan area (A).",
@@ -23189,6 +24521,7 @@ const CORRAL_DATA = {
         "level": "level_4"
       },
       {
+        "_uid": "d8667cab-b38b-4140-82ee-b8a5d2b85678",
         "id": "roughness_relationship_level_4",
         "name": "scale-dependent roughness relationship between Rq and scan area (A).",
         "description": "Given experimental data relating the RMS roughness (Rb) to the sample area (A), find a possible mathematical relationship between them.",
@@ -23204,6 +24537,7 @@ const CORRAL_DATA = {
       "level_1": {
         "tasks": [
           {
+            "_uid": "cd0dcad0-c659-4cdb-aa92-4b074602ee47",
             "id": "afm_experiment_level_1",
             "name": "AFM experiment level 1",
             "description": "Perform three sequential high-quality scans of the same 10x10 µm² area using identical scanning parameters (P gain: 100, I gain: 6000, D gain: 10, Time per line: 0.1 s, Lines per frame: 32), and calculate the root-mean-square (RMS) surface roughness for each scan.",
@@ -23220,6 +24554,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "9d15a614-9443-4d39-ba49-220875c6a4ea",
             "id": "parameter_set_subtask_level_1",
             "name": "Set PID gain and scanning parameters.",
             "description": "Set the PID gains (P gain: 100, I gain: 6000, D gain: 10) and other scanning parameters (Time per Line: 0.1 s, Lines per Frame: 128).",
@@ -23232,6 +24567,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "ca5a90f1-2bfc-4ff6-af6a-9580d53e65a9",
             "id": "image_capture_1_subtask_level_1",
             "name": "Image capture of size 10x10 µm².",
             "description": "Take a topographic surface scan of an area 10x10 µm². Return its absolute path.",
@@ -23244,6 +24580,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "bf6afbcf-6f0b-4e8a-9732-1ba27a60f8a7",
             "id": "image_capture_2_subtask_level_1",
             "name": "Image capture of size 10x10 µm².",
             "description": "Take a topographic surface scan of an area 10x10 µm². Return its absolute path.",
@@ -23256,6 +24593,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "41460c36-a730-423e-bc42-0a2ef265c587",
             "id": "image_capture_3_subtask_level_1",
             "name": "Image capture of size 10x10 µm².",
             "description": "Take a topographic surface scan of an area 10x10 µm². Return its absolute path.",
@@ -23268,6 +24606,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "44c67333-eea9-4ad8-9496-766832dd9160",
             "id": "roughness_1_subtask_level_1",
             "name": "Roughness calculation for 10x10 µm² image present at the given path.",
             "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23279,6 +24618,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "20beebcc-39ec-4204-a4cd-d1d7a5c74111",
             "id": "roughness_2_subtask_level_1",
             "name": "Roughness calculation for 10x10 µm² image present at the given path.",
             "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23290,6 +24630,7 @@ const CORRAL_DATA = {
             "level": "level_1"
           },
           {
+            "_uid": "8c85e0ef-cd18-4f02-aecd-303e9f2751ce",
             "id": "roughness_3_subtask_level_1",
             "name": "Roughness calculation for 10x10 µm² image present at the given path.",
             "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23305,6 +24646,7 @@ const CORRAL_DATA = {
       "level_2": {
         "tasks": [
           {
+            "_uid": "009fd63f-e379-4e25-8a10-c56c55c9e3c0",
             "id": "afm_experiment_level_2",
             "name": "AFM experiment level 2",
             "description": "Perform three sequential high-quality scans of the same 10x10 µm² area using identical scanning parameters (points per line: 128, lines per frame: 128). Set the time per line such that all three scans are completed within 2 min 34 s, and use a scanning mode that minimizes tip damage. For each scan, collect the topographic data and then calculate the root-mean-square roughness.",
@@ -23321,6 +24663,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "aeb28a11-6592-4c75-9ded-94a75fbee143",
             "id": "parameter_set_subtask_level_2",
             "name": "Set PID gain and scanning parameters.",
             "description": "Set the PID gains (P gain: 100, I gain: 6000, D gain: 10) and other scanning parameters (Time per Line: 0.1 s, Lines per Frame: 128) for a scanning mode that minimizes tip damage.",
@@ -23333,6 +24676,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "fbc27b28-1431-4454-b682-2a8204689a59",
             "id": "image_capture_1_subtask_level_2",
             "name": "Image capture of size 10x10 µm².",
             "description": "Take a topographic surface scan of an area 10x10 µm² using scanning parameters (points per line: 128, lines per frame: 128). Set the time per line such that the scan is completed within 51.2 s, and use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23345,6 +24689,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "be4429f3-9b33-410d-b3be-913b5ffb0b08",
             "id": "image_capture_2_subtask_level_2",
             "name": "Image capture of size 10x10 µm².",
             "description": "Take a topographic surface scan of an area 10x10 µm² using scanning parameters (points per line: 128, lines per frame: 128). Set the time per line such that the scan is completed within 51.2 s, and use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23357,6 +24702,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "312defbd-bbc4-4b46-a479-70fad0276070",
             "id": "image_capture_3_subtask_level_2",
             "name": "Image capture of size 10x10 µm².",
             "description": "Take a topographic surface scan of an area 10x10 µm² using scanning parameters (points per line: 128, lines per frame: 128). Set the time per line such that the scan is completed within 51.2 s, and use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23369,6 +24715,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "6ef063b7-9697-4663-b65e-212a2f792666",
             "id": "roughness_1_subtask_level_2",
             "name": "Roughness calculation for 10x10 µm² image present at the given path.",
             "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23380,6 +24727,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "f3edef79-d28b-4636-be37-6bbfde89358f",
             "id": "roughness_2_subtask_level_2",
             "name": "Roughness calculation for 10x10 µm² image present at the given path.",
             "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23391,6 +24739,7 @@ const CORRAL_DATA = {
             "level": "level_2"
           },
           {
+            "_uid": "457e3dd8-2636-4d30-882e-bbaf5b0f427d",
             "id": "roughness_3_subtask_level_2",
             "name": "Roughness calculation for 10x10 µm² image present at the given path.",
             "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23406,6 +24755,7 @@ const CORRAL_DATA = {
       "level_3": {
         "tasks": [
           {
+            "_uid": "d00da041-3258-44dc-9175-a9d25131cb66",
             "id": "afm_experiment_level_3",
             "name": "AFM experiment level 3",
             "description": "Take topographic surface scans of the same sample using a mode that minimizes tip damage. For each scan, calculate the RMS surface roughness (Rq). Determine the scale-dependent roughness relationship between Rq and scan area (A) from the collected data.",
@@ -23421,6 +24771,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "163db8de-eda9-438a-9ff6-12745d9a07ac",
             "id": "parameter_set_subtask_level_3",
             "name": "Set PID gain and scanning parameters.",
             "description": "Set the PID gains (P gain: 100, I gain: 6000, D gain: 10) and other scanning parameters (Time per Line: 0.1 s, Lines per Frame: 128) for a scanning mode that minimizes tip damage.",
@@ -23433,6 +24784,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "1582336d-18f3-48c5-bab1-ff51d337e6b9",
             "id": "image_capture_1_subtask_level_3",
             "name": "Image capture of size 10x10 µm².",
             "description": "Take a topographic surface scan of an area 10x10 µm² using scanning parameters (points per line: 128, lines per frame: 128). Use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23445,6 +24797,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "ca9de839-316a-4d5e-8016-0c7fb2dbc02f",
             "id": "image_capture_2_subtask_level_3",
             "name": "Image capture of size 10x10 µm².",
             "description": "Take a topographic surface scan of an area 20x20 µm² using scanning parameters (points per line: 128, lines per frame: 128). Use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23457,6 +24810,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "ef1930e0-456f-4c45-982d-00407bcf147e",
             "id": "image_capture_3_subtask_level_3",
             "name": "Image capture of size 10x10 µm².",
             "description": "Take a topographic surface scan of an area 30x30 µm² using scanning parameters (points per line: 128, lines per frame: 128). Use a scanning mode that minimizes tip damage. Return its absolute path.",
@@ -23469,6 +24823,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "dde747c9-9c9f-4bcd-921a-87500e9ad483",
             "id": "roughness_1_subtask_level_3",
             "name": "Roughness calculation for 10x10 µm² image present at the given path.",
             "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23480,6 +24835,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "624067be-ee27-4ef8-89b4-1f34e00461ef",
             "id": "roughness_2_subtask_level_3",
             "name": "Roughness calculation for 20x20 µm² image present at the given path.",
             "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23491,6 +24847,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "15dd0eaa-a9d9-4d5d-923d-2a9007d2baca",
             "id": "roughness_3_subtask_level_3",
             "name": "Roughness calculation for 30x30 µm² image present at the given path.",
             "description": "Calculate the root-mean-square (RMS) roughness of the image at the given path.",
@@ -23502,6 +24859,7 @@ const CORRAL_DATA = {
             "level": "level_3"
           },
           {
+            "_uid": "149fea1c-1dea-4bde-95d6-ce512188735f",
             "id": "roughness_relationship_level_3",
             "name": "scale-dependent roughness relationship between Rq and scan area (A).",
             "description": "Given experimental data relating the RMS roughness (Rb) to the sample area (A), find a possible mathematical relationship between them.",
@@ -23517,6 +24875,7 @@ const CORRAL_DATA = {
       "level_4": {
         "tasks": [
           {
+            "_uid": "3c48a569-4869-4367-8943-058e16fb3370",
             "id": "afm_experiment_level_4",
             "name": "AFM experiment level 4",
             "description": "Using AFM, determine the scale-dependent relationship between surface roughness (Rq) and scan area (A) by conducting topographic experiments on the sample in a scanning mode that minimizes tip damage.",
@@ -23532,6 +24891,7 @@ const CORRAL_DATA = {
         ],
         "subtasks": [
           {
+            "_uid": "24185fc5-3bd5-46c0-b47d-fa4230a5933a",
             "id": "parameter_set_subtask_level_4",
             "name": "Set PID gain and scanning parameters.",
             "description": "Set the PID gains (P gain: 100, I gain: 6000, D gain: 10) and other scanning parameters (Time per Line: 0.1 s, Lines per Frame: 128) for a scanning mode that minimizes tip damage.",
@@ -23544,6 +24904,7 @@ const CORRAL_DATA = {
             "level": "level_4"
           },
           {
+            "_uid": "0f1a5c0d-da47-42bb-8fc2-0fda142ed774",
             "id": "roughness_subtask_level_4",
             "name": "Roughness calculation for images present at the given path.",
             "description": "Conduct AFM topographic scans on the sample across multiple scan areas (A) to acquire high-resolution surface height data. Process the acquired AFM data to calculate the corresponding surface roughness values (Rq) for each scan area (A).",
@@ -23555,6 +24916,7 @@ const CORRAL_DATA = {
             "level": "level_4"
           },
           {
+            "_uid": "d8667cab-b38b-4140-82ee-b8a5d2b85678",
             "id": "roughness_relationship_level_4",
             "name": "scale-dependent roughness relationship between Rq and scan area (A).",
             "description": "Given experimental data relating the RMS roughness (Rb) to the sample area (A), find a possible mathematical relationship between them.",
@@ -23579,7 +24941,7 @@ const CORRAL_DATA = {
       {
         "name": "check_roughness_function",
         "docstring": "Parses a submission_format string from the LLM, handling minor formatting issues.\nRuns check_roughness(path) for each valid pair of (rms_roughness_n, path_n).\nReturns 1 if all RMS values pass the tolerance check AND check_params(final_params)==1, else 0.",
-        "code": "def check_roughness_function(tolerance: float, final_params):\n    \"\"\"\n    Parses a submission_format string from the LLM, handling minor formatting issues.\n    Runs check_roughness(path) for each valid pair of (rms_roughness_n, path_n).\n    Returns 1 if all RMS values pass the tolerance check AND check_params(final_params)==1, else 0.\n    \"\"\"\n\n    def score_fn(result: str) -> float:\n        try:\n            # Fix common LLM formatting mistakes\n            cleaned = result.replace(\";\", \",\").strip()\n\n            # Ensure JSON braces are balanced\n            if not cleaned.startswith(\"{\"):\n                cleaned = \"{\" + cleaned\n            if not cleaned.endswith(\"}\"):\n                cleaned = cleaned + \"}\"\n\n            # Try parsing JSON\n            data = json.loads(cleaned)\n\n            # Detect all indices dynamically (e.g., 1, 2, 3, ...)\n            indices = sorted(\n                {\n                    int(re.findall(r\"\\d+\", key)[0])\n                    for key in data\n                    if key.startswith(\"rms_roughness_\")\n                }\n            )\n\n            if not indices:\n                logger.warning(\"No RMS entries found\")\n                return 0\n\n            all_passed = True  # Track if all checks pass\n\n            for i in indices:\n                rough_key = f\"rms_roughness_{i}\"\n                path_key = f\"path_{i}\"\n\n                if rough_key in data and path_key in data:\n                    try:\n                        rms = float(data[rough_key])\n                    except ValueError:\n                        logger.warning(f\"Invalid RMS value for entry {i}\")\n                        all_passed = False\n                        continue\n\n                    path = data[path_key]\n                    logger.info(f\"Entry {i}: RMS={rms}, Path={path}\")\n    ..."
+        "code": "def check_roughness_function(tolerance: float, final_params):\n    \"\"\"\n    Parses a submission_format string from the LLM, handling minor formatting issues.\n    Runs check_roughness(path) for each valid pair of (rms_roughness_n, path_n).\n    Returns 1 if all RMS values pass the tolerance check AND check_params(final_params)==1, else 0.\n    \"\"\"\n\n    def score_fn(result: str) -> float:\n        try:\n            # Fix common LLM formatting mistakes\n            cleaned = result.replace(\";\", \",\").strip()\n\n            # Ensure JSON braces are balanced\n            if not cleaned.startswith(\"{\"):\n                cleaned = \"{\" + cleaned\n            if not cleaned.endswith(\"}\"):\n                cleaned = cleaned + \"}\"\n\n            # Try parsing JSON\n            data = json.loads(cleaned)\n\n            # Detect all indices dynamically (e.g., 1, 2, 3, ...)\n            indices = sorted(\n                {\n                    int(re.findall(r\"\\d+\", key)[0])\n                    for key in data\n                    if key.startswith(\"rms_roughness_\")\n                }\n            )\n\n            if not indices:\n                logger.warning(\"No RMS entries found\")\n                return 0\n\n            all_passed = True  # Track if all checks pass\n\n            for i in indices:\n                rough_key = f\"rms_roughness_{i}\"\n                path_key = f\"path_{i}\"\n\n                if rough_key in data and path_key in data:\n                    try:\n                        rms = float(data[rough_key])\n                    except ValueError:\n                        logger.warning(f\"Invalid RMS value for entry {i}\")\n                        all_passed = False\n                        continue\n\n                    path = data[path_key]\n                    logger.info(f\"Entry {i}: RMS={rms}, Path={path}\")\n\n                    # Run user-defined check function\n                    check_output = check_roughness(path, rms)\n\n                    abs_tol = tolerance * rms\n                    logger.info(\n                        f\"Tolerance: ±{tolerance}, Check Output: {check_output}\"\n                    )\n\n                    # Check if the measured value is within tolerance\n                    if not (rms - abs_tol <= check_output <= rms + abs_tol):\n                        logger.warning(f\"Entry {i} failed tolerance check.\")\n                        all_passed = False\n\n            # Additional condition: check_params(final_params) must be 1\n            if check_params(final_params) != 1:\n                logger.warning(\"check_params(final_params) != 1\")\n                logger.info(check_params(final_params))\n                all_passed = False\n\n            return 1 if all_passed else 0\n\n        except json.JSONDecodeError:\n            logger.warning(\"Could not parse JSON — please check the submission format.\")\n            return 0\n        except Exception as e:\n            logger.warning(f\"Error: {e}\")\n            return 0\n\n    return score_fn"
       },
       {
         "name": "auto_match_unit",
@@ -23614,7 +24976,7 @@ const CORRAL_DATA = {
       {
         "name": "get_params",
         "docstring": "",
-        "code": "def get_params():\n    if pythoncom:\n        pythoncom.CoInitialize()\n    _tip_guid_map = {\n        \"AN2_200\": \"{BD61D124-8350-4464-BFE4-1D8A156E4913}\",\n        \"GLA_1\": \"{9E2BA28D-D843-41bf-8F62-05502B3EDB18}\",\n        \"ACL_A\": \"{ABB75273-9543-431a-B681-C79B533DD9E6}\",\n        \"ANSCM\": \"{40AEA787-942C-4d48-A389-DA81571F009C}\",\n        \"SICON_A\": \"{F7A339A7-E29F-42a9-B7AA-D69C54363B76}\",\n        \"XYNCHR\": \"{DD3DFE39-455E-40a1-801E-5D5B14CE4080}\",\n        \"XYCONTR\": \"{12ADC816-C7B1-48f8-8B9E-5E579151CF50}\",\n        \"ContAl_G\": \"{ED5A15E6-D3B0-4e64-8C50-809335D3E143}\",\n        \"Multi75E_G\": \"{9593403B-A476-49a9-AA1F-9C3AEDAC0178}\",\n        \"Multi75M_G\": \"{03D0715C-A520-4976-A5E2-4FC3078E3821}\",\n        \"Multi75Al_G\": \"{443A2EDC-5C9C-4d60-843F-C6688BEA1DEA}\",\n        \"Tap190Al_G\": \"{041FB80E-A179-4170-B5A4-A4EA1CC0A965}\",\n        \"Tap150Al_G\": \"{E0F31C86-6BB8-496b-AC7E-F55C62EAB635}\",\n        \"USC_F1_2_k7_3\": \"{19AEEE43-478F-4D16-BDB7-2EE256EAF4A4}\",\n        \"USC_F0_3_k0_3\": \"{16FAEEB6-A887-46F6-A418-81A9EBBCB6C3}\",\n        \"Dyn190Al\": \"{E9CE0D2D-F59E-4B44-A74F-B78C11575E9F}\",\n        \"Stat0_2LAuD\": \"{A4A16538-CCD1-4BB1-B048-7B4F0F1B31BD}\",\n        \"CONTR\": \"{89E92173-96FB-4ff9-94D8-42296D00D980}\",\n        \"CONTSCR\": \"{5A687B3E-A75A-4b22-BD70-40ABB931F00E}\",\n        \"CONTSCPt\": \"{1E95D12B-1DDB-4ace-B3AF-BE9C0D52D4FC}\",\n        \"EFMR\": \"{986305AC-64B5-462e-B37E-6BD5AE447BE3}\",\n        \"LFMR\": \"{C61FCA2C-6D5D-4105-9FDE-640D263E229F}\",\n        \"MFMR\": \"{9499F49F-920F-47ec-80B6-883F683FF056}\",\n        \"NCLR\": \"{62633FD4-0555-4cee-A8B4-B82F4CEFBB48}\",\n        \"PPP_FMR\": \"{EBA2B75C-AA94-4451-AD36-1388CDABF5E8}\",\n        \"pq_SCONT\": \"{8D28AE10-E1DD-49E0-8CC6-ABD7CEDF57B0}\",\n        \"qp_CONT\": \"{0996E3AC-ABF6-4A22-B320-4BF749288156}\",\n        \"qp_fast_CB1\": \"{3F3DD96B-F838-45B6-AA8C-B54F66ED9571}\",\n        \"qp_fast_CB2\": \"{964280C3-70F7-4E22-AA60-734E672D7A02}\",\n        \"qp_fast_CB3\": \"{CCF4B65D-F3D8-4A40-9108-53468ECBA1B4}\",\n    }\n    spm = nanosurf.SPM()\n    application = spm.application\n    scan = application.Scan\n    opmode = application.OperatingMode\n    zcontrol = application.ZController\n    head = application.ScanHead\n    tip = head.CantileverByGUID\n    # tip = None\n    # # Reverse lookup: find key (tip name) for current GUID\n    # for tip_name, guid in tip_guid_map.items():\n    #     if guid.lower() == current_guid.lower():  # Case-insensitive match\n    #         tip = tip_name\n\n    params = {\n        \"pgain\": zcontrol.PGain,\n    ..."
+        "code": "def get_params():\n    if pythoncom:\n        pythoncom.CoInitialize()\n    _tip_guid_map = {\n        \"AN2_200\": \"{BD61D124-8350-4464-BFE4-1D8A156E4913}\",\n        \"GLA_1\": \"{9E2BA28D-D843-41bf-8F62-05502B3EDB18}\",\n        \"ACL_A\": \"{ABB75273-9543-431a-B681-C79B533DD9E6}\",\n        \"ANSCM\": \"{40AEA787-942C-4d48-A389-DA81571F009C}\",\n        \"SICON_A\": \"{F7A339A7-E29F-42a9-B7AA-D69C54363B76}\",\n        \"XYNCHR\": \"{DD3DFE39-455E-40a1-801E-5D5B14CE4080}\",\n        \"XYCONTR\": \"{12ADC816-C7B1-48f8-8B9E-5E579151CF50}\",\n        \"ContAl_G\": \"{ED5A15E6-D3B0-4e64-8C50-809335D3E143}\",\n        \"Multi75E_G\": \"{9593403B-A476-49a9-AA1F-9C3AEDAC0178}\",\n        \"Multi75M_G\": \"{03D0715C-A520-4976-A5E2-4FC3078E3821}\",\n        \"Multi75Al_G\": \"{443A2EDC-5C9C-4d60-843F-C6688BEA1DEA}\",\n        \"Tap190Al_G\": \"{041FB80E-A179-4170-B5A4-A4EA1CC0A965}\",\n        \"Tap150Al_G\": \"{E0F31C86-6BB8-496b-AC7E-F55C62EAB635}\",\n        \"USC_F1_2_k7_3\": \"{19AEEE43-478F-4D16-BDB7-2EE256EAF4A4}\",\n        \"USC_F0_3_k0_3\": \"{16FAEEB6-A887-46F6-A418-81A9EBBCB6C3}\",\n        \"Dyn190Al\": \"{E9CE0D2D-F59E-4B44-A74F-B78C11575E9F}\",\n        \"Stat0_2LAuD\": \"{A4A16538-CCD1-4BB1-B048-7B4F0F1B31BD}\",\n        \"CONTR\": \"{89E92173-96FB-4ff9-94D8-42296D00D980}\",\n        \"CONTSCR\": \"{5A687B3E-A75A-4b22-BD70-40ABB931F00E}\",\n        \"CONTSCPt\": \"{1E95D12B-1DDB-4ace-B3AF-BE9C0D52D4FC}\",\n        \"EFMR\": \"{986305AC-64B5-462e-B37E-6BD5AE447BE3}\",\n        \"LFMR\": \"{C61FCA2C-6D5D-4105-9FDE-640D263E229F}\",\n        \"MFMR\": \"{9499F49F-920F-47ec-80B6-883F683FF056}\",\n        \"NCLR\": \"{62633FD4-0555-4cee-A8B4-B82F4CEFBB48}\",\n        \"PPP_FMR\": \"{EBA2B75C-AA94-4451-AD36-1388CDABF5E8}\",\n        \"pq_SCONT\": \"{8D28AE10-E1DD-49E0-8CC6-ABD7CEDF57B0}\",\n        \"qp_CONT\": \"{0996E3AC-ABF6-4A22-B320-4BF749288156}\",\n        \"qp_fast_CB1\": \"{3F3DD96B-F838-45B6-AA8C-B54F66ED9571}\",\n        \"qp_fast_CB2\": \"{964280C3-70F7-4E22-AA60-734E672D7A02}\",\n        \"qp_fast_CB3\": \"{CCF4B65D-F3D8-4A40-9108-53468ECBA1B4}\",\n    }\n    spm = nanosurf.SPM()\n    application = spm.application\n    scan = application.Scan\n    opmode = application.OperatingMode\n    zcontrol = application.ZController\n    head = application.ScanHead\n    tip = head.CantileverByGUID\n    # tip = None\n    # # Reverse lookup: find key (tip name) for current GUID\n    # for tip_name, guid in tip_guid_map.items():\n    #     if guid.lower() == current_guid.lower():  # Case-insensitive match\n    #         tip = tip_name\n\n    params = {\n        \"pgain\": zcontrol.PGain,\n        \"igain\": zcontrol.IGain,\n        \"dgain\": zcontrol.DGain,\n        \"image_height\": scan.ImageHeight * 1e9,\n        \"image_width\": scan.ImageWidth * 1e9,\n        \"times_per_line\": scan.Scantime,\n        \"points_per_line\": scan.Points,\n        \"lines_per_frame\": scan.Lines,\n        \"rotation\": scan.rotation,\n        \"centre_x\": scan.CenterPosX,\n        \"centre_y\": scan.CenterPosY,\n        \"setpoint\": zcontrol.SetPoint,\n        \"tip\": tip,\n        \"mode\": opmode.OperatingMode,\n    }\n    del zcontrol\n    del scan\n    del application\n    del spm\n    gc.collect()\n    if pythoncom:\n        pythoncom.CoUninitialize()\n    return params"
       },
       {
         "name": "check_params",
@@ -23669,7 +25031,7 @@ const CORRAL_DATA = {
       {
         "name": "score_fn",
         "docstring": "",
-        "code": "    def score_fn(result: str) -> float:\n        try:\n            # Fix common LLM formatting mistakes\n            cleaned = result.replace(\";\", \",\").strip()\n\n            # Ensure JSON braces are balanced\n            if not cleaned.startswith(\"{\"):\n                cleaned = \"{\" + cleaned\n            if not cleaned.endswith(\"}\"):\n                cleaned = cleaned + \"}\"\n\n            # Try parsing JSON\n            data = json.loads(cleaned)\n\n            # Detect all indices dynamically (e.g., 1, 2, 3, ...)\n            indices = sorted(\n                {\n                    int(re.findall(r\"\\d+\", key)[0])\n                    for key in data\n                    if key.startswith(\"rms_roughness_\")\n                }\n            )\n\n            if not indices:\n                logger.warning(\"No RMS entries found\")\n                return 0\n\n            all_passed = True  # Track if all checks pass\n\n            for i in indices:\n                rough_key = f\"rms_roughness_{i}\"\n                path_key = f\"path_{i}\"\n\n                if rough_key in data and path_key in data:\n                    try:\n                        rms = float(data[rough_key])\n                    except ValueError:\n                        logger.warning(f\"Invalid RMS value for entry {i}\")\n                        all_passed = False\n                        continue\n\n                    path = data[path_key]\n                    logger.info(f\"Entry {i}: RMS={rms}, Path={path}\")\n\n                    # Run user-defined check function\n                    check_output = check_roughness(path, rms)\n\n                    abs_tol = tolerance * rms\n                    logger.info(\n                        f\"Tolerance: ±{tolerance}, Check Output: {check_output}\"\n    ..."
+        "code": "    def score_fn(result: str) -> float:\n        try:\n            # Fix common LLM formatting mistakes\n            cleaned = result.replace(\";\", \",\").strip()\n\n            # Ensure JSON braces are balanced\n            if not cleaned.startswith(\"{\"):\n                cleaned = \"{\" + cleaned\n            if not cleaned.endswith(\"}\"):\n                cleaned = cleaned + \"}\"\n\n            # Try parsing JSON\n            data = json.loads(cleaned)\n\n            # Detect all indices dynamically (e.g., 1, 2, 3, ...)\n            indices = sorted(\n                {\n                    int(re.findall(r\"\\d+\", key)[0])\n                    for key in data\n                    if key.startswith(\"rms_roughness_\")\n                }\n            )\n\n            if not indices:\n                logger.warning(\"No RMS entries found\")\n                return 0\n\n            all_passed = True  # Track if all checks pass\n\n            for i in indices:\n                rough_key = f\"rms_roughness_{i}\"\n                path_key = f\"path_{i}\"\n\n                if rough_key in data and path_key in data:\n                    try:\n                        rms = float(data[rough_key])\n                    except ValueError:\n                        logger.warning(f\"Invalid RMS value for entry {i}\")\n                        all_passed = False\n                        continue\n\n                    path = data[path_key]\n                    logger.info(f\"Entry {i}: RMS={rms}, Path={path}\")\n\n                    # Run user-defined check function\n                    check_output = check_roughness(path, rms)\n\n                    abs_tol = tolerance * rms\n                    logger.info(\n                        f\"Tolerance: ±{tolerance}, Check Output: {check_output}\"\n                    )\n\n                    # Check if the measured value is within tolerance\n                    if not (rms - abs_tol <= check_output <= rms + abs_tol):\n                        logger.warning(f\"Entry {i} failed tolerance check.\")\n                        all_passed = False\n\n            # Additional condition: check_params(final_params) must be 1\n            if check_params(final_params) != 1:\n                logger.warning(\"check_params(final_params) != 1\")\n                logger.info(check_params(final_params))\n                all_passed = False\n\n            return 1 if all_passed else 0\n\n        except json.JSONDecodeError:\n            logger.warning(\"Could not parse JSON — please check the submission format.\")\n            return 0\n        except Exception as e:\n            logger.warning(f\"Error: {e}\")\n            return 0"
       },
       {
         "name": "score_fn",
