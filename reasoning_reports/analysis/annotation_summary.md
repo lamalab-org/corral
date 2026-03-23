@@ -4,6 +4,386 @@
 
 ## By model + env + level
 
+### claude_sonnet_45/afm/level_1
+
+- Traces: 5 | Total messages: 145 | Mean messages/trace: 29.00
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 0.9896 | 1.0000 |
+| n_H | 0.0331 | 0.0345 |
+| n_T | 0.3052 | 0.3103 |
+| n_E | 0.4731 | 0.4759 |
+| n_J | 0.1435 | 0.1448 |
+| n_U | 0.0000 | 0.0000 |
+| n_C | 0.0347 | 0.0345 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.7600 |
+| loop_density | 0.0000 |
+| update_grounding_rate | N/A |
+| orphan_evidence_rate | 0.2331 |
+| refute_neglect_rate | N/A |
+| hypothesis_switch_without_eval_rate | N/A |
+| scientificness_score | N/A |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
+| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
+| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
+| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
+| abductive | 4 | 0.8000 | 4 | 0.8000 |
+| triangulation | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 3 | 0.6000 | 4 | 0.8000 |
+| evidence_ignored | 5 | 1.0000 | 34 | 6.8000 |
+| judgment_without_evidence | 1 | 0.2000 | 1 | 0.2000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 3 | 0.6000 | 4 | 0.8000 |
+| evidence_ignored | 5 | 1.0000 | 34 | 6.8000 |
+| judgment_without_evidence | 1 | 0.2000 | 1 | 0.2000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 3 | 0.6000 | 4 | 0.8000 |
+| evidence_handling | 5 | 1.0000 | 35 | 7.0000 |
+| experimental_strategy | 5 | 1.0000 | 5 | 1.0000 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 3 | 0.6000 | 4 | 0.8000 |
+| evidence_handling | 5 | 1.0000 | 35 | 7.0000 |
+| experimental_strategy | 5 | 1.0000 | 5 | 1.0000 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 4 | 0.8000 | 4 | 0.8000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
+
+### claude_sonnet_45/afm/level_2
+
+- Traces: 2 | Total messages: 64 | Mean messages/trace: 32.00
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.0345 | 1.0312 |
+| n_H | 0.0803 | 0.0781 |
+| n_T | 0.3123 | 0.3125 |
+| n_E | 0.5187 | 0.5156 |
+| n_J | 0.0916 | 0.0938 |
+| n_U | 0.0000 | 0.0000 |
+| n_C | 0.0315 | 0.0312 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.8000 |
+| loop_density | 0.0000 |
+| update_grounding_rate | N/A |
+| orphan_evidence_rate | 0.1838 |
+| refute_neglect_rate | N/A |
+| hypothesis_switch_without_eval_rate | N/A |
+| scientificness_score | N/A |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
+| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
+| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
+| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
+| abductive | 0 | 0.0000 | 0 | 0.0000 |
+| triangulation | 1 | 0.5000 | 1 | 0.5000 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 2 | 1.0000 | 3 | 1.5000 |
+| evidence_ignored | 2 | 1.0000 | 18 | 9.0000 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| no_belief_revision | 2 | 1.0000 | 2 | 1.0000 |
+| orphan_evidence | 1 | 0.5000 | 1 | 0.5000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 2 | 1.0000 | 3 | 1.5000 |
+| evidence_ignored | 2 | 1.0000 | 18 | 9.0000 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| no_belief_revision | 2 | 1.0000 | 2 | 1.0000 |
+| orphan_evidence | 1 | 0.5000 | 1 | 0.5000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 2 | 1.0000 | 3 | 1.5000 |
+| evidence_handling | 2 | 1.0000 | 19 | 9.5000 |
+| experimental_strategy | 2 | 1.0000 | 2 | 1.0000 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 2 | 1.0000 | 3 | 1.5000 |
+| evidence_handling | 2 | 1.0000 | 19 | 9.5000 |
+| experimental_strategy | 2 | 1.0000 | 2 | 1.0000 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_handling | 1 | 0.5000 | 1 | 0.5000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
+
+### claude_sonnet_45/afm/level_3
+
+- Traces: 1 | Total messages: 43 | Mean messages/trace: 43.00
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.2326 | 1.2326 |
+| n_H | 0.0698 | 0.0698 |
+| n_T | 0.4419 | 0.4419 |
+| n_E | 0.5349 | 0.5349 |
+| n_J | 0.1860 | 0.1860 |
+| n_U | 0.0000 | 0.0000 |
+| n_C | 0.0000 | 0.0000 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.8000 |
+| loop_density | 0.0000 |
+| update_grounding_rate | N/A |
+| orphan_evidence_rate | 0.1739 |
+| refute_neglect_rate | 0.0000 |
+| hypothesis_switch_without_eval_rate | N/A |
+| scientificness_score | N/A |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
+| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
+| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
+| bayesian_belief_updating | 1 | 1.0000 | 1 | 1.0000 |
+| abductive | 1 | 1.0000 | 1 | 1.0000 |
+| triangulation | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 1 | 1.0000 | 3 | 3.0000 |
+| evidence_ignored | 1 | 1.0000 | 7 | 7.0000 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 1 | 1.0000 |
+| no_belief_revision | 1 | 1.0000 | 1 | 1.0000 |
+| orphan_evidence | 1 | 1.0000 | 1 | 1.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 1 | 1.0000 | 3 | 3.0000 |
+| evidence_ignored | 1 | 1.0000 | 7 | 7.0000 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 1 | 1.0000 | 1 | 1.0000 |
+| no_belief_revision | 1 | 1.0000 | 1 | 1.0000 |
+| orphan_evidence | 1 | 1.0000 | 1 | 1.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 1 | 1.0000 | 3 | 3.0000 |
+| evidence_handling | 1 | 1.0000 | 9 | 9.0000 |
+| experimental_strategy | 1 | 1.0000 | 1 | 1.0000 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 1 | 1.0000 | 3 | 3.0000 |
+| evidence_handling | 1 | 1.0000 | 9 | 9.0000 |
+| experimental_strategy | 1 | 1.0000 | 1 | 1.0000 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 1 | 1.0000 | 2 | 2.0000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
+
+### claude_sonnet_45/afm/level_4
+
+- Traces: 2 | Total messages: 86 | Mean messages/trace: 43.00
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.3140 | 1.3140 |
+| n_H | 0.0698 | 0.0698 |
+| n_T | 0.5698 | 0.5698 |
+| n_E | 0.5698 | 0.5698 |
+| n_J | 0.1047 | 0.1047 |
+| n_U | 0.0000 | 0.0000 |
+| n_C | 0.0000 | 0.0000 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.8000 |
+| loop_density | 0.0000 |
+| update_grounding_rate | N/A |
+| orphan_evidence_rate | 0.3442 |
+| refute_neglect_rate | 0.0000 |
+| hypothesis_switch_without_eval_rate | N/A |
+| scientificness_score | N/A |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
+| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
+| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
+| bayesian_belief_updating | 1 | 0.5000 | 1 | 0.5000 |
+| abductive | 1 | 0.5000 | 1 | 0.5000 |
+| triangulation | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 2 | 1.0000 | 5 | 2.5000 |
+| evidence_ignored | 2 | 1.0000 | 31 | 15.5000 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 4 | 2.0000 |
+| no_belief_revision | 2 | 1.0000 | 2 | 1.0000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 2 | 1.0000 | 5 | 2.5000 |
+| evidence_ignored | 2 | 1.0000 | 31 | 15.5000 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 2 | 1.0000 | 4 | 2.0000 |
+| no_belief_revision | 2 | 1.0000 | 2 | 1.0000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 2 | 1.0000 | 5 | 2.5000 |
+| evidence_handling | 2 | 1.0000 | 35 | 17.5000 |
+| experimental_strategy | 2 | 1.0000 | 2 | 1.0000 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 2 | 1.0000 | 5 | 2.5000 |
+| evidence_handling | 2 | 1.0000 | 35 | 17.5000 |
+| experimental_strategy | 2 | 1.0000 | 2 | 1.0000 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 1 | 0.5000 | 2 | 1.0000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
+
 ### claude_sonnet_45/catalyst/level_1
 
 - Traces: 15 | Total messages: 321 | Mean messages/trace: 21.40
@@ -288,6 +668,196 @@
 | hypothesis_generation | 5 | 0.5000 | 5 | 0.5000 |
 | evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
+
+### claude_sonnet_45/ml/level_1
+
+- Traces: 15 | Total messages: 276 | Mean messages/trace: 18.40
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.2532 | 1.2464 |
+| n_H | 0.0148 | 0.0145 |
+| n_T | 0.4292 | 0.4275 |
+| n_E | 0.5212 | 0.5181 |
+| n_J | 0.1879 | 0.1884 |
+| n_U | 0.0035 | 0.0036 |
+| n_C | 0.0965 | 0.0942 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.6667 |
+| loop_density | 0.0000 |
+| update_grounding_rate | 1.0000 |
+| orphan_evidence_rate | 0.0588 |
+| refute_neglect_rate | N/A |
+| hypothesis_switch_without_eval_rate | N/A |
+| scientificness_score | 0.5500 |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
+| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
+| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
+| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
+| abductive | 2 | 0.1333 | 2 | 0.1333 |
+| triangulation | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 1 | 0.0667 | 1 | 0.0667 |
+| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 3 | 0.2000 | 3 | 0.2000 |
+| evidence_ignored | 15 | 1.0000 | 69 | 4.6000 |
+| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 4 | 0.2667 |
+| no_belief_revision | 14 | 0.9333 | 14 | 0.9333 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 3 | 0.2000 | 3 | 0.2000 |
+| evidence_ignored | 15 | 1.0000 | 69 | 4.6000 |
+| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 3 | 0.2000 | 4 | 0.2667 |
+| no_belief_revision | 14 | 0.9333 | 14 | 0.9333 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 3 | 0.2000 | 3 | 0.2000 |
+| evidence_handling | 15 | 1.0000 | 74 | 4.9333 |
+| experimental_strategy | 14 | 0.9333 | 14 | 0.9333 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 3 | 0.2000 | 3 | 0.2000 |
+| evidence_handling | 15 | 1.0000 | 74 | 4.9333 |
+| experimental_strategy | 14 | 0.9333 | 14 | 0.9333 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 2 | 0.1333 | 2 | 0.1333 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 1 | 0.0667 | 1 | 0.0667 |
+
+### claude_sonnet_45/resistor/level_1
+
+- Traces: 30 | Total messages: 442 | Mean messages/trace: 14.73
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.2112 | 1.1561 |
+| n_H | 0.1998 | 0.2262 |
+| n_T | 0.1783 | 0.1765 |
+| n_E | 0.3396 | 0.3190 |
+| n_J | 0.3457 | 0.3303 |
+| n_U | 0.0265 | 0.0385 |
+| n_C | 0.1213 | 0.0656 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.8733 |
+| loop_density | 0.0000 |
+| update_grounding_rate | 0.1410 |
+| orphan_evidence_rate | 0.0377 |
+| refute_neglect_rate | 0.0264 |
+| hypothesis_switch_without_eval_rate | 0.7490 |
+| scientificness_score | 0.4408 |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 6 | 0.2000 | 6 | 0.2000 |
+| ml_make_it_work | 2 | 0.0667 | 2 | 0.0667 |
+| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
+| bayesian_belief_updating | 11 | 0.3667 | 11 | 0.3667 |
+| abductive | 20 | 0.6667 | 20 | 0.6667 |
+| triangulation | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 9 | 0.3000 | 47 | 1.5667 |
+| evidence_ignored | 11 | 0.3667 | 37 | 1.2333 |
+| judgment_without_evidence | 10 | 0.3333 | 34 | 1.1333 |
+| dead_end_update | 2 | 0.0667 | 3 | 0.1000 |
+| unresolved_contradiction | 2 | 0.0667 | 15 | 0.5000 |
+| hypothesis_to_commitment_shortcut | 1 | 0.0333 | 1 | 0.0333 |
+| test_without_evidence | 1 | 0.0333 | 4 | 0.1333 |
+| no_belief_revision | 17 | 0.5667 | 17 | 0.5667 |
+| orphan_evidence | 1 | 0.0333 | 1 | 0.0333 |
+| confirmation_only | 3 | 0.1000 | 4 | 0.1333 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 10 | 0.3333 | 47 | 1.5667 |
+| evidence_ignored | 16 | 0.5333 | 37 | 1.2333 |
+| judgment_without_evidence | 10 | 0.3333 | 34 | 1.1333 |
+| dead_end_update | 2 | 0.0667 | 3 | 0.1000 |
+| unresolved_contradiction | 9 | 0.3000 | 22 | 0.7333 |
+| hypothesis_to_commitment_shortcut | 1 | 0.0333 | 1 | 0.0333 |
+| test_without_evidence | 4 | 0.1333 | 4 | 0.1333 |
+| no_belief_revision | 17 | 0.5667 | 17 | 0.5667 |
+| orphan_evidence | 1 | 0.0333 | 1 | 0.0333 |
+| confirmation_only | 3 | 0.1000 | 4 | 0.1333 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 12 | 0.4000 | 66 | 2.2000 |
+| evidence_handling | 18 | 0.6000 | 76 | 2.5333 |
+| experimental_strategy | 20 | 0.6667 | 21 | 0.7000 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 13 | 0.4333 | 73 | 2.4333 |
+| evidence_handling | 19 | 0.6333 | 76 | 2.5333 |
+| experimental_strategy | 20 | 0.6667 | 21 | 0.7000 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 24 | 0.8000 | 37 | 1.2333 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 2 | 0.0667 | 2 | 0.0667 |
 
 ### claude_sonnet_45/retrosynthesis/level_1
 
@@ -764,33 +1334,33 @@
 | evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
-### claude_sonnet_45/wetlab/level1
+### claude_sonnet_45/wetlab/level_1
 
-- Traces: 10 | Total messages: 330 | Mean messages/trace: 33.00
+- Traces: 15 | Total messages: 521 | Mean messages/trace: 34.73
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.3778 | 1.3818 |
-| n_H | 0.1772 | 0.1788 |
-| n_T | 0.2625 | 0.2667 |
-| n_E | 0.4808 | 0.4788 |
-| n_J | 0.3692 | 0.3697 |
-| n_U | 0.0569 | 0.0576 |
-| n_C | 0.0312 | 0.0303 |
+| nodes_total | 1.3735 | 1.3954 |
+| n_H | 0.1753 | 0.1766 |
+| n_T | 0.2696 | 0.2802 |
+| n_E | 0.4818 | 0.4837 |
+| n_J | 0.3634 | 0.3724 |
+| n_U | 0.0532 | 0.0537 |
+| n_C | 0.0302 | 0.0288 |
 
 #### Metric means
 
 | metric | mean |
 | --- | ---: |
-| workflow_completeness | 0.9800 |
+| workflow_completeness | 0.9733 |
 | loop_density | 0.0000 |
-| update_grounding_rate | 0.2037 |
-| orphan_evidence_rate | 0.1885 |
+| update_grounding_rate | 0.2619 |
+| orphan_evidence_rate | 0.1534 |
 | refute_neglect_rate | 0.0000 |
-| hypothesis_switch_without_eval_rate | 0.1875 |
-| scientificness_score | 0.3955 |
+| hypothesis_switch_without_eval_rate | 0.1597 |
+| scientificness_score | 0.4326 |
 
 #### Global subgraph presence
 
@@ -799,8 +1369,8 @@
 | popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
 | ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
 | exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 4 | 0.4000 | 4 | 0.4000 |
-| abductive | 10 | 1.0000 | 10 | 1.0000 |
+| bayesian_belief_updating | 7 | 0.4667 | 7 | 0.4667 |
+| abductive | 15 | 1.0000 | 15 | 1.0000 |
 | triangulation | 0 | 0.0000 | 0 | 0.0000 |
 | preregistered | 0 | 0.0000 | 0 | 0.0000 |
 | active_learning | 0 | 0.0000 | 0 | 0.0000 |
@@ -809,71 +1379,71 @@
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 1.0000 | 56 | 5.6000 |
-| evidence_ignored | 3 | 0.3000 | 38 | 3.8000 |
-| judgment_without_evidence | 8 | 0.8000 | 14 | 1.4000 |
-| dead_end_update | 2 | 0.2000 | 2 | 0.2000 |
-| unresolved_contradiction | 2 | 0.2000 | 4 | 0.4000 |
-| hypothesis_to_commitment_shortcut | 1 | 0.1000 | 1 | 0.1000 |
-| test_without_evidence | 0 | 0.0000 | 1 | 0.1000 |
-| no_belief_revision | 1 | 0.1000 | 1 | 0.1000 |
-| orphan_evidence | 9 | 0.9000 | 17 | 1.7000 |
-| confirmation_only | 1 | 0.1000 | 1 | 0.1000 |
+| untested_hypothesis | 15 | 1.0000 | 86 | 5.7333 |
+| evidence_ignored | 6 | 0.4000 | 53 | 3.5333 |
+| judgment_without_evidence | 8 | 0.5333 | 11 | 0.7333 |
+| dead_end_update | 5 | 0.3333 | 5 | 0.3333 |
+| unresolved_contradiction | 5 | 0.3333 | 8 | 0.5333 |
+| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 6 | 0.4000 |
+| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| no_belief_revision | 1 | 0.0667 | 1 | 0.0667 |
+| orphan_evidence | 10 | 0.6667 | 19 | 1.2667 |
+| confirmation_only | 4 | 0.2667 | 5 | 0.3333 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 1.0000 | 56 | 5.6000 |
-| evidence_ignored | 10 | 1.0000 | 38 | 3.8000 |
-| judgment_without_evidence | 8 | 0.8000 | 14 | 1.4000 |
-| dead_end_update | 2 | 0.2000 | 2 | 0.2000 |
-| unresolved_contradiction | 3 | 0.3000 | 5 | 0.5000 |
-| hypothesis_to_commitment_shortcut | 1 | 0.1000 | 1 | 0.1000 |
-| test_without_evidence | 1 | 0.1000 | 1 | 0.1000 |
-| no_belief_revision | 1 | 0.1000 | 1 | 0.1000 |
-| orphan_evidence | 9 | 0.9000 | 17 | 1.7000 |
-| confirmation_only | 1 | 0.1000 | 1 | 0.1000 |
+| untested_hypothesis | 15 | 1.0000 | 86 | 5.7333 |
+| evidence_ignored | 15 | 1.0000 | 53 | 3.5333 |
+| judgment_without_evidence | 8 | 0.5333 | 11 | 0.7333 |
+| dead_end_update | 5 | 0.3333 | 5 | 0.3333 |
+| unresolved_contradiction | 6 | 0.4000 | 8 | 0.5333 |
+| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 6 | 0.4000 |
+| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| no_belief_revision | 1 | 0.0667 | 1 | 0.0667 |
+| orphan_evidence | 10 | 0.6667 | 19 | 1.2667 |
+| confirmation_only | 4 | 0.2667 | 5 | 0.3333 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 61 | 6.1000 |
-| evidence_handling | 10 | 1.0000 | 70 | 7.0000 |
-| experimental_strategy | 4 | 0.4000 | 4 | 0.4000 |
+| hypothesis_generation | 15 | 1.0000 | 99 | 6.6000 |
+| evidence_handling | 13 | 0.8667 | 83 | 5.5333 |
+| experimental_strategy | 7 | 0.4667 | 12 | 0.8000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 62 | 6.2000 |
-| evidence_handling | 10 | 1.0000 | 70 | 7.0000 |
-| experimental_strategy | 4 | 0.4000 | 4 | 0.4000 |
+| hypothesis_generation | 15 | 1.0000 | 99 | 6.6000 |
+| evidence_handling | 15 | 1.0000 | 83 | 5.5333 |
+| experimental_strategy | 7 | 0.4667 | 12 | 0.8000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 14 | 1.4000 |
+| hypothesis_generation | 15 | 1.0000 | 22 | 1.4667 |
 | evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
-### claude_sonnet_45/wetlab/level2
+### claude_sonnet_45/wetlab/level_2
 
-- Traces: 10 | Total messages: 562 | Mean messages/trace: 56.20
+- Traces: 15 | Total messages: 975 | Mean messages/trace: 65.00
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.3594 | 1.3754 |
-| n_H | 0.1736 | 0.1726 |
-| n_T | 0.3294 | 0.3363 |
-| n_E | 0.4738 | 0.4786 |
-| n_J | 0.3187 | 0.3274 |
-| n_U | 0.0428 | 0.0409 |
-| n_C | 0.0211 | 0.0196 |
+| nodes_total | 1.3947 | 1.4072 |
+| n_H | 0.1762 | 0.1785 |
+| n_T | 0.3289 | 0.3323 |
+| n_E | 0.5013 | 0.5067 |
+| n_J | 0.3275 | 0.3323 |
+| n_U | 0.0467 | 0.0451 |
+| n_C | 0.0141 | 0.0123 |
 
 #### Metric means
 
@@ -881,11 +1451,201 @@
 | --- | ---: |
 | workflow_completeness | 1.0000 |
 | loop_density | 0.0000 |
-| update_grounding_rate | 0.0250 |
-| orphan_evidence_rate | 0.2286 |
-| refute_neglect_rate | 0.0333 |
-| hypothesis_switch_without_eval_rate | 0.1648 |
-| scientificness_score | 0.3475 |
+| update_grounding_rate | 0.1133 |
+| orphan_evidence_rate | 0.1978 |
+| refute_neglect_rate | 0.0208 |
+| hypothesis_switch_without_eval_rate | 0.3361 |
+| scientificness_score | 0.3863 |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
+| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
+| exploratory_to_confirmatory | 1 | 0.0667 | 1 | 0.0667 |
+| bayesian_belief_updating | 8 | 0.5333 | 8 | 0.5333 |
+| abductive | 15 | 1.0000 | 15 | 1.0000 |
+| triangulation | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 15 | 1.0000 | 165 | 11.0000 |
+| evidence_ignored | 11 | 0.7333 | 157 | 10.4667 |
+| judgment_without_evidence | 10 | 0.6667 | 24 | 1.6000 |
+| dead_end_update | 10 | 0.6667 | 15 | 1.0000 |
+| unresolved_contradiction | 5 | 0.3333 | 23 | 1.5333 |
+| hypothesis_to_commitment_shortcut | 2 | 0.1333 | 4 | 0.2667 |
+| test_without_evidence | 0 | 0.0000 | 2 | 0.1333 |
+| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| orphan_evidence | 15 | 1.0000 | 41 | 2.7333 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 15 | 1.0000 | 165 | 11.0000 |
+| evidence_ignored | 15 | 1.0000 | 157 | 10.4667 |
+| judgment_without_evidence | 10 | 0.6667 | 24 | 1.6000 |
+| dead_end_update | 10 | 0.6667 | 15 | 1.0000 |
+| unresolved_contradiction | 8 | 0.5333 | 24 | 1.6000 |
+| hypothesis_to_commitment_shortcut | 2 | 0.1333 | 4 | 0.2667 |
+| test_without_evidence | 2 | 0.1333 | 2 | 0.1333 |
+| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| orphan_evidence | 15 | 1.0000 | 41 | 2.7333 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 15 | 1.0000 | 188 | 12.5333 |
+| evidence_handling | 15 | 1.0000 | 224 | 14.9333 |
+| experimental_strategy | 10 | 0.6667 | 19 | 1.2667 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 15 | 1.0000 | 189 | 12.6000 |
+| evidence_handling | 15 | 1.0000 | 224 | 14.9333 |
+| experimental_strategy | 10 | 0.6667 | 19 | 1.2667 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 15 | 1.0000 | 23 | 1.5333 |
+| evidence_handling | 1 | 0.0667 | 1 | 0.0667 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
+
+### claude_sonnet_45/wetlab/level_3
+
+- Traces: 15 | Total messages: 1099 | Mean messages/trace: 73.27
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.4257 | 1.4313 |
+| n_H | 0.1737 | 0.1747 |
+| n_T | 0.3466 | 0.3530 |
+| n_E | 0.5079 | 0.5123 |
+| n_J | 0.3415 | 0.3385 |
+| n_U | 0.0420 | 0.0400 |
+| n_C | 0.0139 | 0.0127 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 1.0000 |
+| loop_density | 0.0000 |
+| update_grounding_rate | 0.0500 |
+| orphan_evidence_rate | 0.2231 |
+| refute_neglect_rate | 0.0952 |
+| hypothesis_switch_without_eval_rate | 0.3503 |
+| scientificness_score | 0.3631 |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 1 | 0.0667 | 1 | 0.0667 |
+| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
+| exploratory_to_confirmatory | 1 | 0.0667 | 1 | 0.0667 |
+| bayesian_belief_updating | 14 | 0.9333 | 14 | 0.9333 |
+| abductive | 15 | 1.0000 | 15 | 1.0000 |
+| triangulation | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 15 | 1.0000 | 177 | 11.8000 |
+| evidence_ignored | 11 | 0.7333 | 177 | 11.8000 |
+| judgment_without_evidence | 7 | 0.4667 | 13 | 0.8667 |
+| dead_end_update | 14 | 0.9333 | 22 | 1.4667 |
+| unresolved_contradiction | 6 | 0.4000 | 28 | 1.8667 |
+| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 8 | 0.5333 |
+| test_without_evidence | 0 | 0.0000 | 5 | 0.3333 |
+| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| orphan_evidence | 15 | 1.0000 | 40 | 2.6667 |
+| confirmation_only | 2 | 0.1333 | 3 | 0.2000 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 15 | 1.0000 | 177 | 11.8000 |
+| evidence_ignored | 15 | 1.0000 | 177 | 11.8000 |
+| judgment_without_evidence | 7 | 0.4667 | 13 | 0.8667 |
+| dead_end_update | 14 | 0.9333 | 22 | 1.4667 |
+| unresolved_contradiction | 9 | 0.6000 | 28 | 1.8667 |
+| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 8 | 0.5333 |
+| test_without_evidence | 4 | 0.2667 | 5 | 0.3333 |
+| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| orphan_evidence | 15 | 1.0000 | 40 | 2.6667 |
+| confirmation_only | 2 | 0.1333 | 3 | 0.2000 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 15 | 1.0000 | 208 | 13.8667 |
+| evidence_handling | 15 | 1.0000 | 235 | 15.6667 |
+| experimental_strategy | 14 | 0.9333 | 30 | 2.0000 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 15 | 1.0000 | 208 | 13.8667 |
+| evidence_handling | 15 | 1.0000 | 235 | 15.6667 |
+| experimental_strategy | 14 | 0.9333 | 30 | 2.0000 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 15 | 1.0000 | 30 | 2.0000 |
+| evidence_handling | 1 | 0.0667 | 1 | 0.0667 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
+
+### gpt_4o/afm/level_1
+
+- Traces: 5 | Total messages: 145 | Mean messages/trace: 29.00
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.1451 | 1.1172 |
+| n_H | 0.0337 | 0.0345 |
+| n_T | 0.3637 | 0.3310 |
+| n_E | 0.5479 | 0.5517 |
+| n_J | 0.1667 | 0.1724 |
+| n_U | 0.0000 | 0.0000 |
+| n_C | 0.0331 | 0.0276 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.7600 |
+| loop_density | 0.0000 |
+| update_grounding_rate | N/A |
+| orphan_evidence_rate | 0.1256 |
+| refute_neglect_rate | 0.1667 |
+| hypothesis_switch_without_eval_rate | N/A |
+| scientificness_score | N/A |
 
 #### Global subgraph presence
 
@@ -894,8 +1654,8 @@
 | popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
 | ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
 | exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 10 | 1.0000 | 10 | 1.0000 |
-| abductive | 10 | 1.0000 | 10 | 1.0000 |
+| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
+| abductive | 4 | 0.8000 | 4 | 0.8000 |
 | triangulation | 0 | 0.0000 | 0 | 0.0000 |
 | preregistered | 0 | 0.0000 | 0 | 0.0000 |
 | active_learning | 0 | 0.0000 | 0 | 0.0000 |
@@ -904,71 +1664,71 @@
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 1.0000 | 92 | 9.2000 |
-| evidence_ignored | 6 | 0.6000 | 78 | 7.8000 |
-| judgment_without_evidence | 3 | 0.3000 | 7 | 0.7000 |
-| dead_end_update | 4 | 0.4000 | 5 | 0.5000 |
-| unresolved_contradiction | 0 | 0.0000 | 8 | 0.8000 |
-| hypothesis_to_commitment_shortcut | 1 | 0.1000 | 3 | 0.3000 |
-| test_without_evidence | 0 | 0.0000 | 3 | 0.3000 |
-| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
-| orphan_evidence | 10 | 1.0000 | 24 | 2.4000 |
+| untested_hypothesis | 3 | 0.6000 | 3 | 0.6000 |
+| evidence_ignored | 4 | 0.8000 | 29 | 5.8000 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 3 | 0.6000 | 9 | 1.8000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
+| orphan_evidence | 1 | 0.2000 | 1 | 0.2000 |
 | confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 1.0000 | 92 | 9.2000 |
-| evidence_ignored | 10 | 1.0000 | 78 | 7.8000 |
-| judgment_without_evidence | 3 | 0.3000 | 7 | 0.7000 |
-| dead_end_update | 4 | 0.4000 | 5 | 0.5000 |
-| unresolved_contradiction | 6 | 0.6000 | 13 | 1.3000 |
-| hypothesis_to_commitment_shortcut | 1 | 0.1000 | 3 | 0.3000 |
-| test_without_evidence | 3 | 0.3000 | 3 | 0.3000 |
-| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
-| orphan_evidence | 10 | 1.0000 | 24 | 2.4000 |
+| untested_hypothesis | 3 | 0.6000 | 3 | 0.6000 |
+| evidence_ignored | 5 | 1.0000 | 29 | 5.8000 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 3 | 0.6000 | 9 | 1.8000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
+| orphan_evidence | 1 | 0.2000 | 1 | 0.2000 |
 | confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 100 | 10.0000 |
-| evidence_handling | 10 | 1.0000 | 112 | 11.2000 |
-| experimental_strategy | 4 | 0.4000 | 8 | 0.8000 |
+| hypothesis_generation | 4 | 0.8000 | 12 | 2.4000 |
+| evidence_handling | 4 | 0.8000 | 30 | 6.0000 |
+| experimental_strategy | 5 | 1.0000 | 5 | 1.0000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 105 | 10.5000 |
-| evidence_handling | 10 | 1.0000 | 112 | 11.2000 |
-| experimental_strategy | 4 | 0.4000 | 8 | 0.8000 |
+| hypothesis_generation | 4 | 0.8000 | 12 | 2.4000 |
+| evidence_handling | 5 | 1.0000 | 30 | 6.0000 |
+| experimental_strategy | 5 | 1.0000 | 5 | 1.0000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 20 | 2.0000 |
+| hypothesis_generation | 4 | 0.8000 | 4 | 0.8000 |
 | evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
-### claude_sonnet_45/wetlab/level3
+### gpt_4o/afm/level_2
 
-- Traces: 10 | Total messages: 702 | Mean messages/trace: 70.20
+- Traces: 5 | Total messages: 163 | Mean messages/trace: 32.60
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.3853 | 1.3860 |
-| n_H | 0.1855 | 0.1852 |
-| n_T | 0.3286 | 0.3291 |
-| n_E | 0.4917 | 0.4943 |
-| n_J | 0.3292 | 0.3276 |
-| n_U | 0.0355 | 0.0356 |
-| n_C | 0.0148 | 0.0142 |
+| nodes_total | 1.1051 | 1.1534 |
+| n_H | 0.0829 | 0.0920 |
+| n_T | 0.2612 | 0.2945 |
+| n_E | 0.4906 | 0.4908 |
+| n_J | 0.1985 | 0.2086 |
+| n_U | 0.0381 | 0.0368 |
+| n_C | 0.0339 | 0.0307 |
 
 #### Metric means
 
@@ -976,11 +1736,11 @@
 | --- | ---: |
 | workflow_completeness | 1.0000 |
 | loop_density | 0.0000 |
-| update_grounding_rate | 0.1500 |
-| orphan_evidence_rate | 0.1793 |
-| refute_neglect_rate | 0.1389 |
-| hypothesis_switch_without_eval_rate | 0.1667 |
-| scientificness_score | 0.3791 |
+| update_grounding_rate | 0.8000 |
+| orphan_evidence_rate | 0.1595 |
+| refute_neglect_rate | 0.0500 |
+| hypothesis_switch_without_eval_rate | N/A |
+| scientificness_score | 0.5051 |
 
 #### Global subgraph presence
 
@@ -988,9 +1748,9 @@
 | --- | ---: | ---: | ---: | ---: |
 | popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
 | ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 1 | 0.1000 | 1 | 0.1000 |
-| bayesian_belief_updating | 9 | 0.9000 | 9 | 0.9000 |
-| abductive | 10 | 1.0000 | 10 | 1.0000 |
+| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
+| bayesian_belief_updating | 2 | 0.4000 | 2 | 0.4000 |
+| abductive | 3 | 0.6000 | 3 | 0.6000 |
 | triangulation | 0 | 0.0000 | 0 | 0.0000 |
 | preregistered | 0 | 0.0000 | 0 | 0.0000 |
 | active_learning | 0 | 0.0000 | 0 | 0.0000 |
@@ -999,54 +1759,244 @@
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 1.0000 | 125 | 12.5000 |
-| evidence_ignored | 6 | 0.6000 | 107 | 10.7000 |
-| judgment_without_evidence | 8 | 0.8000 | 14 | 1.4000 |
-| dead_end_update | 4 | 0.4000 | 8 | 0.8000 |
-| unresolved_contradiction | 4 | 0.4000 | 17 | 1.7000 |
-| hypothesis_to_commitment_shortcut | 5 | 0.5000 | 13 | 1.3000 |
-| test_without_evidence | 0 | 0.0000 | 1 | 0.1000 |
+| untested_hypothesis | 2 | 0.4000 | 4 | 0.8000 |
+| evidence_ignored | 4 | 0.8000 | 24 | 4.8000 |
+| judgment_without_evidence | 2 | 0.4000 | 2 | 0.4000 |
+| dead_end_update | 2 | 0.4000 | 3 | 0.6000 |
+| unresolved_contradiction | 1 | 0.2000 | 3 | 0.6000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 1 | 0.2000 |
 | no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
-| orphan_evidence | 9 | 0.9000 | 24 | 2.4000 |
-| confirmation_only | 2 | 0.2000 | 3 | 0.3000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 1.0000 | 125 | 12.5000 |
-| evidence_ignored | 10 | 1.0000 | 107 | 10.7000 |
-| judgment_without_evidence | 8 | 0.8000 | 14 | 1.4000 |
-| dead_end_update | 4 | 0.4000 | 8 | 0.8000 |
-| unresolved_contradiction | 7 | 0.7000 | 24 | 2.4000 |
-| hypothesis_to_commitment_shortcut | 5 | 0.5000 | 13 | 1.3000 |
-| test_without_evidence | 1 | 0.1000 | 1 | 0.1000 |
+| untested_hypothesis | 3 | 0.6000 | 4 | 0.8000 |
+| evidence_ignored | 5 | 1.0000 | 24 | 4.8000 |
+| judgment_without_evidence | 2 | 0.4000 | 2 | 0.4000 |
+| dead_end_update | 2 | 0.4000 | 3 | 0.6000 |
+| unresolved_contradiction | 2 | 0.4000 | 3 | 0.6000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 1 | 0.2000 | 1 | 0.2000 |
 | no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
-| orphan_evidence | 9 | 0.9000 | 24 | 2.4000 |
-| confirmation_only | 2 | 0.2000 | 3 | 0.3000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 145 | 14.5000 |
-| evidence_handling | 10 | 1.0000 | 146 | 14.6000 |
-| experimental_strategy | 6 | 0.6000 | 21 | 2.1000 |
+| hypothesis_generation | 2 | 0.4000 | 7 | 1.4000 |
+| evidence_handling | 4 | 0.8000 | 27 | 5.4000 |
+| experimental_strategy | 2 | 0.4000 | 3 | 0.6000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 152 | 15.2000 |
-| evidence_handling | 10 | 1.0000 | 146 | 14.6000 |
-| experimental_strategy | 6 | 0.6000 | 21 | 2.1000 |
+| hypothesis_generation | 3 | 0.6000 | 7 | 1.4000 |
+| evidence_handling | 5 | 1.0000 | 27 | 5.4000 |
+| experimental_strategy | 2 | 0.4000 | 3 | 0.6000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 19 | 1.9000 |
-| evidence_handling | 1 | 0.1000 | 1 | 0.1000 |
+| hypothesis_generation | 5 | 1.0000 | 5 | 1.0000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
+
+### gpt_4o/afm/level_3
+
+- Traces: 5 | Total messages: 117 | Mean messages/trace: 23.40
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.1158 | 1.1111 |
+| n_H | 0.0249 | 0.0342 |
+| n_T | 0.2945 | 0.2906 |
+| n_E | 0.5344 | 0.5214 |
+| n_J | 0.2107 | 0.2137 |
+| n_U | 0.0054 | 0.0085 |
+| n_C | 0.0459 | 0.0427 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.7200 |
+| loop_density | 0.0000 |
+| update_grounding_rate | 1.0000 |
+| orphan_evidence_rate | 0.0499 |
+| refute_neglect_rate | 0.0000 |
+| hypothesis_switch_without_eval_rate | 1.0000 |
+| scientificness_score | 0.6882 |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
+| ml_make_it_work | 1 | 0.2000 | 1 | 0.2000 |
+| exploratory_to_confirmatory | 1 | 0.2000 | 1 | 0.2000 |
+| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
+| abductive | 2 | 0.4000 | 2 | 0.4000 |
+| triangulation | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 1 | 0.2000 | 1 | 0.2000 |
+| evidence_ignored | 1 | 0.2000 | 14 | 2.8000 |
+| judgment_without_evidence | 1 | 0.2000 | 1 | 0.2000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 0 | 0.0000 | 2 | 0.4000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| no_belief_revision | 4 | 0.8000 | 4 | 0.8000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 1 | 0.2000 | 1 | 0.2000 |
+| evidence_ignored | 5 | 1.0000 | 14 | 2.8000 |
+| judgment_without_evidence | 1 | 0.2000 | 1 | 0.2000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 1 | 0.2000 | 2 | 0.4000 |
+| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
+| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| no_belief_revision | 4 | 0.8000 | 4 | 0.8000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 1 | 0.2000 | 3 | 0.6000 |
+| evidence_handling | 2 | 0.4000 | 15 | 3.0000 |
+| experimental_strategy | 4 | 0.8000 | 4 | 0.8000 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 1 | 0.2000 | 3 | 0.6000 |
+| evidence_handling | 5 | 1.0000 | 15 | 3.0000 |
+| experimental_strategy | 4 | 0.8000 | 4 | 0.8000 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 2 | 0.4000 | 2 | 0.4000 |
+| evidence_handling | 1 | 0.2000 | 1 | 0.2000 |
+| experimental_strategy | 1 | 0.2000 | 1 | 0.2000 |
+
+### gpt_4o/afm/level_4
+
+- Traces: 5 | Total messages: 133 | Mean messages/trace: 26.60
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 0.9137 | 0.8947 |
+| n_H | 0.0414 | 0.0376 |
+| n_T | 0.2169 | 0.2180 |
+| n_E | 0.4424 | 0.4286 |
+| n_J | 0.1721 | 0.1805 |
+| n_U | 0.0000 | 0.0000 |
+| n_C | 0.0408 | 0.0301 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.7600 |
+| loop_density | 0.0000 |
+| update_grounding_rate | N/A |
+| orphan_evidence_rate | 0.1383 |
+| refute_neglect_rate | 0.5000 |
+| hypothesis_switch_without_eval_rate | N/A |
+| scientificness_score | N/A |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
+| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
+| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
+| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
+| abductive | 4 | 0.8000 | 4 | 0.8000 |
+| triangulation | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 2 | 0.4000 | 2 | 0.4000 |
+| evidence_ignored | 3 | 0.6000 | 15 | 3.0000 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 1 | 0.2000 | 2 | 0.4000 |
+| hypothesis_to_commitment_shortcut | 2 | 0.4000 | 2 | 0.4000 |
+| test_without_evidence | 0 | 0.0000 | 2 | 0.4000 |
+| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 2 | 0.4000 | 2 | 0.4000 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 2 | 0.4000 | 2 | 0.4000 |
+| evidence_ignored | 5 | 1.0000 | 15 | 3.0000 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 1 | 0.2000 | 2 | 0.4000 |
+| hypothesis_to_commitment_shortcut | 2 | 0.4000 | 2 | 0.4000 |
+| test_without_evidence | 1 | 0.2000 | 2 | 0.4000 |
+| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 2 | 0.4000 | 2 | 0.4000 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 3 | 0.6000 | 6 | 1.2000 |
+| evidence_handling | 3 | 0.6000 | 17 | 3.4000 |
+| experimental_strategy | 5 | 1.0000 | 7 | 1.4000 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 3 | 0.6000 | 6 | 1.2000 |
+| evidence_handling | 5 | 1.0000 | 17 | 3.4000 |
+| experimental_strategy | 5 | 1.0000 | 7 | 1.4000 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 4 | 0.8000 | 4 | 0.8000 |
+| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ### gpt_4o/catalyst/level_1
@@ -1428,6 +2378,101 @@
 | hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
 | evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
+
+### gpt_4o/resistor/level_1
+
+- Traces: 29 | Total messages: 1021 | Mean messages/trace: 35.21
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.4509 | 1.5083 |
+| n_H | 0.1539 | 0.1469 |
+| n_T | 0.3948 | 0.4182 |
+| n_E | 0.5253 | 0.5524 |
+| n_J | 0.3342 | 0.3595 |
+| n_U | 0.0207 | 0.0206 |
+| n_C | 0.0221 | 0.0108 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.9034 |
+| loop_density | 0.0005 |
+| update_grounding_rate | 0.2941 |
+| orphan_evidence_rate | 0.1144 |
+| refute_neglect_rate | 0.0692 |
+| hypothesis_switch_without_eval_rate | 0.6250 |
+| scientificness_score | 0.4053 |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
+| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
+| exploratory_to_confirmatory | 7 | 0.2414 | 7 | 0.2414 |
+| bayesian_belief_updating | 19 | 0.6552 | 19 | 0.6552 |
+| abductive | 25 | 0.8621 | 25 | 0.8621 |
+| triangulation | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 1 | 0.0345 | 1 | 0.0345 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 19 | 0.6552 | 70 | 2.4138 |
+| evidence_ignored | 13 | 0.4483 | 167 | 5.7586 |
+| judgment_without_evidence | 9 | 0.3103 | 9 | 0.3103 |
+| dead_end_update | 10 | 0.3448 | 11 | 0.3793 |
+| unresolved_contradiction | 8 | 0.2759 | 59 | 2.0345 |
+| hypothesis_to_commitment_shortcut | 2 | 0.0690 | 3 | 0.1034 |
+| test_without_evidence | 0 | 0.0000 | 4 | 0.1379 |
+| no_belief_revision | 12 | 0.4138 | 12 | 0.4138 |
+| orphan_evidence | 8 | 0.2759 | 10 | 0.3448 |
+| confirmation_only | 2 | 0.0690 | 3 | 0.1034 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 22 | 0.7586 | 70 | 2.4138 |
+| evidence_ignored | 28 | 0.9655 | 167 | 5.7586 |
+| judgment_without_evidence | 9 | 0.3103 | 9 | 0.3103 |
+| dead_end_update | 10 | 0.3448 | 11 | 0.3793 |
+| unresolved_contradiction | 20 | 0.6897 | 64 | 2.2069 |
+| hypothesis_to_commitment_shortcut | 2 | 0.0690 | 3 | 0.1034 |
+| test_without_evidence | 4 | 0.1379 | 4 | 0.1379 |
+| no_belief_revision | 12 | 0.4138 | 12 | 0.4138 |
+| orphan_evidence | 8 | 0.2759 | 10 | 0.3448 |
+| confirmation_only | 2 | 0.0690 | 3 | 0.1034 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 20 | 0.6897 | 132 | 4.5517 |
+| evidence_handling | 20 | 0.6897 | 190 | 6.5517 |
+| experimental_strategy | 22 | 0.7586 | 26 | 0.8966 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 25 | 0.8621 | 137 | 4.7241 |
+| evidence_handling | 28 | 0.9655 | 190 | 6.5517 |
+| experimental_strategy | 22 | 0.7586 | 26 | 0.8966 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 29 | 1.0000 | 44 | 1.5172 |
+| evidence_handling | 7 | 0.2414 | 7 | 0.2414 |
+| experimental_strategy | 1 | 0.0345 | 1 | 0.0345 |
 
 ### gpt_4o/retrosynthesis/level_1
 
@@ -1904,33 +2949,33 @@
 | evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
-### gpt_4o/wetlab/level1
+### gpt_4o/wetlab/level_1
 
-- Traces: 10 | Total messages: 206 | Mean messages/trace: 20.60
+- Traces: 15 | Total messages: 315 | Mean messages/trace: 21.00
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.1467 | 1.1602 |
-| n_H | 0.1599 | 0.1602 |
-| n_T | 0.3007 | 0.3058 |
-| n_E | 0.3927 | 0.3981 |
-| n_J | 0.2157 | 0.2184 |
-| n_U | 0.0279 | 0.0291 |
-| n_C | 0.0497 | 0.0485 |
+| nodes_total | 1.1752 | 1.1841 |
+| n_H | 0.1672 | 0.1651 |
+| n_T | 0.2812 | 0.2889 |
+| n_E | 0.4276 | 0.4286 |
+| n_J | 0.2262 | 0.2286 |
+| n_U | 0.0240 | 0.0254 |
+| n_C | 0.0489 | 0.0476 |
 
 #### Metric means
 
 | metric | mean |
 | --- | ---: |
-| workflow_completeness | 0.9200 |
+| workflow_completeness | 0.9067 |
 | loop_density | 0.0000 |
-| update_grounding_rate | 0.0000 |
-| orphan_evidence_rate | 0.2922 |
-| refute_neglect_rate | 0.1000 |
-| hypothesis_switch_without_eval_rate | 0.0833 |
-| scientificness_score | 0.3521 |
+| update_grounding_rate | 0.1250 |
+| orphan_evidence_rate | 0.3334 |
+| refute_neglect_rate | 0.0000 |
+| hypothesis_switch_without_eval_rate | 0.0000 |
+| scientificness_score | 0.3616 |
 
 #### Global subgraph presence
 
@@ -1938,9 +2983,9 @@
 | --- | ---: | ---: | ---: | ---: |
 | popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
 | ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 1 | 0.1000 | 1 | 0.1000 |
-| bayesian_belief_updating | 6 | 0.6000 | 6 | 0.6000 |
-| abductive | 10 | 1.0000 | 10 | 1.0000 |
+| exploratory_to_confirmatory | 1 | 0.0667 | 1 | 0.0667 |
+| bayesian_belief_updating | 9 | 0.6000 | 9 | 0.6000 |
+| abductive | 15 | 1.0000 | 15 | 1.0000 |
 | triangulation | 0 | 0.0000 | 0 | 0.0000 |
 | preregistered | 0 | 0.0000 | 0 | 0.0000 |
 | active_learning | 0 | 0.0000 | 0 | 0.0000 |
@@ -1949,83 +2994,83 @@
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 1.0000 | 29 | 2.9000 |
-| evidence_ignored | 9 | 0.9000 | 39 | 3.9000 |
-| judgment_without_evidence | 2 | 0.2000 | 3 | 0.3000 |
-| dead_end_update | 1 | 0.1000 | 1 | 0.1000 |
-| unresolved_contradiction | 1 | 0.1000 | 2 | 0.2000 |
-| hypothesis_to_commitment_shortcut | 4 | 0.4000 | 5 | 0.5000 |
-| test_without_evidence | 0 | 0.0000 | 2 | 0.2000 |
-| no_belief_revision | 4 | 0.4000 | 4 | 0.4000 |
-| orphan_evidence | 7 | 0.7000 | 8 | 0.8000 |
-| confirmation_only | 4 | 0.4000 | 5 | 0.5000 |
+| untested_hypothesis | 15 | 1.0000 | 50 | 3.3333 |
+| evidence_ignored | 15 | 1.0000 | 60 | 4.0000 |
+| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
+| dead_end_update | 1 | 0.0667 | 1 | 0.0667 |
+| unresolved_contradiction | 2 | 0.1333 | 5 | 0.3333 |
+| hypothesis_to_commitment_shortcut | 11 | 0.7333 | 14 | 0.9333 |
+| test_without_evidence | 0 | 0.0000 | 1 | 0.0667 |
+| no_belief_revision | 7 | 0.4667 | 7 | 0.4667 |
+| orphan_evidence | 13 | 0.8667 | 18 | 1.2000 |
+| confirmation_only | 11 | 0.7333 | 14 | 0.9333 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 1.0000 | 29 | 2.9000 |
-| evidence_ignored | 10 | 1.0000 | 39 | 3.9000 |
-| judgment_without_evidence | 2 | 0.2000 | 3 | 0.3000 |
-| dead_end_update | 1 | 0.1000 | 1 | 0.1000 |
-| unresolved_contradiction | 2 | 0.2000 | 2 | 0.2000 |
-| hypothesis_to_commitment_shortcut | 4 | 0.4000 | 5 | 0.5000 |
-| test_without_evidence | 2 | 0.2000 | 2 | 0.2000 |
-| no_belief_revision | 4 | 0.4000 | 4 | 0.4000 |
-| orphan_evidence | 7 | 0.7000 | 8 | 0.8000 |
-| confirmation_only | 4 | 0.4000 | 5 | 0.5000 |
+| untested_hypothesis | 15 | 1.0000 | 50 | 3.3333 |
+| evidence_ignored | 15 | 1.0000 | 60 | 4.0000 |
+| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
+| dead_end_update | 1 | 0.0667 | 1 | 0.0667 |
+| unresolved_contradiction | 5 | 0.3333 | 5 | 0.3333 |
+| hypothesis_to_commitment_shortcut | 11 | 0.7333 | 14 | 0.9333 |
+| test_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
+| no_belief_revision | 7 | 0.4667 | 7 | 0.4667 |
+| orphan_evidence | 13 | 0.8667 | 18 | 1.2000 |
+| confirmation_only | 11 | 0.7333 | 14 | 0.9333 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 36 | 3.6000 |
-| evidence_handling | 9 | 0.9000 | 52 | 5.2000 |
-| experimental_strategy | 5 | 0.5000 | 10 | 1.0000 |
+| hypothesis_generation | 15 | 1.0000 | 69 | 4.6000 |
+| evidence_handling | 15 | 1.0000 | 80 | 5.3333 |
+| experimental_strategy | 11 | 0.7333 | 22 | 1.4667 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 36 | 3.6000 |
-| evidence_handling | 10 | 1.0000 | 52 | 5.2000 |
-| experimental_strategy | 5 | 0.5000 | 10 | 1.0000 |
+| hypothesis_generation | 15 | 1.0000 | 69 | 4.6000 |
+| evidence_handling | 15 | 1.0000 | 80 | 5.3333 |
+| experimental_strategy | 11 | 0.7333 | 22 | 1.4667 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 16 | 1.6000 |
-| evidence_handling | 1 | 0.1000 | 1 | 0.1000 |
+| hypothesis_generation | 15 | 1.0000 | 24 | 1.6000 |
+| evidence_handling | 1 | 0.0667 | 1 | 0.0667 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
-### gpt_4o/wetlab/level2
+### gpt_4o/wetlab/level_2
 
-- Traces: 10 | Total messages: 250 | Mean messages/trace: 25.00
+- Traces: 15 | Total messages: 351 | Mean messages/trace: 23.40
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.3064 | 1.3080 |
-| n_H | 0.1748 | 0.1760 |
-| n_T | 0.3531 | 0.3600 |
-| n_E | 0.4720 | 0.4760 |
-| n_J | 0.2343 | 0.2280 |
-| n_U | 0.0313 | 0.0280 |
-| n_C | 0.0409 | 0.0400 |
+| nodes_total | 1.1617 | 1.1652 |
+| n_H | 0.1654 | 0.1652 |
+| n_T | 0.2687 | 0.2735 |
+| n_E | 0.4174 | 0.4217 |
+| n_J | 0.2279 | 0.2251 |
+| n_U | 0.0388 | 0.0370 |
+| n_C | 0.0437 | 0.0427 |
 
 #### Metric means
 
 | metric | mean |
 | --- | ---: |
-| workflow_completeness | 0.9000 |
+| workflow_completeness | 0.9333 |
 | loop_density | 0.0000 |
-| update_grounding_rate | 0.0667 |
-| orphan_evidence_rate | 0.2205 |
+| update_grounding_rate | 0.2000 |
+| orphan_evidence_rate | 0.2192 |
 | refute_neglect_rate | 0.0000 |
-| hypothesis_switch_without_eval_rate | 0.2000 |
-| scientificness_score | 0.3260 |
+| hypothesis_switch_without_eval_rate | 0.0312 |
+| scientificness_score | 0.3836 |
 
 #### Global subgraph presence
 
@@ -2034,8 +3079,8 @@
 | popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
 | ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
 | exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 5 | 0.5000 | 5 | 0.5000 |
-| abductive | 10 | 1.0000 | 10 | 1.0000 |
+| bayesian_belief_updating | 9 | 0.6000 | 9 | 0.6000 |
+| abductive | 15 | 1.0000 | 15 | 1.0000 |
 | triangulation | 0 | 0.0000 | 0 | 0.0000 |
 | preregistered | 0 | 0.0000 | 0 | 0.0000 |
 | active_learning | 0 | 0.0000 | 0 | 0.0000 |
@@ -2044,83 +3089,83 @@
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 9 | 0.9000 | 38 | 3.8000 |
-| evidence_ignored | 10 | 1.0000 | 59 | 5.9000 |
-| judgment_without_evidence | 1 | 0.1000 | 2 | 0.2000 |
-| dead_end_update | 1 | 0.1000 | 1 | 0.1000 |
-| unresolved_contradiction | 3 | 0.3000 | 8 | 0.8000 |
-| hypothesis_to_commitment_shortcut | 4 | 0.4000 | 9 | 0.9000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 5 | 0.5000 | 5 | 0.5000 |
-| orphan_evidence | 4 | 0.4000 | 7 | 0.7000 |
-| confirmation_only | 4 | 0.4000 | 9 | 0.9000 |
+| untested_hypothesis | 15 | 1.0000 | 54 | 3.6000 |
+| evidence_ignored | 14 | 0.9333 | 68 | 4.5333 |
+| judgment_without_evidence | 5 | 0.3333 | 6 | 0.4000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 1 | 0.0667 | 2 | 0.1333 |
+| hypothesis_to_commitment_shortcut | 6 | 0.4000 | 12 | 0.8000 |
+| test_without_evidence | 0 | 0.0000 | 3 | 0.2000 |
+| no_belief_revision | 5 | 0.3333 | 5 | 0.3333 |
+| orphan_evidence | 14 | 0.9333 | 23 | 1.5333 |
+| confirmation_only | 6 | 0.4000 | 11 | 0.7333 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 9 | 0.9000 | 38 | 3.8000 |
-| evidence_ignored | 10 | 1.0000 | 59 | 5.9000 |
-| judgment_without_evidence | 1 | 0.1000 | 2 | 0.2000 |
-| dead_end_update | 1 | 0.1000 | 1 | 0.1000 |
-| unresolved_contradiction | 3 | 0.3000 | 8 | 0.8000 |
-| hypothesis_to_commitment_shortcut | 4 | 0.4000 | 9 | 0.9000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 5 | 0.5000 | 5 | 0.5000 |
-| orphan_evidence | 4 | 0.4000 | 7 | 0.7000 |
-| confirmation_only | 4 | 0.4000 | 9 | 0.9000 |
+| untested_hypothesis | 15 | 1.0000 | 54 | 3.6000 |
+| evidence_ignored | 15 | 1.0000 | 68 | 4.5333 |
+| judgment_without_evidence | 5 | 0.3333 | 6 | 0.4000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 2 | 0.1333 | 4 | 0.2667 |
+| hypothesis_to_commitment_shortcut | 6 | 0.4000 | 12 | 0.8000 |
+| test_without_evidence | 3 | 0.2000 | 3 | 0.2000 |
+| no_belief_revision | 5 | 0.3333 | 5 | 0.3333 |
+| orphan_evidence | 14 | 0.9333 | 23 | 1.5333 |
+| confirmation_only | 6 | 0.4000 | 11 | 0.7333 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 55 | 5.5000 |
-| evidence_handling | 10 | 1.0000 | 68 | 6.8000 |
-| experimental_strategy | 6 | 0.6000 | 15 | 1.5000 |
+| hypothesis_generation | 15 | 1.0000 | 67 | 4.4667 |
+| evidence_handling | 15 | 1.0000 | 100 | 6.6667 |
+| experimental_strategy | 8 | 0.5333 | 17 | 1.1333 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 55 | 5.5000 |
-| evidence_handling | 10 | 1.0000 | 68 | 6.8000 |
-| experimental_strategy | 6 | 0.6000 | 15 | 1.5000 |
+| hypothesis_generation | 15 | 1.0000 | 69 | 4.6000 |
+| evidence_handling | 15 | 1.0000 | 100 | 6.6667 |
+| experimental_strategy | 8 | 0.5333 | 17 | 1.1333 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 15 | 1.5000 |
+| hypothesis_generation | 15 | 1.0000 | 24 | 1.6000 |
 | evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
-### gpt_4o/wetlab/level3
+### gpt_4o/wetlab/level_3
 
-- Traces: 10 | Total messages: 236 | Mean messages/trace: 23.60
+- Traces: 15 | Total messages: 377 | Mean messages/trace: 25.13
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.1766 | 1.1864 |
-| n_H | 0.1567 | 0.1610 |
-| n_T | 0.2977 | 0.3051 |
-| n_E | 0.4436 | 0.4449 |
-| n_J | 0.2172 | 0.2161 |
-| n_U | 0.0184 | 0.0169 |
-| n_C | 0.0431 | 0.0424 |
+| nodes_total | 1.2056 | 1.2202 |
+| n_H | 0.1609 | 0.1645 |
+| n_T | 0.3101 | 0.3156 |
+| n_E | 0.4470 | 0.4509 |
+| n_J | 0.2267 | 0.2308 |
+| n_U | 0.0202 | 0.0186 |
+| n_C | 0.0407 | 0.0398 |
 
 #### Metric means
 
 | metric | mean |
 | --- | ---: |
-| workflow_completeness | 0.8800 |
+| workflow_completeness | 0.8933 |
 | loop_density | 0.0000 |
-| update_grounding_rate | 0.2500 |
-| orphan_evidence_rate | 0.2713 |
+| update_grounding_rate | 0.4286 |
+| orphan_evidence_rate | 0.2075 |
 | refute_neglect_rate | 0.0000 |
-| hypothesis_switch_without_eval_rate | 0.5000 |
-| scientificness_score | 0.3311 |
+| hypothesis_switch_without_eval_rate | 0.0000 |
+| scientificness_score | 0.4521 |
 
 #### Global subgraph presence
 
@@ -2128,9 +3173,9 @@
 | --- | ---: | ---: | ---: | ---: |
 | popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
 | ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 4 | 0.4000 | 4 | 0.4000 |
-| abductive | 10 | 1.0000 | 10 | 1.0000 |
+| exploratory_to_confirmatory | 2 | 0.1333 | 2 | 0.1333 |
+| bayesian_belief_updating | 7 | 0.4667 | 7 | 0.4667 |
+| abductive | 15 | 1.0000 | 15 | 1.0000 |
 | triangulation | 0 | 0.0000 | 0 | 0.0000 |
 | preregistered | 0 | 0.0000 | 0 | 0.0000 |
 | active_learning | 0 | 0.0000 | 0 | 0.0000 |
@@ -2139,249 +3184,344 @@
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 1.0000 | 33 | 3.3000 |
-| evidence_ignored | 9 | 0.9000 | 52 | 5.2000 |
-| judgment_without_evidence | 1 | 0.1000 | 2 | 0.2000 |
+| untested_hypothesis | 14 | 0.9333 | 46 | 3.0667 |
+| evidence_ignored | 13 | 0.8667 | 71 | 4.7333 |
+| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
 | dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 1 | 0.1000 | 1 | 0.1000 |
-| hypothesis_to_commitment_shortcut | 5 | 0.5000 | 9 | 0.9000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 6 | 0.6000 | 6 | 0.6000 |
-| orphan_evidence | 6 | 0.6000 | 10 | 1.0000 |
-| confirmation_only | 5 | 0.5000 | 10 | 1.0000 |
+| unresolved_contradiction | 6 | 0.4000 | 12 | 0.8000 |
+| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 4 | 0.2667 |
+| test_without_evidence | 0 | 0.0000 | 2 | 0.1333 |
+| no_belief_revision | 8 | 0.5333 | 8 | 0.5333 |
+| orphan_evidence | 11 | 0.7333 | 19 | 1.2667 |
+| confirmation_only | 5 | 0.3333 | 8 | 0.5333 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 1.0000 | 33 | 3.3000 |
-| evidence_ignored | 10 | 1.0000 | 52 | 5.2000 |
-| judgment_without_evidence | 1 | 0.1000 | 2 | 0.2000 |
+| untested_hypothesis | 15 | 1.0000 | 46 | 3.0667 |
+| evidence_ignored | 15 | 1.0000 | 71 | 4.7333 |
+| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
 | dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 3 | 0.3000 | 4 | 0.4000 |
-| hypothesis_to_commitment_shortcut | 5 | 0.5000 | 9 | 0.9000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 6 | 0.6000 | 6 | 0.6000 |
-| orphan_evidence | 6 | 0.6000 | 10 | 1.0000 |
-| confirmation_only | 5 | 0.5000 | 10 | 1.0000 |
+| unresolved_contradiction | 6 | 0.4000 | 12 | 0.8000 |
+| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 4 | 0.2667 |
+| test_without_evidence | 2 | 0.1333 | 2 | 0.1333 |
+| no_belief_revision | 8 | 0.5333 | 8 | 0.5333 |
+| orphan_evidence | 11 | 0.7333 | 19 | 1.2667 |
+| confirmation_only | 5 | 0.3333 | 8 | 0.5333 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 44 | 4.4000 |
-| evidence_handling | 10 | 1.0000 | 64 | 6.4000 |
-| experimental_strategy | 7 | 0.7000 | 15 | 1.5000 |
+| hypothesis_generation | 15 | 1.0000 | 66 | 4.4000 |
+| evidence_handling | 15 | 1.0000 | 93 | 6.2000 |
+| experimental_strategy | 10 | 0.6667 | 12 | 0.8000 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 47 | 4.7000 |
-| evidence_handling | 10 | 1.0000 | 64 | 6.4000 |
-| experimental_strategy | 7 | 0.7000 | 15 | 1.5000 |
+| hypothesis_generation | 15 | 1.0000 | 66 | 4.4000 |
+| evidence_handling | 15 | 1.0000 | 93 | 6.2000 |
+| experimental_strategy | 10 | 0.6667 | 12 | 0.8000 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 1.0000 | 14 | 1.4000 |
-| evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 15 | 1.0000 | 22 | 1.4667 |
+| evidence_handling | 2 | 0.1333 | 2 | 0.1333 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ## By model
 
 ### claude_sonnet_45
 
-- Traces: 154 | Total messages: 4712 | Mean messages/trace: 30.60
+- Traces: 224 | Total messages: 6769 | Mean messages/trace: 30.22
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.2069 | 1.2638 |
-| n_H | 0.1240 | 0.1384 |
-| n_T | 0.2788 | 0.2978 |
-| n_E | 0.4765 | 0.4921 |
-| n_J | 0.2470 | 0.2651 |
-| n_U | 0.0308 | 0.0335 |
-| n_C | 0.0498 | 0.0369 |
+| nodes_total | 1.2213 | 1.2789 |
+| n_H | 0.1266 | 0.1399 |
+| n_T | 0.2831 | 0.3076 |
+| n_E | 0.4660 | 0.4893 |
+| n_J | 0.2582 | 0.2726 |
+| n_U | 0.0284 | 0.0332 |
+| n_C | 0.0589 | 0.0363 |
 
 #### Metric means
 
 | metric | mean |
 | --- | ---: |
-| workflow_completeness | 0.8662 |
+| workflow_completeness | 0.8580 |
 | loop_density | 0.0001 |
-| update_grounding_rate | 0.3836 |
-| orphan_evidence_rate | 0.1725 |
-| refute_neglect_rate | 0.1876 |
-| hypothesis_switch_without_eval_rate | 0.5279 |
-| scientificness_score | 0.4359 |
+| update_grounding_rate | 0.3776 |
+| orphan_evidence_rate | 0.1501 |
+| refute_neglect_rate | 0.1438 |
+| hypothesis_switch_without_eval_rate | 0.5617 |
+| scientificness_score | 0.4451 |
 
 #### Global subgraph presence
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 2 | 0.0130 | 2 | 0.0130 |
-| ml_make_it_work | 5 | 0.0325 | 5 | 0.0325 |
-| exploratory_to_confirmatory | 3 | 0.0195 | 3 | 0.0195 |
-| bayesian_belief_updating | 59 | 0.3831 | 59 | 0.3831 |
-| abductive | 84 | 0.5455 | 84 | 0.5455 |
-| triangulation | 1 | 0.0065 | 1 | 0.0065 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 2 | 0.0130 | 2 | 0.0130 |
+| popperian_falsification | 9 | 0.0402 | 9 | 0.0402 |
+| ml_make_it_work | 7 | 0.0312 | 7 | 0.0312 |
+| exploratory_to_confirmatory | 4 | 0.0179 | 4 | 0.0179 |
+| bayesian_belief_updating | 78 | 0.3482 | 78 | 0.3482 |
+| abductive | 127 | 0.5670 | 127 | 0.5670 |
+| triangulation | 2 | 0.0089 | 2 | 0.0089 |
+| preregistered | 1 | 0.0045 | 1 | 0.0045 |
+| active_learning | 2 | 0.0089 | 2 | 0.0089 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 109 | 0.7078 | 498 | 3.2338 |
-| evidence_ignored | 96 | 0.6234 | 929 | 6.0325 |
-| judgment_without_evidence | 42 | 0.2727 | 88 | 0.5714 |
-| dead_end_update | 26 | 0.1688 | 31 | 0.2013 |
-| unresolved_contradiction | 25 | 0.1623 | 96 | 0.6234 |
-| hypothesis_to_commitment_shortcut | 26 | 0.1688 | 37 | 0.2403 |
-| test_without_evidence | 3 | 0.0195 | 48 | 0.3117 |
-| no_belief_revision | 65 | 0.4221 | 65 | 0.4221 |
-| orphan_evidence | 39 | 0.2532 | 80 | 0.5195 |
-| confirmation_only | 17 | 0.1104 | 19 | 0.1234 |
+| untested_hypothesis | 144 | 0.6429 | 718 | 3.2054 |
+| evidence_ignored | 145 | 0.6473 | 1289 | 5.7545 |
+| judgment_without_evidence | 60 | 0.2679 | 137 | 0.6116 |
+| dead_end_update | 47 | 0.2098 | 61 | 0.2723 |
+| unresolved_contradiction | 37 | 0.1652 | 141 | 0.6295 |
+| hypothesis_to_commitment_shortcut | 30 | 0.1339 | 39 | 0.1741 |
+| test_without_evidence | 4 | 0.0179 | 63 | 0.2812 |
+| no_belief_revision | 106 | 0.4732 | 106 | 0.4732 |
+| orphan_evidence | 54 | 0.2411 | 118 | 0.5268 |
+| confirmation_only | 23 | 0.1027 | 27 | 0.1205 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 112 | 0.7273 | 498 | 3.2338 |
-| evidence_ignored | 141 | 0.9156 | 929 | 6.0325 |
-| judgment_without_evidence | 42 | 0.2727 | 88 | 0.5714 |
-| dead_end_update | 26 | 0.1688 | 31 | 0.2013 |
-| unresolved_contradiction | 54 | 0.3506 | 135 | 0.8766 |
-| hypothesis_to_commitment_shortcut | 26 | 0.1688 | 37 | 0.2403 |
-| test_without_evidence | 23 | 0.1494 | 48 | 0.3117 |
-| no_belief_revision | 65 | 0.4221 | 65 | 0.4221 |
-| orphan_evidence | 39 | 0.2532 | 80 | 0.5195 |
-| confirmation_only | 17 | 0.1104 | 19 | 0.1234 |
+| untested_hypothesis | 148 | 0.6607 | 718 | 3.2054 |
+| evidence_ignored | 197 | 0.8795 | 1289 | 5.7545 |
+| judgment_without_evidence | 60 | 0.2679 | 137 | 0.6116 |
+| dead_end_update | 47 | 0.2098 | 61 | 0.2723 |
+| unresolved_contradiction | 70 | 0.3125 | 175 | 0.7812 |
+| hypothesis_to_commitment_shortcut | 30 | 0.1339 | 39 | 0.1741 |
+| test_without_evidence | 34 | 0.1518 | 63 | 0.2812 |
+| no_belief_revision | 106 | 0.4732 | 106 | 0.4732 |
+| orphan_evidence | 54 | 0.2411 | 118 | 0.5268 |
+| confirmation_only | 23 | 0.1027 | 27 | 0.1205 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 115 | 0.7468 | 613 | 3.9805 |
-| evidence_handling | 123 | 0.7987 | 1145 | 7.4351 |
-| experimental_strategy | 99 | 0.6429 | 133 | 0.8636 |
+| hypothesis_generation | 153 | 0.6830 | 886 | 3.9554 |
+| evidence_handling | 179 | 0.7991 | 1607 | 7.1741 |
+| experimental_strategy | 160 | 0.7143 | 206 | 0.9196 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 117 | 0.7597 | 652 | 4.2338 |
-| evidence_handling | 142 | 0.9221 | 1145 | 7.4351 |
-| experimental_strategy | 99 | 0.6429 | 133 | 0.8636 |
+| hypothesis_generation | 156 | 0.6964 | 920 | 4.1071 |
+| evidence_handling | 201 | 0.8973 | 1607 | 7.1741 |
+| experimental_strategy | 160 | 0.7143 | 206 | 0.9196 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 99 | 0.6429 | 145 | 0.9416 |
-| evidence_handling | 4 | 0.0260 | 4 | 0.0260 |
-| experimental_strategy | 7 | 0.0455 | 7 | 0.0455 |
+| hypothesis_generation | 146 | 0.6518 | 214 | 0.9554 |
+| evidence_handling | 6 | 0.0268 | 6 | 0.0268 |
+| experimental_strategy | 10 | 0.0446 | 10 | 0.0446 |
 
 ### gpt_4o
 
-- Traces: 163 | Total messages: 3723 | Mean messages/trace: 22.84
+- Traces: 227 | Total messages: 5653 | Mean messages/trace: 24.90
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.0925 | 1.1397 |
-| n_H | 0.0869 | 0.0843 |
-| n_T | 0.3009 | 0.3411 |
-| n_E | 0.4329 | 0.4674 |
-| n_J | 0.1996 | 0.1918 |
-| n_U | 0.0116 | 0.0140 |
-| n_C | 0.0606 | 0.0411 |
+| nodes_total | 1.1383 | 1.1990 |
+| n_H | 0.0971 | 0.0973 |
+| n_T | 0.3064 | 0.3426 |
+| n_E | 0.4501 | 0.4828 |
+| n_J | 0.2181 | 0.2254 |
+| n_U | 0.0140 | 0.0161 |
+| n_C | 0.0527 | 0.0348 |
 
 #### Metric means
 
 | metric | mean |
 | --- | ---: |
-| workflow_completeness | 0.7816 |
-| loop_density | 0.0000 |
-| update_grounding_rate | 0.3659 |
-| orphan_evidence_rate | 0.1101 |
-| refute_neglect_rate | 0.0936 |
-| hypothesis_switch_without_eval_rate | 0.5983 |
-| scientificness_score | 0.4199 |
+| workflow_completeness | 0.8097 |
+| loop_density | 0.0001 |
+| update_grounding_rate | 0.3975 |
+| orphan_evidence_rate | 0.1198 |
+| refute_neglect_rate | 0.0859 |
+| hypothesis_switch_without_eval_rate | 0.5171 |
+| scientificness_score | 0.4355 |
 
 #### Global subgraph presence
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 2 | 0.0123 | 2 | 0.0123 |
-| ml_make_it_work | 4 | 0.0245 | 4 | 0.0245 |
-| exploratory_to_confirmatory | 15 | 0.0920 | 15 | 0.0920 |
-| bayesian_belief_updating | 32 | 0.1963 | 32 | 0.1963 |
-| abductive | 103 | 0.6319 | 103 | 0.6319 |
+| popperian_falsification | 2 | 0.0088 | 2 | 0.0088 |
+| ml_make_it_work | 5 | 0.0220 | 5 | 0.0220 |
+| exploratory_to_confirmatory | 25 | 0.1101 | 25 | 0.1101 |
+| bayesian_belief_updating | 63 | 0.2775 | 63 | 0.2775 |
+| abductive | 156 | 0.6872 | 156 | 0.6872 |
 | triangulation | 0 | 0.0000 | 0 | 0.0000 |
 | preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 2 | 0.0123 | 2 | 0.0123 |
+| active_learning | 3 | 0.0132 | 3 | 0.0132 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 88 | 0.5399 | 200 | 1.2270 |
-| evidence_ignored | 120 | 0.7362 | 854 | 5.2393 |
-| judgment_without_evidence | 11 | 0.0675 | 15 | 0.0920 |
-| dead_end_update | 8 | 0.0491 | 9 | 0.0552 |
-| unresolved_contradiction | 25 | 0.1534 | 57 | 0.3497 |
-| hypothesis_to_commitment_shortcut | 34 | 0.2086 | 44 | 0.2699 |
-| test_without_evidence | 0 | 0.0000 | 22 | 0.1350 |
-| no_belief_revision | 120 | 0.7362 | 120 | 0.7362 |
-| orphan_evidence | 20 | 0.1227 | 29 | 0.1779 |
-| confirmation_only | 35 | 0.2147 | 46 | 0.2822 |
+| untested_hypothesis | 130 | 0.5727 | 330 | 1.4537 |
+| evidence_ignored | 159 | 0.7004 | 1152 | 5.0749 |
+| judgment_without_evidence | 26 | 0.1145 | 28 | 0.1233 |
+| dead_end_update | 19 | 0.0837 | 22 | 0.0969 |
+| unresolved_contradiction | 42 | 0.1850 | 140 | 0.6167 |
+| hypothesis_to_commitment_shortcut | 46 | 0.2026 | 56 | 0.2467 |
+| test_without_evidence | 0 | 0.0000 | 33 | 0.1454 |
+| no_belief_revision | 151 | 0.6652 | 151 | 0.6652 |
+| orphan_evidence | 50 | 0.2203 | 75 | 0.3304 |
+| confirmation_only | 48 | 0.2115 | 60 | 0.2643 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 93 | 0.5706 | 200 | 1.2270 |
-| evidence_ignored | 136 | 0.8344 | 854 | 5.2393 |
-| judgment_without_evidence | 11 | 0.0675 | 15 | 0.0920 |
-| dead_end_update | 8 | 0.0491 | 9 | 0.0552 |
-| unresolved_contradiction | 34 | 0.2086 | 61 | 0.3742 |
-| hypothesis_to_commitment_shortcut | 34 | 0.2086 | 44 | 0.2699 |
-| test_without_evidence | 15 | 0.0920 | 22 | 0.1350 |
-| no_belief_revision | 120 | 0.7362 | 120 | 0.7362 |
-| orphan_evidence | 20 | 0.1227 | 29 | 0.1779 |
-| confirmation_only | 35 | 0.2147 | 46 | 0.2822 |
+| untested_hypothesis | 140 | 0.6167 | 330 | 1.4537 |
+| evidence_ignored | 199 | 0.8767 | 1152 | 5.0749 |
+| judgment_without_evidence | 26 | 0.1145 | 28 | 0.1233 |
+| dead_end_update | 19 | 0.0837 | 22 | 0.0969 |
+| unresolved_contradiction | 66 | 0.2907 | 148 | 0.6520 |
+| hypothesis_to_commitment_shortcut | 46 | 0.2026 | 56 | 0.2467 |
+| test_without_evidence | 25 | 0.1101 | 33 | 0.1454 |
+| no_belief_revision | 151 | 0.6652 | 151 | 0.6652 |
+| orphan_evidence | 50 | 0.2203 | 75 | 0.3304 |
+| confirmation_only | 48 | 0.2115 | 60 | 0.2643 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 100 | 0.6135 | 303 | 1.8589 |
-| evidence_handling | 123 | 0.7546 | 920 | 5.6442 |
-| experimental_strategy | 130 | 0.7975 | 173 | 1.0613 |
+| hypothesis_generation | 145 | 0.6388 | 530 | 2.3348 |
+| evidence_handling | 172 | 0.7577 | 1288 | 5.6740 |
+| experimental_strategy | 179 | 0.7885 | 229 | 1.0088 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 103 | 0.6319 | 307 | 1.8834 |
-| evidence_handling | 137 | 0.8405 | 920 | 5.6442 |
-| experimental_strategy | 130 | 0.7975 | 173 | 1.0613 |
+| hypothesis_generation | 154 | 0.6784 | 538 | 2.3700 |
+| evidence_handling | 200 | 0.8811 | 1288 | 5.6740 |
+| experimental_strategy | 179 | 0.7885 | 229 | 1.0088 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 107 | 0.6564 | 137 | 0.8405 |
-| evidence_handling | 15 | 0.0920 | 15 | 0.0920 |
-| experimental_strategy | 5 | 0.0307 | 6 | 0.0368 |
+| hypothesis_generation | 166 | 0.7313 | 221 | 0.9736 |
+| evidence_handling | 25 | 0.1101 | 25 | 0.1101 |
+| experimental_strategy | 7 | 0.0308 | 8 | 0.0352 |
 
 ## By env
+
+### afm
+
+- Traces: 30 | Total messages: 896 | Mean messages/trace: 29.87
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.0759 | 1.0893 |
+| n_H | 0.0483 | 0.0536 |
+| n_T | 0.3138 | 0.3259 |
+| n_E | 0.5051 | 0.5045 |
+| n_J | 0.1679 | 0.1696 |
+| n_U | 0.0072 | 0.0078 |
+| n_C | 0.0335 | 0.0279 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.8000 |
+| loop_density | 0.0000 |
+| update_grounding_rate | 0.9000 |
+| orphan_evidence_rate | 0.1587 |
+| refute_neglect_rate | 0.1558 |
+| hypothesis_switch_without_eval_rate | 1.0000 |
+| scientificness_score | 0.5967 |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
+| ml_make_it_work | 1 | 0.0333 | 1 | 0.0333 |
+| exploratory_to_confirmatory | 1 | 0.0333 | 1 | 0.0333 |
+| bayesian_belief_updating | 4 | 0.1333 | 4 | 0.1333 |
+| abductive | 19 | 0.6333 | 19 | 0.6333 |
+| triangulation | 1 | 0.0333 | 1 | 0.0333 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 16 | 0.5333 | 25 | 0.8333 |
+| evidence_ignored | 22 | 0.7333 | 172 | 5.7333 |
+| judgment_without_evidence | 4 | 0.1333 | 4 | 0.1333 |
+| dead_end_update | 2 | 0.0667 | 3 | 0.1000 |
+| unresolved_contradiction | 5 | 0.1667 | 16 | 0.5333 |
+| hypothesis_to_commitment_shortcut | 2 | 0.0667 | 2 | 0.0667 |
+| test_without_evidence | 0 | 0.0000 | 8 | 0.2667 |
+| no_belief_revision | 24 | 0.8000 | 24 | 0.8000 |
+| orphan_evidence | 3 | 0.1000 | 3 | 0.1000 |
+| confirmation_only | 2 | 0.0667 | 2 | 0.0667 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 17 | 0.5667 | 25 | 0.8333 |
+| evidence_ignored | 30 | 1.0000 | 172 | 5.7333 |
+| judgment_without_evidence | 4 | 0.1333 | 4 | 0.1333 |
+| dead_end_update | 2 | 0.0667 | 3 | 0.1000 |
+| unresolved_contradiction | 7 | 0.2333 | 16 | 0.5333 |
+| hypothesis_to_commitment_shortcut | 2 | 0.0667 | 2 | 0.0667 |
+| test_without_evidence | 5 | 0.1667 | 8 | 0.2667 |
+| no_belief_revision | 24 | 0.8000 | 24 | 0.8000 |
+| orphan_evidence | 3 | 0.1000 | 3 | 0.1000 |
+| confirmation_only | 2 | 0.0667 | 2 | 0.0667 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 18 | 0.6000 | 43 | 1.4333 |
+| evidence_handling | 23 | 0.7667 | 187 | 6.2333 |
+| experimental_strategy | 26 | 0.8667 | 29 | 0.9667 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 19 | 0.6333 | 43 | 1.4333 |
+| evidence_handling | 30 | 1.0000 | 187 | 6.2333 |
+| experimental_strategy | 26 | 0.8667 | 29 | 0.9667 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 21 | 0.7000 | 23 | 0.7667 |
+| evidence_handling | 2 | 0.0667 | 2 | 0.0667 |
+| experimental_strategy | 1 | 0.0333 | 1 | 0.0333 |
 
 ### catalyst
 
@@ -2575,31 +3715,31 @@
 
 ### ml
 
-- Traces: 15 | Total messages: 233 | Mean messages/trace: 15.53
+- Traces: 30 | Total messages: 509 | Mean messages/trace: 16.97
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.0862 | 1.1030 |
-| n_H | 0.0000 | 0.0000 |
-| n_T | 0.4433 | 0.4506 |
-| n_E | 0.4493 | 0.4549 |
-| n_J | 0.1049 | 0.1073 |
-| n_U | 0.0000 | 0.0000 |
-| n_C | 0.0887 | 0.0901 |
+| nodes_total | 1.1697 | 1.1807 |
+| n_H | 0.0074 | 0.0079 |
+| n_T | 0.4363 | 0.4381 |
+| n_E | 0.4853 | 0.4892 |
+| n_J | 0.1464 | 0.1513 |
+| n_U | 0.0018 | 0.0020 |
+| n_C | 0.0926 | 0.0923 |
 
 #### Metric means
 
 | metric | mean |
 | --- | ---: |
-| workflow_completeness | 0.6000 |
+| workflow_completeness | 0.6333 |
 | loop_density | 0.0000 |
-| update_grounding_rate | N/A |
-| orphan_evidence_rate | 0.0778 |
+| update_grounding_rate | 1.0000 |
+| orphan_evidence_rate | 0.0683 |
 | refute_neglect_rate | N/A |
 | hypothesis_switch_without_eval_rate | N/A |
-| scientificness_score | N/A |
+| scientificness_score | 0.5500 |
 
 #### Global subgraph presence
 
@@ -2609,23 +3749,23 @@
 | ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
 | exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
 | bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 0 | 0.0000 | 0 | 0.0000 |
+| abductive | 2 | 0.0667 | 2 | 0.0667 |
 | triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 1 | 0.0333 | 1 | 0.0333 |
 | active_learning | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 0 | 0.0000 | 0 | 0.0000 |
-| evidence_ignored | 14 | 0.9333 | 67 | 4.4667 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| untested_hypothesis | 3 | 0.1000 | 3 | 0.1000 |
+| evidence_ignored | 29 | 0.9667 | 136 | 4.5333 |
+| judgment_without_evidence | 1 | 0.0333 | 1 | 0.0333 |
 | dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
 | unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
 | hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 15 | 1.0000 | 15 | 1.0000 |
+| test_without_evidence | 0 | 0.0000 | 4 | 0.1333 |
+| no_belief_revision | 29 | 0.9667 | 29 | 0.9667 |
 | orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
 | confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
 
@@ -2633,14 +3773,14 @@
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 0 | 0.0000 | 0 | 0.0000 |
-| evidence_ignored | 14 | 0.9333 | 67 | 4.4667 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| untested_hypothesis | 3 | 0.1000 | 3 | 0.1000 |
+| evidence_ignored | 29 | 0.9667 | 136 | 4.5333 |
+| judgment_without_evidence | 1 | 0.0333 | 1 | 0.0333 |
 | dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
 | unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
 | hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 15 | 1.0000 | 15 | 1.0000 |
+| test_without_evidence | 3 | 0.1000 | 4 | 0.1333 |
+| no_belief_revision | 29 | 0.9667 | 29 | 0.9667 |
 | orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
 | confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
 
@@ -2648,25 +3788,120 @@
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
-| evidence_handling | 14 | 0.9333 | 67 | 4.4667 |
-| experimental_strategy | 15 | 1.0000 | 15 | 1.0000 |
+| hypothesis_generation | 3 | 0.1000 | 3 | 0.1000 |
+| evidence_handling | 29 | 0.9667 | 141 | 4.7000 |
+| experimental_strategy | 29 | 0.9667 | 29 | 0.9667 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
-| evidence_handling | 14 | 0.9333 | 67 | 4.4667 |
-| experimental_strategy | 15 | 1.0000 | 15 | 1.0000 |
+| hypothesis_generation | 3 | 0.1000 | 3 | 0.1000 |
+| evidence_handling | 29 | 0.9667 | 141 | 4.7000 |
+| experimental_strategy | 29 | 0.9667 | 29 | 0.9667 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 2 | 0.0667 | 2 | 0.0667 |
 | evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
-| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
+| experimental_strategy | 1 | 0.0333 | 1 | 0.0333 |
+
+### resistor
+
+- Traces: 59 | Total messages: 1463 | Mean messages/trace: 24.80
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.3290 | 1.4019 |
+| n_H | 0.1772 | 0.1709 |
+| n_T | 0.2847 | 0.3452 |
+| n_E | 0.4309 | 0.4819 |
+| n_J | 0.3400 | 0.3506 |
+| n_U | 0.0237 | 0.0260 |
+| n_C | 0.0725 | 0.0273 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.8881 |
+| loop_density | 0.0002 |
+| update_grounding_rate | 0.2163 |
+| orphan_evidence_rate | 0.0754 |
+| refute_neglect_rate | 0.0474 |
+| hypothesis_switch_without_eval_rate | 0.6881 |
+| scientificness_score | 0.4234 |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 6 | 0.1017 | 6 | 0.1017 |
+| ml_make_it_work | 2 | 0.0339 | 2 | 0.0339 |
+| exploratory_to_confirmatory | 7 | 0.1186 | 7 | 0.1186 |
+| bayesian_belief_updating | 30 | 0.5085 | 30 | 0.5085 |
+| abductive | 45 | 0.7627 | 45 | 0.7627 |
+| triangulation | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 1 | 0.0169 | 1 | 0.0169 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 28 | 0.4746 | 117 | 1.9831 |
+| evidence_ignored | 24 | 0.4068 | 204 | 3.4576 |
+| judgment_without_evidence | 19 | 0.3220 | 43 | 0.7288 |
+| dead_end_update | 12 | 0.2034 | 14 | 0.2373 |
+| unresolved_contradiction | 10 | 0.1695 | 74 | 1.2542 |
+| hypothesis_to_commitment_shortcut | 3 | 0.0508 | 4 | 0.0678 |
+| test_without_evidence | 1 | 0.0169 | 8 | 0.1356 |
+| no_belief_revision | 29 | 0.4915 | 29 | 0.4915 |
+| orphan_evidence | 9 | 0.1525 | 11 | 0.1864 |
+| confirmation_only | 5 | 0.0847 | 7 | 0.1186 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 32 | 0.5424 | 117 | 1.9831 |
+| evidence_ignored | 44 | 0.7458 | 204 | 3.4576 |
+| judgment_without_evidence | 19 | 0.3220 | 43 | 0.7288 |
+| dead_end_update | 12 | 0.2034 | 14 | 0.2373 |
+| unresolved_contradiction | 29 | 0.4915 | 86 | 1.4576 |
+| hypothesis_to_commitment_shortcut | 3 | 0.0508 | 4 | 0.0678 |
+| test_without_evidence | 8 | 0.1356 | 8 | 0.1356 |
+| no_belief_revision | 29 | 0.4915 | 29 | 0.4915 |
+| orphan_evidence | 9 | 0.1525 | 11 | 0.1864 |
+| confirmation_only | 5 | 0.0847 | 7 | 0.1186 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 32 | 0.5424 | 198 | 3.3559 |
+| evidence_handling | 38 | 0.6441 | 266 | 4.5085 |
+| experimental_strategy | 42 | 0.7119 | 47 | 0.7966 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 38 | 0.6441 | 210 | 3.5593 |
+| evidence_handling | 47 | 0.7966 | 266 | 4.5085 |
+| experimental_strategy | 42 | 0.7119 | 47 | 0.7966 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 53 | 0.8983 | 81 | 1.3729 |
+| evidence_handling | 7 | 0.1186 | 7 | 0.1186 |
+| experimental_strategy | 3 | 0.0508 | 3 | 0.0508 |
 
 ### retrosynthesis
 
@@ -2860,41 +4095,41 @@
 
 ### wetlab
 
-- Traces: 60 | Total messages: 2286 | Mean messages/trace: 38.10
+- Traces: 90 | Total messages: 3638 | Mean messages/trace: 40.42
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.2920 | 1.3333 |
-| n_H | 0.1713 | 0.1754 |
-| n_T | 0.3120 | 0.3206 |
-| n_E | 0.4591 | 0.4724 |
-| n_J | 0.2807 | 0.3014 |
-| n_U | 0.0355 | 0.0367 |
-| n_C | 0.0335 | 0.0267 |
+| nodes_total | 1.2894 | 1.3507 |
+| n_H | 0.1698 | 0.1732 |
+| n_T | 0.3008 | 0.3200 |
+| n_E | 0.4638 | 0.4843 |
+| n_J | 0.2856 | 0.3101 |
+| n_U | 0.0375 | 0.0396 |
+| n_C | 0.0319 | 0.0236 |
 
 #### Metric means
 
 | metric | mean |
 | --- | ---: |
-| workflow_completeness | 0.9467 |
+| workflow_completeness | 0.9511 |
 | loop_density | 0.0000 |
-| update_grounding_rate | 0.1159 |
-| orphan_evidence_rate | 0.2301 |
-| refute_neglect_rate | 0.0454 |
-| hypothesis_switch_without_eval_rate | 0.2171 |
-| scientificness_score | 0.3552 |
+| update_grounding_rate | 0.1965 |
+| orphan_evidence_rate | 0.2224 |
+| refute_neglect_rate | 0.0193 |
+| hypothesis_switch_without_eval_rate | 0.1462 |
+| scientificness_score | 0.3965 |
 
 #### Global subgraph presence
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
+| popperian_falsification | 1 | 0.0111 | 1 | 0.0111 |
 | ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 2 | 0.0333 | 2 | 0.0333 |
-| bayesian_belief_updating | 38 | 0.6333 | 38 | 0.6333 |
-| abductive | 60 | 1.0000 | 60 | 1.0000 |
+| exploratory_to_confirmatory | 5 | 0.0556 | 5 | 0.0556 |
+| bayesian_belief_updating | 54 | 0.6000 | 54 | 0.6000 |
+| abductive | 90 | 1.0000 | 90 | 1.0000 |
 | triangulation | 0 | 0.0000 | 0 | 0.0000 |
 | preregistered | 0 | 0.0000 | 0 | 0.0000 |
 | active_learning | 0 | 0.0000 | 0 | 0.0000 |
@@ -2903,180 +4138,370 @@
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 59 | 0.9833 | 373 | 6.2167 |
-| evidence_ignored | 43 | 0.7167 | 373 | 6.2167 |
-| judgment_without_evidence | 23 | 0.3833 | 42 | 0.7000 |
-| dead_end_update | 12 | 0.2000 | 17 | 0.2833 |
-| unresolved_contradiction | 11 | 0.1833 | 40 | 0.6667 |
-| hypothesis_to_commitment_shortcut | 20 | 0.3333 | 40 | 0.6667 |
-| test_without_evidence | 0 | 0.0000 | 7 | 0.1167 |
-| no_belief_revision | 16 | 0.2667 | 16 | 0.2667 |
-| orphan_evidence | 45 | 0.7500 | 90 | 1.5000 |
-| confirmation_only | 16 | 0.2667 | 28 | 0.4667 |
+| untested_hypothesis | 89 | 0.9889 | 578 | 6.4222 |
+| evidence_ignored | 70 | 0.7778 | 586 | 6.5111 |
+| judgment_without_evidence | 32 | 0.3556 | 56 | 0.6222 |
+| dead_end_update | 30 | 0.3333 | 43 | 0.4778 |
+| unresolved_contradiction | 25 | 0.2778 | 78 | 0.8667 |
+| hypothesis_to_commitment_shortcut | 31 | 0.3444 | 48 | 0.5333 |
+| test_without_evidence | 0 | 0.0000 | 13 | 0.1444 |
+| no_belief_revision | 21 | 0.2333 | 21 | 0.2333 |
+| orphan_evidence | 78 | 0.8667 | 160 | 1.7778 |
+| confirmation_only | 28 | 0.3111 | 41 | 0.4556 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 59 | 0.9833 | 373 | 6.2167 |
-| evidence_ignored | 60 | 1.0000 | 373 | 6.2167 |
-| judgment_without_evidence | 23 | 0.3833 | 42 | 0.7000 |
-| dead_end_update | 12 | 0.2000 | 17 | 0.2833 |
-| unresolved_contradiction | 24 | 0.4000 | 56 | 0.9333 |
-| hypothesis_to_commitment_shortcut | 20 | 0.3333 | 40 | 0.6667 |
-| test_without_evidence | 7 | 0.1167 | 7 | 0.1167 |
-| no_belief_revision | 16 | 0.2667 | 16 | 0.2667 |
-| orphan_evidence | 45 | 0.7500 | 90 | 1.5000 |
-| confirmation_only | 16 | 0.2667 | 28 | 0.4667 |
+| untested_hypothesis | 90 | 1.0000 | 578 | 6.4222 |
+| evidence_ignored | 90 | 1.0000 | 586 | 6.5111 |
+| judgment_without_evidence | 32 | 0.3556 | 56 | 0.6222 |
+| dead_end_update | 30 | 0.3333 | 43 | 0.4778 |
+| unresolved_contradiction | 36 | 0.4000 | 81 | 0.9000 |
+| hypothesis_to_commitment_shortcut | 31 | 0.3444 | 48 | 0.5333 |
+| test_without_evidence | 12 | 0.1333 | 13 | 0.1444 |
+| no_belief_revision | 21 | 0.2333 | 21 | 0.2333 |
+| orphan_evidence | 78 | 0.8667 | 160 | 1.7778 |
+| confirmation_only | 28 | 0.3111 | 41 | 0.4556 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 60 | 1.0000 | 441 | 7.3500 |
-| evidence_handling | 59 | 0.9833 | 512 | 8.5333 |
-| experimental_strategy | 32 | 0.5333 | 73 | 1.2167 |
+| hypothesis_generation | 90 | 1.0000 | 697 | 7.7444 |
+| evidence_handling | 88 | 0.9778 | 815 | 9.0556 |
+| experimental_strategy | 60 | 0.6667 | 112 | 1.2444 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 60 | 1.0000 | 457 | 7.6167 |
-| evidence_handling | 60 | 1.0000 | 512 | 8.5333 |
-| experimental_strategy | 32 | 0.5333 | 73 | 1.2167 |
+| hypothesis_generation | 90 | 1.0000 | 700 | 7.7778 |
+| evidence_handling | 90 | 1.0000 | 815 | 9.0556 |
+| experimental_strategy | 60 | 0.6667 | 112 | 1.2444 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 60 | 1.0000 | 98 | 1.6333 |
-| evidence_handling | 2 | 0.0333 | 2 | 0.0333 |
+| hypothesis_generation | 90 | 1.0000 | 145 | 1.6111 |
+| evidence_handling | 5 | 0.0556 | 5 | 0.0556 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
 
 ## By level
 
-### level1
+### level_1
 
-- Traces: 20 | Total messages: 536 | Mean messages/trace: 26.80
+- Traces: 253 | Total messages: 5651 | Mean messages/trace: 22.34
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.2622 | 1.2966 |
-| n_H | 0.1686 | 0.1716 |
-| n_T | 0.2816 | 0.2817 |
-| n_E | 0.4367 | 0.4478 |
-| n_J | 0.2925 | 0.3116 |
-| n_U | 0.0424 | 0.0466 |
-| n_C | 0.0405 | 0.0373 |
+| nodes_total | 1.1720 | 1.2139 |
+| n_H | 0.1030 | 0.1087 |
+| n_T | 0.3008 | 0.3153 |
+| n_E | 0.4487 | 0.4744 |
+| n_J | 0.2357 | 0.2493 |
+| n_U | 0.0170 | 0.0202 |
+| n_C | 0.0668 | 0.0460 |
 
 #### Metric means
 
 | metric | mean |
 | --- | ---: |
-| workflow_completeness | 0.9500 |
-| loop_density | 0.0000 |
-| update_grounding_rate | 0.1019 |
-| orphan_evidence_rate | 0.2403 |
-| refute_neglect_rate | 0.0500 |
-| hypothesis_switch_without_eval_rate | 0.1354 |
-| scientificness_score | 0.3738 |
+| workflow_completeness | 0.7913 |
+| loop_density | 0.0001 |
+| update_grounding_rate | 0.3069 |
+| orphan_evidence_rate | 0.1206 |
+| refute_neglect_rate | 0.1112 |
+| hypothesis_switch_without_eval_rate | 0.5987 |
+| scientificness_score | 0.4162 |
 
 #### Global subgraph presence
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 1 | 0.0500 | 1 | 0.0500 |
-| bayesian_belief_updating | 10 | 0.5000 | 10 | 0.5000 |
-| abductive | 20 | 1.0000 | 20 | 1.0000 |
+| popperian_falsification | 6 | 0.0237 | 6 | 0.0237 |
+| ml_make_it_work | 4 | 0.0158 | 4 | 0.0158 |
+| exploratory_to_confirmatory | 16 | 0.0632 | 16 | 0.0632 |
+| bayesian_belief_updating | 68 | 0.2688 | 68 | 0.2688 |
+| abductive | 150 | 0.5929 | 150 | 0.5929 |
 | triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| preregistered | 1 | 0.0040 | 1 | 0.0040 |
+| active_learning | 1 | 0.0040 | 1 | 0.0040 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 20 | 1.0000 | 85 | 4.2500 |
-| evidence_ignored | 12 | 0.6000 | 77 | 3.8500 |
-| judgment_without_evidence | 10 | 0.5000 | 17 | 0.8500 |
-| dead_end_update | 3 | 0.1500 | 3 | 0.1500 |
-| unresolved_contradiction | 3 | 0.1500 | 6 | 0.3000 |
-| hypothesis_to_commitment_shortcut | 5 | 0.2500 | 6 | 0.3000 |
-| test_without_evidence | 0 | 0.0000 | 3 | 0.1500 |
-| no_belief_revision | 5 | 0.2500 | 5 | 0.2500 |
-| orphan_evidence | 16 | 0.8000 | 25 | 1.2500 |
-| confirmation_only | 5 | 0.2500 | 6 | 0.3000 |
+| untested_hypothesis | 125 | 0.4941 | 380 | 1.5020 |
+| evidence_ignored | 160 | 0.6324 | 1071 | 4.2332 |
+| judgment_without_evidence | 41 | 0.1621 | 81 | 0.3202 |
+| dead_end_update | 22 | 0.0870 | 24 | 0.0949 |
+| unresolved_contradiction | 35 | 0.1383 | 138 | 0.5455 |
+| hypothesis_to_commitment_shortcut | 34 | 0.1344 | 41 | 0.1621 |
+| test_without_evidence | 4 | 0.0158 | 45 | 0.1779 |
+| no_belief_revision | 172 | 0.6798 | 172 | 0.6798 |
+| orphan_evidence | 39 | 0.1542 | 59 | 0.2332 |
+| confirmation_only | 33 | 0.1304 | 40 | 0.1581 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 20 | 1.0000 | 85 | 4.2500 |
-| evidence_ignored | 20 | 1.0000 | 77 | 3.8500 |
-| judgment_without_evidence | 10 | 0.5000 | 17 | 0.8500 |
-| dead_end_update | 3 | 0.1500 | 3 | 0.1500 |
-| unresolved_contradiction | 5 | 0.2500 | 7 | 0.3500 |
-| hypothesis_to_commitment_shortcut | 5 | 0.2500 | 6 | 0.3000 |
-| test_without_evidence | 3 | 0.1500 | 3 | 0.1500 |
-| no_belief_revision | 5 | 0.2500 | 5 | 0.2500 |
-| orphan_evidence | 16 | 0.8000 | 25 | 1.2500 |
-| confirmation_only | 5 | 0.2500 | 6 | 0.3000 |
+| untested_hypothesis | 132 | 0.5217 | 380 | 1.5020 |
+| evidence_ignored | 211 | 0.8340 | 1071 | 4.2332 |
+| judgment_without_evidence | 41 | 0.1621 | 81 | 0.3202 |
+| dead_end_update | 22 | 0.0870 | 24 | 0.0949 |
+| unresolved_contradiction | 66 | 0.2609 | 155 | 0.6126 |
+| hypothesis_to_commitment_shortcut | 34 | 0.1344 | 41 | 0.1621 |
+| test_without_evidence | 22 | 0.0870 | 45 | 0.1779 |
+| no_belief_revision | 172 | 0.6798 | 172 | 0.6798 |
+| orphan_evidence | 39 | 0.1542 | 59 | 0.2332 |
+| confirmation_only | 33 | 0.1304 | 40 | 0.1581 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 20 | 1.0000 | 97 | 4.8500 |
-| evidence_handling | 19 | 0.9500 | 122 | 6.1000 |
-| experimental_strategy | 9 | 0.4500 | 14 | 0.7000 |
+| hypothesis_generation | 137 | 0.5415 | 558 | 2.2055 |
+| evidence_handling | 189 | 0.7470 | 1256 | 4.9644 |
+| experimental_strategy | 201 | 0.7945 | 237 | 0.9368 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 20 | 1.0000 | 98 | 4.9000 |
-| evidence_handling | 20 | 1.0000 | 122 | 6.1000 |
-| experimental_strategy | 9 | 0.4500 | 14 | 0.7000 |
+| hypothesis_generation | 145 | 0.5731 | 575 | 2.2727 |
+| evidence_handling | 215 | 0.8498 | 1256 | 4.9644 |
+| experimental_strategy | 201 | 0.7945 | 237 | 0.9368 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 20 | 1.0000 | 30 | 1.5000 |
-| evidence_handling | 1 | 0.0500 | 1 | 0.0500 |
-| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_generation | 161 | 0.6364 | 224 | 0.8854 |
+| evidence_handling | 16 | 0.0632 | 16 | 0.0632 |
+| experimental_strategy | 6 | 0.0237 | 6 | 0.0237 |
 
-### level2
+### level_2
 
-- Traces: 20 | Total messages: 812 | Mean messages/trace: 40.60
+- Traces: 126 | Total messages: 3641 | Mean messages/trace: 28.90
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.3329 | 1.3547 |
-| n_H | 0.1742 | 0.1736 |
-| n_T | 0.3413 | 0.3436 |
-| n_E | 0.4729 | 0.4778 |
-| n_J | 0.2765 | 0.2968 |
-| n_U | 0.0371 | 0.0369 |
-| n_C | 0.0310 | 0.0259 |
+| nodes_total | 1.1592 | 1.2502 |
+| n_H | 0.1306 | 0.1425 |
+| n_T | 0.2463 | 0.2944 |
+| n_E | 0.4544 | 0.4864 |
+| n_J | 0.2506 | 0.2598 |
+| n_U | 0.0276 | 0.0330 |
+| n_C | 0.0497 | 0.0341 |
 
 #### Metric means
 
 | metric | mean |
 | --- | ---: |
-| workflow_completeness | 0.9500 |
+| workflow_completeness | 0.8746 |
 | loop_density | 0.0000 |
-| update_grounding_rate | 0.0458 |
-| orphan_evidence_rate | 0.2245 |
-| refute_neglect_rate | 0.0167 |
-| hypothesis_switch_without_eval_rate | 0.1824 |
-| scientificness_score | 0.3367 |
+| update_grounding_rate | 0.4784 |
+| orphan_evidence_rate | 0.1472 |
+| refute_neglect_rate | 0.1562 |
+| hypothesis_switch_without_eval_rate | 0.4555 |
+| scientificness_score | 0.4576 |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 3 | 0.0238 | 3 | 0.0238 |
+| ml_make_it_work | 5 | 0.0397 | 5 | 0.0397 |
+| exploratory_to_confirmatory | 8 | 0.0635 | 8 | 0.0635 |
+| bayesian_belief_updating | 41 | 0.3254 | 41 | 0.3254 |
+| abductive | 93 | 0.7381 | 93 | 0.7381 |
+| triangulation | 1 | 0.0079 | 1 | 0.0079 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 3 | 0.0238 | 3 | 0.0238 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 95 | 0.7540 | 385 | 3.0556 |
+| evidence_ignored | 84 | 0.6667 | 695 | 5.5159 |
+| judgment_without_evidence | 30 | 0.2381 | 63 | 0.5000 |
+| dead_end_update | 21 | 0.1667 | 27 | 0.2143 |
+| unresolved_contradiction | 18 | 0.1429 | 67 | 0.5317 |
+| hypothesis_to_commitment_shortcut | 29 | 0.2302 | 37 | 0.2937 |
+| test_without_evidence | 0 | 0.0000 | 22 | 0.1746 |
+| no_belief_revision | 57 | 0.4524 | 57 | 0.4524 |
+| orphan_evidence | 38 | 0.3016 | 74 | 0.5873 |
+| confirmation_only | 26 | 0.2063 | 31 | 0.2460 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 99 | 0.7857 | 385 | 3.0556 |
+| evidence_ignored | 113 | 0.8968 | 695 | 5.5159 |
+| judgment_without_evidence | 30 | 0.2381 | 63 | 0.5000 |
+| dead_end_update | 21 | 0.1667 | 27 | 0.2143 |
+| unresolved_contradiction | 37 | 0.2937 | 91 | 0.7222 |
+| hypothesis_to_commitment_shortcut | 29 | 0.2302 | 37 | 0.2937 |
+| test_without_evidence | 18 | 0.1429 | 22 | 0.1746 |
+| no_belief_revision | 57 | 0.4524 | 57 | 0.4524 |
+| orphan_evidence | 38 | 0.3016 | 74 | 0.5873 |
+| confirmation_only | 26 | 0.2063 | 31 | 0.2460 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 100 | 0.7937 | 483 | 3.8333 |
+| evidence_handling | 95 | 0.7540 | 854 | 6.7778 |
+| experimental_strategy | 84 | 0.6667 | 121 | 0.9603 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 103 | 0.8175 | 507 | 4.0238 |
+| evidence_handling | 114 | 0.9048 | 854 | 6.7778 |
+| experimental_strategy | 84 | 0.6667 | 121 | 0.9603 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 103 | 0.8175 | 137 | 1.0873 |
+| evidence_handling | 9 | 0.0714 | 9 | 0.0714 |
+| experimental_strategy | 7 | 0.0556 | 8 | 0.0635 |
+
+### level_3
+
+- Traces: 65 | Total messages: 2911 | Mean messages/trace: 44.78
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.2644 | 1.3023 |
+| n_H | 0.1159 | 0.1213 |
+| n_T | 0.3633 | 0.3734 |
+| n_E | 0.4987 | 0.5094 |
+| n_J | 0.2317 | 0.2511 |
+| n_U | 0.0274 | 0.0282 |
+| n_C | 0.0273 | 0.0189 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.9262 |
+| loop_density | 0.0002 |
+| update_grounding_rate | 0.4592 |
+| orphan_evidence_rate | 0.1598 |
+| refute_neglect_rate | 0.0220 |
+| hypothesis_switch_without_eval_rate | 0.5118 |
+| scientificness_score | 0.4822 |
+
+#### Global subgraph presence
+
+| subgraph | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| popperian_falsification | 2 | 0.0308 | 2 | 0.0308 |
+| ml_make_it_work | 3 | 0.0462 | 3 | 0.0462 |
+| exploratory_to_confirmatory | 5 | 0.0769 | 5 | 0.0769 |
+| bayesian_belief_updating | 31 | 0.4769 | 31 | 0.4769 |
+| abductive | 35 | 0.5385 | 35 | 0.5385 |
+| triangulation | 1 | 0.0154 | 1 | 0.0154 |
+| preregistered | 0 | 0.0000 | 0 | 0.0000 |
+| active_learning | 1 | 0.0154 | 1 | 0.0154 |
+
+#### Anti-pattern presence (global)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 50 | 0.7692 | 276 | 4.2462 |
+| evidence_ignored | 55 | 0.8462 | 629 | 9.6769 |
+| judgment_without_evidence | 15 | 0.2308 | 21 | 0.3231 |
+| dead_end_update | 23 | 0.3538 | 32 | 0.4923 |
+| unresolved_contradiction | 25 | 0.3846 | 74 | 1.1385 |
+| hypothesis_to_commitment_shortcut | 11 | 0.1692 | 15 | 0.2308 |
+| test_without_evidence | 0 | 0.0000 | 23 | 0.3538 |
+| no_belief_revision | 21 | 0.3231 | 21 | 0.3231 |
+| orphan_evidence | 27 | 0.4154 | 60 | 0.9231 |
+| confirmation_only | 10 | 0.1538 | 14 | 0.2154 |
+
+#### Anti-pattern presence (local)
+
+| anti-pattern | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| untested_hypothesis | 53 | 0.8154 | 276 | 4.2462 |
+| evidence_ignored | 65 | 1.0000 | 629 | 9.6769 |
+| judgment_without_evidence | 15 | 0.2308 | 21 | 0.3231 |
+| dead_end_update | 23 | 0.3538 | 32 | 0.4923 |
+| unresolved_contradiction | 32 | 0.4923 | 75 | 1.1538 |
+| hypothesis_to_commitment_shortcut | 11 | 0.1692 | 15 | 0.2308 |
+| test_without_evidence | 16 | 0.2462 | 23 | 0.3538 |
+| no_belief_revision | 21 | 0.3231 | 21 | 0.3231 |
+| orphan_evidence | 27 | 0.4154 | 60 | 0.9231 |
+| confirmation_only | 10 | 0.1538 | 14 | 0.2154 |
+
+#### Anti-pattern family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 56 | 0.8615 | 364 | 5.6000 |
+| evidence_handling | 62 | 0.9538 | 733 | 11.2769 |
+| experimental_strategy | 47 | 0.7231 | 68 | 1.0462 |
+
+#### Anti-pattern family presence (local)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 57 | 0.8769 | 365 | 5.6154 |
+| evidence_handling | 65 | 1.0000 | 733 | 11.2769 |
+| experimental_strategy | 47 | 0.7231 | 68 | 1.0462 |
+
+#### Subgraph family presence (global)
+
+| family | count | fraction | raw_total | raw_mean |
+| --- | ---: | ---: | ---: | ---: |
+| hypothesis_generation | 43 | 0.6615 | 68 | 1.0462 |
+| evidence_handling | 6 | 0.0923 | 6 | 0.0923 |
+| experimental_strategy | 4 | 0.0615 | 4 | 0.0615 |
+
+### level_4
+
+- Traces: 7 | Total messages: 219 | Mean messages/trace: 31.29
+
+#### Node probability per message
+
+| field | mean/trace | pooled |
+| --- | ---: | ---: |
+| nodes_total | 1.0281 | 1.0594 |
+| n_H | 0.0495 | 0.0502 |
+| n_T | 0.3177 | 0.3562 |
+| n_E | 0.4788 | 0.4840 |
+| n_J | 0.1529 | 0.1507 |
+| n_U | 0.0000 | 0.0000 |
+| n_C | 0.0292 | 0.0183 |
+
+#### Metric means
+
+| metric | mean |
+| --- | ---: |
+| workflow_completeness | 0.7714 |
+| loop_density | 0.0000 |
+| update_grounding_rate | N/A |
+| orphan_evidence_rate | 0.1971 |
+| refute_neglect_rate | 0.3571 |
+| hypothesis_switch_without_eval_rate | N/A |
+| scientificness_score | N/A |
 
 #### Global subgraph presence
 
@@ -3085,8 +4510,8 @@
 | popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
 | ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
 | exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 15 | 0.7500 | 15 | 0.7500 |
-| abductive | 20 | 1.0000 | 20 | 1.0000 |
+| bayesian_belief_updating | 1 | 0.1429 | 1 | 0.1429 |
+| abductive | 5 | 0.7143 | 5 | 0.7143 |
 | triangulation | 0 | 0.0000 | 0 | 0.0000 |
 | preregistered | 0 | 0.0000 | 0 | 0.0000 |
 | active_learning | 0 | 0.0000 | 0 | 0.0000 |
@@ -3095,529 +4520,149 @@
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 19 | 0.9500 | 130 | 6.5000 |
-| evidence_ignored | 16 | 0.8000 | 137 | 6.8500 |
-| judgment_without_evidence | 4 | 0.2000 | 9 | 0.4500 |
-| dead_end_update | 5 | 0.2500 | 6 | 0.3000 |
-| unresolved_contradiction | 3 | 0.1500 | 16 | 0.8000 |
-| hypothesis_to_commitment_shortcut | 5 | 0.2500 | 12 | 0.6000 |
-| test_without_evidence | 0 | 0.0000 | 3 | 0.1500 |
-| no_belief_revision | 5 | 0.2500 | 5 | 0.2500 |
-| orphan_evidence | 14 | 0.7000 | 31 | 1.5500 |
-| confirmation_only | 4 | 0.2000 | 9 | 0.4500 |
+| untested_hypothesis | 4 | 0.5714 | 7 | 1.0000 |
+| evidence_ignored | 5 | 0.7143 | 46 | 6.5714 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 1 | 0.1429 | 2 | 0.2857 |
+| hypothesis_to_commitment_shortcut | 2 | 0.2857 | 2 | 0.2857 |
+| test_without_evidence | 0 | 0.0000 | 6 | 0.8571 |
+| no_belief_revision | 7 | 1.0000 | 7 | 1.0000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 2 | 0.2857 | 2 | 0.2857 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 19 | 0.9500 | 130 | 6.5000 |
-| evidence_ignored | 20 | 1.0000 | 137 | 6.8500 |
-| judgment_without_evidence | 4 | 0.2000 | 9 | 0.4500 |
-| dead_end_update | 5 | 0.2500 | 6 | 0.3000 |
-| unresolved_contradiction | 9 | 0.4500 | 21 | 1.0500 |
-| hypothesis_to_commitment_shortcut | 5 | 0.2500 | 12 | 0.6000 |
-| test_without_evidence | 3 | 0.1500 | 3 | 0.1500 |
-| no_belief_revision | 5 | 0.2500 | 5 | 0.2500 |
-| orphan_evidence | 14 | 0.7000 | 31 | 1.5500 |
-| confirmation_only | 4 | 0.2000 | 9 | 0.4500 |
+| untested_hypothesis | 4 | 0.5714 | 7 | 1.0000 |
+| evidence_ignored | 7 | 1.0000 | 46 | 6.5714 |
+| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
+| unresolved_contradiction | 1 | 0.1429 | 2 | 0.2857 |
+| hypothesis_to_commitment_shortcut | 2 | 0.2857 | 2 | 0.2857 |
+| test_without_evidence | 3 | 0.4286 | 6 | 0.8571 |
+| no_belief_revision | 7 | 1.0000 | 7 | 1.0000 |
+| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| confirmation_only | 2 | 0.2857 | 2 | 0.2857 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 20 | 1.0000 | 155 | 7.7500 |
-| evidence_handling | 20 | 1.0000 | 180 | 9.0000 |
-| experimental_strategy | 10 | 0.5000 | 23 | 1.1500 |
+| hypothesis_generation | 5 | 0.7143 | 11 | 1.5714 |
+| evidence_handling | 5 | 0.7143 | 52 | 7.4286 |
+| experimental_strategy | 7 | 1.0000 | 9 | 1.2857 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 20 | 1.0000 | 160 | 8.0000 |
-| evidence_handling | 20 | 1.0000 | 180 | 9.0000 |
-| experimental_strategy | 10 | 0.5000 | 23 | 1.1500 |
+| hypothesis_generation | 5 | 0.7143 | 11 | 1.5714 |
+| evidence_handling | 7 | 1.0000 | 52 | 7.4286 |
+| experimental_strategy | 7 | 1.0000 | 9 | 1.2857 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 20 | 1.0000 | 35 | 1.7500 |
+| hypothesis_generation | 5 | 0.7143 | 6 | 0.8571 |
 | evidence_handling | 0 | 0.0000 | 0 | 0.0000 |
 | experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
-
-### level3
-
-- Traces: 20 | Total messages: 938 | Mean messages/trace: 46.90
-
-#### Node probability per message
-
-| field | mean/trace | pooled |
-| --- | ---: | ---: |
-| nodes_total | 1.2809 | 1.3358 |
-| n_H | 0.1711 | 0.1791 |
-| n_T | 0.3131 | 0.3230 |
-| n_E | 0.4676 | 0.4819 |
-| n_J | 0.2732 | 0.2996 |
-| n_U | 0.0269 | 0.0309 |
-| n_C | 0.0289 | 0.0213 |
-
-#### Metric means
-
-| metric | mean |
-| --- | ---: |
-| workflow_completeness | 0.9400 |
-| loop_density | 0.0000 |
-| update_grounding_rate | 0.2000 |
-| orphan_evidence_rate | 0.2253 |
-| refute_neglect_rate | 0.0694 |
-| hypothesis_switch_without_eval_rate | 0.3333 |
-| scientificness_score | 0.3551 |
-
-#### Global subgraph presence
-
-| subgraph | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 1 | 0.0500 | 1 | 0.0500 |
-| bayesian_belief_updating | 13 | 0.6500 | 13 | 0.6500 |
-| abductive | 20 | 1.0000 | 20 | 1.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
-
-#### Anti-pattern presence (global)
-
-| anti-pattern | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 20 | 1.0000 | 158 | 7.9000 |
-| evidence_ignored | 15 | 0.7500 | 159 | 7.9500 |
-| judgment_without_evidence | 9 | 0.4500 | 16 | 0.8000 |
-| dead_end_update | 4 | 0.2000 | 8 | 0.4000 |
-| unresolved_contradiction | 5 | 0.2500 | 18 | 0.9000 |
-| hypothesis_to_commitment_shortcut | 10 | 0.5000 | 22 | 1.1000 |
-| test_without_evidence | 0 | 0.0000 | 1 | 0.0500 |
-| no_belief_revision | 6 | 0.3000 | 6 | 0.3000 |
-| orphan_evidence | 15 | 0.7500 | 34 | 1.7000 |
-| confirmation_only | 7 | 0.3500 | 13 | 0.6500 |
-
-#### Anti-pattern presence (local)
-
-| anti-pattern | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 20 | 1.0000 | 158 | 7.9000 |
-| evidence_ignored | 20 | 1.0000 | 159 | 7.9500 |
-| judgment_without_evidence | 9 | 0.4500 | 16 | 0.8000 |
-| dead_end_update | 4 | 0.2000 | 8 | 0.4000 |
-| unresolved_contradiction | 10 | 0.5000 | 28 | 1.4000 |
-| hypothesis_to_commitment_shortcut | 10 | 0.5000 | 22 | 1.1000 |
-| test_without_evidence | 1 | 0.0500 | 1 | 0.0500 |
-| no_belief_revision | 6 | 0.3000 | 6 | 0.3000 |
-| orphan_evidence | 15 | 0.7500 | 34 | 1.7000 |
-| confirmation_only | 7 | 0.3500 | 13 | 0.6500 |
-
-#### Anti-pattern family presence (global)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 20 | 1.0000 | 189 | 9.4500 |
-| evidence_handling | 20 | 1.0000 | 210 | 10.5000 |
-| experimental_strategy | 13 | 0.6500 | 36 | 1.8000 |
-
-#### Anti-pattern family presence (local)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 20 | 1.0000 | 199 | 9.9500 |
-| evidence_handling | 20 | 1.0000 | 210 | 10.5000 |
-| experimental_strategy | 13 | 0.6500 | 36 | 1.8000 |
-
-#### Subgraph family presence (global)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 20 | 1.0000 | 33 | 1.6500 |
-| evidence_handling | 1 | 0.0500 | 1 | 0.0500 |
-| experimental_strategy | 0 | 0.0000 | 0 | 0.0000 |
-
-### level_1
-
-- Traces: 139 | Total messages: 2786 | Mean messages/trace: 20.04
-
-#### Node probability per message
-
-| field | mean/trace | pooled |
-| --- | ---: | ---: |
-| nodes_total | 1.0820 | 1.0976 |
-| n_H | 0.0712 | 0.0739 |
-| n_T | 0.2969 | 0.2976 |
-| n_E | 0.4426 | 0.4655 |
-| n_J | 0.1897 | 0.1910 |
-| n_U | 0.0121 | 0.0140 |
-| n_C | 0.0694 | 0.0556 |
-
-#### Metric means
-
-| metric | mean |
-| --- | ---: |
-| workflow_completeness | 0.7338 |
-| loop_density | 0.0000 |
-| update_grounding_rate | 0.2893 |
-| orphan_evidence_rate | 0.1157 |
-| refute_neglect_rate | 0.1975 |
-| hypothesis_switch_without_eval_rate | 0.7083 |
-| scientificness_score | 0.3964 |
-
-#### Global subgraph presence
-
-| subgraph | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 2 | 0.0144 | 2 | 0.0144 |
-| exploratory_to_confirmatory | 8 | 0.0576 | 8 | 0.0576 |
-| bayesian_belief_updating | 22 | 0.1583 | 22 | 0.1583 |
-| abductive | 65 | 0.4676 | 65 | 0.4676 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
-
-#### Anti-pattern presence (global)
-
-| anti-pattern | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 58 | 0.4173 | 117 | 0.8417 |
-| evidence_ignored | 91 | 0.6547 | 622 | 4.4748 |
-| judgment_without_evidence | 11 | 0.0791 | 24 | 0.1727 |
-| dead_end_update | 4 | 0.0288 | 4 | 0.0288 |
-| unresolved_contradiction | 15 | 0.1079 | 42 | 0.3022 |
-| hypothesis_to_commitment_shortcut | 16 | 0.1151 | 17 | 0.1223 |
-| test_without_evidence | 3 | 0.0216 | 32 | 0.2302 |
-| no_belief_revision | 111 | 0.7986 | 111 | 0.7986 |
-| orphan_evidence | 6 | 0.0432 | 10 | 0.0719 |
-| confirmation_only | 13 | 0.0935 | 14 | 0.1007 |
-
-#### Anti-pattern presence (local)
-
-| anti-pattern | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 61 | 0.4388 | 117 | 0.8417 |
-| evidence_ignored | 112 | 0.8058 | 622 | 4.4748 |
-| judgment_without_evidence | 11 | 0.0791 | 24 | 0.1727 |
-| dead_end_update | 4 | 0.0288 | 4 | 0.0288 |
-| unresolved_contradiction | 23 | 0.1655 | 47 | 0.3381 |
-| hypothesis_to_commitment_shortcut | 16 | 0.1151 | 17 | 0.1223 |
-| test_without_evidence | 10 | 0.0719 | 32 | 0.2302 |
-| no_belief_revision | 111 | 0.7986 | 111 | 0.7986 |
-| orphan_evidence | 6 | 0.0432 | 10 | 0.0719 |
-| confirmation_only | 13 | 0.0935 | 14 | 0.1007 |
-
-#### Anti-pattern family presence (global)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 65 | 0.4676 | 173 | 1.2446 |
-| evidence_handling | 99 | 0.7122 | 688 | 4.9496 |
-| experimental_strategy | 117 | 0.8417 | 132 | 0.9496 |
-
-#### Anti-pattern family presence (local)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 67 | 0.4820 | 178 | 1.2806 |
-| evidence_handling | 113 | 0.8129 | 688 | 4.9496 |
-| experimental_strategy | 117 | 0.8417 | 132 | 0.9496 |
-
-#### Subgraph family presence (global)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 68 | 0.4892 | 87 | 0.6259 |
-| evidence_handling | 8 | 0.0576 | 8 | 0.0576 |
-| experimental_strategy | 2 | 0.0144 | 2 | 0.0144 |
-
-### level_2
-
-- Traces: 89 | Total messages: 2088 | Mean messages/trace: 23.46
-
-#### Node probability per message
-
-| field | mean/trace | pooled |
-| --- | ---: | ---: |
-| nodes_total | 1.1249 | 1.2055 |
-| n_H | 0.1209 | 0.1279 |
-| n_T | 0.2263 | 0.2797 |
-| n_E | 0.4493 | 0.4866 |
-| n_J | 0.2480 | 0.2409 |
-| n_U | 0.0225 | 0.0273 |
-| n_C | 0.0580 | 0.0431 |
-
-#### Metric means
-
-| metric | mean |
-| --- | ---: |
-| workflow_completeness | 0.8382 |
-| loop_density | 0.0000 |
-| update_grounding_rate | 0.5688 |
-| orphan_evidence_rate | 0.1250 |
-| refute_neglect_rate | 0.2113 |
-| hypothesis_switch_without_eval_rate | 0.5658 |
-| scientificness_score | 0.4795 |
-
-#### Global subgraph presence
-
-| subgraph | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 3 | 0.0337 | 3 | 0.0337 |
-| ml_make_it_work | 5 | 0.0562 | 5 | 0.0562 |
-| exploratory_to_confirmatory | 7 | 0.0787 | 7 | 0.0787 |
-| bayesian_belief_updating | 22 | 0.2472 | 22 | 0.2472 |
-| abductive | 60 | 0.6742 | 60 | 0.6742 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 3 | 0.0337 | 3 | 0.0337 |
-
-#### Anti-pattern presence (global)
-
-| anti-pattern | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 61 | 0.6854 | 159 | 1.7865 |
-| evidence_ignored | 53 | 0.5955 | 428 | 4.8090 |
-| judgment_without_evidence | 13 | 0.1461 | 31 | 0.3483 |
-| dead_end_update | 9 | 0.1011 | 9 | 0.1011 |
-| unresolved_contradiction | 11 | 0.1236 | 39 | 0.4382 |
-| hypothesis_to_commitment_shortcut | 21 | 0.2360 | 21 | 0.2360 |
-| test_without_evidence | 0 | 0.0000 | 16 | 0.1798 |
-| no_belief_revision | 50 | 0.5618 | 50 | 0.5618 |
-| orphan_evidence | 8 | 0.0899 | 9 | 0.1011 |
-| confirmation_only | 20 | 0.2247 | 20 | 0.2247 |
-
-#### Anti-pattern presence (local)
-
-| anti-pattern | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 64 | 0.7191 | 159 | 1.7865 |
-| evidence_ignored | 76 | 0.8539 | 428 | 4.8090 |
-| judgment_without_evidence | 13 | 0.1461 | 31 | 0.3483 |
-| dead_end_update | 9 | 0.1011 | 9 | 0.1011 |
-| unresolved_contradiction | 25 | 0.2809 | 60 | 0.6742 |
-| hypothesis_to_commitment_shortcut | 21 | 0.2360 | 21 | 0.2360 |
-| test_without_evidence | 12 | 0.1348 | 16 | 0.1798 |
-| no_belief_revision | 50 | 0.5618 | 50 | 0.5618 |
-| orphan_evidence | 8 | 0.0899 | 9 | 0.1011 |
-| confirmation_only | 20 | 0.2247 | 20 | 0.2247 |
-
-#### Anti-pattern family presence (global)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 66 | 0.7416 | 218 | 2.4494 |
-| evidence_handling | 59 | 0.6629 | 484 | 5.4382 |
-| experimental_strategy | 62 | 0.6966 | 80 | 0.8989 |
-
-#### Anti-pattern family presence (local)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 68 | 0.7640 | 239 | 2.6854 |
-| evidence_handling | 77 | 0.8652 | 484 | 5.4382 |
-| experimental_strategy | 62 | 0.6966 | 80 | 0.8989 |
-
-#### Subgraph family presence (global)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 68 | 0.7640 | 85 | 0.9551 |
-| evidence_handling | 7 | 0.0787 | 7 | 0.0787 |
-| experimental_strategy | 7 | 0.0787 | 8 | 0.0899 |
-
-### level_3
-
-- Traces: 29 | Total messages: 1275 | Mean messages/trace: 43.97
-
-#### Node probability per message
-
-| field | mean/trace | pooled |
-| --- | ---: | ---: |
-| nodes_total | 1.2382 | 1.2353 |
-| n_H | 0.0801 | 0.0722 |
-| n_T | 0.4086 | 0.4133 |
-| n_E | 0.5134 | 0.5224 |
-| n_J | 0.1827 | 0.1875 |
-| n_U | 0.0282 | 0.0235 |
-| n_C | 0.0251 | 0.0165 |
-
-#### Metric means
-
-| metric | mean |
-| --- | ---: |
-| workflow_completeness | 0.9448 |
-| loop_density | 0.0004 |
-| update_grounding_rate | 0.5934 |
-| orphan_evidence_rate | 0.1208 |
-| refute_neglect_rate | 0.0000 |
-| hypothesis_switch_without_eval_rate | 0.7759 |
-| scientificness_score | 0.5239 |
-
-#### Global subgraph presence
-
-| subgraph | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 1 | 0.0345 | 1 | 0.0345 |
-| ml_make_it_work | 2 | 0.0690 | 2 | 0.0690 |
-| exploratory_to_confirmatory | 1 | 0.0345 | 1 | 0.0345 |
-| bayesian_belief_updating | 9 | 0.3103 | 9 | 0.3103 |
-| abductive | 2 | 0.0690 | 2 | 0.0690 |
-| triangulation | 1 | 0.0345 | 1 | 0.0345 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 1 | 0.0345 | 1 | 0.0345 |
-
-#### Anti-pattern presence (global)
-
-| anti-pattern | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 19 | 0.6552 | 49 | 1.6897 |
-| evidence_ignored | 29 | 1.0000 | 360 | 12.4138 |
-| judgment_without_evidence | 6 | 0.2069 | 6 | 0.2069 |
-| dead_end_update | 9 | 0.3103 | 10 | 0.3448 |
-| unresolved_contradiction | 13 | 0.4483 | 32 | 1.1034 |
-| hypothesis_to_commitment_shortcut | 3 | 0.1034 | 3 | 0.1034 |
-| test_without_evidence | 0 | 0.0000 | 15 | 0.5172 |
-| no_belief_revision | 8 | 0.2759 | 8 | 0.2759 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 3 | 0.1034 | 3 | 0.1034 |
-
-#### Anti-pattern presence (local)
-
-| anti-pattern | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 21 | 0.7241 | 49 | 1.6897 |
-| evidence_ignored | 29 | 1.0000 | 360 | 12.4138 |
-| judgment_without_evidence | 6 | 0.2069 | 6 | 0.2069 |
-| dead_end_update | 9 | 0.3103 | 10 | 0.3448 |
-| unresolved_contradiction | 16 | 0.5517 | 33 | 1.1379 |
-| hypothesis_to_commitment_shortcut | 3 | 0.1034 | 3 | 0.1034 |
-| test_without_evidence | 9 | 0.3103 | 15 | 0.5172 |
-| no_belief_revision | 8 | 0.2759 | 8 | 0.2759 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 3 | 0.1034 | 3 | 0.1034 |
-
-#### Anti-pattern family presence (global)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 24 | 0.8276 | 84 | 2.8966 |
-| evidence_handling | 29 | 1.0000 | 381 | 13.1379 |
-| experimental_strategy | 18 | 0.6207 | 21 | 0.7241 |
-
-#### Anti-pattern family presence (local)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 25 | 0.8621 | 85 | 2.9310 |
-| evidence_handling | 29 | 1.0000 | 381 | 13.1379 |
-| experimental_strategy | 18 | 0.6207 | 21 | 0.7241 |
-
-#### Subgraph family presence (global)
-
-| family | count | fraction | raw_total | raw_mean |
-| --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 0.3448 | 12 | 0.4138 |
-| evidence_handling | 2 | 0.0690 | 2 | 0.0690 |
-| experimental_strategy | 3 | 0.1034 | 3 | 0.1034 |
 
 ## Overall
 
 ### overall
 
-- Traces: 317 | Total messages: 8435 | Mean messages/trace: 26.61
+- Traces: 451 | Total messages: 12422 | Mean messages/trace: 27.54
 
 #### Node probability per message
 
 | field | mean/trace | pooled |
 | --- | ---: | ---: |
-| nodes_total | 1.1481 | 1.2090 |
-| n_H | 0.1049 | 0.1145 |
-| n_T | 0.2901 | 0.3169 |
-| n_E | 0.4541 | 0.4812 |
-| n_J | 0.2226 | 0.2327 |
-| n_U | 0.0209 | 0.0249 |
-| n_C | 0.0553 | 0.0388 |
+| nodes_total | 1.1795 | 1.2426 |
+| n_H | 0.1117 | 0.1205 |
+| n_T | 0.2949 | 0.3235 |
+| n_E | 0.4580 | 0.4863 |
+| n_J | 0.2380 | 0.2511 |
+| n_U | 0.0212 | 0.0254 |
+| n_C | 0.0557 | 0.0357 |
 
 #### Metric means
 
 | metric | mean |
 | --- | ---: |
-| workflow_completeness | 0.8227 |
-| loop_density | 0.0000 |
-| update_grounding_rate | 0.3749 |
-| orphan_evidence_rate | 0.1404 |
-| refute_neglect_rate | 0.1445 |
-| hypothesis_switch_without_eval_rate | 0.5602 |
-| scientificness_score | 0.4281 |
+| workflow_completeness | 0.8337 |
+| loop_density | 0.0001 |
+| update_grounding_rate | 0.3872 |
+| orphan_evidence_rate | 0.1348 |
+| refute_neglect_rate | 0.1152 |
+| hypothesis_switch_without_eval_rate | 0.5405 |
+| scientificness_score | 0.4404 |
 
 #### Global subgraph presence
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 4 | 0.0126 | 4 | 0.0126 |
-| ml_make_it_work | 9 | 0.0284 | 9 | 0.0284 |
-| exploratory_to_confirmatory | 18 | 0.0568 | 18 | 0.0568 |
-| bayesian_belief_updating | 91 | 0.2871 | 91 | 0.2871 |
-| abductive | 187 | 0.5899 | 187 | 0.5899 |
-| triangulation | 1 | 0.0032 | 1 | 0.0032 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 4 | 0.0126 | 4 | 0.0126 |
+| popperian_falsification | 11 | 0.0244 | 11 | 0.0244 |
+| ml_make_it_work | 12 | 0.0266 | 12 | 0.0266 |
+| exploratory_to_confirmatory | 29 | 0.0643 | 29 | 0.0643 |
+| bayesian_belief_updating | 141 | 0.3126 | 141 | 0.3126 |
+| abductive | 283 | 0.6275 | 283 | 0.6275 |
+| triangulation | 2 | 0.0044 | 2 | 0.0044 |
+| preregistered | 1 | 0.0022 | 1 | 0.0022 |
+| active_learning | 5 | 0.0111 | 5 | 0.0111 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 197 | 0.6215 | 698 | 2.2019 |
-| evidence_ignored | 216 | 0.6814 | 1783 | 5.6246 |
-| judgment_without_evidence | 53 | 0.1672 | 103 | 0.3249 |
-| dead_end_update | 34 | 0.1073 | 40 | 0.1262 |
-| unresolved_contradiction | 50 | 0.1577 | 153 | 0.4826 |
-| hypothesis_to_commitment_shortcut | 60 | 0.1893 | 81 | 0.2555 |
-| test_without_evidence | 3 | 0.0095 | 70 | 0.2208 |
-| no_belief_revision | 185 | 0.5836 | 185 | 0.5836 |
-| orphan_evidence | 59 | 0.1861 | 109 | 0.3438 |
-| confirmation_only | 52 | 0.1640 | 65 | 0.2050 |
+| untested_hypothesis | 274 | 0.6075 | 1048 | 2.3237 |
+| evidence_ignored | 304 | 0.6741 | 2441 | 5.4124 |
+| judgment_without_evidence | 86 | 0.1907 | 165 | 0.3659 |
+| dead_end_update | 66 | 0.1463 | 83 | 0.1840 |
+| unresolved_contradiction | 79 | 0.1752 | 281 | 0.6231 |
+| hypothesis_to_commitment_shortcut | 76 | 0.1685 | 95 | 0.2106 |
+| test_without_evidence | 4 | 0.0089 | 96 | 0.2129 |
+| no_belief_revision | 257 | 0.5698 | 257 | 0.5698 |
+| orphan_evidence | 104 | 0.2306 | 193 | 0.4279 |
+| confirmation_only | 71 | 0.1574 | 87 | 0.1929 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 205 | 0.6467 | 698 | 2.2019 |
-| evidence_ignored | 277 | 0.8738 | 1783 | 5.6246 |
-| judgment_without_evidence | 53 | 0.1672 | 103 | 0.3249 |
-| dead_end_update | 34 | 0.1073 | 40 | 0.1262 |
-| unresolved_contradiction | 88 | 0.2776 | 196 | 0.6183 |
-| hypothesis_to_commitment_shortcut | 60 | 0.1893 | 81 | 0.2555 |
-| test_without_evidence | 38 | 0.1199 | 70 | 0.2208 |
-| no_belief_revision | 185 | 0.5836 | 185 | 0.5836 |
-| orphan_evidence | 59 | 0.1861 | 109 | 0.3438 |
-| confirmation_only | 52 | 0.1640 | 65 | 0.2050 |
+| untested_hypothesis | 288 | 0.6386 | 1048 | 2.3237 |
+| evidence_ignored | 396 | 0.8780 | 2441 | 5.4124 |
+| judgment_without_evidence | 86 | 0.1907 | 165 | 0.3659 |
+| dead_end_update | 66 | 0.1463 | 83 | 0.1840 |
+| unresolved_contradiction | 136 | 0.3016 | 323 | 0.7162 |
+| hypothesis_to_commitment_shortcut | 76 | 0.1685 | 95 | 0.2106 |
+| test_without_evidence | 59 | 0.1308 | 96 | 0.2129 |
+| no_belief_revision | 257 | 0.5698 | 257 | 0.5698 |
+| orphan_evidence | 104 | 0.2306 | 193 | 0.4279 |
+| confirmation_only | 71 | 0.1574 | 87 | 0.1929 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 215 | 0.6782 | 916 | 2.8896 |
-| evidence_handling | 246 | 0.7760 | 2065 | 6.5142 |
-| experimental_strategy | 229 | 0.7224 | 306 | 0.9653 |
+| hypothesis_generation | 298 | 0.6608 | 1416 | 3.1397 |
+| evidence_handling | 351 | 0.7783 | 2895 | 6.4191 |
+| experimental_strategy | 339 | 0.7517 | 435 | 0.9645 |
 
 #### Anti-pattern family presence (local)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 220 | 0.6940 | 959 | 3.0252 |
-| evidence_handling | 279 | 0.8801 | 2065 | 6.5142 |
-| experimental_strategy | 229 | 0.7224 | 306 | 0.9653 |
+| hypothesis_generation | 310 | 0.6874 | 1458 | 3.2328 |
+| evidence_handling | 401 | 0.8891 | 2895 | 6.4191 |
+| experimental_strategy | 339 | 0.7517 | 435 | 0.9645 |
 
 #### Subgraph family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 206 | 0.6498 | 282 | 0.8896 |
-| evidence_handling | 19 | 0.0599 | 19 | 0.0599 |
-| experimental_strategy | 12 | 0.0379 | 13 | 0.0410 |
+| hypothesis_generation | 312 | 0.6918 | 435 | 0.9645 |
+| evidence_handling | 31 | 0.0687 | 31 | 0.0687 |
+| experimental_strategy | 17 | 0.0377 | 18 | 0.0399 |

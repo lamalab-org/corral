@@ -14,7 +14,7 @@ DATASET_ID = "jablonkagroup/corral-traces"
 MODELS = ("claude_sonnet_45", "gpt_4o")
 AGENT = "ReActAgent"
 VERBOSITY = "brief"
-COMPLEXITY = "tasks"
+COMPLEXITY = ("tasks", "task")
 
 CONFIG_RE = re.compile(
     r"^(?P<model>[^-]+(?:_[^-]+)*)-(?P<env>[^-]+)-level_(?P<level>\d+)"
@@ -57,7 +57,7 @@ def discover_configs() -> list[dict]:
             info["model"] in MODELS
             and info["agent"] == AGENT
             and info["verbosity"] == VERBOSITY
-            and info["complexity"] == COMPLEXITY
+            and info["complexity"] in COMPLEXITY
         ):
             info["config_name"] = config_name
             configs.append(info)

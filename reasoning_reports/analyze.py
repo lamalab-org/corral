@@ -306,7 +306,7 @@ async def llm_json_call_async(
     model: str,
     system: str,
     user: str,
-    temperature: float = 1.0,
+    temperature: float = 0.0,
     max_retries: int = 5,
     timeout_s: int = 120,
 ) -> dict[str, Any]:
