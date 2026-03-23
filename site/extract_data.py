@@ -34,74 +34,49 @@ SUPPORTED_KEYWORDS = [
 _keyword_pattern = "|".join(re.escape(kw) for kw in SUPPORTED_KEYWORDS)
 TAG_RE = re.compile(rf"\[({_keyword_pattern})\](.*?)\[/\1\]", re.DOTALL | re.IGNORECASE)
 
+SKIP_ENVS = {"samplemath"}
+
 ENVIRONMENTS = {
     "Catalyst": {
+        "dir": "catalyst",
         "tools_py": "tasks/catalyst/src/catalyst/tools.py",
         "score_py": "tasks/catalyst/src/catalyst/score.py",
-        "task_configs": [("single", "tasks/catalyst/config/single/single.json")],
         "description": "Design and evaluate catalyst structures for CO2 adsorption on crystal slabs using Materials Project data and surface chemistry tools.",
     },
     "MD": {
+        "dir": "corral_md",
         "tools_py": "tasks/corral_md/src/corral_md/tools.py",
         "score_py": "tasks/corral_md/src/corral_md/score.py",
-        "task_configs": [
-            ("melting", "tasks/corral_md/environments/melting/level_1/tasks/si.json"),
-            (
-                "quenching",
-                "tasks/corral_md/environments/quenching/level_1/tasks/na2sio3.json",
-            ),
-            (
-                "surface_energy",
-                "tasks/corral_md/environments/surface_energy/level_1/tasks/al.json",
-            ),
-        ],
         "description": "Run molecular dynamics simulations with LAMMPS to compute physical properties like diffusion coefficients, glass transition temperatures, and surface energies.",
     },
     "ML": {
+        "dir": "ml",
         "tools_py": "tasks/ml/src/ml/tools.py",
         "score_py": "tasks/ml/src/ml/score.py",
-        "task_configs": [("single", "tasks/ml/config/single/single.json")],
         "description": "Train and evaluate machine learning models (XGBoost) on materials science datasets from the Materials Project.",
     },
     "Resistor": {
+        "dir": "resistor_network",
         "tools_py": "tasks/resistor_network/src/resistor_network/tools.py",
         "score_py": "tasks/resistor_network/src/resistor_network/score.py",
-        "task_configs": [
-            ("single", "tasks/resistor_network/config/single/single.json")
-        ],
         "description": "Infer resistor circuit topologies and values from node-to-node resistance measurements using circuit analysis tools.",
     },
     "Spectra": {
+        "dir": "spectra_elucidation",
         "tools_py": "tasks/spectra_elucidation/spectra_elucidation/tools.py",
         "score_py": "tasks/spectra_elucidation/spectra_elucidation/score.py",
-        "task_configs": [
-            (
-                "level_1",
-                "tasks/spectra_elucidation/environments/level_1/tasks_json/task_1.json",
-            ),
-            (
-                "level_2",
-                "tasks/spectra_elucidation/environments/level_2/tasks_json/task_1.json",
-            ),
-        ],
         "description": "Identify organic molecules from spectroscopic data (NMR, IR, mass spectrometry) through systematic spectra analysis.",
     },
     "Retrosynthesis": {
+        "dir": "retrosynthesis",
         "tools_py": "tasks/retrosynthesis/retrosynthesis/tools.py",
         "score_py": "tasks/retrosynthesis/retrosynthesis/score.py",
-        "task_configs": [
-            ("level_1", "tasks/retrosynthesis/environments/level_1/tasks/make_1.json"),
-            ("level_2", "tasks/retrosynthesis/environments/level_2/tasks/make_1.json"),
-        ],
         "description": "Plan retrosynthetic routes for target molecules using reaction template catalogs and chemical verification tools.",
     },
     "AFM": {
+        "dir": "afm",
         "tools_py": "tasks/afm/src/tools.py",
         "score_py": "tasks/afm/src/score.py",
-        "task_configs": [
-            ("level_1", "tasks/afm/src/enviroment/tasks_1.json"),
-            ("level_2", "tasks/afm/src/enviroment/tasks_2.json"),
-        ],
         "description": "Operate an atomic force microscope to perform surface scans and measure roughness with optimized scanning parameters.",
     },
 }
@@ -178,14 +153,12 @@ def extract_tools_from_file(filepath: Path) -> list[dict]:
             return_type = ast.unparse(node.returns)
 
         # Get code snippet: signature + body without docstring
-        # Find where the body starts (after docstring)
         body_nodes = node.body
         if (
             body_nodes
             and isinstance(body_nodes[0], ast.Expr)
             and isinstance(body_nodes[0].value, ast.Constant)
         ):
-            # First body node is docstring, skip it
             if len(body_nodes) > 1:
                 body_start = body_nodes[1].lineno - 1
             else:
@@ -193,11 +166,9 @@ def extract_tools_from_file(filepath: Path) -> list[dict]:
         else:
             body_start = body_nodes[0].lineno - 1 if body_nodes else node.lineno
 
-        # Build code: decorator + def line + body (no docstring)
         def_line = lines[node.lineno - 1]
         end_line = node.end_lineno or body_start + 20
         body_lines = lines[body_start:end_line]
-        # Limit body to ~50 lines
         if len(body_lines) > 50:
             body_lines = body_lines[:50]
             body_lines.append("    ...")
@@ -232,7 +203,6 @@ def extract_scoring_functions(filepath: Path) -> list[dict]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef):
             continue
-        # Skip private/helper functions
         if node.name.startswith("_"):
             continue
 
@@ -255,50 +225,108 @@ def extract_scoring_functions(filepath: Path) -> list[dict]:
     return functions
 
 
-def load_task_config(filepath: Path) -> list[dict]:
-    """Load and parse a task JSON config file."""
-    if not filepath.exists():
-        return []
+def load_entries_from_dir(directory: Path) -> list[dict]:
+    """Load all JSON files from a directory and return flattened standardized entries."""
+    entries = []
+    if not directory.is_dir():
+        return entries
 
-    data = json.loads(filepath.read_text())
+    for fpath in sorted(directory.glob("*.json")):
+        data = json.loads(fpath.read_text())
+        if isinstance(data, list):
+            entries.extend(data)
+        else:
+            entries.append(data)
 
-    tasks = []
-    # Handle both dict-of-tasks and list-of-tasks formats
-    if isinstance(data, dict):
-        for key, val in data.items():
-            tasks.append(
-                {
-                    "id": key,
-                    "name": val.get("name", key),
-                    "description": val.get("description", ""),
-                    "tools": val.get("tools", []),
-                    "scoring_function": val.get(
-                        "scoring_function", val.get("scoring_fn", "")
-                    ),
-                    "submission_format": val.get("submission_format", ""),
-                }
-            )
-    elif isinstance(data, list):
-        tasks.extend(
+    return entries
+
+
+def load_tasks_and_subtasks(env_dir_name: str) -> dict:
+    """Load all tasks and subtasks for an environment from the standardized directory structure.
+
+    Returns:
+        {
+            "levels": {
+                "level_1": {"tasks": [...], "subtasks": [...]},
+                "level_2": {"tasks": [...], "subtasks": [...]},
+                ...
+            },
+            "all_tasks": [...],
+            "all_subtasks": [...],
+            "task_count": int,
+            "subtask_count": int,
+        }
+    """
+    env_root = ROOT / "tasks" / env_dir_name / "environments"
+    levels = {}
+    all_tasks = []
+    all_subtasks = []
+
+    if not env_root.is_dir():
+        return {
+            "levels": {},
+            "all_tasks": [],
+            "all_subtasks": [],
+            "task_count": 0,
+            "subtask_count": 0,
+        }
+
+    for level_dir in sorted(env_root.iterdir()):
+        if not level_dir.is_dir() or not re.match(r"^level_\d+$", level_dir.name):
+            continue
+
+        level_name = level_dir.name
+        tasks_dir = level_dir / "tasks_json"
+        subtasks_dir = level_dir / "subtasks_json"
+
+        raw_tasks = load_entries_from_dir(tasks_dir)
+        raw_subtasks = load_entries_from_dir(subtasks_dir)
+
+        # Normalize entries
+        tasks = [
             {
-                "id": item.get("id", item.get("name", "")),
-                "name": item.get("name", ""),
-                "description": item.get("input", {}).get("prompt", ""),
-                "tools": item.get("tools", []),
-                "scoring_function": item.get(
-                    "scoring_fn", item.get("scoring_function", "")
-                ),
-                "submission_format": item.get("submission_format", ""),
+                "id": e.get("id", e.get("name", "")),
+                "name": e.get("name", ""),
+                "description": e.get("description", ""),
+                "tools": e.get("tools", []),
+                "scoring_function": e.get("scoring_function", ""),
+                "submission_format": e.get("submission_format", ""),
+                "level": level_name,
             }
-            for item in data
-        )
+            for e in raw_tasks
+        ]
+        subtasks = [
+            {
+                "id": e.get("id", e.get("name", "")),
+                "name": e.get("name", ""),
+                "description": e.get("description", ""),
+                "tools": e.get("tools", []),
+                "scoring_function": e.get("scoring_function", ""),
+                "submission_format": e.get("submission_format", ""),
+                "level": level_name,
+            }
+            for e in raw_subtasks
+        ]
 
-    return tasks
+        levels[level_name] = {"tasks": tasks, "subtasks": subtasks}
+        all_tasks.extend(tasks)
+        all_subtasks.extend(subtasks)
+
+    return {
+        "levels": levels,
+        "all_tasks": all_tasks,
+        "all_subtasks": all_subtasks,
+        "task_count": len(all_tasks),
+        "subtask_count": len(all_subtasks),
+    }
 
 
 def build_data():
     """Build the complete data structure for all environments."""
     env_data = {}
+    total_tasks = 0
+    total_subtasks = 0
+    total_tools = 0
 
     for env_name, config in ENVIRONMENTS.items():
         tools_path = ROOT / config["tools_py"]
@@ -306,25 +334,34 @@ def build_data():
 
         tools = extract_tools_from_file(tools_path)
         scoring_fns = extract_scoring_functions(score_path)
-
-        all_tasks = []
-        for level_name, config_path in config["task_configs"]:
-            tasks = load_task_config(ROOT / config_path)
-            for t in tasks:
-                t["level"] = level_name
-            all_tasks.extend(tasks)
+        task_data = load_tasks_and_subtasks(config["dir"])
 
         env_data[env_name] = {
             "description": config["description"],
             "tools": tools,
-            "tasks": all_tasks,
+            "tasks": task_data["all_tasks"],
+            "subtasks": task_data["all_subtasks"],
+            "levels": task_data["levels"],
+            "task_count": task_data["task_count"],
+            "subtask_count": task_data["subtask_count"],
             "scoring_functions": scoring_fns,
         }
 
+        total_tasks += task_data["task_count"]
+        total_subtasks += task_data["subtask_count"]
+        total_tools += len(tools)
+
         log.info(
-            f"  {env_name}: {len(tools)} tools, {len(all_tasks)} tasks, {len(scoring_fns)} scoring functions"
+            f"  {env_name}: {len(tools)} tools, "
+            f"{task_data['task_count']} tasks, "
+            f"{task_data['subtask_count']} subtasks, "
+            f"{len(scoring_fns)} scoring functions, "
+            f"{len(task_data['levels'])} levels"
         )
 
+    log.info(
+        f"\n  Totals: {total_tools} tools, {total_tasks} tasks, {total_subtasks} subtasks"
+    )
     return env_data
 
 
