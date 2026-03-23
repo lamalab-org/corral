@@ -135,20 +135,57 @@ def main() -> int:
         exist_ok=True,
     )
 
-    # Upload a clean README first
-    readme = (
-        "---\nlicense: apache-2.0\n---\n"
-        "# CORRAL Environment Tasks\n\n"
-        "Standardized task and subtask configurations for the CORRAL benchmark.\n\n"
-        "Each subset follows the naming pattern: "
-        "`{environment}-level_{N}-{task|subtask}`\n"
+    # Build README with YAML front matter that declares all configs/subsets
+    readme_lines = [
+        "---",
+        "license: apache-2.0",
+        "configs:",
+    ]
+    for subset_name in sorted(subsets):
+        readme_lines.extend(
+            [
+                f"  - config_name: {subset_name}",
+                "    data_files:",
+                "      - split: train",
+                f"        path: {subset_name}/train-00000-of-00001.parquet",
+            ]
+        )
+    readme_lines.extend(
+        [
+            "---",
+            "# CORRAL Environment Tasks",
+            "",
+            "Standardized task and subtask configurations for the CORRAL benchmark.",
+            "",
+            "Each subset follows the naming pattern: `{environment}-level_{N}-{task|subtask}`",
+            "",
+            "## Subsets",
+            "",
+        ]
     )
+
+    # Group subsets by environment for the README table
+    envs: dict[str, list[str]] = {}
+    for name in sorted(subsets):
+        env = name.split("-")[0]
+        envs.setdefault(env, []).append(name)
+
+    readme_lines.append("| Environment | Subsets |")
+    readme_lines.append("|---|---|")
+    for env, names in sorted(envs.items()):
+        subset_list = ", ".join(f"`{n}`" for n in names)
+        readme_lines.append(f"| {env} | {subset_list} |")
+
+    readme_lines.append("")
+
+    readme = "\n".join(readme_lines)
     api.upload_file(
         path_or_fileobj=readme.encode("utf-8"),
         path_in_repo="README.md",
         repo_id=HF_REPO,
         repo_type="dataset",
     )
+    sys.stdout.write("README with subset configs uploaded.\n\n")
 
     # Upload each subset as a parquet file under the HF dataset layout
     with tempfile.TemporaryDirectory() as tmpdir:
