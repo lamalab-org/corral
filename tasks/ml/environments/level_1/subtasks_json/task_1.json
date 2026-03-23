@@ -1,0 +1,95 @@
+[
+  {
+    "name": "Batch Retrieve Oxide Polymorphs",
+    "description": "Generate a diverse list of oxide compositions for dataset creation. Retrieve polymorphs for all oxide compositions from Materials Project database. For each composition, collect multiple polymorphs including both stable and metastable structures. Consolidate all individual polymorph files into a single comprehensive dataset. Each entry should have `source_composition`.",
+    "tools": [
+      "batch_retrieve_polymorphs",
+      "filter_json_with_strategy",
+      "select_polymorphs_with_strategy_to_file",
+      "consolidate_polymorph_datasets",
+      "select_polymorphs_with_strategy",
+      "get_bulk_polymorphs_data",
+      "sort_and_get_first_from_json",
+      "get_bulk_polymorphs_data_to_file"
+    ],
+    "scoring_function": "score_polymorph_dataset",
+    "submission_format": "path to the json file (eg. polymorph_data.json)",
+    "input_from_tasks": [],
+    "initial_input": {
+      "max_energy_above_hull": 0.3,
+      "max_per_composition": 3,
+      "max_compositions": 40
+    },
+    "id": "batch_retrieve_oxide_polymorphs",
+    "uuid": "ed26343f-a680-4cfc-b1de-533aa8280bdc"
+  },
+  {
+    "name": "Prepare ML-Ready Dataset",
+    "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
+    "tools": [
+      "prepare_tabular_dataset"
+    ],
+    "scoring_function": "ml_dataset_preparation_quality_binary",
+    "submission_format": "path to the json file (eg. ml_dataset_metadata.json)",
+    "input_from_tasks": [
+      "batch_retrieve_oxide_polymorphs"
+    ],
+    "initial_input": {
+      "target_property": "formation_energy_per_atom",
+      "feature_engineering": "advanced",
+      "test_split": 0.2,
+      "normalize": true,
+      "output_path": "oxide_ml_dataset"
+    },
+    "id": "prepare_ml_ready_dataset",
+    "uuid": "933bb943-6b81-4548-9d68-323723569f23"
+  },
+  {
+    "name": "Train XGBoost Formation Energy Model",
+    "description": "Train an XGBoost regression model to predict formation energies of oxide polymorphs. Use the prepared dataset with optimized hyperparameters for oxide materials. Focus on achieving good generalization performance across different oxide families and structural types.",
+    "tools": [
+      "train_xgboost_model",
+      "perform_cross_validation"
+    ],
+    "scoring_function": "model_training_success_binary",
+    "submission_format": "path to the model checkpoint file (eg. trained_xgboost_model.pkl)",
+    "input_from_tasks": [
+      "prepare_ml_ready_dataset"
+    ],
+    "initial_input": {
+      "target_column": "formation_energy_per_atom",
+      "hyperparameters": {
+        "n_estimators": 200,
+        "max_depth": 8,
+        "learning_rate": 0.1,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_alpha": 0.1,
+        "reg_lambda": 0.1
+      }
+    },
+    "id": "train_xgboost_formation_energy_model",
+    "uuid": "71737708-b654-4109-b89f-85d2f6b2c381"
+  },
+  {
+    "name": "Evaluate Model Performance",
+    "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
+    "tools": [
+      "evaluate_xgboost_model",
+      "perform_cross_validation"
+    ],
+    "scoring_function": "model_evaluation_completeness_binary",
+    "submission_format": "path to the results file (eg. model_evaluation_results.json)",
+    "input_from_tasks": [
+      "train_xgboost_formation_energy_model",
+      "prepare_ml_ready_dataset"
+    ],
+    "initial_input": {
+      "target_column": "formation_energy_per_atom",
+      "detailed_analysis": true,
+      "cv_folds": 5
+    },
+    "id": "evaluate_model_performance",
+    "uuid": "4b743314-5d59-4967-894e-b0cbb3825402"
+  }
+]
