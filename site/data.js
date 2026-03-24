@@ -1,6 +1,6 @@
 const CORRAL_DATA = {
-  "AFM": {
-    "description": "Operate an atomic force microscope to perform surface scans and measure roughness with optimized scanning parameters.",
+  "AFM Operation": {
+    "description": "Analyze and interpret atomic force microscopy data for nanoscale surface characterization. Tools provide image analysis and data processing capabilities for topographical and mechanical property measurements.",
     "tools": [
       {
         "name": "visualize_grain_boxes",
@@ -1062,8 +1062,8 @@ const CORRAL_DATA = {
       }
     ]
   },
-  "Catalyst": {
-    "description": "Design and evaluate catalyst structures for CO2 adsorption on crystal slabs using Materials Project data and surface chemistry tools.",
+  "Surface Construction": {
+    "description": "Build adsorbate-slab configurations from bulk crystal structures and molecules for heterogeneous catalysis studies. Tools integrate with the Materials Project to retrieve structures, generate surface slabs for specified Miller indices, and enumerate adsorption sites.",
     "tools": [
       {
         "name": "get_structure_from_mp_text",
@@ -2259,8 +2259,8 @@ const CORRAL_DATA = {
       }
     ]
   },
-  "MD": {
-    "description": "Run molecular dynamics simulations with LAMMPS to compute physical properties like diffusion coefficients, glass transition temperatures, and surface energies.",
+  "Molecular Simulation": {
+    "description": "Design and execute molecular dynamics simulations using LAMMPS to predict materials properties. Tools cover the full workflow: retrieving crystal structures, converting to LAMMPS format, querying force-field metadata, running simulations, and analyzing output logs.",
     "tools": [
       {
         "name": "get_nth_run_log",
@@ -3170,8 +3170,8 @@ const CORRAL_DATA = {
       }
     ]
   },
-  "ML": {
-    "description": "Train and evaluate machine learning models (XGBoost) on materials science datasets from the Materials Project.",
+  "ML Property Prediction": {
+    "description": "Assemble a complete machine-learning pipeline to predict formation energies of material polymorphs. Tools cover data retrieval from the Materials Project, dataset filtering, tabular feature engineering, XGBoost model training, evaluation, and cross-validation.",
     "tools": [
       {
         "name": "get_structure_from_mp_text",
@@ -4264,8 +4264,8 @@ const CORRAL_DATA = {
       }
     ]
   },
-  "Resistor": {
-    "description": "Infer resistor circuit topologies and values from node-to-node resistance measurements using circuit analysis tools.",
+  "Circuit Inference": {
+    "description": "Recover the topology and component values of a hidden resistor network from pairwise resistance measurements between nodes. Tools provide series/parallel calculations, delta-wye transforms, resistance measurement, and circuit validation.",
     "tools": [
       {
         "name": "calculate_series_resistance",
@@ -5609,8 +5609,8 @@ const CORRAL_DATA = {
       }
     ]
   },
-  "Retrosynthesis": {
-    "description": "Plan retrosynthetic routes for target molecules using reaction template catalogs and chemical verification tools.",
+  "Retrosynthetic Planning": {
+    "description": "Design multi-step synthetic routes to target molecules under cost, step-count, and commercial-availability constraints. Tools include a template catalogue, template application and step verification, commercial-availability lookup, and functional-group detection.",
     "tools": [
       {
         "name": "search_template_catalog_by_criteria",
@@ -10413,8 +10413,8 @@ const CORRAL_DATA = {
       }
     ]
   },
-  "Spectra": {
-    "description": "Identify organic molecules from spectroscopic data (NMR, IR, mass spectrometry) through systematic spectra analysis.",
+  "Spectra Elucidation": {
+    "description": "Determine the molecular structure of an unknown compound by requesting and interpreting spectroscopic data. Available tools include mass spectrometry, NMR, HSQC, and IR spectroscopy, alongside reference databases for chemical shifts, isotope distributions, and degree-of-unsaturation calculations.",
     "tools": [
       {
         "name": "get_formula_from_smiles",
