@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from adjustText import adjust_text
-from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 
@@ -121,7 +121,7 @@ def plot_gap_scatter(
     env_labels = [ENVIRONMENT_NAMES.get(env, env.upper()) for env in environments]
 
     # Create figure
-    fig, ax = plt.subplots(1, 1, figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT))
+    fig, ax = plt.subplots(1, 1, figsize=(TWO_COL_WIDTH / 3, ONE_COL_HEIGHT))
 
     # Plot diagonal line (y=x) first
     max_gap = max(*agent_gaps, *model_gaps)

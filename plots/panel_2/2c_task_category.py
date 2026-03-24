@@ -236,7 +236,7 @@ def main():
 
     logger.info(f"Processed {total_subtasks_processed} subtask results")
     logger.info(
-        f"Classified {classified_count} subtasks ({100*classified_count/total_subtasks_processed:.1f}%)"
+        f"Classified {classified_count} subtasks ({100 * classified_count / total_subtasks_processed:.1f}%)"
     )
 
     # Compute average scores
@@ -248,7 +248,7 @@ def main():
         }
 
     # Create plot
-    fig, ax = plt.subplots(1, 1, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
+    fig, ax = plt.subplots(1, 1, figsize=(TWO_COL_WIDTH * 2 / 3, ONE_COL_HEIGHT))
 
     # Define visual mappings
     agent_display = dict(AGENT_NAMES)
