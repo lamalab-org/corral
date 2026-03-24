@@ -69,9 +69,19 @@ def discover_environments() -> dict[str, dict]:
         display_name = env_meta.get("display_name", dir_name.replace("_", " ").title())
         description = env_meta.get("description", "")
 
-        # Auto-discover tools.py and score.py
-        tools_files = list(env_dir.rglob("tools.py"))
-        score_files = list(env_dir.rglob("score.py"))
+        # Auto-discover tools.py and score.py (exclude .venv and hidden dirs)
+        tools_files = [
+            p
+            for p in env_dir.rglob("tools.py")
+            if ".venv" not in p.parts
+            and not any(part.startswith(".") for part in p.relative_to(env_dir).parts)
+        ]
+        score_files = [
+            p
+            for p in env_dir.rglob("score.py")
+            if ".venv" not in p.parts
+            and not any(part.startswith(".") for part in p.relative_to(env_dir).parts)
+        ]
 
         envs[display_name] = {
             "dir": dir_name,

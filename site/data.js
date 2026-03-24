@@ -1647,7 +1647,7 @@ const CORRAL_DATA = {
     "subtasks": [
       {
         "_uid": "14e366e1-708f-4cae-90b4-adc5020184f9",
-        "id": "retrieve_structure",
+        "id": "task_1_retrieve_structure",
         "name": "Retrieve Bulk Structure",
         "description": "Retrieve structure of Si from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1659,7 +1659,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "2c470e2c-422c-44ce-86fa-15c2b2167bb0",
-        "id": "enumerate_slabs",
+        "id": "task_1_enumerate_slabs",
         "name": "Enumerate Possible Slabs",
         "description": "Enumerate possible slabs from the bulk Si structure and save the result as a JSON file. Submit the path to the JSON file.",
         "tools": [
@@ -1671,7 +1671,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "2e51e09e-51a1-4f38-8631-76236cf2cfa0",
-        "id": "choose_slab",
+        "id": "task_1_choose_slab",
         "name": "Choose Slab",
         "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1683,7 +1683,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "d887fadf-9127-4ac0-9888-5a06c80f1d57",
-        "id": "create_molecule",
+        "id": "task_1_create_molecule",
         "name": "Create CO2 Molecule",
         "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1695,7 +1695,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "ec350e71-cca3-42a5-8da9-6f52ae1fef91",
-        "id": "get_adsorption_sites",
+        "id": "task_1_get_adsorption_sites",
         "name": "Identify Adsorption Sites",
         "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
         "tools": [
@@ -1707,7 +1707,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "ceef1b29-a7b0-4e70-89a9-b38070d1a1ef",
-        "id": "choose_adsorption_site",
+        "id": "task_1_choose_adsorption_site",
         "name": "Choose Adsorption Site",
         "description": "Choose one adsorption site (preferably ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
         "tools": [
@@ -1719,7 +1719,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "4a9280f9-92c5-438c-a937-e49a3ea74eb1",
-        "id": "add_adsorbate",
+        "id": "task_1_add_adsorbate",
         "name": "Add CO2 to Silicon Slab",
         "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1731,7 +1731,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "7915a910-5bb5-48b1-b9ab-a28cfcd4e888",
-        "id": "retrieve_structure",
+        "id": "task_2_retrieve_structure",
         "name": "Retrieve Bulk Structure",
         "description": "Retrieve structure of TiO2 from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1743,7 +1743,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "ecc8a599-c88a-4ad6-9ebd-cfbaab04ae06",
-        "id": "enumerate_slabs",
+        "id": "task_2_enumerate_slabs",
         "name": "Enumerate Possible Slabs",
         "description": "Enumerate possible slabs from the bulk TiO2 structure and save the result as a JSON file. Submit the path to the JSON file.",
         "tools": [
@@ -1755,7 +1755,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "6fe24ab5-f718-4434-8c63-aa35b2ed73c8",
-        "id": "choose_slab",
+        "id": "task_2_choose_slab",
         "name": "Choose Slab",
         "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1767,7 +1767,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "65230291-0bf7-4f70-89e3-409247f2920e",
-        "id": "create_molecule",
+        "id": "task_2_create_molecule",
         "name": "Create CO2 Molecule",
         "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1779,7 +1779,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "a91058f5-c06c-4e30-a4e8-57e2653c67c4",
-        "id": "get_adsorption_sites",
+        "id": "task_2_get_adsorption_sites",
         "name": "Identify Adsorption Sites",
         "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
         "tools": [
@@ -1791,7 +1791,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "a58c018d-2306-45d8-aa5f-bbc0ca5f3853",
-        "id": "choose_adsorption_site",
+        "id": "task_2_choose_adsorption_site",
         "name": "Choose Adsorption Site",
         "description": "Choose one adsorption site (preferably a ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
         "tools": [
@@ -1803,7 +1803,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "5a261e6b-6e6a-4287-aec6-5c2a31c543db",
-        "id": "add_adsorbate",
+        "id": "task_2_add_adsorbate",
         "name": "Add CO2 to Silicon Slab",
         "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1815,7 +1815,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "cfcf1824-83ec-4619-bce2-12efc34615ad",
-        "id": "retrieve_structure",
+        "id": "task_3_retrieve_structure",
         "name": "Retrieve Bulk Structure",
         "description": "Retrieve structure of Cu2O from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1827,7 +1827,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "f85513ed-3b81-4f78-b45e-772c8ff39f3d",
-        "id": "enumerate_slabs",
+        "id": "task_3_enumerate_slabs",
         "name": "Enumerate Possible Slabs",
         "description": "Enumerate possible slabs from the bulk Cu2O structure and save the result as a JSON file. Submit the path to the JSON file.",
         "tools": [
@@ -1839,7 +1839,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "ebcc377d-93f6-4948-bbad-72afab18988b",
-        "id": "choose_slab",
+        "id": "task_3_choose_slab",
         "name": "Choose Slab",
         "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1851,7 +1851,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "bbf060f8-6fee-48ac-a353-d93751f9394c",
-        "id": "create_molecule",
+        "id": "task_3_create_molecule",
         "name": "Create CO2 Molecule",
         "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1863,7 +1863,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "bde9d905-6f0b-46da-ad25-6508ddf073fd",
-        "id": "get_adsorption_sites",
+        "id": "task_3_get_adsorption_sites",
         "name": "Identify Adsorption Sites",
         "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
         "tools": [
@@ -1875,7 +1875,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "790f0baa-bc06-42d1-9370-9ee35fd4b861",
-        "id": "choose_adsorption_site",
+        "id": "task_3_choose_adsorption_site",
         "name": "Choose Adsorption Site",
         "description": "Choose one adsorption site (preferably ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
         "tools": [
@@ -1887,7 +1887,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "28aa4320-4b51-4b17-b7b4-f43f404e0cb7",
-        "id": "add_adsorbate",
+        "id": "task_3_add_adsorbate",
         "name": "Add CO2 to Silicon Slab",
         "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
         "tools": [
@@ -1956,7 +1956,7 @@ const CORRAL_DATA = {
         "subtasks": [
           {
             "_uid": "14e366e1-708f-4cae-90b4-adc5020184f9",
-            "id": "retrieve_structure",
+            "id": "task_1_retrieve_structure",
             "name": "Retrieve Bulk Structure",
             "description": "Retrieve structure of Si from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -1968,7 +1968,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "2c470e2c-422c-44ce-86fa-15c2b2167bb0",
-            "id": "enumerate_slabs",
+            "id": "task_1_enumerate_slabs",
             "name": "Enumerate Possible Slabs",
             "description": "Enumerate possible slabs from the bulk Si structure and save the result as a JSON file. Submit the path to the JSON file.",
             "tools": [
@@ -1980,7 +1980,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "2e51e09e-51a1-4f38-8631-76236cf2cfa0",
-            "id": "choose_slab",
+            "id": "task_1_choose_slab",
             "name": "Choose Slab",
             "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -1992,7 +1992,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "d887fadf-9127-4ac0-9888-5a06c80f1d57",
-            "id": "create_molecule",
+            "id": "task_1_create_molecule",
             "name": "Create CO2 Molecule",
             "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -2004,7 +2004,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "ec350e71-cca3-42a5-8da9-6f52ae1fef91",
-            "id": "get_adsorption_sites",
+            "id": "task_1_get_adsorption_sites",
             "name": "Identify Adsorption Sites",
             "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
             "tools": [
@@ -2016,7 +2016,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "ceef1b29-a7b0-4e70-89a9-b38070d1a1ef",
-            "id": "choose_adsorption_site",
+            "id": "task_1_choose_adsorption_site",
             "name": "Choose Adsorption Site",
             "description": "Choose one adsorption site (preferably ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
             "tools": [
@@ -2028,7 +2028,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "4a9280f9-92c5-438c-a937-e49a3ea74eb1",
-            "id": "add_adsorbate",
+            "id": "task_1_add_adsorbate",
             "name": "Add CO2 to Silicon Slab",
             "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -2040,7 +2040,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "7915a910-5bb5-48b1-b9ab-a28cfcd4e888",
-            "id": "retrieve_structure",
+            "id": "task_2_retrieve_structure",
             "name": "Retrieve Bulk Structure",
             "description": "Retrieve structure of TiO2 from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -2052,7 +2052,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "ecc8a599-c88a-4ad6-9ebd-cfbaab04ae06",
-            "id": "enumerate_slabs",
+            "id": "task_2_enumerate_slabs",
             "name": "Enumerate Possible Slabs",
             "description": "Enumerate possible slabs from the bulk TiO2 structure and save the result as a JSON file. Submit the path to the JSON file.",
             "tools": [
@@ -2064,7 +2064,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "6fe24ab5-f718-4434-8c63-aa35b2ed73c8",
-            "id": "choose_slab",
+            "id": "task_2_choose_slab",
             "name": "Choose Slab",
             "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -2076,7 +2076,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "65230291-0bf7-4f70-89e3-409247f2920e",
-            "id": "create_molecule",
+            "id": "task_2_create_molecule",
             "name": "Create CO2 Molecule",
             "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -2088,7 +2088,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "a91058f5-c06c-4e30-a4e8-57e2653c67c4",
-            "id": "get_adsorption_sites",
+            "id": "task_2_get_adsorption_sites",
             "name": "Identify Adsorption Sites",
             "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
             "tools": [
@@ -2100,7 +2100,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "a58c018d-2306-45d8-aa5f-bbc0ca5f3853",
-            "id": "choose_adsorption_site",
+            "id": "task_2_choose_adsorption_site",
             "name": "Choose Adsorption Site",
             "description": "Choose one adsorption site (preferably a ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
             "tools": [
@@ -2112,7 +2112,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "5a261e6b-6e6a-4287-aec6-5c2a31c543db",
-            "id": "add_adsorbate",
+            "id": "task_2_add_adsorbate",
             "name": "Add CO2 to Silicon Slab",
             "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -2124,7 +2124,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "cfcf1824-83ec-4619-bce2-12efc34615ad",
-            "id": "retrieve_structure",
+            "id": "task_3_retrieve_structure",
             "name": "Retrieve Bulk Structure",
             "description": "Retrieve structure of Cu2O from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -2136,7 +2136,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "f85513ed-3b81-4f78-b45e-772c8ff39f3d",
-            "id": "enumerate_slabs",
+            "id": "task_3_enumerate_slabs",
             "name": "Enumerate Possible Slabs",
             "description": "Enumerate possible slabs from the bulk Cu2O structure and save the result as a JSON file. Submit the path to the JSON file.",
             "tools": [
@@ -2148,7 +2148,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "ebcc377d-93f6-4948-bbad-72afab18988b",
-            "id": "choose_slab",
+            "id": "task_3_choose_slab",
             "name": "Choose Slab",
             "description": "Choose one slab from the enumerated slabs (by index) and save it as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -2160,7 +2160,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "bbf060f8-6fee-48ac-a353-d93751f9394c",
-            "id": "create_molecule",
+            "id": "task_3_create_molecule",
             "name": "Create CO2 Molecule",
             "description": "Retrieve CO2 molecule structure from Materials Project and save it as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -2172,7 +2172,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "bde9d905-6f0b-46da-ad25-6508ddf073fd",
-            "id": "get_adsorption_sites",
+            "id": "task_3_get_adsorption_sites",
             "name": "Identify Adsorption Sites",
             "description": "Determine possible adsorption sites on the chosen slab and save the results as a JSON file. Submit the path to the JSON file.",
             "tools": [
@@ -2184,7 +2184,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "790f0baa-bc06-42d1-9370-9ee35fd4b861",
-            "id": "choose_adsorption_site",
+            "id": "task_3_choose_adsorption_site",
             "name": "Choose Adsorption Site",
             "description": "Choose one adsorption site (preferably ontop site) from the identified sites and save the coordinates to a file. Submit the path to the file.",
             "tools": [
@@ -2196,7 +2196,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "28aa4320-4b51-4b17-b7b4-f43f404e0cb7",
-            "id": "add_adsorbate",
+            "id": "task_3_add_adsorbate",
             "name": "Add CO2 to Silicon Slab",
             "description": "Place the CO2 molecule on the chosen slab at the specified adsorption site with a height of approximately 2.0 Angstrom and save the combined structure as a CIF file. Submit the path to the CIF file.",
             "tools": [
@@ -3805,7 +3805,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "933bb943-6b81-4548-9d68-323723569f23",
-        "id": "prepare_ml_ready_dataset",
+        "id": "task_1_prepare_ml_ready_dataset",
         "name": "Prepare ML-Ready Dataset",
         "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
         "tools": [
@@ -3817,7 +3817,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "71737708-b654-4109-b89f-85d2f6b2c381",
-        "id": "train_xgboost_formation_energy_model",
+        "id": "task_1_train_xgboost_formation_energy_model",
         "name": "Train XGBoost Formation Energy Model",
         "description": "Train an XGBoost regression model to predict formation energies of oxide polymorphs. Use the prepared dataset with optimized hyperparameters for oxide materials. Focus on achieving good generalization performance across different oxide families and structural types.",
         "tools": [
@@ -3830,7 +3830,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "4b743314-5d59-4967-894e-b0cbb3825402",
-        "id": "evaluate_model_performance",
+        "id": "task_1_evaluate_model_performance",
         "name": "Evaluate Model Performance",
         "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
         "tools": [
@@ -3862,7 +3862,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "22a3ae4d-f085-4cc5-ad8b-d4a1d5dc3055",
-        "id": "prepare_ml_ready_dataset",
+        "id": "task_2_prepare_ml_ready_dataset",
         "name": "Prepare ML-Ready Dataset",
         "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
         "tools": [
@@ -3874,7 +3874,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "9a1289fc-91bd-4c72-89cc-2e8b6ddb19dc",
-        "id": "train_xgboost_formation_energy_model",
+        "id": "task_2_train_xgboost_formation_energy_model",
         "name": "Train XGBoost Formation Energy Model",
         "description": "Train an XGBoost regression model to predict formation energies of nitride polymorphs. Use the prepared dataset with optimized hyperparameters for nitride materials. Focus on achieving good generalization performance across different nitride families and structural types.",
         "tools": [
@@ -3887,7 +3887,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "2f17a16f-4b4c-4d7b-8c06-11b19a47467b",
-        "id": "evaluate_model_performance",
+        "id": "task_2_evaluate_model_performance",
         "name": "Evaluate Model Performance",
         "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
         "tools": [
@@ -3919,7 +3919,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "949c2d47-6392-43f5-803f-22495693628b",
-        "id": "prepare_ml_ready_dataset",
+        "id": "task_3_prepare_ml_ready_dataset",
         "name": "Prepare ML-Ready Dataset",
         "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
         "tools": [
@@ -3931,7 +3931,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "dbf304e2-ab06-4118-8530-96b3d4c34c21",
-        "id": "train_xgboost_formation_energy_model",
+        "id": "task_3_train_xgboost_formation_energy_model",
         "name": "Train XGBoost Formation Energy Model",
         "description": "Train an XGBoost regression model to predict formation energies of sulphide polymorphs. Use the prepared dataset with optimized hyperparameters for sulphide materials. Focus on achieving good generalization performance across different sulphide families and structural types.",
         "tools": [
@@ -3944,7 +3944,7 @@ const CORRAL_DATA = {
       },
       {
         "_uid": "857cf98a-7dc6-4039-98b4-694d8b7d82ef",
-        "id": "evaluate_model_performance",
+        "id": "task_3_evaluate_model_performance",
         "name": "Evaluate Model Performance",
         "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
         "tools": [
@@ -4051,7 +4051,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "933bb943-6b81-4548-9d68-323723569f23",
-            "id": "prepare_ml_ready_dataset",
+            "id": "task_1_prepare_ml_ready_dataset",
             "name": "Prepare ML-Ready Dataset",
             "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
             "tools": [
@@ -4063,7 +4063,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "71737708-b654-4109-b89f-85d2f6b2c381",
-            "id": "train_xgboost_formation_energy_model",
+            "id": "task_1_train_xgboost_formation_energy_model",
             "name": "Train XGBoost Formation Energy Model",
             "description": "Train an XGBoost regression model to predict formation energies of oxide polymorphs. Use the prepared dataset with optimized hyperparameters for oxide materials. Focus on achieving good generalization performance across different oxide families and structural types.",
             "tools": [
@@ -4076,7 +4076,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "4b743314-5d59-4967-894e-b0cbb3825402",
-            "id": "evaluate_model_performance",
+            "id": "task_1_evaluate_model_performance",
             "name": "Evaluate Model Performance",
             "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
             "tools": [
@@ -4108,7 +4108,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "22a3ae4d-f085-4cc5-ad8b-d4a1d5dc3055",
-            "id": "prepare_ml_ready_dataset",
+            "id": "task_2_prepare_ml_ready_dataset",
             "name": "Prepare ML-Ready Dataset",
             "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
             "tools": [
@@ -4120,7 +4120,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "9a1289fc-91bd-4c72-89cc-2e8b6ddb19dc",
-            "id": "train_xgboost_formation_energy_model",
+            "id": "task_2_train_xgboost_formation_energy_model",
             "name": "Train XGBoost Formation Energy Model",
             "description": "Train an XGBoost regression model to predict formation energies of nitride polymorphs. Use the prepared dataset with optimized hyperparameters for nitride materials. Focus on achieving good generalization performance across different nitride families and structural types.",
             "tools": [
@@ -4133,7 +4133,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "2f17a16f-4b4c-4d7b-8c06-11b19a47467b",
-            "id": "evaluate_model_performance",
+            "id": "task_2_evaluate_model_performance",
             "name": "Evaluate Model Performance",
             "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
             "tools": [
@@ -4165,7 +4165,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "949c2d47-6392-43f5-803f-22495693628b",
-            "id": "prepare_ml_ready_dataset",
+            "id": "task_3_prepare_ml_ready_dataset",
             "name": "Prepare ML-Ready Dataset",
             "description": "Transform the consolidated dataset into ML-ready format with engineered features, proper train/test splits. Create a metadata json file with `features`, `train_path` and `test_path`.",
             "tools": [
@@ -4177,7 +4177,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "dbf304e2-ab06-4118-8530-96b3d4c34c21",
-            "id": "train_xgboost_formation_energy_model",
+            "id": "task_3_train_xgboost_formation_energy_model",
             "name": "Train XGBoost Formation Energy Model",
             "description": "Train an XGBoost regression model to predict formation energies of sulphide polymorphs. Use the prepared dataset with optimized hyperparameters for sulphide materials. Focus on achieving good generalization performance across different sulphide families and structural types.",
             "tools": [
@@ -4190,7 +4190,7 @@ const CORRAL_DATA = {
           },
           {
             "_uid": "857cf98a-7dc6-4039-98b4-694d8b7d82ef",
-            "id": "evaluate_model_performance",
+            "id": "task_3_evaluate_model_performance",
             "name": "Evaluate Model Performance",
             "description": "Evaluate the trained XGBoost model using test set and cross-validation metrics. Save the results as a JSON file with keys `test_set_evaluation` and `cross_validation_results`. The test_set_evaluation dictionary must contain `mae`, `rmse`, `r2`, and `feature_importance`. The cross_validation_results dictionary must contain `r2_mean` and `r2_std`.",
             "tools": [
