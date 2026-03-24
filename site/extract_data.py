@@ -1,4 +1,8 @@
-"""Extract environment data from Corral task sources and output data.js for the landing page."""
+"""Extract environment data from Corral task sources and output data.js for the landing page.
+
+Auto-discovers environments from tasks/*/environments/ directory structure.
+Display names and descriptions are loaded from site/env_meta.json.
+"""
 
 import ast
 import json
@@ -11,8 +15,11 @@ logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(message)s")
 log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent.parent
+SITE_DIR = Path(__file__).resolve().parent
+TASKS_ROOT = ROOT / "tasks"
+SKIP_ENVS = {"samplemath"}
 
-# Same regex as VerbosityConfig._keyword_regex
+# Verbosity tag regex (same as VerbosityConfig._keyword_regex)
 SUPPORTED_KEYWORDS = [
     "BRIEF",
     "DETAILED",
@@ -34,56 +41,53 @@ SUPPORTED_KEYWORDS = [
 _keyword_pattern = "|".join(re.escape(kw) for kw in SUPPORTED_KEYWORDS)
 TAG_RE = re.compile(rf"\[({_keyword_pattern})\](.*?)\[/\1\]", re.DOTALL | re.IGNORECASE)
 
-SKIP_ENVS = {"samplemath"}
 
-ENVIRONMENTS = {
-    "Catalyst": {
-        "dir": "catalyst",
-        "tools_py": "tasks/catalyst/src/catalyst/tools.py",
-        "score_py": "tasks/catalyst/src/catalyst/score.py",
-        "description": "Design and evaluate catalyst structures for CO2 adsorption on crystal slabs using Materials Project data and surface chemistry tools.",
-    },
-    "MD": {
-        "dir": "corral_md",
-        "tools_py": "tasks/corral_md/src/corral_md/tools.py",
-        "score_py": "tasks/corral_md/src/corral_md/score.py",
-        "description": "Run molecular dynamics simulations with LAMMPS to compute physical properties like diffusion coefficients, glass transition temperatures, and surface energies.",
-    },
-    "ML": {
-        "dir": "ml",
-        "tools_py": "tasks/ml/src/ml/tools.py",
-        "score_py": "tasks/ml/src/ml/score.py",
-        "description": "Train and evaluate machine learning models (XGBoost) on materials science datasets from the Materials Project.",
-    },
-    "Resistor": {
-        "dir": "resistor_network",
-        "tools_py": "tasks/resistor_network/src/resistor_network/tools.py",
-        "score_py": "tasks/resistor_network/src/resistor_network/score.py",
-        "description": "Infer resistor circuit topologies and values from node-to-node resistance measurements using circuit analysis tools.",
-    },
-    "Spectra": {
-        "dir": "spectra_elucidation",
-        "tools_py": "tasks/spectra_elucidation/spectra_elucidation/tools.py",
-        "score_py": "tasks/spectra_elucidation/spectra_elucidation/score.py",
-        "description": "Identify organic molecules from spectroscopic data (NMR, IR, mass spectrometry) through systematic spectra analysis.",
-    },
-    "Retrosynthesis": {
-        "dir": "retrosynthesis",
-        "tools_py": "tasks/retrosynthesis/retrosynthesis/tools.py",
-        "score_py": "tasks/retrosynthesis/retrosynthesis/score.py",
-        "description": "Plan retrosynthetic routes for target molecules using reaction template catalogs and chemical verification tools.",
-    },
-    "AFM": {
-        "dir": "afm",
-        "tools_py": "tasks/afm/src/tools.py",
-        "score_py": "tasks/afm/src/score.py",
-        "description": "Operate an atomic force microscope to perform surface scans and measure roughness with optimized scanning parameters.",
-    },
-}
+def load_env_meta() -> dict[str, dict]:
+    """Load display names and descriptions from env_meta.json."""
+    meta_path = SITE_DIR / "env_meta.json"
+    if meta_path.exists():
+        return json.loads(meta_path.read_text())
+    return {}
+
+
+def discover_environments() -> dict[str, dict]:
+    """Auto-discover environments from tasks/*/environments/ structure.
+
+    Returns dict keyed by display_name with paths to tools.py, score.py, and dir name.
+    """
+    meta = load_env_meta()
+    envs = {}
+
+    for env_dir in sorted(TASKS_ROOT.iterdir()):
+        if not env_dir.is_dir() or env_dir.name in SKIP_ENVS:
+            continue
+        if not (env_dir / "environments").is_dir():
+            continue
+
+        dir_name = env_dir.name
+        env_meta = meta.get(dir_name, {})
+        display_name = env_meta.get("display_name", dir_name.replace("_", " ").title())
+        description = env_meta.get("description", "")
+
+        # Auto-discover tools.py and score.py
+        tools_files = list(env_dir.rglob("tools.py"))
+        score_files = list(env_dir.rglob("score.py"))
+
+        envs[display_name] = {
+            "dir": dir_name,
+            "tools_py": tools_files[0] if tools_files else None,
+            "score_py": score_files[0] if score_files else None,
+            "description": description,
+        }
+
+    return envs
+
+
+# ── AST extraction ──────────────────────────────────────────────────────
 
 
 def extract_sections(docstring: str) -> dict[str, str]:
-    """Extract all tagged sections from a docstring using the same regex as VerbosityConfig."""
+    """Extract all tagged sections from a docstring."""
     if not docstring:
         return {}
     sections = {}
@@ -91,7 +95,6 @@ def extract_sections(docstring: str) -> dict[str, str]:
         tag = match.group(1).upper()
         content = match.group(2).strip()
         if content:
-            # Clean nested tags
             cleaned = re.sub(
                 r"\[([A-Z_]+)\](.*?)\[/\1\]", r"\2", content, flags=re.DOTALL
             )
@@ -99,9 +102,9 @@ def extract_sections(docstring: str) -> dict[str, str]:
     return sections
 
 
-def extract_tools_from_file(filepath: Path) -> list[dict]:
-    """Parse a tools.py file using AST and extract @tool decorated functions."""
-    if not filepath.exists():
+def extract_tools_from_file(filepath: Path | None) -> list[dict]:
+    """Parse a tools.py file and extract @tool decorated functions."""
+    if not filepath or not filepath.exists():
         return []
 
     source = filepath.read_text()
@@ -116,7 +119,6 @@ def extract_tools_from_file(filepath: Path) -> list[dict]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef):
             continue
-        # Check for @tool decorator
         has_tool = any(
             (isinstance(d, ast.Name) and d.id == "tool")
             or (
@@ -132,37 +134,27 @@ def extract_tools_from_file(filepath: Path) -> list[dict]:
         docstring = ast.get_docstring(node) or ""
         sections = extract_sections(docstring)
 
-        # Extract function signature
         args_info = []
         for arg in node.args.args:
             if arg.arg == "self":
                 continue
-            type_str = ""
-            if arg.annotation:
-                type_str = ast.unparse(arg.annotation)
-            args_info.append(
-                {
-                    "name": arg.arg,
-                    "type": type_str,
-                }
-            )
+            type_str = ast.unparse(arg.annotation) if arg.annotation else ""
+            args_info.append({"name": arg.arg, "type": type_str})
 
-        # Extract return type
-        return_type = ""
-        if node.returns:
-            return_type = ast.unparse(node.returns)
+        return_type = ast.unparse(node.returns) if node.returns else ""
 
-        # Get code snippet: signature + body without docstring
+        # Code snippet: full function body (no docstring)
         body_nodes = node.body
         if (
             body_nodes
             and isinstance(body_nodes[0], ast.Expr)
             and isinstance(body_nodes[0].value, ast.Constant)
         ):
-            if len(body_nodes) > 1:
-                body_start = body_nodes[1].lineno - 1
-            else:
-                body_start = body_nodes[0].end_lineno or node.lineno
+            body_start = (
+                body_nodes[1].lineno - 1
+                if len(body_nodes) > 1
+                else (body_nodes[0].end_lineno or node.lineno)
+            )
         else:
             body_start = body_nodes[0].lineno - 1 if body_nodes else node.lineno
 
@@ -171,21 +163,22 @@ def extract_tools_from_file(filepath: Path) -> list[dict]:
         body_lines = lines[body_start:end_line]
         code_snippet = def_line + "\n" + "\n".join(body_lines)
 
-        tool_data = {
-            "name": node.name,
-            "sections": sections,
-            "args": args_info,
-            "returns": return_type,
-            "code": code_snippet,
-        }
-        tools.append(tool_data)
+        tools.append(
+            {
+                "name": node.name,
+                "sections": sections,
+                "args": args_info,
+                "returns": return_type,
+                "code": code_snippet,
+            }
+        )
 
     return tools
 
 
-def extract_scoring_functions(filepath: Path) -> list[dict]:
+def extract_scoring_functions(filepath: Path | None) -> list[dict]:
     """Extract scoring function definitions from score.py."""
-    if not filepath.exists():
+    if not filepath or not filepath.exists():
         return []
 
     source = filepath.read_text()
@@ -220,42 +213,29 @@ def extract_scoring_functions(filepath: Path) -> list[dict]:
     return functions
 
 
+# ── Task loading ────────────────────────────────────────────────────────
+
+
 def load_entries_from_dir(directory: Path) -> list[dict]:
-    """Load all JSON files from a directory and return flattened standardized entries."""
+    """Load all JSON files from a directory and return flattened entries."""
     entries = []
     if not directory.is_dir():
         return entries
-
     for fpath in sorted(directory.glob("*.json")):
         data = json.loads(fpath.read_text())
         if isinstance(data, list):
             entries.extend(data)
         else:
             entries.append(data)
-
     return entries
 
 
 def load_tasks_and_subtasks(env_dir_name: str) -> dict:
-    """Load all tasks and subtasks for an environment from the standardized directory structure.
-
-    Returns:
-        {
-            "levels": {
-                "level_1": {"tasks": [...], "subtasks": [...]},
-                "level_2": {"tasks": [...], "subtasks": [...]},
-                ...
-            },
-            "all_tasks": [...],
-            "all_subtasks": [...],
-            "task_count": int,
-            "subtask_count": int,
-        }
-    """
-    env_root = ROOT / "tasks" / env_dir_name / "environments"
-    levels = {}
-    all_tasks = []
-    all_subtasks = []
+    """Load all tasks and subtasks for an environment."""
+    env_root = TASKS_ROOT / env_dir_name / "environments"
+    levels: dict[str, dict] = {}
+    all_tasks: list[dict] = []
+    all_subtasks: list[dict] = []
 
     if not env_root.is_dir():
         return {
@@ -271,13 +251,9 @@ def load_tasks_and_subtasks(env_dir_name: str) -> dict:
             continue
 
         level_name = level_dir.name
-        tasks_dir = level_dir / "tasks_json"
-        subtasks_dir = level_dir / "subtasks_json"
+        raw_tasks = load_entries_from_dir(level_dir / "tasks_json")
+        raw_subtasks = load_entries_from_dir(level_dir / "subtasks_json")
 
-        raw_tasks = load_entries_from_dir(tasks_dir)
-        raw_subtasks = load_entries_from_dir(subtasks_dir)
-
-        # Normalize entries — _uid ensures uniqueness even when id repeats across files
         tasks = [
             {
                 "_uid": e.get("uuid", f"{level_name}-task-{i}"),
@@ -318,22 +294,23 @@ def load_tasks_and_subtasks(env_dir_name: str) -> dict:
     }
 
 
+# ── Main build ──────────────────────────────────────────────────────────
+
+
 def build_data():
     """Build the complete data structure for all environments."""
+    environments = discover_environments()
     env_data = {}
     total_tasks = 0
     total_subtasks = 0
     total_tools = 0
 
-    for env_name, config in ENVIRONMENTS.items():
-        tools_path = ROOT / config["tools_py"]
-        score_path = ROOT / config["score_py"]
-
-        tools = extract_tools_from_file(tools_path)
-        scoring_fns = extract_scoring_functions(score_path)
+    for display_name, config in environments.items():
+        tools = extract_tools_from_file(config["tools_py"])
+        scoring_fns = extract_scoring_functions(config["score_py"])
         task_data = load_tasks_and_subtasks(config["dir"])
 
-        env_data[env_name] = {
+        env_data[display_name] = {
             "description": config["description"],
             "tools": tools,
             "tasks": task_data["all_tasks"],
@@ -349,15 +326,16 @@ def build_data():
         total_tools += len(tools)
 
         log.info(
-            f"  {env_name}: {len(tools)} tools, "
+            f"  {display_name}: {len(tools)} tools, "
             f"{task_data['task_count']} tasks, "
             f"{task_data['subtask_count']} subtasks, "
-            f"{len(scoring_fns)} scoring functions, "
+            f"{len(scoring_fns)} scoring fns, "
             f"{len(task_data['levels'])} levels"
         )
 
     log.info(
-        f"\n  Totals: {total_tools} tools, {total_tasks} tasks, {total_subtasks} subtasks"
+        f"\n  Totals: {total_tools} tools, {total_tasks} tasks, "
+        f"{total_subtasks} subtasks"
     )
     return env_data
 
@@ -372,7 +350,7 @@ def main():
     log.info("Extracting Corral environment data...")
     data = build_data()
 
-    output_path = Path(__file__).resolve().parent / "data.js"
+    output_path = SITE_DIR / "data.js"
     output_path.write_text(to_js(data))
     log.info(f"\nWrote {output_path} ({output_path.stat().st_size / 1024:.1f} KB)")
 
