@@ -27,6 +27,9 @@ sys.path.insert(0, str(REPO_ROOT / "analysis"))
 sys.path.insert(0, str(REPO_ROOT / "plots"))
 
 from plot_config import (  # noqa: E402
+    AGENT_NAMES,
+    ENVIRONMENT_GROUPS,
+    ENVIRONMENT_MAX_LEVELS,
     ENVIRONMENT_NAMES,
     FONT_SIZES,
     MODEL_NAMES,
@@ -37,14 +40,6 @@ from plot_utils import (  # noqa: E402
     get_metric_column_name,
     load_reports_data,
 )
-
-# ==================== CONFIGURATION ====================
-
-AGENT_NAMES = {
-    "react": "ReAct",
-    "tool_calling": "Tool-Call",
-}
-
 
 # ==================== DATA COLLECTION ====================
 
@@ -78,32 +73,67 @@ def collect_full_coverage_data(
     )
 
 
-def format_heatmap_labels(pivot_df: pd.DataFrame) -> pd.DataFrame:
-    """Format row and column labels for display.
+def get_ordered_env_level_columns() -> list[str]:
+    """Return env-level column keys ordered by environment group then increasing level.
 
-    Args:
-        pivot_df: Pivot dataframe with raw labels
+    Order follows ENVIRONMENT_GROUPS (Hypothesis-driven, Strategic, Workflow construction),
+    and within each environment, levels go S1, S2, S3, ...
+    """
+    return [
+        f"{env}-{level}"
+        for group_info in ENVIRONMENT_GROUPS.values()
+        for env in group_info["environments"]
+        for level in range(1, ENVIRONMENT_MAX_LEVELS.get(env, 1) + 1)
+    ]
+
+
+def format_heatmap_data(pivot_df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
+    """Format and reorder heatmap data. No gap rows — gaps are drawn visually.
 
     Returns:
-        DataFrame with formatted labels
+        (display_df, row_meta) where row_meta has per-row info for label rendering.
+        Each entry in row_meta: {"model": str, "agent": str, "is_first_of_model": bool}
     """
     display_df = pivot_df.copy()
 
-    # Format row labels (model_agent -> Model - Agent)
-    row_labels = []
+    # Reorder columns by environment group, then increasing level
+    ordered_cols = get_ordered_env_level_columns()
+    ordered_cols = [c for c in ordered_cols if c in display_df.columns]
+    remaining = [c for c in display_df.columns if c not in ordered_cols]
+    display_df = display_df[ordered_cols + remaining]
+
+    # Parse and sort rows by model then agent
+    model_order = list(MODEL_NAMES.keys())
+    agent_order = list(AGENT_NAMES.keys())
+    parsed_rows = []
     for config in display_df.index:
         parts = config.split("_")
-        if len(parts) >= 2:
-            model = parts[0]
-            agent = "_".join(parts[1:])
-            model_name = MODEL_NAMES.get(model, model)
-            agent_name = AGENT_NAMES.get(agent, agent)
-            row_labels.append(f"{model_name}\n{agent_name}")
-        else:
-            row_labels.append(config)
-    display_df.index = row_labels
+        model = parts[0] if parts else config
+        agent = "_".join(parts[1:]) if len(parts) >= 2 else ""
+        m_idx = model_order.index(model) if model in model_order else 99
+        a_idx = agent_order.index(agent) if agent in agent_order else 99
+        parsed_rows.append((m_idx, a_idx, model, agent, config))
+    parsed_rows.sort(key=lambda x: (x[0], x[1]))
 
-    # Format column labels (environment-level -> ENV-L#)
+    # Build ordered dataframe and row metadata
+    new_rows = []
+    row_meta = []
+    prev_model = None
+    for _m_idx, _a_idx, model, agent, config in parsed_rows:
+        is_first = model != prev_model
+        new_rows.append(display_df.loc[config])
+        row_meta.append(
+            {
+                "model": MODEL_NAMES.get(model, model),
+                "agent": AGENT_NAMES.get(agent, agent),
+                "is_first_of_model": is_first,
+            }
+        )
+        prev_model = model
+
+    display_df = pd.DataFrame(new_rows)
+
+    # Format column labels (environment-level -> ENV S#)
     col_labels = []
     for env_level in display_df.columns:
         parts = env_level.split("-")
@@ -111,15 +141,33 @@ def format_heatmap_labels(pivot_df: pd.DataFrame) -> pd.DataFrame:
             env = parts[0]
             level = parts[1]
             env_name = ENVIRONMENT_NAMES.get(env, env.upper())
-            col_labels.append(f"{env_name}-L{level}")
+            col_labels.append(f"{env_name} S{level}")
         else:
             col_labels.append(env_level)
     display_df.columns = col_labels
 
-    return display_df
+    return display_df, row_meta
 
 
 # ==================== PLOTTING ====================
+
+
+def _get_group_column_spans(display_df: pd.DataFrame) -> list[tuple[str, int, int]]:
+    """Compute (group_name, col_start, col_end) spans for the ordered columns."""
+    spans = []
+    col_idx = 0
+    for group_name, group_info in ENVIRONMENT_GROUPS.items():
+        start = col_idx
+        for env in group_info["environments"]:
+            max_level = ENVIRONMENT_MAX_LEVELS.get(env, 1)
+            for _lvl in range(1, max_level + 1):
+                env_name = ENVIRONMENT_NAMES.get(env, env.upper())
+                col_label = f"{env_name} S{_lvl}"
+                if col_label in display_df.columns:
+                    col_idx += 1
+        if col_idx > start:
+            spans.append((group_name, start, col_idx - 1))
+    return spans
 
 
 def plot_full_coverage_heatmap(
@@ -127,37 +175,32 @@ def plot_full_coverage_heatmap(
     output_path: Path,
     metric_display_name: str,
 ) -> None:
-    """Create full coverage heatmap.
+    """Create full coverage heatmap with hierarchical y-axis.
 
-    Args:
-        heatmap_data: DataFrame with configs as rows, env-levels as columns
-        output_path: Path to save the figure
-        metric_display_name: Display name for the metric
+    Y-axis: model name (bold) above its agent rows, agent names to the left.
+    Thin white lines separate model groups.
+    X-axis: environment labels at bottom (rotated 90°),
+    group labels with lines ABOVE the heatmap.
     """
     if heatmap_data.empty:
         logger.warning("No data available for heatmap!")
         return
 
-    # Format labels
-    display_df = format_heatmap_labels(heatmap_data)
+    display_df, row_meta = format_heatmap_data(heatmap_data)
 
-    # Calculate figure width based on number of columns
     n_cols = len(display_df.columns)
     n_rows = len(display_df.index)
 
-    # Adaptive sizing: wider if many columns
     fig_width = min(TWO_COL_WIDTH * 1.5, max(TWO_COL_WIDTH, n_cols * 0.4))
-    fig_height = max(ONE_COL_HEIGHT * 0.8, n_rows * 0.5)
+    fig_height = max(ONE_COL_HEIGHT * 0.6, n_rows * 0.35)
 
-    # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
 
-    # Create heatmap
     sns.heatmap(
         display_df,
         annot=True,
         fmt=".2f",
-        cmap="Purples",  # "RdYlGn",
+        cmap="Purples",
         cbar_kws={"label": metric_display_name, "shrink": 0.8},
         ax=ax,
         linewidths=0.5,
@@ -165,43 +208,79 @@ def plot_full_coverage_heatmap(
         annot_kws={"fontsize": FONT_SIZES["tick_label"] - 3},
     )
 
-    # Styling
-    ax.set_xlabel(
-        "Environment - Level",
-        fontsize=FONT_SIZES["axis_label"],
-        fontweight="bold",
-    )
-    ax.set_ylabel(
-        "Model x Agent Configuration",
-        fontsize=FONT_SIZES["axis_label"],
-        fontweight="bold",
-    )
-    ax.tick_params(axis="both", labelsize=FONT_SIZES["tick_label"] - 1)
+    # --- Thin white separator lines between model groups ---
+    for i, meta in enumerate(row_meta):
+        if meta["is_first_of_model"] and i > 0:
+            ax.axhline(y=i, color="white", linewidth=3, zorder=5)
 
-    # Rotate tick labels
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
-    ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
+    # --- Hierarchical y-axis ---
+    ax.set_yticks([])
+    ax.set_ylabel("")
 
-    # Add title with experimental scope
-    n_configs = len(display_df.index)
-    n_env_levels = len(display_df.columns)
-    ax.set_title(
-        f"Full Experimental Coverage: {n_configs} Configurations x {n_env_levels} Environment-Level Combinations",
-        fontsize=FONT_SIZES["axis_label"],
-        fontweight="bold",
-        pad=15,
-    )
+    # Agent labels for each row
+    for i, meta in enumerate(row_meta):
+        ax.text(
+            -0.01,
+            i + 0.5,
+            meta["agent"],
+            ha="right",
+            va="center",
+            fontsize=FONT_SIZES["tick_label"] - 1,
+            transform=ax.get_yaxis_transform(),
+        )
 
-    fig.tight_layout()
+    # Model name labels (bold) — above the first agent row of each model
+    for i, meta in enumerate(row_meta):
+        if meta["is_first_of_model"]:
+            ax.text(
+                -0.01,
+                i + 0.05,
+                meta["model"],
+                ha="right",
+                va="bottom",
+                fontsize=FONT_SIZES["tick_label"],
+                fontweight="bold",
+                transform=ax.get_yaxis_transform(),
+            )
 
-    # Save figure
+    # --- X-axis: env labels at bottom ---
+    ax.set_xlabel("")
+    ax.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=90, ha="center")
+
+    # --- Group labels ABOVE the heatmap ---
+    group_spans = _get_group_column_spans(display_df)
+    for group_name, col_start, col_end in group_spans:
+        # Convert data x-coordinates to axes fraction for positioning
+        mid_data = (col_start + col_end) / 2.0 + 0.5
+        start_frac = (col_start + 0.15) / n_cols
+        end_frac = (col_end + 0.85) / n_cols
+        mid_frac = mid_data / n_cols
+        ax.text(
+            mid_frac,
+            1.06,
+            group_name,
+            ha="center",
+            va="bottom",
+            fontsize=FONT_SIZES["tick_label"],
+            fontweight="bold",
+            clip_on=False,
+            transform=ax.transAxes,
+        )
+        ax.plot(
+            [start_frac, end_frac],
+            [1.02, 1.02],
+            color="gray",
+            linewidth=0.8,
+            clip_on=False,
+            transform=ax.transAxes,
+        )
+
+    fig.subplots_adjust(top=0.85)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, bbox_inches="tight")
-    fig.savefig(
-        output_path.with_suffix(".png"),
-        bbox_inches="tight",
-        dpi=300,
-    )
+    fig.savefig(output_path.with_suffix(".png"), bbox_inches="tight", dpi=300)
     logger.success(f"Saved: {output_path}")
     plt.close(fig)
 
@@ -214,7 +293,7 @@ def main(
     task_type_strategy: str = "both",
     metric: str = "average_score",
     k_value: int = 5,
-    output_filename: str = "full_coverage_heatmap.pdf",
+    output_filename: str | None = None,
 ) -> None:
     """Generate full coverage heatmap showing all tested configurations.
 
@@ -263,7 +342,9 @@ def main(
     # Filter reports data (no level filtering - we want all levels)
     logger.info("Filtering benchmark reports...")
     filtered_df = reports_df.copy()
-    filtered_df = filter_by_verbosity(filtered_df, verbosity_strategy)
+    filtered_df = filter_by_verbosity(
+        filtered_df, None if verbosity_strategy == "average" else verbosity_strategy
+    )
     filtered_df = filter_by_task_type(filtered_df, task_type_strategy)
 
     logger.info(f"Filtered to {len(filtered_df)} rows")
@@ -294,7 +375,10 @@ def main(
     # Generate plot
     logger.info("")
     logger.info("Generating full coverage heatmap...")
-    output_path = Path(output_filename)
+    if output_filename is None:
+        output_path = Path(__file__).parent / "2a_full_coverage_heatmap.pdf"
+    else:
+        output_path = Path(output_filename)
     plot_full_coverage_heatmap(heatmap_data, output_path, metric_display_name)
 
     logger.info("")

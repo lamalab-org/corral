@@ -29,15 +29,10 @@ sys.path.insert(0, str(REPO_ROOT / "analysis"))
 sys.path.insert(0, str(REPO_ROOT / "plots"))
 
 
-GAP_COLORS = {
-    "model_gap": "#7150e0",
-    "agent_gap": "#e87584",
-}
-
-
 from plot_config import (  # noqa: E402
-    # ENVIRONMENT_NAMES,
+    ENVIRONMENT_NAMES,
     FONT_SIZES,
+    GAP_COLORS,
 )
 from plot_utils import (  # noqa: E402
     filter_by_level,
@@ -47,22 +42,10 @@ from plot_utils import (  # noqa: E402
     load_reports_data,
 )
 
-ENVIRONMENT_NAMES = {
-    "afm": "AFM",
-    "catalyst": "Catalyst",
-    "md": "MD",
-    "ml": "ML",
-    "resistor": "Resistor",
-    "retro": "Retrosynthesis",
-    "spectra": "Spectra",
-    "wetlab": "Wetlab",
-}
-
-
 # ==================== CONFIGURATION ====================
 
 # Color for scatter points
-SCATTER_COLOR = "#e87584"  # "#7C4DFF"  # Purple
+SCATTER_COLOR = GAP_COLORS["model_gap"]
 
 
 # ==================== DATA COLLECTION ====================
@@ -252,7 +235,7 @@ def main(
     level_strategy: str = "default_map",
     metric: str = "average_score",
     k_value: int = 5,
-    output_filename: str = "gap_scatter.pdf",
+    output_filename: str | None = None,
 ) -> None:
     """Generate scatter plot showing model gap vs agent gap.
 
@@ -306,7 +289,9 @@ def main(
     # Filter reports data
     logger.info("Filtering benchmark reports...")
     filtered_df = reports_df.copy()
-    filtered_df = filter_by_verbosity(filtered_df, verbosity_strategy)
+    filtered_df = filter_by_verbosity(
+        filtered_df, None if verbosity_strategy == "average" else verbosity_strategy
+    )
     filtered_df = filter_by_task_type(filtered_df, task_type_strategy)
     filtered_df = filter_by_level(filtered_df, level_strategy)
 
@@ -320,7 +305,10 @@ def main(
 
     # Generate plot
     logger.info("Generating scatter plot...")
-    output_path = Path(output_filename)
+    if output_filename is None:
+        output_path = Path(__file__).parent / "2b_gap_scatter.pdf"
+    else:
+        output_path = Path(output_filename)
     plot_gap_scatter(gap_data, output_path, metric_display_name)
 
     # Print summary statistics

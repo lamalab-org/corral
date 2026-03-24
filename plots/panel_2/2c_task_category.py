@@ -27,7 +27,12 @@ sys.path.insert(0, str(REPO_ROOT / "analysis"))
 sys.path.insert(0, str(REPO_ROOT / "plots"))
 
 from loguru import logger  # noqa: E402
-from plot_config import FONT_SIZES, MODEL_COLOUR_MAP, MODEL_NAMES  # noqa: E402
+from plot_config import (  # noqa: E402
+    AGENT_NAMES,
+    FONT_SIZES,
+    MODEL_COLOURS,
+    MODEL_NAMES,
+)
 from plot_utils import load_reports_data  # noqa: E402
 
 lama_aesthetics.get_style("main")
@@ -181,11 +186,10 @@ def main():
     df_comp = reports_df[reports_df["Tool Verbosity"] == "comprehensive"].copy()
     logger.info(f"Filtered to {len(df_comp)} rows with comprehensive verbosity")
 
-    # Define category order
+    # Define category order (code_execution + experiment_execution merged into execution)
     category_order = [
         "retrieval",
-        "code_execution",
-        "experiment_execution",
+        "execution",
         "reasoning",
         "validation",
     ]
@@ -221,6 +225,10 @@ def main():
             if category is None:
                 continue
 
+            # Merge code_execution and experiment_execution into execution
+            if category in ("code_execution", "experiment_execution"):
+                category = "execution"
+
             classified_count += 1
 
             # Store score
@@ -243,10 +251,7 @@ def main():
     fig, ax = plt.subplots(1, 1, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
 
     # Define visual mappings
-    agent_display = {
-        "react": "ReAct",
-        "tool_calling": "Tool-Calling",
-    }
+    agent_display = dict(AGENT_NAMES)
     agent_markers = {
         "react": "o",
         "tool_calling": "D",
@@ -262,7 +267,7 @@ def main():
     # Plot each model-agent combination
     for (model, agent_type), category_avgs in sorted(avg_scores.items()):
         # Get visual properties
-        color = MODEL_COLOUR_MAP.get(model, "gray")
+        color = MODEL_COLOURS.get(model, "gray")
         marker = agent_markers.get(agent_type, "o")
         linestyle = agent_linestyle.get(agent_type, "-")
         model_display = MODEL_NAMES.get(model, model)
@@ -287,7 +292,7 @@ def main():
         )
 
     # Customize axes
-    ax.set_ylabel("Average Pass@5", fontsize=FONT_SIZES["axis_label"])
+    ax.set_ylabel("Average Pass@5", fontsize=FONT_SIZES["tick_label"])
     ax.set_xlabel("Task Category", fontsize=FONT_SIZES["axis_label"])
     ax.set_ylim(0, 1)
     ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
@@ -307,9 +312,7 @@ def main():
 
     # Model colors
     for model in sorted({m for m, _ in avg_scores}):
-        handles.append(
-            Line2D([0], [0], color=MODEL_COLOUR_MAP.get(model, "gray"), lw=4)
-        )
+        handles.append(Line2D([0], [0], color=MODEL_COLOURS.get(model, "gray"), lw=4))
         labels.append(MODEL_NAMES.get(model, model))
 
     # Agent markers
@@ -340,7 +343,7 @@ def main():
 
     output_dir = Path(__file__).parent
     for ext in ["pdf", "png"]:
-        output_path = output_dir / f"12_task_category.{ext}"
+        output_path = output_dir / f"2c_task_category.{ext}"
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         logger.info(f"Saved: {output_path}")
 
