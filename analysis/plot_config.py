@@ -88,34 +88,27 @@ SECONDARY_COLOURS = [
     "#0891b2",  # cyan
 ]
 
-# ---------- Colours per category (ordered to match logical order) ----------
-MODEL_COLOURS = [
-    "#711c91",  # Claude 4.5
-    "#ea00d9",  # GPT-4o
-    "#7150e0",  # GPT-OSS-120B
-]
+# ---------- Colours per category ----------
+MODEL_COLOURS = {
+    "claude-4.5": "#711c91",
+    "gpt-4o": "#ea00d9",
+    "gpt-oss-120b": "#7150e0",
+}
 
-AGENT_COLOURS = [
-    "#30292F",  # React
-    "#5D737E",  # Tool calling
-]
+AGENT_COLOURS = {
+    "react": "#30292F",
+    "tool_calling": "#5D737E",
+}
 
-ENVIRONMENT_COLOURS = [
-    "#7c3aed",  # spectra
-    "#2563eb",  # resistor
-    "#0d9488",  # retro
-    "#ca8a04",  # catalyst
-    "#dc2626",  # afm
-    "#16a34a",  # ml
-    "#0891b2",  # md
-]
-
-# ---------- Optional: dict form for lookup by id ----------
-MODEL_COLOUR_MAP = dict(zip(MODEL_NAMES.keys(), MODEL_COLOURS, strict=False))
-AGENT_COLOUR_MAP = dict(zip(AGENT_NAMES.keys(), AGENT_COLOURS, strict=False))
-ENVIRONMENT_COLOUR_MAP = dict(
-    zip(ENVIRONMENT_NAMES.keys(), ENVIRONMENT_COLOURS, strict=False)
-)
+ENVIRONMENT_COLOURS = {
+    "spectra": "#7c3aed",
+    "resistor": "#2563eb",
+    "retro": "#0d9488",
+    "catalyst": "#ca8a04",
+    "afm": "#dc2626",
+    "ml": "#16a34a",
+    "md": "#0891b2",
+}
 
 # ---------- Font sizes ----------
 FONT_SIZES = {
@@ -135,9 +128,6 @@ PLOT_CONFIG = {
     "model_colours": MODEL_COLOURS,
     "agent_colours": AGENT_COLOURS,
     "environment_colours": ENVIRONMENT_COLOURS,
-    "model_colour_map": MODEL_COLOUR_MAP,
-    "agent_colour_map": AGENT_COLOUR_MAP,
-    "environment_colour_map": ENVIRONMENT_COLOUR_MAP,
     "environment_groups": ENVIRONMENT_GROUPS,
     "environment_max_levels": ENVIRONMENT_MAX_LEVELS,
     "default_env_level_map": DEFAULT_ENV_LEVEL_MAP,

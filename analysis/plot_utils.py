@@ -112,28 +112,21 @@ def load_reasoning_data() -> dict:
 # ==================== FILTERING FUNCTIONS ====================
 
 
-def filter_by_verbosity(
-    df: pd.DataFrame, verbosity_strategy: str, verbosity_value: str | None = None
-) -> pd.DataFrame:
-    """Filter dataframe by verbosity strategy.
+def filter_by_verbosity(df: pd.DataFrame, verbosity: str | None = None) -> pd.DataFrame:
+    """Filter dataframe by verbosity.
 
     Args:
         df: Input dataframe with "Tool Verbosity" column
-        verbosity_strategy: "average", "brief", "workflow", or "comprehensive"
-        verbosity_value: Specific verbosity value (overrides strategy)
+        verbosity: "brief", "workflow", or "comprehensive". None keeps all rows.
 
     Returns:
         Filtered dataframe
     """
-    if verbosity_value:
-        verbosity_strategy = verbosity_value
-
-    if verbosity_strategy == "average":
-        # Keep all verbosities (will be averaged in aggregation)
+    if verbosity is None:
         return df
-    if verbosity_strategy in ["brief", "workflow", "comprehensive"]:
-        return df[df["Tool Verbosity"] == verbosity_strategy]
-    msg = f"Invalid verbosity_strategy: {verbosity_strategy}"
+    if verbosity in ["brief", "workflow", "comprehensive"]:
+        return df[df["Tool Verbosity"] == verbosity]
+    msg = f"Invalid verbosity: {verbosity}"
     raise ValueError(msg)
 
 
@@ -200,60 +193,55 @@ def filter_by_level(
 
 
 def filter_by_agent_type(
-    df: pd.DataFrame, agent_type_strategy: str, agent_value: str | None = None
+    df: pd.DataFrame, agent_type: str | None = None
 ) -> pd.DataFrame:
-    """Filter dataframe by agent type strategy.
+    """Filter dataframe by agent type.
 
     Args:
         df: Input dataframe with "agent_type" column
-        agent_type_strategy: "average", "react", or "tool_calling"
-        agent_value: Specific agent value (overrides strategy)
+        agent_type: "react" or "tool_calling". None keeps all rows.
 
     Returns:
         Filtered dataframe
     """
-    if agent_value:
-        agent_type_strategy = agent_value
-
-    if agent_type_strategy == "average":
+    if agent_type is None:
         return df
-    if agent_type_strategy in ["react", "tool_calling"]:
-        return df[df["agent_type"] == agent_type_strategy]
-    msg = f"Invalid agent_type_strategy: {agent_type_strategy}"
+    if agent_type in ["react", "tool_calling"]:
+        return df[df["agent_type"] == agent_type]
+    msg = f"Invalid agent_type: {agent_type}"
     raise ValueError(msg)
 
 
-def filter_by_model(df: pd.DataFrame, model_strategy: str) -> pd.DataFrame:
-    """Filter dataframe by model strategy.
+def filter_by_model(df: pd.DataFrame, model: str | None = None) -> pd.DataFrame:
+    """Filter dataframe by model.
 
     Args:
         df: Input dataframe with "model" column
-        model_strategy: "average" or specific model name
+        model: Specific model name. None keeps all rows.
 
     Returns:
         Filtered dataframe
     """
-    if model_strategy == "average":
+    if model is None:
         return df
-    # Specific model
-    return df[df["model"] == model_strategy]
+    return df[df["model"] == model]
 
 
-def filter_by_agent(df: pd.DataFrame, agent_strategy: str) -> pd.DataFrame:
-    """Filter dataframe by agent strategy.
+def filter_by_agent(df: pd.DataFrame, agent: str | None = None) -> pd.DataFrame:
+    """Filter dataframe by agent.
 
     Args:
         df: Input dataframe with "agent_type" column
-        agent_strategy: "average", "react", or "tool_calling"
+        agent: "react" or "tool_calling". None keeps all rows.
 
     Returns:
         Filtered dataframe
     """
-    if agent_strategy == "average":
+    if agent is None:
         return df
-    if agent_strategy in ["react", "tool_calling"]:
-        return df[df["agent_type"] == agent_strategy]
-    msg = f"Invalid agent_strategy: {agent_strategy}"
+    if agent in ["react", "tool_calling"]:
+        return df[df["agent_type"] == agent]
+    msg = f"Invalid agent: {agent}"
     raise ValueError(msg)
 
 
