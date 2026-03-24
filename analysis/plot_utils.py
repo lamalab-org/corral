@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 from loguru import logger
+from plot_config import DEFAULT_ENV_LEVEL_MAP
 
 # ==================== CONFIGURATION ====================
 
@@ -21,18 +22,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 REPORTS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "reports.jsonl"
 QA_REPORTS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "qa_topic_reports.jsonl"
 REASONING_PATH = REPO_ROOT / "analysis" / "reasoning.json"
-
-# Default per-environment level selection (used when level_strategy="default_map")
-DEFAULT_ENV_LEVEL_MAP = {
-    "afm": 1,
-    "catalyst": 1,
-    "md": 2,
-    "ml": 1,
-    "resistor": 1,
-    "retro": 2,
-    "spectra": 1,
-    "wetlab": 2,
-}
 
 
 # ==================== METRIC HELPERS ====================

@@ -13,19 +13,59 @@ MODEL_NAMES = {
 }
 
 ENVIRONMENT_NAMES = {
-    "afm": "AFM",
-    "catalyst": "Catalyst",
-    "md": "Molecular\nDynamics",
-    "ml": "Machine\nLearning",
-    "resistor": "Resistor",
-    "retro": "Retro-\nsynthesis",
-    "spectra": "Spectra",
-    "wetlab": "Wetlab",
+    "afm": "AFM Operation",
+    "catalyst": "Surface Construction",
+    "md": "Molecular Simulation",
+    "ml": "ML Property Prediction",
+    "resistor": "Circuit Inference",
+    "retro": "Retrosynthetic Planning",
+    "spectra": "Spectra Elucidation",
+    "wetlab": "Qualitative Analysis",
 }
 
 AGENT_NAMES = {
     "react": "ReAct",
     "tool_calling": "Tool calling",
+}
+
+# ---------- High-level environment grouping ----------
+ENVIRONMENT_GROUPS = {
+    "Hypothesis-driven inquiry": {
+        "description": "Reason from observations to hidden structure",
+        "environments": ["spectra", "wetlab", "resistor"],
+    },
+    "Strategic reasoning": {
+        "description": "Navigate combinatorial spaces under constraints",
+        "environments": ["retro", "afm"],
+    },
+    "Workflow construction": {
+        "description": "Assemble and execute computational protocols",
+        "environments": ["md", "catalyst", "ml"],
+    },
+}
+
+# ---------- Environment max difficulty levels (S1, S2, ...) ----------
+ENVIRONMENT_MAX_LEVELS = {
+    "spectra": 2,
+    "wetlab": 3,
+    "resistor": 1,
+    "retro": 3,
+    "afm": 4,
+    "md": 2,
+    "catalyst": 1,
+    "ml": 1,
+}
+
+# ---------- Default per-environment level selection ----------
+DEFAULT_ENV_LEVEL_MAP = {
+    "afm": 1,
+    "catalyst": 1,
+    "md": 2,
+    "ml": 1,
+    "resistor": 1,
+    "retro": 2,
+    "spectra": 1,
+    "wetlab": 2,
 }
 
 # ---------- Primary / secondary colour lists ----------
@@ -98,5 +138,8 @@ PLOT_CONFIG = {
     "model_colour_map": MODEL_COLOUR_MAP,
     "agent_colour_map": AGENT_COLOUR_MAP,
     "environment_colour_map": ENVIRONMENT_COLOUR_MAP,
+    "environment_groups": ENVIRONMENT_GROUPS,
+    "environment_max_levels": ENVIRONMENT_MAX_LEVELS,
+    "default_env_level_map": DEFAULT_ENV_LEVEL_MAP,
     "font_sizes": FONT_SIZES,
 }
