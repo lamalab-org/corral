@@ -13,7 +13,9 @@ from unittest.mock import Mock, patch
 os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_files" / "temp")
 
 import pytest
-from catalyst.env import TaskGroupEnvironment, create_environments, load_tasks_from_json
+from catalyst.env import create_environments, entries_to_task_definitions
+from corral.utils.task_group import TaskGroupEnvironment
+from corral.utils.task_loader import load_task_entries
 from catalyst.score import check_mp_structure, check_slabs_json, check_valid_json_file
 from hypothesis import given
 from hypothesis import strategies as st
@@ -498,10 +500,12 @@ class TestTaskSystemIntegration:
             yield Path(temp_dir)
 
     @pytest.fixture()
-    def sample_task_json(self, temp_workspace):
-        """Create a sample task JSON file."""
-        task_def = {
-            "retrieve_structure": {
+    def sample_task_dir(self, temp_workspace):
+        """Create a directory with standardized task JSON files."""
+        task_entries = [
+            {
+                "uuid": "test-uuid-001",
+                "id": "retrieve_structure",
                 "name": "Retrieve Bulk Structure",
                 "description": "Retrieve structure and save as CIF",
                 "tools": ["mock_tool"],
@@ -509,7 +513,9 @@ class TestTaskSystemIntegration:
                 "submission_format": "/path/to/structure.cif",
                 "initial_input": {"mp_id": "mp-149"},
             },
-            "enumerate_slabs": {
+            {
+                "uuid": "test-uuid-002",
+                "id": "enumerate_slabs",
                 "name": "Enumerate Slabs",
                 "description": "Enumerate slabs from bulk structure",
                 "tools": ["mock_tool"],
@@ -518,7 +524,9 @@ class TestTaskSystemIntegration:
                 "input_from_tasks": ["retrieve_structure"],
                 "initial_input": {"miller_index": [1, 1, 1]},
             },
-            "validate_json": {
+            {
+                "uuid": "test-uuid-003",
+                "id": "validate_json",
                 "name": "Validate JSON",
                 "description": "Validate a JSON file",
                 "tools": ["mock_tool"],
@@ -526,18 +534,23 @@ class TestTaskSystemIntegration:
                 "submission_format": "/path/to/file.json",
                 "initial_input": {},
             },
-        }
+        ]
 
-        json_file = temp_workspace / "test_tasks.json"
+        task_dir = temp_workspace / "tasks_json"
+        task_dir.mkdir()
+        json_file = task_dir / "tasks.json"
         with json_file.open("w") as f:
-            json.dump(task_def, f, indent=2)
+            json.dump(task_entries, f, indent=2)
 
-        return json_file
+        return task_dir
 
-    def test_load_tasks_from_json(self, sample_task_json, temp_workspace):
-        """Test loading tasks from JSON file."""
+    def test_load_and_convert_tasks(self, sample_task_dir, temp_workspace):
+        """Test loading task entries and converting to TaskDefinitions."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            tasks = load_tasks_from_json(sample_task_json, str(temp_workspace))
+            entries = load_task_entries(local_dir=sample_task_dir)
+            assert len(entries) == 3
+
+            tasks = entries_to_task_definitions(entries, str(temp_workspace))
 
             assert len(tasks) == 3
             assert "retrieve_structure" in tasks
@@ -553,11 +566,11 @@ class TestTaskSystemIntegration:
             task2 = tasks["enumerate_slabs"]
             assert "retrieve_structure" in task2.input_from_tasks
 
-    def test_create_environments(self, sample_task_json, temp_workspace):
-        """Test creating environments from JSON file."""
+    def test_create_environments(self, sample_task_dir, temp_workspace):
+        """Test creating environments from task directory."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
             environments = create_environments(
-                sample_task_json, work_dir=str(temp_workspace)
+                local_dir=sample_task_dir, work_dir=str(temp_workspace)
             )
 
             assert len(environments) == 3
@@ -570,7 +583,7 @@ class TestTaskSystemIntegration:
             assert isinstance(env1, TaskGroupEnvironment)
             assert env1.task_id == "retrieve_structure"
 
-    def test_task_dependency_workflow(self, sample_task_json, temp_workspace):
+    def test_task_dependency_workflow(self, sample_task_dir, temp_workspace):
         """Test complete workflow with task dependencies."""
         # Create test files
         cif_content = """# generated using pymatgen
@@ -611,7 +624,7 @@ loop_
 
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
             environments = create_environments(
-                sample_task_json, work_dir=str(temp_workspace)
+                local_dir=sample_task_dir, work_dir=str(temp_workspace)
             )
 
             # Complete task 1
@@ -637,31 +650,30 @@ loop_
 
     def test_invalid_task_json(self, temp_workspace):
         """Test handling of invalid task JSON."""
-        invalid_json = temp_workspace / "invalid.json"
-        invalid_json.write_text("{ invalid json")
+        invalid_dir = temp_workspace / "invalid_tasks"
+        invalid_dir.mkdir()
+        (invalid_dir / "bad.json").write_text("{ invalid json")
 
         with pytest.raises(json.JSONDecodeError):
-            load_tasks_from_json(invalid_json, str(temp_workspace))
+            load_task_entries(local_dir=invalid_dir)
 
     def test_missing_scoring_function(self, temp_workspace):
         """Test handling of missing scoring function."""
-        task_def = {
-            "test_task": {
+        entries = [
+            {
+                "uuid": "test-uuid-bad",
+                "id": "test_task",
                 "name": "Test Task",
                 "description": "Test description",
                 "scoring_function": "nonexistent_function",
                 "submission_format": "/path/to/file",
             }
-        }
-
-        json_file = temp_workspace / "bad_tasks.json"
-        with json_file.open("w") as f:
-            json.dump(task_def, f)
+        ]
 
         with pytest.raises(
             ValueError, match="Scoring function 'nonexistent_function' not found"
         ):
-            load_tasks_from_json(json_file, str(temp_workspace))
+            entries_to_task_definitions(entries, str(temp_workspace))
 
     @given(st.text(min_size=1, max_size=100))
     def test_scoring_robustness(self, submission_text):
