@@ -24,7 +24,7 @@ ENVIRONMENT_NAMES = {
 }
 
 AGENT_NAMES = {
-    "react": "React",
+    "react": "ReAct",
     "tool_calling": "Tool calling",
 }
 
