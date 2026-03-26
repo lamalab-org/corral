@@ -67,9 +67,9 @@ def get_nth_run_log(
                  [ARGS_SYNTACTICAL] Format: "Non-negative integer" [/ARGS_SYNTACTICAL]
                  [ARGS_EXAMPLES] Examples: 0, 5, 10 [/ARGS_EXAMPLES]
     Returns:
-        str: [ARGS_BRIEF] Summary of the extracted run log and optional data at the specified index. [/ARGS_BRIEF]
-             [ARGS_DETAILED] A string summarizing the columns present in the extracted run log, total number of rows, and optionally the thermodynamic data at the specified index. [/ARGS_DETAILED]
-             [ARGS_EXAMPLES] Examples: "the thermo data has been saved successfully at run0_thermo.csv. The thermo columns are: ['Step', 'Temp', 'Press']. There are total 1000 rows. Data at index 10: {'Step': 100, 'Temp': 300, 'Press': 1.0}", "The thermo columns are: ['Step', 'Temp', 'Press']. There are total 500 rows." [/ARGS_EXAMPLES]
+        str: [RETURNS_BRIEF] Summary of the extracted run log and optional data at the specified index. [/RETURNS_BRIEF]
+             [RETURNS_DETAILED] A string summarizing the columns present in the extracted run log, total number of rows, and optionally the thermodynamic data at the specified index. [/RETURNS_DETAILED]
+             [RETURNS_EXAMPLES] Examples: "the thermo data has been saved successfully at run0_thermo.csv. The thermo columns are: ['Step', 'Temp', 'Press']. There are total 1000 rows. Data at index 10: {'Step': 100, 'Temp': 300, 'Press': 1.0}", "The thermo columns are: ['Step', 'Temp', 'Press']. There are total 500 rows." [/RETURNS_EXAMPLES]
     [RAISES] Exceptions:
         Exception:
             [ERROR_WHEN] If there is an error reading the log file or extracting the run log. [/ERROR_WHEN]
@@ -130,9 +130,9 @@ def keyword_log_extractor(path: str, keyword: str) -> str:
                   [ARGS_SYNTACTICAL] Format: "Non-empty string" [/ARGS_SYNTACTICAL]
                   [ARGS_EXAMPLES] Examples: "fix", "compute", "thermo" [/ARGS_EXAMPLES]
     Returns:
-        str: [ARGS_BRIEF] Extracted sections as a structured dictionary in string format. [/ARGS_BRIEF]
-             [ARGS_DETAILED] A string representation of a dictionary containing the extracted sections that start with the specified keyword. [/ARGS_DETAILED]
-             [ARGS_EXAMPLES] "{'fix': [...]}", "{'compute': [...]}" [/ARGS_EXAMPLES]
+        str: [RETURNS_BRIEF] Extracted sections as a structured dictionary in string format. [/RETURNS_BRIEF]
+             [RETURNS_DETAILED] A string representation of a dictionary containing the extracted sections that start with the specified keyword. [/RETURNS_DETAILED]
+             [RETURNS_EXAMPLES] "{'fix': [...]}", "{'compute': [...]}" [/RETURNS_EXAMPLES]
     [RAISES] Exceptions:
         Exception:
             [ERROR_WHEN] If there is an error reading the log file or extracting sections. [/ERROR_WHEN]
@@ -227,10 +227,10 @@ def execute_python_script(
                     [ARGS_EXAMPLES] "/path/to/project", "data/analysis", None [/ARGS_EXAMPLES]
 
     Returns:
-        str: [ARGS_BRIEF] JSON string with comprehensive execution results and monitoring data. [/ARGS_BRIEF]
-             [ARGSDETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.
-             This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/ARGS_DETAILED]
-             [ARGS_EXAMPLES] "{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}" [/ARGS_EXAMPLES]
+        str: [RETURNS_BRIEF] JSON string with comprehensive execution results and monitoring data. [/RETURNS_BRIEF]
+             [RETURNS_DETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.
+             This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/RETURNS_DETAILED]
+             [RETURNS_EXAMPLES] "{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         FileNotFoundError: [ERROR_WHEN] When the specified script file doesn't exist [/ERROR_WHEN]
@@ -317,9 +317,9 @@ def get_potential_metadata(file_path: str) -> str:
 
     Returns:
         str :
-            [ARGS_BRIEF] Structured metadata string describing the potential file. [/ARGS_BRIEF]
-            [ARGS_DETAILED] The returned string includes the type of interatomic potential, supported chemical elements, and the LAMMPS pair style. [/ARGS_DETAILED]
-            [ARGS_EXAMPLES] Example output: "{potential type : EAM, elements supported : Al (Aluminum), pair_style : eam/alloy}" [/ARGS_EXAMPLES]
+            [RETURNS_BRIEF] Structured metadata string describing the potential file. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The returned string includes the type of interatomic potential, supported chemical elements, and the LAMMPS pair style. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] Example output: "{potential type : EAM, elements supported : Al (Aluminum), pair_style : eam/alloy}" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -425,12 +425,12 @@ def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:
 
     Returns:
         str :
-            [ARGS_BRIEF] Status message indicating successful structure retrieval and saving at required path. [/ARGS_BRIEF]
-            [ARGS_DETAILED] If successful, the tool retrieves the conventional crystallographic structure for the given Materials Project ID, converts it into CIF format, saves it at the specified path, and returns a confirmation message.
-            If any step fails, a descriptive error message is returned instead. [/ARGS_DETAILED]
-            [ARGS_EXAMPLES]
+            [RETURNS_BRIEF] Status message indicating successful structure retrieval and saving at required path. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] If successful, the tool retrieves the conventional crystallographic structure for the given Materials Project ID, converts it into CIF format, saves it at the specified path, and returns a confirmation message.
+            If any step fails, a descriptive error message is returned instead. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES]
                 - "Structure saved successfully at /workspace/data/structure.cif"
-                - "Failed to retrieve or save structure: Invalid Materials Project ID" [/ARGS_EXAMPLES]
+                - "Failed to retrieve or save structure: Invalid Materials Project ID" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -538,11 +538,11 @@ def convert_structure_to_lammps_data(
 
     Returns:
         str:
-            [ARGS_BRIEF] Status message indicating successful LAMMPS data file generation. [/ARGS_BRIEF]
-            [ARGS_DETAILED] If the conversion is successful, returns a confirmation message specifying the path where the LAMMPS data file has been saved. This message can be used for logging or downstream validation in automated simulation workflows. [/ARGS_DETAILED]
-            [ARGS_EXAMPLES] Example outputs:
+            [RETURNS_BRIEF] Status message indicating successful LAMMPS data file generation. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] If the conversion is successful, returns a confirmation message specifying the path where the LAMMPS data file has been saved. This message can be used for logging or downstream validation in automated simulation workflows. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] Example outputs:
                 - "LAMMPS data file successfully written to: /workspace/output/graphene.data"
-                - "LAMMPS data file successfully written to: ./converted_data/SiO2.data" [/ARGS_EXAMPLES]
+                - "LAMMPS data file successfully written to: ./converted_data/SiO2.data" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -626,11 +626,11 @@ def run_lammps(input_file: str) -> str:
 
     Returns:
         str:
-            [ARGS_BRIEF] Message indicating simulation completion with log file location. [/ARGS_BRIEF]
-            [ARGS_DETAILED] On success, returns a message confirming the simulation run, the path to the latest input script used, and the corresponding log file. The log file contains detailed runtime diagnostics and output for verification. [/ARGS_DETAILED]
-            [ARGS_EXAMPLES]
+            [RETURNS_BRIEF] Message indicating simulation completion with log file location. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] On success, returns a message confirming the simulation run, the path to the latest input script used, and the corresponding log file. The log file contains detailed runtime diagnostics and output for verification. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES]
                 - "Simulation ran successfully using input: simulations/run_graphene.in, log saved at: run_graphene.log"
-                - "Simulation ran successfully using input: ./jobs/job123.lmp, log saved at: job123.log" [/ARGS_EXAMPLES]
+                - "Simulation ran successfully using input: ./jobs/job123.lmp, log saved at: job123.log" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -740,12 +740,12 @@ def visualisation_tool(path: str, query: str) -> str:
 
     Returns:
         str:
-            [ARGS_BRIEF] A qualitative, visually grounded answer to the query, or a refusal if the query requires a derived quantity. [/ARGS_BRIEF]
-            [ARGS_DETAILED] On success, returns a text response describing the relevant visual features of the plot and, if applicable, an approximate value read directly from the axis at a visually identifiable feature. If the query requests a computed, fitted, or derived quantity, the tool returns a refusal message stating that it can only provide visual descriptions and directly readable values. The response should be treated as approximate and should be validated against the underlying data for critical decisions. [/ARGS_DETAILED]
-            [ARGS_EXAMPLES]
+            [RETURNS_BRIEF] A qualitative, visually grounded answer to the query, or a refusal if the query requires a derived quantity. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] On success, returns a text response describing the relevant visual features of the plot and, if applicable, an approximate value read directly from the axis at a visually identifiable feature. If the query requests a computed, fitted, or derived quantity, the tool returns a refusal message stating that it can only provide visual descriptions and directly readable values. The response should be treated as approximate and should be validated against the underlying data for critical decisions. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES]
                 - "There is a clear kink in the curve around the temperature labeled near 350 K, which appears to mark the transition."
                 - "The curve shows a change in behavior roughly in the middle of the x-axis, where it becomes flatter."
-                - "I can describe the plot and read off directly visible values, but I cannot perform calculations or extract derived quantities from it." [/ARGS_EXAMPLES]
+                - "I can describe the plot and read off directly visible values, but I cannot perform calculations or extract derived quantities from it." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
