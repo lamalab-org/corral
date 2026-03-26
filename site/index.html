@@ -1042,7 +1042,12 @@
           const tool = this.currentToolData;
           if (!tool || !tool.sections) return '';
           const secs = this.verbositySections[this.verbosityLevel] || [];
-          const escape = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const escapeHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const formatContent = s => {
+            const escaped = escapeHtml(s);
+            // Inline code: `...`
+            return escaped.replace(/`([^`]+)`/g, '<code class="text-xs font-mono bg-slate-100 dark:bg-slate-700 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded">$1</code>');
+          };
 
           // Group ARGS_* and RETURNS_* into combined blocks; keep others as standalone
           const argKeys = ['ARGS_BRIEF', 'ARGS_DETAILED', 'ARGS_SYNTACTICAL', 'ARGS_EXAMPLES'];
@@ -1061,7 +1066,7 @@
             // Render combined Arguments block on first ARGS_* key encountered
             if (argKeys.includes(sec) && !argsRendered) {
               argsRendered = true;
-              const argParts = argKeys.filter(k => secs.includes(k) && tool.sections[k]).map(k => escape(tool.sections[k]));
+              const argParts = argKeys.filter(k => secs.includes(k) && tool.sections[k]).map(k => formatContent(tool.sections[k]));
               if (argParts.length) {
                 parts.push(`<div class="mt-4 pt-3 border-t border-slate-100"><span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Arguments</span><div class="mt-1.5">${argParts.join('\n')}</div></div>`);
               }
@@ -1072,7 +1077,7 @@
             // Render combined Returns block on first RETURNS_* key encountered
             if (retKeys.includes(sec) && !returnsRendered) {
               returnsRendered = true;
-              const retParts = retKeys.filter(k => secs.includes(k) && tool.sections[k]).map(k => escape(tool.sections[k]));
+              const retParts = retKeys.filter(k => secs.includes(k) && tool.sections[k]).map(k => formatContent(tool.sections[k]));
               if (retParts.length) {
                 parts.push(`<div class="mt-4 pt-3 border-t border-slate-100"><span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Returns</span><div class="mt-1.5">${retParts.join('\n')}</div></div>`);
               }
@@ -1083,7 +1088,7 @@
             // Standalone sections
             if (tool.sections[sec]) {
               const label = standaloneLabels[sec];
-              const content = escape(tool.sections[sec]);
+              const content = formatContent(tool.sections[sec]);
               if (label) {
                 parts.push(`<div class="mt-4 pt-3 border-t border-slate-100"><span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">${label}</span><div class="mt-1.5">${content}</div></div>`);
               } else {
@@ -1091,7 +1096,7 @@
               }
             }
           }
-          return parts.join('\n') || escape(tool.sections.BRIEF || 'No description available.');
+          return parts.join('\n') || formatContent(tool.sections.BRIEF || 'No description available.');
         },
         get matchedScoringCode() {
           const task = this.currentTaskData;
