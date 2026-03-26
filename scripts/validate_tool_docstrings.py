@@ -284,11 +284,18 @@ def validate_tool_docstring(
 
 
 def find_tool_files(repo_root: Path) -> list[Path]:
-    """Find all tools.py files under tasks/."""
+    """Find all tools.py files under tasks/ and src/corral/utils/."""
+    files: list[Path] = []
+
     tasks_dir = repo_root / "tasks"
-    if not tasks_dir.exists():
-        return []
-    return sorted(tasks_dir.rglob("**/tools.py"))
+    if tasks_dir.exists():
+        files.extend(tasks_dir.rglob("**/tools.py"))
+
+    utils_dir = repo_root / "src" / "corral" / "utils"
+    if utils_dir.exists():
+        files.extend(utils_dir.glob("*_tools.py"))
+
+    return sorted(files)
 
 
 def validate_file(filepath: Path) -> list[Violation]:
