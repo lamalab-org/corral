@@ -216,7 +216,7 @@ def execute_python_script(
                 This prevents runaway processes and ensures resource management.
                 Choose appropriate values based on expected script execution time.
                 For computational simulations, longer timeouts may be necessary. [/ARGS_DETAILED]
-                [ARGS_SYNTACTIC] positive integer representing seconds [/ARGS_SYNTACTIC]
+                [ARGS_SYNTACTICAL] positive integer representing seconds [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/ARGS_EXAMPLES]
         working_dir: [ARGS_BRIEF] Optional working directory for script execution. [/ARGS_BRIEF]
                     [ARGS_DETAILED] The directory from which the script should be executed.
@@ -520,7 +520,7 @@ def convert_structure_to_lammps_data(
             [ARGS_BRIEF] Path where the LAMMPS data file will be saved. [/ARGS_BRIEF]
             [ARGS_DETAILED] This is the destination file path where the generated LAMMPS-compatible data file will be written.
             The output file will contain the atomic positions, types, and other necessary information formatted for LAMMPS simulations. [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] Format: 'valid string representing a writable `.data` file path'. [/ARGS_SYNTACTICAL]
+            [ARGS_SYNTACTICAL] Format: 'valid string representing a writable `.data` file path'. [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] Examples:
                 - "/workspace/output/graphene.data",
                 -"./converted_data/SiO2.data" [/ARGS_EXAMPLES]
