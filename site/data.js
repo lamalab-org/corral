@@ -25169,5 +25169,4969 @@ const CORRAL_DATA = {
         "code": "def score_num_carbonyl_groups(prediction: int | str, ground_truth: str) -> float:\n    \"\"\"Count carbonyl groups (C=O) in the molecule, handling tautomers.\n    It works through identifying double bonds between carbon and oxygen atoms.\n    Then compare to predicted number and score consequently.\n\n    Args:\n        prediction: Predicted number of carbonyl groups\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of carbonyl groups.\"\n        )\n        return 0.0\n\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    # Canonicalize tautomers to get the most stable form (usually keto)\n    enumerator = rdMolStandardize.TautomerEnumerator()\n    canonical_mol = enumerator.Canonicalize(mol)\n\n    carbonyl_groups = sum(\n        1\n        for bond in canonical_mol.GetBonds()\n        if bond.GetBondType() == Chem.BondType.DOUBLE\n        and (\n            (\n                bond.GetBeginAtom().GetAtomicNum() == 6\n                and bond.GetEndAtom().GetAtomicNum() == 8\n            )\n            or (\n                bond.GetBeginAtom().GetAtomicNum() == 8\n                and bond.GetEndAtom().GetAtomicNum() == 6\n            )\n        )\n    )\n\n    return float(carbonyl_groups == prediction)"
       }
     ]
+  },
+  "Wet Chemistry": {
+    "description": "Plan and simulate wet-chemistry experiments involving aqueous equilibria, precipitation, complexation, and titration. Tools provide thermodynamic calculations, solubility predictions, species distribution analysis, and experimental protocol design for analytical chemistry workflows.",
+    "tools": [
+      {
+        "name": "possible_cations",
+        "sections": {
+          "BRIEF": "Returns the list of possible cations.",
+          "DETAILED": "This functions returns a space-separated string of all the possible cations that can be present in an unknown sample.",
+          "PROCEDURAL": "When to use this tool:\n- Used to define the space of possible cations in unknown samples.\n- Usually used early on in the analysis.\n- Only suitable when the task involves identifying unknown cations in the sample(s).",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Make sure the task involves identifying one or more unknown cations in the samples. \n2.  Use this tool to know what possible cations can be present in the unknown sample(s). \n3.  Can be followed up by tests to check for specific cations or groups of cations.",
+          "CONTEXTUAL": "How this tool works:\n- It returns a pre-defined list of cations as a space-separated string.\n- Each cation is formatted as 'X+n' where 'X' is the elemental symbol and '+n' is the charge.\n- The ammonium ion is represented as 'NH4+' and mercury(I) dimer is represented as 'Hg2+2'.\n- The tool does not perform any tests; it simply returns the pre-defined list of all possible cations.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `possible_cations()`,\n]",
+          "RETURNS_BRIEF": "a string containing all the possible cations",
+          "RETURNS_DETAILED": "a space-separated string, containing all possible cations that can be present in the unknown sample(s)",
+          "RETURNS_EXAMPLES": "\"Ag+ Al+3 Ba+2 ...\"",
+          "RAISES": "Exceptions:\n    None:\n         This tool does not raise exceptions under normal usage. \n         N/A \n         N/A",
+          "LIMITATIONS": "Known Limitations:\n    - This tool returns the pre-defined list of all possible cations and does not perform any calculations or tests.\n    - The list contains only the bare aqueous cations; cationic metal-complexes are not listed.\n    - This tool is only useful when the task involves identifying unknown cations. If the task is about identifying solutions from a possible list of solutions with known compositions, there is no need for this tool."
+        },
+        "args": [],
+        "returns": "str",
+        "code": "def possible_cations() -> str:\n    return ' '.join(CATIONS)"
+      },
+      {
+        "name": "possible_anions",
+        "sections": {
+          "BRIEF": "Returns the list of possible anions.",
+          "DETAILED": "This functions returns a space-separated string of all the possible anions that can be present in an unknown sample. One or more of these anions could be present in the unknown sample(s).",
+          "PROCEDURAL": "When to use this tool:\n- Used to define the space of possible anions in unknown samples.\n- Usually used early on in the analysis.\n- Only suitable when the task involves identifying unknown anions in the sample(s).",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Make sure the task involves identifying one or more unknown anions in the sample(s). \n2.  Use this tool to know what possible anions can be present in the unknown sample(s). \n3.  Can be followed up by tests to check for specific anions or groups of anions.",
+          "CONTEXTUAL": "How this tool works:\n- It returns a pre-defined list of anions as a space-separated string.\n- Each anion is formatted as 'XYZ-n' where 'XYZ' is the elemental composition and '-n' is the charge.\n- For example, hydrogen carbonate is represented as 'HCO3-' and dichromate is represented as 'Cr2O7-2'.\n- The tool does not perform any tests; it simply returns the pre-defined list of all possible anions.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `possible_anions()`,\n]",
+          "RETURNS_BRIEF": "a string containing all the possible anions",
+          "RETURNS_DETAILED": "a space-separated string, containing all possible anions that can be present in the unknown sample(s)",
+          "RETURNS_EXAMPLES": "\"Br- Cl- CO3-2 HPO4-2 ...\"",
+          "RAISES": "Exceptions:\n    None:\n         This tool does not raise exceptions under normal usage. \n         N/A \n         N/A",
+          "LIMITATIONS": "Known Limitations:\n    - This tool returns the pre-defined list of all possible anions and does not perform any calculations or tests.\n    - The list contains only the bare aqueous anions; anionic metal-complexes are not listed.\n    - This tool is only useful when the task involves identifying unknown anions. If the task is about identifying solutions from a possible list of solutions with known compositions, there is no need for this tool."
+        },
+        "args": [],
+        "returns": "str",
+        "code": "def possible_anions() -> str:\n    return ' '.join(ANIONS)"
+      },
+      {
+        "name": "measure_pH",
+        "sections": {
+          "BRIEF": "Measures the pH of the solution using a pH paper.",
+          "DETAILED": "This tool measure the pH of a solution using a universal pH-indicator paper and reports the pH as the closest integer.",
+          "PROCEDURAL": "When to use this tool:\n- Used to measure the pH of a solution.\n- Sometimes knowing the initial pH of an unknown sample can provide information about its contents.\n- Some tests only work in certain pH ranges, therefore knowing the pH is important.\n- It can also be informative to measure the pH before and after performing a test to observe how it changes.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Make sure that `label` points to a solution and that knowing the pH of that solution gives valuable information. \n2.  Use this tool to measure the pH of the solution. \n3.  After measuring the pH, you can perform another test and then measure the pH again to observe how that test changes the pH of the solution.",
+          "CONTEXTUAL": "How this tool works:\n- It uses universal indicator paper to measure the pH of a solution.\n- Returns the measure pH as an integer in the 0-14 range.\n- Values closer to 0 represent acidic, values around 7 represent neutral, and values closer to 14 represent alkaline solutions.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `measure_pH(\"sample\")`,\n    `measure_pH(\"sample_2\")`,\n    `measure_pH(\"sample_B\")`,\n    `measure_pH(\"test_01\")`,\n    `measure_pH(\"sample_1_test_2\")`,\n]",
+          "ARGS_BRIEF": "label of the target solution",
+          "ARGS_DETAILED": "a string representing the label of the solution in the Inventory, for which the pH will be measured",
+          "ARGS_SYNTACTICAL": "the label of supernatant solutions after filtration are appended with \"_filtrate\"",
+          "ARGS_EXAMPLES": "\"sample\", \"test_1\", \"test2_filtrate\"",
+          "RETURNS_BRIEF": "the closest integer value to the actual pH of the solution",
+          "RETURNS_DETAILED": "an integer value between 0-14, representing the closest integer to the actual pH of the solution",
+          "RETURNS_EXAMPLES": "`4`, `6`, `11`",
+          "RAISES": "Exceptions:\n    KeyError:  When the given `label` is invalid \n               The given `label` is not found in the Inventory \n               Check the Inventory and ensure you are using a correct `label` \n    \n    ValueError:  When the given `label` is not a solution \n                 The given `label` exists in the Inventory but the object it points to is not a solution (for example it could be a precipitate) \n                 Check the Inventory and make sure the `label` you use points to a solution",
+          "LIMITATIONS": "Known Limitations:\n    - The pH can only be defined for solutions, not precipitates.\n    - This tool does not return a precise pH value, only an integer estimate of the actual pH of the solution."
+        },
+        "args": [
+          {
+            "name": "compositions",
+            "type": ""
+          },
+          {
+            "name": "label",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def measure_pH(compositions, label: str) -> str:\n    try:\n        target = compositions[label]\n    except KeyError as e:\n        raise KeyError(f\"Invalid label: {e}\")\n    \n    if isinstance(target, StockSolution):\n        if type(target) == StockSolution:\n            target = 1 * target  # converting StockSolution --> Solution\n            target.equilibrate()\n        pH = target.pH\n    \n    else:\n        raise ValueError(f\"{label} is not a solution!\")\n\n    pH = min(max(pH, 0), 14)\n    return round(pH)"
+      },
+      {
+        "name": "perform_flame_test",
+        "sections": {
+          "BRIEF": "Performs a flame test on the solution. Cost = 1 mL",
+          "DETAILED": "This test consumes 1 mL of the solution to perform a flame-color test. It returns the observed color of the flame (if any).",
+          "PROCEDURAL": "When to use this tool:\n- Flame color can identify certain cations.\n- Useful to identify copper, alkali, and alkaline earth metals because of their characteristic flame colors.\n- It is especially useful for identifying alkali metals because they do not form precipitates under normal conditions.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Make sure that `label` points to a solution and that it does not contain a precipitate. If the solution has a precipitate, filter it before running this test. \n2.  Use this tool to perform the flame test. Make sure that you have not previously introduced any interfering cations (i.e. those that result in a colored flame) to the solution as this will affect the results. \n3.  If a multi-colored flame is observed, you can try to remove some of the cations by precipitation and run the test again. If a certain color can be interpreted as more than one ion, you can perform additional tests to confirm which is present. You can also use the `lookup_flame_color` tool to retrieve the characteristic color of cations.",
+          "CONTEXTUAL": "How this tool works:\n- It uses 1 mL of the solution to perform a flame test.\n- If no species are present that give a characteristic flame color, the resulting observations is \"No characteristic color\".\n- If the flame has a single characteristic color, the resulting observation will indicate the exact name for that color.\n- If multiple different colors are observed, the resulting observation will be \"A multi-colored flame\".",
+          "SYNTACTICAL": "Usage examples:\n[\n    `perform_flame_test(\"sample\")`,\n    `perform_flame_test(\"sample_2\")`,\n    `perform_flame_test(\"sample_B\")`,\n    `perform_flame_test(\"test_01\")`,\n    `perform_flame_test(\"sample_1_test_2\")`,\n]",
+          "ARGS_BRIEF": "label of the target solution",
+          "ARGS_DETAILED": "a string representing the label of the solution in the Inventory, for which the flame test will be performed",
+          "ARGS_SYNTACTICAL": "the label of supernatant solutions after filtration are appended with \"_filtrate\"",
+          "ARGS_EXAMPLES": "\"sample\", \"test_1\", \"test2_filtrate\"",
+          "RETURNS_BRIEF": "the resulting observation from the flame test",
+          "RETURNS_DETAILED": "the resulting observation depends on the color of the flame. If no species present has a positive flame test, \"No characteristic color\" is returned. If exactly one color is observed, the observation will indicate that color. If more than one color is present in the flame, the observation will be \"multi-colored flame\"",
+          "RETURNS_EXAMPLES": "\"A red flame is observed.\", \"No characteristic flame color is observed.\", \"A multi-colored flame is observed.\"",
+          "RAISES": "Exceptions:\n    KeyError:  When the given `label` is invalid \n               The given `label` is not found in the Inventory \n               Check the Inventory and ensure you are using a correct `label` \n    \n    ValueError:  When the given `label` is not a solution \n                 The given `label` exists in the Inventory but the object it points to is not a solution (for example it could be a precipitate) \n                 Check the Inventory and make sure the `label` you use points to a solution \n\n    VolumeError:  When the solution contains a precipitate or less than 1 mL of it is remaining \n                  The given `label` exists in the Inventory as a solution, but it either contains a precipitate or the remaining volume is less than 1 mL \n                  If the solution contains a precipitate, filter it first and then perform the flame test again. If there is not enough solution to perform the test, you may be able to make more of it by repeating the steps that lead to it",
+          "LIMITATIONS": "Known Limitations:\n    - The flame test's result depends on the concentration of cations; only species with a concentration higher than 5e-4 molar will give a positive result.\n    - If you have introduced known interfering cations to the solution in previous steps, they will affect the results.\n    - Some flame colors can be interpreted as more than one cation. Additional tests may be required to indicate the exact identity of the species.\n    - A \"multi-colored\" flame means that there are at least two cations present with different flame colors."
+        },
+        "args": [
+          {
+            "name": "compositions",
+            "type": ""
+          },
+          {
+            "name": "label",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def perform_flame_test(compositions, label: str) -> str:\n    try:\n        target = compositions[label]\n    except KeyError as e:\n        raise KeyError(f\"Invalid label: {e}\")\n    \n    if not isinstance(target, StockSolution):\n        raise ValueError(f\"{label} is not a solution\")\n    \n    test = 1 * target # drawing 1 mL from the target solution\n\n    colors = []\n    total_copper = 0\n    for sp, conc in test.composition.items():\n        if 'Cu' in sp:  # copper is the only flame-active element that exists as multiple species and not just \"Cu+2\", therefore, all copper-containing species are summed\n            total_copper += conc\n        elif (sp in FLAME_COLORS) and (conc > 5e-4):\n            colors.append(FLAME_COLORS[sp])\n    \n    if total_copper > 5e-4:\n        colors.append(FLAME_COLORS['Cu+2'])\n\n    colors = list(set(colors))\n\n    if len(colors) > 1:\n        return \"A multi-colored flame is observed.\"\n    if len(colors) == 1:\n        return f\"A {colors[0]} flame is observed.\"\n    if len(colors) == 0:\n        return \"No characteristic flame color is observed.\""
+      },
+      {
+        "name": "lookup_flame_colors",
+        "sections": {
+          "BRIEF": "Returns the characteristic flame colors of cations.",
+          "DETAILED": "This tool returns a pre-defined list of ideal flame colors for each cation with a characteristic flame color. The mentioned colors are the color of the flame when no other cation with a positive flame test is present.",
+          "PROCEDURAL": "When to use this tool:\n    - Use this to retrieve the ideal characteristic flame colors of cations.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Perform a flame test using the `perform_flame_test`tool before looking up the colors. \n    2.  Use this tool to retrieve the expected characteristic flame colors. \n    3.  If the result is a specific color, it usually means the presence of a specific cation. In some cases, more than one cation gives the same flame color in which case further tests can indicate which one. If the result is \"No characteristic color\" it means that none of the cations with a characteristic flame color are present or that their concentrations are lower than 5e-4 M. If \"A multi-colored flame\" is observed, it means that at least two of such cations are present but it is not clear which two (or more) are present.",
+          "CONTEXTUAL": "How this tool works:\n    - This tool does not perform any tests. It just return a pre-defined list of flame colors.",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `lookup_flame_colors()`,\n    ]",
+          "RETURNS_BRIEF": "the list of characteristic flame colors",
+          "RETURNS_DETAILED": "a string in which each cation is on a separate line, along with its characteristic color",
+          "RETURNS_EXAMPLES": "\"Ba+2     green\nCa+2     orange-red\n...\"",
+          "RAISES": "Exceptions:\n        None:\n             This tool does not raise exceptions under normal usage. \n             N/A \n             N/A",
+          "LIMITATIONS": "Known Limitations:\n        - This tool returns the pre-defined list of characteristic flame colors and does not perform any calculations or tests.\n        - The flame test only works for cations that have a characteristic flame color.\n        - If the concentration of a cation is below 5e-4, it will not give a colored flame."
+        },
+        "args": [],
+        "returns": "str",
+        "code": "def lookup_flame_colors() -> str:\n    flame_colors = [f\"{ion}     {color}\" for ion,color in FLAME_COLORS.items()]\n    return '\\n'.join(flame_colors)"
+      },
+      {
+        "name": "checkout_color",
+        "sections": {
+          "BRIEF": "Observe the color of a solution or precipitate.",
+          "DETAILED": "Observe the color of a solution or precipitate from the Inventory. This can be the color of a sample solution, a reagent or a precipitate from previous tests.",
+          "PROCEDURAL": "When to use this tool:\n   - You can use this tool to observe the color of sample solutions.\n   - The changes in the color of solutions and/or precipitates are always reported as part of performing the tests, but you can also use this tool to check those colors again.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n   1.  Make sure that `label` points to an object in the Inventory. \n   2.  Use this tool to check the color of the object. This is useful to observe the color of the initial sample solutions. \n   3.  Take note of the observed colors. You can perform further tests on the object and notice how the observed colors change (or don't change). You can also use the `lookup_precipitate_colors` tool to retrieve the color of pure precipitates or the `simulate_color_mixture` tool to predict the color of a precipitate mixture, and compare that with the observed color.",
+          "CONTEXTUAL": "How this tool works:\n   - It returns the type (reagent, solution, or precipitate) and the color of the target object.\n   - For solutions that also contain a precipitate, two colors will be reported: one for the precipitate and one for the supernatant solution.\n   - If a solution does not contain a precipitate, it will be called a \"clear solution\" and its color will be reported.\n   - Color names are subjective and qualitative, so treat the reported color names as only approximate.\n   - Since color names are subjective and approximate, sometimes it is possible that a color can be described with more than one color name. In those cases the possible color names are separated by a slash '/'.",
+          "SYNTACTICAL": "Usage examples:\n   [\n       `checkout_color(\"sample\")`,\n       `checkout_color(\"sample_A\")`,\n       `checkout_color(\"test_1_filtrate\")`,\n       `checkout_color(\"test_2_precipitate\")`,\n       `checkout_color(\"test3_precipitate_HNO3\")`,\n   ]",
+          "ARGS_BRIEF": "label of the target object",
+          "ARGS_DETAILED": "a string representing the label of the object in the Inventory which can be a solution (with or without a precipitate), a reagent, or a filtered precipitate",
+          "ARGS_SYNTACTICAL": "after filtration, the supernatant's label is appended with \"_filtrate\" and the precipitate is appended with \"_precipitate\"",
+          "ARGS_EXAMPLES": "\"sample\", \"test2_filtrate\", \"test3_precipitate\"",
+          "RETURNS_BRIEF": "the type (reagent, solution, or precipitate) and the color of the object",
+          "RETURNS_DETAILED": "a string containing a statement about the type and the color of the object. The type can be: a reagent solution, a precipitate, a clear solution (meaning it has no precipitate), or a solution containing a precipitate. In the latter case, the color of both the supernatant solution and the existing precipitate will be reported.",
+          "RETURNS_EXAMPLES": "\"sample_B is a clear solution with the following color: pale yellow\", \"test_03 is a solution that also contains a precipitate.\nColor of the precipitate: black\nColor of the supernatant solution: colorless\", \"test_1_precipitate is a precipitate with the following color: rosy brown / reddish gray\"",
+          "RAISES": "Exceptions:\n       KeyError:  When the given `label` is invalid \n                  The given `label` is not found in the Inventory \n                  Check the Inventory and ensure you are using a correct `label`",
+          "LIMITATIONS": "Known Limitations:\n       - If the target object is the result of a previously performed test, all color observations were already reported as part of that test, so using this tool to check those colors again will be redundant.\n       - All reported colors are qualitative and approximate.\n       - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change."
+        },
+        "args": [
+          {
+            "name": "compositions",
+            "type": ""
+          },
+          {
+            "name": "label",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def checkout_color(compositions, label: str) -> str:\n    try:\n        target = compositions[label]\n    except KeyError as e:\n        raise KeyError(f\"Invalid label: {e}\")\n    \n    if type(target) == StockSolution:\n        sample = 1 * target # converting StockSolution --> Solution\n        return f\"{label} is a reagent solution with the following color: {sample.color_name}\"\n    \n    elif type(target) == Precipitate:\n        return f\"{label} is a precipitate with the following color: {target.color_name}\"\n    \n    elif type(target) == Solution:\n        if target.has_precipitate:\n            prec_color = target.precipitate.color_name\n            sol_color = target.color_name\n            return f\"{label} is a solution that also contains a precipitate.\\n Color of the precipitate: {prec_color}\\n Color of the supernatant solution: {sol_color}\"\n        else:\n            return f\"{label} is a clear solution with the following color: {target.color_name}\""
+      },
+      {
+        "name": "lookup_precipitate_colors",
+        "sections": {
+          "BRIEF": "Returns the list of colored precipitates and their color.",
+          "DETAILED": "This tool returns a pre-defined list of non-white precipitates and their corresponding color in their pure, freshly precipitated form.",
+          "PROCEDURAL": "When to use this tool:\n    - Use this tool if you want to know the color of specific precipitates in their pure form.\n    - To know the exact color name used to describe the color of a pure precipitate, as reported by other tools.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Make sure you have observed the formation or change of appearance of precipitates before calling this tool. Useful tools include `checkout_color`, `mix_two_solutions`, and `add_solution`, and you might also observe a color change for an existing precipitate when using tools such as `add_solution` or `add_precipitate_to_solution`. \n    2.  Use this tool to get the list of color names associated with pure precipitates. \n    3.  Remember that the listed color names will only exactly match with the reported colors from other tools if the precipitate is pure, meaning nothing else has co-precipitated with it. You can use the `simulate_color_mixture` tool to estimate the color of mixtures.",
+          "CONTEXTUAL": "How this tool works:\n    - The tool does not perform any tests; it simply returns the full pre-defined list of non-white precipitates and their colors in their pure form.\n    - Since there is a large number of white precipitates, only colored (non-white) precipitates are listed; precipitates that are not listed are white. \n    - The observed color of precipitates reported by other tools will only match these listed colors if there is only one compound in the precipitate. If multiple compounds co-precipitate at the same time, it can affect the perceived color of the precipitate.",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `lookup_precipitate_colors()`,\n    ]",
+          "RETURNS_BRIEF": "the list of precipitate colors",
+          "RETURNS_DETAILED": "a string where each separate line contains a single pure precipitate followed by its perceived color",
+          "RETURNS_EXAMPLES": "\"AgBr     pale yellow\nAg2CO3     pale yellow\nAg2CrO4     brick red\n...\"",
+          "RAISES": "Exceptions:\n        None:\n             This tool does not raise exceptions under normal usage. \n             N/A \n             N/A",
+          "LIMITATIONS": "Known Limitations:\n        - This tool just returns the pre-defined list of precipitate colors and does not perform any calculations or tests.\n        - The listed colors are for the pure precipitates only, not for the mixture of precipitates.\n        - All reported colors are qualitative and approximate."
+        },
+        "args": [],
+        "returns": "str",
+        "code": "def lookup_precipitate_colors() -> str:\n    note = \"NOTE: This list only describes colored (non-white) precipitates. White precipitates are omitted; if a precipitate is not listed below, it means that it's white.\\n\"\n    precipitate_colors = [f\"{prec} :    {color}\" for prec,color in PRECIPITATE_COLORS.items()]\n\n    return note + '\\n'.join(precipitate_colors)"
+      },
+      {
+        "name": "simulate_color_mixture",
+        "sections": {
+          "BRIEF": "Given a mixture of precipitate colors, it mixes them with the given fractions and returns the name of the resulting precipitate color.",
+          "DETAILED": "This tool simulates the mixing of precipitate colors with the given fractions and returns the name of the closest matching color of the resulting precipitate mixture.",
+          "PROCEDURAL": "When to use this tool:\n- Use this tool to estimate the resulting color of a mixture of precipitates.\n- If the reported color of a precipitate is not listed by the `lookup_precipitate_colors` tool or if you suspect that an observed precipitate may have more than one component, you can use this tool to predict the color of a certain mixture of precipitates and compare it with the reported color.\n- If you have made a guess about the components of an observed precipitate, you can use this tool to predict its perceived color and compare that to the actual observed color.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  You need to have a hypothesis about the composition of an observed precipitate. Use the `lookup_precipitate_colors` tool to get the color names of the pure constituents. \n2.  Assign fractions to the retrieved color names and use this tool to estimate the color of the resulting mixture. \n3.  Depending on the predicted color, you may want to keep or change your hypothesis, test other hypothetical compositions, or perform follow-up tests.",
+          "CONTEXTUAL": "How this tool works:\n- It receives a mixture of up to 3 color names and their fractions as a list of tuples.\n- Each tuple must be formatted as (color_name, fraction).\n- The fractions must be all positive and sum to 1.0. They will be rounded to two decimal places before performing the prediction, so there is no point in having more precision.\n- The colors will be mixed and the name of the closest matching color will be reported.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `simulate_color_mixture([(\"black\", 0.5), (\"pale yellow\", 0.5)])`,\n    `simulate_color_mixture([(\"white\", 0.7), (\"turquoise\", 0.3)])`,\n    `simulate_color_mixture([(\"cyan\", 0.2), (\"white\", 0.2), (\"pink\", 0.6)])`,\n    `simulate_color_mixture([(\"white\", 0.1), (\"reddish brown\", 0.1), (\"crimson\", 0.8)])`,\n    `simulate_color_mixture([(\"yellow\", 0.6), (\"brick red\", 0.4)])`,\n    \n]",
+          "ARGS_BRIEF": "mixture components and their fractions as a list of tuples",
+          "ARGS_DETAILED": "a list of tuples, where the first element of the tuple is the color name and the second element its fraction in the mixture. The maximum allowed number of tuples in the list is three.",
+          "ARGS_SYNTACTICAL": "list of tuples, each formatted as (<color>, <fraction>)",
+          "ARGS_EXAMPLES": "[(\"yellow\", 0.5), (\"red\", 0.5)] , [(\"turquoise\", 0.4), (\"black\", 0.3), (\"dark blue\", 0.3)]",
+          "RETURNS_BRIEF": "name of the resulting color",
+          "RETURNS_DETAILED": "the closest matching name to the resulting color",
+          "RETURNS_EXAMPLES": "\"dark olive\", \"lavender\", \"pale gray\"",
+          "RAISES": "Exceptions:\n    ValueError:  When a given color name is invalid \n                 The first element of one of the tuples is not a valid color name \n                 Make sure you only use color names that correspond to pure precipitates as listed by the `lookup_precipitate_colors` tool \n    \n    ValueError:  When the mixture has more than 3 components \n                 The list of color mixtures has 4 or more tuples \n                 Ensure that you are mixing at most 3 colors \n\n    AssertionError:  When there is a numerical problem with the fractions \n                     There is a non-positive fraction or the fractions do not sum to 1.0 \n                     Ensure that all fractions are positive values between 0 and 1 and they all sum to 1.0",
+          "LIMITATIONS": "Known Limitations:\n    - This simulation only works for the color of precipitates. It is not intended to be used to predict solution color.\n    - Only a maximum of three (3) colors can be mixed.\n    - The fractions will be rounded to two decimal places before the simulation.\n    - The returned color name is an approximate close match to the actual color of the mixture and might not be an exact match."
+        },
+        "args": [
+          {
+            "name": "mixture",
+            "type": "list[tuple[str, float]]"
+          }
+        ],
+        "returns": "str",
+        "code": "def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:\n    if len(mixture) > 3:\n        raise ValueError(f\"Attempted to mix {len(mixture)} colors. Up to 3 colors can be mixed.\")\n    \n    try:\n        hex_mixture = []\n        for name, frac in mixture:\n            hex = PALETTE[name]\n            hex_mixture.append((hex, round(frac, 2)))\n    except KeyError:\n        raise ValueError(f\"Undefined color name: {name}\")\n    \n    result_hex = mix_colors(hex_mixture)\n    return closest_color_names(result_hex, mode='precipitate', max_names=1)"
+      },
+      {
+        "name": "get_available_reagents",
+        "sections": {
+          "BRIEF": "Returns the list of available reagent solutions.",
+          "DETAILED": "Returns a string where each reagent appears on a separate line. Each line contains the reagent's label as well as its composition.",
+          "PROCEDURAL": "When to use this tool:\n    - Usually called in the beginning of a task to know all of the possible reagents available (if any) to solve the task.\n    - If you want to perform a certain test and need a specific known solution, you can use this tool to check if that is available as a reagent.\n    - You can use this tool to get the exact concentration of the components in the reagent solutions.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  None. \n    2.  Use this tool to get the full list of available reagents to use during the task. \n    3.  You can perform any tests you wish by mixing the samples with the reagents using tools such as `mix_two_solutions` and `add_solution`.",
+          "CONTEXTUAL": "How this tool works:\n    - This tool does not perform any tests; it simply returns the full list of available reagents.\n    - Each reagent appears on a separate line.\n    - Each reagent is represented by its \"reagent label\" and its \"composition\".\n    - The \"reagent label\" is the label to use when calling tools such as `mix_two_solutions`, `add_solution`, or `add_precipitate_to_solution`.\n    - There is no limit on the amount of available reagent solutions, as opposed to sample solutions.",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `get_available_reagents()`,\n    ]",
+          "RETURNS_BRIEF": "a string containing all available reagents",
+          "RETURNS_DETAILED": "a string where each available reagent appears on a separate line and is represented by \"reagent label\" and \"composition\". If no additional reagents are available in the tasks, it will be mentioned by this tool.",
+          "RETURNS_EXAMPLES": "\"reagent label: HCl(0.02M)     composition: HCl 0.02 M, in water\nreagent label: KOH(6M)     composition: KOH 6.0 M, in water\n...\"",
+          "RAISES": "Exceptions:\n        None:\n             This tool does not raise exceptions under normal usage. \n             N/A \n             N/A",
+          "LIMITATIONS": "Known Limitations:\n    - This tool does not perform any tests; it simply returns the full list of available reagents.\n    - All reagent solutions are at room temperature; there are no ways to heat up or cool down the reagents."
+        },
+        "args": [
+          {
+            "name": "compositions",
+            "type": ""
+          }
+        ],
+        "returns": "str",
+        "code": "def get_available_reagents(compositions) -> str:\n    reagent_descriptions = [f\"reagent label: {k}     composition: {v.description}\" for k,v in compositions.items() if type(v)==StockSolution]\n    if len(reagent_descriptions)==0:\n        return \"There are no external reagents available.\"\n    else:\n        note = \"NOTE: All reagent solutions are made with distilled water.\\n\"\n        return note + '\\n'.join(reagent_descriptions)"
+      },
+      {
+        "name": "mix_two_solutions",
+        "sections": {
+          "BRIEF": "Mixes two solutions with the given volumes an returns observations about precipitation and color of the resulting solution",
+          "DETAILED": "Mixes the two solutions (which must not contain any precipitates) with the given volumes (in mL) and reports observations about color change or precipitate formation. It also adds the resulting solution to the Inventory and labels it `test_label`",
+          "PROCEDURAL": "When to use this tool:\n    - This tool lets you perform chemical tests and observe color changes and precipitate formations.\n    - Use this tool when you want to mix two solutions with specific volumes and neither of them contain any precipitates.\n    - This tool can be used to add a certain volume of a reagent to a certain volume of the sample solution or solutions from previous tests.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Make sure that `sol1_label` and `sol2_label` both point to reagents or solutions in the Inventory and that neither of them contain a precipitate. If a solution has precipitation, filter it using the `filter_solution` tool.  \n    2.  Use this tool to mix the solutions and add the new resulting solution to the Inventory. Notice the reported observations. \n    3.  You can use your chosen `test_label` to refer to this solution when performing further tests. Sometimes for a given color change or precipitation to happen, you need to add more of one of the initial solutions, in that case you can use the `add_a_solution` tool. If the test resulted in the formation of a precipitate, you can either add other solutions to the mixture using the `add_a_solution` tool or filter the precipitate using the `filter_solution` tool. You can also lookup the color of precipitates by calling the `lookup_precipitates_color` tool. If you have a hypothesis about the composition of the formed precipitate you can try to check your hypothesis using the `simulate_color_mixture` tool.",
+          "CONTEXTUAL": "How this tool works:\n    - It draws `sol1_vol` mL from `sol1_label`.\n    - It draws `sol2_vol` mL from `sol2_label`.\n    - Mixes the drawn volumes together in a new empty container labeled `test_label` and stirs until equilibrium is reached, at room temperature.\n    - The resulting mixture is then added to the Inventory with the label `test_label`.\n    - It returns two observations on two separate lines: one for the formation of precipitates (if any) and one for the color of the resulting solution.\n    - Sometimes it is possible that the resulting precipitate's color can be described using more than one color name. In those cases the different given names will be separated by a slash '/'.\n    - Remember that the reported colors are qualitative and approximate.",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `mix_two_solutions(test_label=\"test_1\", sol1_label=\"HCl(1M)\", sol1_vol=5, sol2_label=\"sample\", sol2_vol=5)`, # mixing 5 mL of the reagent 'HCl(1M)' and 5 mL of 'sample', labeling the result as 'test_1'\n        `mix_two_solutions(test_label=\"test_2_iodide\", sol1_label=\"test_1\", sol1_vol=3, sol2_label=\"NH4I\", sol2_vol=2)`, # mixing 3 mL of 'test_1' and 2 mL of the reagent 'NH4I', labeling the result as 'test_2_iodide'\n        `mix_two_solutions(test_label=\"A_B\", sol1_label=\"sample_A\", sol1_vol=5, sol2_label=\"sample_B\", sol2_vol=5)`, # mixing 10 mL of 'sample_A' and 10 mL of 'sample_B', labeling the result as 'A_B'\n        `mix_two_solutions(test_label=\"A_B_HCl\", sol1_label=\"A_B\", sol1_vol=2, sol2_label=\"HCl(6M)\", sol2_vol=1)`, # mixing 10 mL of 'A_B' and 2 mL of the reagent 'HCl(6M)', labeling the result as 'A_B_HCl'\n        `mix_two_solutions(test_label=\"sample_buffer\", sol1_label=\"sample\", sol1_vol=3, sol2_label=\"BUFFER_9\", sol2_vol=5)`, # mixing 3 mL of 'sample' and 5 mL of the reagent 'BUFFER_9', labeling the result as 'sample_buffer'\n    ]",
+          "ARGS_BRIEF": "volume of the second solution to draw",
+          "ARGS_DETAILED": "the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL.",
+          "ARGS_SYNTACTICAL": "integer value",
+          "ARGS_EXAMPLES": "`1`, `2`, `4`",
+          "RETURNS_BRIEF": "a string containing the observations from the test",
+          "RETURNS_DETAILED": "a string containing two lines where the first line is an observation about the formation (or lack thereof) of precipitates and its color and the second line is about the color of the resulting solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes.",
+          "RETURNS_EXAMPLES": "\"No precipitate forms.\nThe resulting solution is colorless.\", \"A precipitate forms. Color: black\nThe supernatant solution is pale yellow.\"",
+          "RAISES": "Exceptions:\n        KeyError:  When `sol1_label` or `sol2_label` is invalid \n                   The given `sol1_label` or `sol2_label` was not found in the Inventory \n                   Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        RuntimeError:  When `sol1_label` or `sol2_label` is not a solution \n                       The given `sol1_label` or `sol2_label` was found in the Inventory but the object it points to is not a solution. \n                       Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        ValueError:  When `sol1_vol` or `sol2_vol` is not a positive integer greater than or equal to 1 \n                     The given `sol1_vol` or `sol2_vol` is not an integer or it is less than 1 mL \n                     Make sure you use at least 1 mL of each solution \n        \n        VolumeError:  When `sol1_label` or `sol2_label` contain precipitates or the remaining volume is less than the requested amount \n                      The given `sol1_label` or `sol2_label` was found in the Inventory and it is a solution but it either contains a precipitate or there is not enough of it remaining \n                      If the solution contains a precipitate, either filter it using the `filter_solution` tool, or use the `add_a_solution` tool if the presence of the precipitate is necessary for the test. If the remaining amount of solution is less that the requested amount, try doing the test will a smaller volume if possible, or make more of that solution by repeating the steps that lead to it.",
+          "LIMITATIONS": "Known Limitations:\n    - This tool only works when mixing clear solutions, meaning solutions that do not contain any precipitates.\n    - All solutions are at room temperature; there are no ways to heat up or cool down the solutions/reagents.\n    - The minimum allowed volume to draw is 1 mL.\n    - The reported colors are qualitative and approximate.\n    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than one compound co-precipitate at the same time, the color may be different from the color of pure precipitates.\n    - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.\n    - Sometimes a given change in color or precipitate formation needs more of one of the solutions to happen."
+        },
+        "args": [
+          {
+            "name": "compositions",
+            "type": ""
+          },
+          {
+            "name": "test_label",
+            "type": "str"
+          },
+          {
+            "name": "sol1_label",
+            "type": "str"
+          },
+          {
+            "name": "sol1_vol",
+            "type": "int"
+          },
+          {
+            "name": "sol2_label",
+            "type": "str"
+          },
+          {
+            "name": "sol2_vol",
+            "type": "int"
+          }
+        ],
+        "returns": "str",
+        "code": "def mix_two_solutions(compositions, test_label: str, sol1_label: str, sol1_vol: int, sol2_label: str,  sol2_vol: int) -> str:\n    try:\n        sol1 = compositions[sol1_label]\n    except KeyError as e:\n        raise KeyError(f\"Invalid sol1_label: {e}\")\n    \n    try:\n        sol2 = compositions[sol2_label]\n    except KeyError as e:\n        raise KeyError(f\"Invalid sol2_label: {e}\")\n\n    if not isinstance(sol1, StockSolution):\n        raise RuntimeError(f\"{sol1_label} is not a solution!\")\n    if not isinstance(sol2, StockSolution):\n        raise RuntimeError(f\"{sol2_label} is not a solution!\")\n    \n    if type(sol1_vol) != int or sol1_vol<1:\n        raise ValueError(\"sol1_vol must be a positive integer greater than or equal to 1\")\n    if type(sol2_vol) != int or sol2_vol<1:\n        raise ValueError(\"sol2_vol must be a positive integer greater than or equal to 1\")\n    \n    test = sol1_vol * sol1 + sol2_vol * sol2\n    description = f\"{int(sol1_vol)} mL {sol1_label} + {int(sol2_vol)} mL {sol2_label}\"\n    test.description = description\n    test.equilibrate()\n    compositions[test_label] = test\n\n    observations = []\n\n    #precipitate observation\n    if test.has_precipitate:\n        prec_colors = test.precipitate.color_name\n        tiny = \"tiny amount of \" if (1000 * test.precipitate.total_mol / test.volume < 5e-4) else \"\" # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.\n        observations.append(f\"A {tiny}precipitate forms. Color: {prec_colors}\")\n    else:\n        observations.append(\"No precipitate forms.\")\n    \n    #solution observation\n    sol_color = test.color_name\n    if test.has_precipitate:\n        observations.append(f\"The supernatant solution is {sol_color}.\")\n    else:\n        observations.append(f\"The resulting solution is {sol_color}.\")\n\n    return '\\n'.join(observations)"
+      },
+      {
+        "name": "add_a_solution",
+        "sections": {
+          "BRIEF": "Adds a specific volume of `sol2_label` to all of `sol1_label` and returns observations about the changes of solution color and precipitation amount and color.",
+          "DETAILED": "Add the given volumes (in mL) of `sol2_label` (which must not contain any precipitates) to the remaining volume of `sol1_label` (which can have precipitates) and reports observations about color change or precipitate formation/dissolution. It also adds the resulting solution to the Inventory and labels it `test_label`.",
+          "PROCEDURAL": "When to use this tool:\n    - This tool lets you perform chemical tests and observe color changes and precipitate formations/dissolutions.\n    - Use this tool when you want to mix two solutions and one of them (sol1) contains a precipitate.\n    - This tool can be used to add a certain volume of a reagent or a clear solution to the remaining amount of another solution (which can also contain precipitates).\n    - You can also use this tool to keep adding more of the same solution to a host solution (sol1).\n    - Use this tool when you want to test wether the color or amount of an existing precipitate in a solution would change by adding another solution to it.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  If you used the `mix_two_solutions` tool and want to keep adding more of one of the solutions, you can use this tool. You can also use this tool if a previous test resulted in the formation of precipitate and you want to perform further tests on the resulting mixture.  \n    2.  Use this tool to add the given volume of sol2 to the whole remaining amount sol1. Notice the reported observations. \n    3.  You can use your chosen `test_label` to refer to the resulting solution when performing further tests. If the test resulted in the formation of a precipitate, you can either add other solutions to the mixture by calling this tool again or filter the precipitate using the `filter_solution` tool. You can also lookup the color of precipitates by calling the `lookup_precipitates_color` tool. If you have a hypothesis about the color change of a pre-existing precipitate you can try to check your hypothesis using the `simulate_color_mixture` tool.",
+          "CONTEXTUAL": "How this tool works:\n    - It draws `sol2_vol` mL from `sol2_label`.\n    - Adds it to the same container as `sol1_label`, and stirs the contents until equilibrium is reached, at room temperature.\n    - The remaining volume of `sol1_label` is set to 0 mL in the Inventory. The new solution is labeled `test_label` and is added to the Inventory.\n    - It returns two observations on two separate lines: one about the change in the color and the amount of precipitates (if any) and one about the change in the color of the solution.\n    - The reference for observations about the change in solution color is `sol1_label`.\n    - When an observation mentions partial dissolution, it roughly means that somewhere between 15% to 50% of the original precipitate has dissolved.\n    - When an observation mentions that a precipitate has mostly dissolved, it means that more than 50% of it has dissolved but there is still some undissolved precipitate remaining.\n    - Sometimes it is possible that the precipitate's color can be described using more than one color name. In those cases the different given names will be separated by a slash '/'.\n    - Remember that the reported colors are qualitative and approximate.",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `add_a_solution(test_label=\"test_2B\", sol1_label=\"test_2A\", sol2_label=\"HCl(0.02M)\", sol2_vol=1)`, # adding 1 mL of the reagent 'HCl(0.02M)' to 'test_2A', labeling the result as 'test_2B'\n        `add_a_solution(test_label=\"A_B_HCl\", sol1_label=\"A_B\", sol2_label=\"HCl(6M)\", sol2_vol=5)`, # adding 5 mL of the reagent 'HCl(6M)' to 'A_B', labeling the result as 'A_B_HCl'\n        `add_a_solution(test_label=\"test_3\", sol1_label=\"test_1\", sol2_label=\"test_2\", sol2_vol=2)`, # adding 2 mL of 'test_2' to 'test_1', labeling the result as 'test_3'\n        `add_a_solution(test_label=\"test4_excess_KOH\", sol1_label=\"test3_KOH\", sol2_label=\"KOH(6M)\", sol2_vol=2)`, # adding 2 mL of the reagent 'KOH(6M)' to 'test3_KOH', labeling the result as 'test4_excess_KOH'\n        `add_a_solution(test_label=\"test5_more_NH3\", sol1_label=\"test4_NH3\", sol2_label=\"NH3(1M)\", sol2_vol=5)`, # adding 5 mL of the reagent 'NH3(1M)' to 'test4_NH3', labeling the result as 'test4_more_NH3'\n    ]",
+          "ARGS_BRIEF": "volume of the second solution to draw",
+          "ARGS_DETAILED": "the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL",
+          "ARGS_SYNTACTICAL": "integer value",
+          "ARGS_EXAMPLES": "`1`, `2`, `4`",
+          "RETURNS_BRIEF": "a string containing the observations from the test",
+          "RETURNS_DETAILED": "a string containing two lines where the first line is an observation about the formation/color change (or lack thereof) of precipitates, and the second line is about any color change of the supernatant solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes.",
+          "RETURNS_EXAMPLES": "\"The amount and color of the existing precipitate does not noticeably change.\nColor of the supernatant solution changes to very pale blue.\" , \"The existing precipitate partially dissolves and changes color. New color: maroon / reddish brown.\nColor of the supernatant solution does not noticeably change.\"",
+          "RAISES": "Exceptions:\n        KeyError:  When `sol1_label` or `sol2_label` is invalid \n                   The given `sol1_label` or `sol2_label` was not found in the Inventory \n                   Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        RuntimeError:  When `sol1_label` or `sol2_label` is not a solution \n                       The given `sol1_label` or `sol2_label` was found in the Inventory but the object it points to is not a solution. \n                       Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        ValueError:  When `sol2_vol` is not a positive integer greater than or equal to 1 \n                     The given `sol2_vol` is not an integer or it is less than 1 mL \n                     Make sure you are adding at least 1 mL of the second solution \n        \n        VolumeError:  When `sol2_label` contains a precipitate or its remaining volume is less than the requested amount \n                      The given `sol2_label` was found in the Inventory and it is a solution but it either contains a precipitate or there is not enough of it remaining \n                      If the second solution contains a precipitate, filter it using the `filter_solution` tool. If the remaining amount of it is less that the requested amount, try doing the test will a smaller `sol2_vol` if possible, or make more of that solution by repeating the steps that lead to it.",
+          "LIMITATIONS": "Known Limitations:\n    - The host solution (sol1) may contain precipitates but the second solution (sol2, the one being added) cannot contain any precipitates.\n    - All solutions are at room temperature; there are no ways to heat up or cool down the solutions/reagents.\n    - The minimum allowed volume for the second solution is 1 mL.\n    - The reported colors are qualitative and approximate.\n    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than one compound co-precipitate at the same time, the color may be different from the color of pure precipitates.\n    - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.\n    - Any observations mentioning that an existing precipitate \"partially\" or \"mostly\" dissolves are qualitative and approximate statements."
+        },
+        "args": [
+          {
+            "name": "compositions",
+            "type": ""
+          },
+          {
+            "name": "test_label",
+            "type": "str"
+          },
+          {
+            "name": "sol1_label",
+            "type": "str"
+          },
+          {
+            "name": "sol2_label",
+            "type": "str"
+          },
+          {
+            "name": "sol2_vol",
+            "type": "int"
+          }
+        ],
+        "returns": "str",
+        "code": "def add_a_solution(compositions, test_label: str, sol1_label: str, sol2_label: str,  sol2_vol: int) -> str:\n    try:\n        sol1 = compositions[sol1_label]\n    except KeyError as e:\n        raise KeyError(f\"Invalid sol1_label: {e}\")\n\n    if type(sol1) != Solution:\n        raise RuntimeError(f\"{sol1_label} is not a valid solution!\")\n    \n    if sol1.volume == 0:\n        raise VolumeError(f\"The remaining volume of {sol1_label} is zero!\")\n    \n    try:\n        sol2 = compositions[sol2_label]\n    except KeyError as e:\n        raise KeyError(f\"Invalid sol2_label: {e}\")\n    \n    if not isinstance(sol2, StockSolution):\n        raise RuntimeError(f\"{sol2_label} is not a solution!\")\n    \n    if type(sol2_vol) != int or sol2_vol<1:\n        raise ValueError(\"sol2_vol must be a positive integer greater than or equal to 1\")\n    \n    description = f\"{int(sol1.volume)} mL {sol1_label} + {int(sol2_vol)} mL {sol2_label}\"\n\n    old_supernatant, old_precipitate = sol1.filter()\n    old_sol_color = sol1.color_name\n\n    test = sol1 + sol2_vol * sol2\n    test.description = description\n    test.equilibrate()\n    compositions[test_label] = test\n\n    observations = []\n\n    #precipitate observation\n    if old_precipitate is None:\n        if test.has_precipitate:\n            prec_colors = test.precipitate.color_name\n            tiny = \"tiny amount of \"  if (1000 * test.precipitate.total_mol / test.volume < 5e-4) else \"\" # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.\n            observations.append(f\"A {tiny}precipitate forms. Color: {prec_colors}\")\n        else:\n            observations.append(\"No precipitate forms.\")\n    \n    else:\n        old_amount = old_precipitate.total_mol\n        old_color = old_precipitate.color_name\n\n        if test.has_precipitate:\n            new_amount = test.precipitate.total_mol\n            new_color = test.precipitate.color_name\n            # if there is at least one shared color name between the old and new color, we add a \"slightly\" modifier \n            old_color_set = set(old_color.split(' / '))\n            new_color_set = set(new_color.split(' / '))\n            shared_colors = old_color_set.intersection(new_color_set)\n            slightly = \"slightly \" if len(shared_colors)>0 else \"\"\n            \n            precipitate_ratio = new_amount / old_amount \n\n            # checking if a new precipitate was formed\n            test_no_prec = old_supernatant + sol2_vol * sol2.clone() # .clone() is used to prevent the volume of sol2 from decreasing twice\n            test_no_prec.equilibrate()\n\n            if test_no_prec.has_precipitate:\n                additional_color = test_no_prec.precipitate.color_name\n                tiny = \"tiny amount of \"  if (1000 * test_no_prec.precipitate.total_mol / test.volume < 5e-4) else \"\" # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.\n                if additional_color == old_color:\n                    observations.append(f\"A {tiny}precipitate with the same color as the existing precipitate forms.\")\n                elif new_color == old_color: \n                    observations.append(f\"A {tiny}new precipitate (color: {additional_color}) forms, but does not cause the color of the existing precipitate to noticeably change.\")\n                else:\n                    observations.append(f\"A {tiny}new precipitate (color: {additional_color}) forms, mixing with the existing precipitate causing it to {slightly}change color. New color: {new_color}.\")\n            \n            elif 0.85 < precipitate_ratio : # we assume that a change of less than 15% will not be noticeable\n                if new_color == old_color:\n                    observations.append(\"The amount and color of the existing precipitate does not noticeably change.\")\n                else:\n                    observations.append(f\"The amount of the existing precipitate does not noticeably change, but its color {slightly}changes. New color: {new_color}.\")\n\n            elif 0.5 <= precipitate_ratio <= 0.85 : # we will call a change of 15 to 50% 'partial dissolution'\n                if new_color == old_color:\n                    observations.append(\"The existing precipitate partially dissolves. Its color does not noticeably change.\")\n                else:\n                    observations.append(f\"The existing precipitate partially dissolves and {slightly}changes color. New color: {new_color}.\")\n            \n            else: # meaning precipitate_ratio < 0.5\n                if new_color == old_color:\n                    observations.append(\"The existing precipitate mostly (but not fully) dissolves. Its color does not noticeably change.\")\n                else:\n                    observations.append(f\"The existing precipitate mostly (but not fully) dissolves and {slightly}changes color. New color: {new_color}.\")\n\n        else:\n            observations.append(f\"The existing precipitate fully dissolves.\")\n\n\n    #solution observation\n    new_sol_color = test.color_name\n    if new_sol_color == old_sol_color:\n        if test.has_precipitate:\n            observations.append(\"Color of the supernatant solution does not noticeably change.\")\n        else:\n            observations.append(\"Color of the solution does not noticeably change.\")\n    \n    else:\n        if test.has_precipitate:\n            observations.append(f\"Color of the supernatant solution changes to {new_sol_color}.\")\n        else:\n            observations.append(f\"Color of the solution changes to {new_sol_color}.\")\n\n    return '\\n'.join(observations)"
+      },
+      {
+        "name": "filter_solution",
+        "sections": {
+          "BRIEF": "Separates the precipitate from the supernatant solution.",
+          "DETAILED": "Filters a solution, separating the precipitate from the supernatant solution, and adds the resulting filtrate and the precipitate to the Inventory.",
+          "PROCEDURAL": "When to use this tool:\n- Use this tool when you want to remove the existing precipitate from a solution to perform further tests on only the supernatant \n- Use this tool to collect the newly formed precipitate in a test if you want to perform further tests on the precipitate only",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  If performing a test using tools such as `mix_two_solutions` or `add_a_solution` result in the formation of a precipitate and you want to perform other tests only on the supernatant solution or the newly formed precipitate, you can use this tool two separate the two phases. \n2.  Use this tool to separate the supernatant and the precipitate. \n3.  You can perform further tests on the supernatant by calling tools like `mix_two_solutions` or `add_a_solution`. You can perform further tests on the precipitate by adding it to a solution using the `add_precipitate_to_solution` tool.",
+          "CONTEXTUAL": "How this tool works:\n- It separates the aqueous phase and the solid phase from the `label`, and removes it from the inventory.\n- The supernatant is added to the Inventory, with the original label appended by '_filtrate'.\n- The precipitate is added to the Inventory, with the original label appended by '_precipitate'.",
+          "SYNTACTICAL": "Usage examples:\n[\n    `filter_solution(label=\"test_2B\")`, # 'test_2B' is removed from the Inventory and is replaced by 'test_2B_filtrate' and 'test_2B_precipitate'\n    `filter_solution(label=\"test3_HCl\")`, # 'test_HCl' is removed from the Inventory and is replaced by 'test3_HCl_filtrate' and 'test3_HCl_precipitate'\n    `filter_solution(label=\"test_2A_H2S\")`, # 'test_2A_H2S' is removed from the Inventory and is replaced by 'test_2A_H2S_filtrate' and 'test_2A_H2S_precipitate'\n    `filter_solution(label=\"test2_filtrate_NH4I\")`, # 'test2_filtrate_NH4I' is removed from the Inventory and is replaced by 'test2_filtrate_NH4I_filtrate' and 'test2_filtrate_NH4I_precipitate'\n    `filter_solution(label=\"test1_precipitate_NH3\")`, # 'test1_precipitate_NH3' is removed from the Inventory and is replaced by 'test1_precipitate_NH3_filtrate' and 'test1_precipitate_NH3_precipitate'\n]",
+          "ARGS_BRIEF": "label of the target solution",
+          "ARGS_DETAILED": "the label given to the solution being filtered. This label is appended by '_filtrate' or '_precipitate' to refer to the separated phases.",
+          "ARGS_SYNTACTICAL": "label of unfiltered solutions does not end with \"_filtrate\"",
+          "ARGS_EXAMPLES": "\"test1_HCl\", \"test_NH3_filt_iodide\"",
+          "RETURNS_BRIEF": "a string with a message about the success/failure of the filtration",
+          "RETURNS_DETAILED": "if the solution does not contain a precipitate",
+          "RETURNS_EXAMPLES": "\"The solution was successfully filtered! The filtrate and precipitate are added to the Inventory.\" , \"The target solution has no precipitate to filter! No change was made to the Inventory.\"",
+          "RAISES": "Exceptions:\n    KeyError:  When `label` is invalid \n               The given `label` was not found in the Inventory \n               Make sure you are passing the correct label. You can use the `check_inventory` tool. \n    \n    RuntimeError:  When `label` is a reagent solution or a precipitate \n                   The given `label` was found in the Inventory but the object it points to is either a precipitate or a reagent solution \n                   Make sure you are passing the correct label. You can use the `check_inventory` tool.",
+          "LIMITATIONS": "Known Limitations:\n- Reagent solutions cannot be filtered."
+        },
+        "args": [
+          {
+            "name": "compositions",
+            "type": ""
+          },
+          {
+            "name": "label",
+            "type": "str"
+          }
+        ],
+        "returns": "str",
+        "code": "def filter_solution(compositions, label: str) -> str:\n    try:\n        target = compositions[label]\n    except KeyError as e:\n        raise KeyError(f\"Invalid label: {e}\")\n    \n    if type(target) == StockSolution:\n        raise RuntimeError(\"The target solution is a reagent and cannot be filtered.\")\n    elif type(target) == Precipitate:\n        raise RuntimeError(f\"The object with label {label} is not a solution, it's a precipitate!\")\n    else:\n        assert type(target) == Solution\n        if target.has_precipitate:\n            filtrate, precipitate = target.filter()\n            filtrate.description = target.description + \" --> filtered\"\n            precipitate.description = target.description + \" --> precipitate collected\"\n            \n            filt_label = label + \"_filtrate\"\n            prec_label = label + \"_precipitate\"\n            compositions[filt_label] = filtrate\n            compositions[prec_label] = precipitate\n            compositions.pop(label)\n            return \"The solution was successfully filtered! The filtrate and precipitate are added to the Inventory.\"\n        \n        else:\n            return \"The target solution has no visible precipitate to filter! No change was made to the Inventory.\""
+      },
+      {
+        "name": "add_precipitate_to_solution",
+        "sections": {
+          "BRIEF": "Adds a precipitate to a specific volume of a solution and returns observations about the changes in the amount/color of the added precipitate or the solution color.",
+          "DETAILED": "Draws `sol_vol` mL of `sol_label` (which must not contain any precipitates), adds to it all of the precipitate `prec_label` and reports observations about any changes in the color or the amount of the added precipitate and any color changes in the solution. It also adds the resulting solution to the Inventory and labels it `test_label`.",
+          "PROCEDURAL": "When to use this tool:\n    - This tool lets you perform chemical tests on the filtered precipitates.\n    - Use this tool when you want to add the filtered precipitate from a previous test to another solution.\n    - Use this tool to test if a precipitate dissolves in another solution or causes any other observable change in that solution.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  You need to have a separated precipitate in the Inventory before calling this tool. Separate the precipitates by using the `filter_solution` tool. \n    2.  Use this tool to add the precipitate to a given volume of the solution. It's better to choose the known reagents as the solution. \n    3.  You can use your chosen `test_label` to refer to the resulting solution when performing further tests. If the added precipitate does not fully dissolve, you can add other solutions to the mixture by calling the `add_a_solution` tool or filter the precipitate again using the `filter_solution` tool. If the added precipitate fully dissolves, you can perform further tests on the resulting solution by calling tools such as `measure_pH`, `mix_two_solutions`, `add_a_solution` or `perform_flame_test`.",
+          "CONTEXTUAL": "How this tool works:\n    - It draws `sol_vol` mL from `sol_label`.\n    - Adds it to a new empty container labeled `test_label`.\n    - Adds all of the precipitate labeled `prec_label` to the container and stirs the mixture until equilibrium is reached, at room temperature. \n    - The resulting mixture is added to the Inventory with the label `test_label`.\n    - It returns two observations on two separate lines: one about the change in the color and the amount of the added precipitate, and one about the change in the color of the supernatant solution.\n    - The reference for observations about the change in solution color is `sol_label`.\n    - When an observation mentions partial dissolution, it roughly means that about 20-50% of the added precipitate has dissolved.\n    - When an observation mentions that a precipitate has mostly dissolved, it means that more than 50% of it has dissolved but there is still some undissolved precipitate remaining.\n    - Sometimes it is possible that the precipitate's color can be described using more than one color name. In those cases the different given names will be separated by a slash '/'.\n    - Remember that the reported colors are qualitative and approximate.",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `add_precipitate_to_solution(test_label=\"test_3\", prec_label=\"test_2_precipitate\", sol_label=\"test_1\", sol_vol=4)`, # adding all of the precipitate 'test_2_precipitate' to 4 mL of the solution 'test_1', labeling the result as 'test_3'\n        `add_precipitate_to_solution(test_label=\"prec3_HCl\", prec_label=\"test3_precipitate\", sol_label=\"HCl(1M)\", sol_vol=5)`, # adding all of the precipitate 'test3_precipitate' to 5 mL of the reagent solution 'HCl(1M)', labeling the result as 'prec2_HCl'\n        `add_precipitate_to_solution(test_label=\"filt4_ppt1\", prec_label=\"test1_precipitate\", sol_label=\"test4_K2CrO4_filtrate\", sol_vol=10)`, # adding all of the precipitate 'test1_precipitate' to 10 mL of the solution 'test4_K2CrO4_filtrate', labeling the result as 'filt4_ppt1'\n        `add_precipitate_to_solution(test_label=\"test2_ppt_NH3\", prec_label=\"test2_precipitate\", sol_label=\"NH3(5M)\", sol_vol=4)`, # adding all of the precipitate 'test2_precipitate' to 4 mL of the reagent solution 'NH3(5M)', labeling the result as 'test2_ppt_NH3'\n        `add_precipitate_to_solution(test_label=\"Ba_precipitate_HNO3\", prec_label=\"test1_Ba_precipitate\", sol_label=\"HNO3(1M)\", sol_vol=10)`, # adding all of the precipitate 'test1_Ba_precipitate' to 10 mL of the reagent solution 'HNO3(1M)', labeling the result as 'Ba_precipitate_HNO3'\n    ]",
+          "ARGS_BRIEF": "volume of the solution",
+          "ARGS_DETAILED": "the volume (in mL) of the host solution, labeled `sol_label`. This volume will be drawn from the solution and the precipitate is then added to the drawn volume. The minimum allowed volume is 4 mL",
+          "ARGS_SYNTACTICAL": "integer value",
+          "ARGS_EXAMPLES": "`1`, `2`, `4`",
+          "RETURNS_BRIEF": "a string containing the observations from the test",
+          "RETURNS_DETAILED": "a string containing two lines where the first line is an observation about any changes in the color or the amount of the added precipitate, and the second line is about any color changes of the supernatant solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes.",
+          "RETURNS_EXAMPLES": "\"The added precipitate partially dissolves. Its color does not noticeably change.\nColor of the supernatant solution changes to very pale blue.\" , \"The added precipitate fully dissolves.\nColor of the supernatant solution does not noticeably change.\"",
+          "RAISES": "Exceptions:\n        KeyError:  When `sol_label` or `prec_label` is invalid \n                   The given `sol_label` or `prec_label` was not found in the Inventory \n                   Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        RuntimeError:  When `sol_label` is not a solution or `prec_label` is not a precipitate \n                       The given `sol_label` and `prec_label` were found in the Inventory but the do not point to the correct type of object \n                       Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        ValueError:  When `sol_vol` is invalid \n                     The given `sol_vol` is not an integer greater than or equal to 4 mL \n                     Make sure you are using at least 4 mL of the solution and passing it as an integer value \n        \n        VolumeError:  When `sol_label` contains a precipitate or its remaining volume is less than the requested amount \n                      The given `sol_label` was found in the Inventory and it is a solution but it either contains a precipitate or there is not enough of it remaining \n                      If the solution contains a precipitate, filter it using the `filter_solution` tool. If the remaining amount of it is less that the requested amount, try doing the test will a smaller `sol_vol` if possible, or make more of that solution by repeating the steps that lead to it.",
+          "LIMITATIONS": "Known Limitations:\n    - The solution may not contain any precipitates.\n    - All solutions are at room temperature; there are no ways to heat up or cool down the solutions/reagents.\n    - The minimum allowed volume for the solution is 4 mL.\n    - The reported colors are qualitative and approximate.\n    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than one compound co-precipitate at the same time, the color may be different from the color of pure precipitates.\n    - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.\n    - Any observations mentioning that the added precipitate \"partially\" or \"mostly\" dissolves are qualitative and approximate statements.\n    - In some cases it is possible that the chemical identity of the added precipitate change without any noticeable effects on its color or the color of the solution."
+        },
+        "args": [
+          {
+            "name": "compositions",
+            "type": ""
+          },
+          {
+            "name": "test_label",
+            "type": "str"
+          },
+          {
+            "name": "prec_label",
+            "type": "str"
+          },
+          {
+            "name": "sol_label",
+            "type": "str"
+          },
+          {
+            "name": "sol_vol",
+            "type": "int"
+          }
+        ],
+        "returns": "str",
+        "code": "def add_precipitate_to_solution(compositions, test_label: str, prec_label: str, sol_label: str,  sol_vol: int) -> str:\n    try:\n        prec = compositions[prec_label]\n    except KeyError as e:\n        raise KeyError(f\"Invalid prec_label: {e}\")\n    \n    try:\n        sol = compositions[sol_label]\n    except KeyError as e:\n        raise KeyError(f\"Invalid sol_label: {e}\")\n    \n    if type(prec) != Precipitate:\n        raise RuntimeError(f\"{prec_label} is not a precipitate!\")\n    if type(sol) not in [Solution, StockSolution]:\n        raise RuntimeError(f\"{sol_label} is not a solution!\")\n    if type(sol) == Solution:\n        if sol.has_precipitate: \n            raise VolumeError(f\"{sol_label} already has a precipitate. If you want to add a different precipitate, you must filter it first!\")\n\n    if type(sol_vol) != int or sol_vol < 4:\n        raise ValueError(f\"`sol_vol` must be an integer greater than or equal to 4\")\n    \n    old_amount = prec.total_mol\n    old_color = prec.color_name\n\n    test = sol_vol * sol\n    test.equilibrate()\n    old_sol_color = test.color_name\n\n    test.add_solid(prec)\n    test.equilibrate()\n    test.description = f\"{int(sol_vol)} mL {sol_label} + {prec_label}\"\n\n    compositions[test_label] = test\n    compositions.pop(prec_label)\n\n    observations = []\n\n    #precipitate observation\n    if test.has_precipitate:\n        new_amount = test.precipitate.total_mol\n        new_color = test.precipitate.color_name\n        # if there is at least one shared color name between the old and new color, we add a \"slightly\" modifier \n        old_color_set = set(old_color.split(' / '))\n        new_color_set = set(new_color.split(' / '))\n        shared_colors = old_color_set.intersection(new_color_set)\n        slightly = \"slightly \" if len(shared_colors)>0 else \"\"\n        \n        precipitate_ratio = new_amount / old_amount \n\n        if 0.85 <=  precipitate_ratio : # we assume that a change of less than 15% will not be noticeable\n            if new_color == old_color:\n                observations.append(\"The amount and color of the added precipitate does not noticeably change.\")\n            else:\n                observations.append(f\"The amount of the added precipitate does not noticeably change, but its color {slightly}changes. New color: {new_color}\")\n\n        elif 0.50 <= precipitate_ratio < 0.85 : # we will call a change of 15 to 50% 'partial dissolution'\n            if new_color == old_color:\n                observations.append(\"The added precipitate partially dissolves. Its color does not noticeably change.\")\n            else:\n                observations.append(f\"The added precipitate partially dissolves and its color {slightly}changes. New color: {new_color}\")\n        \n        else:\n            if new_color == old_color:\n                observations.append(\"The added precipitate mostly (but not fully) dissolves. Its color does not noticeably change.\")\n            else:\n                observations.append(f\"The added precipitate mostly (but not fully) dissolves and its color {slightly}changes. New color: {new_color}\")\n\n    else:\n        observations.append(f\"The added precipitate fully dissolves.\")\n    \n    #solution observation\n    new_sol_color = test.color_name\n    if new_sol_color == old_sol_color:\n        if test.has_precipitate:\n            observations.append(\"Color of the supernatant solution does not noticeably change.\")\n        else:\n            observations.append(\"Color of the solution does not noticeably change.\")\n    \n    else:\n        if test.has_precipitate:\n            observations.append(f\"Color of the supernatant solution changes to {new_sol_color}.\")\n        else:\n            observations.append(f\"Color of the solution changes to {new_sol_color}.\")\n    \n    return '\\n'.join(observations)"
+      },
+      {
+        "name": "check_inventory",
+        "sections": {
+          "BRIEF": "Returns the current contents of the Inventory",
+          "DETAILED": "Returns a string containing the details of the solutions and precipitates in the Inventory, including their remaining volumes in mL",
+          "PROCEDURAL": "When to use this tool:\n    - Typically used in the beginning of a task to check the unknown samples.\n    - You can use this tool to check the Inventory, which is effectively a summary of the experiments performed so far. \n    - Use this tool to check the remaining volumes of the samples and test solutions.\n    - Use this tool to check the correct label of solutions and precipitates to use in other tools.",
+          "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  None. \n    2.  Use this tool to retrieve the full Inventory of solutions and filtered precipitates, including their remaining volumes in mL. \n    3.  Use the labels returned by this tool to call other tools. You can also use the returned Inventory as a summary of the experiments you have performed so far and decide what experiment you want to perform next.",
+          "CONTEXTUAL": "How this tool works:\n    - It returns the Inventory as a string, with each item printed on a separate line as a dictionary.\n    - Each line contains the details about a separate solution or precipitate in the Inventory.\n    - Solutions with a remaining volume of 0 mL are kept in the Inventory for record-keeping purposes.\n    - When a solution is filtered using the `filter_solution` tool, it is removed from the Inventory and is replaced by the filtrate and the collected precipitate.\n    - When a precipitate is added to a solution using the `add_precipitate_to_solution` tool, it is removed from the Inventory.\n    - Reagent solutions are not part of the Inventory, use the `get_available_reagents` tool to check the reagents.",
+          "SYNTACTICAL": "Usage examples:\n    [\n        `check_inventory()`,\n    ]",
+          "RETURNS_BRIEF": "a string containing the solutions and precipitates in the Inventory",
+          "RETURNS_DETAILED": "a string where each line represents a different item of the Inventory as a dictionary.",
+          "RETURNS_EXAMPLES": "\"{'label': 'sample', 'type': 'clear solution', 'description': 'unknown', 'remaining_volume': '11 mL'}\n{'label': 'test_1', 'type': 'clear solution', 'description': '9 mL sample + 1 mL HCl(1M)', 'remaining_volume': '0 mL'}\n{'label': 'test_2_filtrate', 'type': 'clear solution', 'description': '5 mL test_1 + 1 mL NH4I --> filtered', 'remaining_volume': '6 mL'}\n{'label': 'test_2_precipitate', 'type': 'precipitate', 'description': '5 mL test_1 + 1 mL NH4I --> precipitate collected'}\"",
+          "RAISES": "Exceptions:\n        None:\n             This tool does not raise exceptions under normal usage. \n             N/A \n             N/A",
+          "LIMITATIONS": "Known Limitations:\n        - Reagents are not shown by tool. Use the `get_available_reagents` tool to check the available reagents.\n        - This tool does not report the color if items, use the `checkout_color` tool to observe the color of a specific item.\n        - The observations made during an experiment involving an item are not stored in the Inventory."
+        },
+        "args": [
+          {
+            "name": "compositions",
+            "type": ""
+          }
+        ],
+        "returns": "str",
+        "code": "def check_inventory(compositions) -> str:\n    solution_descriptions = [\n        str({\n            \"label\": k, \n            \"type\": \"solution with precipitate\" if v.has_precipitate else \"clear solution\",\n            \"description\": v.description,\n            \"remaining_volume\": f\"{int(v.volume)} mL\",\n        })\n        for k,v in compositions.items() if isinstance(v, Solution)\n    ]\n    \n    precipitate_descriptions = [\n        str({\n            \"label\": k,\n            \"type\": \"precipitate\",\n            \"description\": v.description,\n        })\n        for k,v in compositions.items() if isinstance(v, Precipitate)\n    ]\n\n    return '\\n'.join(solution_descriptions + precipitate_descriptions)"
+      }
+    ],
+    "tasks": [
+      {
+        "_uid": "d55ff699-4150-4ab4-b291-cf5d263945c1",
+        "id": "qualysis_lvl1_01",
+        "name": "qualysis_lvl1_01",
+        "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "a49a92b9-b052-4efe-80c6-4b8a0b339103",
+        "id": "qualysis_lvl1_10",
+        "name": "qualysis_lvl1_10",
+        "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "20a5b7a8-0c24-4eae-a853-f30f9d2b17fa",
+        "id": "qualysis_lvl1_02",
+        "name": "qualysis_lvl1_02",
+        "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "e7cbaecd-c382-4543-b2c1-64275d36a3b2",
+        "id": "qualysis_lvl1_03",
+        "name": "qualysis_lvl1_03",
+        "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "01ea2fec-921b-470e-90b3-f8dbf5fefecd",
+        "id": "qualysis_lvl1_04",
+        "name": "qualysis_lvl1_04",
+        "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "307f4fac-929a-4867-8ace-2e56294f21bf",
+        "id": "qualysis_lvl1_05",
+        "name": "qualysis_lvl1_05",
+        "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "f7b54ebf-c2ce-4a19-9079-214fa3a53196",
+        "id": "qualysis_lvl1_06",
+        "name": "qualysis_lvl1_06",
+        "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "7e373b35-ccc9-4ca4-8224-7d038da147ad",
+        "id": "qualysis_lvl1_07",
+        "name": "qualysis_lvl1_07",
+        "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "01d8ede8-fd49-4fc1-ac09-7f551c149bd2",
+        "id": "qualysis_lvl1_08",
+        "name": "qualysis_lvl1_08",
+        "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "984bb995-82f5-4de5-846f-821bec254214",
+        "id": "qualysis_lvl1_09",
+        "name": "qualysis_lvl1_09",
+        "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "4a5ec677-83ed-467a-9bb4-2190c871e2ff",
+        "id": "qualysis_lvl2_01",
+        "name": "qualysis_lvl2_01",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "c52a878b-73e4-4228-8e2f-0b986afbf265",
+        "id": "qualysis_lvl2_10",
+        "name": "qualysis_lvl2_10",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "040c0583-fe01-4bc7-8f96-400d1dcc9ecd",
+        "id": "qualysis_lvl2_02",
+        "name": "qualysis_lvl2_02",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "736dac65-728e-4b0d-9e4f-32b97712f281",
+        "id": "qualysis_lvl2_03",
+        "name": "qualysis_lvl2_03",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "6bda107c-da21-4a03-9935-277374c1cdc3",
+        "id": "qualysis_lvl2_04",
+        "name": "qualysis_lvl2_04",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "abad2ec8-c405-4cf6-ab0b-a284cde89e9f",
+        "id": "qualysis_lvl2_05",
+        "name": "qualysis_lvl2_05",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "9a455c6f-6cd8-434a-a0ee-8d8962f77f69",
+        "id": "qualysis_lvl2_06",
+        "name": "qualysis_lvl2_06",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "9a2a5a5f-e41b-4a29-b4c4-fbabdffe0a25",
+        "id": "qualysis_lvl2_07",
+        "name": "qualysis_lvl2_07",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "3535f038-1067-448a-85a7-d497580c2185",
+        "id": "qualysis_lvl2_08",
+        "name": "qualysis_lvl2_08",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "4b4fc0ad-39a5-459b-835c-6c5a33297506",
+        "id": "qualysis_lvl2_09",
+        "name": "qualysis_lvl2_09",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "4c12bf10-40ae-444a-a31c-25c4ba772990",
+        "id": "qualysis_lvl3_01",
+        "name": "qualysis_lvl3_01",
+        "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "8bcbba08-8fae-41c0-b43f-dadedf084483",
+        "id": "qualysis_lvl3_10",
+        "name": "qualysis_lvl3_10",
+        "description": "You are given 20 mL of an unknown sample solution containing 5 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "fffe17f5-3349-4712-b2ed-791e3d4a4681",
+        "id": "qualysis_lvl3_02",
+        "name": "qualysis_lvl3_02",
+        "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "1f369536-3378-41b4-b4a0-b9ca8a232c9d",
+        "id": "qualysis_lvl3_03",
+        "name": "qualysis_lvl3_03",
+        "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "4c300fd4-5c0e-496e-8d09-4f1e815dd2b2",
+        "id": "qualysis_lvl3_04",
+        "name": "qualysis_lvl3_04",
+        "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "a698f611-f069-4c78-90e0-a7f38939724a",
+        "id": "qualysis_lvl3_05",
+        "name": "qualysis_lvl3_05",
+        "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "b42c4182-2316-483b-b390-f9ce7f1990b3",
+        "id": "qualysis_lvl3_06",
+        "name": "qualysis_lvl3_06",
+        "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "728e9cf3-e01e-4946-b52c-4912d07b132a",
+        "id": "qualysis_lvl3_07",
+        "name": "qualysis_lvl3_07",
+        "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "7a872e6d-b270-4578-afb9-f5928b8053e4",
+        "id": "qualysis_lvl3_08",
+        "name": "qualysis_lvl3_08",
+        "description": "You are given 20 mL of an unknown sample solution containing 5 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "39dd54e6-951f-43d5-85cf-afb9f5b5c78c",
+        "id": "qualysis_lvl3_09",
+        "name": "qualysis_lvl3_09",
+        "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      }
+    ],
+    "subtasks": [
+      {
+        "_uid": "b75b3e05-cffa-4173-a539-4cafc9b84834",
+        "id": "qualysis_lvl1_01_sub1",
+        "name": "qualysis_lvl1_01_sub1",
+        "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "6880b5f0-bf52-4e71-9c79-cae603f0e5a1",
+        "id": "qualysis_lvl1_01_sub2",
+        "name": "qualysis_lvl1_01_sub2",
+        "description": "If needed, perform further tests to identify the cation.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the cation in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "94f9f5a2-d55f-4d0f-aa64-7bf068eabf42",
+        "id": "qualysis_lvl1_01_sub3",
+        "name": "qualysis_lvl1_01_sub3",
+        "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+        "tools": [
+          "possible_anions",
+          "check_inventory",
+          "checkout_color",
+          "measure_pH"
+        ],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "51082021-1707-4a99-a920-4010c0f3c579",
+        "id": "qualysis_lvl1_01_sub4",
+        "name": "qualysis_lvl1_01_sub4",
+        "description": "If needed, perform further tests to identify the anion.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the anion in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "e094615e-c48c-430f-8e88-8c76e354cd24",
+        "id": "qualysis_lvl1_01_sub5",
+        "name": "qualysis_lvl1_01_sub5",
+        "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "404141d9-ad2f-40d0-aa18-bbe4ccc03086",
+        "id": "qualysis_lvl1_10_sub1",
+        "name": "qualysis_lvl1_10_sub1",
+        "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "3ad3f371-71cf-4d6b-be67-b39676ce91ff",
+        "id": "qualysis_lvl1_10_sub2",
+        "name": "qualysis_lvl1_10_sub2",
+        "description": "If needed, perform further tests to identify the cation.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the cation in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "41f1fb87-3ce7-4dd0-a115-514a0461754a",
+        "id": "qualysis_lvl1_10_sub3",
+        "name": "qualysis_lvl1_10_sub3",
+        "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+        "tools": [
+          "possible_anions",
+          "check_inventory",
+          "checkout_color",
+          "measure_pH"
+        ],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "582bf300-76a5-49e5-801a-b40e22ff40bd",
+        "id": "qualysis_lvl1_10_sub4",
+        "name": "qualysis_lvl1_10_sub4",
+        "description": "If needed, perform further tests to identify the anion.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the anion in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "86e7569c-027d-465f-bb49-4691340b91aa",
+        "id": "qualysis_lvl1_10_sub5",
+        "name": "qualysis_lvl1_10_sub5",
+        "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "46e56395-e0bc-4a3c-8373-3875ba59741a",
+        "id": "qualysis_lvl1_02_sub1",
+        "name": "qualysis_lvl1_02_sub1",
+        "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "028023b8-ba2b-4940-ba73-abe5284af8f0",
+        "id": "qualysis_lvl1_02_sub2",
+        "name": "qualysis_lvl1_02_sub2",
+        "description": "If needed, perform further tests to identify the cation.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the cation in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "92da0ff5-2ddd-4006-865f-19ccc736f896",
+        "id": "qualysis_lvl1_02_sub3",
+        "name": "qualysis_lvl1_02_sub3",
+        "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+        "tools": [
+          "possible_anions",
+          "check_inventory",
+          "checkout_color",
+          "measure_pH"
+        ],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "0982a618-ba94-463c-b07f-62e7233a2941",
+        "id": "qualysis_lvl1_02_sub4",
+        "name": "qualysis_lvl1_02_sub4",
+        "description": "If needed, perform further tests to identify the anion.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the anion in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "13ca9abd-d198-4ba5-b1ca-6ae58ded1fdc",
+        "id": "qualysis_lvl1_02_sub5",
+        "name": "qualysis_lvl1_02_sub5",
+        "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "1bfa00d0-9bc0-4046-a56c-9059fbdf04ae",
+        "id": "qualysis_lvl1_03_sub1",
+        "name": "qualysis_lvl1_03_sub1",
+        "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "e2024f6b-3df8-46b2-9fa8-452cfc6bdc04",
+        "id": "qualysis_lvl1_03_sub2",
+        "name": "qualysis_lvl1_03_sub2",
+        "description": "If needed, perform further tests to identify the cation.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the cation in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "e28dc868-ed5e-4967-a7bf-584b7b55e85b",
+        "id": "qualysis_lvl1_03_sub3",
+        "name": "qualysis_lvl1_03_sub3",
+        "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+        "tools": [
+          "possible_anions",
+          "check_inventory",
+          "checkout_color",
+          "measure_pH"
+        ],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "0fe3f131-bc31-4096-bd8c-076f5ea8a873",
+        "id": "qualysis_lvl1_03_sub4",
+        "name": "qualysis_lvl1_03_sub4",
+        "description": "If needed, perform further tests to identify the anion.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the anion in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "167ac46f-5768-41e9-ae27-409d906975b9",
+        "id": "qualysis_lvl1_03_sub5",
+        "name": "qualysis_lvl1_03_sub5",
+        "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "6aaa7e75-6953-4467-bbff-67a42c56f051",
+        "id": "qualysis_lvl1_04_sub1",
+        "name": "qualysis_lvl1_04_sub1",
+        "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "58e8bc9e-2c9a-4dd6-8f74-9ec882da8664",
+        "id": "qualysis_lvl1_04_sub2",
+        "name": "qualysis_lvl1_04_sub2",
+        "description": "If needed, perform further tests to identify the cation.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the cation in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "1c9e4ce6-11ed-4141-b366-ff9c841d9e8c",
+        "id": "qualysis_lvl1_04_sub3",
+        "name": "qualysis_lvl1_04_sub3",
+        "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+        "tools": [
+          "possible_anions",
+          "check_inventory",
+          "checkout_color",
+          "measure_pH"
+        ],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "ee5531ca-06ac-434c-a6b2-ac0910d12387",
+        "id": "qualysis_lvl1_04_sub4",
+        "name": "qualysis_lvl1_04_sub4",
+        "description": "If needed, perform further tests to identify the anion.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the anion in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "2946f3fe-e941-49f7-a0bb-18f6ef7885fb",
+        "id": "qualysis_lvl1_04_sub5",
+        "name": "qualysis_lvl1_04_sub5",
+        "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "fa218a6f-218d-43d1-82de-b1721fa4ceb7",
+        "id": "qualysis_lvl1_05_sub1",
+        "name": "qualysis_lvl1_05_sub1",
+        "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "aa37e433-7ff3-47a9-b741-ac003edd0d56",
+        "id": "qualysis_lvl1_05_sub2",
+        "name": "qualysis_lvl1_05_sub2",
+        "description": "If needed, perform further tests to identify the cation.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the cation in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "ae8e2cd9-d2ae-4e61-8508-61dfbc2caa6c",
+        "id": "qualysis_lvl1_05_sub3",
+        "name": "qualysis_lvl1_05_sub3",
+        "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+        "tools": [
+          "possible_anions",
+          "check_inventory",
+          "checkout_color",
+          "measure_pH"
+        ],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "be3d1fd2-9228-4d72-8e07-3424599fc516",
+        "id": "qualysis_lvl1_05_sub4",
+        "name": "qualysis_lvl1_05_sub4",
+        "description": "If needed, perform further tests to identify the anion.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the anion in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "94a430df-855d-4bc0-8382-d129c898cbf7",
+        "id": "qualysis_lvl1_05_sub5",
+        "name": "qualysis_lvl1_05_sub5",
+        "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "fb91b11b-a0ae-4d17-89cd-5bae97c6756c",
+        "id": "qualysis_lvl1_06_sub1",
+        "name": "qualysis_lvl1_06_sub1",
+        "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "976809ca-941e-4d09-a506-05a07d8609a5",
+        "id": "qualysis_lvl1_06_sub2",
+        "name": "qualysis_lvl1_06_sub2",
+        "description": "If needed, perform further tests to identify the cation.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the cation in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "b1b18185-7efc-430c-b4ed-39dc177380e2",
+        "id": "qualysis_lvl1_06_sub3",
+        "name": "qualysis_lvl1_06_sub3",
+        "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+        "tools": [
+          "possible_anions",
+          "check_inventory",
+          "checkout_color",
+          "measure_pH"
+        ],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "c2ac7d6f-a556-4118-a4b6-25b856d21573",
+        "id": "qualysis_lvl1_06_sub4",
+        "name": "qualysis_lvl1_06_sub4",
+        "description": "If needed, perform further tests to identify the anion.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the anion in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "c4e64e1c-aee6-40db-a3f4-be9069d6e665",
+        "id": "qualysis_lvl1_06_sub5",
+        "name": "qualysis_lvl1_06_sub5",
+        "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "64d01949-87b0-4f64-a8b2-43c6b618a36d",
+        "id": "qualysis_lvl1_07_sub1",
+        "name": "qualysis_lvl1_07_sub1",
+        "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "c690a948-d4db-430f-bdfd-9f9613679873",
+        "id": "qualysis_lvl1_07_sub2",
+        "name": "qualysis_lvl1_07_sub2",
+        "description": "If needed, perform further tests to identify the cation.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the cation in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "3bd250db-4320-4168-9e28-1d245be20f86",
+        "id": "qualysis_lvl1_07_sub3",
+        "name": "qualysis_lvl1_07_sub3",
+        "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+        "tools": [
+          "possible_anions",
+          "check_inventory",
+          "checkout_color",
+          "measure_pH"
+        ],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "707507e3-03c2-4d39-bdf7-5dae39c8f50e",
+        "id": "qualysis_lvl1_07_sub4",
+        "name": "qualysis_lvl1_07_sub4",
+        "description": "If needed, perform further tests to identify the anion.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the anion in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "b037c7bb-337a-4145-b953-b27cc0fb98d5",
+        "id": "qualysis_lvl1_07_sub5",
+        "name": "qualysis_lvl1_07_sub5",
+        "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "b1d32ca6-2503-4331-b005-4dfc5c9fade4",
+        "id": "qualysis_lvl1_08_sub1",
+        "name": "qualysis_lvl1_08_sub1",
+        "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "e44ee357-bc90-4668-bc0d-fea116b3b2f7",
+        "id": "qualysis_lvl1_08_sub2",
+        "name": "qualysis_lvl1_08_sub2",
+        "description": "If needed, perform further tests to identify the cation.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the cation in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "841dfbad-7f14-425f-b6bc-406a726c3a60",
+        "id": "qualysis_lvl1_08_sub3",
+        "name": "qualysis_lvl1_08_sub3",
+        "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+        "tools": [
+          "possible_anions",
+          "check_inventory",
+          "checkout_color",
+          "measure_pH"
+        ],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "4886891d-7310-429b-8f13-ab3062b7f25d",
+        "id": "qualysis_lvl1_08_sub4",
+        "name": "qualysis_lvl1_08_sub4",
+        "description": "If needed, perform further tests to identify the anion.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the anion in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "f84c3900-a55a-4aac-b964-3f9d997c39bf",
+        "id": "qualysis_lvl1_08_sub5",
+        "name": "qualysis_lvl1_08_sub5",
+        "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "9979a078-8c02-48e6-9b32-da1e0f00c64f",
+        "id": "qualysis_lvl1_09_sub1",
+        "name": "qualysis_lvl1_09_sub1",
+        "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "ef3fc7a8-d477-4fc0-8b6e-8cb22844985b",
+        "id": "qualysis_lvl1_09_sub2",
+        "name": "qualysis_lvl1_09_sub2",
+        "description": "If needed, perform further tests to identify the cation.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the cation in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "de609187-c9cb-49a6-a1d3-24bf6c560ff9",
+        "id": "qualysis_lvl1_09_sub3",
+        "name": "qualysis_lvl1_09_sub3",
+        "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+        "tools": [
+          "possible_anions",
+          "check_inventory",
+          "checkout_color",
+          "measure_pH"
+        ],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "b06ab95d-8862-477f-a6e8-99bb46240538",
+        "id": "qualysis_lvl1_09_sub4",
+        "name": "qualysis_lvl1_09_sub4",
+        "description": "If needed, perform further tests to identify the anion.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Identity of the anion in the sample.",
+        "level": "level_1"
+      },
+      {
+        "_uid": "da7fa82a-510d-4be3-9e35-a8bbc861396a",
+        "id": "qualysis_lvl1_09_sub5",
+        "name": "qualysis_lvl1_09_sub5",
+        "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+        "tools": [],
+        "scoring_function": "score_salt",
+        "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+        "level": "level_1"
+      },
+      {
+        "_uid": "6e382525-4277-4a71-8d0f-f850c86ce972",
+        "id": "qualysis_lvl2_01_sub1",
+        "name": "qualysis_lvl2_01_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "e3cb4953-f4a6-49bd-9d1b-9d2f6c321d75",
+        "id": "qualysis_lvl2_01_sub2",
+        "name": "qualysis_lvl2_01_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "4b3ba8ce-c5a6-480c-9af4-949ffd8f9d80",
+        "id": "qualysis_lvl2_01_sub3",
+        "name": "qualysis_lvl2_01_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "6e12f06f-9ed7-429d-b321-3478213157aa",
+        "id": "qualysis_lvl2_01_sub4",
+        "name": "qualysis_lvl2_01_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "201b02fb-9506-483d-8307-08bdf0e07114",
+        "id": "qualysis_lvl2_01_sub5",
+        "name": "qualysis_lvl2_01_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "776943c8-867e-4e8c-ad45-52d44b891747",
+        "id": "qualysis_lvl2_01_sub6",
+        "name": "qualysis_lvl2_01_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "74916d1c-03ad-4dcc-9717-4d7dedd03123",
+        "id": "qualysis_lvl2_01_sub7",
+        "name": "qualysis_lvl2_01_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "12dc09af-3dbd-4d7b-8d16-f8aa6204ba8b",
+        "id": "qualysis_lvl2_10_sub1",
+        "name": "qualysis_lvl2_10_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "c0de7e43-b629-4959-9f65-1866e62f2f32",
+        "id": "qualysis_lvl2_10_sub2",
+        "name": "qualysis_lvl2_10_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "a61d4f90-8ca7-4460-8512-fefc057dfc47",
+        "id": "qualysis_lvl2_10_sub3",
+        "name": "qualysis_lvl2_10_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "14946547-855c-4a3d-bc42-196b1baf7a10",
+        "id": "qualysis_lvl2_10_sub4",
+        "name": "qualysis_lvl2_10_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "7094eb4c-0084-400e-ab82-3a06af9f967d",
+        "id": "qualysis_lvl2_10_sub5",
+        "name": "qualysis_lvl2_10_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "61739ccb-3b16-4fee-8f39-f10681720af9",
+        "id": "qualysis_lvl2_10_sub6",
+        "name": "qualysis_lvl2_10_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "8acfd743-ec0d-450e-98df-a0ed7428371e",
+        "id": "qualysis_lvl2_10_sub7",
+        "name": "qualysis_lvl2_10_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "05ccb46a-16db-44e7-91c3-22f83d2170ad",
+        "id": "qualysis_lvl2_02_sub1",
+        "name": "qualysis_lvl2_02_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "600bfa98-17c0-470c-aa80-06f690907ec5",
+        "id": "qualysis_lvl2_02_sub2",
+        "name": "qualysis_lvl2_02_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "da797b43-182d-4ff6-8152-f834b94c62c9",
+        "id": "qualysis_lvl2_02_sub3",
+        "name": "qualysis_lvl2_02_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "b600135e-dee3-4688-8fc5-8db34b2f3c07",
+        "id": "qualysis_lvl2_02_sub4",
+        "name": "qualysis_lvl2_02_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "6ef9543c-9588-4683-8cb6-bd602e2a5791",
+        "id": "qualysis_lvl2_02_sub5",
+        "name": "qualysis_lvl2_02_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "60fa72e1-7562-4da7-8cde-0b1c425c9cd8",
+        "id": "qualysis_lvl2_02_sub6",
+        "name": "qualysis_lvl2_02_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "d044e285-1dc5-49ba-b9dc-687c1c837af0",
+        "id": "qualysis_lvl2_02_sub7",
+        "name": "qualysis_lvl2_02_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "f994e005-4fa8-4ae7-94ed-8843cc88849c",
+        "id": "qualysis_lvl2_03_sub1",
+        "name": "qualysis_lvl2_03_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "044056d8-d198-4f19-ac19-1e98f7bdc5d1",
+        "id": "qualysis_lvl2_03_sub2",
+        "name": "qualysis_lvl2_03_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "11753b4e-4019-4e70-a8d7-46b8ef46a642",
+        "id": "qualysis_lvl2_03_sub3",
+        "name": "qualysis_lvl2_03_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "de499f8a-d837-4961-ac60-56380c8ac65f",
+        "id": "qualysis_lvl2_03_sub4",
+        "name": "qualysis_lvl2_03_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "ac9bb19f-63e0-433a-9762-04a1741b2e31",
+        "id": "qualysis_lvl2_03_sub5",
+        "name": "qualysis_lvl2_03_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "325ad81d-5e39-42ac-9f1a-b4cf90784905",
+        "id": "qualysis_lvl2_03_sub6",
+        "name": "qualysis_lvl2_03_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "662b19d5-08e8-4e51-9c96-497c7e86db44",
+        "id": "qualysis_lvl2_03_sub7",
+        "name": "qualysis_lvl2_03_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "6d810b1c-dc25-49f9-9172-29a9b338126b",
+        "id": "qualysis_lvl2_04_sub1",
+        "name": "qualysis_lvl2_04_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "45875b65-4e86-423e-b34b-1a07930b9b53",
+        "id": "qualysis_lvl2_04_sub2",
+        "name": "qualysis_lvl2_04_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "9810d3fd-1af7-4183-be49-7d9803588d7a",
+        "id": "qualysis_lvl2_04_sub3",
+        "name": "qualysis_lvl2_04_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "fe74c92a-c2d6-456a-b0e4-cd2adaea4ed6",
+        "id": "qualysis_lvl2_04_sub4",
+        "name": "qualysis_lvl2_04_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "c4497ec5-b445-4095-affc-0b8d89a0c1c5",
+        "id": "qualysis_lvl2_04_sub5",
+        "name": "qualysis_lvl2_04_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "25051425-1030-4927-b0cf-b898830a1bb7",
+        "id": "qualysis_lvl2_04_sub6",
+        "name": "qualysis_lvl2_04_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "9f879ea6-9746-47b8-a0ea-8f97163db3aa",
+        "id": "qualysis_lvl2_04_sub7",
+        "name": "qualysis_lvl2_04_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "68e781be-6801-47ad-a252-6112b7dabfcd",
+        "id": "qualysis_lvl2_05_sub1",
+        "name": "qualysis_lvl2_05_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "58311fd7-9a21-4ee3-b0c7-c0493d7a5a1f",
+        "id": "qualysis_lvl2_05_sub2",
+        "name": "qualysis_lvl2_05_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "c738a16b-1e8d-496b-98fb-737bde70b942",
+        "id": "qualysis_lvl2_05_sub3",
+        "name": "qualysis_lvl2_05_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide at pH 9).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "14b21813-50bb-4129-b025-a7fdcec469bc",
+        "id": "qualysis_lvl2_05_sub4",
+        "name": "qualysis_lvl2_05_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "321a8544-5bde-4dfb-9ad2-bbdb0bf0d441",
+        "id": "qualysis_lvl2_05_sub5",
+        "name": "qualysis_lvl2_05_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "8403f77e-d842-4d0b-85d8-d63303ace3c8",
+        "id": "qualysis_lvl2_05_sub6",
+        "name": "qualysis_lvl2_05_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "2216db83-0e3b-45f1-950d-24f1ad5b3196",
+        "id": "qualysis_lvl2_05_sub7",
+        "name": "qualysis_lvl2_05_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "896a504c-9f80-4a2e-b3be-b2b1656d7f77",
+        "id": "qualysis_lvl2_06_sub1",
+        "name": "qualysis_lvl2_06_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "39e8c961-5ce1-4d26-a67e-c0c613e2eda2",
+        "id": "qualysis_lvl2_06_sub2",
+        "name": "qualysis_lvl2_06_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "713e3062-b8c6-47f1-8654-f9e9a51858ec",
+        "id": "qualysis_lvl2_06_sub3",
+        "name": "qualysis_lvl2_06_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "6847a5fa-434f-433b-8ed5-84b9895567b0",
+        "id": "qualysis_lvl2_06_sub4",
+        "name": "qualysis_lvl2_06_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "cdf63c31-dd10-4d2e-9945-3ff1859650d0",
+        "id": "qualysis_lvl2_06_sub5",
+        "name": "qualysis_lvl2_06_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "5925e127-8446-4a1f-8c48-1b69fa7978ad",
+        "id": "qualysis_lvl2_06_sub6",
+        "name": "qualysis_lvl2_06_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "faaef518-7d07-49d6-bd62-fade17bf01ea",
+        "id": "qualysis_lvl2_06_sub7",
+        "name": "qualysis_lvl2_06_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "7d6e1109-10b7-4b1c-9bf9-86b785bce26b",
+        "id": "qualysis_lvl2_07_sub1",
+        "name": "qualysis_lvl2_07_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "8ec64e43-7cde-4291-a697-b2f4b1e54c3e",
+        "id": "qualysis_lvl2_07_sub2",
+        "name": "qualysis_lvl2_07_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "26752d30-259b-4ca6-8907-71c0d1477888",
+        "id": "qualysis_lvl2_07_sub3",
+        "name": "qualysis_lvl2_07_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "858a1a6c-6d1d-4820-bb44-6bf50c21d9de",
+        "id": "qualysis_lvl2_07_sub4",
+        "name": "qualysis_lvl2_07_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "c22613be-2eff-420b-b8c1-3404d7994423",
+        "id": "qualysis_lvl2_07_sub5",
+        "name": "qualysis_lvl2_07_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "b014d643-f95b-400a-aecd-1477f7c9f012",
+        "id": "qualysis_lvl2_07_sub6",
+        "name": "qualysis_lvl2_07_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "8f459f33-5215-4638-ae1b-2aa84e68e5ed",
+        "id": "qualysis_lvl2_07_sub7",
+        "name": "qualysis_lvl2_07_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "59689779-a53e-4f81-9d5e-fd8bd798b5eb",
+        "id": "qualysis_lvl2_08_sub1",
+        "name": "qualysis_lvl2_08_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "ae8d61d0-3580-4c11-81d3-cb93c25f0f02",
+        "id": "qualysis_lvl2_08_sub2",
+        "name": "qualysis_lvl2_08_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "c31ecd49-976e-411a-8ca7-94802b7ef145",
+        "id": "qualysis_lvl2_08_sub3",
+        "name": "qualysis_lvl2_08_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "a4198e52-f7f1-4cc9-99d2-8a7f6c05c33e",
+        "id": "qualysis_lvl2_08_sub4",
+        "name": "qualysis_lvl2_08_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "208bc99c-9d03-43c3-92d3-18321aa4096d",
+        "id": "qualysis_lvl2_08_sub5",
+        "name": "qualysis_lvl2_08_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "02ccd82a-e3ef-4277-8d73-9dc7b4850479",
+        "id": "qualysis_lvl2_08_sub6",
+        "name": "qualysis_lvl2_08_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "d44e1dbb-56ef-47e5-a748-6286a48f4333",
+        "id": "qualysis_lvl2_08_sub7",
+        "name": "qualysis_lvl2_08_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "07594d02-b0c6-43bb-bac4-97bc1c86d6d3",
+        "id": "qualysis_lvl2_09_sub1",
+        "name": "qualysis_lvl2_09_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "598ea69e-ae20-4aa0-afb4-576999acc123",
+        "id": "qualysis_lvl2_09_sub2",
+        "name": "qualysis_lvl2_09_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "813f929f-4f4f-4c9d-a6e5-b1be4da3015c",
+        "id": "qualysis_lvl2_09_sub3",
+        "name": "qualysis_lvl2_09_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "1dfa71ec-d19a-412f-9ba5-2243da0ceea8",
+        "id": "qualysis_lvl2_09_sub4",
+        "name": "qualysis_lvl2_09_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "9c3b65d6-8d9f-412a-84a2-c9297ba2ec8e",
+        "id": "qualysis_lvl2_09_sub5",
+        "name": "qualysis_lvl2_09_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "915053bb-4138-4c54-a618-7e883924dab9",
+        "id": "qualysis_lvl2_09_sub6",
+        "name": "qualysis_lvl2_09_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_2"
+      },
+      {
+        "_uid": "4a22c746-71d0-43bd-8295-3a5f663c6b9b",
+        "id": "qualysis_lvl2_09_sub7",
+        "name": "qualysis_lvl2_09_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_2"
+      },
+      {
+        "_uid": "2b9729b5-9af9-4d4b-bd17-b7e1360ad54d",
+        "id": "qualysis_lvl3_01_sub1",
+        "name": "qualysis_lvl3_01_sub1",
+        "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "a2ebf14b-7dbe-4348-9266-cae4f359d71a",
+        "id": "qualysis_lvl3_01_sub2",
+        "name": "qualysis_lvl3_01_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "b56ce210-765d-45d2-9b35-f5c68855025c",
+        "id": "qualysis_lvl3_01_sub3",
+        "name": "qualysis_lvl3_01_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "603a7d51-da2c-4847-9578-a5dc19c9e43d",
+        "id": "qualysis_lvl3_01_sub4",
+        "name": "qualysis_lvl3_01_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "ada7cbe5-cfcd-495f-9ce5-9136864b4bbd",
+        "id": "qualysis_lvl3_01_sub5",
+        "name": "qualysis_lvl3_01_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "7621a8c6-d602-40fb-b7d5-84c8283a053a",
+        "id": "qualysis_lvl3_01_sub6",
+        "name": "qualysis_lvl3_01_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "556d2ebe-4d3f-43e4-a6d9-52f3b16864eb",
+        "id": "qualysis_lvl3_01_sub7",
+        "name": "qualysis_lvl3_01_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "5dc07c25-7dd5-49bd-aa58-9a353ddf0c6c",
+        "id": "qualysis_lvl3_10_sub1",
+        "name": "qualysis_lvl3_10_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 5 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "8154c5b9-da01-41ab-aaa1-6c958fe63e8c",
+        "id": "qualysis_lvl3_10_sub2",
+        "name": "qualysis_lvl3_10_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "4c6661ba-8ccf-4a1d-9fa1-7cbef7142cbe",
+        "id": "qualysis_lvl3_10_sub3",
+        "name": "qualysis_lvl3_10_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "03f23639-9974-41d4-ae18-339330ea5895",
+        "id": "qualysis_lvl3_10_sub4",
+        "name": "qualysis_lvl3_10_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "efa62a4d-f596-48ff-b075-7cb38a8afd25",
+        "id": "qualysis_lvl3_10_sub5",
+        "name": "qualysis_lvl3_10_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "73adf7fb-0194-4e3a-a69d-adce0cdacb34",
+        "id": "qualysis_lvl3_10_sub6",
+        "name": "qualysis_lvl3_10_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "a3986cfc-1bfd-412f-8491-cb8267ec8e25",
+        "id": "qualysis_lvl3_10_sub7",
+        "name": "qualysis_lvl3_10_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "f0737705-890b-4bc2-bf21-f4eef9f9531a",
+        "id": "qualysis_lvl3_02_sub1",
+        "name": "qualysis_lvl3_02_sub1",
+        "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "6527b199-7029-41b2-89ae-7bc2cfa2436c",
+        "id": "qualysis_lvl3_02_sub2",
+        "name": "qualysis_lvl3_02_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "6d683a01-ece9-4318-9548-f12aec681f55",
+        "id": "qualysis_lvl3_02_sub3",
+        "name": "qualysis_lvl3_02_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "2b253749-e7f1-417e-9f46-c953e0aa1f4a",
+        "id": "qualysis_lvl3_02_sub4",
+        "name": "qualysis_lvl3_02_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "bba2cc97-0ed0-42bf-9778-172a516d6d47",
+        "id": "qualysis_lvl3_02_sub5",
+        "name": "qualysis_lvl3_02_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "fb7cf963-4001-4ab3-9a39-28e003a85428",
+        "id": "qualysis_lvl3_02_sub6",
+        "name": "qualysis_lvl3_02_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "2454dded-847d-4836-835a-9bc0e3d0ec1e",
+        "id": "qualysis_lvl3_02_sub7",
+        "name": "qualysis_lvl3_02_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "acf6c2f4-a340-4440-be29-cfa49293a4e2",
+        "id": "qualysis_lvl3_03_sub1",
+        "name": "qualysis_lvl3_03_sub1",
+        "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "0a895e8d-dcb1-4ecd-b4ac-de93ef168153",
+        "id": "qualysis_lvl3_03_sub2",
+        "name": "qualysis_lvl3_03_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "f08e645d-10f1-4115-a884-c97677a955eb",
+        "id": "qualysis_lvl3_03_sub3",
+        "name": "qualysis_lvl3_03_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "33998617-4fe0-4c0e-8330-388c5fc17950",
+        "id": "qualysis_lvl3_03_sub4",
+        "name": "qualysis_lvl3_03_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "6c4533a7-fd65-481e-9e3b-a5d154e029ed",
+        "id": "qualysis_lvl3_03_sub5",
+        "name": "qualysis_lvl3_03_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "2d482bb9-cd42-4416-8761-c2cd945a3078",
+        "id": "qualysis_lvl3_03_sub6",
+        "name": "qualysis_lvl3_03_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "88004ef9-a858-4706-9ea7-5d3aadf0b118",
+        "id": "qualysis_lvl3_03_sub7",
+        "name": "qualysis_lvl3_03_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "7392f33f-a851-41ef-970c-0b051f078a58",
+        "id": "qualysis_lvl3_04_sub1",
+        "name": "qualysis_lvl3_04_sub1",
+        "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "24f99803-11de-46b8-9d44-184bebe74100",
+        "id": "qualysis_lvl3_04_sub2",
+        "name": "qualysis_lvl3_04_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "517e458a-284e-42fc-9e08-c47bd20f3d32",
+        "id": "qualysis_lvl3_04_sub3",
+        "name": "qualysis_lvl3_04_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "04f29f97-a1f9-4b2f-bab5-f222b3a13902",
+        "id": "qualysis_lvl3_04_sub4",
+        "name": "qualysis_lvl3_04_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "8517665c-b168-4a85-84a9-88226ae0fe26",
+        "id": "qualysis_lvl3_04_sub5",
+        "name": "qualysis_lvl3_04_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "5857b516-a342-4974-a2d5-8441c5eb0d4b",
+        "id": "qualysis_lvl3_04_sub6",
+        "name": "qualysis_lvl3_04_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "9aeab6d2-15f5-4104-b590-ad4d5422374d",
+        "id": "qualysis_lvl3_04_sub7",
+        "name": "qualysis_lvl3_04_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "9be4f919-617b-4eab-a517-50e261329ab0",
+        "id": "qualysis_lvl3_05_sub1",
+        "name": "qualysis_lvl3_05_sub1",
+        "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "fbd7553e-a901-416a-a903-6a123857f37f",
+        "id": "qualysis_lvl3_05_sub2",
+        "name": "qualysis_lvl3_05_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "c1230849-9c03-47f7-992d-67906d1c26a7",
+        "id": "qualysis_lvl3_05_sub3",
+        "name": "qualysis_lvl3_05_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "396a8763-09d7-4a22-9b7f-07e4f594c6a4",
+        "id": "qualysis_lvl3_05_sub4",
+        "name": "qualysis_lvl3_05_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "cf1fe4d8-636e-455d-9ad8-2b2bb49241b7",
+        "id": "qualysis_lvl3_05_sub5",
+        "name": "qualysis_lvl3_05_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "106d35b6-9889-448e-b15c-c4eb7b2ff73b",
+        "id": "qualysis_lvl3_05_sub6",
+        "name": "qualysis_lvl3_05_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "3b1c929d-574c-468a-bddf-fc10ddb20a53",
+        "id": "qualysis_lvl3_05_sub7",
+        "name": "qualysis_lvl3_05_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "85ee9975-c76d-4676-b7f1-710cdde393fc",
+        "id": "qualysis_lvl3_06_sub1",
+        "name": "qualysis_lvl3_06_sub1",
+        "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "95105e85-e91d-432f-a533-a7cc6eb6cafa",
+        "id": "qualysis_lvl3_06_sub2",
+        "name": "qualysis_lvl3_06_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "f3dbaca3-9fd3-4aa9-ad3a-94aab49ef724",
+        "id": "qualysis_lvl3_06_sub3",
+        "name": "qualysis_lvl3_06_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "53dc1a40-be4a-4247-a373-6e17b7196063",
+        "id": "qualysis_lvl3_06_sub4",
+        "name": "qualysis_lvl3_06_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "f7b7698e-6900-404d-9d7f-d1429ee5f545",
+        "id": "qualysis_lvl3_06_sub5",
+        "name": "qualysis_lvl3_06_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "1086efb9-86ba-4f2d-8e1b-60ceee590c61",
+        "id": "qualysis_lvl3_06_sub6",
+        "name": "qualysis_lvl3_06_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "cf864305-5e3c-4f27-904c-66a48ce3a363",
+        "id": "qualysis_lvl3_06_sub7",
+        "name": "qualysis_lvl3_06_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "01106e6a-9bcf-4a72-b0b2-56fd5ebdc835",
+        "id": "qualysis_lvl3_07_sub1",
+        "name": "qualysis_lvl3_07_sub1",
+        "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "120c904b-3fa4-4182-8ce9-08886a603c27",
+        "id": "qualysis_lvl3_07_sub2",
+        "name": "qualysis_lvl3_07_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "89078d35-0f6b-4ecb-b811-b025afa2ce25",
+        "id": "qualysis_lvl3_07_sub3",
+        "name": "qualysis_lvl3_07_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "80258302-2c35-4a49-be93-930dba8ecb4c",
+        "id": "qualysis_lvl3_07_sub4",
+        "name": "qualysis_lvl3_07_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "a341453f-523d-4fa5-b802-8763b4ab2c59",
+        "id": "qualysis_lvl3_07_sub5",
+        "name": "qualysis_lvl3_07_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "76de3c0e-b696-4bad-8eb6-ef8850090038",
+        "id": "qualysis_lvl3_07_sub6",
+        "name": "qualysis_lvl3_07_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "3c427212-1ec6-458d-803b-aa56103ff4bb",
+        "id": "qualysis_lvl3_07_sub7",
+        "name": "qualysis_lvl3_07_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "db53e8cb-c94a-44b4-89e7-df07603d844f",
+        "id": "qualysis_lvl3_08_sub1",
+        "name": "qualysis_lvl3_08_sub1",
+        "description": "You are given 20 mL of an unknown sample solution containing 5 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "bba1f046-c53c-4b5b-8a4c-55a210ab6697",
+        "id": "qualysis_lvl3_08_sub2",
+        "name": "qualysis_lvl3_08_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "90060140-3c06-493c-9269-d13ee26a3c04",
+        "id": "qualysis_lvl3_08_sub3",
+        "name": "qualysis_lvl3_08_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "398e46de-8af2-4d23-9205-accaa7ba0545",
+        "id": "qualysis_lvl3_08_sub4",
+        "name": "qualysis_lvl3_08_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "ee813954-1a57-4b43-97b9-28f9b0fc882a",
+        "id": "qualysis_lvl3_08_sub5",
+        "name": "qualysis_lvl3_08_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "3f8e3261-a733-4d2b-917e-72c9bfb72605",
+        "id": "qualysis_lvl3_08_sub6",
+        "name": "qualysis_lvl3_08_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "738fc4bc-a6bb-40b3-8e49-78fde9b0d580",
+        "id": "qualysis_lvl3_08_sub7",
+        "name": "qualysis_lvl3_08_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      },
+      {
+        "_uid": "35174095-9aea-4f39-9849-9262369c9d46",
+        "id": "qualysis_lvl3_09_sub1",
+        "name": "qualysis_lvl3_09_sub1",
+        "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "a09ec82f-0339-4115-a66f-f5c764a251df",
+        "id": "qualysis_lvl3_09_sub2",
+        "name": "qualysis_lvl3_09_sub2",
+        "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "32c5253f-bfeb-4d30-a8e5-7ead100f65eb",
+        "id": "qualysis_lvl3_09_sub3",
+        "name": "qualysis_lvl3_09_sub3",
+        "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "3ecfad91-5036-4599-be21-1f8b3f4310f6",
+        "id": "qualysis_lvl3_09_sub4",
+        "name": "qualysis_lvl3_09_sub4",
+        "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "724e56cf-14aa-48e6-8f31-519a16df35d0",
+        "id": "qualysis_lvl3_09_sub5",
+        "name": "qualysis_lvl3_09_sub5",
+        "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "57392744-68a9-4ea5-ba1d-7f49eae3c9ce",
+        "id": "qualysis_lvl3_09_sub6",
+        "name": "qualysis_lvl3_09_sub6",
+        "description": "Identifying cations from the sixth analytical group (alkali metals).",
+        "tools": [],
+        "scoring_function": "none_checker",
+        "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+        "level": "level_3"
+      },
+      {
+        "_uid": "a407fb9c-13c1-407a-8be2-28e6fcf6039e",
+        "id": "qualysis_lvl3_09_sub7",
+        "name": "qualysis_lvl3_09_sub7",
+        "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+        "tools": [],
+        "scoring_function": "score_ion_list",
+        "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+        "level": "level_3"
+      }
+    ],
+    "levels": {
+      "level_1": {
+        "tasks": [
+          {
+            "_uid": "d55ff699-4150-4ab4-b291-cf5d263945c1",
+            "id": "qualysis_lvl1_01",
+            "name": "qualysis_lvl1_01",
+            "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "a49a92b9-b052-4efe-80c6-4b8a0b339103",
+            "id": "qualysis_lvl1_10",
+            "name": "qualysis_lvl1_10",
+            "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "20a5b7a8-0c24-4eae-a853-f30f9d2b17fa",
+            "id": "qualysis_lvl1_02",
+            "name": "qualysis_lvl1_02",
+            "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "e7cbaecd-c382-4543-b2c1-64275d36a3b2",
+            "id": "qualysis_lvl1_03",
+            "name": "qualysis_lvl1_03",
+            "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "01ea2fec-921b-470e-90b3-f8dbf5fefecd",
+            "id": "qualysis_lvl1_04",
+            "name": "qualysis_lvl1_04",
+            "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "307f4fac-929a-4867-8ace-2e56294f21bf",
+            "id": "qualysis_lvl1_05",
+            "name": "qualysis_lvl1_05",
+            "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "f7b54ebf-c2ce-4a19-9079-214fa3a53196",
+            "id": "qualysis_lvl1_06",
+            "name": "qualysis_lvl1_06",
+            "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "7e373b35-ccc9-4ca4-8224-7d038da147ad",
+            "id": "qualysis_lvl1_07",
+            "name": "qualysis_lvl1_07",
+            "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "01d8ede8-fd49-4fc1-ac09-7f551c149bd2",
+            "id": "qualysis_lvl1_08",
+            "name": "qualysis_lvl1_08",
+            "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "984bb995-82f5-4de5-846f-821bec254214",
+            "id": "qualysis_lvl1_09",
+            "name": "qualysis_lvl1_09",
+            "description": "You are given 20 mL of a sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. The salt consists of one type of cation and one type of anion. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"H2PO4-\"}' ",
+            "level": "level_1"
+          }
+        ],
+        "subtasks": [
+          {
+            "_uid": "b75b3e05-cffa-4173-a539-4cafc9b84834",
+            "id": "qualysis_lvl1_01_sub1",
+            "name": "qualysis_lvl1_01_sub1",
+            "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "6880b5f0-bf52-4e71-9c79-cae603f0e5a1",
+            "id": "qualysis_lvl1_01_sub2",
+            "name": "qualysis_lvl1_01_sub2",
+            "description": "If needed, perform further tests to identify the cation.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the cation in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "94f9f5a2-d55f-4d0f-aa64-7bf068eabf42",
+            "id": "qualysis_lvl1_01_sub3",
+            "name": "qualysis_lvl1_01_sub3",
+            "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+            "tools": [
+              "possible_anions",
+              "check_inventory",
+              "checkout_color",
+              "measure_pH"
+            ],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "51082021-1707-4a99-a920-4010c0f3c579",
+            "id": "qualysis_lvl1_01_sub4",
+            "name": "qualysis_lvl1_01_sub4",
+            "description": "If needed, perform further tests to identify the anion.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the anion in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "e094615e-c48c-430f-8e88-8c76e354cd24",
+            "id": "qualysis_lvl1_01_sub5",
+            "name": "qualysis_lvl1_01_sub5",
+            "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "404141d9-ad2f-40d0-aa18-bbe4ccc03086",
+            "id": "qualysis_lvl1_10_sub1",
+            "name": "qualysis_lvl1_10_sub1",
+            "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "3ad3f371-71cf-4d6b-be67-b39676ce91ff",
+            "id": "qualysis_lvl1_10_sub2",
+            "name": "qualysis_lvl1_10_sub2",
+            "description": "If needed, perform further tests to identify the cation.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the cation in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "41f1fb87-3ce7-4dd0-a115-514a0461754a",
+            "id": "qualysis_lvl1_10_sub3",
+            "name": "qualysis_lvl1_10_sub3",
+            "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+            "tools": [
+              "possible_anions",
+              "check_inventory",
+              "checkout_color",
+              "measure_pH"
+            ],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "582bf300-76a5-49e5-801a-b40e22ff40bd",
+            "id": "qualysis_lvl1_10_sub4",
+            "name": "qualysis_lvl1_10_sub4",
+            "description": "If needed, perform further tests to identify the anion.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the anion in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "86e7569c-027d-465f-bb49-4691340b91aa",
+            "id": "qualysis_lvl1_10_sub5",
+            "name": "qualysis_lvl1_10_sub5",
+            "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "46e56395-e0bc-4a3c-8373-3875ba59741a",
+            "id": "qualysis_lvl1_02_sub1",
+            "name": "qualysis_lvl1_02_sub1",
+            "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "028023b8-ba2b-4940-ba73-abe5284af8f0",
+            "id": "qualysis_lvl1_02_sub2",
+            "name": "qualysis_lvl1_02_sub2",
+            "description": "If needed, perform further tests to identify the cation.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the cation in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "92da0ff5-2ddd-4006-865f-19ccc736f896",
+            "id": "qualysis_lvl1_02_sub3",
+            "name": "qualysis_lvl1_02_sub3",
+            "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+            "tools": [
+              "possible_anions",
+              "check_inventory",
+              "checkout_color",
+              "measure_pH"
+            ],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "0982a618-ba94-463c-b07f-62e7233a2941",
+            "id": "qualysis_lvl1_02_sub4",
+            "name": "qualysis_lvl1_02_sub4",
+            "description": "If needed, perform further tests to identify the anion.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the anion in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "13ca9abd-d198-4ba5-b1ca-6ae58ded1fdc",
+            "id": "qualysis_lvl1_02_sub5",
+            "name": "qualysis_lvl1_02_sub5",
+            "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "1bfa00d0-9bc0-4046-a56c-9059fbdf04ae",
+            "id": "qualysis_lvl1_03_sub1",
+            "name": "qualysis_lvl1_03_sub1",
+            "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "e2024f6b-3df8-46b2-9fa8-452cfc6bdc04",
+            "id": "qualysis_lvl1_03_sub2",
+            "name": "qualysis_lvl1_03_sub2",
+            "description": "If needed, perform further tests to identify the cation.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the cation in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "e28dc868-ed5e-4967-a7bf-584b7b55e85b",
+            "id": "qualysis_lvl1_03_sub3",
+            "name": "qualysis_lvl1_03_sub3",
+            "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+            "tools": [
+              "possible_anions",
+              "check_inventory",
+              "checkout_color",
+              "measure_pH"
+            ],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "0fe3f131-bc31-4096-bd8c-076f5ea8a873",
+            "id": "qualysis_lvl1_03_sub4",
+            "name": "qualysis_lvl1_03_sub4",
+            "description": "If needed, perform further tests to identify the anion.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the anion in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "167ac46f-5768-41e9-ae27-409d906975b9",
+            "id": "qualysis_lvl1_03_sub5",
+            "name": "qualysis_lvl1_03_sub5",
+            "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "6aaa7e75-6953-4467-bbff-67a42c56f051",
+            "id": "qualysis_lvl1_04_sub1",
+            "name": "qualysis_lvl1_04_sub1",
+            "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "58e8bc9e-2c9a-4dd6-8f74-9ec882da8664",
+            "id": "qualysis_lvl1_04_sub2",
+            "name": "qualysis_lvl1_04_sub2",
+            "description": "If needed, perform further tests to identify the cation.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the cation in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "1c9e4ce6-11ed-4141-b366-ff9c841d9e8c",
+            "id": "qualysis_lvl1_04_sub3",
+            "name": "qualysis_lvl1_04_sub3",
+            "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+            "tools": [
+              "possible_anions",
+              "check_inventory",
+              "checkout_color",
+              "measure_pH"
+            ],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "ee5531ca-06ac-434c-a6b2-ac0910d12387",
+            "id": "qualysis_lvl1_04_sub4",
+            "name": "qualysis_lvl1_04_sub4",
+            "description": "If needed, perform further tests to identify the anion.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the anion in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "2946f3fe-e941-49f7-a0bb-18f6ef7885fb",
+            "id": "qualysis_lvl1_04_sub5",
+            "name": "qualysis_lvl1_04_sub5",
+            "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "fa218a6f-218d-43d1-82de-b1721fa4ceb7",
+            "id": "qualysis_lvl1_05_sub1",
+            "name": "qualysis_lvl1_05_sub1",
+            "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "aa37e433-7ff3-47a9-b741-ac003edd0d56",
+            "id": "qualysis_lvl1_05_sub2",
+            "name": "qualysis_lvl1_05_sub2",
+            "description": "If needed, perform further tests to identify the cation.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the cation in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "ae8e2cd9-d2ae-4e61-8508-61dfbc2caa6c",
+            "id": "qualysis_lvl1_05_sub3",
+            "name": "qualysis_lvl1_05_sub3",
+            "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+            "tools": [
+              "possible_anions",
+              "check_inventory",
+              "checkout_color",
+              "measure_pH"
+            ],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "be3d1fd2-9228-4d72-8e07-3424599fc516",
+            "id": "qualysis_lvl1_05_sub4",
+            "name": "qualysis_lvl1_05_sub4",
+            "description": "If needed, perform further tests to identify the anion.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the anion in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "94a430df-855d-4bc0-8382-d129c898cbf7",
+            "id": "qualysis_lvl1_05_sub5",
+            "name": "qualysis_lvl1_05_sub5",
+            "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "fb91b11b-a0ae-4d17-89cd-5bae97c6756c",
+            "id": "qualysis_lvl1_06_sub1",
+            "name": "qualysis_lvl1_06_sub1",
+            "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "976809ca-941e-4d09-a506-05a07d8609a5",
+            "id": "qualysis_lvl1_06_sub2",
+            "name": "qualysis_lvl1_06_sub2",
+            "description": "If needed, perform further tests to identify the cation.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the cation in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "b1b18185-7efc-430c-b4ed-39dc177380e2",
+            "id": "qualysis_lvl1_06_sub3",
+            "name": "qualysis_lvl1_06_sub3",
+            "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+            "tools": [
+              "possible_anions",
+              "check_inventory",
+              "checkout_color",
+              "measure_pH"
+            ],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "c2ac7d6f-a556-4118-a4b6-25b856d21573",
+            "id": "qualysis_lvl1_06_sub4",
+            "name": "qualysis_lvl1_06_sub4",
+            "description": "If needed, perform further tests to identify the anion.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the anion in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "c4e64e1c-aee6-40db-a3f4-be9069d6e665",
+            "id": "qualysis_lvl1_06_sub5",
+            "name": "qualysis_lvl1_06_sub5",
+            "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "64d01949-87b0-4f64-a8b2-43c6b618a36d",
+            "id": "qualysis_lvl1_07_sub1",
+            "name": "qualysis_lvl1_07_sub1",
+            "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "c690a948-d4db-430f-bdfd-9f9613679873",
+            "id": "qualysis_lvl1_07_sub2",
+            "name": "qualysis_lvl1_07_sub2",
+            "description": "If needed, perform further tests to identify the cation.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the cation in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "3bd250db-4320-4168-9e28-1d245be20f86",
+            "id": "qualysis_lvl1_07_sub3",
+            "name": "qualysis_lvl1_07_sub3",
+            "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+            "tools": [
+              "possible_anions",
+              "check_inventory",
+              "checkout_color",
+              "measure_pH"
+            ],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "707507e3-03c2-4d39-bdf7-5dae39c8f50e",
+            "id": "qualysis_lvl1_07_sub4",
+            "name": "qualysis_lvl1_07_sub4",
+            "description": "If needed, perform further tests to identify the anion.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the anion in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "b037c7bb-337a-4145-b953-b27cc0fb98d5",
+            "id": "qualysis_lvl1_07_sub5",
+            "name": "qualysis_lvl1_07_sub5",
+            "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "b1d32ca6-2503-4331-b005-4dfc5c9fade4",
+            "id": "qualysis_lvl1_08_sub1",
+            "name": "qualysis_lvl1_08_sub1",
+            "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "e44ee357-bc90-4668-bc0d-fea116b3b2f7",
+            "id": "qualysis_lvl1_08_sub2",
+            "name": "qualysis_lvl1_08_sub2",
+            "description": "If needed, perform further tests to identify the cation.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the cation in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "841dfbad-7f14-425f-b6bc-406a726c3a60",
+            "id": "qualysis_lvl1_08_sub3",
+            "name": "qualysis_lvl1_08_sub3",
+            "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+            "tools": [
+              "possible_anions",
+              "check_inventory",
+              "checkout_color",
+              "measure_pH"
+            ],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "4886891d-7310-429b-8f13-ab3062b7f25d",
+            "id": "qualysis_lvl1_08_sub4",
+            "name": "qualysis_lvl1_08_sub4",
+            "description": "If needed, perform further tests to identify the anion.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the anion in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "f84c3900-a55a-4aac-b964-3f9d997c39bf",
+            "id": "qualysis_lvl1_08_sub5",
+            "name": "qualysis_lvl1_08_sub5",
+            "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+            "level": "level_1"
+          },
+          {
+            "_uid": "9979a078-8c02-48e6-9b32-da1e0f00c64f",
+            "id": "qualysis_lvl1_09_sub1",
+            "name": "qualysis_lvl1_09_sub1",
+            "description": "You are given 20 mL of an unknown sample solution which is created by dissolving an unknown, pure inorganic salt in distilled water. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce the identity of the unknown salt. You will perform a systematic analysis, broken down into the following subtasks:\n1. Narrow down the list of possible cations based on initial tests.\n2. Identifying the cation with confirmatory reagent tests.\n3. Narrow down the list of possible anions based on the identified cation and sample's pH.\n4. Identifying the anion with confirmatory reagent tests.\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by narrowing down the list of possible cations; only use information from: sample's color, sample's flame test, sample's chloride test, sample's hydroxide test.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible cations.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "ef3fc7a8-d477-4fc0-8b6e-8cb22844985b",
+            "id": "qualysis_lvl1_09_sub2",
+            "name": "qualysis_lvl1_09_sub2",
+            "description": "If needed, perform further tests to identify the cation.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the cation in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "de609187-c9cb-49a6-a1d3-24bf6c560ff9",
+            "id": "qualysis_lvl1_09_sub3",
+            "name": "qualysis_lvl1_09_sub3",
+            "description": "Based on the identified cation and the sample's color and pH, narrow down the list of possible anions.",
+            "tools": [
+              "possible_anions",
+              "check_inventory",
+              "checkout_color",
+              "measure_pH"
+            ],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the narrowed down list of possible anions.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "b06ab95d-8862-477f-a6e8-99bb46240538",
+            "id": "qualysis_lvl1_09_sub4",
+            "name": "qualysis_lvl1_09_sub4",
+            "description": "If needed, perform further tests to identify the anion.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Identity of the anion in the sample.",
+            "level": "level_1"
+          },
+          {
+            "_uid": "da7fa82a-510d-4be3-9e35-a8bbc861396a",
+            "id": "qualysis_lvl1_09_sub5",
+            "name": "qualysis_lvl1_09_sub5",
+            "description": "Perform any confirmatory tests if needed, then state the identity of the unknown salt in the sample.",
+            "tools": [],
+            "scoring_function": "score_salt",
+            "submission_format": "A string containing the identified cation and anion in JSON format. Examples: '{\"cation\": \"Na+\", \"anion\": \"Cl-\"}' or '{\"cation\": \"Ca+2\", \"anion\": \"HCO3-\"}' or '{\"cation\": \"NH4+\", \"anion\": \"HPO4-2\"}' ",
+            "level": "level_1"
+          }
+        ]
+      },
+      "level_2": {
+        "tasks": [
+          {
+            "_uid": "4a5ec677-83ed-467a-9bb4-2190c871e2ff",
+            "id": "qualysis_lvl2_01",
+            "name": "qualysis_lvl2_01",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "c52a878b-73e4-4228-8e2f-0b986afbf265",
+            "id": "qualysis_lvl2_10",
+            "name": "qualysis_lvl2_10",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "040c0583-fe01-4bc7-8f96-400d1dcc9ecd",
+            "id": "qualysis_lvl2_02",
+            "name": "qualysis_lvl2_02",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "736dac65-728e-4b0d-9e4f-32b97712f281",
+            "id": "qualysis_lvl2_03",
+            "name": "qualysis_lvl2_03",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "6bda107c-da21-4a03-9935-277374c1cdc3",
+            "id": "qualysis_lvl2_04",
+            "name": "qualysis_lvl2_04",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "abad2ec8-c405-4cf6-ab0b-a284cde89e9f",
+            "id": "qualysis_lvl2_05",
+            "name": "qualysis_lvl2_05",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "9a455c6f-6cd8-434a-a0ee-8d8962f77f69",
+            "id": "qualysis_lvl2_06",
+            "name": "qualysis_lvl2_06",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "9a2a5a5f-e41b-4a29-b4c4-fbabdffe0a25",
+            "id": "qualysis_lvl2_07",
+            "name": "qualysis_lvl2_07",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "3535f038-1067-448a-85a7-d497580c2185",
+            "id": "qualysis_lvl2_08",
+            "name": "qualysis_lvl2_08",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "4b4fc0ad-39a5-459b-835c-6c5a33297506",
+            "id": "qualysis_lvl2_09",
+            "name": "qualysis_lvl2_09",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          }
+        ],
+        "subtasks": [
+          {
+            "_uid": "6e382525-4277-4a71-8d0f-f850c86ce972",
+            "id": "qualysis_lvl2_01_sub1",
+            "name": "qualysis_lvl2_01_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "e3cb4953-f4a6-49bd-9d1b-9d2f6c321d75",
+            "id": "qualysis_lvl2_01_sub2",
+            "name": "qualysis_lvl2_01_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "4b3ba8ce-c5a6-480c-9af4-949ffd8f9d80",
+            "id": "qualysis_lvl2_01_sub3",
+            "name": "qualysis_lvl2_01_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "6e12f06f-9ed7-429d-b321-3478213157aa",
+            "id": "qualysis_lvl2_01_sub4",
+            "name": "qualysis_lvl2_01_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "201b02fb-9506-483d-8307-08bdf0e07114",
+            "id": "qualysis_lvl2_01_sub5",
+            "name": "qualysis_lvl2_01_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "776943c8-867e-4e8c-ad45-52d44b891747",
+            "id": "qualysis_lvl2_01_sub6",
+            "name": "qualysis_lvl2_01_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "74916d1c-03ad-4dcc-9717-4d7dedd03123",
+            "id": "qualysis_lvl2_01_sub7",
+            "name": "qualysis_lvl2_01_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "12dc09af-3dbd-4d7b-8d16-f8aa6204ba8b",
+            "id": "qualysis_lvl2_10_sub1",
+            "name": "qualysis_lvl2_10_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "c0de7e43-b629-4959-9f65-1866e62f2f32",
+            "id": "qualysis_lvl2_10_sub2",
+            "name": "qualysis_lvl2_10_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "a61d4f90-8ca7-4460-8512-fefc057dfc47",
+            "id": "qualysis_lvl2_10_sub3",
+            "name": "qualysis_lvl2_10_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "14946547-855c-4a3d-bc42-196b1baf7a10",
+            "id": "qualysis_lvl2_10_sub4",
+            "name": "qualysis_lvl2_10_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "7094eb4c-0084-400e-ab82-3a06af9f967d",
+            "id": "qualysis_lvl2_10_sub5",
+            "name": "qualysis_lvl2_10_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "61739ccb-3b16-4fee-8f39-f10681720af9",
+            "id": "qualysis_lvl2_10_sub6",
+            "name": "qualysis_lvl2_10_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "8acfd743-ec0d-450e-98df-a0ed7428371e",
+            "id": "qualysis_lvl2_10_sub7",
+            "name": "qualysis_lvl2_10_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "05ccb46a-16db-44e7-91c3-22f83d2170ad",
+            "id": "qualysis_lvl2_02_sub1",
+            "name": "qualysis_lvl2_02_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "600bfa98-17c0-470c-aa80-06f690907ec5",
+            "id": "qualysis_lvl2_02_sub2",
+            "name": "qualysis_lvl2_02_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "da797b43-182d-4ff6-8152-f834b94c62c9",
+            "id": "qualysis_lvl2_02_sub3",
+            "name": "qualysis_lvl2_02_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "b600135e-dee3-4688-8fc5-8db34b2f3c07",
+            "id": "qualysis_lvl2_02_sub4",
+            "name": "qualysis_lvl2_02_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "6ef9543c-9588-4683-8cb6-bd602e2a5791",
+            "id": "qualysis_lvl2_02_sub5",
+            "name": "qualysis_lvl2_02_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "60fa72e1-7562-4da7-8cde-0b1c425c9cd8",
+            "id": "qualysis_lvl2_02_sub6",
+            "name": "qualysis_lvl2_02_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "d044e285-1dc5-49ba-b9dc-687c1c837af0",
+            "id": "qualysis_lvl2_02_sub7",
+            "name": "qualysis_lvl2_02_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "f994e005-4fa8-4ae7-94ed-8843cc88849c",
+            "id": "qualysis_lvl2_03_sub1",
+            "name": "qualysis_lvl2_03_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "044056d8-d198-4f19-ac19-1e98f7bdc5d1",
+            "id": "qualysis_lvl2_03_sub2",
+            "name": "qualysis_lvl2_03_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "11753b4e-4019-4e70-a8d7-46b8ef46a642",
+            "id": "qualysis_lvl2_03_sub3",
+            "name": "qualysis_lvl2_03_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "de499f8a-d837-4961-ac60-56380c8ac65f",
+            "id": "qualysis_lvl2_03_sub4",
+            "name": "qualysis_lvl2_03_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "ac9bb19f-63e0-433a-9762-04a1741b2e31",
+            "id": "qualysis_lvl2_03_sub5",
+            "name": "qualysis_lvl2_03_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "325ad81d-5e39-42ac-9f1a-b4cf90784905",
+            "id": "qualysis_lvl2_03_sub6",
+            "name": "qualysis_lvl2_03_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "662b19d5-08e8-4e51-9c96-497c7e86db44",
+            "id": "qualysis_lvl2_03_sub7",
+            "name": "qualysis_lvl2_03_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "6d810b1c-dc25-49f9-9172-29a9b338126b",
+            "id": "qualysis_lvl2_04_sub1",
+            "name": "qualysis_lvl2_04_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "45875b65-4e86-423e-b34b-1a07930b9b53",
+            "id": "qualysis_lvl2_04_sub2",
+            "name": "qualysis_lvl2_04_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "9810d3fd-1af7-4183-be49-7d9803588d7a",
+            "id": "qualysis_lvl2_04_sub3",
+            "name": "qualysis_lvl2_04_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "fe74c92a-c2d6-456a-b0e4-cd2adaea4ed6",
+            "id": "qualysis_lvl2_04_sub4",
+            "name": "qualysis_lvl2_04_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "c4497ec5-b445-4095-affc-0b8d89a0c1c5",
+            "id": "qualysis_lvl2_04_sub5",
+            "name": "qualysis_lvl2_04_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "25051425-1030-4927-b0cf-b898830a1bb7",
+            "id": "qualysis_lvl2_04_sub6",
+            "name": "qualysis_lvl2_04_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "9f879ea6-9746-47b8-a0ea-8f97163db3aa",
+            "id": "qualysis_lvl2_04_sub7",
+            "name": "qualysis_lvl2_04_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "68e781be-6801-47ad-a252-6112b7dabfcd",
+            "id": "qualysis_lvl2_05_sub1",
+            "name": "qualysis_lvl2_05_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "58311fd7-9a21-4ee3-b0c7-c0493d7a5a1f",
+            "id": "qualysis_lvl2_05_sub2",
+            "name": "qualysis_lvl2_05_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "c738a16b-1e8d-496b-98fb-737bde70b942",
+            "id": "qualysis_lvl2_05_sub3",
+            "name": "qualysis_lvl2_05_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide at pH 9).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "14b21813-50bb-4129-b025-a7fdcec469bc",
+            "id": "qualysis_lvl2_05_sub4",
+            "name": "qualysis_lvl2_05_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "321a8544-5bde-4dfb-9ad2-bbdb0bf0d441",
+            "id": "qualysis_lvl2_05_sub5",
+            "name": "qualysis_lvl2_05_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "8403f77e-d842-4d0b-85d8-d63303ace3c8",
+            "id": "qualysis_lvl2_05_sub6",
+            "name": "qualysis_lvl2_05_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "2216db83-0e3b-45f1-950d-24f1ad5b3196",
+            "id": "qualysis_lvl2_05_sub7",
+            "name": "qualysis_lvl2_05_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "896a504c-9f80-4a2e-b3be-b2b1656d7f77",
+            "id": "qualysis_lvl2_06_sub1",
+            "name": "qualysis_lvl2_06_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "39e8c961-5ce1-4d26-a67e-c0c613e2eda2",
+            "id": "qualysis_lvl2_06_sub2",
+            "name": "qualysis_lvl2_06_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "713e3062-b8c6-47f1-8654-f9e9a51858ec",
+            "id": "qualysis_lvl2_06_sub3",
+            "name": "qualysis_lvl2_06_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "6847a5fa-434f-433b-8ed5-84b9895567b0",
+            "id": "qualysis_lvl2_06_sub4",
+            "name": "qualysis_lvl2_06_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "cdf63c31-dd10-4d2e-9945-3ff1859650d0",
+            "id": "qualysis_lvl2_06_sub5",
+            "name": "qualysis_lvl2_06_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "5925e127-8446-4a1f-8c48-1b69fa7978ad",
+            "id": "qualysis_lvl2_06_sub6",
+            "name": "qualysis_lvl2_06_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "faaef518-7d07-49d6-bd62-fade17bf01ea",
+            "id": "qualysis_lvl2_06_sub7",
+            "name": "qualysis_lvl2_06_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "7d6e1109-10b7-4b1c-9bf9-86b785bce26b",
+            "id": "qualysis_lvl2_07_sub1",
+            "name": "qualysis_lvl2_07_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "8ec64e43-7cde-4291-a697-b2f4b1e54c3e",
+            "id": "qualysis_lvl2_07_sub2",
+            "name": "qualysis_lvl2_07_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "26752d30-259b-4ca6-8907-71c0d1477888",
+            "id": "qualysis_lvl2_07_sub3",
+            "name": "qualysis_lvl2_07_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "858a1a6c-6d1d-4820-bb44-6bf50c21d9de",
+            "id": "qualysis_lvl2_07_sub4",
+            "name": "qualysis_lvl2_07_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "c22613be-2eff-420b-b8c1-3404d7994423",
+            "id": "qualysis_lvl2_07_sub5",
+            "name": "qualysis_lvl2_07_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "b014d643-f95b-400a-aecd-1477f7c9f012",
+            "id": "qualysis_lvl2_07_sub6",
+            "name": "qualysis_lvl2_07_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "8f459f33-5215-4638-ae1b-2aa84e68e5ed",
+            "id": "qualysis_lvl2_07_sub7",
+            "name": "qualysis_lvl2_07_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "59689779-a53e-4f81-9d5e-fd8bd798b5eb",
+            "id": "qualysis_lvl2_08_sub1",
+            "name": "qualysis_lvl2_08_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "ae8d61d0-3580-4c11-81d3-cb93c25f0f02",
+            "id": "qualysis_lvl2_08_sub2",
+            "name": "qualysis_lvl2_08_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "c31ecd49-976e-411a-8ca7-94802b7ef145",
+            "id": "qualysis_lvl2_08_sub3",
+            "name": "qualysis_lvl2_08_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "a4198e52-f7f1-4cc9-99d2-8a7f6c05c33e",
+            "id": "qualysis_lvl2_08_sub4",
+            "name": "qualysis_lvl2_08_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "208bc99c-9d03-43c3-92d3-18321aa4096d",
+            "id": "qualysis_lvl2_08_sub5",
+            "name": "qualysis_lvl2_08_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "02ccd82a-e3ef-4277-8d73-9dc7b4850479",
+            "id": "qualysis_lvl2_08_sub6",
+            "name": "qualysis_lvl2_08_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "d44e1dbb-56ef-47e5-a748-6286a48f4333",
+            "id": "qualysis_lvl2_08_sub7",
+            "name": "qualysis_lvl2_08_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          },
+          {
+            "_uid": "07594d02-b0c6-43bb-bac4-97bc1c86d6d3",
+            "id": "qualysis_lvl2_09_sub1",
+            "name": "qualysis_lvl2_09_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "598ea69e-ae20-4aa0-afb4-576999acc123",
+            "id": "qualysis_lvl2_09_sub2",
+            "name": "qualysis_lvl2_09_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "813f929f-4f4f-4c9d-a6e5-b1be4da3015c",
+            "id": "qualysis_lvl2_09_sub3",
+            "name": "qualysis_lvl2_09_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "1dfa71ec-d19a-412f-9ba5-2243da0ceea8",
+            "id": "qualysis_lvl2_09_sub4",
+            "name": "qualysis_lvl2_09_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "9c3b65d6-8d9f-412a-84a2-c9297ba2ec8e",
+            "id": "qualysis_lvl2_09_sub5",
+            "name": "qualysis_lvl2_09_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "915053bb-4138-4c54-a618-7e883924dab9",
+            "id": "qualysis_lvl2_09_sub6",
+            "name": "qualysis_lvl2_09_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_2"
+          },
+          {
+            "_uid": "4a22c746-71d0-43bd-8295-3a5f663c6b9b",
+            "id": "qualysis_lvl2_09_sub7",
+            "name": "qualysis_lvl2_09_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_2"
+          }
+        ]
+      },
+      "level_3": {
+        "tasks": [
+          {
+            "_uid": "4c12bf10-40ae-444a-a31c-25c4ba772990",
+            "id": "qualysis_lvl3_01",
+            "name": "qualysis_lvl3_01",
+            "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "8bcbba08-8fae-41c0-b43f-dadedf084483",
+            "id": "qualysis_lvl3_10",
+            "name": "qualysis_lvl3_10",
+            "description": "You are given 20 mL of an unknown sample solution containing 5 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "fffe17f5-3349-4712-b2ed-791e3d4a4681",
+            "id": "qualysis_lvl3_02",
+            "name": "qualysis_lvl3_02",
+            "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "1f369536-3378-41b4-b4a0-b9ca8a232c9d",
+            "id": "qualysis_lvl3_03",
+            "name": "qualysis_lvl3_03",
+            "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "4c300fd4-5c0e-496e-8d09-4f1e815dd2b2",
+            "id": "qualysis_lvl3_04",
+            "name": "qualysis_lvl3_04",
+            "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "a698f611-f069-4c78-90e0-a7f38939724a",
+            "id": "qualysis_lvl3_05",
+            "name": "qualysis_lvl3_05",
+            "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "b42c4182-2316-483b-b390-f9ce7f1990b3",
+            "id": "qualysis_lvl3_06",
+            "name": "qualysis_lvl3_06",
+            "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "728e9cf3-e01e-4946-b52c-4912d07b132a",
+            "id": "qualysis_lvl3_07",
+            "name": "qualysis_lvl3_07",
+            "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "7a872e6d-b270-4578-afb9-f5928b8053e4",
+            "id": "qualysis_lvl3_08",
+            "name": "qualysis_lvl3_08",
+            "description": "You are given 20 mL of an unknown sample solution containing 5 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "39dd54e6-951f-43d5-85cf-afb9f5b5c78c",
+            "id": "qualysis_lvl3_09",
+            "name": "qualysis_lvl3_09",
+            "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. Most experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the cations present. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          }
+        ],
+        "subtasks": [
+          {
+            "_uid": "2b9729b5-9af9-4d4b-bd17-b7e1360ad54d",
+            "id": "qualysis_lvl3_01_sub1",
+            "name": "qualysis_lvl3_01_sub1",
+            "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "a2ebf14b-7dbe-4348-9266-cae4f359d71a",
+            "id": "qualysis_lvl3_01_sub2",
+            "name": "qualysis_lvl3_01_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "b56ce210-765d-45d2-9b35-f5c68855025c",
+            "id": "qualysis_lvl3_01_sub3",
+            "name": "qualysis_lvl3_01_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "603a7d51-da2c-4847-9578-a5dc19c9e43d",
+            "id": "qualysis_lvl3_01_sub4",
+            "name": "qualysis_lvl3_01_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "ada7cbe5-cfcd-495f-9ce5-9136864b4bbd",
+            "id": "qualysis_lvl3_01_sub5",
+            "name": "qualysis_lvl3_01_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "7621a8c6-d602-40fb-b7d5-84c8283a053a",
+            "id": "qualysis_lvl3_01_sub6",
+            "name": "qualysis_lvl3_01_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "556d2ebe-4d3f-43e4-a6d9-52f3b16864eb",
+            "id": "qualysis_lvl3_01_sub7",
+            "name": "qualysis_lvl3_01_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "5dc07c25-7dd5-49bd-aa58-9a353ddf0c6c",
+            "id": "qualysis_lvl3_10_sub1",
+            "name": "qualysis_lvl3_10_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 5 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "8154c5b9-da01-41ab-aaa1-6c958fe63e8c",
+            "id": "qualysis_lvl3_10_sub2",
+            "name": "qualysis_lvl3_10_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "4c6661ba-8ccf-4a1d-9fa1-7cbef7142cbe",
+            "id": "qualysis_lvl3_10_sub3",
+            "name": "qualysis_lvl3_10_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "03f23639-9974-41d4-ae18-339330ea5895",
+            "id": "qualysis_lvl3_10_sub4",
+            "name": "qualysis_lvl3_10_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "efa62a4d-f596-48ff-b075-7cb38a8afd25",
+            "id": "qualysis_lvl3_10_sub5",
+            "name": "qualysis_lvl3_10_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "73adf7fb-0194-4e3a-a69d-adce0cdacb34",
+            "id": "qualysis_lvl3_10_sub6",
+            "name": "qualysis_lvl3_10_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "a3986cfc-1bfd-412f-8491-cb8267ec8e25",
+            "id": "qualysis_lvl3_10_sub7",
+            "name": "qualysis_lvl3_10_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "f0737705-890b-4bc2-bf21-f4eef9f9531a",
+            "id": "qualysis_lvl3_02_sub1",
+            "name": "qualysis_lvl3_02_sub1",
+            "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "6527b199-7029-41b2-89ae-7bc2cfa2436c",
+            "id": "qualysis_lvl3_02_sub2",
+            "name": "qualysis_lvl3_02_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "6d683a01-ece9-4318-9548-f12aec681f55",
+            "id": "qualysis_lvl3_02_sub3",
+            "name": "qualysis_lvl3_02_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "2b253749-e7f1-417e-9f46-c953e0aa1f4a",
+            "id": "qualysis_lvl3_02_sub4",
+            "name": "qualysis_lvl3_02_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "bba2cc97-0ed0-42bf-9778-172a516d6d47",
+            "id": "qualysis_lvl3_02_sub5",
+            "name": "qualysis_lvl3_02_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "fb7cf963-4001-4ab3-9a39-28e003a85428",
+            "id": "qualysis_lvl3_02_sub6",
+            "name": "qualysis_lvl3_02_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "2454dded-847d-4836-835a-9bc0e3d0ec1e",
+            "id": "qualysis_lvl3_02_sub7",
+            "name": "qualysis_lvl3_02_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "acf6c2f4-a340-4440-be29-cfa49293a4e2",
+            "id": "qualysis_lvl3_03_sub1",
+            "name": "qualysis_lvl3_03_sub1",
+            "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "0a895e8d-dcb1-4ecd-b4ac-de93ef168153",
+            "id": "qualysis_lvl3_03_sub2",
+            "name": "qualysis_lvl3_03_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "f08e645d-10f1-4115-a884-c97677a955eb",
+            "id": "qualysis_lvl3_03_sub3",
+            "name": "qualysis_lvl3_03_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "33998617-4fe0-4c0e-8330-388c5fc17950",
+            "id": "qualysis_lvl3_03_sub4",
+            "name": "qualysis_lvl3_03_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "6c4533a7-fd65-481e-9e3b-a5d154e029ed",
+            "id": "qualysis_lvl3_03_sub5",
+            "name": "qualysis_lvl3_03_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "2d482bb9-cd42-4416-8761-c2cd945a3078",
+            "id": "qualysis_lvl3_03_sub6",
+            "name": "qualysis_lvl3_03_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "88004ef9-a858-4706-9ea7-5d3aadf0b118",
+            "id": "qualysis_lvl3_03_sub7",
+            "name": "qualysis_lvl3_03_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "7392f33f-a851-41ef-970c-0b051f078a58",
+            "id": "qualysis_lvl3_04_sub1",
+            "name": "qualysis_lvl3_04_sub1",
+            "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "24f99803-11de-46b8-9d44-184bebe74100",
+            "id": "qualysis_lvl3_04_sub2",
+            "name": "qualysis_lvl3_04_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "517e458a-284e-42fc-9e08-c47bd20f3d32",
+            "id": "qualysis_lvl3_04_sub3",
+            "name": "qualysis_lvl3_04_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "04f29f97-a1f9-4b2f-bab5-f222b3a13902",
+            "id": "qualysis_lvl3_04_sub4",
+            "name": "qualysis_lvl3_04_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "8517665c-b168-4a85-84a9-88226ae0fe26",
+            "id": "qualysis_lvl3_04_sub5",
+            "name": "qualysis_lvl3_04_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "5857b516-a342-4974-a2d5-8441c5eb0d4b",
+            "id": "qualysis_lvl3_04_sub6",
+            "name": "qualysis_lvl3_04_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "9aeab6d2-15f5-4104-b590-ad4d5422374d",
+            "id": "qualysis_lvl3_04_sub7",
+            "name": "qualysis_lvl3_04_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "9be4f919-617b-4eab-a517-50e261329ab0",
+            "id": "qualysis_lvl3_05_sub1",
+            "name": "qualysis_lvl3_05_sub1",
+            "description": "You are given 15 mL of an unknown sample solution containing 3 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "fbd7553e-a901-416a-a903-6a123857f37f",
+            "id": "qualysis_lvl3_05_sub2",
+            "name": "qualysis_lvl3_05_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "c1230849-9c03-47f7-992d-67906d1c26a7",
+            "id": "qualysis_lvl3_05_sub3",
+            "name": "qualysis_lvl3_05_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "396a8763-09d7-4a22-9b7f-07e4f594c6a4",
+            "id": "qualysis_lvl3_05_sub4",
+            "name": "qualysis_lvl3_05_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "cf1fe4d8-636e-455d-9ad8-2b2bb49241b7",
+            "id": "qualysis_lvl3_05_sub5",
+            "name": "qualysis_lvl3_05_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "106d35b6-9889-448e-b15c-c4eb7b2ff73b",
+            "id": "qualysis_lvl3_05_sub6",
+            "name": "qualysis_lvl3_05_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "3b1c929d-574c-468a-bddf-fc10ddb20a53",
+            "id": "qualysis_lvl3_05_sub7",
+            "name": "qualysis_lvl3_05_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "85ee9975-c76d-4676-b7f1-710cdde393fc",
+            "id": "qualysis_lvl3_06_sub1",
+            "name": "qualysis_lvl3_06_sub1",
+            "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "95105e85-e91d-432f-a533-a7cc6eb6cafa",
+            "id": "qualysis_lvl3_06_sub2",
+            "name": "qualysis_lvl3_06_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "f3dbaca3-9fd3-4aa9-ad3a-94aab49ef724",
+            "id": "qualysis_lvl3_06_sub3",
+            "name": "qualysis_lvl3_06_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "53dc1a40-be4a-4247-a373-6e17b7196063",
+            "id": "qualysis_lvl3_06_sub4",
+            "name": "qualysis_lvl3_06_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "f7b7698e-6900-404d-9d7f-d1429ee5f545",
+            "id": "qualysis_lvl3_06_sub5",
+            "name": "qualysis_lvl3_06_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "1086efb9-86ba-4f2d-8e1b-60ceee590c61",
+            "id": "qualysis_lvl3_06_sub6",
+            "name": "qualysis_lvl3_06_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "cf864305-5e3c-4f27-904c-66a48ce3a363",
+            "id": "qualysis_lvl3_06_sub7",
+            "name": "qualysis_lvl3_06_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "01106e6a-9bcf-4a72-b0b2-56fd5ebdc835",
+            "id": "qualysis_lvl3_07_sub1",
+            "name": "qualysis_lvl3_07_sub1",
+            "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "120c904b-3fa4-4182-8ce9-08886a603c27",
+            "id": "qualysis_lvl3_07_sub2",
+            "name": "qualysis_lvl3_07_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "89078d35-0f6b-4ecb-b811-b025afa2ce25",
+            "id": "qualysis_lvl3_07_sub3",
+            "name": "qualysis_lvl3_07_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "80258302-2c35-4a49-be93-930dba8ecb4c",
+            "id": "qualysis_lvl3_07_sub4",
+            "name": "qualysis_lvl3_07_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "a341453f-523d-4fa5-b802-8763b4ab2c59",
+            "id": "qualysis_lvl3_07_sub5",
+            "name": "qualysis_lvl3_07_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "76de3c0e-b696-4bad-8eb6-ef8850090038",
+            "id": "qualysis_lvl3_07_sub6",
+            "name": "qualysis_lvl3_07_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "3c427212-1ec6-458d-803b-aa56103ff4bb",
+            "id": "qualysis_lvl3_07_sub7",
+            "name": "qualysis_lvl3_07_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "db53e8cb-c94a-44b4-89e7-df07603d844f",
+            "id": "qualysis_lvl3_08_sub1",
+            "name": "qualysis_lvl3_08_sub1",
+            "description": "You are given 20 mL of an unknown sample solution containing 5 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "bba1f046-c53c-4b5b-8a4c-55a210ab6697",
+            "id": "qualysis_lvl3_08_sub2",
+            "name": "qualysis_lvl3_08_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "90060140-3c06-493c-9269-d13ee26a3c04",
+            "id": "qualysis_lvl3_08_sub3",
+            "name": "qualysis_lvl3_08_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "398e46de-8af2-4d23-9205-accaa7ba0545",
+            "id": "qualysis_lvl3_08_sub4",
+            "name": "qualysis_lvl3_08_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "ee813954-1a57-4b43-97b9-28f9b0fc882a",
+            "id": "qualysis_lvl3_08_sub5",
+            "name": "qualysis_lvl3_08_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "3f8e3261-a733-4d2b-917e-72c9bfb72605",
+            "id": "qualysis_lvl3_08_sub6",
+            "name": "qualysis_lvl3_08_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "738fc4bc-a6bb-40b3-8e49-78fde9b0d580",
+            "id": "qualysis_lvl3_08_sub7",
+            "name": "qualysis_lvl3_08_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          },
+          {
+            "_uid": "35174095-9aea-4f39-9849-9262369c9d46",
+            "id": "qualysis_lvl3_09_sub1",
+            "name": "qualysis_lvl3_09_sub1",
+            "description": "You are given 15 mL of an unknown sample solution containing 4 different inorganic cations. Your task is to perform tests and experiments on the sample using the given tools and reagents, and use the resulting observations to deduce which cations are present in the solution. You will perform a systematic analysis, broken down into the following subtasks:\n1. First analytical group (insoluble chloride)\n2. Second analytical group (acid-insoluble sulfide)\n3. Third analytical group (insoluble hydroxide)\n4. Fourth analytical group (insoluble sulfide)\n5. Fifth analytical group (insoluble carbonate)\n6. Sixth analytical group (alkali metals)\nMost experiments will consume a portion of the involved solutions, including the unknown sample. If you run out of the sample, you cannot perform any tests that use it but you can keep experimenting with other solutions in the Inventory from the previously performed tests. NOTE: All solutions are at room temperature.\nStart by identifying cations from the first analytical group.",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the first analytical group of cations present. Submit 'None' if there are no cations from the first analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "a09ec82f-0339-4115-a66f-f5c764a251df",
+            "id": "qualysis_lvl3_09_sub2",
+            "name": "qualysis_lvl3_09_sub2",
+            "description": "Identifying cations from the second analytical group (acid-insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the second analytical group of cations present. Submit 'None' if there are no cations from the second analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "32c5253f-bfeb-4d30-a8e5-7ead100f65eb",
+            "id": "qualysis_lvl3_09_sub3",
+            "name": "qualysis_lvl3_09_sub3",
+            "description": "Identifying cations from the third analytical group (insoluble hydroxide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the third analytical group of cations present. Submit 'None' if there are no cations from the third analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "3ecfad91-5036-4599-be21-1f8b3f4310f6",
+            "id": "qualysis_lvl3_09_sub4",
+            "name": "qualysis_lvl3_09_sub4",
+            "description": "Identifying cations from the fourth analytical group (insoluble sulfide).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fourth analytical group of cations present. Submit 'None' if there are no cations from the fourth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "724e56cf-14aa-48e6-8f31-519a16df35d0",
+            "id": "qualysis_lvl3_09_sub5",
+            "name": "qualysis_lvl3_09_sub5",
+            "description": "Identifying cations from the fifth analytical group (insoluble carbonate).",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of the fifth analytical group of cations present. Submit 'None' if there are no cations from the fifth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "57392744-68a9-4ea5-ba1d-7f49eae3c9ce",
+            "id": "qualysis_lvl3_09_sub6",
+            "name": "qualysis_lvl3_09_sub6",
+            "description": "Identifying cations from the sixth analytical group (alkali metals).",
+            "tools": [],
+            "scoring_function": "none_checker",
+            "submission_format": "Comma-separated string of the sixth analytical group of cations present. Submit 'None' if there are no cations from the sixth analytical group in the sample.",
+            "level": "level_3"
+          },
+          {
+            "_uid": "a407fb9c-13c1-407a-8be2-28e6fcf6039e",
+            "id": "qualysis_lvl3_09_sub7",
+            "name": "qualysis_lvl3_09_sub7",
+            "description": "Perform confirmatory tests if needed, then provide the final list of cations present in the sample.",
+            "tools": [],
+            "scoring_function": "score_ion_list",
+            "submission_format": "Comma-separated string of all the cations present in the sample. Examples: 'K+, Sr+2, Al+3' or 'Li+, Hg2+2, Al+3, Ca+2, Cu+2'",
+            "level": "level_3"
+          }
+        ]
+      }
+    },
+    "task_count": 30,
+    "subtask_count": 190,
+    "scoring_functions": [
+      {
+        "name": "none_checker",
+        "docstring": "",
+        "code": "def none_checker(prediction: str, ground_truth: str) -> float:\n    assert ground_truth.lower() == 'none', \"none_checker used but ground_truth is not None!\"\n    return prediction.strip().lower() == 'none'"
+      },
+      {
+        "name": "score_ion_list",
+        "docstring": "",
+        "code": "def score_ion_list(prediction: str, ground_truth: str, binarize=True) -> float:\n\n    gt_set = set([_normalize_ion(x.strip()) for x in ground_truth.split(\",\")])\n    try:\n        pred_set = set([_normalize_ion(x.strip()) for x in prediction.split(\",\")])\n    except ValueError:\n        return 0.0\n    \n    iou = len(gt_set.intersection(pred_set)) / len(gt_set.union(pred_set))\n    \n    if binarize:\n        return 1.0 if (iou == 1) else 0.0\n    else:\n        return iou"
+      },
+      {
+        "name": "score_salt",
+        "docstring": "",
+        "code": "def score_salt(prediction: str, ground_truth: Dict, binarize=True) -> float:\n    if prediction.startswith(\"`\"):\n        prediction = prediction.strip(\"`json\")\n\n    try:\n        pred_dict = json.loads(prediction)\n    except json.JSONDecodeError:\n        return 0.0\n\n    if set(pred_dict.keys()) != {'cation', 'anion'}:\n        return 0.0\n    \n    true_cation = ground_truth['cation']\n    true_anion = ground_truth['anion']\n    pred_cation = pred_dict['cation']\n    pred_anion = pred_dict['anion']\n\n    cation_score = 1.0 if (pred_cation == true_cation) else 0.0\n\n    if pred_anion == true_anion:\n        anion_score = 1.0\n    else:\n        normal_true_anion = _normalize_ion(true_anion)\n        try:\n            normal_pred_anion = _normalize_ion(pred_anion)\n        except ValueError:\n            normal_pred_anion = \"\"\n\n        anion_score = 0.5 if (normal_pred_anion == normal_true_anion) else 0.0\n    \n    final_score = (cation_score + anion_score) / 2\n\n    if binarize:\n        return 1.0 if (final_score == 1.0) else 0.0\n    else:\n        return final_score"
+      }
+    ]
   }
 };
