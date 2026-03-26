@@ -83,10 +83,18 @@ def discover_environments() -> dict[str, dict]:
             and not any(part.startswith(".") for part in p.relative_to(env_dir).parts)
         ]
 
+        env_files = [
+            p
+            for p in env_dir.rglob("env.py")
+            if ".venv" not in p.parts
+            and not any(part.startswith(".") for part in p.relative_to(env_dir).parts)
+        ]
+
         envs[display_name] = {
             "dir": dir_name,
             "tools_py": tools_files[0] if tools_files else None,
             "score_py": score_files[0] if score_files else None,
+            "env_py": env_files[0] if env_files else None,
             "description": description,
         }
 
@@ -186,6 +194,49 @@ def extract_tools_from_file(filepath: Path | None) -> list[dict]:
     return tools
 
 
+def extract_scoring_registry(filepath: Path | None) -> dict[str, str]:
+    """Extract SCORING_FUNCTIONS registry from env.py.
+
+    Returns a dict mapping registry key -> function name, e.g.
+    {"check_mathematical_eq": "check_mathematical_eq", "mp_structure": "check_mp_structure"}.
+    Also handles integer keys (spectra) by converting to strings.
+    """
+    if not filepath or not filepath.exists():
+        return {}
+
+    source = filepath.read_text()
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return {}
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if not isinstance(target, ast.Name) or target.id != "SCORING_FUNCTIONS":
+                continue
+            if not isinstance(node.value, ast.Dict):
+                continue
+            registry = {}
+            for key_node, val_node in zip(
+                node.value.keys, node.value.values, strict=False
+            ):
+                # Key can be a string constant or int
+                if isinstance(key_node, ast.Constant):
+                    key = str(key_node.value)
+                else:
+                    continue
+                # Value is a Name reference to the function
+                if isinstance(val_node, ast.Name):
+                    registry[key] = val_node.id
+                elif isinstance(val_node, ast.Attribute):
+                    registry[key] = val_node.attr
+            return registry
+
+    return {}
+
+
 def extract_scoring_functions(filepath: Path | None) -> list[dict]:
     """Extract scoring function definitions from score.py."""
     if not filepath or not filepath.exists():
@@ -271,7 +322,7 @@ def load_tasks_and_subtasks(env_dir_name: str) -> dict:
                 "name": e.get("name", ""),
                 "description": e.get("description", ""),
                 "tools": e.get("tools", []),
-                "scoring_function": e.get("scoring_function", ""),
+                "scoring_function": str(e.get("scoring_function", "")),
                 "submission_format": e.get("submission_format", ""),
                 "level": level_name,
             }
@@ -284,7 +335,7 @@ def load_tasks_and_subtasks(env_dir_name: str) -> dict:
                 "name": e.get("name", ""),
                 "description": e.get("description", ""),
                 "tools": e.get("tools", []),
-                "scoring_function": e.get("scoring_function", ""),
+                "scoring_function": str(e.get("scoring_function", "")),
                 "submission_format": e.get("submission_format", ""),
                 "level": level_name,
             }
@@ -319,6 +370,17 @@ def build_data():
         tools = extract_tools_from_file(config["tools_py"])
         scoring_fns = extract_scoring_functions(config["score_py"])
         task_data = load_tasks_and_subtasks(config["dir"])
+
+        # Use env.py registry to add aliases so tasks can find scoring fns by registry key
+        registry = extract_scoring_registry(config.get("env_py"))
+        if registry:
+            fn_by_name = {fn["name"]: fn for fn in scoring_fns}
+            for reg_key, fn_name in registry.items():
+                if reg_key not in fn_by_name and fn_name in fn_by_name:
+                    # Add an alias entry with the registry key as the name
+                    alias = dict(fn_by_name[fn_name])
+                    alias["name"] = reg_key
+                    scoring_fns.append(alias)
 
         env_data[display_name] = {
             "description": config["description"],

@@ -1052,9 +1052,9 @@ const CORRAL_DATA = {
         "code": "def fit_power_law(area, roughness):\n    area = np.array(area, dtype=float)\n    roughness = np.array(roughness, dtype=float)\n\n    def power_func(A, C, k):\n        return C * A**k\n\n    popt, _ = curve_fit(power_func, area, roughness, maxfev=10000)\n    C, k = popt\n    return C, k"
       },
       {
-        "name": "check_equation",
+        "name": "check_mathematical_eq",
         "docstring": "",
-        "code": "def check_equation(final_params, tolerance):\n    def score_fn(result: str) -> float:\n        try:\n            data = json.loads(result)\n            logger.info(f\"Checking params with final_params: {final_params}\")\n            logger.info(f\"Raw submission {result}\")\n            logger.info(f\"Parsed data: {data['equation']}, {data['Rb']}, {data['A']}\")\n            # Fit power law\n            C, k = fit_power_law(data[\"A\"], data[\"Rb\"])\n            fitted_eq = f\"Rb = {C:.4f} * A**{k:.4f}\"\n            logger.info(f\"Fitted power law: {fitted_eq}\")\n            match = re.search(\n                r\"Rb\\s*=\\s*(?:([0-9.]+)\\s*\\*\\s*)?A\\s*\\*\\*\\s*([0-9.]+)\", data[\"equation\"]\n            )\n            if match:\n                C_orig = float(match.group(1) if match.group(1) else 1)\n                k_orig = float(match.group(2))\n                return (\n                    1\n                    if (abs(C - C_orig) <= tolerance and abs(k - k_orig) <= tolerance)\n                    and (check_params(final_params) == 1)\n                    else 0\n                )\n            else:\n                raise ValueError(\"Equation format not recognized\")\n        except Exception as e:\n            logger.error(f\"Error during scoring: {e}\")\n            return 0.0  # Return 0.0 in case of an error\n\n    return score_fn  # Return the scoring function itself"
+        "code": "def check_mathematical_eq(final_params, tolerance):\n    def score_fn(result: str) -> float:\n        try:\n            data = json.loads(result)\n            logger.info(f\"Checking params with final_params: {final_params}\")\n            logger.info(f\"Raw submission {result}\")\n            logger.info(f\"Parsed data: {data['equation']}, {data['Rb']}, {data['A']}\")\n            # Fit power law\n            C, k = fit_power_law(data[\"A\"], data[\"Rb\"])\n            fitted_eq = f\"Rb = {C:.4f} * A**{k:.4f}\"\n            logger.info(f\"Fitted power law: {fitted_eq}\")\n            match = re.search(\n                r\"Rb\\s*=\\s*(?:([0-9.]+)\\s*\\*\\s*)?A\\s*\\*\\*\\s*([0-9.]+)\", data[\"equation\"]\n            )\n            if match:\n                C_orig = float(match.group(1) if match.group(1) else 1)\n                k_orig = float(match.group(2))\n                return (\n                    1\n                    if (abs(C - C_orig) <= tolerance and abs(k - k_orig) <= tolerance)\n                    and (check_params(final_params) == 1)\n                    else 0\n                )\n            else:\n                raise ValueError(\"Equation format not recognized\")\n        except Exception as e:\n            logger.error(f\"Error during scoring: {e}\")\n            return 0.0  # Return 0.0 in case of an error\n\n    return score_fn  # Return the scoring function itself"
       },
       {
         "name": "score_fn",
@@ -2307,6 +2307,36 @@ const CORRAL_DATA = {
         "name": "score_fn",
         "docstring": "",
         "code": "    def score_fn(path_or_cif: str) -> float:\n        try:\n            logger.info(f\"check_adsorption_structure: input={path_or_cif!r}\")\n\n            # Check if file exists\n            if Path(path_or_cif).exists():\n                logger.info(f\"File exists at resolved path: {path_or_cif}\")\n                structure = Structure.from_file(path_or_cif)\n                logger.info(\"Successfully loaded structure from file\")\n            else:\n                logger.warning(f\"File does not exist at resolved path: {path_or_cif}\")\n                # If resolved path doesn't exist, try original input as CIF string\n                try:\n                    logger.info(\"Trying to parse original input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed original input as CIF\")\n                except Exception as e1:\n                    logger.warning(f\"Failed to parse original input as CIF: {e1}\")\n                    # If that fails too, try resolved input as CIF string\n                    logger.info(\"Trying to parse resolved input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed resolved input as CIF\")\n\n            if not structure:\n                logger.error(\"Structure is None\")\n                return 0.0\n\n            if len(structure) == 0:\n                logger.error(\"Structure is empty\")\n                return 0.0\n\n            logger.info(f\"Structure loaded successfully with {len(structure)} sites\")\n\n            atoms = {site.specie.symbol for site in structure}\n            logger.info(f\"Found atoms in structure: {atoms}\")\n\n            has_slab = all(e in atoms for e in slab_elements)\n            has_adsorbate = all(e in atoms for e in adsorbate_elements)\n\n            logger.info(f\"Required slab elements {slab_elements}: {has_slab}\")\n            logger.info(\n                f\"Required adsorbate elements {adsorbate_elements}: {has_adsorbate}\"\n            )\n\n            if has_slab and has_adsorbate:\n                logger.info(\n                    \"SUCCESS: Structure contains both slab and adsorbate elements\"\n                )\n                return 1.0\n            elif has_slab or has_adsorbate:\n                logger.info(\n                    \"PARTIAL: Structure contains only slab or adsorbate elements\"\n                )\n                return 0.0\n            else:\n                logger.error(\"FAILURE: Structure missing required elements\")\n                return 0.0\n\n        except Exception as e:\n            logger.error(f\"Exception in check_adsorption_structure: {e}\", exc_info=True)\n            return 0.0"
+      },
+      {
+        "name": "mp_structure",
+        "docstring": "Check if the path points to a valid CIF file containing a structure from Materials Project.",
+        "code": "def check_mp_structure(path_or_cif: str) -> float:\n    \"\"\"\n    Check if the path points to a valid CIF file containing a structure from Materials Project.\n    \"\"\"\n    logger.info(\"check_mp_structure\")\n    logger.info(f\"Input path_or_cif: {path_or_cif}\")\n    try:\n        # Try first as a CIF string since that's more common\n        try:\n            logger.info(f\"Trying to parse as CIF string first: {path_or_cif}\")\n            structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n            logger.info(\"Successfully parsed as CIF string\")\n        except Exception as e:\n            logger.info(f\"Could not parse as CIF string: {e}\")\n            # If that fails, try as a file path\n            if Path(path_or_cif).exists():\n                logger.info(f\"Input is a valid file path: {path_or_cif}\")\n                structure = Structure.from_file(path_or_cif)\n            else:\n                logger.error(\n                    f\"Input is neither a valid CIF string nor a file path: {path_or_cif}\"\n                )\n                return 0.0\n\n        return 1.0 if structure and len(structure) > 0 else 0.0\n    except Exception as e:\n        logger.error(f\"Error validating structure: {e}\")\n        return 0.0"
+      },
+      {
+        "name": "slabs_json",
+        "docstring": "Check that the slabs JSON contains at least one valid slab by trying to parse\nthe CIF string for one of the slabs. Accepts either a path to a JSON file or a raw JSON string.",
+        "code": "def check_slabs_json(slabs_json: str) -> float:\n    \"\"\"\n    Check that the slabs JSON contains at least one valid slab by trying to parse\n    the CIF string for one of the slabs. Accepts either a path to a JSON file or a raw JSON string.\n    \"\"\"\n    try:\n        logger.info(f\"check_slabs_json: input={slabs_json!r}\")\n\n        # Try to resolve as path\n        resolved_input = smart_resolve_path(slabs_json)\n        logger.info(f\"check_slabs_json: resolved={resolved_input!r}\")\n\n        # Try loading from file if it's a valid path\n        json_data = None\n        if Path(resolved_input).exists():\n            with Path(resolved_input).open() as f:\n                json_data = json.load(f)\n        else:\n            # Try parsing as raw JSON string (try original first, then resolved)\n            try:\n                json_data = json.loads(slabs_json)\n            except json.JSONDecodeError:\n                json_data = json.loads(resolved_input)\n\n        if not json_data or not isinstance(json_data, dict):\n            return 0.0\n\n        # Choose one slab and validate\n        for cif in json_data.values():\n            try:\n                struct = Structure.from_str(cif, fmt=\"cif\")\n                if struct and len(struct) > 0:\n                    return 1.0\n            except Exception:\n                continue\n        return 0.0\n\n    except Exception as e:\n        logger.error(f\"Error in check_slabs_json: {e}\", exc_info=True)\n        return 0.0"
+      },
+      {
+        "name": "slab_structure",
+        "docstring": "Check if the path points to a valid CIF file containing a slab structure.\n\nArgs:\n    path_or_cif: Either a path to a CIF file or a CIF string\n\nReturns:\n    float: Score between 0.0 and 1.0",
+        "code": "def check_slab_structure(path_or_cif: str) -> float:  # TODO: better slab check.\n    \"\"\"\n    Check if the path points to a valid CIF file containing a slab structure.\n\n    Args:\n        path_or_cif: Either a path to a CIF file or a CIF string\n\n    Returns:\n        float: Score between 0.0 and 1.0\n    \"\"\"\n    logger.info(f\"Input path_or_cif: {path_or_cif}\")\n    try:\n        # Determine if the input is a path or a CIF string\n        if Path(path_or_cif).exists():\n            structure = Structure.from_file(path_or_cif)\n        else:\n            structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n\n        # Check if the structure is valid\n        return 1.0 if structure and len(structure) > 0 else 0.0\n    except Exception as e:\n        logger.error(f\"Error validating slab structure: {e}\")\n        return 0.0"
+      },
+      {
+        "name": "adsorption_sites",
+        "docstring": "Check if the JSON string contains valid adsorption sites.\n\nArgs:\n    sites_json_or_path: JSON string containing adsorption sites or path to a JSON file\n\nReturns:\n    float: Score between 0.0 and 1.0",
+        "code": "def check_adsorption_sites(sites_json_or_path: str) -> float:\n    \"\"\"\n    Check if the JSON string contains valid adsorption sites.\n\n    Args:\n        sites_json_or_path: JSON string containing adsorption sites or path to a JSON file\n\n    Returns:\n        float: Score between 0.0 and 1.0\n    \"\"\"\n    try:\n        if not sites_json_or_path or not sites_json_or_path.strip():\n            logger.warning(\"Empty input provided to check_adsorption_sites\")\n            return 0.0\n\n        logger.info(f\"check_adsorption_sites: input={sites_json_or_path!r}\")\n\n        # Try to resolve as path\n        resolved_input = smart_resolve_path(sites_json_or_path.strip())\n        logger.info(f\"check_adsorption_sites: resolved={resolved_input!r}\")\n\n        # Try to load from file first\n        if Path(resolved_input).is_file():\n            with Path(resolved_input).open() as f:\n                json_content = f.read()\n        else:\n            # If no file exists, treat as raw JSON string\n            # Try original input first, then resolved input\n            json_content = (\n                sites_json_or_path\n                if not resolved_input.endswith(\".json\")\n                else resolved_input\n            )\n\n        sites = json.loads(json_content)\n\n        # Check if the structure contains expected site types\n        type_aliases = {\n            \"top\": \"ontop\",\n            \"ontop\": \"ontop\",\n            \"bridge\": \"bridge\",\n            \"hollow\": \"hollow\",\n        }\n        found_types = [alias for alias, canon in type_aliases.items() if alias in sites]\n\n        if not found_types:\n            return 0  # No recognized site types\n\n        # Check if sites have coordinates\n        has_coords = any(\n            isinstance(sites.get(site_type), list) and len(sites.get(site_type)) > 0\n            for site_type in found_types\n        )\n\n        if not has_coords:\n            return 0  # Has site types but all are empty\n\n        # Check if at least one site type has valid coordinates\n        has_valid_coords = any(\n            all(\n                isinstance(coord, list) and len(coord) == 3\n                for coord in sites.get(site_type, [])\n            )\n            for site_type in found_types\n            if sites.get(site_type)\n        )\n\n        if not has_valid_coords:\n            return 0  # Has coordinates but they're malformed\n\n        return 1.0  # At least one site type has valid coordinates\n\n    except Exception as e:\n        logger.error(f\"Error validating adsorption sites: {e}\", exc_info=True)\n        return 0.0"
+      },
+      {
+        "name": "adsorption_structure",
+        "docstring": "Returns a scoring function customized to given slab and adsorbate elements",
+        "code": "def check_adsorption_structure(\n    slab_elements: list[str], adsorbate_elements: list[str]\n) -> Callable[[str], float]:\n    \"\"\"Returns a scoring function customized to given slab and adsorbate elements\"\"\"\n\n    logger.info(\n        f\"Creating adsorption structure checker for slab_elements={slab_elements}, adsorbate_elements={adsorbate_elements}\"\n    )\n\n    def score_fn(path_or_cif: str) -> float:\n        try:\n            logger.info(f\"check_adsorption_structure: input={path_or_cif!r}\")\n\n            # Check if file exists\n            if Path(path_or_cif).exists():\n                logger.info(f\"File exists at resolved path: {path_or_cif}\")\n                structure = Structure.from_file(path_or_cif)\n                logger.info(\"Successfully loaded structure from file\")\n            else:\n                logger.warning(f\"File does not exist at resolved path: {path_or_cif}\")\n                # If resolved path doesn't exist, try original input as CIF string\n                try:\n                    logger.info(\"Trying to parse original input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed original input as CIF\")\n                except Exception as e1:\n                    logger.warning(f\"Failed to parse original input as CIF: {e1}\")\n                    # If that fails too, try resolved input as CIF string\n                    logger.info(\"Trying to parse resolved input as CIF string\")\n                    structure = Structure.from_str(path_or_cif, fmt=\"cif\")\n                    logger.info(\"Successfully parsed resolved input as CIF\")\n\n            if not structure:\n                logger.error(\"Structure is None\")\n                return 0.0\n\n            if len(structure) == 0:\n                logger.error(\"Structure is empty\")\n                return 0.0\n\n            logger.info(f\"Structure loaded successfully with {len(structure)} sites\")\n\n            atoms = {site.specie.symbol for site in structure}\n            logger.info(f\"Found atoms in structure: {atoms}\")\n\n            has_slab = all(e in atoms for e in slab_elements)\n            has_adsorbate = all(e in atoms for e in adsorbate_elements)\n\n            logger.info(f\"Required slab elements {slab_elements}: {has_slab}\")\n            logger.info(\n                f\"Required adsorbate elements {adsorbate_elements}: {has_adsorbate}\"\n            )\n\n            if has_slab and has_adsorbate:\n                logger.info(\n                    \"SUCCESS: Structure contains both slab and adsorbate elements\"\n                )\n                return 1.0\n            elif has_slab or has_adsorbate:\n                logger.info(\n                    \"PARTIAL: Structure contains only slab or adsorbate elements\"\n                )\n                return 0.0\n            else:\n                logger.error(\"FAILURE: Structure missing required elements\")\n                return 0.0\n\n        except Exception as e:\n            logger.error(f\"Exception in check_adsorption_structure: {e}\", exc_info=True)\n            return 0.0\n\n    return score_fn"
+      },
+      {
+        "name": "file_exists",
+        "docstring": "Check if a valid JSON file exists at the given path.\n\nArgs:\n    json_path: Path to the JSON file to validate\n\nReturns:\n    float: 1.0 if valid JSON file exists, 0.0 otherwise",
+        "code": "def check_valid_json_file(json_path: str) -> float:\n    \"\"\"\n    Check if a valid JSON file exists at the given path.\n\n    Args:\n        json_path: Path to the JSON file to validate\n\n    Returns:\n        float: 1.0 if valid JSON file exists, 0.0 otherwise\n    \"\"\"\n    try:\n        json_path = json_path.strip()\n        if not json_path or not json_path.strip():\n            logger.warning(\"Empty path provided to check_valid_json_file\")\n            return 0.0\n\n        # Check if file exists\n        if not Path(json_path).exists():\n            logger.info(f\"JSON file not found at: {json_path}\")\n            return 0.0\n\n        # Check if it's a file (not a directory)\n        if not Path(json_path).is_file():\n            logger.info(f\"Path exists but is not a file: {json_path}\")\n            return 0.0\n\n        # Try to load and parse the JSON\n        with Path(json_path).open(\"r\", encoding=\"utf-8\") as f:\n            json_data = json.load(f)\n\n        # Additional validation - check if it's not empty\n        if json_data is None:\n            logger.info(\"JSON file contains null\")\n            return 0.0  # Valid JSON but null content\n\n        logger.info(f\"Valid JSON file found with {type(json_data).__name__} content\")\n        return 1.0\n\n    except json.JSONDecodeError as e:\n        logger.error(f\"Invalid JSON format in file {json_path}: {e}\")\n        return 0.0\n    except UnicodeDecodeError as e:\n        logger.error(f\"Encoding error reading file {json_path}: {e}\")\n        return 0.0\n    except PermissionError as e:\n        logger.error(f\"Permission denied reading file {json_path}: {e}\")\n        return 0.0\n    except Exception as e:\n        logger.error(f\"Error validating JSON file {json_path}: {e}\", exc_info=True)\n        return 0.0"
       }
     ]
   },
@@ -5705,6 +5735,31 @@ const CORRAL_DATA = {
         "name": "score_fn",
         "docstring": "",
         "code": "    def score_fn(values_input: str) -> float:\n        try:\n            logger.info(f\"check_resistor_values_only: input={values_input!r}\")\n\n            # Try to resolve and load values\n            resolved_input = smart_resolve_path(values_input.strip())\n            values_data = None\n\n            if Path(resolved_input).exists():\n                with Path(resolved_input).open() as f:\n                    data = json.load(f)\n                    # Extract resistor values if it's a full topology\n                    values_data = data.get(\"resistors\", data)\n            else:\n                try:\n                    data = json.loads(values_input)\n                    values_data = data.get(\"resistors\", data)\n                except json.JSONDecodeError:\n                    data = json.loads(resolved_input)\n                    values_data = data.get(\"resistors\", data)\n\n            if not values_data:\n                return 0.0\n\n            score = _score_resistor_values(values_data, expected_values, tolerance)\n            logger.info(f\"Resistor values score: {score}\")\n            return score\n\n        except Exception as e:\n            logger.error(f\"Error checking resistor values: {e}\", exc_info=True)\n            return 0.0"
+      },
+      {
+        "name": "resistor_topology",
+        "docstring": "Enhanced scoring function that checks:\n1. Topology structure (connections)\n2. Functional behavior (does it produce expected measurements?)\n3. Optionally: exact resistor values\n\nArgs:\n    expected_topology: Expected circuit topology (required)\n    use_functional_scoring: Whether to use functional val",
+        "code": "def check_resistor_topology(\n    expected_topology: dict[str, Any],\n    use_functional_scoring: bool,\n    topology_weight: float,\n    functional_weight: float,\n    exact_values_weight: float,\n    tolerance: float = 0.1,\n    require_both: bool = True,\n    expected_measurements: list[dict[str, Any]] | None = None,\n) -> Callable[[str], float]:\n    \"\"\"\n    Enhanced scoring function that checks:\n    1. Topology structure (connections)\n    2. Functional behavior (does it produce expected measurements?)\n    3. Optionally: exact resistor values\n\n    Args:\n        expected_topology: Expected circuit topology (required)\n        use_functional_scoring: Whether to use functional validation (required)\n        topology_weight: Weight for topology structure score (required, set 0.0 to disable)\n        functional_weight: Weight for functional behavior score (required, set 0.0 to disable)\n        exact_values_weight: Weight for exact resistor values score (required, set 0.0 to disable)\n        tolerance: Tolerance for measurements and resistor values (default: 0.1)\n        require_both: Legacy parameter - ignored when use_functional_scoring=True (default: True)\n        expected_measurements: List of expected resistance measurements (required if functional_weight > 0)\n\n    Notes:\n        - At least one weight must be > 0\n        - If functional_weight > 0, expected_measurements must be provided\n        - Weights are normalized automatically in weighted scoring mode\n\n    Example configurations:\n        # Pure functional scoring (for subtasks with arbitrary resistor names):\n        use_functional_scoring=True, topology_weight=0.0, functional_weight=1.0, exact_values_weight=0.0\n\n        # Functional + topology (for main tasks):\n        use_functional_scoring=True, topology_weight=0.5, functional_weight=0.5, exact_values_weight=0.0\n\n        # Original strict mode (backward compatible):\n        use_functional_scoring=False, topology_weight=0.5, functional_weight=0.0, exact_values_weight=0.5\n    \"\"\"\n    # Validate configuration\n    if topology_weight < 0 or functional_weight < 0 or exact_values_weight < 0:\n        raise ValueError(\"All weights must be non-negative\")\n\n    if topology_weight == 0 and functional_weight == 0 and exact_values_weight == 0:\n        raise ValueError(\n            \"At least one weight must be > 0. \"\n            \"Set topology_weight, functional_weight, or exact_values_weight to enable scoring.\"\n        )\n\n    if functional_weight > 0 and not expected_measurements:\n        raise ValueError(\n            \"expected_measurements must be provided when functional_weight > 0\"\n        )\n\n    logger.info(\n        f\"Creating enhanced topology checker - functional: {use_functional_scoring}, \"\n        f\"weights(topology={topology_weight}, functional={functional_weight}, exact_values={exact_values_weight})\"\n    )\n\n    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"ENHANCED SCORING INPUT: {topology_input!r}\")\n            logger.info(f\"EXPECTED TOPOLOGY: {expected_topology}\")\n\n            # Parse topology (same logic as before)\n            topology_data = None\n            input_stripped = topology_input.strip()\n\n            if input_stripped.startswith(\"{\") and input_stripped.endswith(\"}\"):\n                try:\n                    topology_data = json.loads(input_stripped)\n                    logger.info(\"Parsed topology from direct JSON string\")\n                except json.JSONDecodeError as e:\n                    logger.warning(f\"Failed to parse as direct JSON: {e}\")\n                    return 0.0\n\n            if (\n                not topology_data\n                or \"resistors\" not in topology_data\n                or \"connections\" not in topology_data\n            ):\n                logger.error(\"Invalid topology data\")\n                return 0.0\n\n            proposed_resistors = topology_data[\"resistors\"]\n            proposed_connections = topology_data[\"connections\"]\n            expected_resistors = expected_topology[\"resistors\"]\n            expected_connections = expected_topology[\"connections\"]\n\n            logger.info(f\"PROPOSED TOPOLOGY: {topology_data}\")\n\n            # 1. Score topology structure (connections)\n            topology_score = _score_topology_structure(\n                proposed_connections, expected_connections\n            )\n            logger.info(f\"Topology structure score: {topology_score}\")\n\n            scores = {\"topology\": topology_score}\n            weights = {\"topology\": topology_weight}\n\n            logger.info(\n                f\"Function parameters - use_functional_scoring: {use_functional_scoring}, functional_weight: {functional_weight}, exact_values_weight: {exact_values_weight}\"\n            )\n\n            # 2. Score functional behavior\n            if (\n                use_functional_scoring\n                and expected_measurements\n                and functional_weight > 0\n            ):\n                functional_score = _score_functional_behavior(\n                    topology_data, expected_measurements, tolerance\n                )\n                scores[\"functional\"] = functional_score\n                weights[\"functional\"] = functional_weight\n                logger.info(f\"Functional behavior score: {functional_score}\")\n\n            # 3. Score exact resistor values (should be enabled by default for backward compatibility)\n            if exact_values_weight > 0:\n                exact_values_score = _score_resistor_values(\n                    proposed_resistors, expected_resistors, tolerance\n                )\n                scores[\"exact_values\"] = exact_values_score\n                weights[\"exact_values\"] = exact_values_weight\n                logger.info(f\"Exact values score: {exact_values_score}\")\n            else:\n                logger.info(\n                    f\"Exact values scoring disabled (weight={exact_values_weight})\"\n                )\n\n            # Calculate final score based on require_both setting\n            if use_functional_scoring:\n                # New behavior: use weighted or require_both logic for functional scoring\n                if False:  # Replace with actual condition\n                    # All enabled components must be perfect (score = 1.0)\n                    required_components = [\n                        component for component, weight in weights.items() if weight > 0\n                    ]\n                    all_perfect = all(\n                        scores[component] == 1.0 for component in required_components\n                    )\n                    final_score = 1.0 if all_perfect else 0.0\n                    logger.info(\n                        f\"FUNCTIONAL REQUIRE_BOTH=True: All components perfect? {all_perfect}\"\n                    )\n                else:\n                    # Use weighted scoring for functional mode\n                    total_weight = sum(weights.values())\n                    if total_weight == 0:\n                        logger.error(\"No scoring components enabled\")\n                        return 0.0\n\n                    final_score = (\n                        sum(\n                            scores[component] * weight\n                            for component, weight in weights.items()\n                        )\n                        / total_weight\n                    )\n                    logger.info(\"FUNCTIONAL REQUIRE_BOTH=False: Using weighted scoring\")\n            else:\n                # Original behavior: binary logic for backward compatibility\n                topology_score = scores.get(\"topology\", 0.0)\n                resistor_score = scores.get(\"exact_values\", 0.0)\n\n                if require_both:\n                    # Both topology AND resistors must be perfect\n                    final_score = (\n                        1.0\n                        if (topology_score == 1.0 and resistor_score == 1.0)\n                        else 0.0\n                    )\n                    logger.info(\n                        f\"ORIGINAL REQUIRE_BOTH=True: topology={topology_score}, resistors={resistor_score}, result={final_score}\"\n                    )\n                else:\n                    # Either topology OR resistors being perfect is enough\n                    final_score = (\n                        1.0 if (topology_score == 1.0 or resistor_score == 1.0) else 0.0\n                    )\n                    logger.info(\n                        f\"ORIGINAL REQUIRE_BOTH=False: topology={topology_score}, resistors={resistor_score}, result={final_score}\"\n                    )\n\n            logger.info(f\"COMPONENT SCORES: {scores}\")\n            logger.info(f\"WEIGHTS: {weights}\")\n            logger.info(f\"FINAL SCORE: {final_score}\")\n\n            return final_score\n\n        except Exception as e:\n            logger.error(f\"ENHANCED SCORING ERROR: {e}\", exc_info=True)\n            return 0.0\n\n    return score_fn"
+      },
+      {
+        "name": "resistance_measurements",
+        "docstring": "Returns a scoring function that validates a topology against expected measurements.\n\nArgs:\n    expected_measurements: list of measurement dicts with node_a, node_b, resistance\n    tolerance: Relative tolerance for resistance comparison (default 5%)\n\nReturns:\n    Scoring function that takes a topolog",
+        "code": "def check_resistance_measurements(\n    expected_measurements: list[dict[str, Any]], tolerance: float = 0.05\n) -> Callable[[str], float]:\n    \"\"\"\n    Returns a scoring function that validates a topology against expected measurements.\n\n    Args:\n        expected_measurements: list of measurement dicts with node_a, node_b, resistance\n        tolerance: Relative tolerance for resistance comparison (default 5%)\n\n    Returns:\n        Scoring function that takes a topology and returns measurement match score 0.0-1.0\n    \"\"\"\n    logger.info(\n        f\"Creating measurement checker with {len(expected_measurements)} measurements\"\n    )\n\n    def score_fn(topology_input: str) -> float:\n        try:\n            logger.info(f\"check_resistance_measurements: input={topology_input!r}\")\n\n            # Load topology\n            resolved_input = smart_resolve_path(topology_input.strip())\n            topology_data = None\n\n            if Path(resolved_input).exists():\n                with Path(resolved_input).open() as f:\n                    topology_data = json.load(f)\n            else:\n                try:\n                    topology_data = json.loads(topology_input)\n                except json.JSONDecodeError:\n                    topology_data = json.loads(resolved_input)\n\n            if not topology_data:\n                return 0.0\n\n            scores = []\n\n            for measurement in expected_measurements:\n                try:\n                    # This would call the actual circuit simulation\n                    predicted_resistance = _simulate_resistance(\n                        topology_data, measurement[\"node_a\"], measurement[\"node_b\"]\n                    )\n\n                    expected_resistance = measurement[\"resistance\"]\n\n                    if expected_resistance == 0:\n                        score = 1.0 if abs(predicted_resistance) < 1e-6 else 0.0\n                    else:\n                        relative_error = (\n                            abs(predicted_resistance - expected_resistance)\n                            / expected_resistance\n                        )\n                        score = max(0.0, 1.0 - relative_error / tolerance)\n\n                    scores.append(score)\n                    logger.info(\n                        f\"Measurement {measurement['node_a']}-{measurement['node_b']}: \"\n                        f\"expected={expected_resistance}, predicted={predicted_resistance}, score={score}\"\n                    )\n\n                except Exception as e:\n                    logger.error(f\"Failed to simulate measurement: {e}\")\n                    scores.append(0.0)\n\n            final_score = sum(scores) / len(scores) if scores else 0.0\n            logger.info(f\"Overall measurement score: {final_score}\")\n            return final_score\n\n        except Exception as e:\n            logger.error(f\"Error in measurement checking: {e}\", exc_info=True)\n            return 0.0\n\n    return score_fn"
+      },
+      {
+        "name": "complete_circuit_solution",
+        "docstring": "Returns a comprehensive scoring function that checks both topology and measurements.",
+        "code": "def check_complete_circuit_solution(\n    expected_topology: dict[str, Any],\n    expected_measurements: list[dict[str, Any]],\n    topology_weight: float = 0.6,\n    measurement_weight: float = 0.4,\n    tolerance: float = 0.1,\n) -> Callable[[str], float]:\n    \"\"\"\n    Returns a comprehensive scoring function that checks both topology and measurements.\n    \"\"\"\n    logger.info(\"Creating complete circuit solution checker\")\n\n    # Use backward-compatible mode (original strict binary scoring)\n    topology_scorer = check_resistor_topology(\n        expected_topology=expected_topology,\n        use_functional_scoring=False,\n        topology_weight=0.5,\n        functional_weight=0.0,\n        exact_values_weight=0.5,\n        tolerance=tolerance,\n        require_both=True,\n    )\n    measurement_scorer = check_resistance_measurements(expected_measurements, tolerance)\n\n    def score_fn(solution_input: str) -> float:\n        try:\n            topology_score = topology_scorer(solution_input)\n            measurement_score = measurement_scorer(solution_input)\n\n            final_score = (\n                topology_weight * topology_score\n                + measurement_weight * measurement_score\n            )\n\n            logger.info(\n                f\"Complete solution - topology: {topology_score}, \"\n                f\"measurements: {measurement_score}, final: {final_score}\"\n            )\n\n            return final_score\n\n        except Exception as e:\n            logger.error(f\"Error in complete solution checking: {e}\", exc_info=True)\n            return 0.0\n\n    return score_fn"
+      },
+      {
+        "name": "resistor_values_only",
+        "docstring": "Returns a scoring function that only checks if resistor values are correct.",
+        "code": "def check_resistor_values_only(\n    expected_values: dict[str, float], tolerance: float = 0.1\n) -> Callable[[str], float]:\n    \"\"\"\n    Returns a scoring function that only checks if resistor values are correct.\n    \"\"\"\n    logger.info(\n        f\"Creating resistor values checker for {len(expected_values)} resistors\"\n    )\n\n    def score_fn(values_input: str) -> float:\n        try:\n            logger.info(f\"check_resistor_values_only: input={values_input!r}\")\n\n            # Try to resolve and load values\n            resolved_input = smart_resolve_path(values_input.strip())\n            values_data = None\n\n            if Path(resolved_input).exists():\n                with Path(resolved_input).open() as f:\n                    data = json.load(f)\n                    # Extract resistor values if it's a full topology\n                    values_data = data.get(\"resistors\", data)\n            else:\n                try:\n                    data = json.loads(values_input)\n                    values_data = data.get(\"resistors\", data)\n                except json.JSONDecodeError:\n                    data = json.loads(resolved_input)\n                    values_data = data.get(\"resistors\", data)\n\n            if not values_data:\n                return 0.0\n\n            score = _score_resistor_values(values_data, expected_values, tolerance)\n            logger.info(f\"Resistor values score: {score}\")\n            return score\n\n        except Exception as e:\n            logger.error(f\"Error checking resistor values: {e}\", exc_info=True)\n            return 0.0\n\n    return score_fn"
+      },
+      {
+        "name": "valid_circuit_json",
+        "docstring": "Check if a valid circuit topology JSON file exists at the given path.",
+        "code": "def check_valid_circuit_json(json_path: str) -> float:\n    \"\"\"\n    Check if a valid circuit topology JSON file exists at the given path.\n    \"\"\"\n    try:\n        json_path = json_path.strip()\n        if not json_path:\n            logger.warning(\"Empty path provided to check_valid_circuit_json\")\n            return 0.0\n\n        if not Path(json_path).exists():\n            logger.info(f\"Circuit JSON file not found at: {json_path}\")\n            return 0.0\n\n        if not Path(json_path).is_file():\n            logger.info(f\"Path exists but is not a file: {json_path}\")\n            return 0.0\n\n        with Path(json_path).open(\"r\", encoding=\"utf-8\") as f:\n            circuit_data = json.load(f)\n\n        # Validate circuit structure\n        if not isinstance(circuit_data, dict):\n            logger.info(\"Circuit JSON is not a dictionary\")\n            return 0.0\n\n        required_keys = [\"resistors\", \"connections\"]\n        if not all(key in circuit_data for key in required_keys):\n            logger.info(f\"Circuit JSON missing required keys: {required_keys}\")\n            return 0.0\n\n        # Basic validation of resistors\n        resistors = circuit_data[\"resistors\"]\n        if not isinstance(resistors, dict) or not resistors:\n            logger.info(\"Invalid or empty resistors section\")\n            return 0.0\n\n        # Basic validation of connections\n        connections = circuit_data[\"connections\"]\n        if not isinstance(connections, list) or not connections:\n            logger.info(\"Invalid or empty connections section\")\n            return 0.0\n\n        # Check connection format\n        for conn in connections:\n            if not isinstance(conn, list) or len(conn) != 3:\n                logger.info(\n                    \"Invalid connection format - should be [node1, node2, resistor_id]\"\n                )\n                return 0.0\n\n        logger.info(\n            f\"Valid circuit JSON with {len(resistors)} resistors and {len(connections)} connections\"\n        )\n        return 1.0\n\n    except json.JSONDecodeError as e:\n        logger.error(f\"Invalid JSON format in file {json_path}: {e}\")\n        return 0.0\n    except Exception as e:\n        logger.error(\n            f\"Error validating circuit JSON file {json_path}: {e}\", exc_info=True\n        )\n        return 0.0"
       }
     ]
   },
@@ -11974,7 +12029,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -11986,7 +12041,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -11999,7 +12054,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -12012,7 +12067,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -12026,7 +12081,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -12043,7 +12098,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -12060,7 +12115,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -12077,7 +12132,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -12100,7 +12155,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -12114,7 +12169,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -12126,7 +12181,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -12138,7 +12193,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -12151,7 +12206,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -12164,7 +12219,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -12178,7 +12233,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -12195,7 +12250,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -12212,7 +12267,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -12229,7 +12284,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -12252,7 +12307,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -12265,7 +12320,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -12277,7 +12332,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -12289,7 +12344,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -12302,7 +12357,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -12315,7 +12370,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -12329,7 +12384,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -12346,7 +12401,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -12363,7 +12418,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -12380,7 +12435,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -12403,7 +12458,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -12416,7 +12471,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -12428,7 +12483,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -12440,7 +12495,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -12453,7 +12508,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -12466,7 +12521,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -12480,7 +12535,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -12497,7 +12552,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -12514,7 +12569,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -12531,7 +12586,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -12554,7 +12609,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -12567,7 +12622,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -12579,7 +12634,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -12591,7 +12646,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -12604,7 +12659,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -12617,7 +12672,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -12631,7 +12686,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -12648,7 +12703,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -12665,7 +12720,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -12682,7 +12737,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -12705,7 +12760,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -12718,7 +12773,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -12730,7 +12785,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -12742,7 +12797,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -12755,7 +12810,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -12768,7 +12823,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -12782,7 +12837,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -12799,7 +12854,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -12816,7 +12871,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -12833,7 +12888,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -12856,7 +12911,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -12869,7 +12924,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -12881,7 +12936,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -12893,7 +12948,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -12906,7 +12961,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -12919,7 +12974,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -12933,7 +12988,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -12950,7 +13005,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -12967,7 +13022,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -12984,7 +13039,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -13007,7 +13062,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -13020,7 +13075,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -13032,7 +13087,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -13044,7 +13099,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -13057,7 +13112,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -13070,7 +13125,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -13084,7 +13139,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -13101,7 +13156,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -13118,7 +13173,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -13135,7 +13190,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -13158,7 +13213,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -13171,7 +13226,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -13183,7 +13238,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -13195,7 +13250,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -13208,7 +13263,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -13221,7 +13276,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -13235,7 +13290,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -13252,7 +13307,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -13269,7 +13324,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -13286,7 +13341,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -13309,7 +13364,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -13322,7 +13377,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -13334,7 +13389,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -13346,7 +13401,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -13359,7 +13414,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -13372,7 +13427,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -13386,7 +13441,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -13403,7 +13458,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -13420,7 +13475,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -13437,7 +13492,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -13460,7 +13515,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -13473,7 +13528,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -13485,7 +13540,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -13497,7 +13552,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -13510,7 +13565,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -13523,7 +13578,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -13537,7 +13592,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -13554,7 +13609,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -13571,7 +13626,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -13588,7 +13643,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -13611,7 +13666,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -13624,7 +13679,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -13636,7 +13691,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -13648,7 +13703,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -13661,7 +13716,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -13674,7 +13729,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -13688,7 +13743,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -13705,7 +13760,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -13722,7 +13777,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -13739,7 +13794,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -13762,7 +13817,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -13775,7 +13830,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -13787,7 +13842,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -13799,7 +13854,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -13812,7 +13867,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -13825,7 +13880,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -13839,7 +13894,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -13856,7 +13911,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -13873,7 +13928,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -13890,7 +13945,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -13913,7 +13968,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -13926,7 +13981,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -13938,7 +13993,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -13950,7 +14005,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -13963,7 +14018,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -13976,7 +14031,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -13990,7 +14045,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -14007,7 +14062,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -14024,7 +14079,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -14041,7 +14096,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -14064,7 +14119,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -14077,7 +14132,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -14089,7 +14144,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -14101,7 +14156,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -14114,7 +14169,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -14127,7 +14182,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -14141,7 +14196,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -14158,7 +14213,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -14175,7 +14230,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -14192,7 +14247,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -14215,7 +14270,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -14228,7 +14283,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -14240,7 +14295,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -14252,7 +14307,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -14265,7 +14320,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -14278,7 +14333,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -14292,7 +14347,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -14309,7 +14364,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -14326,7 +14381,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -14343,7 +14398,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -14366,7 +14421,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -14379,7 +14434,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -14391,7 +14446,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -14403,7 +14458,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -14416,7 +14471,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -14429,7 +14484,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -14443,7 +14498,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -14460,7 +14515,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -14477,7 +14532,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -14494,7 +14549,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -14517,7 +14572,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -14530,7 +14585,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -14542,7 +14597,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -14554,7 +14609,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -14567,7 +14622,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -14580,7 +14635,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -14594,7 +14649,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -14611,7 +14666,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -14628,7 +14683,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -14645,7 +14700,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -14668,7 +14723,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -14681,7 +14736,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -14693,7 +14748,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -14705,7 +14760,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -14718,7 +14773,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -14731,7 +14786,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -14745,7 +14800,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -14762,7 +14817,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -14779,7 +14834,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -14796,7 +14851,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -14819,7 +14874,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -14832,7 +14887,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -14844,7 +14899,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_1"
       },
@@ -14856,7 +14911,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_1"
       },
@@ -14869,7 +14924,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_1"
       },
@@ -14882,7 +14937,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_1"
       },
@@ -14896,7 +14951,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_1"
       },
@@ -14913,7 +14968,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_1"
       },
@@ -14930,7 +14985,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_1"
       },
@@ -14947,7 +15002,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_1"
       },
@@ -14970,7 +15025,7 @@ const CORRAL_DATA = {
           "return_possible_fragments",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_1"
       },
@@ -14983,7 +15038,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_1"
       },
@@ -14995,7 +15050,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -15007,7 +15062,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -15020,7 +15075,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -15033,7 +15088,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -15047,7 +15102,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -15064,7 +15119,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -15081,7 +15136,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -15098,7 +15153,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -15120,7 +15175,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -15134,7 +15189,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -15146,7 +15201,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -15158,7 +15213,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -15171,7 +15226,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -15184,7 +15239,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -15198,7 +15253,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -15215,7 +15270,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -15232,7 +15287,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -15249,7 +15304,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -15271,7 +15326,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -15284,7 +15339,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -15296,7 +15351,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -15308,7 +15363,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -15321,7 +15376,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -15334,7 +15389,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -15348,7 +15403,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -15365,7 +15420,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -15382,7 +15437,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -15399,7 +15454,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -15421,7 +15476,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -15434,7 +15489,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -15446,7 +15501,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -15458,7 +15513,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -15471,7 +15526,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -15484,7 +15539,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -15498,7 +15553,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -15515,7 +15570,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -15532,7 +15587,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -15549,7 +15604,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -15571,7 +15626,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -15584,7 +15639,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -15596,7 +15651,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -15608,7 +15663,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -15621,7 +15676,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -15634,7 +15689,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -15648,7 +15703,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -15665,7 +15720,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -15682,7 +15737,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -15699,7 +15754,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -15721,7 +15776,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -15734,7 +15789,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -15746,7 +15801,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -15758,7 +15813,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -15771,7 +15826,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -15784,7 +15839,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -15798,7 +15853,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -15815,7 +15870,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -15832,7 +15887,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -15849,7 +15904,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -15871,7 +15926,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -15884,7 +15939,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -15896,7 +15951,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -15908,7 +15963,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -15921,7 +15976,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -15934,7 +15989,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -15948,7 +16003,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -15965,7 +16020,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -15982,7 +16037,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -15999,7 +16054,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -16021,7 +16076,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -16034,7 +16089,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -16046,7 +16101,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -16058,7 +16113,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -16071,7 +16126,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -16084,7 +16139,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -16098,7 +16153,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -16115,7 +16170,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -16132,7 +16187,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -16149,7 +16204,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -16171,7 +16226,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -16184,7 +16239,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -16196,7 +16251,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -16208,7 +16263,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -16221,7 +16276,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -16234,7 +16289,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -16248,7 +16303,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -16265,7 +16320,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -16282,7 +16337,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -16299,7 +16354,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -16321,7 +16376,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -16334,7 +16389,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -16346,7 +16401,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -16358,7 +16413,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -16371,7 +16426,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -16384,7 +16439,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -16398,7 +16453,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -16415,7 +16470,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -16432,7 +16487,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -16449,7 +16504,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -16471,7 +16526,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -16484,7 +16539,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -16496,7 +16551,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -16508,7 +16563,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -16521,7 +16576,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -16534,7 +16589,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -16548,7 +16603,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -16565,7 +16620,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -16582,7 +16637,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -16599,7 +16654,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -16621,7 +16676,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -16634,7 +16689,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -16646,7 +16701,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -16658,7 +16713,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -16671,7 +16726,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -16684,7 +16739,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -16698,7 +16753,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -16715,7 +16770,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -16732,7 +16787,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -16749,7 +16804,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -16771,7 +16826,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -16784,7 +16839,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -16796,7 +16851,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -16808,7 +16863,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -16821,7 +16876,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -16834,7 +16889,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -16848,7 +16903,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -16865,7 +16920,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -16882,7 +16937,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -16899,7 +16954,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -16921,7 +16976,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -16934,7 +16989,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -16946,7 +17001,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -16958,7 +17013,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -16971,7 +17026,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -16984,7 +17039,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -16998,7 +17053,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -17015,7 +17070,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -17032,7 +17087,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -17049,7 +17104,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -17071,7 +17126,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -17084,7 +17139,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -17096,7 +17151,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -17108,7 +17163,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -17121,7 +17176,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -17134,7 +17189,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -17148,7 +17203,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -17165,7 +17220,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -17182,7 +17237,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -17199,7 +17254,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -17221,7 +17276,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -17234,7 +17289,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -17246,7 +17301,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -17258,7 +17313,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -17271,7 +17326,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -17284,7 +17339,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -17298,7 +17353,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -17315,7 +17370,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -17332,7 +17387,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -17349,7 +17404,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -17371,7 +17426,7 @@ const CORRAL_DATA = {
           "search_by_smiles",
           "simulate_spectra"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -17384,7 +17439,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -17396,7 +17451,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -17408,7 +17463,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -17421,7 +17476,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -17434,7 +17489,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -17448,7 +17503,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -17465,7 +17520,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -17482,7 +17537,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -17499,7 +17554,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -17521,7 +17576,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -17534,7 +17589,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -17546,7 +17601,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -17558,7 +17613,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -17571,7 +17626,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -17584,7 +17639,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -17598,7 +17653,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -17615,7 +17670,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -17632,7 +17687,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -17649,7 +17704,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -17671,7 +17726,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -17684,7 +17739,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -17696,7 +17751,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -17708,7 +17763,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -17721,7 +17776,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -17734,7 +17789,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -17748,7 +17803,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -17765,7 +17820,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -17782,7 +17837,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -17799,7 +17854,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -17821,7 +17876,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -17834,7 +17889,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       },
@@ -17846,7 +17901,7 @@ const CORRAL_DATA = {
         "tools": [
           "mass_spectrometry_spectra"
         ],
-        "scoring_function": 1,
+        "scoring_function": "1",
         "submission_format": "molecular formula in the format CxHyOzX",
         "level": "level_2"
       },
@@ -17858,7 +17913,7 @@ const CORRAL_DATA = {
         "tools": [
           "retrieve_dbe_formula"
         ],
-        "scoring_function": 2,
+        "scoring_function": "2",
         "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
         "level": "level_2"
       },
@@ -17871,7 +17926,7 @@ const CORRAL_DATA = {
           "mass_spectrometry_spectra",
           "retrieve_isotope_distribution"
         ],
-        "scoring_function": 3,
+        "scoring_function": "3",
         "submission_format": "list of elements in the format ['C', 'S',...]",
         "level": "level_2"
       },
@@ -17884,7 +17939,7 @@ const CORRAL_DATA = {
           "carbon_nmr_spectra",
           "retrieve_carbon_shifts"
         ],
-        "scoring_function": 4,
+        "scoring_function": "4",
         "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
         "level": "level_2"
       },
@@ -17898,7 +17953,7 @@ const CORRAL_DATA = {
           "retrieve_protons_shifts",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 5,
+        "scoring_function": "5",
         "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
         "level": "level_2"
       },
@@ -17915,7 +17970,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 6,
+        "scoring_function": "6",
         "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
         "level": "level_2"
       },
@@ -17932,7 +17987,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 7,
+        "scoring_function": "7",
         "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
         "level": "level_2"
       },
@@ -17949,7 +18004,7 @@ const CORRAL_DATA = {
           "retrieve_carbon_shifts",
           "retrieve_protons_shifts"
         ],
-        "scoring_function": 8,
+        "scoring_function": "8",
         "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
         "level": "level_2"
       },
@@ -17971,7 +18026,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "retrieve_aromatic_protons_shifts"
         ],
-        "scoring_function": 9,
+        "scoring_function": "9",
         "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
         "level": "level_2"
       },
@@ -17984,7 +18039,7 @@ const CORRAL_DATA = {
           "simulate_spectra",
           "validate_smiles"
         ],
-        "scoring_function": 10,
+        "scoring_function": "10",
         "submission_format": "string corresponding to the SMILES of the molecule",
         "level": "level_2"
       }
@@ -18542,7 +18597,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -18554,7 +18609,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -18567,7 +18622,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -18580,7 +18635,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -18594,7 +18649,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -18611,7 +18666,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -18628,7 +18683,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -18645,7 +18700,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -18668,7 +18723,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -18682,7 +18737,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -18694,7 +18749,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -18706,7 +18761,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -18719,7 +18774,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -18732,7 +18787,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -18746,7 +18801,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -18763,7 +18818,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -18780,7 +18835,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -18797,7 +18852,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -18820,7 +18875,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -18833,7 +18888,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -18845,7 +18900,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -18857,7 +18912,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -18870,7 +18925,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -18883,7 +18938,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -18897,7 +18952,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -18914,7 +18969,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -18931,7 +18986,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -18948,7 +19003,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -18971,7 +19026,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -18984,7 +19039,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -18996,7 +19051,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -19008,7 +19063,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -19021,7 +19076,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -19034,7 +19089,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -19048,7 +19103,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -19065,7 +19120,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -19082,7 +19137,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -19099,7 +19154,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -19122,7 +19177,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -19135,7 +19190,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -19147,7 +19202,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -19159,7 +19214,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -19172,7 +19227,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -19185,7 +19240,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -19199,7 +19254,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -19216,7 +19271,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -19233,7 +19288,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -19250,7 +19305,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -19273,7 +19328,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -19286,7 +19341,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -19298,7 +19353,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -19310,7 +19365,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -19323,7 +19378,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -19336,7 +19391,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -19350,7 +19405,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -19367,7 +19422,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -19384,7 +19439,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -19401,7 +19456,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -19424,7 +19479,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -19437,7 +19492,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -19449,7 +19504,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -19461,7 +19516,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -19474,7 +19529,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -19487,7 +19542,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -19501,7 +19556,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -19518,7 +19573,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -19535,7 +19590,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -19552,7 +19607,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -19575,7 +19630,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -19588,7 +19643,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -19600,7 +19655,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -19612,7 +19667,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -19625,7 +19680,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -19638,7 +19693,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -19652,7 +19707,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -19669,7 +19724,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -19686,7 +19741,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -19703,7 +19758,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -19726,7 +19781,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -19739,7 +19794,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -19751,7 +19806,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -19763,7 +19818,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -19776,7 +19831,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -19789,7 +19844,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -19803,7 +19858,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -19820,7 +19875,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -19837,7 +19892,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -19854,7 +19909,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -19877,7 +19932,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -19890,7 +19945,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -19902,7 +19957,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -19914,7 +19969,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -19927,7 +19982,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -19940,7 +19995,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -19954,7 +20009,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -19971,7 +20026,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -19988,7 +20043,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -20005,7 +20060,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -20028,7 +20083,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -20041,7 +20096,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -20053,7 +20108,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -20065,7 +20120,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -20078,7 +20133,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -20091,7 +20146,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -20105,7 +20160,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -20122,7 +20177,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -20139,7 +20194,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -20156,7 +20211,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -20179,7 +20234,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -20192,7 +20247,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -20204,7 +20259,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -20216,7 +20271,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -20229,7 +20284,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -20242,7 +20297,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -20256,7 +20311,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -20273,7 +20328,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -20290,7 +20345,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -20307,7 +20362,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -20330,7 +20385,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -20343,7 +20398,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -20355,7 +20410,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -20367,7 +20422,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -20380,7 +20435,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -20393,7 +20448,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -20407,7 +20462,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -20424,7 +20479,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -20441,7 +20496,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -20458,7 +20513,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -20481,7 +20536,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -20494,7 +20549,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -20506,7 +20561,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -20518,7 +20573,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -20531,7 +20586,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -20544,7 +20599,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -20558,7 +20613,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -20575,7 +20630,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -20592,7 +20647,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -20609,7 +20664,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -20632,7 +20687,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -20645,7 +20700,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -20657,7 +20712,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -20669,7 +20724,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -20682,7 +20737,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -20695,7 +20750,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -20709,7 +20764,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -20726,7 +20781,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -20743,7 +20798,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -20760,7 +20815,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -20783,7 +20838,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -20796,7 +20851,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -20808,7 +20863,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -20820,7 +20875,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -20833,7 +20888,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -20846,7 +20901,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -20860,7 +20915,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -20877,7 +20932,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -20894,7 +20949,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -20911,7 +20966,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -20934,7 +20989,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -20947,7 +21002,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -20959,7 +21014,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -20971,7 +21026,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -20984,7 +21039,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -20997,7 +21052,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -21011,7 +21066,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -21028,7 +21083,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -21045,7 +21100,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -21062,7 +21117,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -21085,7 +21140,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -21098,7 +21153,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -21110,7 +21165,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -21122,7 +21177,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -21135,7 +21190,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -21148,7 +21203,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -21162,7 +21217,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -21179,7 +21234,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -21196,7 +21251,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -21213,7 +21268,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -21236,7 +21291,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -21249,7 +21304,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -21261,7 +21316,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -21273,7 +21328,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -21286,7 +21341,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -21299,7 +21354,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -21313,7 +21368,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -21330,7 +21385,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -21347,7 +21402,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -21364,7 +21419,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -21387,7 +21442,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -21400,7 +21455,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           },
@@ -21412,7 +21467,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_1"
           },
@@ -21424,7 +21479,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_1"
           },
@@ -21437,7 +21492,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_1"
           },
@@ -21450,7 +21505,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_1"
           },
@@ -21464,7 +21519,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_1"
           },
@@ -21481,7 +21536,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_1"
           },
@@ -21498,7 +21553,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_1"
           },
@@ -21515,7 +21570,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_1"
           },
@@ -21538,7 +21593,7 @@ const CORRAL_DATA = {
               "return_possible_fragments",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_1"
           },
@@ -21551,7 +21606,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_1"
           }
@@ -22089,7 +22144,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -22101,7 +22156,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -22114,7 +22169,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -22127,7 +22182,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -22141,7 +22196,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -22158,7 +22213,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -22175,7 +22230,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -22192,7 +22247,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -22214,7 +22269,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -22228,7 +22283,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -22240,7 +22295,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -22252,7 +22307,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -22265,7 +22320,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -22278,7 +22333,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -22292,7 +22347,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -22309,7 +22364,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -22326,7 +22381,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -22343,7 +22398,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -22365,7 +22420,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -22378,7 +22433,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -22390,7 +22445,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -22402,7 +22457,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -22415,7 +22470,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -22428,7 +22483,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -22442,7 +22497,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -22459,7 +22514,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -22476,7 +22531,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -22493,7 +22548,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -22515,7 +22570,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -22528,7 +22583,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -22540,7 +22595,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -22552,7 +22607,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -22565,7 +22620,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -22578,7 +22633,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -22592,7 +22647,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -22609,7 +22664,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -22626,7 +22681,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -22643,7 +22698,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -22665,7 +22720,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -22678,7 +22733,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -22690,7 +22745,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -22702,7 +22757,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -22715,7 +22770,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -22728,7 +22783,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -22742,7 +22797,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -22759,7 +22814,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -22776,7 +22831,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -22793,7 +22848,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -22815,7 +22870,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -22828,7 +22883,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -22840,7 +22895,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -22852,7 +22907,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -22865,7 +22920,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -22878,7 +22933,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -22892,7 +22947,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -22909,7 +22964,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -22926,7 +22981,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -22943,7 +22998,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -22965,7 +23020,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -22978,7 +23033,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -22990,7 +23045,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -23002,7 +23057,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -23015,7 +23070,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -23028,7 +23083,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -23042,7 +23097,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -23059,7 +23114,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -23076,7 +23131,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -23093,7 +23148,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -23115,7 +23170,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -23128,7 +23183,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -23140,7 +23195,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -23152,7 +23207,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -23165,7 +23220,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -23178,7 +23233,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -23192,7 +23247,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -23209,7 +23264,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -23226,7 +23281,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -23243,7 +23298,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -23265,7 +23320,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -23278,7 +23333,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -23290,7 +23345,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -23302,7 +23357,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -23315,7 +23370,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -23328,7 +23383,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -23342,7 +23397,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -23359,7 +23414,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -23376,7 +23431,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -23393,7 +23448,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -23415,7 +23470,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -23428,7 +23483,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -23440,7 +23495,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -23452,7 +23507,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -23465,7 +23520,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -23478,7 +23533,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -23492,7 +23547,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -23509,7 +23564,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -23526,7 +23581,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -23543,7 +23598,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -23565,7 +23620,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -23578,7 +23633,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -23590,7 +23645,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -23602,7 +23657,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -23615,7 +23670,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -23628,7 +23683,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -23642,7 +23697,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -23659,7 +23714,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -23676,7 +23731,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -23693,7 +23748,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -23715,7 +23770,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -23728,7 +23783,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -23740,7 +23795,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -23752,7 +23807,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -23765,7 +23820,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -23778,7 +23833,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -23792,7 +23847,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -23809,7 +23864,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -23826,7 +23881,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -23843,7 +23898,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -23865,7 +23920,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -23878,7 +23933,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -23890,7 +23945,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -23902,7 +23957,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -23915,7 +23970,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -23928,7 +23983,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -23942,7 +23997,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -23959,7 +24014,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -23976,7 +24031,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -23993,7 +24048,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -24015,7 +24070,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -24028,7 +24083,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -24040,7 +24095,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -24052,7 +24107,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -24065,7 +24120,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -24078,7 +24133,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -24092,7 +24147,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -24109,7 +24164,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -24126,7 +24181,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -24143,7 +24198,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -24165,7 +24220,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -24178,7 +24233,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -24190,7 +24245,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -24202,7 +24257,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -24215,7 +24270,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -24228,7 +24283,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -24242,7 +24297,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -24259,7 +24314,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -24276,7 +24331,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -24293,7 +24348,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -24315,7 +24370,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -24328,7 +24383,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -24340,7 +24395,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -24352,7 +24407,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -24365,7 +24420,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -24378,7 +24433,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -24392,7 +24447,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -24409,7 +24464,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -24426,7 +24481,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -24443,7 +24498,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -24465,7 +24520,7 @@ const CORRAL_DATA = {
               "search_by_smiles",
               "simulate_spectra"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -24478,7 +24533,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -24490,7 +24545,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -24502,7 +24557,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -24515,7 +24570,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -24528,7 +24583,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -24542,7 +24597,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -24559,7 +24614,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -24576,7 +24631,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -24593,7 +24648,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -24615,7 +24670,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -24628,7 +24683,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -24640,7 +24695,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -24652,7 +24707,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -24665,7 +24720,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -24678,7 +24733,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -24692,7 +24747,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -24709,7 +24764,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -24726,7 +24781,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -24743,7 +24798,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -24765,7 +24820,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -24778,7 +24833,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -24790,7 +24845,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -24802,7 +24857,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -24815,7 +24870,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -24828,7 +24883,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -24842,7 +24897,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -24859,7 +24914,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -24876,7 +24931,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -24893,7 +24948,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -24915,7 +24970,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -24928,7 +24983,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           },
@@ -24940,7 +24995,7 @@ const CORRAL_DATA = {
             "tools": [
               "mass_spectrometry_spectra"
             ],
-            "scoring_function": 1,
+            "scoring_function": "1",
             "submission_format": "molecular formula in the format CxHyOzX",
             "level": "level_2"
           },
@@ -24952,7 +25007,7 @@ const CORRAL_DATA = {
             "tools": [
               "retrieve_dbe_formula"
             ],
-            "scoring_function": 2,
+            "scoring_function": "2",
             "submission_format": "integer value representing the number of the double bond equivalents (DBE)",
             "level": "level_2"
           },
@@ -24965,7 +25020,7 @@ const CORRAL_DATA = {
               "mass_spectrometry_spectra",
               "retrieve_isotope_distribution"
             ],
-            "scoring_function": 3,
+            "scoring_function": "3",
             "submission_format": "list of elements in the format ['C', 'S',...]",
             "level": "level_2"
           },
@@ -24978,7 +25033,7 @@ const CORRAL_DATA = {
               "carbon_nmr_spectra",
               "retrieve_carbon_shifts"
             ],
-            "scoring_function": 4,
+            "scoring_function": "4",
             "submission_format": "integer value representing the number of equivalent carbon atoms, e.g., '5'",
             "level": "level_2"
           },
@@ -24992,7 +25047,7 @@ const CORRAL_DATA = {
               "retrieve_protons_shifts",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 5,
+            "scoring_function": "5",
             "submission_format": "integer value representing the number of equivalent protons, e.g., '12'",
             "level": "level_2"
           },
@@ -25009,7 +25064,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 6,
+            "scoring_function": "6",
             "submission_format": "integer value representing the number of aromatic carbons, e.g., '6'",
             "level": "level_2"
           },
@@ -25026,7 +25081,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 7,
+            "scoring_function": "7",
             "submission_format": "integer value corresponding to the number of methyls in the molecule, e.g., '3'",
             "level": "level_2"
           },
@@ -25043,7 +25098,7 @@ const CORRAL_DATA = {
               "retrieve_carbon_shifts",
               "retrieve_protons_shifts"
             ],
-            "scoring_function": 8,
+            "scoring_function": "8",
             "submission_format": "integer value corresponding to the number of carbonyls in the molecule, e.g., '2'",
             "level": "level_2"
           },
@@ -25065,7 +25120,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "retrieve_aromatic_protons_shifts"
             ],
-            "scoring_function": 9,
+            "scoring_function": "9",
             "submission_format": "list with the fragments that could be joined, e.g., ['C1=CC=CC=C1', 'O=C(O)C1=CC=CC=C1']",
             "level": "level_2"
           },
@@ -25078,7 +25133,7 @@ const CORRAL_DATA = {
               "simulate_spectra",
               "validate_smiles"
             ],
-            "scoring_function": 10,
+            "scoring_function": "10",
             "submission_format": "string corresponding to the SMILES of the molecule",
             "level": "level_2"
           }
@@ -25167,6 +25222,56 @@ const CORRAL_DATA = {
         "name": "score_num_carbonyl_groups",
         "docstring": "Count carbonyl groups (C=O) in the molecule, handling tautomers.\nIt works through identifying double bonds between carbon and oxygen atoms.\nThen compare to predicted number and score consequently.\n\nArgs:\n    prediction: Predicted number of carbonyl groups\n    ground_truth: SMILES string of the groun",
         "code": "def score_num_carbonyl_groups(prediction: int | str, ground_truth: str) -> float:\n    \"\"\"Count carbonyl groups (C=O) in the molecule, handling tautomers.\n    It works through identifying double bonds between carbon and oxygen atoms.\n    Then compare to predicted number and score consequently.\n\n    Args:\n        prediction: Predicted number of carbonyl groups\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of carbonyl groups.\"\n        )\n        return 0.0\n\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    # Canonicalize tautomers to get the most stable form (usually keto)\n    enumerator = rdMolStandardize.TautomerEnumerator()\n    canonical_mol = enumerator.Canonicalize(mol)\n\n    carbonyl_groups = sum(\n        1\n        for bond in canonical_mol.GetBonds()\n        if bond.GetBondType() == Chem.BondType.DOUBLE\n        and (\n            (\n                bond.GetBeginAtom().GetAtomicNum() == 6\n                and bond.GetEndAtom().GetAtomicNum() == 8\n            )\n            or (\n                bond.GetBeginAtom().GetAtomicNum() == 8\n                and bond.GetEndAtom().GetAtomicNum() == 6\n            )\n        )\n    )\n\n    return float(carbonyl_groups == prediction)"
+      },
+      {
+        "name": "1",
+        "docstring": "Scoring function that checks if the predicted molecular formula matches the ground truth molecule.\nIt decomposes both the predicted formula and the ground truth SMILES into element counts\nand compares them for equality.\n\nArgs:\n    prediction: Predicted molecular formula (e.g., \"C6H6\")\n    ground_tru",
+        "code": "def score_formula_match(prediction: str, ground_truth: str) -> float:\n    \"\"\"\n    Scoring function that checks if the predicted molecular formula matches the ground truth molecule.\n    It decomposes both the predicted formula and the ground truth SMILES into element counts\n    and compares them for equality.\n\n    Args:\n        prediction: Predicted molecular formula (e.g., \"C6H6\")\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float 1.0 if the formulas match, 0.0 otherwise\n    \"\"\"\n    # prediction: SMILES, ground_truth: formula\n    return 1.0 if validate_molecular_formula(prediction, ground_truth) else 0.0"
+      },
+      {
+        "name": "2",
+        "docstring": "Validate that the predicted DBE value (integer) matches the DBE calculated from the ground truth SMILES string within a tolerance.\n\nArgs:\n    prediction: Predicted DBE value (should be an integer or string representing an integer).\n    ground_truth: SMILES string of the ground truth molecule.\n\nRetur",
+        "code": "def validate_dbe_consistency(prediction: int | str, ground_truth: str) -> float:\n    \"\"\"\n    Validate that the predicted DBE value (integer) matches the DBE calculated from the ground truth SMILES string within a tolerance.\n\n    Args:\n        prediction: Predicted DBE value (should be an integer or string representing an integer).\n        ground_truth: SMILES string of the ground truth molecule.\n\n    Returns:\n        A float being 1.0 if the predicted DBE matches the calculated DBE, 0.0 otherwise.\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\"Prediction must be an integer representing the DBE value.\")\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid SMILES string provided.\")\n    # ground_truth can be a formula or a DBE value\n    expected_dbe = calculate_dbe(mol) if isinstance(ground_truth, str) else ground_truth\n    logger.debug(f\"Calculated DBE: {expected_dbe}, Predicted DBE: {prediction}\")\n    return float(prediction == expected_dbe)"
+      },
+      {
+        "name": "3",
+        "docstring": "Score the isotopic distribution of a molecule based on the provided prediction and ground truth.\nChecks that all the elements with significant isotopic distributions (C, S, Cl, Br)\nin the ground truth molecule are present in the predicted list of elements.\n\nArgs:\n    prediction: list of element symb",
+        "code": "def score_isotopic_distribution(\n    prediction: list[str] | str, ground_truth: str\n) -> float:\n    \"\"\"\n    Score the isotopic distribution of a molecule based on the provided prediction and ground truth.\n    Checks that all the elements with significant isotopic distributions (C, S, Cl, Br)\n    in the ground truth molecule are present in the predicted list of elements.\n\n    Args:\n        prediction: list of element symbols (e.g. [\"C\", \"H\", \"O\"]) or a string representation of such a list\n        ground_truth: SMILES string of the sample molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted elements for the isotopic distribution match the ground truth, 0.0 otherwise\n    \"\"\"\n    if isinstance(prediction, list):\n        seq = prediction\n    elif isinstance(prediction, str):\n        try:\n            seq = ast.literal_eval(prediction)\n        except Exception:\n            return 0.0  # signal bad input\n    else:\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        logger.error(\"Invalid ground truth SMILES string.\")\n        return 0.0\n    formula = rdMolDescriptors.CalcMolFormula(mol)\n    elems = parse_formula(formula)\n    elems = {\n        k: v for k, v in elems.items() if k in _ELEMENTS_WITH_ISOTOPIC_DISTRIBUTION\n    }\n\n    if seq and seq is None and not elems:\n        return 1.0\n    if set(seq) == set(elems):\n        return 1.0\n    else:\n        return 0.0"
+      },
+      {
+        "name": "4",
+        "docstring": "Count unique carbon environments using canonical ranking. Stereochemistry is ignored.\nThen compare to predicted number and score consequently.\n\nArgs:\n    prediction: Predicted number of carbon symmetry classes\n    ground_truth: SMILES string of the ground truth molecule\n\nReturns:\n    Float that will",
+        "code": "def score_num_carbon_symmetry_classes(\n    prediction: int | str, ground_truth: str\n) -> float:\n    \"\"\"Count unique carbon environments using canonical ranking. Stereochemistry is ignored.\n    Then compare to predicted number and score consequently.\n\n    Args:\n        prediction: Predicted number of carbon symmetry classes\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of carbon symmetry classes.\"\n        )\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    c_classes = carbon_envs_stereo(ground_truth)[\"n_carbon_envs\"]\n    return float(c_classes == prediction)"
+      },
+      {
+        "name": "5",
+        "docstring": "Count unique hydrogen environments using canonical ranking. Stereochemistry is ignored.\nThen compare to predicted number and score consequently. It avoids acidic hydrogens.\n\nArgs:\n    prediction: Predicted number of hydrogen symmetry classes\n    ground_truth: SMILES string of the ground truth molecu",
+        "code": "def score_num_hydrogen_symmetry_classes(\n    prediction: int | str, ground_truth: str\n) -> float:\n    \"\"\"Count unique hydrogen environments using canonical ranking. Stereochemistry is ignored.\n    Then compare to predicted number and score consequently. It avoids acidic hydrogens.\n\n    Args:\n        prediction: Predicted number of hydrogen symmetry classes\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of hydrogen symmetry classes.\"\n        )\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    num_h_envs = count_h_env(mol)\n    return float(num_h_envs == prediction)"
+      },
+      {
+        "name": "6",
+        "docstring": "Count aromatic carbons in the molecule, this is centers on cyclic,\nplanar molecules with a specific number of delocalized pi electrons,\nexhibiting enhanced stability due to resonance.\nThen compare to predicted number and score consequently.\n\nArgs:\n    prediction: Predicted number of aromatic carbons",
+        "code": "def score_num_aromatic_carbons(prediction: int | str, ground_truth: str) -> float:\n    \"\"\"Count aromatic carbons in the molecule, this is centers on cyclic,\n    planar molecules with a specific number of delocalized pi electrons,\n    exhibiting enhanced stability due to resonance.\n    Then compare to predicted number and score consequently.\n\n    Args:\n        prediction: Predicted number of aromatic carbons\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of aromatic carbons.\"\n        )\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n    aromatic_carbons = sum(\n        1\n        for atom in mol.GetAtoms()\n        if atom.GetAtomicNum() == 6 and atom.GetIsAromatic()\n    )\n    logger.debug(f\"Found {aromatic_carbons} aromatic carbons.\")\n    return float(aromatic_carbons == prediction)"
+      },
+      {
+        "name": "7",
+        "docstring": "Count CH3 groups in the molecule and compare to predicted number.\nIt works through identifying carbon atoms bonded to three hydrogen atoms and one other atom.\nThen compare to predicted number and score consequently.\n\nArgs:\n    prediction: Predicted number of CH3 groups\n    ground_truth: SMILES strin",
+        "code": "def score_num_ch3_groups(prediction: int | str, ground_truth: str) -> float:\n    \"\"\"Count CH3 groups in the molecule and compare to predicted number.\n    It works through identifying carbon atoms bonded to three hydrogen atoms and one other atom.\n    Then compare to predicted number and score consequently.\n\n    Args:\n        prediction: Predicted number of CH3 groups\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of CH3 groups.\"\n        )\n        return 0.0\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n    ch3_groups = sum(\n        1\n        for a in mol.GetAtoms()\n        if a.GetAtomicNum() == 6 and a.GetTotalNumHs() == 3 and a.GetDegree() == 1\n    )\n    return float(ch3_groups == prediction)"
+      },
+      {
+        "name": "8",
+        "docstring": "Count carbonyl groups (C=O) in the molecule, handling tautomers.\nIt works through identifying double bonds between carbon and oxygen atoms.\nThen compare to predicted number and score consequently.\n\nArgs:\n    prediction: Predicted number of carbonyl groups\n    ground_truth: SMILES string of the groun",
+        "code": "def score_num_carbonyl_groups(prediction: int | str, ground_truth: str) -> float:\n    \"\"\"Count carbonyl groups (C=O) in the molecule, handling tautomers.\n    It works through identifying double bonds between carbon and oxygen atoms.\n    Then compare to predicted number and score consequently.\n\n    Args:\n        prediction: Predicted number of carbonyl groups\n        ground_truth: SMILES string of the ground truth molecule\n\n    Returns:\n        Float that will be 1.0 if the predicted number matches the actual number, 0.0 otherwise\n    \"\"\"\n    try:\n        prediction = int(prediction)\n    except ValueError:\n        logger.error(\n            \"Prediction must be an integer representing the number of carbonyl groups.\"\n        )\n        return 0.0\n\n    mol = Chem.MolFromSmiles(ground_truth)\n    if mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    # Canonicalize tautomers to get the most stable form (usually keto)\n    enumerator = rdMolStandardize.TautomerEnumerator()\n    canonical_mol = enumerator.Canonicalize(mol)\n\n    carbonyl_groups = sum(\n        1\n        for bond in canonical_mol.GetBonds()\n        if bond.GetBondType() == Chem.BondType.DOUBLE\n        and (\n            (\n                bond.GetBeginAtom().GetAtomicNum() == 6\n                and bond.GetEndAtom().GetAtomicNum() == 8\n            )\n            or (\n                bond.GetBeginAtom().GetAtomicNum() == 8\n                and bond.GetEndAtom().GetAtomicNum() == 6\n            )\n        )\n    )\n\n    return float(carbonyl_groups == prediction)"
+      },
+      {
+        "name": "9",
+        "docstring": "Score the prediction based on whether fragments are substructures of the ground truth molecule.\n\nThis function handles charged fragments by neutralizing them before substructure matching.\nFragments with extreme charges (|charge| > 1) that create unrealistic neutral structures\nare treated more lenien",
+        "code": "def score_molecule_fragments(prediction: list[str] | str, ground_truth: str) -> float:\n    \"\"\"Score the prediction based on whether fragments are substructures of the ground truth molecule.\n\n    This function handles charged fragments by neutralizing them before substructure matching.\n    Fragments with extreme charges (|charge| > 1) that create unrealistic neutral structures\n    are treated more leniently to account for fragmentation artifacts.\n\n    Args:\n        prediction: List of SMILES strings representing fragments.\n        ground_truth: SMILES string of the ground truth molecule.\n\n    Returns:\n        Score either 0.0 or 1.0 based on fragment matching.\n               Returns 1.0 if all the valid fragments match substructures of the ground truth molecule,\n    \"\"\"\n    # If prediction is a string representation of a list, parse it\n    if isinstance(prediction, list):\n        seq = prediction\n    elif isinstance(prediction, str):\n        try:\n            seq = ast.literal_eval(prediction)\n        except Exception:\n            return 0.0  # signal bad input\n    else:\n        return 0.0\n\n    # Enforce: must be a list, not tuple/set/etc.\n    if not isinstance(seq, list):\n        return 0.0\n\n    # Enforce: list[str]\n    if not all(isinstance(x, str) for x in seq):\n        return 0.0\n\n    if not seq:  # Empty list\n        return 0.0\n\n    target_mol = Chem.MolFromSmiles(ground_truth)\n    if target_mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    # Neutralize the target molecule\n    target_mol_neutral = neutralize_charges(target_mol)\n    if target_mol_neutral is None:\n        target_mol_neutral = target_mol\n\n    valid_fragments = 0\n    matching_fragments = 0\n    extreme_charge_fragments = 0\n\n    for frag in seq:\n        frag_mol = Chem.MolFromSmiles(frag)\n        if frag_mol is None:\n            continue  # Skip unparseable fragments\n\n        # Check if fragment has extreme charges (|charge| > 1 on any atom)\n        has_extreme_charge = any(\n            abs(atom.GetFormalCharge()) > 1 for atom in frag_mol.GetAtoms()\n        )\n\n        if has_extreme_charge:\n            extreme_charge_fragments += 1\n            # For extreme charge fragments, we're more lenient\n            # These often represent fragmentation artifacts\n            continue\n\n        valid_fragments += 1\n\n        # Neutralize the fragment\n        frag_mol_neutral = neutralize_charges(frag_mol)\n        if frag_mol_neutral is None:\n            frag_mol_neutral = frag_mol\n\n        # Check if neutralized fragment is a substructure of the neutralized target molecule\n        if target_mol_neutral.HasSubstructMatch(frag_mol_neutral):\n            matching_fragments += 1\n\n    # If we have mostly extreme charge fragments, be very lenient\n    if extreme_charge_fragments > len(seq) * 0.5:\n        # If more than 50% are extreme charge fragments, use a lenient threshold\n        if valid_fragments == 0:\n            return 1.0  # No valid fragments to check, assume success\n        return 1.0 if matching_fragments / valid_fragments >= 0.7 else 0.0\n\n    # Standard case: all valid fragments must match\n    if valid_fragments == 0:\n        return 1.0  # No valid fragments to check\n\n    return 1.0 if matching_fragments == valid_fragments else 0.0"
+      },
+      {
+        "name": "10",
+        "docstring": "Compare predicted and ground truth SMILES strings and calculate similarity score.\nStereochemistry is not considered in the comparison.\nMolecules are first converted to canonical SMILES without stereochemistry. Then compared.\n\nArgs:\n    prediction (str): SMILES string of predicted molecule\n    ground",
+        "code": "def score_molecule(prediction: str, ground_truth: str) -> float:\n    \"\"\"\n    Compare predicted and ground truth SMILES strings and calculate similarity score.\n    Stereochemistry is not considered in the comparison.\n    Molecules are first converted to canonical SMILES without stereochemistry. Then compared.\n\n    Args:\n        prediction (str): SMILES string of predicted molecule\n        ground_truth (str): SMILES string of ground truth molecule\n\n    Returns:\n        Score either 0.0 or 1.0 based on correctness of the prediction.\n    \"\"\"\n    try:\n        pred_mol = Chem.MolFromSmiles(prediction)\n    except Exception:\n        pred_mol = None\n    try:\n        true_mol = Chem.MolFromSmiles(ground_truth)\n    except Exception:\n        true_mol = None\n\n    if true_mol is None:\n        raise ValueError(\"Invalid ground truth SMILES string.\")\n\n    if pred_mol is None:\n        return 0.0\n\n    # Convert to canonical SMILES without stereochemistry\n    pred_canonical = Chem.MolToSmiles(pred_mol, isomericSmiles=False)\n    true_canonical = Chem.MolToSmiles(true_mol, isomericSmiles=False)\n\n    if pred_canonical == true_canonical:\n        return 1.0\n\n    return 0.0"
       }
     ]
   },
