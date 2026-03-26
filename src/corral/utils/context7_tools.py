@@ -258,47 +258,47 @@ def get_library_documentation(
 
     Args:
         package_name (str):
-            [BRIEF] Name of the package/library to fetch documentation for. [/BRIEF]
-            [DETAILED] The name of the software library, framework, or package to retrieve documentation for.
+            [ARGS_BRIEF] Name of the package/library to fetch documentation for. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The name of the software library, framework, or package to retrieve documentation for.
             This will be resolved to a Context7-compatible library ID automatically using fuzzy matching and relevance scoring.
-            If library_id is provided, this parameter is optional but still used for cache key generation. [/DETAILED]
-            [SYNTACTIC] "valid package name string" [/SYNTACTIC]
-            [EXAMPLES] "react", "nextjs", "fastapi", "pandas", "tensorflow", "django" [/EXAMPLES]
+            If library_id is provided, this parameter is optional but still used for cache key generation. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] "valid package name string" [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "react", "nextjs", "fastapi", "pandas", "tensorflow", "django" [/ARGS_EXAMPLES]
 
         topic (str):
-            [BRIEF] Optional topic to focus documentation retrieval. Defaults to None. [/BRIEF]
-            [DETAILED] An optional string specifying what aspect or feature of the library to focus on.
+            [ARGS_BRIEF] Optional topic to focus documentation retrieval. Defaults to None. [/ARGS_BRIEF]
+            [ARGS_DETAILED] An optional string specifying what aspect or feature of the library to focus on.
             When provided, the documentation returned will be more relevant to this specific topic.
-            Leave as None for general comprehensive documentation. [/DETAILED]
-            [SYNTACTIC] "descriptive topic string or None" [/SYNTACTIC]
-            [EXAMPLES] "routing", "hooks", "authentication", "websockets", "dataframe operations", None [/EXAMPLES]
+            Leave as None for general comprehensive documentation. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] "descriptive topic string or None" [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "routing", "hooks", "authentication", "websockets", "dataframe operations", None [/ARGS_EXAMPLES]
 
         tokens (int):
-            [BRIEF] Maximum number of tokens to retrieve. Defaults to 5000. [/BRIEF]
-            [DETAILED] The maximum number of tokens (roughly words) of documentation to retrieve from the server.
+            [ARGS_BRIEF] Maximum number of tokens to retrieve. Defaults to 5000. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The maximum number of tokens (roughly words) of documentation to retrieve from the server.
             Context7 enforces a minimum of 1000 and defaults to 5000.
             Higher values provide more comprehensive documentation but consume more tokens and bandwidth.
-            Adjust based on how much context you need: 3000 for quick reference, 5000 for standard usage, 10000+ for deep dives. [/DETAILED]
-            [SYNTACTIC] positive integer between 1000 and server maximum [/SYNTACTIC]
-            [EXAMPLES] 3000, 5000 (default), 8000, 10000, 15000 [/EXAMPLES]
+            Adjust based on how much context you need: 3000 for quick reference, 5000 for standard usage, 10000+ for deep dives. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] positive integer between 1000 and server maximum [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] 3000, 5000 (default), 8000, 10000, 15000 [/ARGS_EXAMPLES]
 
         library_id (str):
-            [BRIEF] Optional Context7-compatible library ID to skip resolution. [/BRIEF]
-            [DETAILED] An optional pre-determined Context7 library ID in the format '/org/project' or '/org/project/version'.
+            [ARGS_BRIEF] Optional Context7-compatible library ID to skip resolution. [/ARGS_BRIEF]
+            [ARGS_DETAILED] An optional pre-determined Context7 library ID in the format '/org/project' or '/org/project/version'.
             When provided, skips the package name resolution step and fetches documentation directly.
             Useful when you already know the exact library ID or want to retrieve a specific version.
-            If None, the tool will resolve package_name automatically. [/DETAILED]
-            [SYNTACTIC] "/org/project[/version] format string or None" [/SYNTACTIC]
-            [EXAMPLES] "/vercel/next.js", "/vercel/next.js/v14.2.5", "/mongodb/docs", None [/EXAMPLES]
+            If None, the tool will resolve package_name automatically. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] "/org/project[/version] format string or None" [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "/vercel/next.js", "/vercel/next.js/v14.2.5", "/mongodb/docs", None [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] JSON string containing documentation text and metadata. [/BRIEF]
-            [DETAILED] A comprehensive JSON-formatted string containing the retrieved documentation text, cache status, and retrieval metadata.
+            [RETURNS_BRIEF] JSON string containing documentation text and metadata. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] A comprehensive JSON-formatted string containing the retrieved documentation text, cache status, and retrieval metadata.
             The documentation includes API references, usage examples, and best practices for the requested library.
             Includes 'cached' field indicating whether docs were retrieved from cache or freshly fetched.
-            The 'text' field contains the actual documentation content ready for use. [/DETAILED]
-            [EXAMPLES] '{"success": true, "text": "Next.js routing documentation...", "cached": false, "library_id": "/vercel/next.js", "tokens": 5000}' [/EXAMPLES]
+            The 'text' field contains the actual documentation content ready for use. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] '{"success": true, "text": "Next.js routing documentation...", "cached": false, "library_id": "/vercel/next.js", "tokens": 5000}' [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         RuntimeError:
