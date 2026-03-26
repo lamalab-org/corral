@@ -156,3 +156,189 @@ rule fit_model3_abilities_env:
         "results/logs/fit_model3_abilities_env.log",
     shell:
         "python latent_factor_modeling.py --use_model3 --use_balanced_data --output_dir results/model3_abilities_env > {log} 2>&1"
+
+
+# ==============================================================================
+# LFM: Latent Factor Models (8 models in lfm/ subdirectory)
+# ==============================================================================
+
+LFM_DIR = "lfm"
+LFM_RESULTS = "results/lfm"
+
+LFM_MODEL_NAMES = {
+    1: "model1_baseline_tasks",
+    2: "model2_tasks_environment",
+    3: "model3_abilities_env",
+    4: "model4_scaffold_env",
+    5: "model5_scaffold_level",
+    6: "model6_env_level",
+    7: "model7_abilities_env_level",
+    8: "model8_abilities_env_envlevel_intercept",
+}
+
+LFM_ALL_TRACES = expand(
+    "{results}/{name}_trace.nc",
+    results=LFM_RESULTS,
+    name=LFM_MODEL_NAMES.values(),
+)
+
+
+rule lfm_all:
+    input:
+        LFM_ALL_TRACES,
+        f"{LFM_RESULTS}/model_comparison.csv",
+
+
+rule lfm_fit_irt:
+    input:
+        "results/data/knowledge_qa.csv",
+        "results/data/reasoning_qa.csv",
+    output:
+        f"{LFM_RESULTS}/irt_baseline/knowledge_theta.csv",
+        f"{LFM_RESULTS}/irt_baseline/reasoning_theta.csv",
+    log:
+        f"{LFM_RESULTS}/logs/fit_irt.log",
+    shell:
+        "python {LFM_DIR}/fit_irt.py --data_dir results/data --output_dir {LFM_RESULTS}/irt_baseline > {log} 2>&1"
+
+
+rule lfm_prepare:
+    input:
+        "results/data/overall_trace.csv",
+        f"{LFM_RESULTS}/irt_baseline/knowledge_theta.csv",
+        f"{LFM_RESULTS}/irt_baseline/reasoning_theta.csv",
+    output:
+        f"{LFM_RESULTS}/prepared_data.csv",
+    log:
+        f"{LFM_RESULTS}/logs/prepare_data.log",
+    shell:
+        "python {LFM_DIR}/prepare_data.py --input results/data/overall_trace.csv --irt_dir {LFM_RESULTS}/irt_baseline --output {LFM_RESULTS}/prepared_data.csv > {log} 2>&1"
+
+
+rule lfm_fit_model:
+    input:
+        f"{LFM_RESULTS}/prepared_data.csv",
+    output:
+        f"{LFM_RESULTS}/{{model_name}}_trace.nc",
+    log:
+        f"{LFM_RESULTS}/logs/fit_{{model_name}}.log",
+    params:
+        model_num=lambda wc: [k for k, v in LFM_MODEL_NAMES.items() if v == wc.model_name][0],
+    shell:
+        "python {LFM_DIR}/fit.py --model {params.model_num} --data {input} --output {LFM_RESULTS} > {log} 2>&1"
+
+
+# Convenience targets: snakemake lfm_fit_model1, lfm_fit_model3, etc.
+for _num, _name in LFM_MODEL_NAMES.items():
+    rule:
+        name: f"lfm_fit_model{_num}"
+        input: f"{LFM_RESULTS}/{_name}_trace.nc"
+
+
+rule lfm_fit_all:
+    input: LFM_ALL_TRACES
+
+
+rule lfm_evaluate:
+    input:
+        f"{LFM_RESULTS}/prepared_data.csv",
+        LFM_ALL_TRACES,
+    output:
+        f"{LFM_RESULTS}/model_comparison.csv",
+    log:
+        f"{LFM_RESULTS}/logs/evaluate.log",
+    shell:
+        "python {LFM_DIR}/evaluate.py --all --results_dir {LFM_RESULTS} --data {LFM_RESULTS}/prepared_data.csv --plots > {log} 2>&1"
+
+
+# ==============================================================================
+# LFM-Binomial: Latent Factor Models with Binomial likelihood
+# ==============================================================================
+
+LFM_BIN_DIR = "lfm-binomial"
+LFM_BIN_RESULTS = "results/lfm-binomial"
+
+LFM_BIN_MODEL_NAMES = {
+    1: "model1_baseline_tasks",
+    2: "model2_tasks_environment",
+    3: "model3_abilities_env",
+    4: "model4_scaffold_env",
+    5: "model5_scaffold_level",
+    6: "model6_env_level",
+    7: "model7_abilities_env_level",
+    8: "model8_abilities_env_envlevel_intercept",
+}
+
+LFM_BIN_ALL_TRACES = expand(
+    "{results}/{name}_trace.nc",
+    results=LFM_BIN_RESULTS,
+    name=LFM_BIN_MODEL_NAMES.values(),
+)
+
+
+rule lfm_bin_all:
+    input:
+        LFM_BIN_ALL_TRACES,
+        f"{LFM_BIN_RESULTS}/model_comparison.csv",
+
+
+rule lfm_bin_fit_irt:
+    input:
+        "results/data/knowledge_qa.csv",
+        "results/data/reasoning_qa.csv",
+    output:
+        f"{LFM_BIN_RESULTS}/irt_baseline/knowledge_theta.csv",
+        f"{LFM_BIN_RESULTS}/irt_baseline/reasoning_theta.csv",
+    log:
+        f"{LFM_BIN_RESULTS}/logs/fit_irt.log",
+    shell:
+        "python {LFM_BIN_DIR}/fit_irt.py --data_dir results/data --output_dir {LFM_BIN_RESULTS}/irt_baseline > {log} 2>&1"
+
+
+rule lfm_bin_prepare:
+    input:
+        "results/data/overall_trace.csv",
+        f"{LFM_BIN_RESULTS}/irt_baseline/knowledge_theta.csv",
+        f"{LFM_BIN_RESULTS}/irt_baseline/reasoning_theta.csv",
+    output:
+        f"{LFM_BIN_RESULTS}/prepared_data.csv",
+    log:
+        f"{LFM_BIN_RESULTS}/logs/prepare_data.log",
+    shell:
+        "python {LFM_BIN_DIR}/prepare_data.py --input results/data/overall_trace.csv --irt_dir {LFM_BIN_RESULTS}/irt_baseline --output {LFM_BIN_RESULTS}/prepared_data.csv > {log} 2>&1"
+
+
+rule lfm_bin_fit_model:
+    input:
+        f"{LFM_BIN_RESULTS}/prepared_data.csv",
+    output:
+        f"{LFM_BIN_RESULTS}/{{model_name}}_trace.nc",
+    log:
+        f"{LFM_BIN_RESULTS}/logs/fit_{{model_name}}.log",
+    params:
+        model_num=lambda wc: [k for k, v in LFM_BIN_MODEL_NAMES.items() if v == wc.model_name][0],
+    shell:
+        "python {LFM_BIN_DIR}/fit.py --model {params.model_num} --data {input} --output {LFM_BIN_RESULTS} > {log} 2>&1"
+
+
+# Convenience targets: snakemake lfm_bin_fit_model1, lfm_bin_fit_model3, etc.
+for _num, _name in LFM_BIN_MODEL_NAMES.items():
+    rule:
+        name: f"lfm_bin_fit_model{_num}"
+        input: f"{LFM_BIN_RESULTS}/{_name}_trace.nc"
+
+
+rule lfm_bin_fit_all:
+    input: LFM_BIN_ALL_TRACES
+
+
+rule lfm_bin_evaluate:
+    input:
+        f"{LFM_BIN_RESULTS}/prepared_data.csv",
+        LFM_BIN_ALL_TRACES,
+    output:
+        f"{LFM_BIN_RESULTS}/model_comparison.csv",
+    log:
+        f"{LFM_BIN_RESULTS}/logs/evaluate.log",
+    shell:
+        "python {LFM_BIN_DIR}/evaluate.py --all --results_dir {LFM_BIN_RESULTS} --data {LFM_BIN_RESULTS}/prepared_data.csv --plots > {log} 2>&1"
