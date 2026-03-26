@@ -25170,8 +25170,8 @@ const CORRAL_DATA = {
       }
     ]
   },
-  "Wet Chemistry": {
-    "description": "Plan and simulate wet-chemistry experiments involving aqueous equilibria, precipitation, complexation, and titration. Tools provide thermodynamic calculations, solubility predictions, species distribution analysis, and experimental protocol design for analytical chemistry workflows.",
+  "Qualitative Analysis": {
+    "description": "The agent identifies unknown cations in solution through systematic wet-laboratory procedures. Tools include adding reagents, performing flame tests, measuring pH, centrifuging, decanting, heating, and observing colour and precipitate changes. The environment simulates real chemical equilibria; observations are computed from thermodynamic data rather than scripted. Three scopes increase the number of candidate ions from 3–5 common species with distinct chemistry to 15 or more including ions with overlapping reactivity, progressively requiring the agent to design discriminating experimental sequences rather than follow a decision tree. Sample volume is limited, penalizing redundant experiments.",
     "tools": [
       {
         "name": "possible_cations",
