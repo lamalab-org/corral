@@ -17,7 +17,7 @@ TASKS_ROOT = Path("tasks")
 SKIP_ENVS = {"samplemath"}
 
 # Group A environments use array format with scoring_fn and input.prompt
-GROUP_A_ENVS = {"spectra_elucidation", "retrosynthesis"}
+GROUP_A_ENVS = {"spectra_elucidation", "retrosynthesis", "wetlab"}
 
 
 def generate_uuid() -> str:
