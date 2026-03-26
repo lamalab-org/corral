@@ -19,9 +19,7 @@ from pathlib import Path
 
 TASKS_ROOT = Path("tasks")
 
-# Environments that should follow the convention
-# (skip samplemath as it's a sample/demo environment)
-SKIP_ENVS = {"samplemath"}
+SKIP_ENVS: set[str] = set()
 
 LEVEL_PATTERN = re.compile(r"^level_\d+$")
 ALLOWED_SUBDIRS = {"tasks_json", "subtasks_json"}
@@ -117,23 +115,7 @@ def main() -> int:
             continue
         if env_dir.name in SKIP_ENVS:
             continue
-        # Only check envs that have an environments/ dir or config/ dir (legacy)
-        has_environments = (env_dir / "environments").is_dir()
-        has_legacy_config = (env_dir / "config").is_dir()
-        has_legacy_enviroment = (env_dir / "src" / "enviroment").is_dir()
-
-        if has_legacy_config:
-            all_errors.append(
-                f"{env_dir.name}: uses legacy 'config/' directory. "
-                f"Migrate to environments/level_N/{{tasks_json,subtasks_json}}/"
-            )
-        if has_legacy_enviroment:
-            all_errors.append(
-                f"{env_dir.name}: uses legacy 'src/enviroment/' directory. "
-                f"Migrate to environments/level_N/{{tasks_json,subtasks_json}}/"
-            )
-
-        if has_environments:
+        if (env_dir / "environments").is_dir():
             all_errors.extend(check_environment(env_dir))
 
     if all_errors:
