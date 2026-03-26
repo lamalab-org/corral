@@ -32,7 +32,7 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 
 TASKS_ROOT = Path("tasks")
 HF_REPO = "jablonkagroup/corral-environment-tasks"
-SKIP_ENVS = {"samplemath"}
+SKIP_ENVS: set[str] = set()
 
 SUBDIR_TO_TYPE = {
     "tasks_json": "task",

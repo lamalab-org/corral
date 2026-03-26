@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 
 TASKS_ROOT = Path("tasks")
-SKIP_ENVS = {"samplemath"}
+SKIP_ENVS: set[str] = set()
 
 # Group A environments use array format with scoring_fn and input.prompt
 GROUP_A_ENVS = {"spectra_elucidation", "retrosynthesis", "wetlab"}

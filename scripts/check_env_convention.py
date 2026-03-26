@@ -19,9 +19,7 @@ from pathlib import Path
 
 TASKS_ROOT = Path("tasks")
 
-# Environments that should follow the convention
-# (skip samplemath as it's a sample/demo environment)
-SKIP_ENVS = {"samplemath"}
+SKIP_ENVS: set[str] = set()
 
 LEVEL_PATTERN = re.compile(r"^level_\d+$")
 ALLOWED_SUBDIRS = {"tasks_json", "subtasks_json"}
