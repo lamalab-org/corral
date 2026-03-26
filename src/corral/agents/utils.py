@@ -286,6 +286,12 @@ def convert_dict_arg(arg: dict) -> dict:
         prop["description"] += (
             ' - Provide as an array of strings, e.g., ["item1", "item2"]'
         )
+    elif arg_type == ("list[tuple[str, float]]"):
+        prop["type"] = "array"
+        prop["items"] = {
+            "type": "array",
+            "items": {"anyOf": [{"type": "string"}, {"type": "number"}]},
+        }
     else:
         json_type = TYPE_MAPPING.get(arg_type)
         if not json_type:
@@ -597,7 +603,7 @@ def count_tokens_and_add(
     """
     window = get_context_window(model=model)
     if window is None:
-        window = get_context_window(model=model.split("/")[-1])
+        window = get_context_window(model=model.rsplit("/", maxsplit=1)[-1])
 
     if window is None:
         window = 8192  # Default to 8k if unknown
