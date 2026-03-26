@@ -929,9 +929,9 @@ def obtain_isomers_from_molecular_formula(
     - Recommended for tasks that require understanding the structural diversity of a molecule, such as chemical structure elucidation or database searches. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. Obtain the molecular formula for the compound of interest. You can use the `get_formula_from_smiles` tool to convert a SMILES string to its molecular formula.
-        2. Call this tool with the molecular formula to retrieve isomers.
-        3. Use the list of isomers for further analysis or processing.
+        1. [PREREQUISITE] Obtain the molecular formula for the compound of interest. You can use the `get_formula_from_smiles` tool to convert a SMILES string to its molecular formula. [/PREREQUISITE]
+        2. [CURRENT] Call this tool with the molecular formula to retrieve isomers. [/CURRENT]
+        3. [FOLLOW_UP] Use the list of isomers for further analysis or processing. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
@@ -999,9 +999,9 @@ def validate_smiles(smiles: str) -> bool:
     - Recommended for tasks that require checking the validity of chemical structures represented in SMILES format, such as chemical database searches or structure-based predictions. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. Obtain a good guess for the molecule in the sample at hand.
-    2. Call this tool with the SMILES string to validate it.
-    3. If the SMILES string is valid, proceed with further analysis or submit the final answer.
+    1. [PREREQUISITE] Obtain a good guess for the molecule in the sample at hand. [/PREREQUISITE]
+    2. [CURRENT] Call this tool with the SMILES string to validate it. [/CURRENT]
+    3. [FOLLOW_UP] If the SMILES string is valid, proceed with further analysis or submit the final answer. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
@@ -1160,19 +1160,19 @@ def simulate_spectra(smiles: str) -> dict[str, str]:
 
     Args:
         smiles (str):
-            [BRIEF] The SMILES representation of the compound to simulate spectra for [/BRIEF]
-            [DETAILED] The SMILES string representing the chemical structure of the molecule for which the spectra will be simulated.
-            It should be a valid SMILES notation that can be processed by the remote function. [/DETAILED]
-            [SYNTACTICAL] Format: "valid SMILES string" [/SYNTACTICAL]
-            [EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O"[/EXAMPLES]
+            [ARGS_BRIEF] The SMILES representation of the compound to simulate spectra for [/ARGS_BRIEF]
+            [ARGS_DETAILED] The SMILES string representing the chemical structure of the molecule for which the spectra will be simulated.
+            It should be a valid SMILES notation that can be processed by the remote function. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: "valid SMILES string" [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/ARGS_EXAMPLES]
 
     Returns:
         dict[str, str]:
-            [BRIEF] The simulated spectra of the compound [/BRIEF]
-            [DETAILED] A dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.
+            [RETURNS_BRIEF] The simulated spectra of the compound [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] A dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.
             Each key corresponds to a type of spectrum, and the value is a string representation of the simulated spectrum.
-            If some spectra are not available, the value will be None for those keys. [/DETAILED]
-            [EXAMPLES] Examples: {"1H NMR": "simulated_1H_NMR_spectrum", "13C NMR": "simulated_13C_NMR_spectrum", "IR": "simulated_IR_spectrum"} [/EXAMPLES]
+            If some spectra are not available, the value will be None for those keys. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] Examples: {"1H NMR": "simulated_1H_NMR_spectrum", "13C NMR": "simulated_13C_NMR_spectrum", "IR": "simulated_IR_spectrum"} [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
