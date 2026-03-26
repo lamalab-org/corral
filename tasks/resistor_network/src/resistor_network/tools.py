@@ -543,7 +543,7 @@ def validate_measurements(topology: str, measurements: str) -> str:
     Returns:
     str: [RETURNS_BRIEF] JSON string with validation results including error metrics. [/RETURNS_BRIEF]
          [RETURNS_DETAILED] A JSON string containing a dictionary with various error metrics: `total_error`, `max_error`, `mean_error`, and `detailed_errors` (a list of per-measurement errors including predicted, actual, absolute error, and relative error). It also includes `num_measurements`. This output helps quantify the accuracy of the proposed topology. [/RETURNS_DETAILED]
-         [EXAMPLES] `{"total_error": 5.0, "max_error": 5.0, "mean_error": 5.0, "detailed_errors": [{"nodes": "A-B", "predicted": 10.0, "actual": 15.0, "error": 5.0, "relative_error": 0.333}], "num_measurements": 1}` [/EXAMPLES]
+         [RETURNS_EXAMPLES] `{"total_error": 5.0, "max_error": 5.0, "mean_error": 5.0, "detailed_errors": [{"nodes": "A-B", "predicted": 10.0, "actual": 15.0, "error": 5.0, "relative_error": 0.333}], "num_measurements": 1}` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError: [ERRORS]
@@ -671,7 +671,10 @@ def propose_simple_topology(num_resistors: int, topology_type: str) -> str:
              [RETURNS_EXAMPLES] ` "{\\\"resistors\\\": {\\\"R1\\\": 10.0, \\\"R2\\\": 10.0, \\\"R3\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}"` (for `propose_simple_topology(3, "series")`) [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None explicitly raised by the tool itself, but downstream tools using this output might raise errors if the generated topology is invalid for their operations.
+        json.JSONEncodeError:
+            [ERROR_WHEN] If the generated topology object cannot be serialized to JSON. [/ERROR_WHEN]
+            [ERROR_DETAILS] This is unlikely in practice since the topology is constructed from basic Python types (dicts, lists, strings, floats), but could occur if the internal structure is corrupted. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify that `num_resistors` is a positive integer and `topology_type` is a valid string. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
@@ -949,10 +952,15 @@ def generate_test_measurements(topology: str, terminal_pairs: list[list[str]]) -
                  [RETURNS_EXAMPLES] `'[{"node_a": "A", "node_b": "B", "resistance": 15.0}, {"node_a": "A", "node_b": "C", "resistance": 45.0}]'` [/RETURNS_EXAMPLES]
 
         [RAISES] Exceptions:
-            json.JSONDecodeError: [BRIEF] If `topology` is not a valid JSON string.
-                                  [DETAILED] This occurs if the input `topology` string cannot be parsed into a valid JSON object, which is required for circuit definition.
-            Exception: [BRIEF] General error during measurement generation.
-                       [DETAILED] Catches any other unforeseen errors that might occur during the iteration through terminal pairs or calls to `get_resistance_between_nodes`, returning an error message for the overall process. Specific measurement errors are handled per-pair.
+            json.JSONDecodeError:
+                [ERROR_WHEN] If `topology` is not a valid JSON string. [/ERROR_WHEN]
+                [ERROR_DETAILS] This occurs if the input `topology` string cannot be parsed into a valid JSON object, which is required for circuit definition. [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Ensure the `topology` argument is a properly formatted JSON string with escaped quotes. [/ERROR_RECOVERY]
+            Exception:
+                [ERROR_WHEN] General error during measurement generation. [/ERROR_WHEN]
+                [ERROR_DETAILS] Catches any other unforeseen errors that might occur during the iteration through terminal pairs or calls to `get_resistance_between_nodes`, returning an error message for the overall process. Specific measurement errors are handled per-pair. [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Verify the topology is valid and terminal pairs reference existing nodes in the circuit. [/ERROR_RECOVERY]
+        [/RAISES]
 
         [LIMITATIONS] Known limitations:
         - Relies entirely on the accuracy and robustness of the `get_resistance_between_nodes` tool.

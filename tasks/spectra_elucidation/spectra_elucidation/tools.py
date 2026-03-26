@@ -211,7 +211,10 @@ def retrieve_protons_shifts() -> str:
             [RETURNS_EXAMPLES] "[{"Proton": "Aldehyde", "delta / ppm": "9.5 - 10.5"}, {"Proton": "Aromatic", "delta / ppm": "6.5 - 8.2"}, ...]" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -286,7 +289,10 @@ def retrieve_aromatic_protons_shifts() -> str:
             [RETURNS_EXAMPLES] "[{"Substituent": "NO2", "Ortho": 0.95, "Meta": 0.17, "Para": 0.33}, {"Substituent": "CHO", "Ortho": 0.58, "Meta": 0.21, "Para": 0.27}, ...]" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -372,7 +378,10 @@ def retrieve_carbon_shifts() -> str:
             [RETURNS_EXAMPLES] "[{"Group": "CH3-", "Shift (ppm)": "10-30 ppm"}, {"Group": "R3C-, R₂CH, RCH₂", "Shift (ppm)": "25-50 ppm"}, ...]" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -737,7 +746,10 @@ def retrieve_isotope_distribution() -> str:
             [RETURNS_EXAMPLES] "{"Carbon": {"isotopes": {"12C": {"abundance": 98.89, "m/z": 12},"13C": {"abundance": 1.11, "m/z": 13}<more elements...}}}" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -852,7 +864,10 @@ def retrieve_dbe_formula() -> str:
             [RETURNS_EXAMPLES] "Double Bond Equivalent (DBE) = <more details>." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -955,7 +970,10 @@ def obtain_isomers_from_molecular_formula(
             [RETURNS_EXAMPLES] `["CCO", "C1=CC=CC=C1"]` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        Exception:
+            [ERROR_WHEN] If the remote call to PubChem fails or returns an error. [/ERROR_WHEN]
+            [ERROR_DETAILS] This can occur due to network connectivity issues, PubChem API unavailability, an invalid molecular formula, or timeouts when querying formulas with many isomers. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the molecular formula is valid (e.g., "C6H6" not "XYZ"). If the error is a timeout, try reducing the `limit` parameter. If it is a network issue, retry after some time. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -1016,7 +1034,10 @@ def validate_smiles(smiles: str) -> bool:
             [RETURNS_EXAMPLES] `True`, `False` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -1068,7 +1089,10 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
             [RETURNS_EXAMPLES] Example SMILES strings: ["C1=CC=CC=C1", "C1=CC=CC=C1O", ...] [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        ValueError:
+            [ERROR_WHEN] If the provided SMILES string is invalid or cannot be parsed by RDKit. [/ERROR_WHEN]
+            [ERROR_DETAILS] Raised when `Chem.MolFromSmiles` returns None, indicating the input SMILES does not represent a valid molecular structure. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the SMILES string is valid using the `validate_smiles` tool before calling this tool. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
