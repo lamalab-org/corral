@@ -8,6 +8,7 @@ assembles a tabular dataset, and uploads grouped subsets to the Hub.
 import ast
 import json
 import re
+import tempfile
 from datetime import datetime, timezone
 from itertools import zip_longest
 from pathlib import Path
@@ -225,7 +226,18 @@ def build_trials_from_pair(config, pair):
 
     for task_name in task_results:
         trials = task_results.get(task_name).get("trials")
-        trials = sorted(trials, key=lambda x: int(x["trial_id"]))
+
+        def _trial_sort_key(x):
+            val = x["trial_id"]
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                import re
+
+                m = re.search(r"\d+", str(val))
+                return int(m.group()) if m else 0
+
+        trials = sorted(trials, key=_trial_sort_key)
 
         traces = collect_traces_for_task(trace_dir, task_name)
 
@@ -291,7 +303,10 @@ def match_agent_verbosity(category_path: Path):
     grouped = {}
 
     for item in category_path.iterdir():
-        if item.is_dir() and item.name.lower().startswith("logprobs"):
+        if item.is_dir() and (
+            item.name.lower().startswith("logprobs")
+            or item.name.lower().startswith("metrics")
+        ):
             continue
 
         pair = extract_pair(item.name)
@@ -394,11 +409,17 @@ def push_trials_to_hub(trials_df: pd.DataFrame, dataset_name: str):
 
         dataset = Dataset.from_pandas(subset_df.reset_index(drop=True))
 
-        dataset.push_to_hub(
-            dataset_name,
-            config_name=subset_name,
-            private=False,
-        )
+        # Upload parquet directly to avoid README YAML validation
+        # which fails with 413 Payload Too Large when there are many configs.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            parquet_path = Path(tmpdir) / "data.parquet"
+            dataset.to_parquet(str(parquet_path))
+            api.upload_file(
+                path_or_fileobj=str(parquet_path),
+                path_in_repo=f"{subset_name}/train-00000-of-00001.parquet",
+                repo_id=dataset_name,
+                repo_type="dataset",
+            )
 
 
 def build_dataset_configs(path: str):
@@ -474,6 +495,8 @@ def build_dataset_configs(path: str):
     # strict NaN check below only fires for truly unexpected missing columns.
     OPTIONAL_STR_COLS = ["error", "submitted_answer"]
     OPTIONAL_INT_COLS = ["total_calls", "successful_calls", "failed_calls"]
+    OPTIONAL_FLOAT_COLS = ["duration"]
+    OPTIONAL_BOOL_COLS = ["surrendered"]
     OPTIONAL_LIST_COLS = ["tools_used", "error_types"]
 
     for col in OPTIONAL_STR_COLS:
@@ -483,6 +506,14 @@ def build_dataset_configs(path: str):
     for col in OPTIONAL_INT_COLS:
         if col in trials_df.columns:
             trials_df[col] = trials_df[col].fillna(0).astype(int)
+
+    for col in OPTIONAL_FLOAT_COLS:
+        if col in trials_df.columns:
+            trials_df[col] = trials_df[col].fillna(0.0).astype(float)
+
+    for col in OPTIONAL_BOOL_COLS:
+        if col in trials_df.columns:
+            trials_df[col] = trials_df[col].fillna(False).astype(bool)
 
     for col in OPTIONAL_LIST_COLS:
         if col in trials_df.columns:
