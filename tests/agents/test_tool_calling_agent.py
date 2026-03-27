@@ -123,14 +123,8 @@ def test_tool_calling_agent_run_setup(tool_calling_agent, mock_interface, monkey
             LiteLLMMessage(role="user", content="User prompt"),
         ]
     )
-    mock_convert_tools = MockFunction(
-        return_value=[{"type": "function", "function": {"name": "test_tool"}}]
-    )
 
     monkeypatch.setattr("corral.agents.tool_calling.create_prompt", mock_create_prompt)
-    monkeypatch.setattr(
-        "corral.agents.tool_calling.convert_to_openai_tool_format", mock_convert_tools
-    )
 
     # Mock get_llm_response to return final answer immediately
     mock_llm_response = MockFunction(
@@ -143,13 +137,12 @@ def test_tool_calling_agent_run_setup(tool_calling_agent, mock_interface, monkey
     # Verify setup calls
     assert mock_interface.call_counts.get("get_available_tools_for_task", 0) == 1
     assert mock_interface.call_counts.get("get_task_prompt", 0) == 1
-    assert mock_convert_tools.call_count == 1
     assert mock_create_prompt.call_count == 1
 
-    # Verify tools are stored
-    assert tool_calling_agent._available_tools == [
-        {"type": "function", "function": {"name": "test_tool"}}
-    ]
+    # Verify tools are stored (already in OpenAI format from the interface)
+    assert tool_calling_agent._available_tools is not None
+    assert len(tool_calling_agent._available_tools) == 1
+    assert tool_calling_agent._available_tools[0]["type"] == "function"
 
     assert result == "Test result"
 
@@ -448,16 +441,10 @@ def test_run_final_answer_extraction(tool_calling_agent, mock_interface, monkeyp
     assert result == "The solution is 42 with detailed explanation."
 
 
-def test_tools_conversion_called_correctly(
+def test_tools_from_interface_used_directly(
     tool_calling_agent, mock_interface, monkeypatch
 ):
-    """Test that tools are converted to OpenAI format correctly."""
-    expected_tools = [{"type": "function", "function": {"name": "test_tool"}}]
-    mock_convert_tools = MockFunction(return_value=expected_tools)
-    monkeypatch.setattr(
-        "corral.agents.tool_calling.convert_to_openai_tool_format", mock_convert_tools
-    )
-
+    """Test that tools from interface are used directly (already in OpenAI format)."""
     mock_llm_response = MockFunction(
         return_value=MockLLMResponse(content="Final Answer: Test")
     )
@@ -465,13 +452,12 @@ def test_tools_conversion_called_correctly(
 
     tool_calling_agent.run(mock_interface, "test_task")
 
-    # Verify convert_to_openai_tool_format was called with correct tools
-    assert mock_convert_tools.call_count == 1
-    args, kwargs = mock_convert_tools.call_args_list[0]
-    assert len(args) == 1
-    # The mock_interface now returns a dict with tools key
-    expected_arg = mock_interface.available_tools
-    assert args[0] == expected_arg
+    # Verify tools were fetched from interface
+    assert mock_interface.call_counts.get("get_available_tools_for_task", 0) == 1
+    # Verify stored tools match the interface's OpenAI format tools
+    assert (
+        tool_calling_agent._available_tools == mock_interface.available_tools["tools"]
+    )
 
 
 def test_available_tools_storage(tool_calling_agent, mock_interface, monkeypatch):

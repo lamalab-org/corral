@@ -142,25 +142,9 @@ class Environment(ABC):
         """Add a tool to the environment"""
         self.tools[tool.name] = tool
 
-    def get_available_tools(self) -> list[dict[str, str | list[dict]]]:
-        return [
-            {
-                "name": t.name,
-                "description": t.description,
-                "arguments": [
-                    {
-                        "name": arg.name,
-                        "type": arg.type,
-                        "description": arg.description,
-                        "required": arg.required,
-                        "default": arg.default,
-                        "choices": arg.choices,
-                    }
-                    for arg in t.arguments
-                ],
-            }
-            for t in self.tools.values()
-        ]
+    def get_available_tools(self) -> list[dict[str, Any]]:
+        """Return tools in OpenAI function-calling format."""
+        return [t.get_openai_tool_format() for t in self.tools.values()]
 
     def get_tools_guide(self) -> str:
         """Generate a guide for the available tools"""

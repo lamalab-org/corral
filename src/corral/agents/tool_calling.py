@@ -7,10 +7,7 @@ from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint
 from corral.agents.prompt_utils import create_prompt
 from corral.agents.schema import Action
-from corral.agents.utils import (
-    LiteLLMMessage,
-    convert_to_openai_tool_format,
-)
+from corral.agents.utils import LiteLLMMessage
 from corral.router.routes import CorralRouter
 
 
@@ -109,9 +106,7 @@ class ToolCallingAgent(BaseAgent):
         Returns:
             str: The final answer to the task
         """
-        tools = convert_to_openai_tool_format(
-            interface.get_available_tools_for_task(task_id)
-        )
+        tools = interface.get_available_tools_for_task(task_id).get("tools", [])
         # Store tools for logging
         self._available_tools = tools
 
