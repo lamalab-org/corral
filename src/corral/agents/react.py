@@ -115,12 +115,6 @@ class ReActAgent(BaseAgent):
                     "False", "false"
                 )
 
-                # Convert tuples to lists for color mixing in wetlab
-                if tool_name == "simulate_color_mixture":
-                    converted_input = converted_input.replace("(", "[").replace(
-                        ")", "]"
-                    )
-
                 # Parse as JSON
                 arguments = json.loads(converted_input)
                 actions.append(Action(tool_name=tool_name, arguments=arguments))
