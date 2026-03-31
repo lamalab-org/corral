@@ -21,21 +21,12 @@ from tools import (
     visualisation_tool,
 )
 
-from corral.backend.env import Environment
 from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
 from corral.backend.tool import Tool
 from corral.utils.context7_tools import get_library_documentation
-from corral.utils.io_tools import (
-    CatFilesTool,
-    CopyFileTool,
-    FileInfoTool,
-    FSManager,
-    GrepTool,
-    ListFilesTool,
-    ReadFileTool,
-    WriteFileTool,
-)
+from corral.utils.io_tools import GrepTool
+from corral.utils.task_group import TaskGroupEnvironment as _BaseTaskGroupEnvironment
 
 SCORING_FUNCTIONS = {
     "check_numerical": check_numerical,
@@ -82,16 +73,6 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
 
             # Resolve 'target' if it looks like a relative path
             target = scoring_params.get("target")
-            # if isinstance(target, str) and (target.endswith(".data")):
-            # json_dir = Path(task_file).resolve().parent.parent
-            # abs_target_path = Path(json_dir, target).resolve()
-            # logger.info(f"Resolving target path: {abs_target_path}")
-
-            # if not abs_target_path.is_file():
-            #     raise FileNotFoundError(
-            #         f"[{task_id}] Target path does not exist: {abs_target_path}"
-            #     )
-
             scoring_params["target"] = target
 
             # Optionally reassign if task_info is reused later
@@ -115,89 +96,11 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
     return tasks
 
 
-class TaskGroupEnvironment(Environment):
-    """Environment that works with a task group - simple composition approach"""
-
-    def __init__(
-        self,
-        task_id: str,
-        task_group: TaskGroup,
-        subtask_specific_tools: dict[str, Tool],
-        base_work_dir: str,
-        taskgroup_common_tools: dict[str, Tool] | None = None,
-    ):
-        self.task_group = task_group
-        self.subtask_specific_tools = subtask_specific_tools
-        self.taskgroup_common_tools = taskgroup_common_tools or {}
-
-        if task_id not in task_group.tasks:
-            raise ValueError(f"Task {task_id} not found in task group")
-
-        self.current_task = task_group.tasks[task_id]
-
-        super().__init__(
-            f"{task_id}",
-            base_work_dir=base_work_dir,
-            fs_manager=FSManager("file", base_path=base_work_dir, app="simagent"),
-        )
-
-        # Add tools
-        self._add_task_tools()
-        self._setup_file_tools()
-
-    def _add_task_tools(self):
-        """Add required tools for the task"""
-        for tool_name in self.current_task.tools:
-            if tool_name in self.subtask_specific_tools:
-                self.add_tool(self.subtask_specific_tools[tool_name])
-            else:
-                logger.warning(
-                    f"Tool {tool_name} required for task {self.task_id} not found"
-                )
-
-        for tool in self.taskgroup_common_tools.values():
-            self.add_tool(tool)
-
-    def _setup_file_tools(self):
-        """Setup file tools for current workspace"""
-        if self.current_work_dir:
-            logger.info(
-                f"DEBUG: Setting up FSManager with base_path: {self.current_work_dir}"
-            )
-            # Create new FSManager for current workspace
-            fs_manager = FSManager(
-                "file", base_path=self.current_work_dir, app="simagent"
-            )
-
-            # Add/update file tools
-            self.tools.update(
-                {
-                    "list_files": ListFilesTool(fs_manager),
-                    "read_file": ReadFileTool(fs_manager),
-                    "write_file": WriteFileTool(fs_manager),
-                    "file_info": FileInfoTool(fs_manager),
-                    "cat_files": CatFilesTool(fs_manager),
-                    "copy_file": CopyFileTool(fs_manager),
-                    "grep": GrepTool(fs_manager),
-                    "library_docs": get_library_documentation,
-                    "execute_python_script": execute_python_script,
-                }
-            )
-            logger.info(
-                f"DEBUG: File tools setup complete for workspace: {self.current_work_dir}"
-            )
-        else:
-            logger.warning("DEBUG: No current_work_dir set, skipping file tools setup")
-
-    def reset_state(self) -> str:
-        """Reset state and update file tools for new workspace"""
-        trial_id = super().reset_state()
-        # Recreate file tools for new workspace
-        self._setup_file_tools()
-        return trial_id
+class TaskGroupEnvironment(_BaseTaskGroupEnvironment):
+    """MD-specific environment with domain-specific prompts and scoring."""
 
     def get_task_prompt(self) -> str:
-        """Generate the task prompt for the current task"""
+        """Generate the task prompt with MD-specific guidelines."""
 
         prompt = f"""\nTask: {self.current_task.name}
 Description: {self.current_task.description}
@@ -248,7 +151,6 @@ Required submission format:
                 "   - Density\n"
                 "These quantities should be written at an appropriate, user-configurable frequency (typically 1000 timesteps) suitable for monitoring equilibration and production behavior.\n"
             )
-            # prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir} when using tools use this path.\n"
 
         # Add note about dependencies
         if self.current_task.input_from_tasks:
@@ -353,6 +255,11 @@ def create_environments(
         "visualisation_tool": visualisation_tool,
     }
 
+    extra_file_tools = {
+        "library_docs": get_library_documentation,
+        "execute_python_script": execute_python_script,
+    }
+
     environments = {}
     for task_id in task_group.tasks:
         environments[task_id] = TaskGroupEnvironment(
@@ -361,6 +268,9 @@ def create_environments(
             subtask_specific_tools=subtask_specific_tools,
             taskgroup_common_tools=taskgroup_common_tools,
             base_work_dir=work_dir,
+            fsmanager_app="simagent",
+            extra_file_tools=extra_file_tools,
+            extra_fsmanager_tool_classes={"grep": GrepTool},
         )
 
     return environments

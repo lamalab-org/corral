@@ -56,6 +56,7 @@ class TrialCompletionResponse(BaseModel):
     state: dict[str, Any]
     trial_id: str
     surrendered: bool = False
+    workspace_id: str | None = None
 
 
 class ToLatexRequest(BaseModel):

@@ -22,6 +22,8 @@ class TaskTrialResult:
     token_usage: dict[str, int] | None = None
     error_message: str | None = None
     surrendered: bool = False
+    workspace_id: str | None = None
+    workspace_path: str | None = None
 
     @property
     def success(self) -> bool:

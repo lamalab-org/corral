@@ -1,12 +1,18 @@
+from __future__ import annotations
+
 import json
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import fsspec
 import modal
 
 from corral.backend.schema import ToolArgument
 from corral.backend.tool import Tool
+
+if TYPE_CHECKING:
+    from corral.utils.workspace_registry import WorkspaceRegistry
 
 
 class FSManager:
@@ -19,12 +25,16 @@ class FSManager:
         protocol: str = "file",
         base_path: str = "./",
         app: str | None = None,
+        registry: WorkspaceRegistry | None = None,
+        workspace_id: str | None = None,
         **kwargs,
     ):
         self.protocol = protocol
         self.base_path = Path(base_path) if base_path else None
         self.fs = fsspec.filesystem(protocol, **kwargs)
         self.app = app
+        self.registry = registry
+        self.workspace_id = workspace_id
 
     def _resolve_path(self, path: str) -> str:
         """Resolve a relative path against the base_path"""
@@ -37,19 +47,6 @@ class FSManager:
         # Relative path - resolve against base_path
         resolved = self.base_path / path_obj
         return str(resolved)
-
-    def _resolve_path(self, path: str) -> str:
-        """Resolve a relative path against the base_path"""
-        if self.base_path is None:
-            return path
-
-        path_obj = Path(path)
-        if path_obj.is_absolute():
-            return str(path_obj)
-        else:
-            # Relative path - resolve against base_path
-            resolved = self.base_path / path_obj
-            return str(resolved)
 
     def list_files(self, path: str, recursive: bool = False) -> list[str]:
         """List files in a directory"""
@@ -88,6 +85,11 @@ class FSManager:
 
                 with self.fs.open(resolved_path, "w") as f:
                     f.write(content)
+
+            # Track file in registry
+            if self.registry and self.workspace_id:
+                filename = Path(resolved_path).name
+                self.registry.register_file(self.workspace_id, filename, resolved_path)
         except Exception as e:
             raise RuntimeError(f"Error writing file {path}: {e}") from e
 

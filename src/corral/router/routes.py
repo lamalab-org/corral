@@ -32,6 +32,8 @@ def _parse_trial_completion(task_id: str, response_data: dict) -> TaskTrialResul
         tool_statistics=completion.state["tool_statistics"],
         surrendered=completion.surrendered,
         duration=completion.state.get("duration"),
+        workspace_id=completion.workspace_id,
+        workspace_path=completion.state.get("workspace_path"),
     )
 
 

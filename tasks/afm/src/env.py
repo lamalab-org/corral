@@ -171,13 +171,16 @@ class AFMEnvironment(Environment):
             self.add_tool(tool)
 
     def _setup_file_tools(self):
-        """Setup file tools for current workspace"""
-        if self.current_work_dir:
-            logger.info(
-                f"DEBUG: Setting up FSManager with base_path: {self.current_work_dir}"
+        """Setup file tools with global workspace scope for cross-trial access."""
+        if self.base_work_dir:
+            logger.info(f"Setting up FSManager with base_path: {self.base_work_dir}")
+            # FSManager scoped to base_work_dir (global) for cross-trial file access
+            fs_manager = FSManager(
+                "file",
+                base_path=self.base_work_dir,
+                registry=self.workspace_registry,
+                workspace_id=self.current_workspace_id,
             )
-            # Create new FSManager for current workspace
-            fs_manager = FSManager("file", base_path=self.current_work_dir)
 
             # Add/update file tools
             self.tools.update(
@@ -191,10 +194,10 @@ class AFMEnvironment(Environment):
                 }
             )
             logger.info(
-                f"DEBUG: File tools setup complete for workspace: {self.current_work_dir}"
+                f"File tools setup complete for workspace: {self.base_work_dir}"
             )
         else:
-            logger.warning("DEBUG: No current_work_dir set, skipping file tools setup")
+            logger.warning("No base_work_dir set, skipping file tools setup")
 
     def reset_params(self) -> None:
         if pythoncom:

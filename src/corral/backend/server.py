@@ -47,6 +47,7 @@ def _finalize_trial(
         state=completed_trial["state"],
         trial_id=finished_trial_id,
         surrendered=surrendered,
+        workspace_id=completed_trial["state"].get("workspace_id"),
     )
 
 
@@ -331,6 +332,52 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(
                 status_code=500, detail=f"Failed to generate LaTeX: {e!s}"
             ) from e
+
+    @app.get("/tasks/{task_id}/workspaces")
+    def get_workspaces(task_id: str):
+        """Get all workspace entries for a task from the registry."""
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+        env = environments[task_id]
+        if env.workspace_registry:
+            entries = env.workspace_registry.get_workspaces(task_id=task_id)
+            return {
+                "workspaces": [
+                    {
+                        "workspace_id": e.workspace_id,
+                        "task_id": e.task_id,
+                        "trial_id": e.trial_id,
+                        "path": e.path,
+                        "status": e.status,
+                        "created_at": e.created_at,
+                        "completed_at": e.completed_at,
+                    }
+                    for e in entries
+                ]
+            }
+        return {"workspaces": []}
+
+    @app.get("/tasks/{task_id}/workspaces/{workspace_id}")
+    def get_workspace(task_id: str, workspace_id: str):
+        """Look up a specific workspace by UUID."""
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+        env = environments[task_id]
+        if env.workspace_registry:
+            entry = env.workspace_registry.get_by_id(workspace_id)
+            if entry:
+                return {
+                    "workspace": {
+                        "workspace_id": entry.workspace_id,
+                        "task_id": entry.task_id,
+                        "trial_id": entry.trial_id,
+                        "path": entry.path,
+                        "status": entry.status,
+                        "created_at": entry.created_at,
+                        "completed_at": entry.completed_at,
+                    }
+                }
+        raise HTTPException(status_code=404, detail="Workspace not found")
 
     return app
 

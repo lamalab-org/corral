@@ -1,5 +1,6 @@
 import inspect
 import time
+import uuid
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -41,6 +42,8 @@ class TaskState:
     submitted_answer: str | None = None
     feedback: str | None = None
     surrendered: bool = False
+    workspace_id: str | None = None
+    workspace_path: str | None = None
     env_start_time: datetime = field(
         default_factory=lambda: datetime.now(tz=timezone.utc)
     )
@@ -81,6 +84,15 @@ class Environment(ABC):
         self.trial_states: dict[str, TaskState] = {}
         self.trial_counter = -1
         self.fs_manager = fs_manager
+        self.current_workspace_id: str | None = None
+        if base_work_dir:
+            from corral.utils.workspace_registry import WorkspaceRegistry
+
+            self.workspace_registry: WorkspaceRegistry | None = WorkspaceRegistry(
+                base_work_dir
+            )
+        else:
+            self.workspace_registry = None
         self.reset_state()
 
     def save_current_state(self) -> TaskState:
@@ -100,25 +112,47 @@ class Environment(ABC):
                 self.state.env_end_time = datetime.now(tz=timezone.utc)
             archived_snapshot = self.save_current_state()
             self.trial_states[self.state.trial_id] = archived_snapshot
+            # Mark previous workspace as completed in registry
+            if self.workspace_registry and self.current_workspace_id:
+                self.workspace_registry.update_status(
+                    self.current_workspace_id,
+                    "completed",
+                    completed_at=datetime.now(tz=timezone.utc).isoformat(),
+                )
 
         self.trial_counter += 1
         new_trial_id = str(self.trial_counter)
 
         if self.base_work_dir:
-            self.current_work_dir = self._create_trial_workspace(new_trial_id)
+            self.current_workspace_id = str(uuid.uuid4())
+            self.current_work_dir = self._create_trial_workspace(
+                new_trial_id, self.current_workspace_id
+            )
+            if self.workspace_registry:
+                self.workspace_registry.register_workspace(
+                    self.task_id,
+                    new_trial_id,
+                    self.current_workspace_id,
+                    self.current_work_dir,
+                )
         else:
             self.current_work_dir = None
+            self.current_workspace_id = None
 
         self.state = TaskState(
             task_id=self.task_id,
             trial_id=new_trial_id,
             task_prompt=self.get_task_prompt(),
+            workspace_id=self.current_workspace_id,
+            workspace_path=self.current_work_dir,
         )
         return self.state.trial_id
 
-    def _create_trial_workspace(self, trial_id: str) -> str:
-        """Create workspace directory for this trial"""
-        workspace = Path(self.base_work_dir) / f"{self.task_id}_trial_{trial_id}"
+    def _create_trial_workspace(self, trial_id: str, workspace_id: str) -> str:
+        """Create workspace directory for this trial with UUID identifier."""
+        workspace = (
+            Path(self.base_work_dir) / f"{self.task_id}_trial_{trial_id}_{workspace_id}"
+        )
         logger.info(f"Creating workspace: {workspace}")
         if self.fs_manager:
             self.fs_manager.mkdir(str(workspace), create_parents=True)
@@ -381,6 +415,8 @@ class Environment(ABC):
             "submitted_answer": self.state.submitted_answer,
             "surrendered": self.state.surrendered,
             "tool_statistics": self._get_complete_tool_statistics(),
+            "workspace_id": self.state.workspace_id,
+            "workspace_path": self.state.workspace_path,
         }
 
         return {"trial_id": self.state.trial_id, "state": state_data}

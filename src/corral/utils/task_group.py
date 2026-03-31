@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from loguru import logger
 
 from corral.backend.env import Environment
@@ -23,23 +25,41 @@ class TaskGroupEnvironment(Environment):
         task_id: str,
         task_group: TaskGroup,
         subtask_specific_tools: dict[str, Tool],
-        base_work_dir: str,
+        base_work_dir: str | Path,
         taskgroup_common_tools: dict[str, Tool] | None = None,
+        hidden_args_keys: list[str] | None = None,
+        fsmanager_app: str | None = None,
+        extra_file_tools: dict[str, Tool] | None = None,
+        extra_fsmanager_tool_classes: dict[str, type] | None = None,
     ):
         self.task_group = task_group
         self.subtask_specific_tools = subtask_specific_tools
         self.taskgroup_common_tools = taskgroup_common_tools or {}
+        self._hidden_args_keys = hidden_args_keys or []
+        self._fsmanager_app = fsmanager_app
+        self._extra_file_tools = extra_file_tools or {}
+        self._extra_fsmanager_tool_classes = extra_fsmanager_tool_classes or {}
 
         if task_id not in task_group.tasks:
             raise ValueError(f"Task {task_id} not found in task group")
 
         self.current_task = task_group.tasks[task_id]
 
+        # Initialize hidden_args before super().__init__ which calls reset_state
+        self.hidden_args: dict[str, str] = {}
+
         super().__init__(f"{task_id}", base_work_dir=base_work_dir)
+
+        self._update_hidden_args()
 
         # Add tools
         self._add_task_tools()
         self._setup_file_tools()
+
+    def _update_hidden_args(self):
+        """Update hidden_args with current workspace values."""
+        if "work_dir" in self._hidden_args_keys:
+            self.hidden_args["work_dir"] = self.get_current_work_dir()
 
     def _add_task_tools(self):
         """Add required tools for the task"""
@@ -55,34 +75,44 @@ class TaskGroupEnvironment(Environment):
             self.add_tool(tool)
 
     def _setup_file_tools(self):
-        """Setup file tools for current workspace"""
-        if self.current_work_dir:
-            logger.info(
-                f"DEBUG: Setting up FSManager with base_path: {self.current_work_dir}"
-            )
-            # Create new FSManager for current workspace
-            fs_manager = FSManager("file", base_path=self.current_work_dir)
+        """Setup file tools with global workspace scope for cross-trial access."""
+        if self.base_work_dir:
+            logger.info(f"Setting up FSManager with base_path: {self.base_work_dir}")
+            # FSManager scoped to base_work_dir (global) for cross-trial file access
+            fsmanager_kwargs = {
+                "base_path": self.base_work_dir,
+                "registry": self.workspace_registry,
+                "workspace_id": self.current_workspace_id,
+            }
+            if self._fsmanager_app:
+                fsmanager_kwargs["app"] = self._fsmanager_app
+            fs_manager = FSManager("file", **fsmanager_kwargs)
 
             # Add/update file tools
-            self.tools.update(
-                {
-                    "list_files": ListFilesTool(fs_manager),
-                    "read_file": ReadFileTool(fs_manager),
-                    "write_file": WriteFileTool(fs_manager),
-                    "file_info": FileInfoTool(fs_manager),
-                    "cat_files": CatFilesTool(fs_manager),
-                    "copy_file": CopyFileTool(fs_manager),
-                }
-            )
+            file_tools = {
+                "list_files": ListFilesTool(fs_manager),
+                "read_file": ReadFileTool(fs_manager),
+                "write_file": WriteFileTool(fs_manager),
+                "file_info": FileInfoTool(fs_manager),
+                "cat_files": CatFilesTool(fs_manager),
+                "copy_file": CopyFileTool(fs_manager),
+            }
+            # Add tools that need FSManager instance
+            for name, cls in self._extra_fsmanager_tool_classes.items():
+                file_tools[name] = cls(fs_manager)
+            # Add static extra tools
+            file_tools.update(self._extra_file_tools)
+            self.tools.update(file_tools)
             logger.info(
-                f"DEBUG: File tools setup complete for workspace: {self.current_work_dir}"
+                f"File tools setup complete for workspace: {self.base_work_dir}"
             )
         else:
-            logger.warning("DEBUG: No current_work_dir set, skipping file tools setup")
+            logger.warning("No base_work_dir set, skipping file tools setup")
 
     def reset_state(self) -> str:
         """Reset state and update file tools for new workspace"""
         trial_id = super().reset_state()
+        self._update_hidden_args()
         # Recreate file tools for new workspace
         self._setup_file_tools()
         return trial_id
@@ -118,7 +148,9 @@ Required submission format:
 
         # Add workspace info
         if self.current_work_dir:
-            prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n"
+            rel_workspace = Path(self.current_work_dir).name
+            prompt += f"\nIMPORTANT: You have access to filesystem tools. Your workspace directory is: {rel_workspace}/\n"
+            prompt += "Write your output files to this directory.\n"
 
         # Add note about dependencies
         if self.current_task.input_from_tasks:
@@ -153,7 +185,9 @@ Required submission format:
                 resolved_answer = answer_value  # Use as-is
             else:
                 logger.info("Non-JSON submission, using path resolution")
-                resolved_answer = smart_resolve_path(answer_value)
+                resolved_answer = smart_resolve_path(
+                    answer_value, registry=self.workspace_registry
+                )
 
             logger.info(f"Resolved answer for {self.task_id}: {resolved_answer!r}")
             # Call the scoring function with the raw answer

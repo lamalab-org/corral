@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 import requests
@@ -13,6 +15,9 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
+
+if TYPE_CHECKING:
+    from corral.utils.workspace_registry import WorkspaceRegistry
 
 
 def extract_path_from_answer(answer: str) -> str:
@@ -49,15 +54,25 @@ def extract_path_from_answer(answer: str) -> str:
     return answer
 
 
-def find_file_by_name(filename: str, base_dir: str | None = None) -> str:
-    """Find file by name in workspace"""
+def find_file_by_name(
+    filename: str,
+    base_dir: str | None = None,
+    registry: WorkspaceRegistry | None = None,
+) -> str:
+    """Find file by name. Uses registry if available, falls back to rglob search."""
+    # Try registry-backed lookup first
+    if registry:
+        result = registry.find_file(filename)
+        if result:
+            return result
+
+    # Fallback: recursive filesystem search
     if not base_dir:
         base_dir = os.environ.get("CORRAL_WORK_DIR", "")
 
     if not base_dir or not Path(base_dir).exists():
         return filename
 
-    # Search for the file recursively
     base_path = Path(base_dir)
     matches = list(base_path.rglob(filename))
 
@@ -68,14 +83,22 @@ def find_file_by_name(filename: str, base_dir: str | None = None) -> str:
     return filename
 
 
-def smart_resolve_path(input_path: str) -> str:
-    """Resolve path intelligently - use absolute path if exists, search only as fallback"""
+def smart_resolve_path(
+    input_path: str,
+    registry: WorkspaceRegistry | None = None,
+) -> str:
+    """Resolve path intelligently - use absolute path if exists, search only as fallback.
+
+    When a registry is provided, file lookup uses the SQLite registry
+    instead of recursive filesystem search.
+    """
     extracted_path = extract_path_from_answer(input_path)
 
     if Path(extracted_path).exists():
         return extracted_path  # Use the extracted path directly
-    else:
-        return find_file_by_name(Path(extracted_path).name)  # Search as fallback
+    return find_file_by_name(
+        Path(extracted_path).name, registry=registry
+    )  # Search as fallback
 
 
 @retry(
