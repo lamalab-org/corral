@@ -13,7 +13,9 @@ from pathlib import Path
 
 import fire
 import lama_aesthetics
+import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_WIDTH
@@ -173,14 +175,14 @@ def _get_group_column_spans(display_df: pd.DataFrame) -> list[tuple[str, int, in
 def plot_full_coverage_heatmap(
     heatmap_data: pd.DataFrame,
     output_path: Path,
-    metric_display_name: str,
 ) -> None:
-    """Create full coverage heatmap with hierarchical y-axis.
+    """Create full coverage heatmap with marginal mean bar charts.
 
+    Layout: top bar chart (column means), main heatmap, right bar chart (row means).
     Y-axis: model name (bold) above its agent rows, agent names to the left.
     Thin white lines separate model groups.
     X-axis: environment labels at bottom (rotated 90°),
-    group labels with lines ABOVE the heatmap.
+    group labels with lines ABOVE the top bar chart.
     """
     if heatmap_data.empty:
         logger.warning("No data available for heatmap!")
@@ -191,89 +193,194 @@ def plot_full_coverage_heatmap(
     n_cols = len(display_df.columns)
     n_rows = len(display_df.index)
 
+    # Compute marginal means
+    col_means = display_df.mean(axis=0, skipna=True)
+    row_means = display_df.mean(axis=1, skipna=True)
+
     fig_width = min(TWO_COL_WIDTH * 1.5, max(TWO_COL_WIDTH, n_cols * 0.4))
     fig_height = max(ONE_COL_HEIGHT * 0.6, n_rows * 0.35)
 
-    fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
+    # Add space for marginal plots (use absolute size so both bars are same dimension)
+    bar_size = 0.6  # inches for both marginal bar plots
+    fig_width_total = fig_width + bar_size + 0.1
+    fig_height_total = fig_height + bar_size + 0.1
+    bar_ratio_w = bar_size / fig_width
+    bar_ratio_h = bar_size / fig_height
 
+    fig = plt.figure(figsize=(fig_width_total, fig_height_total))
+    gs = gridspec.GridSpec(
+        2,
+        2,
+        width_ratios=[1, bar_ratio_w],
+        height_ratios=[bar_ratio_h, 1],
+        wspace=0.02,
+        hspace=0.02,
+    )
+
+    ax_top = fig.add_subplot(gs[0, 0])
+    ax_heatmap = fig.add_subplot(gs[1, 0])
+    ax_right = fig.add_subplot(gs[1, 1])
+    # Leave gs[0,1] empty (corner)
+
+    # --- Main heatmap ---
     sns.heatmap(
         display_df,
         annot=True,
         fmt=".2f",
         cmap="Purples",
-        cbar_kws={"label": metric_display_name, "shrink": 0.8},
-        ax=ax,
+        cbar=False,
+        ax=ax_heatmap,
         linewidths=0.5,
         linecolor="white",
         annot_kws={"fontsize": FONT_SIZES["tick_label"] - 3},
     )
 
-    # --- Thin white separator lines between model groups ---
+    # --- Thin white separator lines between model groups (horizontal) ---
     for i, meta in enumerate(row_meta):
         if meta["is_first_of_model"] and i > 0:
-            ax.axhline(y=i, color="white", linewidth=3, zorder=5)
+            ax_heatmap.axhline(y=i, color="white", linewidth=3, zorder=5)
+
+    # --- Thick white separator lines between environment groups (vertical) ---
+    group_spans = _get_group_column_spans(display_df)
+    for _group_name, _col_start, col_end in group_spans[:-1]:  # skip last group
+        ax_heatmap.axvline(x=col_end + 1, color="white", linewidth=3, zorder=5)
 
     # --- Hierarchical y-axis ---
-    ax.set_yticks([])
-    ax.set_ylabel("")
+    ax_heatmap.set_yticks([])
+    ax_heatmap.set_ylabel("")
 
-    # Agent labels for each row
+    # Find the row span for each model group
+    model_groups = []
     for i, meta in enumerate(row_meta):
-        ax.text(
+        if meta["is_first_of_model"]:
+            model_groups.append({"model": meta["model"], "start": i})
+            if len(model_groups) > 1:
+                model_groups[-2]["end"] = i
+    if model_groups:
+        model_groups[-1]["end"] = len(row_meta)
+
+    # Agent labels for each row (indented to make room for model name)
+    for i, meta in enumerate(row_meta):
+        ax_heatmap.text(
             -0.01,
             i + 0.5,
             meta["agent"],
             ha="right",
             va="center",
             fontsize=FONT_SIZES["tick_label"] - 1,
-            transform=ax.get_yaxis_transform(),
+            transform=ax_heatmap.get_yaxis_transform(),
         )
 
-    # Model name labels (bold) — above the first agent row of each model
-    for i, meta in enumerate(row_meta):
-        if meta["is_first_of_model"]:
-            ax.text(
-                -0.01,
-                i + 0.05,
-                meta["model"],
-                ha="right",
-                va="bottom",
-                fontsize=FONT_SIZES["tick_label"],
-                fontweight="bold",
-                transform=ax.get_yaxis_transform(),
-            )
+    # Model name labels are on the right bar chart (see below)
 
     # --- X-axis: env labels at bottom ---
-    ax.set_xlabel("")
-    ax.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=90, ha="center")
+    ax_heatmap.set_xlabel("")
+    ax_heatmap.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
+    ax_heatmap.set_xticklabels(ax_heatmap.get_xticklabels(), rotation=90, ha="center")
 
-    # --- Group labels ABOVE the heatmap ---
-    group_spans = _get_group_column_spans(display_df)
+    # --- Top bar chart (column means) ---
+    purple_cmap = plt.get_cmap("Purples")
+    bar_positions = np.arange(n_cols) + 0.5
+    col_colors = [purple_cmap(0.3 + 0.5 * v) for v in col_means.to_numpy()]
+    ax_top.bar(
+        bar_positions,
+        col_means.values,
+        width=1.0,
+        color=col_colors,
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax_top.set_xlim(0, n_cols)
+    ax_top.set_ylim(0, min(1.0, col_means.max() * 1.3))
+    ax_top.set_xticks([])
+    # Vertical separators matching heatmap groups
+    for _group_name, _col_start, col_end in group_spans[:-1]:
+        ax_top.axvline(x=col_end + 1, color="white", linewidth=3, zorder=5)
+    ax_top.yaxis.tick_right()
+    ax_top.yaxis.set_label_position("right")
+    ax_top.tick_params(axis="y", labelsize=FONT_SIZES["tick_label"] - 2)
+    ax_top.set_ylabel(
+        "Mean", fontsize=FONT_SIZES["tick_label"] - 1, rotation=270, labelpad=10
+    )
+    for spine in ax_top.spines.values():
+        spine.set_visible(False)
+
+    # --- Right bar chart (row means) ---
+    bar_positions_y = np.arange(n_rows) + 0.5
+    row_colors = [purple_cmap(0.3 + 0.5 * v) for v in row_means.to_numpy()]
+    ax_right.barh(
+        bar_positions_y,
+        row_means.values,
+        height=1.0,
+        color=row_colors,
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax_right.set_ylim(n_rows, 0)  # Invert to match heatmap orientation
+    ax_right.set_xlim(0, min(1.0, row_means.max() * 1.3))
+    ax_right.set_yticks([])
+    ax_right.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
+    ax_right.set_xlabel("Mean", fontsize=FONT_SIZES["tick_label"] - 1)
+    for spine in ax_right.spines.values():
+        spine.set_visible(False)
+
+    # Add separator lines in right bar chart matching model groups
+    for i, meta in enumerate(row_meta):
+        if meta["is_first_of_model"] and i > 0:
+            ax_right.axhline(y=i, color="white", linewidth=3, zorder=5)
+
+    # Model group labels to the right of the right bar chart (mirroring top group labels)
+    for group in model_groups:
+        start_frac = group["start"] / n_rows
+        end_frac = group["end"] / n_rows
+        # Invert fractions since y-axis is inverted
+        start_frac_inv = 1.0 - end_frac + 0.02
+        end_frac_inv = 1.0 - start_frac - 0.02
+        mid_frac = (start_frac_inv + end_frac_inv) / 2.0
+        ax_right.text(
+            1.15,
+            mid_frac,
+            group["model"],
+            ha="left",
+            va="center",
+            fontsize=FONT_SIZES["tick_label"],
+            fontweight="bold",
+            clip_on=False,
+            transform=ax_right.transAxes,
+        )
+        ax_right.plot(
+            [1.05, 1.05],
+            [start_frac_inv, end_frac_inv],
+            color="gray",
+            linewidth=0.8,
+            clip_on=False,
+            transform=ax_right.transAxes,
+        )
+
+    # --- Group labels ABOVE the top bar chart ---
     for group_name, col_start, col_end in group_spans:
-        # Convert data x-coordinates to axes fraction for positioning
         mid_data = (col_start + col_end) / 2.0 + 0.5
         start_frac = (col_start + 0.15) / n_cols
         end_frac = (col_end + 0.85) / n_cols
         mid_frac = mid_data / n_cols
-        ax.text(
+        ax_top.text(
             mid_frac,
-            1.06,
+            1.15,
             group_name,
             ha="center",
             va="bottom",
             fontsize=FONT_SIZES["tick_label"],
             fontweight="bold",
             clip_on=False,
-            transform=ax.transAxes,
+            transform=ax_top.transAxes,
         )
-        ax.plot(
+        ax_top.plot(
             [start_frac, end_frac],
-            [1.02, 1.02],
+            [1.05, 1.05],
             color="gray",
             linewidth=0.8,
             clip_on=False,
-            transform=ax.transAxes,
+            transform=ax_top.transAxes,
         )
 
     fig.subplots_adjust(top=0.85)
@@ -326,14 +433,8 @@ def main(
         msg = f"Invalid k_value: {k_value}. Must be between 1 and 5"
         raise ValueError(msg)
 
-    # Get metric column name and display name
+    # Get metric column name
     metric_column = get_metric_column_name(metric, k_value)
-    if metric == "average_score":
-        metric_display_name = "Average Score"
-    elif metric == "pass_at_k":
-        metric_display_name = f"Pass@{k_value}"
-    elif metric == "pass_hat_k":
-        metric_display_name = f"Pass^{k_value}"
 
     # Load data
     logger.info("Loading datasets...")
@@ -379,7 +480,7 @@ def main(
         output_path = Path(__file__).parent / "2a_full_coverage_heatmap.pdf"
     else:
         output_path = Path(output_filename)
-    plot_full_coverage_heatmap(heatmap_data, output_path, metric_display_name)
+    plot_full_coverage_heatmap(heatmap_data, output_path)
 
     logger.info("")
     logger.info("=" * 60)
