@@ -135,26 +135,35 @@ def format_heatmap_data(pivot_df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict
 
     display_df = pd.DataFrame(new_rows)
 
-    # Format column labels (environment-level -> ENV S#)
+    # Format column labels to just S# and track environment spans
     col_labels = []
-    for env_level in display_df.columns:
+    env_spans = []  # list of (env_display_name, col_start, col_end)
+    prev_env = None
+    for idx, env_level in enumerate(display_df.columns):
         parts = env_level.split("-")
         if len(parts) >= 2:
             env = parts[0]
             level = parts[1]
             env_name = ENVIRONMENT_NAMES.get(env, env.upper())
-            col_labels.append(f"{env_name} S{level}")
+            col_labels.append(f"S{level}")
+            if env != prev_env:
+                if env_spans:
+                    env_spans[-1] = (*env_spans[-1][:2], idx - 1)
+                env_spans.append((env_name, idx, idx))
+                prev_env = env
+            else:
+                env_spans[-1] = (*env_spans[-1][:2], idx)
         else:
             col_labels.append(env_level)
     display_df.columns = col_labels
 
-    return display_df, row_meta
+    return display_df, row_meta, env_spans
 
 
 # ==================== PLOTTING ====================
 
 
-def _get_group_column_spans(display_df: pd.DataFrame) -> list[tuple[str, int, int]]:
+def _get_group_column_spans(n_cols_total: int) -> list[tuple[str, int, int]]:
     """Compute (group_name, col_start, col_end) spans for the ordered columns."""
     spans = []
     col_idx = 0
@@ -162,14 +171,11 @@ def _get_group_column_spans(display_df: pd.DataFrame) -> list[tuple[str, int, in
         start = col_idx
         for env in group_info["environments"]:
             max_level = ENVIRONMENT_MAX_LEVELS.get(env, 1)
-            for _lvl in range(1, max_level + 1):
-                env_name = ENVIRONMENT_NAMES.get(env, env.upper())
-                col_label = f"{env_name} S{_lvl}"
-                if col_label in display_df.columns:
-                    col_idx += 1
+            col_idx += max_level
         if col_idx > start:
             spans.append((group_name, start, col_idx - 1))
-    return spans
+    # Clamp to actual column count
+    return [(g, s, min(e, n_cols_total - 1)) for g, s, e in spans if s < n_cols_total]
 
 
 def plot_full_coverage_heatmap(
@@ -188,7 +194,7 @@ def plot_full_coverage_heatmap(
         logger.warning("No data available for heatmap!")
         return
 
-    display_df, row_meta = format_heatmap_data(heatmap_data)
+    display_df, row_meta, env_spans = format_heatmap_data(heatmap_data)
 
     n_cols = len(display_df.columns)
     n_rows = len(display_df.index)
@@ -241,7 +247,7 @@ def plot_full_coverage_heatmap(
             ax_heatmap.axhline(y=i, color="white", linewidth=3, zorder=5)
 
     # --- Thick white separator lines between environment groups (vertical) ---
-    group_spans = _get_group_column_spans(display_df)
+    group_spans = _get_group_column_spans(n_cols)
     for _group_name, _col_start, col_end in group_spans[:-1]:  # skip last group
         ax_heatmap.axvline(x=col_end + 1, color="white", linewidth=3, zorder=5)
 
@@ -273,10 +279,39 @@ def plot_full_coverage_heatmap(
 
     # Model name labels are on the right bar chart (see below)
 
-    # --- X-axis: env labels at bottom ---
+    # --- X-axis: S# labels at bottom, environment names above them ---
     ax_heatmap.set_xlabel("")
     ax_heatmap.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
-    ax_heatmap.set_xticklabels(ax_heatmap.get_xticklabels(), rotation=90, ha="center")
+    ax_heatmap.set_xticklabels(ax_heatmap.get_xticklabels(), rotation=0, ha="center")
+
+    # Lines and environment name labels below S# tick labels
+    for env_name, col_start, col_end in env_spans:
+        mid_x = (col_start + col_end) / 2.0 + 0.5
+        start_frac = (col_start + 0.15) / n_cols
+        end_frac = (col_end + 0.85) / n_cols
+        mid_frac = mid_x / n_cols
+        # Line spanning the environment's columns
+        ax_heatmap.plot(
+            [start_frac, end_frac],
+            [-0.01, -0.01],
+            color="gray",
+            linewidth=0.8,
+            clip_on=False,
+            transform=ax_heatmap.transAxes,
+        )
+        # Environment name label below the line, anchored at start of span
+        ax_heatmap.text(
+            start_frac,
+            -0.03,
+            env_name,
+            ha="right",
+            va="top",
+            fontsize=FONT_SIZES["tick_label"] - 2,
+            rotation=45,
+            rotation_mode="anchor",
+            clip_on=False,
+            transform=ax_heatmap.transAxes,
+        )
 
     # --- Top bar chart (column means) ---
     purple_cmap = plt.get_cmap("Purples")

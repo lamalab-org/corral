@@ -13,14 +13,14 @@ MODEL_NAMES = {
 }
 
 ENVIRONMENT_NAMES = {
-    "afm": "AFM Operation",
-    "catalyst": "Surface Construction",
-    "md": "Molecular Simulation",
-    "ml": "ML Property Prediction",
-    "resistor": "Circuit Inference",
-    "retro": "Retrosynthetic Planning",
-    "spectra": "Spectra Elucidation",
-    "wetlab": "Qualitative Analysis",
+    "afm": "AFM Experiment\nExecution",
+    "catalyst": "Adsorption Surface\nConstruction",
+    "md": "Molecular\nSimulation",
+    "ml": "ML-based Property\nPrediction",
+    "resistor": "Circuit\nInference",
+    "retro": "Retrosynthetic\nPlanning",
+    "spectra": "Spectroscopic Structure\nElucidation",
+    "wetlab": "Inorganic Qualitative\nAnalysis",
 }
 
 AGENT_NAMES = {
