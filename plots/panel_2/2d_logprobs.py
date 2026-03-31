@@ -48,7 +48,7 @@ ENVIRONMENT_NAMES = {
 lama_aesthetics.get_style("main")
 
 OUT_DIR = Path(__file__).resolve().parent
-OUT_FILE = OUT_DIR / "mean_logprobs_by_env.png"
+OUT_FILE = OUT_DIR / "2d_logprobs.png"
 
 
 # ── Data ─────────────────────────────────────────────────────────────────────
@@ -131,8 +131,6 @@ def plot_mean_logprobs(stats: pd.DataFrame, output_path: Path):
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(labels, fontsize=FONT_SIZES["tick_label"])
-    ax.yaxis.tick_right()
-    ax.yaxis.set_label_position("right")
     ax.set_xlabel(
         "Mean log-probability",
         fontsize=FONT_SIZES["axis_label"],

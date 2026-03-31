@@ -55,6 +55,7 @@ def get_env_key_mapping():
         "md": "md",
         "ml": "ml",
         "resistor": "resistor",
+        "wetlab": "wetlab",
     }
 
 
@@ -167,6 +168,20 @@ def classify_subtask(subtask, environment, category_tags):
                 return env_tags[subtask_num]
         return None
 
+    # Wetlab: pattern matching by level and sub number
+    if environment == "wetlab":
+        # e.g., qualysis_lvl2_03_sub4 -> level_2, qualysis_lvl2_*_sub4
+        import re
+
+        m = re.match(r"qualysis_lvl(\d+)_\d+_(sub\d+)", subtask)
+        if m:
+            level_key = f"level_{m.group(1)}"
+            sub_key = f"qualysis_lvl{m.group(1)}_*_{m.group(2)}"
+            level_tags = env_tags.get(level_key, {})
+            if sub_key in level_tags:
+                return level_tags[sub_key]
+        return None
+
     return None
 
 
@@ -248,7 +263,7 @@ def main():
         }
 
     # Create plot
-    fig, ax = plt.subplots(1, 1, figsize=(TWO_COL_WIDTH * 2 / 3, ONE_COL_HEIGHT))
+    fig, ax = plt.subplots(1, 1, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
 
     # Define visual mappings
     agent_display = dict(AGENT_NAMES)

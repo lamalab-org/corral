@@ -1,28 +1,32 @@
-"""Combined panel figure: heatmap (top), scatter (bottom-left 1/3), task category (bottom-right 2/3).
+"""Combined panel 2 figure.
+
+Layout (3 rows):
+  Row 1: (a) Full-coverage heatmap with marginal mean bars  [full width]
+  Row 2: (b) Task category performance line plot             [full width]
+  Row 3: (c) Gap scatter (left)  |  (d) Log-prob bar (right) [half each]
 
 Usage:
     python 2_panel.py
 """
 
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 import lama_aesthetics
+import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from adjustText import adjust_text
-from lama_aesthetics import TWO_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
-from matplotlib.lines import Line2D
 
 lama_aesthetics.get_style("main")
 
-# Add analysis and plot config to path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT / "analysis"))
 sys.path.insert(0, str(REPO_ROOT / "plots"))
@@ -33,22 +37,20 @@ from plot_config import (  # noqa: E402
     ENVIRONMENT_MAX_LEVELS,
     ENVIRONMENT_NAMES,
     FONT_SIZES,
-    GAP_COLORS,
-    MODEL_COLOURS,
+    GROUP_COLOURS,
     MODEL_NAMES,
 )
 from plot_utils import (  # noqa: E402
     filter_by_level,
     get_metric_column_name,
+    load_logprobs_data,
     load_reports_data,
 )
-
-SCATTER_COLOR = GAP_COLORS["model_gap"]
 
 PANEL_DIR = Path(__file__).resolve().parent
 
 
-# ==================== HEATMAP helpers ====================
+# ==================== (a) HEATMAP helpers ====================
 
 
 def get_ordered_env_level_columns() -> list[str]:
@@ -70,7 +72,6 @@ def collect_full_coverage_data(df, metric_column):
 
 
 def format_heatmap_data(pivot_df):
-    """Format heatmap data with gap rows between model groups."""
     display_df = pivot_df.copy()
     ordered_cols = [
         c for c in get_ordered_env_level_columns() if c in display_df.columns
@@ -94,18 +95,13 @@ def format_heatmap_data(pivot_df):
     row_meta = []
     prev_model = None
     for _m_idx, _a_idx, model, agent, config in parsed_rows:
-        if prev_model is not None and model != prev_model:
-            gap = pd.Series(
-                float("nan"), index=display_df.columns, name=f"__gap_{model}"
-            )
-            new_rows.append(gap)
-            row_meta.append({"model": "", "agent": "", "is_gap": True})
+        is_first = model != prev_model
         new_rows.append(display_df.loc[config])
         row_meta.append(
             {
                 "model": MODEL_NAMES.get(model, model),
                 "agent": AGENT_NAMES.get(agent, agent),
-                "is_gap": False,
+                "is_first_of_model": is_first,
             }
         )
         prev_model = model
@@ -113,212 +109,254 @@ def format_heatmap_data(pivot_df):
     display_df = pd.DataFrame(new_rows)
 
     col_labels = []
-    for env_level in display_df.columns:
+    env_spans = []
+    prev_env = None
+    for idx, env_level in enumerate(display_df.columns):
         parts = env_level.split("-")
-        env = parts[0]
-        level = parts[1] if len(parts) >= 2 else ""
-        env_name = ENVIRONMENT_NAMES.get(env, env.upper())
-        col_labels.append(f"{env_name} S{level}")
+        if len(parts) >= 2:
+            env = parts[0]
+            level = parts[1]
+            env_name = ENVIRONMENT_NAMES.get(env, env.upper())
+            col_labels.append(f"S{level}")
+            if env != prev_env:
+                if env_spans:
+                    env_spans[-1] = (*env_spans[-1][:2], idx - 1)
+                env_spans.append((env_name, idx, idx))
+                prev_env = env
+            else:
+                env_spans[-1] = (*env_spans[-1][:2], idx)
+        else:
+            col_labels.append(env_level)
     display_df.columns = col_labels
-    return display_df, row_meta
+
+    return display_df, row_meta, env_spans
 
 
-def _get_group_column_spans(display_df):
+def _get_group_column_spans(n_cols_total):
     spans = []
     col_idx = 0
     for group_name, group_info in ENVIRONMENT_GROUPS.items():
         start = col_idx
         for env in group_info["environments"]:
-            max_level = ENVIRONMENT_MAX_LEVELS.get(env, 1)
-            for _lvl in range(1, max_level + 1):
-                env_name = ENVIRONMENT_NAMES.get(env, env.upper())
-                col_label = f"{env_name} S{_lvl}"
-                if col_label in display_df.columns:
-                    col_idx += 1
+            col_idx += ENVIRONMENT_MAX_LEVELS.get(env, 1)
         if col_idx > start:
             spans.append((group_name, start, col_idx - 1))
-    return spans
+    return [(g, s, min(e, n_cols_total - 1)) for g, s, e in spans if s < n_cols_total]
 
 
-def draw_heatmap(ax, heatmap_data, metric_display_name):
-    display_df, row_meta = format_heatmap_data(heatmap_data)
+def draw_heatmap(parent_gs):
+    """Draw heatmap with marginal bars into the given SubplotSpec.
 
-    mask = pd.DataFrame(False, index=display_df.index, columns=display_df.columns)
-    for i, meta in enumerate(row_meta):
-        if meta["is_gap"]:
-            mask.iloc[i] = True
+    Returns the axes tuple (ax_top, ax_heatmap, ax_right) for panel-label placement.
+    """
+    reports_df = load_reports_data()
+    metric_column = get_metric_column_name("average_score", 5)
+    heatmap_data = collect_full_coverage_data(reports_df, metric_column)
 
+    display_df, row_meta, env_spans = format_heatmap_data(heatmap_data)
+    n_cols = len(display_df.columns)
+    n_rows = len(display_df.index)
+    col_means = display_df.mean(axis=0, skipna=True)
+    row_means = display_df.mean(axis=1, skipna=True)
+
+    # Nested gridspec inside parent slot
+    inner_gs = gridspec.GridSpecFromSubplotSpec(
+        2,
+        2,
+        subplot_spec=parent_gs,
+        width_ratios=[1, 0.08],
+        height_ratios=[0.12, 1],
+        wspace=0.02,
+        hspace=0.02,
+    )
+
+    fig = plt.gcf()
+    ax_top = fig.add_subplot(inner_gs[0, 0])
+    ax_heatmap = fig.add_subplot(inner_gs[1, 0])
+    ax_right = fig.add_subplot(inner_gs[1, 1])
+
+    # --- Main heatmap ---
     sns.heatmap(
         display_df,
         annot=True,
         fmt=".2f",
         cmap="Purples",
-        cbar_kws={"label": metric_display_name, "shrink": 0.8},
-        ax=ax,
+        cbar=False,
+        ax=ax_heatmap,
         linewidths=0.5,
         linecolor="white",
-        mask=mask,
         annot_kws={"fontsize": FONT_SIZES["tick_label"] - 3},
     )
 
-    # Hierarchical y-axis
-    ax.set_yticks([])
-    ax.set_ylabel("")
+    # Separator lines between model groups
     for i, meta in enumerate(row_meta):
-        if not meta["is_gap"]:
-            ax.text(
-                -0.02,
-                i + 0.5,
-                f"  {meta['agent']}",
-                ha="right",
-                va="center",
-                fontsize=FONT_SIZES["tick_label"] - 1,
-                transform=ax.get_yaxis_transform(),
-            )
+        if meta["is_first_of_model"] and i > 0:
+            ax_heatmap.axhline(y=i, color="white", linewidth=3, zorder=5)
 
-    prev_model = None
-    model_start = 0
+    # Separator lines between environment groups
+    group_spans = _get_group_column_spans(n_cols)
+    for _gn, _cs, col_end in group_spans[:-1]:
+        ax_heatmap.axvline(x=col_end + 1, color="white", linewidth=3, zorder=5)
+
+    # Y-axis: agent labels
+    ax_heatmap.set_yticks([])
+    ax_heatmap.set_ylabel("")
     for i, meta in enumerate(row_meta):
-        if meta["is_gap"]:
-            continue
-        if meta["model"] != prev_model:
-            if prev_model is not None:
-                data_rows = [
-                    j for j in range(model_start, i) if not row_meta[j]["is_gap"]
-                ]
-                if data_rows:
-                    mid_y = (data_rows[0] + data_rows[-1]) / 2.0 + 0.5
-                    ax.text(
-                        -0.15,
-                        mid_y,
-                        prev_model,
-                        ha="right",
-                        va="center",
-                        fontsize=FONT_SIZES["tick_label"],
-                        fontweight="bold",
-                        transform=ax.get_yaxis_transform(),
-                    )
-            model_start = i
-            prev_model = meta["model"]
-    if prev_model is not None:
-        data_rows = [
-            j for j in range(model_start, len(row_meta)) if not row_meta[j]["is_gap"]
-        ]
-        if data_rows:
-            mid_y = (data_rows[0] + data_rows[-1]) / 2.0 + 0.5
-            ax.text(
-                -0.15,
-                mid_y,
-                prev_model,
-                ha="right",
-                va="center",
-                fontsize=FONT_SIZES["tick_label"],
-                fontweight="bold",
-                transform=ax.get_yaxis_transform(),
-            )
+        ax_heatmap.text(
+            -0.01,
+            i + 0.5,
+            meta["agent"],
+            ha="right",
+            va="center",
+            fontsize=FONT_SIZES["tick_label"] - 1,
+            transform=ax_heatmap.get_yaxis_transform(),
+        )
 
-    ax.set_xlabel("")
-    ax.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=90, ha="center")
+    # X-axis: S# labels + environment name lines below
+    ax_heatmap.set_xlabel("")
+    ax_heatmap.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
+    ax_heatmap.set_xticklabels(ax_heatmap.get_xticklabels(), rotation=0, ha="center")
 
-    # Group labels ABOVE the heatmap
-    n_cols = len(display_df.columns)
-    group_spans = _get_group_column_spans(display_df)
+    for env_name, col_start, col_end in env_spans:
+        start_frac = (col_start + 0.15) / n_cols
+        end_frac = (col_end + 0.85) / n_cols
+        ax_heatmap.plot(
+            [start_frac, end_frac],
+            [-0.01, -0.01],
+            color="gray",
+            linewidth=0.8,
+            clip_on=False,
+            transform=ax_heatmap.transAxes,
+        )
+        ax_heatmap.text(
+            start_frac,
+            -0.03,
+            env_name,
+            ha="right",
+            va="top",
+            fontsize=FONT_SIZES["tick_label"] - 2,
+            rotation=45,
+            rotation_mode="anchor",
+            clip_on=False,
+            transform=ax_heatmap.transAxes,
+        )
+
+    # --- Top bar chart ---
+    purple_cmap = plt.get_cmap("Purples")
+    bar_positions = np.arange(n_cols) + 0.5
+    col_colors = [purple_cmap(0.3 + 0.5 * v) for v in col_means.to_numpy()]
+    ax_top.bar(
+        bar_positions,
+        col_means.to_numpy(),
+        width=1.0,
+        color=col_colors,
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax_top.set_xlim(0, n_cols)
+    ax_top.set_ylim(0, min(1.0, col_means.max() * 1.3))
+    ax_top.set_xticks([])
+    for _gn, _cs, col_end in group_spans[:-1]:
+        ax_top.axvline(x=col_end + 1, color="white", linewidth=3, zorder=5)
+    ax_top.yaxis.tick_right()
+    ax_top.yaxis.set_label_position("right")
+    ax_top.tick_params(axis="y", labelsize=FONT_SIZES["tick_label"] - 2)
+    ax_top.set_ylabel(
+        "Mean", fontsize=FONT_SIZES["tick_label"] - 1, rotation=270, labelpad=10
+    )
+    for spine in ax_top.spines.values():
+        spine.set_visible(False)
+
+    # --- Right bar chart ---
+    bar_positions_y = np.arange(n_rows) + 0.5
+    row_colors = [purple_cmap(0.3 + 0.5 * v) for v in row_means.to_numpy()]
+    ax_right.barh(
+        bar_positions_y,
+        row_means.to_numpy(),
+        height=1.0,
+        color=row_colors,
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax_right.set_ylim(n_rows, 0)
+    ax_right.set_xlim(0, min(1.0, row_means.max() * 1.3))
+    ax_right.set_yticks([])
+    ax_right.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
+    ax_right.set_xlabel("Mean", fontsize=FONT_SIZES["tick_label"] - 1)
+    for spine in ax_right.spines.values():
+        spine.set_visible(False)
+
+    # Separator lines in right bar chart
+    for i, meta in enumerate(row_meta):
+        if meta["is_first_of_model"] and i > 0:
+            ax_right.axhline(y=i, color="white", linewidth=3, zorder=5)
+
+    # Model group labels on the right
+    model_groups = []
+    for i, meta in enumerate(row_meta):
+        if meta["is_first_of_model"]:
+            model_groups.append({"model": meta["model"], "start": i})
+            if len(model_groups) > 1:
+                model_groups[-2]["end"] = i
+    if model_groups:
+        model_groups[-1]["end"] = len(row_meta)
+
+    for group in model_groups:
+        start_frac = group["start"] / n_rows
+        end_frac = group["end"] / n_rows
+        start_frac_inv = 1.0 - end_frac + 0.02
+        end_frac_inv = 1.0 - start_frac - 0.02
+        mid_frac = (start_frac_inv + end_frac_inv) / 2.0
+        ax_right.text(
+            1.15,
+            mid_frac,
+            group["model"],
+            ha="left",
+            va="center",
+            fontsize=FONT_SIZES["tick_label"],
+            fontweight="bold",
+            clip_on=False,
+            transform=ax_right.transAxes,
+        )
+        ax_right.plot(
+            [1.05, 1.05],
+            [start_frac_inv, end_frac_inv],
+            color="gray",
+            linewidth=0.8,
+            clip_on=False,
+            transform=ax_right.transAxes,
+        )
+
+    # Group labels above top bar chart
     for group_name, col_start, col_end in group_spans:
         mid_data = (col_start + col_end) / 2.0 + 0.5
         start_frac = (col_start + 0.15) / n_cols
         end_frac = (col_end + 0.85) / n_cols
         mid_frac = mid_data / n_cols
-        ax.text(
+        ax_top.text(
             mid_frac,
-            1.06,
+            1.15,
             group_name,
             ha="center",
             va="bottom",
-            fontsize=FONT_SIZES["tick_label"] - 1,
+            fontsize=FONT_SIZES["tick_label"],
             fontweight="bold",
             clip_on=False,
-            transform=ax.transAxes,
+            transform=ax_top.transAxes,
         )
-        ax.plot(
+        ax_top.plot(
             [start_frac, end_frac],
-            [1.02, 1.02],
+            [1.05, 1.05],
             color="gray",
             linewidth=0.8,
             clip_on=False,
-            transform=ax.transAxes,
+            transform=ax_top.transAxes,
         )
 
-
-# ==================== SCATTER helpers ====================
-
-
-def collect_gap_data(df, metric_column):
-    gap_data = {}
-    for env in df["environment"].unique():
-        env_df = df[df["environment"] == env]
-        model_scores = env_df.groupby("model")[metric_column].mean()
-        agent_scores = env_df.groupby("agent_type")[metric_column].mean()
-        model_gap = (
-            model_scores.max() - model_scores.min() if len(model_scores) > 1 else np.nan
-        )
-        agent_gap = (
-            agent_scores.max() - agent_scores.min() if len(agent_scores) > 1 else np.nan
-        )
-        if not np.isnan(model_gap) and not np.isnan(agent_gap):
-            gap_data[env] = {"model_gap": model_gap, "agent_gap": agent_gap}
-    return gap_data
+    return ax_top
 
 
-def draw_scatter(ax, gap_data, metric_display_name):
-    environments = list(gap_data.keys())
-    agent_gaps = [gap_data[e]["agent_gap"] for e in environments]
-    model_gaps = [gap_data[e]["model_gap"] for e in environments]
-    env_labels = [ENVIRONMENT_NAMES.get(e, e.upper()) for e in environments]
-
-    max_gap = max(*agent_gaps, *model_gaps)
-    min_gap = min(*agent_gaps, *model_gaps)
-    diag = [min_gap * 0.95, max_gap * 1.05]
-
-    ax.plot(diag, diag, "k--", linewidth=1.5, alpha=0.5, zorder=1)
-    ax.scatter(
-        agent_gaps,
-        model_gaps,
-        s=100,
-        color=SCATTER_COLOR,
-        alpha=0.7,
-        edgecolors="white",
-        linewidths=1.5,
-        zorder=3,
-    )
-
-    texts = []
-    for x, y, label in zip(agent_gaps, model_gaps, env_labels, strict=False):
-        texts.append(ax.text(x, y, label, fontsize=4.5, color="black", alpha=1))
-    adjust_text(
-        texts,
-        arrowprops={"arrowstyle": "-", "color": "black", "lw": 0.5, "alpha": 1},
-        expand_points=(1.5, 1.5),
-        force_text=(0.5, 0.5),
-    )
-
-    ax.fill_between(
-        diag, diag, [max_gap * 1.1] * 2, alpha=0.1, color=SCATTER_COLOR, zorder=0
-    )
-    ax.set_xlabel(
-        f"Agent Gap ({metric_display_name})", fontsize=FONT_SIZES["axis_label"]
-    )
-    ax.set_ylabel(
-        f"Model Gap ({metric_display_name})", fontsize=FONT_SIZES["axis_label"]
-    )
-    ax.tick_params(axis="both", labelsize=FONT_SIZES["tick_label"])
-    ax.set_aspect("equal", adjustable="box")
-    x_range = np.array([min_gap * 0.95, max_gap * 1.05])
-    y_range = np.array([min_gap * 0.95, max_gap * 1.05])
-    range_frame(ax, x_range, y_range, pad=0.05)
-
-
-# ==================== TASK CATEGORY helpers ====================
+# ==================== (b) TASK CATEGORY helpers ====================
 
 
 def load_category_tags():
@@ -336,6 +374,7 @@ def get_env_key_mapping():
         "md": "md",
         "ml": "ml",
         "resistor": "resistor",
+        "wetlab": "wetlab",
     }
 
 
@@ -410,19 +449,28 @@ def classify_subtask(subtask, environment, category_tags):
                 return env_tags[subtask_num]
         return None
 
+    if environment == "wetlab":
+        m = re.match(r"qualysis_lvl(\d+)_\d+_(sub\d+)", subtask)
+        if m:
+            level_key = f"level_{m.group(1)}"
+            sub_key = f"qualysis_lvl{m.group(1)}_*_{m.group(2)}"
+            level_tags = env_tags.get(level_key, {})
+            if sub_key in level_tags:
+                return level_tags[sub_key]
+        return None
+
     return None
 
 
 def draw_task_category(ax, reports_df, category_tags):
+    """Simple bar plot: 4 bars (one per category), averaged across all models & agents."""
     df_sub = reports_df[reports_df["category"] == "subtask"].copy()
     df_comp = df_sub[df_sub["Tool Verbosity"] == "comprehensive"].copy()
 
     category_order = ["retrieval", "execution", "reasoning", "validation"]
+    scores_by_category = defaultdict(list)
 
-    scores_by_group = defaultdict(lambda: defaultdict(list))
     for _, row in df_comp.iterrows():
-        model = row["model"]
-        agent_type = row["agent_type"]
         environment = row["environment"]
         task_results = row["Task Results"]
         if not isinstance(task_results, dict):
@@ -438,67 +486,184 @@ def draw_task_category(ax, reports_df, category_tags):
                 continue
             if category in ("code_execution", "experiment_execution"):
                 category = "execution"
-            scores_by_group[(model, agent_type)][category].append(pass_at_5)
+            scores_by_category[category].append(pass_at_5)
 
-    avg_scores = {}
-    for (model, agent_type), cat_scores in scores_by_group.items():
-        avg_scores[(model, agent_type)] = {
-            cat: np.mean(scores) if scores else np.nan
-            for cat, scores in cat_scores.items()
-        }
-
-    agent_display = dict(AGENT_NAMES)
-    agent_markers = {"react": "o", "tool_calling": "D"}
-    agent_linestyle = {"react": "-", "tool_calling": "--"}
     x_values = np.arange(len(category_order))
+    y_values = [np.mean(scores_by_category.get(cat, [0])) for cat in category_order]
 
-    for (model, agent_type), category_avgs in sorted(avg_scores.items()):
-        color = MODEL_COLOURS.get(model, "gray")
-        marker = agent_markers.get(agent_type, "o")
-        linestyle = agent_linestyle.get(agent_type, "-")
-        y_values = [category_avgs.get(cat, np.nan) for cat in category_order]
-        ax.plot(
-            x_values,
-            y_values,
-            color=color,
-            marker=marker,
-            linestyle=linestyle,
-            markersize=6,
-            alpha=0.8,
-            fillstyle="none",
-            linewidth=2,
-        )
+    ax.bar(
+        x_values,
+        y_values,
+        color="#7150e0",
+        width=0.6,
+        edgecolor="white",
+        linewidth=0.5,
+    )
 
     ax.set_ylabel("Average Pass@5", fontsize=FONT_SIZES["axis_label"])
-    ax.set_xlabel("Task Category", fontsize=FONT_SIZES["axis_label"])
     ax.set_ylim(0, 1)
     ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
     ax.tick_params(axis="y", labelsize=FONT_SIZES["tick_label"])
 
-    category_labels = [cat.replace("_", "\n").title() for cat in category_order]
+    category_labels = [cat.replace("_", " ").title() for cat in category_order]
     ax.set_xticks(x_values)
-    ax.set_xticklabels(category_labels, fontsize=FONT_SIZES["tick_label"])
+    ax.set_xticklabels(
+        category_labels, fontsize=FONT_SIZES["tick_label"], rotation=45, ha="right"
+    )
     range_frame(ax, np.array([0, len(category_order) - 1]), np.array([0, 1]), pad=0.05)
 
-    # Legend
-    handles, labels = [], []
-    for model in sorted({m for m, _ in avg_scores}):
-        handles.append(Line2D([0], [0], color=MODEL_COLOURS.get(model, "gray"), lw=4))
-        labels.append(MODEL_NAMES.get(model, model))
-    for agent_type in sorted({a for _, a in avg_scores}):
-        handles.append(
-            Line2D(
-                [0],
-                [0],
-                color="gray",
-                marker=agent_markers.get(agent_type, "o"),
-                markersize=8,
-                linestyle="None",
-                fillstyle="none",
-            )
+
+# ==================== (c) SCATTER helpers ====================
+
+
+def collect_gap_data(df, metric_column):
+    gap_data = {}
+    for env in df["environment"].unique():
+        env_df = df[df["environment"] == env]
+        model_scores = env_df.groupby("model")[metric_column].mean()
+        agent_scores = env_df.groupby("agent_type")[metric_column].mean()
+        model_gap = (
+            model_scores.max() - model_scores.min() if len(model_scores) > 1 else np.nan
         )
-        labels.append(f"{agent_display.get(agent_type, agent_type)} Agent")
-    ax.legend(handles, labels, fontsize=FONT_SIZES["legend"], loc="upper right")
+        agent_gap = (
+            agent_scores.max() - agent_scores.min() if len(agent_scores) > 1 else np.nan
+        )
+        if not np.isnan(model_gap) and not np.isnan(agent_gap):
+            gap_data[env] = {"model_gap": model_gap, "agent_gap": agent_gap}
+    return gap_data
+
+
+def draw_scatter(ax, gap_data):
+    env_to_group = {}
+    for group_name, group_info in ENVIRONMENT_GROUPS.items():
+        for env in group_info["environments"]:
+            env_to_group[env] = group_name
+
+    environments = list(gap_data.keys())
+    agent_gaps = [gap_data[e]["agent_gap"] for e in environments]
+    model_gaps = [gap_data[e]["model_gap"] for e in environments]
+
+    max_gap = max(*agent_gaps, *model_gaps)
+    min_gap = min(*agent_gaps, *model_gaps)
+    diag = [min_gap * 0.95, max_gap * 1.05]
+
+    ax.plot(diag, diag, "k--", linewidth=1.5, alpha=0.5, zorder=1)
+
+    for group_name in ENVIRONMENT_GROUPS:
+        group_envs = [e for e in environments if env_to_group.get(e) == group_name]
+        if not group_envs:
+            continue
+        gx = [gap_data[e]["agent_gap"] for e in group_envs]
+        gy = [gap_data[e]["model_gap"] for e in group_envs]
+        ax.scatter(
+            gx,
+            gy,
+            s=100,
+            color=GROUP_COLOURS[group_name],
+            alpha=0.7,
+            edgecolors="white",
+            linewidths=1.5,
+            zorder=3,
+            label=group_name,
+        )
+
+    ax.fill_between(
+        diag, diag, [max_gap * 1.1] * 2, alpha=0.1, color="#7150e0", zorder=0
+    )
+    ax.set_xlabel(
+        "Scaffold Spread (Score)",
+        fontsize=FONT_SIZES["axis_label"],
+        fontweight="bold",
+    )
+    ax.set_ylabel(
+        "Model Spread (Score)",
+        fontsize=FONT_SIZES["axis_label"],
+        fontweight="bold",
+    )
+    ax.tick_params(axis="both", labelsize=FONT_SIZES["tick_label"])
+    ax.set_aspect("equal", adjustable="box")
+
+    x_range = np.array([min_gap * 0.95, max_gap * 1.05])
+    y_range = np.array([min_gap * 0.95, max_gap * 1.05])
+    range_frame(ax, x_range, y_range, pad=0.05)
+
+    ax.legend(
+        loc="center left",
+        bbox_to_anchor=(0.35, 0.2),
+        fontsize=FONT_SIZES["legend"] - 1,
+        framealpha=0.0,
+        ncol=1,
+    )
+
+
+# ==================== (d) LOGPROBS helpers ====================
+
+LOGPROB_ENV_NAMES = {
+    "afm": "AFM",
+    "catalyst": "Catalyst",
+    "md": "MD",
+    "ml": "ML",
+    "resistor": "Resistor",
+    "retro": "Retro",
+    "spectra": "Spectra",
+    "wetlab": "Wetlab",
+}
+
+
+def _pool_nonzero_tokens(series) -> np.ndarray:
+    arrays = []
+    for lp in series:
+        if not isinstance(lp, list | np.ndarray) or len(lp) == 0:
+            continue
+        arr = np.asarray(lp, dtype=np.float32)
+        arr = arr[np.isfinite(arr) & (arr != 0.0)]
+        if arr.size > 0:
+            arrays.append(arr)
+    return np.concatenate(arrays) if arrays else np.array([], dtype=np.float32)
+
+
+def compute_env_stats(df):
+    rows = []
+    for env, grp in df.groupby("environment"):
+        tokens = _pool_nonzero_tokens(grp["per_token_logprob"])
+        if tokens.size == 0:
+            continue
+        rows.append(
+            {
+                "environment": env,
+                "display_name": LOGPROB_ENV_NAMES.get(env, env),
+                "mean": float(np.mean(tokens)),
+                "n_tokens": int(tokens.size),
+                "color": "#7150e0",
+            }
+        )
+    return (
+        pd.DataFrame(rows).sort_values("mean", ascending=False).reset_index(drop=True)
+    )
+
+
+def draw_logprobs(ax, stats):
+    labels = stats["display_name"].tolist()
+    values = stats["mean"].tolist()
+    colors = stats["color"].tolist()
+    y_pos = np.arange(len(values))
+
+    bars = ax.barh(y_pos, values, color=colors, height=0.6)
+    for bar, val in zip(bars, values, strict=False):
+        ax.text(
+            bar.get_width() + 0.005,
+            bar.get_y() + bar.get_height() / 2,
+            f"{val:.2f}",
+            va="center",
+            ha="left",
+            fontsize=FONT_SIZES["tick_label"] - 1,
+        )
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(labels, fontsize=FONT_SIZES["tick_label"])
+    ax.set_xlabel("Mean log-probability", fontsize=FONT_SIZES["axis_label"])
+    # Tight x-range: from most negative value to the least negative (all are < 0)
+    range_frame(ax, np.array([min(values), max(values)]), y_pos, pad=0.15)
 
 
 # ==================== MAIN ====================
@@ -508,41 +673,66 @@ def main():
     logger.info("Loading data...")
     reports_df = load_reports_data()
     category_tags = load_category_tags()
+    logprobs_df = load_logprobs_data()
 
     metric_column = get_metric_column_name("average_score", 5)
-    metric_display_name = "Average Score"
-
-    # Heatmap data (all levels, average verbosity)
-    heatmap_data = collect_full_coverage_data(reports_df, metric_column)
 
     # Scatter data (default_map levels, average verbosity)
     scatter_df = filter_by_level(reports_df, "default_map")
     gap_data = collect_gap_data(scatter_df, metric_column)
 
-    # Build combined figure
-    fig = plt.figure(figsize=(TWO_COL_WIDTH * 1.4, TWO_COL_WIDTH * 1.1))
+    # Logprobs stats
+    logprob_stats = compute_env_stats(logprobs_df)
 
-    # GridSpec: 2 rows, 3 columns
-    # Top row: heatmap spans all 3 columns
-    # Bottom row: scatter takes 1 col, task category takes 2 cols
-    gs = fig.add_gridspec(2, 3, height_ratios=[1.2, 1], hspace=0.55, wspace=0.35)
+    # --- Build combined figure ---
+    # Row 0: heatmap (dynamic sizing like standalone script)
+    # Row 1: scatter (left) | bar plot (center) | logprobs (right)
+    # Compute heatmap dimensions from data
+    heatmap_data = collect_full_coverage_data(reports_df, metric_column)
+    display_df_tmp, _, _ = format_heatmap_data(heatmap_data)
+    n_cols_tmp = len(display_df_tmp.columns)
+    n_rows_tmp = len(display_df_tmp.index)
+    hm_width = min(TWO_COL_WIDTH * 1.5, max(TWO_COL_WIDTH, n_cols_tmp * 0.4))
+    hm_height = max(ONE_COL_HEIGHT * 0.6, n_rows_tmp * 0.35)
 
-    ax_heatmap = fig.add_subplot(gs[0, :])
-    ax_scatter = fig.add_subplot(gs[1, 0])
-    ax_category = fig.add_subplot(gs[1, 1:])
+    fig_width = hm_width
+    bottom_height = ONE_COL_HEIGHT * 1.2
+    fig = plt.figure(figsize=(fig_width, hm_height + bottom_height + 1.2))
 
-    # Draw subplots
-    draw_heatmap(ax_heatmap, heatmap_data, metric_display_name)
-    draw_scatter(ax_scatter, gap_data, "Score")
+    outer_gs = fig.add_gridspec(
+        2,
+        3,
+        height_ratios=[hm_height, bottom_height],
+        width_ratios=[0.8, 0.8, 1.2],  # logprobs gets more width for y-labels
+        hspace=0.6,
+        wspace=0.55,
+    )
+
+    # (a) Heatmap — spans all 3 columns of row 0
+    heatmap_slot = outer_gs[0, :]
+    ax_top = draw_heatmap(heatmap_slot)
+
+    # (b) Scatter — row 1, left
+    ax_scatter = fig.add_subplot(outer_gs[1, 0])
+    draw_scatter(ax_scatter, gap_data)
+
+    # (c) Task category bar — row 1, center
+    ax_category = fig.add_subplot(outer_gs[1, 1])
     draw_task_category(ax_category, reports_df, category_tags)
+
+    # (d) Logprobs — row 1, right
+    ax_logprobs = fig.add_subplot(outer_gs[1, 2])
+    draw_logprobs(ax_logprobs, logprob_stats)
 
     # Panel labels
     for ax, label in zip(
-        [ax_heatmap, ax_scatter, ax_category], ["a", "b", "c"], strict=False
+        [ax_top, ax_scatter, ax_category, ax_logprobs],
+        ["a", "b", "c", "d"],
+        strict=False,
     ):
         ax.text(
             -0.05,
-            1.08,
+            1.15,
             label,
             transform=ax.transAxes,
             fontsize=FONT_SIZES["title"] + 2,

@@ -16,8 +16,7 @@ import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from adjustText import adjust_text
-from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 
@@ -30,9 +29,10 @@ sys.path.insert(0, str(REPO_ROOT / "plots"))
 
 
 from plot_config import (  # noqa: E402
-    ENVIRONMENT_NAMES,
+    ENVIRONMENT_GROUPS,
     FONT_SIZES,
     GAP_COLORS,
+    GROUP_COLOURS,
 )
 from plot_utils import (  # noqa: E402
     filter_by_level,
@@ -114,14 +114,19 @@ def plot_gap_scatter(
         logger.warning("No data available for scatter plot!")
         return
 
+    # Build env -> group mapping
+    env_to_group = {}
+    for group_name, group_info in ENVIRONMENT_GROUPS.items():
+        for env in group_info["environments"]:
+            env_to_group[env] = group_name
+
     # Extract data
     environments = list(gap_data.keys())
     agent_gaps = [gap_data[env]["agent_gap"] for env in environments]
     model_gaps = [gap_data[env]["model_gap"] for env in environments]
-    env_labels = [ENVIRONMENT_NAMES.get(env, env.upper()) for env in environments]
 
     # Create figure
-    fig, ax = plt.subplots(1, 1, figsize=(TWO_COL_WIDTH / 3, ONE_COL_HEIGHT))
+    fig, ax = plt.subplots(1, 1, figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT))
 
     # Plot diagonal line (y=x) first
     max_gap = max(*agent_gaps, *model_gaps)
@@ -133,65 +138,49 @@ def plot_gap_scatter(
         "k--",
         linewidth=1.5,
         alpha=0.5,
-        label="Equal Gap",
         zorder=1,
     )
 
-    # Plot scatter points
-    ax.scatter(
-        agent_gaps,
-        model_gaps,
-        s=100,
-        color=SCATTER_COLOR,
-        alpha=0.7,
-        edgecolors="white",
-        linewidths=1.5,
-        zorder=3,
-    )
-
-    # Add environment labels to points with adjustText to avoid overlap
-    texts = []
-    for _i, (x, y, label) in enumerate(
-        zip(agent_gaps, model_gaps, env_labels, strict=False)
-    ):
-        texts.append(
-            ax.text(
-                x,
-                y,
-                label,
-                fontsize=5,
-                color="black",
-                alpha=1,
-            )
+    # Plot scatter points colored by environment group
+    for group_name in ENVIRONMENT_GROUPS:
+        group_envs = [e for e in environments if env_to_group.get(e) == group_name]
+        if not group_envs:
+            continue
+        gx = [gap_data[e]["agent_gap"] for e in group_envs]
+        gy = [gap_data[e]["model_gap"] for e in group_envs]
+        ax.scatter(
+            gx,
+            gy,
+            s=100,
+            color=GROUP_COLOURS[group_name],
+            alpha=0.7,
+            edgecolors="white",
+            linewidths=1.5,
+            zorder=3,
+            label=group_name,
         )
-
-    # Adjust text positions to avoid overlap
-    adjust_text(
-        texts,
-        arrowprops={"arrowstyle": "-", "color": "black", "lw": 0.5, "alpha": 1},
-        expand_points=(1.5, 1.5),
-        force_text=(0.5, 0.5),
-    )
 
     # Styling
     ax.set_xlabel(
-        f"Agent Gap ({metric_display_name})",
+        f"Scaffold Spread ({metric_display_name})",
         fontsize=FONT_SIZES["axis_label"],
         fontweight="bold",
     )
     ax.set_ylabel(
-        f"Model Gap ({metric_display_name})",
+        f"Model Spread ({metric_display_name})",
         fontsize=FONT_SIZES["axis_label"],
         fontweight="bold",
     )
     ax.tick_params(axis="both", labelsize=FONT_SIZES["tick_label"])
 
     # Legend
-    # ax.legend(
-    #     loc="upper left",
-    #     fontsize=FONT_SIZES["legend"],
-    #     framealpha=0.9,
-    # )
+    ax.legend(
+        loc="center left",
+        bbox_to_anchor=(0.45, 0.2),
+        fontsize=FONT_SIZES["legend"],
+        framealpha=0.0,
+        ncol=1,
+    )
 
     # Add shaded region above diagonal to highlight model dominance
     ax.fill_between(

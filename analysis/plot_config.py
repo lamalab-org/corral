@@ -71,9 +71,9 @@ DEFAULT_ENV_LEVEL_MAP = {
 
 # ---------- Colours per environment group ----------
 GROUP_COLOURS = {
-    "Hypothesis-driven inquiry": "#7c3aed",  # violet
-    "Strategic reasoning": "#ea580c",  # orange
-    "Workflow construction": "#0891b2",  # cyan
+    "Hypothesis-driven inquiry": "#b000ff",
+    "Strategic reasoning": "#fd00ff",
+    "Workflow construction": "#0051ff",
 }
 
 # ---------- Primary / secondary colour lists ----------
