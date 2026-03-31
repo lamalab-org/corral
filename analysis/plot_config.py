@@ -68,6 +68,14 @@ DEFAULT_ENV_LEVEL_MAP = {
     "wetlab": 2,
 }
 
+
+# ---------- Colours per environment group ----------
+GROUP_COLOURS = {
+    "Hypothesis-driven inquiry": "#7c3aed",  # violet
+    "Strategic reasoning": "#ea580c",  # orange
+    "Workflow construction": "#0891b2",  # cyan
+}
+
 # ---------- Primary / secondary colour lists ----------
 
 GAP_COLORS = {
