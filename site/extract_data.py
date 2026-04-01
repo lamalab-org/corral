@@ -104,11 +104,27 @@ def discover_environments() -> dict[str, dict]:
 # ── AST extraction ──────────────────────────────────────────────────────
 
 
-def extract_sections(docstring: str) -> dict[str, str]:
-    """Extract all tagged sections from a docstring."""
+def extract_sections(docstring: str) -> dict[str, str | list[str]]:
+    """Extract all tagged sections from a docstring.
+
+    ARGS_* and RETURNS_* tags may appear multiple times (once per parameter).
+    These are collected as lists to preserve all per-argument descriptions.
+    """
     if not docstring:
         return {}
-    sections = {}
+
+    # Tags that can appear multiple times (once per argument/return value)
+    MULTI_TAGS = {
+        "ARGS_BRIEF",
+        "ARGS_DETAILED",
+        "ARGS_SYNTACTICAL",
+        "ARGS_EXAMPLES",
+        "RETURNS_BRIEF",
+        "RETURNS_DETAILED",
+        "RETURNS_EXAMPLES",
+    }
+
+    sections: dict[str, str | list[str]] = {}
     for match in TAG_RE.finditer(docstring):
         tag = match.group(1).upper()
         content = match.group(2).strip()
@@ -116,7 +132,12 @@ def extract_sections(docstring: str) -> dict[str, str]:
             cleaned = re.sub(
                 r"\[([A-Z_]+)\](.*?)\[/\1\]", r"\2", content, flags=re.DOTALL
             )
-            sections[tag] = cleaned.strip()
+            value = cleaned.strip()
+            if tag in MULTI_TAGS:
+                sections.setdefault(tag, [])
+                sections[tag].append(value)
+            else:
+                sections[tag] = value
     return sections
 
 

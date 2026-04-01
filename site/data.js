@@ -11,13 +11,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Provide a valid image file path that captures a topographical or microstructural view of a sample. \n    2.  Use this tool to detect and index each grain, draw bounding boxes, and extract coordinate data. \n    3.  Use the returned grain coordinates (and `image_path`) with the `scan_grain_area` tool to zoom in and scan a specific grain. This enables precise, localized AFM scanning on individual grain features. In case if no bounding boxes are generated, image quality may be low and needs to be improved with optimal P,I,D gains using `Image_optimizer` tool",
           "CONTEXTUAL": "How this tool works:\n    - Uses `image_process(image_path)` to extract bounding box information from the image.\n    - Each grain is given a unique index and surrounded by a rectangle (bounding box).\n    - A matplotlib figure is generated where each grain is visualized in cyan with its index label.\n    - The figure is saved as `\"annotated.png\"` in the current Nanosurf working directory, though this file is not used programmatically in later steps.\n    - The final output is a list of bounding boxes with format: `(index, x1, y1, x2, y2)` where x1/y1 is bottom-left, x2/y2 is top-right (in microns).",
           "SYNTACTICAL": "Usage examples:\n[\n    `visualize_grain_boxes(image_path=\"afm_scan.nid\")`,\n    `visualize_grain_boxes(image_path=\"/data/images/grain_map_12.nid\")`\n]",
-          "ARGS_BRIEF": "Path to the microscopy image file.",
-          "ARGS_DETAILED": "File path pointing to the image to be processed. The image should represent a microstructural scan with visible grains to enable detection.",
-          "ARGS_SYNTACTICAL": "Format: A string ending in `.nid`.",
-          "ARGS_EXAMPLES": "`\"sample_grains.nid\"`, `\"/scans/run5_scan_topo.nid\"`",
-          "RETURNS_BRIEF": "A list of indexed grain bounding boxes.",
-          "RETURNS_DETAILED": "Each entry in the list is a tuple of the form `(index, x1, y1, x2, y2)`, where `index` is the grain number (starting from 1), and `(x1, y1)` and `(x2, y2)` represent the bottom-left and top-right coordinates of the bounding box in microns. This data can be used for grain-by-grain analysis or scan targeting.",
-          "RETURNS_EXAMPLES": "`[(1, 2.1, 3.4, 4.2, 5.5), (2, 6.0, 7.2, 7.8, 8.9)]`",
+          "ARGS_BRIEF": [
+            "Path to the microscopy image file."
+          ],
+          "ARGS_DETAILED": [
+            "File path pointing to the image to be processed. The image should represent a microstructural scan with visible grains to enable detection."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: A string ending in `.nid`."
+          ],
+          "ARGS_EXAMPLES": [
+            "`\"sample_grains.nid\"`, `\"/scans/run5_scan_topo.nid\"`"
+          ],
+          "RETURNS_BRIEF": [
+            "A list of indexed grain bounding boxes."
+          ],
+          "RETURNS_DETAILED": [
+            "Each entry in the list is a tuple of the form `(index, x1, y1, x2, y2)`, where `index` is the grain number (starting from 1), and `(x1, y1)` and `(x2, y2)` represent the bottom-left and top-right coordinates of the bounding box in microns. This data can be used for grain-by-grain analysis or scan targeting."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`[(1, 2.1, 3.4, 4.2, 5.5), (2, 6.0, 7.2, 7.8, 8.9)]`"
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If the image file is missing, corrupted, or if grain detection fails. \n         Could be caused by invalid file path, unsupported image format. \n         Ensure the image exists at the given path.",
           "LIMITATIONS": "Known Limitations:\n    - Grain detection relies on the quality of the image; poor contrast or noise can reduce accuracy."
         },
@@ -39,13 +53,31 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Run `visualize_grain_boxes` with a `.nid` image to obtain the indexed grain list. Choose a specific `grain_id` from the output. \n    2.  Use this tool to zoom into the bounding box of the selected grain and start an AFM scan on that localized area. \n    3.  The resulting `.nid` file (path returned by this tool) can be used for further measurement, or grain-level material analysis.",
           "CONTEXTUAL": "How this tool works:\n    - Loads current scan configuration from the AFM.\n    - Identifies the bounding box of the specified `grain_id`.\n    - Adjusts the scan window (`width`, `height`, `center_x`, `center_y`) of the AFM to zoom into the selected grain area.\n    - Starts a new AFM frame scan using these updated parameters.\n    - Waits for the scan to finish and returns the most recently generated `.nid` file path.",
           "SYNTACTICAL": "Usage examples:\n[\n    `scan_grain_area(grain_id=2, image_path=\"annotated.nid\")`,\n    `scan_grain_area(grain_id=1, image_path=\"/data/images/topo_01.nid\")`\n]",
-          "ARGS_BRIEF": "Path to the `.nid` image that contains the grain.",
-          "ARGS_DETAILED": "This should be the same image file used in `visualize_grain_boxes`, from which the grain indices were derived. It must be in `.nid` format.",
-          "ARGS_SYNTACTICAL": "Format: A string ending in `.nid`.",
-          "ARGS_EXAMPLES": "\"grains_overview.nid\", \"/data/surface1.nid\"",
-          "RETURNS_BRIEF": "Path to the latest `.nid` file produced from the scan.",
-          "RETURNS_DETAILED": "After the scan completes, this tool returns the full path to the `.nid` file corresponding to the localized grain scan.",
-          "RETURNS_EXAMPLES": "`\"/data/scans/local_grain_12.nid\"`",
+          "ARGS_BRIEF": [
+            "Index of the grain to be scanned.",
+            "Path to the `.nid` image that contains the grain."
+          ],
+          "ARGS_DETAILED": [
+            "This should correspond to the `index` returned by `visualize_grain_boxes`. Indexing starts from 1 and follows the order of detection.",
+            "This should be the same image file used in `visualize_grain_boxes`, from which the grain indices were derived. It must be in `.nid` format."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: Positive integer.",
+            "Format: A string ending in `.nid`."
+          ],
+          "ARGS_EXAMPLES": [
+            "\"1\", \"5\", \"12\"",
+            "\"grains_overview.nid\", \"/data/surface1.nid\""
+          ],
+          "RETURNS_BRIEF": [
+            "Path to the latest `.nid` file produced from the scan."
+          ],
+          "RETURNS_DETAILED": [
+            "After the scan completes, this tool returns the full path to the `.nid` file corresponding to the localized grain scan."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`\"/data/scans/local_grain_12.nid\"`"
+          ],
           "RAISES": "Exceptions:\n    FileNotFoundError:\n         If no `.nid` file is found after the scan completes. \n         Could occur if the scan did not finish successfully or saving failed. \n         Ensure the AFM is connected and functioning correctly, and the image path is correct.",
           "LIMITATIONS": "Known Limitations:\n    - Assumes the grain index exists in the image and that the image has not been altered since bounding box extraction.\n    - Only one grain can be scanned per call.\n    - Depends on consistent file naming/timestamps to determine the \"latest\" `.nid` file."
         },
@@ -71,13 +103,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n        1.  Identify a control action you need code for, such as \"set P gain\" or \"start scan.\" \n        2.  Use this tool to retrieve a relevant code snippet. Provide a clear, descriptive query. \n        3.  Use the retrieved code directly or modify it. Then pass it to `Code_Executor(code=...)` to execute the AFM routine.",
           "CONTEXTUAL": "How this tool works:\n        - Receives a query string and performs keyword or semantic search on an indexed database of trusted AFM Python scripts.\n        - Returns one or more relevant code snippets, typically containing object-level interactions with nanosurf Python APIs.\n        - The database includes examples related to scan configuration, imaging, calibration, feedback loops, and motion control.",
           "SYNTACTICAL": "Usage examples:\n    [\n        `Document_Retrieval(query=\"initialize AFM and load application\")`,\n        `Document_Retrieval(query=\"set PID gains\")`,\n        `Document_Retrieval(query=\"start scan in contact mode\")`,\n        `Document_Retrieval(query=\"capture an image\")`\n    ]",
-          "ARGS_BRIEF": "Search string describing the desired AFM control routine.",
-          "ARGS_DETAILED": "This is a plain-language or command-style string that specifies what kind of control code is needed. The system matches it against documented and tested control snippets used in prior AFM workflows.",
-          "ARGS_SYNTACTICAL": "Format: String containing keywords or phrases (e.g., \"initialize AFM\", \"set Z controller gains\").",
-          "ARGS_EXAMPLES": "\"load application\", \"configure scan parameters\", \"set contact mode\", \"move head to (x=5, y=5)\"",
-          "RETURNS_BRIEF": "The AFM control code snippet matching the query.",
-          "RETURNS_DETAILED": "Returns a formatted string of Python code that matches the request. This code is typically suitable for direct use with the `Code_Executor` tool and interacts with the AFM system using nanosurf's Python API.",
-          "RETURNS_EXAMPLES": "`\"spm = nanosurf.SPM()\nscan = spm.application.Scan\nscan.StartFrameUp()\"`,\n                `\"zcontrol.PGain = 120\nzcontrol.IGain = 7000\nzcontrol.DGain = 8\"`",
+          "ARGS_BRIEF": [
+            "Search string describing the desired AFM control routine."
+          ],
+          "ARGS_DETAILED": [
+            "This is a plain-language or command-style string that specifies what kind of control code is needed. The system matches it against documented and tested control snippets used in prior AFM workflows."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: String containing keywords or phrases (e.g., \"initialize AFM\", \"set Z controller gains\")."
+          ],
+          "ARGS_EXAMPLES": [
+            "\"load application\", \"configure scan parameters\", \"set contact mode\", \"move head to (x=5, y=5)\""
+          ],
+          "RETURNS_BRIEF": [
+            "The AFM control code snippet matching the query."
+          ],
+          "RETURNS_DETAILED": [
+            "Returns a formatted string of Python code that matches the request. This code is typically suitable for direct use with the `Code_Executor` tool and interacts with the AFM system using nanosurf's Python API."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`\"spm = nanosurf.SPM()\nscan = spm.application.Scan\nscan.StartFrameUp()\"`,\n                `\"zcontrol.PGain = 120\nzcontrol.IGain = 7000\nzcontrol.DGain = 8\"`"
+          ],
           "RAISES": "Exceptions:\n        Exception:\n             If no relevant code snippet can be found or if an internal error occurs during lookup. \n             Might occur if the query is too vague, malformed, or if the database is temporarily unavailable. \n             Try rephrasing the query with more precise terms or retrying after some time.",
           "LIMITATIONS": "Known Limitations:\n        - The database contains only AFM-related routines; generic Python queries are not supported."
         },
@@ -99,13 +145,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Image has visual quality issues. \n    2.  Run this tool to start P,I,D tuning via genetic optimization. Optionally enable baseline correction. \n    3.  Inspect the latest `.nid` file in the working directory — this file corresponds to the best image produced during optimization, and can be used for downstream analysis.",
           "CONTEXTUAL": "How this tool works:\n    - Defines a custom optimization problem which evaluates image quality based on PID settings.\n    - For each (P, I, D) sample, captures and stores a new `.nid` image file in the working directory.\n    - Uses the `pymoo` genetic algorithm library to explore combinations of gains and minimize error.\n    - The latest saved `.nid` file corresponds to the best-performing PID values and is the one to be used for downstream analysis.",
           "SYNTACTICAL": "Usage examples:\n[\n    `Image_optimizer()`,\n    `Image_optimizer(baseline=True)`\n]",
-          "ARGS_BRIEF": "Whether to enable baseline correction during optimization.",
-          "ARGS_DETAILED": "When set to `True`, baseline leveling is applied to each image before it is evaluated for sharpness. This improves results in cases where scanner drift or sample tilt introduces bias.",
-          "ARGS_SYNTACTICAL": "Format: Boolean. Default is `False`.",
-          "ARGS_EXAMPLES": "\"True\"",
-          "RETURNS_BRIEF": "Best PID settings and corresponding image error value.",
-          "RETURNS_DETAILED": "Returns a summary of the optimal Proportional, Integral, and Derivative gains found via the genetic algorithm, along with the error metric. The image associated with these gains is saved as the most recent `.nid` file in the current working directory.",
-          "RETURNS_EXAMPLES": "\"Best solution found: [Pgain Igain Dgain] = [120 8000 12], [Error] = 0.014\"",
+          "ARGS_BRIEF": [
+            "Whether to enable baseline correction during optimization."
+          ],
+          "ARGS_DETAILED": [
+            "When set to `True`, baseline leveling is applied to each image before it is evaluated for sharpness. This improves results in cases where scanner drift or sample tilt introduces bias."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: Boolean. Default is `False`."
+          ],
+          "ARGS_EXAMPLES": [
+            "\"True\""
+          ],
+          "RETURNS_BRIEF": [
+            "Best PID settings and corresponding image error value."
+          ],
+          "RETURNS_DETAILED": [
+            "Returns a summary of the optimal Proportional, Integral, and Derivative gains found via the genetic algorithm, along with the error metric. The image associated with these gains is saved as the most recent `.nid` file in the current working directory."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"Best solution found: [Pgain Igain Dgain] = [120 8000 12], [Error] = 0.014\""
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         If the `baseline` argument is not a boolean. \n         Prevents misconfiguration by enforcing a valid argument type. \n         Use `baseline=True` or `baseline=False` only. Avoid using strings or numbers.",
           "LIMITATIONS": "Known Limitations:\n    - Uses a small population and limited generations to keep optimization fast, which may reduce solution quality.\n    - The `.nid` file associated with the best PID settings is not explicitly labeled — must check the most recently saved file in the working directory."
         },
@@ -127,13 +187,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n        1.  Retrieve a control script using the `Document_Retriever`. \n        2.  Use `Code_Executor` to run the code directly on the AFM system. \n        3.  Optionally analyse the resulting images or data generated after the code execution for downstream analysis.",
           "CONTEXTUAL": "How this tool works:\n        - Imports and initializes the COM interface via `pythoncom.CoInitialize()` to ensure compatibility with AFM hardware APIs.\n        - Executes the given Python code string via `exec()`.\n        - Returns success or error information based on execution outcome.",
           "SYNTACTICAL": "Usage examples:\n    [\n        `Code_Executor(code=\n                import nanosurf\n                import time\n                import os\n\n                # Load application\n                spm = nanosurf.SPM()\n                application = spm.application\n\n                # Get access to different components\n                scan = application.Scan\n                opmode = application.OperatingMode\n                zcontrol = application.ZController\n                head = application.ScanHead\n\n                # Set Z controller parameters (PID gains)\n                print(\"Setting PID gains...\")\n                zcontrol.PGain = 100\n                zcontrol.IGain = 6000\n                zcontrol.DGain = 10\n                del spm)`\n    ]",
-          "ARGS_BRIEF": "Python code string to be executed.",
-          "ARGS_DETAILED": "Raw Python instructions that will be executed in the current runtime context. This code typically contains AFM operation logic and must be syntactically correct and safe to run.",
-          "ARGS_SYNTACTICAL": "Format: Valid Python code as a string.",
-          "ARGS_EXAMPLES": "\"import nanosurf\nspm=nanosurf.SPM()\napplication = spm.application\nscan=application.scan\nscan.StartFrameUp()\ndel spm\n\"",
-          "RETURNS_BRIEF": "Current AFM parameters status or error information from code execution.",
-          "RETURNS_DETAILED": "Returns a success message with current AFM parameters or the captured exception details if execution fails. The result may be logged or used to troubleshoot control scripts.",
-          "RETURNS_EXAMPLES": "`\"Code executed successfully with current AFM parameters: {'Pgain': 100, 'Igain': 6000, 'Dgain': 10, 'ScanMode': 'Contact', 'ImageWidth': 5e-06, 'ImageHeight': 5e-06}\"`,\n                `\"Error: NameError: name 'afm' is not defined\"`",
+          "ARGS_BRIEF": [
+            "Python code string to be executed."
+          ],
+          "ARGS_DETAILED": [
+            "Raw Python instructions that will be executed in the current runtime context. This code typically contains AFM operation logic and must be syntactically correct and safe to run."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: Valid Python code as a string."
+          ],
+          "ARGS_EXAMPLES": [
+            "\"import nanosurf\nspm=nanosurf.SPM()\napplication = spm.application\nscan=application.scan\nscan.StartFrameUp()\ndel spm\n\""
+          ],
+          "RETURNS_BRIEF": [
+            "Current AFM parameters status or error information from code execution."
+          ],
+          "RETURNS_DETAILED": [
+            "Returns a success message with current AFM parameters or the captured exception details if execution fails. The result may be logged or used to troubleshoot control scripts."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`\"Code executed successfully with current AFM parameters: {'Pgain': 100, 'Igain': 6000, 'Dgain': 10, 'ScanMode': 'Contact', 'ImageWidth': 5e-06, 'ImageHeight': 5e-06}\"`,\n                `\"Error: NameError: name 'afm' is not defined\"`"
+          ],
           "RAISES": "Exceptions:\n        Exception:\n             If the provided Python code raises any runtime or syntax error. \n             All exceptions are caught and returned as output. Common issues include undefined variables, invalid syntax, or hardware communication errors. \n             Review the error message, validate code syntax, confirm all libraries are imported, and ensure the hardware interface is properly initialized.",
           "LIMITATIONS": "Known Limitations:\n        - Executes arbitrary Python code; misuse can cause hardware damage or safety risks.\n        - Does not sandbox or secure code — all commands are executed with full runtime permissions.\n        - Designed only for AFM-related Python control code; general-purpose code execution is not allowed."
         },
@@ -155,13 +229,43 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Pass the path of the .nid file of interest. \n    2.  Use this tool to load the file and analyze image data; optionally provide custom code to select imaging channels or enable metric calculations. \n    3.  Use the returned roughness/friction values for materials characterization, or visualize/compare the extracted image data across experiments.",
           "CONTEXTUAL": "How this tool works:\n    - Reads `.nid` file using Nanosurf's `NSFopen.read`.\n    - Extracts `Z-Axis` image data by default from the `Forward` scan.\n    - Optionally executes user-defined code via the `dynamic_code` argument to switch channels or apply processing.\n    - Computes requested surface metrics (friction, Ra, Rq) using standard definitions.\n    - Returns a structured result including raw image data, processing status, and computed values.",
           "SYNTACTICAL": "Usage examples:\n[\n    `Image_Analyzer(path=\"sample1.nid\")`,\n    `Image_Analyzer(path=\"scan_02.nid\", calculate_friction=True)`,\n    `Image_Analyzer(path=\"scan_03.nid\", dynamic_code='image_data = data[\"Image\"][\"Backward\"][\"Deflection\"]', calculate_mean_roughness=True)`,\n    `Image_Analyzer(path=\"friction_test.nid\", calculate_friction=True, calculate_rms_roughness=True)`,\n    `Image_Analyzer(path=\"surface_scan.nid\", dynamic_code='image_data = data[\"Image\"][\"Forward\"][\"Friction force\"]')`\n]",
-          "ARGS_BRIEF": "If True, computes root-mean-square surface roughness (Rq).",
-          "ARGS_DETAILED": "Measures the standard deviation of the surface height distribution. Useful for quantifying surface texture.",
-          "ARGS_SYNTACTICAL": "Format: Boolean flag. Default is `False`. Set to `True` to enable RMS roughness computation.",
-          "ARGS_EXAMPLES": "\"False\"",
-          "RETURNS_BRIEF": "Dictionary with image data, computation results, and status messages.",
-          "RETURNS_DETAILED": "Contains raw image data extracted from the file, and optionally, values for average friction, mean roughness, and RMS roughness if requested. In case of error, includes a detailed message.",
-          "RETURNS_EXAMPLES": "Example outputs:\n            - \"{\"status\": \"Success\", \"image_data\": [...], \"mean_roughness\": 2.4e-9}\"\n            - \"{\"status\": \"Error\", \"message\": \"An error occurred: File not found\"}\"",
+          "ARGS_BRIEF": [
+            "Path to the `.nid` AFM image file.",
+            "Custom Python code to modify image data access logic.",
+            "If True, computes the average friction force.",
+            "If True, computes mean surface roughness (Ra).",
+            "If True, computes root-mean-square surface roughness (Rq)."
+          ],
+          "ARGS_DETAILED": [
+            "Full file path to a Nanosurf `.nid` AFM image file. This file is read and processed to extract imaging data.",
+            "Executed at runtime to override the default image channel. Useful for switching to different imaging modes such as Deflection or Friction Force, or for accessing Backward scan data.",
+            "Computes the average of the difference between Forward and Backward friction force images.",
+            "Calculates the arithmetic average of absolute deviations from the mean surface height.",
+            "Measures the standard deviation of the surface height distribution. Useful for quantifying surface texture."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: \"string ending in .nid\"",
+            "Format: A string of valid Python code that assigns a value to `image_data`, based on the internal data dictionary structure. Must be compatible with the Nanosurf AFM `.nid` data schema.",
+            "Format: Boolean flag. Default is `False`. Set to `True` to trigger friction force computation.",
+            "Format: Boolean flag. Default is `False`. Set to `True` to enable mean roughness computation.",
+            "Format: Boolean flag. Default is `False`. Set to `True` to enable RMS roughness computation."
+          ],
+          "ARGS_EXAMPLES": [
+            "Examples: \"scan.nid\", \"/data/images/sample3.nid\"",
+            "'image_data = data[\"Image\"][\"Backward\"][\"Deflection\"]'",
+            "\"True\"",
+            "\"True\"",
+            "\"False\""
+          ],
+          "RETURNS_BRIEF": [
+            "Dictionary with image data, computation results, and status messages."
+          ],
+          "RETURNS_DETAILED": [
+            "Contains raw image data extracted from the file, and optionally, values for average friction, mean roughness, and RMS roughness if requested. In case of error, includes a detailed message."
+          ],
+          "RETURNS_EXAMPLES": [
+            "Example outputs:\n            - \"{\"status\": \"Success\", \"image_data\": [...], \"mean_roughness\": 2.4e-9}\"\n            - \"{\"status\": \"Error\", \"message\": \"An error occurred: File not found\"}\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If there is any failure in reading or processing the `.nid` file or executing user code. \n         General exception handler catches file errors, API issues, or invalid dynamic code. \n         Check that the file path is correct, the file is a valid `.nid` format, and the dynamic code is syntactically correct and contextually relevant.",
           "LIMITATIONS": "Known Limitations:\n    - Only works with `.nid` files produced by Nanosurf instruments and supported by the `NSFopen` package.\n    - Relies on user-provided `dynamic_code` being safe and correctly scoped."
         },
@@ -1110,13 +1214,27 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n    - Connects to Materials Project API using authentication key (which is already provided in the environment)\n    - Searches for the specified material ID (MP ID) in the database (MP ID is given as input parameter or if other tools are available to search for MP ID based on available information, then use those tools)\n    - Retrieves the pymatgen Structure object containing atomic positions and lattice parameters\n    - Converts the structure to CIF format string for compatibility with other tools\n    - Returns standardized crystallographic data suitable for further processing",
           "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  Ensure that the other more specific tools are not suitable and you dont have to retrieve multiple strucutres\n    2.  Apply this tool with a valid MP ID to retrieve bulk structure \n    3.  Use the CIF output with slab generation tools like enumerate_slabs_text to create slab structures",
           "SYNTACTICAL": "Usage examples:\n    [\n        `get_structure_from_mp_text(\"mp-149\")`, # Silicon structure\n        `get_structure_from_mp_text(\"mp-20066\")`, # CO2 structure\n        `get_structure_from_mp_text(\"mp-2\")` # Other material\n        `get_structure_from_mp_text(\"mp-12345\")` # Example with a different MP ID\n        `get_structure_from_mp_text(\"mp-67890\")` # Another example with a different MP ID\n    ]",
-          "ARGS_BRIEF": "Materials Project identifier string.",
-          "ARGS_DETAILED": "The unique identifier used by Materials Project to catalog materials.\n               Should be in the format \"mp-XXXXX\" where XXXXX is a numerical ID.\n               This ID corresponds to a specific material entry in the Materials Project database.",
-          "ARGS_SYNTACTICAL": "\"mp-\" followed by digits (e.g., \"mp-149\", \"mp-20066\")",
-          "ARGS_EXAMPLES": "\"mp-149\" (Silicon), \"mp-20066\" (CO2), \"mp-2\" (Li)",
-          "RETURNS_BRIEF": "CIF content string containing the crystal structure data.",
-          "RETURNS_DETAILED": "A properly formatted CIF (Crystallographic Information File) string containing all necessary information about the crystal structure including lattice parameters, atomic positions, space group, and symmetry operations.\n             This format is widely compatible with crystallographic software and other structure analysis tools.",
-          "RETURNS_EXAMPLES": "\"\n_chemical_formula_structural Si\n_cell_length_a 5.468...\"",
+          "ARGS_BRIEF": [
+            "Materials Project identifier string."
+          ],
+          "ARGS_DETAILED": [
+            "The unique identifier used by Materials Project to catalog materials.\n               Should be in the format \"mp-XXXXX\" where XXXXX is a numerical ID.\n               This ID corresponds to a specific material entry in the Materials Project database."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"mp-\" followed by digits (e.g., \"mp-149\", \"mp-20066\")"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"mp-149\" (Silicon), \"mp-20066\" (CO2), \"mp-2\" (Li)"
+          ],
+          "RETURNS_BRIEF": [
+            "CIF content string containing the crystal structure data."
+          ],
+          "RETURNS_DETAILED": [
+            "A properly formatted CIF (Crystallographic Information File) string containing all necessary information about the crystal structure including lattice parameters, atomic positions, space group, and symmetry operations.\n             This format is widely compatible with crystallographic software and other structure analysis tools."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"\n_chemical_formula_structural Si\n_cell_length_a 5.468...\""
+          ],
           "RAISES": "Exceptions:\n        ConnectionError:  When unable to connect to Materials Project API \n                         Network connectivity issues or API server downtime \n                         Check internet connection and MP_API_KEY environment variable \n        KeyError:  When the specified MP ID is not found in the database \n                  Invalid or non-existent material ID provided \n                  Verify MP ID exists on Materials Project website or check MP ID syntax\n        AuthenticationError:  When API key is invalid or missing \n                              MP_API_KEY environment variable not set or expired \n                              Obtain valid API key from Materials Project and set environment variable",
           "LIMITATIONS": "Known limitations:\n    - Requires valid Materials Project API key to be set and internet connection\n    - Limited to materials available in the Materials Project database\n    - May not include the most recent experimental structures"
         },
@@ -1138,13 +1256,43 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n    - Parses the input CIF structure to create a pymatgen Structure object\n    - Uses SlabGenerator to cleave the structure along specified Miller indices\n    - Creates a slab with the specified minimum thickness and vacuum spacing\n    - Reorients the slab to have the surface normal along the c-axis\n    - Sorts atomic positions for consistent structure representation\n    - Converts the final slab structure back to CIF format",
           "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  First obtain bulk structure using get_structure_from_mp_text or using other tools that return single structure CIF \n    2.  Apply this tool to create slab from bulk structure \n    3.  Use output with adsorption site tools like get_adsorption_sites_text",
           "SYNTACTICAL": "Usage examples:\n    [ create_slab_from_structure_text(cif_string, (1,1,1), 12, 5, True), # Create slab with (1,1,1) Miller indices\n    create_slab_from_structure_text(cif_string, (1,0,0), 15, 10, False), # Create slab with (1,0,0) Miller indices\n    create_slab_from_structure_text(cif_string)  # Uses defaults (1,1,1), 12, 5, True\n    ]",
-          "ARGS_BRIEF": "Whether to create a primitive cell slab. Defaults to True.",
-          "ARGS_DETAILED": "Controls whether to use the primitive cell or conventional cell for slab generation.\n                  Primitive cells have the minimum number of atoms while maintaining the essential symmetry, leading to smaller, more efficient computational models.\n                  Setting to False uses the conventional cell which may be larger but more intuitive.",
-          "ARGS_SYNTACTICAL": "boolean value (True/False)",
-          "ARGS_EXAMPLES": "True, False",
-          "RETURNS_BRIEF": "CIF content string of the generated surface slab.",
-          "RETURNS_DETAILED": "A CIF-formatted string containing the surface slab structure with the specified Miller indices, thickness, and vacuum spacing.\n             The structure is oriented with the surface normal along the c-axis and includes all necessary crystallographic information for surface calculations.",
-          "RETURNS_EXAMPLES": "CIF string with slab structure having surface atoms and vacuum region",
+          "ARGS_BRIEF": [
+            "CIF content string of the bulk crystal structure.",
+            "Miller indices for the surface plane. Defaults to (1,1,1).",
+            "Minimum slab thickness in Angstroms. Defaults to 12.",
+            "Minimum vacuum spacing in Angstroms. Defaults to 5.",
+            "Whether to create a primitive cell slab. Defaults to True."
+          ],
+          "ARGS_DETAILED": [
+            "A properly formatted CIF string containing the bulk crystal structure data including lattice parameters, atomic positions, and space group information.\n                      This structure will be cleaved to create the surface.",
+            "A tuple of three integers specifying the crystallographic plane along which the structure will be cleaved.\n                     These indices define the surface orientation and determine the atomic arrangement at the surface.\n                     Common choices include (1,1,1), (1,0,0), and (1,1,0) for different surface orientations.",
+            "The minimum thickness of the slab in the direction perpendicular to the surface plane.\n                      This parameter ensures that the slab has sufficient bulk-like character in the center while exposing the desired surface.\n                      Larger values provide more accurate representation of bulk properties but increase computational cost.",
+            "The minimum vacuum space above the surface to prevent interactions between periodic images in surface calculations.\n                        This parameter is crucial for accurate surface energy calculations and adsorption studies.\n                        Larger values reduce spurious interactions but increase computational requirements.",
+            "Controls whether to use the primitive cell or conventional cell for slab generation.\n                  Primitive cells have the minimum number of atoms while maintaining the essential symmetry, leading to smaller, more efficient computational models.\n                  Setting to False uses the conventional cell which may be larger but more intuitive."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "string in valid CIF syntax",
+            "tuple of three integers (h, k, l)",
+            "positive integer representing thickness in Angstroms",
+            "positive integer representing vacuum thickness in Angstroms",
+            "boolean value (True/False)"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\"",
+            "(1,1,1), (1,0,0), (1,1,0)",
+            "12, 15, 8",
+            "5 (minimal), 10 (standard), 15 (large)",
+            "True, False"
+          ],
+          "RETURNS_BRIEF": [
+            "CIF content string of the generated surface slab."
+          ],
+          "RETURNS_DETAILED": [
+            "A CIF-formatted string containing the surface slab structure with the specified Miller indices, thickness, and vacuum spacing.\n             The structure is oriented with the surface normal along the c-axis and includes all necessary crystallographic information for surface calculations."
+          ],
+          "RETURNS_EXAMPLES": [
+            "CIF string with slab structure having surface atoms and vacuum region"
+          ],
           "RAISES": "Exceptions:\n        ValueError:  When CIF string is malformed or Miller indices are invalid \n                    Invalid CIF format, zero Miller indices, or incompatible surface \n                    Verify CIF format and choose valid Miller indices for the crystal system \n        StructureError:  When slab generation fails due to structural issues \n                        Insufficient slab thickness or problematic surface termination \n                        Increase min_slab_size or try different Miller indices",
           "LIMITATIONS": "Known limitations:\n    - May not handle complex surface reconstructions or relaxations\n    - Does not optimize atomic positions\n    - Limited to simple surface terminations without defects\n    - Cannot account for surface segregation or compositional changes"
         },
@@ -1182,13 +1330,39 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n    - Parses the bulk CIF structure to create a pymatgen Structure object\n    - Uses SlabGenerator to systematically create all possible surface terminations\n    - Generates multiple slabs with different atomic arrangements at the surface\n    - Applies structural sorting and standardization to each slab\n    - Returns all slabs as a JSON dictionary with indexed keys for easy selection",
           "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  First obtain bulk structure using get_structure_from_mp_text \n    2.  Apply this tool to enumerate all possible slab terminations \n    3.  Use choose_slab_text to select a specific termination from the results",
           "SYNTACTICAL": "Usage examples:\n    [\n    `enumerate_slabs_text(cif_string, (1,1,1), 12, 5)`,  # Enumerate slabs with (1,1,1) Miller indices\n    `enumerate_slabs_text(cif_string, (1,0,0), 15, 10)`,  # Enumerate slabs with (1,0,0) Miller indices\n    `enumerate_slabs_text(cif_string)`  # Uses default parameters (1,1,1), 12, 5\n    ]",
-          "ARGS_BRIEF": "Minimum vacuum layer thickness in Angstroms. Defaults to 5.",
-          "ARGS_DETAILED": "The minimum vacuum space above each surface to prevent interactions between periodic images.\n                        This parameter is applied to all generated slabs and is crucial for accurate surface calculations.\n                        Larger values reduce spurious interactions but increase computational cost.",
-          "ARGS_SYNTACTICAL": "positive float representing vacuum thickness in Angstroms",
-          "ARGS_EXAMPLES": "5.0, 10.0, 15.0",
-          "RETURNS_BRIEF": "JSON string mapping slab indices to their CIF representations.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing a dictionary where keys are slab identifiers (e.g., \"slab_0\", \"slab_1\") and values are the corresponding CIF strings for each surface termination.\n             This format allows easy selection and comparison of different surface terminations.",
-          "RETURNS_EXAMPLES": "\"{\"slab_0\": \"CIF content...\", \"slab_1\": \"CIF content...\", ...}\"",
+          "ARGS_BRIEF": [
+            "Bulk crystal structure in CIF string format.",
+            "Miller indices for surface orientation. Defaults to (1,1,1).",
+            "Minimum slab thickness in Angstroms. Defaults to 12.",
+            "Minimum vacuum layer thickness in Angstroms. Defaults to 5."
+          ],
+          "ARGS_DETAILED": [
+            "A properly formatted CIF string containing the bulk crystal structure from which surface slabs will be generated. This should be a three-dimensional periodic structure with well-defined atomic positions and lattice parameters.\n                 The structure will be analyzed to determine all possible surface terminations.",
+            "A tuple of three integers specifying the crystallographic plane along which all surface terminations will be generated. This determines the surface orientation but allows for different terminations along the same plane.\n                     Different Miller indices will produce different surface structures and properties.",
+            "The minimum thickness of each slab in the direction perpendicular to the surface plane.\n                      This ensures that all generated slabs have sufficient bulk-like character while exposing different surface terminations.\n                      Affects both the structural accuracy and computational requirements.",
+            "The minimum vacuum space above each surface to prevent interactions between periodic images.\n                        This parameter is applied to all generated slabs and is crucial for accurate surface calculations.\n                        Larger values reduce spurious interactions but increase computational cost."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "string in valid CIF syntax",
+            "tuple of three integers (h, k, l)",
+            "positive float representing thickness in Angstroms",
+            "positive float representing vacuum thickness in Angstroms"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\"",
+            "(1,1,1), (1,0,0), (1,1,0)",
+            "10.0 (for thin slab), 12.0 (standard), 15.0 (for thick slab)",
+            "5.0, 10.0, 15.0"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string mapping slab indices to their CIF representations."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing a dictionary where keys are slab identifiers (e.g., \"slab_0\", \"slab_1\") and values are the corresponding CIF strings for each surface termination.\n             This format allows easy selection and comparison of different surface terminations."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"slab_0\": \"CIF content...\", \"slab_1\": \"CIF content...\", ...}\""
+          ],
           "RAISES": "Exceptions:\n        ValueError:  When CIF string is malformed or parameters are invalid \n                    Invalid CIF format, negative size parameters, or incompatible Miller indices \n                    Verify CIF format and ensure all parameters are positive numbers \n        StructureError:  When slab generation fails for the given structure \n                        Structure not compatible with specified Miller indices or size constraints \n                        Try different Miller indices or adjust size parameters",
           "LIMITATIONS": "Known limitations:\n    - This tool might generate really many slabs.\n    - Does not perform surface relaxation or optimization\n    - May generate many similar terminations for high-symmetry structures\n    - Limited to periodic slab models without defects or reconstructions"
         },
@@ -1222,13 +1396,31 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Parses the JSON string containing multiple slab structures\n- Locates the slab with the specified index key (e.g., \"slab_0\", \"slab_1\")\n- Extracts the CIF string for the selected slab\n- Returns the CIF content ready for use in subsequent tools",
           "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n1.  First run enumerate_slabs_text to generate multiple slab terminations \n2.  Apply this tool to select a specific slab by index. Can be coupled with io tools or python execution tools to figure out which index to use depending on the task, for example, filter based on miller index\n3.  Use the selected slab with adsorption tools like get_adsorption_sites_text",
           "SYNTACTICAL": "Usage examples:\n[\n`choose_slab_text(slabs_json, 0)`,  # Select first slab\n`choose_slab_text(slabs_json, 1)`,  # Select second slab\n`choose_slab_text(slabs_json)`       # Select first slab (default)\n]",
-          "ARGS_BRIEF": "Index of the slab to select. Defaults to 0.",
-          "ARGS_DETAILED": "The numerical index of the slab to select from the JSON dictionary.\n          This corresponds to the enumeration order from enumerate_slabs_text, where index 0 is the first slab, index 1 is the second, and so on.\n          The tool will look for a key named \"slab_{index}\" in the JSON dictionary.",
-          "ARGS_SYNTACTICAL": "non-negative integer",
-          "ARGS_EXAMPLES": "0 (first slab), 1 (second slab), 2 (third slab)",
-          "RETURNS_BRIEF": "CIF string for the selected slab.",
-          "RETURNS_DETAILED": "A properly formatted CIF string containing the structure data for the selected slab.\n         This includes atomic positions, lattice parameters, and all necessary crystallographic information.\n         The CIF can be used directly with other structure analysis tools.",
-          "RETURNS_EXAMPLES": "CIF string with selected slab structure",
+          "ARGS_BRIEF": [
+            "JSON string mapping slab keys to CIF strings.",
+            "Index of the slab to select. Defaults to 0."
+          ],
+          "ARGS_DETAILED": [
+            "A JSON-formatted string containing a dictionary where keys are slab identifiers (e.g., \"slab_0\", \"slab_1\") and values are the corresponding CIF strings.\n               This should be the output from enumerate_slabs_text tool.\n               The JSON structure must be valid and contain at least one slab entry.",
+            "The numerical index of the slab to select from the JSON dictionary.\n          This corresponds to the enumeration order from enumerate_slabs_text, where index 0 is the first slab, index 1 is the second, and so on.\n          The tool will look for a key named \"slab_{index}\" in the JSON dictionary."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "'Valid JSON string with \"slab_X\" keys and CIF string values'",
+            "non-negative integer"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"{\"slab_0\": \"CIF content...\", \"slab_1\": \"CIF content...\"}\"",
+            "0 (first slab), 1 (second slab), 2 (third slab)"
+          ],
+          "RETURNS_BRIEF": [
+            "CIF string for the selected slab."
+          ],
+          "RETURNS_DETAILED": [
+            "A properly formatted CIF string containing the structure data for the selected slab.\n         This includes atomic positions, lattice parameters, and all necessary crystallographic information.\n         The CIF can be used directly with other structure analysis tools."
+          ],
+          "RETURNS_EXAMPLES": [
+            "CIF string with selected slab structure"
+          ],
           "RAISES": "Exceptions:\n    ValueError:  When the specified slab index is not found in the JSON \n                The key \"slab_{index}\" does not exist in the JSON dictionary \n                Check available slab indices in the JSON or use a valid index \n    JSONDecodeError:  When the slabs_json string is not valid JSON \n                     Malformed JSON string or incorrect format \n                     Verify JSON format and ensure it's output from enumerate_slabs_text",
           "LIMITATIONS": "Known limitations:\n- Cannot validate the quality or stability of the selected slab\n- Does not provide information about surface termination characteristics\n- Limited to slabs generated by enumerate_slabs_text tool\n- Cannot modify or optimize the selected slab structure"
         },
@@ -1254,13 +1446,27 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n    - Parses the slab CIF structure to identify surface atoms\n    - Uses AdsorbateSiteFinder from pymatgen to geometrically analyze the surface topology\n    - Classifies sites based on coordination environment (ontop, bridge, hollow)\n    - Calculates fractional coordinates for each potential binding site\n    - Returns sites organized by type in a JSON format for easy selection",
           "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  First obtain a slab structure using choose_slab_text or create_slab_from_structure_text \n    2.  Apply this tool to identify all adsorption sites on the surface \n    3.  Use choose_adsorption_site_text to select a specific site for adsorbate placement",
           "SYNTACTICAL": "Usage examples:\n    [\n        `get_adsorption_sites_text(slab_cif_string)`,  # Analyze slab structure\n        `get_adsorption_sites_text(output_from_choose_slab_text)`,  # Use output\n        `get_adsorption_sites_text(create_slab_from_structure_text)`,  # From slab creation\n        `get_adsorption_sites_text(\"CIF string of a slab\")`,  # Direct\n        `get_adsorption_sites_text(\"CIF string with surface atoms\")`,  # Example with specific slab\n    ]",
-          "ARGS_BRIEF": "CIF string of the surface slab structure.",
-          "ARGS_DETAILED": "A properly formatted CIF string containing the surface slab structure with atomic positions, lattice parameters, and surface geometry.\n                 This should be a two-dimensional periodic structure with a well-defined surface and vacuum region.\n                 The structure is analyzed to identify potential adsorption sites.",
-          "ARGS_SYNTACTICAL": "string in valid CIF syntax",
-          "ARGS_EXAMPLES": "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\"",
-          "RETURNS_BRIEF": "JSON string containing classified adsorption sites with fractional coordinates.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing a dictionary where keys are site types (e.g., \"top\", \"bridge\", \"hollow\") and values are lists of fractional coordinates for each site of that type.\n             Each coordinate is a list of three numbers [x, y, z] representing the fractional position within the unit cell.",
-          "RETURNS_EXAMPLES": "\"{\"ontop\": [[0.0, 0.0, 0.9], [0.5, 0.5, 0.9]], \"bridge\": [[0.25, 0.25, 0.85]]}\"",
+          "ARGS_BRIEF": [
+            "CIF string of the surface slab structure."
+          ],
+          "ARGS_DETAILED": [
+            "A properly formatted CIF string containing the surface slab structure with atomic positions, lattice parameters, and surface geometry.\n                 This should be a two-dimensional periodic structure with a well-defined surface and vacuum region.\n                 The structure is analyzed to identify potential adsorption sites."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "string in valid CIF syntax"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\""
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string containing classified adsorption sites with fractional coordinates."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing a dictionary where keys are site types (e.g., \"top\", \"bridge\", \"hollow\") and values are lists of fractional coordinates for each site of that type.\n             Each coordinate is a list of three numbers [x, y, z] representing the fractional position within the unit cell."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"ontop\": [[0.0, 0.0, 0.9], [0.5, 0.5, 0.9]], \"bridge\": [[0.25, 0.25, 0.85]]}\""
+          ],
           "RAISES": "Exceptions:\n        ValueError:  When the CIF string is malformed or doesn't represent a valid slab \n                    Invalid CIF format, missing surface atoms, or improper slab structure \n                    Verify CIF format and ensure it represents a proper surface slab \n        StructureError:  When the slab structure cannot be analyzed for adsorption sites \n                        Insufficient surface area, unclear surface definition, or geometric issues \n                        Check slab structure quality and surface termination",
           "LIMITATIONS": "Known limitations:\n    - Does not account for surface relaxation or reconstruction effects\n    - Cannot predict relative binding strengths or preferences\n    - Limited to geometric analysis without chemical bonding considerations\n    - May not identify all possible sites for large or complex molecules"
         },
@@ -1282,13 +1488,35 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Parses the JSON string containing classified adsorption sites\n- Locates the specified site type in the dictionary\n- Selects the site at the specified index within that type\n- Returns the fractional coordinates as a list of three floats",
           "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n1.  First run get_adsorption_sites_text to identify available sites \n2.  Apply this tool to select a specific site by type and index \n3.  Use the coordinates with add_adsorbate_to_slab_text for molecule placement",
           "SYNTACTICAL": "Usage examples:\n[\n    `choose_adsorption_site_text(sites_json, \"ontop\", 0)`,\n    `choose_adsorption_site_text(sites_json, \"bridge\", 1)`,\n    `choose_adsorption_site_text(sites_json, \"hollow\", 0)`,\n    `choose_adsorption_site_text(sites_json, \"ontop\", 1)`,\n    `choose_adsorption_site_text(sites_json, \"bridge\", 0)`\n]",
-          "ARGS_BRIEF": "Index of the site within the specified type. Defaults to 0.",
-          "ARGS_DETAILED": "The numerical index of the site to select from the list of sites of the specified type.\n          Index 0 selects the first site, index 1 the second, and so on.\n          The index must be within the range of available sites for the specified type.",
-          "ARGS_SYNTACTICAL": "non-negative integer",
-          "ARGS_EXAMPLES": "0 (first site), 1 (second site), 2 (third site)",
-          "RETURNS_BRIEF": "Fractional coordinates of the selected adsorption site.",
-          "RETURNS_DETAILED": "A list of three floating-point numbers representing the fractional coordinates [x, y, z] of the selected adsorption site within the unit cell.\n                These coordinates can be used directly for adsorbate placement and represent the optimal binding position for the specified site type.",
-          "RETURNS_EXAMPLES": "[0.0, 0.0, 0.9] or [0.25, 0.25, 0.85]",
+          "ARGS_BRIEF": [
+            "JSON string mapping site types to lists of fractional coordinates.",
+            "Type of adsorption site to select.",
+            "Index of the site within the specified type. Defaults to 0."
+          ],
+          "ARGS_DETAILED": [
+            "A JSON-formatted string containing a dictionary where keys are site types (e.g., \"ontop\", \"bridge\", \"hollow\") and values are lists of fractional coordinates.\n                          This should be the output from get_adsorption_sites_text.\n                          Each coordinate is a list of three numbers representing position within the unit cell.",
+            "The type of binding site to select from the available options.\n              Common types include \"ontop\" (above surface atoms), \"bridge\" (between two atoms), and  \"hollow\" (in multi-atom depressions).\n              The type must exist in the JSON dictionary and determines the coordination environment of the selected site.",
+            "The numerical index of the site to select from the list of sites of the specified type.\n          Index 0 selects the first site, index 1 the second, and so on.\n          The index must be within the range of available sites for the specified type."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "'Valid JSON string with site type keys and coordinate list values'",
+            "string matching available site types",
+            "non-negative integer"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"{\"ontop\": [[0.0, 0.0, 0.9]], \"bridge\": [[0.25, 0.25, 0.85]]}\"",
+            "\"ontop\" (on-top), \"bridge\" (between atoms), \"hollow\" (in depression)",
+            "0 (first site), 1 (second site), 2 (third site)"
+          ],
+          "RETURNS_BRIEF": [
+            "Fractional coordinates of the selected adsorption site."
+          ],
+          "RETURNS_DETAILED": [
+            "A list of three floating-point numbers representing the fractional coordinates [x, y, z] of the selected adsorption site within the unit cell.\n                These coordinates can be used directly for adsorbate placement and represent the optimal binding position for the specified site type."
+          ],
+          "RETURNS_EXAMPLES": [
+            "[0.0, 0.0, 0.9] or [0.25, 0.25, 0.85]"
+          ],
           "RAISES": "Exceptions:\n    ValueError:  When the specified site type is not found in the JSON \n                The site_type key does not exist in the JSON dictionary \n                Check available site types in the JSON or use a valid type \n    IndexError:  When the specified index is out of range for the site type \n                The index is greater than or equal to the number of sites of that type \n                Check the number of available sites for the specified type \n    JSONDecodeError:  When the adsorption_sites_json string is not valid JSON \n                     Malformed JSON string or incorrect format \n                     Verify JSON format and ensure it's output from get_adsorption_sites_text",
           "LIMITATIONS": "Known limitations:\n- Cannot evaluate the relative quality or stability of different sites\n- Limited to sites identified by get_adsorption_sites_text\n- Cannot modify or optimize the selected site coordinates"
         },
@@ -1318,13 +1546,39 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n    - Parses the slab CIF structure to identify the surface geometry\n    - Loads the adsorbate as a molecular structure (handles both XYZ and CIF formats)\n    - Uses AdsorbateSiteFinder from pymatgen to place the adsorbate at the specified site\n    - Adjusts the vertical position according to the specified height parameter\n    - Combines the structures into a single CIF-formatted output\n    - Automatically selects a top site if no specific site is provided",
           "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  First obtain slab from choose_slab_text and adsorbate from get_structure_from_mp_text \n    2.  Apply this tool to place the adsorbate on the surface \n    3.  Use the combined structure for further analysis or optimization",
           "SYNTACTICAL": "Usage examples:\n    [\n        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif)`,  # Default height and auto-select site\n        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 2.0)`,  # Specify height only\n        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 1.5, [0.0, 0.0, 0.9])`,  # Specify height\n        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, site=[0.5, 0.5, 0.9])`,  # Auto-select height\n        `add_adsorbate_to_slab_text(slab_cif, adsorbate_cif, 2.0, None)`  # Specify height, auto-select site\n    ]",
-          "ARGS_BRIEF": "Optional fractional coordinates for adsorbate placement.",
-          "ARGS_DETAILED": "A list of three floating-point numbers representing the fractional coordinates [x, y, z] where the adsorbate should be placed\n             If not provided, the tool will automatically select the first available top site.\n             These coordinates should typically come from choose_adsorption_site_text output.",
-          "ARGS_SYNTACTICAL": "list of three floats [x, y, z] or None",
-          "ARGS_EXAMPLES": "[0.0, 0.0, 0.9], [0.5, 0.5, 0.9], None (auto-select)",
-          "RETURNS_BRIEF": "CIF string of the combined surface-adsorbate structure.",
-          "RETURNS_DETAILED": "A properly formatted CIF string containing the combined structure with the adsorbate placed on the surface at the specified position and height.\n             This structure includes both the original slab atoms and the adsorbate atoms, properly integrated into a single periodic structure.",
-          "RETURNS_EXAMPLES": "CIF string with both slab and adsorbate atoms",
+          "ARGS_BRIEF": [
+            "CIF string of the surface slab structure.",
+            "CIF string of the adsorbate molecule structure.",
+            "Height in Angstroms above the surface for adsorbate placement. Defaults to 2.0.",
+            "Optional fractional coordinates for adsorbate placement."
+          ],
+          "ARGS_DETAILED": [
+            "A properly formatted CIF string containing the surface slab structure on which the adsorbate will be placed.\n                 This should be a two-dimensional periodic structure with a well-defined surface and vacuum region.\n                 The slab provides the substrate for molecular adsorption.",
+            "A CIF or XYZ formatted string containing the molecular structure of the adsorbate to be placed on the surface.\n                      This can be a small molecule like CO2, H2O, or more complex organic molecules.\n                      The tool will attempt to parse both CIF and XYZ formats automatically.",
+            "The vertical distance above the surface at which the adsorbate will be placed.\n               This parameter controls the initial separation between the adsorbate and the surface atoms.\n               Typical values range from 1.5 to 3.0 Å depending on the molecular size and expected binding interaction.",
+            "A list of three floating-point numbers representing the fractional coordinates [x, y, z] where the adsorbate should be placed\n             If not provided, the tool will automatically select the first available top site.\n             These coordinates should typically come from choose_adsorption_site_text output."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "string in valid CIF syntax",
+            "\"Valid CIF or XYZ format string with molecular structure\"",
+            "positive float representing distance in Angstroms",
+            "list of three floats [x, y, z] or None"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\"",
+            "CIF string for molecules",
+            "1.5 (close to slab), 2.0, 2.5 (distant from molecule)",
+            "[0.0, 0.0, 0.9], [0.5, 0.5, 0.9], None (auto-select)"
+          ],
+          "RETURNS_BRIEF": [
+            "CIF string of the combined surface-adsorbate structure."
+          ],
+          "RETURNS_DETAILED": [
+            "A properly formatted CIF string containing the combined structure with the adsorbate placed on the surface at the specified position and height.\n             This structure includes both the original slab atoms and the adsorbate atoms, properly integrated into a single periodic structure."
+          ],
+          "RETURNS_EXAMPLES": [
+            "CIF string with both slab and adsorbate atoms"
+          ],
           "RAISES": "Exceptions:\n        ValueError:  When CIF strings are malformed or adsorbate cannot be parsed \n                    Invalid CIF format, unsupported molecule format, or structural issues \n                    Verify CIF formats and ensure adsorbate is a valid molecular structure \n        StructureError:  When adsorbate placement fails due to geometric constraints \n                        Site coordinates outside unit cell, insufficient surface area, or placement conflicts \n                        Check site coordinates are within [0,1] range and surface has adequate space \n        RuntimeError:  When no adsorption sites are found on the surface \n                      Surface structure lacks identifiable binding sites \n                      Verify slab structure has proper surface termination and geometry",
           "LIMITATIONS": "Known limitations:\n    - Does not optimize adsorbate orientation or conformation\n    - Cannot handle multiple adsorbates or complex binding modes\n    - Limited to simple geometric placement without chemical bonding\n    - Does not account for surface relaxation or reconstruction upon adsorption"
         },
@@ -1358,13 +1612,47 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n    - Parses the bulk structure and validates Miller indices for the crystal system\n    - Interprets complex reconstruction instructions in JSON format\n    - Uses ReconstructionGenerator from pymatgen to apply transformation matrices and structural changes\n    - Implements atomic additions, removals, and rearrangements as specified\n    - Generates either a single reconstruction or all possible variants\n    - Validates and optimizes the resulting surface structures",
           "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  First obtain bulk structure using get_structure_from_mp_text \n    2.  Apply this tool with detailed reconstruction instructions \n    3.  Use the reconstructed surface for adsorption studies or analysis",
           "SYNTACTICAL": "Usage examples:\n    [\n        `generate_reconstructed_slab(bulk_cif, (1,1,1), 12.0, 5.0, instructions_json)`,  # Basic reconstruction\n        `generate_reconstructed_slab(bulk_cif, (1,0,0), 15.0, 10.0, instructions_json, True)`,  # All variants\n        `generate_reconstructed_slab(bulk_cif, (1,1,0), 10.0, 5.0, instructions_json)`,  # Rectangular slab\n        `generate_reconstructed_slab(bulk_cif, (1,2,1), 20.0, 15.0, instructions_json, False)`,  # Complex reconstruction\n        `generate_reconstructed_slab(bulk_cif, (2,0,0), 25.0, 10.0, instructions_json, True)`,  # Thick slab\n    ]",
-          "ARGS_BRIEF": "Whether to return all reconstruction variants. Defaults to False.",
-          "ARGS_DETAILED": "Controls whether to return a single CIF string (False) or a comprehensive JSON with all possible reconstruction variants and metadata (True).\n                           When True, provides detailed information about each variant including structural parameters and characteristics.",
-          "ARGS_SYNTACTICAL": "boolean value (True/False)",
-          "ARGS_EXAMPLES": "False (single CIF), True (all variants with metadata)",
-          "RETURNS_BRIEF": "CIF string of reconstructed slab or JSON with all variants depending on return_all_variants.",
-          "RETURNS_DETAILED": "Either a single CIF-formatted string containing the reconstructed surface structure (if return_all_variants=False) or a comprehensive JSON string with all variants, metadata, and structural information (if return_all_variants=True).\n             The JSON format includes detailed characterization of each variant.",
-          "RETURNS_EXAMPLES": "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\"",
+          "ARGS_BRIEF": [
+            "CIF string of the bulk crystal structure.",
+            "Miller indices for the surface orientation.",
+            "Minimum slab thickness in Angstroms.",
+            "Minimum vacuum layer thickness in Angstroms.",
+            "JSON string containing detailed reconstruction parameters.",
+            "Whether to return all reconstruction variants. Defaults to False."
+          ],
+          "ARGS_DETAILED": [
+            "A properly formatted CIF string containing the bulk crystal structure that will be used as the starting point for reconstruction.\n                 This should be a three-dimensional periodic structure with well-defined symmetry and atomic positions.\n                 The bulk structure provides the template for surface generation.",
+            "A tuple of three integers specifying the crystallographic plane along which the reconstruction will be performed.\n                     These indices must be compatible with the crystal system and determine the base surface geometry before reconstruction modifications are applied.",
+            "The minimum thickness of the slab before reconstruction modifications are applied.\n                      This ensures adequate bulk-like behavior in the center of the slab while providing sufficient surface area for reconstruction.\n                      Larger values improve accuracy but increase computational cost.",
+            "The minimum vacuum space above the reconstructed surface to prevent interactions between periodic images.\n                        This parameter is crucial for accurate surface calculations and should be larger for reconstructions with significant surface protrusions or modifications.",
+            "A comprehensive JSON string specifying all aspects of the reconstruction including transformation matrices, atomic additions/removals, and structural parameters.\n                                   Must include required fields like name, transformation_matrix, and modification instructions",
+            "Controls whether to return a single CIF string (False) or a comprehensive JSON with all possible reconstruction variants and metadata (True).\n                           When True, provides detailed information about each variant including structural parameters and characteristics."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "string in valid CIF syntax",
+            "tuple of three integers (h, k, l)",
+            "positive float representing thickness in Angstroms",
+            "positive float representing vacuum thickness in Angstroms",
+            "\"Valid JSON string with reconstruction parameters\"",
+            "boolean value (True/False)"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\"",
+            "(1,1,1) (close-packed), (1,0,0) (square), (1,1,0) (rectangular)",
+            "12.0 (standard), 15.0 (thick), 10.0 (thin)",
+            "10.0 (standard), 15.0 (large), 5.0 (minimal)",
+            "JSON with transformation matrix and atomic modifications",
+            "False (single CIF), True (all variants with metadata)"
+          ],
+          "RETURNS_BRIEF": [
+            "CIF string of reconstructed slab or JSON with all variants depending on return_all_variants."
+          ],
+          "RETURNS_DETAILED": [
+            "Either a single CIF-formatted string containing the reconstructed surface structure (if return_all_variants=False) or a comprehensive JSON string with all variants, metadata, and structural information (if return_all_variants=True).\n             The JSON format includes detailed characterization of each variant."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\""
+          ],
           "RAISES": "Exceptions:\n        ValueError:  When reconstruction parameters are invalid or incompatible \n                    Invalid JSON format, missing required fields, or incompatible parameters \n                    Verify JSON format and ensure all required fields are present \n        StructureError:  When reconstruction fails due to structural incompatibilities \n                        Invalid transformation matrix, incompatible surface orientation, or atomic placement issues \n                        Check transformation matrix and atomic modification parameters \n        ReconstructionError:  When the reconstruction process fails to generate valid structures \n                             Complex reconstruction instructions cannot be implemented \n                             Simplify reconstruction instructions or try different parameters",
           "LIMITATIONS": "Known limitations:\n    - Cannot predict the thermodynamic stability of reconstructions\n    - Limited to predefined reconstruction patterns and transformations\n    - Does not account for temperature or environmental effects on reconstruction\n    - May not capture all possible reconstruction variants for complex systems\n    - Requires detailed prior knowledge of reconstruction parameters"
         },
@@ -1406,13 +1694,27 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project API using authentication credentials\n- Searches for all materials matching the specified chemical composition\n- Retrieves comprehensive data including energetics, structural, and electronic properties\n- Converts crystal structures to CIF format for compatibility with other tools\n- Sorts results by energy above hull (thermodynamic stability) for easy analysis",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you need to retrieve data for only one composition and there is no better tool \n2.  Apply this tool to retrieve all polymorphs for a composition \n3.  Use select_polymorphs_with_strategy to filter results or batch_retrieve_polymorphs for multiple compositions",
           "SYNTACTICAL": "Usage examples:\n[\n`get_bulk_polymorphs_data(\"TiO2\")`,  # Retrieve polymorphs for titanium dioxide\n`get_bulk_polymorphs_data(\"SiO2\")`,  # Retrieve polymorphs for silicon dioxide\n`get_bulk_polymorphs_data(\"Al2O3\n]",
-          "ARGS_BRIEF": "Chemical composition formula.",
-          "ARGS_DETAILED": "Chemical formula specifying the composition for which polymorphs should be retrieved. Should follow standard chemical notation with element symbols. The tool will find all known crystal structures with this exact composition in the Materials Project database.",
-          "ARGS_SYNTACTICAL": "\"Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)\"",
-          "ARGS_EXAMPLES": "\"TiO2\" (rutile, anatase, brookite), \"SiO2\" (quartz, cristobalite), \"Fe2O3\" (hematite, maghemite)",
-          "RETURNS_BRIEF": "JSON string containing comprehensive polymorph data sorted by stability.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing a list of dictionaries, each representing a polymorph with properties including Materials Project ID, CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information. Results are sorted by energy above hull for easy identification of the most stable phases.",
-          "RETURNS_EXAMPLES": "'[{\"material_id\": \"mp-2657\", \"cif\": \"...\", \"energy_above_hull\": 0.0, \"formation_energy_per_atom\": -4.2, ...}]'",
+          "ARGS_BRIEF": [
+            "Chemical composition formula."
+          ],
+          "ARGS_DETAILED": [
+            "Chemical formula specifying the composition for which polymorphs should be retrieved. Should follow standard chemical notation with element symbols. The tool will find all known crystal structures with this exact composition in the Materials Project database."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)\""
+          ],
+          "ARGS_EXAMPLES": [
+            "\"TiO2\" (rutile, anatase, brookite), \"SiO2\" (quartz, cristobalite), \"Fe2O3\" (hematite, maghemite)"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string containing comprehensive polymorph data sorted by stability."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing a list of dictionaries, each representing a polymorph with properties including Materials Project ID, CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information. Results are sorted by energy above hull for easy identification of the most stable phases."
+          ],
+          "RETURNS_EXAMPLES": [
+            "'[{\"material_id\": \"mp-2657\", \"cif\": \"...\", \"energy_above_hull\": 0.0, \"formation_energy_per_atom\": -4.2, ...}]'"
+          ],
           "RAISES": "Exceptions:\n    KeyError:  When the specified compoisiton is not found in the database \n         Invalid or non-existent material composition is provided \n         Verify if the composition is valid\n    ValueError:  When Materials Project API key is not available \n                MP_API_KEY environment variable not set or invalid \n                If API key is not set, the tool might not work, hence choose some other tool \n    ConnectionError:  When unable to connect to Materials Project API \n                     Network connectivity issues or API server downtime \n                     Check internet connection if not working the tool might not work, hence choose some other tool",
           "LIMITATIONS": "Known limitations:\n- Limited to materials available in the Materials Project database\n- Requires valid API key and internet connection\n- Can retrieve polymorphs only for one composition at a time"
         },
@@ -1434,13 +1736,31 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n - Connects to Materials Project API using authentication credentials\n - Searches for all materials matching the specified chemical composition\n - Retrieves comprehensive data including energetics, structural, and electronic properties\n - Converts crystal structures to CIF format for compatibility with other tools\n - Sorts results by energy above hull (thermodynamic stability) for easy analysis\n - Saves results to specified file path in JSON format with proper formatting\n - Ensures data persistence and enables later processing by other tools\n - Validates file path and creates directories as needed",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n 1.  Ensure you need to retrieve data for only one composition and there is no better tool  \n 2.  Apply this tool to retrieve and save polymorph data and save to a file\n 3.  Use consolidate_polymorph_datasets to combine multiple files of different composition or prepare_tabular_dataset",
           "SYNTACTICAL": "Usage examples:\n [\n `get_bulk_polymorphs_data_to_file(\"TiO2\", \"data/tio2_polymorphs.json\")`,  # Save polymorphs for titanium dioxide\n `get_bulk_polymorphs_data_to_file(\"SiO2\", \"data/si2_polymorphs.json\")`,  # Save polymorphs for silicon dioxide\n `get_bulk_polymorphs_data_to_file(\"Al2O3\", \"data/al2o3_polymorphs.json\")`,  # Save polymorphs for aluminum oxide\n `get_bulk_polymorphs_data_to_file(\"Fe2O3\", \"data/fe2o3_polymorphs.json\")`,  # Save polymorphs for iron\n ]",
-          "ARGS_BRIEF": "File path where JSON data will be saved.",
-          "ARGS_DETAILED": "Complete file path including filename and extension where the polymorph data will be saved.\n               The path should be writable and the directory will be created if it doesn't exist.\n               Using .json extension is recommended for clarity.\n               If None, the tool will raise an error as the file path is required.",
-          "ARGS_SYNTACTICAL": "\"Valid file path with .json extension\"",
-          "ARGS_EXAMPLES": "\"data/tio2_polymorphs.json\", \"save_path/tio2_polymorphs.json\", \"results/Cu2O_polymorphsides.json\"",
-          "RETURNS_BRIEF": "File path where the polymorph data was saved.",
-          "RETURNS_DETAILED": "Returns the exact file path where the JSON data was successfully written.\n          This path can be used by subsequent tools for data loading and processing.\n          The file contains comprehensive polymorph data in JSON format, sorted by thermodynamic stability.",
-          "RETURNS_EXAMPLES": "\"data/tio2_polymorphs.json\"",
+          "ARGS_BRIEF": [
+            "Chemical composition formula.",
+            "File path where JSON data will be saved."
+          ],
+          "ARGS_DETAILED": [
+            "Chemical formula specifying the composition for which polymorphs should be retrieved and saved.\n                 Should follow standard chemical notation with element symbols and subscripts.\n                 The tool will find all known crystal structures with this exact composition in the Materials Project database.",
+            "Complete file path including filename and extension where the polymorph data will be saved.\n               The path should be writable and the directory will be created if it doesn't exist.\n               Using .json extension is recommended for clarity.\n               If None, the tool will raise an error as the file path is required."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)\"",
+            "\"Valid file path with .json extension\""
+          ],
+          "ARGS_EXAMPLES": [
+            "\"TiO2\" (titanium dioxide), \"SiO2\" (silicon dioxide), \"Fe2O3\" (iron oxide)",
+            "\"data/tio2_polymorphs.json\", \"save_path/tio2_polymorphs.json\", \"results/Cu2O_polymorphsides.json\""
+          ],
+          "RETURNS_BRIEF": [
+            "File path where the polymorph data was saved."
+          ],
+          "RETURNS_DETAILED": [
+            "Returns the exact file path where the JSON data was successfully written.\n          This path can be used by subsequent tools for data loading and processing.\n          The file contains comprehensive polymorph data in JSON format, sorted by thermodynamic stability."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"data/tio2_polymorphs.json\""
+          ],
           "RAISES": "Exceptions:\n     ValueError:  When save_path is None or API key is not available \n                 Either save_path parameter is not provided or MP_API_KEY environment variable is missing \n                 Provide valid save_path. If  MP_API_KEY is not set, tool might not work and use a different tool \n     IOError:  When unable to write to the specified file path \n              File path is not writable or directory doesn't exist \n              Check file permissions and ensure directory exists",
           "LIMITATIONS": "Known limitations:\n - Requires writable file system access\n - Limited to materials available in the Materials Project database\n - Can retrieve polymorphs only for one composition at a time\n - Does not validate file format compatibility with other tools"
         },
@@ -1466,13 +1786,35 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n    - Parses JSON string into Python data structure\n    - Applies sorting based on specified key using numerical comparison\n    - Extracts the first element after sorting (best/optimal value)\n    - Returns the specified property value from the optimal element\n    - Handles various data types and provides robust error handling\n    - To find the right keys from polymorph data maybe use io tools or python tools",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  First obtain JSON data from polymorph retrieval tools \n    2.  Apply this tool to identify optimal material based on specific criteria \n    3.  Use the returned value for further analysis or material selection",
           "SYNTACTICAL": "Usage examples:\n    `sort_and_get_first_from_json(polymorphs_json, \"energy_above_hull\", \"material_id\")`,\n    `sort_and_get_first_from_json(polymorphs_json, \"band_gap\", \"cif\")`,\n    `sort_and_get_first_from_json(polymorphs_json, \"density\", \"formation_energy_per_atom\")`,",
-          "ARGS_BRIEF": "Property name to return from the first element after sorting.",
-          "ARGS_DETAILED": "The dictionary key name for the value that should be returned from the first (optimal) element after sorting.\n                   This allows extraction of any property from the optimal structure, such as material_id for identification, cif for structure, or any other calculated property.",
-          "ARGS_SYNTACTICAL": "\"String matching a key in the JSON data dictionaries\"",
-          "ARGS_EXAMPLES": "\"material_id\", \"cif\", \"formation_energy_per_atom\"",
-          "RETURNS_BRIEF": "Value of the specified return_key from the first element after sorting.",
-          "RETURNS_DETAILED": "The value corresponding to the return_key from the material that has the smallest value for the sort_key.\n             This could be a string (like material_id or CIF), a number (like energy or band gap), or any other data type stored in the JSON.\n             The returned value represents the optimal material according to the specified sorting criterion.",
-          "RETURNS_EXAMPLES": "\"mp-2657\" (material ID), \"1.23\" (energy value), CIF structure string",
+          "ARGS_BRIEF": [
+            "JSON string containing the data to be sorted.",
+            "Property name to sort the data by.",
+            "Property name to return from the first element after sorting."
+          ],
+          "ARGS_DETAILED": [
+            "A JSON-formatted string containing a list of dictionaries, each representing a material or structure with various properties.\n                            The data should be structured consistently with numerical values for the sorting key.\n                            This is typically output from polymorph retrieval tools.",
+            "The dictionary key name that will be used for sorting the data.\n                 This should correspond to a numerical property in the JSON data.\n                 The sorting is performed in ascending order, so the first element will have the smallest value for this property.\n                 Common keys include energy_above_hull, band_gap, density, formation_energy_per_atom.",
+            "The dictionary key name for the value that should be returned from the first (optimal) element after sorting.\n                   This allows extraction of any property from the optimal structure, such as material_id for identification, cif for structure, or any other calculated property."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Valid JSON string containing list of dictionaries\"",
+            "\"String matching a key in the JSON data dictionaries\"",
+            "\"String matching a key in the JSON data dictionaries\""
+          ],
+          "ARGS_EXAMPLES": [
+            "[\n    {\n        \"material_id\": \"mp-390\",\n        \"energy_above_hull\": 0.0,\n        \"formation_energy_per_atom\": -3.5080554519444442,\n        \"band_gap\": 2.0586,\n    },\n    {\n        \"material_id\": \"mp-1840\",\n        \"energy_above_hull\": 0.0030413275,\n        \"formation_energy_per_atom\": -3.505014124444444,\n        \"band_gap\": 2.2862,\n    },\n]",
+            "\"energy_above_hull\", \"band_gap\", \"density\"",
+            "\"material_id\", \"cif\", \"formation_energy_per_atom\""
+          ],
+          "RETURNS_BRIEF": [
+            "Value of the specified return_key from the first element after sorting."
+          ],
+          "RETURNS_DETAILED": [
+            "The value corresponding to the return_key from the material that has the smallest value for the sort_key.\n             This could be a string (like material_id or CIF), a number (like energy or band gap), or any other data type stored in the JSON.\n             The returned value represents the optimal material according to the specified sorting criterion."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"mp-2657\" (material ID), \"1.23\" (energy value), CIF structure string"
+          ],
           "RAISES": "Exceptions:\n        JSONDecodeError:  When the json_data string is not valid JSON \n                         Malformed JSON string or incorrect format \n                         Verify JSON format and ensure proper string escaping \n        KeyError:  When sort_key or return_key is not found in the data \n                  Specified keys don't exist in the JSON data dictionaries \n                  Check available keys in the JSON data and use valid key names \n        IndexError:  When the JSON data is empty or contains no elements \n                    Empty list or no valid data after parsing \n                    Ensure JSON data contains at least one element",
           "LIMITATIONS": "Known limitations:\n    - Only returns the first element after sorting (single optimal result)\n    - Sorting is performed in ascending order only\n    - Does not handle complex sorting criteria or multiple keys\n    - May not work properly with non-numerical sort keys"
         },
@@ -1502,13 +1844,27 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project thermodynamics database via API\n- Retrieves calculated formation energies and stability information\n- Provides energy above hull data for phase stability assessment\n- Reports decomposition pathways and competing phases\n- Returns comprehensive thermodynamic dataset with proper energy corrections",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure material MPID is valid \n2.  Retrieve comprehensive thermodynamic data for target material \n3.  Use thermodynamic data for stability analysis or phase diagram studies",
           "SYNTACTICAL": "Usage examples:\n`get_mp_thermo_data(\"mp-149\")   # Silicon thermodynamic data`,\n`get_mp_thermo_data(\"mp-2657\")  # TiO2 thermodynamic properties`,\n`get_mp_thermo_data(\"mp-1143\")  # Al2O3 stability information`,",
-          "ARGS_BRIEF": "Materials Project ID for the target material.",
-          "ARGS_DETAILED": "The unique Materials Project identifier for the material of interest.\n                Should be in the format \"mp-XXXXX\" where XXXXX is the numerical ID.\n                The material must exist in the Materials Project database and have thermodynamic calculations available.",
-          "ARGS_SYNTACTICAL": "\"mp-\" followed by digits (e.g., \"mp-149\", \"mp-2657\")",
-          "ARGS_EXAMPLES": "\"mp-149\" (Silicon), \"mp-2657\" (TiO2), \"mp-1143\" (Al2O3)",
-          "RETURNS_BRIEF": "JSON string containing comprehensive thermodynamic data and stability information.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing thermodynamic properties including material ID, thermodynamic functional used, formation energy per atom, energy above hull, decomposition products, stability status, energy type, and uncorrected energies.\n         Returns error information if thermodynamic data is not available.",
-          "RETURNS_EXAMPLES": "'[{\"material_id\": \"mp-149\", \"formation_energy_per_atom\": -4.2, \"energy_above_hull\": 0.0, \"is_stable\": true, ...}]'",
+          "ARGS_BRIEF": [
+            "Materials Project ID for the target material."
+          ],
+          "ARGS_DETAILED": [
+            "The unique Materials Project identifier for the material of interest.\n                Should be in the format \"mp-XXXXX\" where XXXXX is the numerical ID.\n                The material must exist in the Materials Project database and have thermodynamic calculations available."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"mp-\" followed by digits (e.g., \"mp-149\", \"mp-2657\")"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"mp-149\" (Silicon), \"mp-2657\" (TiO2), \"mp-1143\" (Al2O3)"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string containing comprehensive thermodynamic data and stability information."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing thermodynamic properties including material ID, thermodynamic functional used, formation energy per atom, energy above hull, decomposition products, stability status, energy type, and uncorrected energies.\n         Returns error information if thermodynamic data is not available."
+          ],
+          "RETURNS_EXAMPLES": [
+            "'[{\"material_id\": \"mp-149\", \"formation_energy_per_atom\": -4.2, \"energy_above_hull\": 0.0, \"is_stable\": true, ...}]'"
+          ],
           "RAISES": "Exceptions:\n    ValueError:  When Materials Project API key is not available \n                MP_API_KEY environment variable not set or invalid \n                Obtain valid API key from Materials Project and set environment variable \n    ConnectionError:  When unable to connect to Materials Project API \n                     Network connectivity issues or API server problems \n                     Check internet connection and try again later \n    KeyError:  When material ID is not found or has no thermodynamic data \n              Invalid material ID or thermodynamic properties not calculated \n              Verify material ID exists and has thermodynamic calculations",
           "LIMITATIONS": "Known limitations:\n- Limited to materials with calculated thermodynamic properties in Materials Project\n- Thermodynamic accuracy depends on computational methodology and corrections applied\n- May not include experimental thermodynamic data or recent calculations\n- Cannot provide thermodynamic data for custom or modified compositions"
         },
@@ -1530,13 +1886,51 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Systematically generates slabs for all Miller indices up to the specified maximum\n- Uses advanced algorithms to identify unique surface terminations and orientations\n- Applies consistent slab thickness and vacuum parameters across all surfaces\n- Calculates surface properties including area, thickness, and atom count\n- Returns comprehensive dataset with detailed metadata for each surface",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First obtain bulk structure using get_structure_from_mp_text or select from polymorphs \n2.  Generate comprehensive collection of all possible surface slabs \n3.  Use select_slabs_with_strategy to filter results or save_structures_to_db for storage",
           "SYNTACTICAL": "Usage examples:\n`find_all_unique_slabs_upto_millerindex(bulk_cif, False, 2, 10, 15, True, 10)`,\n`find_all_unique_slabs_upto_millerindex(\"bulk_structure.cif\", True, 1, 8, 12, True, 5)`,\n`find_all_unique_slabs_upto_millerindex(structure_string, False, 3, 12, 20, False, 15)`,",
-          "ARGS_BRIEF": "Maximum number of surface normals to search. Defaults to 10.",
-          "ARGS_DETAILED": "The maximum number of surface normal directions to explore for each Miller index. Higher values may find more unique terminations but increase computational cost. This parameter controls the thoroughness of surface termination exploration for complex structures.",
-          "ARGS_SYNTACTICAL": "positive integer",
-          "ARGS_EXAMPLES": "5 (quick), 10 (standard), 20 (thorough)",
-          "RETURNS_BRIEF": "JSON dictionary with comprehensive slab data including properties and metadata.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing a dictionary where keys are slab identifiers and values contain comprehensive slab information including Miller indices, termination numbers, CIF structures, surface areas, atom counts, and slab thicknesses. This provides complete characterization of all generated surfaces for analysis and selection.",
-          "RETURNS_EXAMPLES": "\"{\"111_0\": {\"miller_index\": [1,1,1], \"cif\": \"...\", \"area\": 45.2, \"num_sites\": 24, ...}}\"",
+          "ARGS_BRIEF": [
+            "Path to CIF file or CIF string of bulk structure.",
+            "Boolean indicating if input is a file path. Defaults to False.",
+            "Maximum Miller index to consider. Defaults to 2.",
+            "Minimum slab thickness in Angstroms. Defaults to 8.",
+            "Minimum vacuum layer thickness in Angstroms. Defaults to 15.",
+            "Whether to center slab in vacuum region. Defaults to True.",
+            "Maximum number of surface normals to search. Defaults to 10."
+          ],
+          "ARGS_DETAILED": [
+            "Either a complete file path to a CIF file containing the bulk crystal structure, or a CIF-formatted string containing the structure data, depending on the from_path parameter. This structure serves as the basis for all surface generation and should be a well-defined three-dimensional crystal.",
+            "Boolean flag that determines how to interpret the bulk_structure_path_or_string parameter. When True, treats the input as a file path to read. When False, treats it as a CIF string to parse directly. This provides flexibility for different data input patterns in workflows.",
+            "The maximum value for Miller indices (h, k, l) to include in surface generation. Higher values explore more surface orientations but increase computational cost exponentially. Common choices are 1, 2, or 3 depending on the comprehensiveness required and computational resources available.",
+            "The minimum thickness of generated slabs in the direction perpendicular to the surface plane. This ensures adequate bulk-like behavior in the slab center while exposing the desired surface. Larger values provide more accurate surface representation but increase computational cost.",
+            "The minimum vacuum space above each surface to prevent interactions between periodic images in surface calculations. Larger vacuum regions are essential for accurate surface energy calculations and prevent spurious interactions between surface images.",
+            "Boolean flag controlling whether the slab should be positioned in the center of the vacuum region. Centering is generally recommended for symmetric boundary conditions and consistent surface calculations. Setting to False may be useful for specific calculation requirements or interfacial studies.",
+            "The maximum number of surface normal directions to explore for each Miller index. Higher values may find more unique terminations but increase computational cost. This parameter controls the thoroughness of surface termination exploration for complex structures."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Valid CIF file path or string in valid CIF syntax\"",
+            "boolean value (True/False)",
+            "positive integer (1, 2, or 3)",
+            "positive float representing thickness in Angstroms",
+            "positive float representing vacuum thickness in Angstroms",
+            "boolean value (True/False)",
+            "positive integer"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"structures/bulk_si.cif\", CIF string from Materials Project",
+            "True (file input), False (string input)",
+            "1 (basic orientations), 2 (standard), 3 (comprehensive but expensive)",
+            "8.0 (minimal), 12.0 (standard), 15.0 (thick)",
+            "10.0 (minimal), 15.0 (standard), 20.0 (large)",
+            "True (centered, recommended), False (offset positioning)",
+            "5 (quick), 10 (standard), 20 (thorough)"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON dictionary with comprehensive slab data including properties and metadata."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing a dictionary where keys are slab identifiers and values contain comprehensive slab information including Miller indices, termination numbers, CIF structures, surface areas, atom counts, and slab thicknesses. This provides complete characterization of all generated surfaces for analysis and selection."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"111_0\": {\"miller_index\": [1,1,1], \"cif\": \"...\", \"area\": 45.2, \"num_sites\": 24, ...}}\""
+          ],
           "RAISES": "Exceptions:\n    ValueError:  When bulk structure is invalid or parameters are incompatible \n                Invalid CIF format, negative size parameters, or structure incompatible with Miller indices \n                Verify structure format and ensure all parameters are positive \n    FileNotFoundError:  When from_path=True but file doesn't exist \n                       Specified file path cannot be found or accessed \n                       Check file path exists and is readable \n    MemoryError:  When max_index is too large for available memory \n                 Exponential growth in surface combinations exceeds memory limits \n                 Reduce max_index or increase available memory",
           "LIMITATIONS": "Known limitations:\n- Computational cost grows exponentially with max_index\n- May generate many similar surfaces for high-symmetry structures\n- Does not perform surface relaxation or energy calculations\n- Cannot predict relative stability or importance of different surfaces"
         },
@@ -1582,13 +1976,27 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project API to access surface property database\n- Retrieves calculated surface energies and related thermodynamic properties\n- Provides surface anisotropy and shape factor information for crystal habit prediction\n- Reports reconstruction information for complex surface behavior\n- Returns comprehensive JSON with all available surface properties",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure MPID is valid \n2.  Retrieve comprehensive surface properties for target material \n3.  Use surface property data for material selection or computational benchmarking",
           "SYNTACTICAL": "Usage examples:\n- get_mp_surface_properties(\"mp-149\")  # Silicon surface properties\n- get_mp_surface_properties(\"mp-2657\")  # TiO2 surface properties\n- get_mp_surface_properties(\"mp-1143\")  # Other material surface data",
-          "ARGS_BRIEF": "Materials Project ID for the target material.",
-          "ARGS_DETAILED": "The unique Materials Project identifier for the material of interest.\n                Should be in the format \"mp-XXXXX\" where XXXXX is the numerical ID.\n                The material must exist in the Materials Project database and have calculated surface properties available.",
-          "ARGS_SYNTACTICAL": "\"mp-\" followed by digits (e.g., \"mp-149\", \"mp-2657\")",
-          "ARGS_EXAMPLES": "\"mp-149\" (Silicon), \"mp-2657\" (TiO2 anatase), \"mp-1143\" (Al2O3)",
-          "RETURNS_BRIEF": "JSON string containing comprehensive surface properties and energetics data.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing surface properties including material ID, formula, weighted surface energy, surface energy in eV/Å², surface anisotropy, shape factor, and reconstruction information.\n         Returns error information if surface properties are not available for the specified material.",
-          "RETURNS_EXAMPLES": "'[{\"material_id\": \"mp-149\", \"weighted_surface_energy\": 1.23, \"surface_anisotropy\": 0.15, ...}]'",
+          "ARGS_BRIEF": [
+            "Materials Project ID for the target material."
+          ],
+          "ARGS_DETAILED": [
+            "The unique Materials Project identifier for the material of interest.\n                Should be in the format \"mp-XXXXX\" where XXXXX is the numerical ID.\n                The material must exist in the Materials Project database and have calculated surface properties available."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"mp-\" followed by digits (e.g., \"mp-149\", \"mp-2657\")"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"mp-149\" (Silicon), \"mp-2657\" (TiO2 anatase), \"mp-1143\" (Al2O3)"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string containing comprehensive surface properties and energetics data."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing surface properties including material ID, formula, weighted surface energy, surface energy in eV/Å², surface anisotropy, shape factor, and reconstruction information.\n         Returns error information if surface properties are not available for the specified material."
+          ],
+          "RETURNS_EXAMPLES": [
+            "'[{\"material_id\": \"mp-149\", \"weighted_surface_energy\": 1.23, \"surface_anisotropy\": 0.15, ...}]'"
+          ],
           "RAISES": "Exceptions:\n    ValueError:  When Materials Project API key is not available \n                MP_API_KEY environment variable not set or invalid \n                Obtain valid API key from Materials Project and set environment variable \n    ConnectionError:  When unable to connect to Materials Project API \n                     Network connectivity issues or API server problems \n                     Check internet connection and try again later \n    KeyError:  When material ID is not found or has no surface data \n              Invalid material ID or surface properties not calculated \n              Verify material ID exists and has surface property calculations",
           "LIMITATIONS": "Known limitations:\n- Limited to materials with calculated surface properties in Materials Project\n- Surface property accuracy depends on computational methodology used\n- May not include very recent calculations or experimental data\n- Cannot provide surface properties for custom or modified structures"
         },
@@ -1610,13 +2018,39 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n    - Loads the slab structure from CIF string\n    - Converts adsorbate CIF to a molecular structure\n    - Parses the adsorption sites information from JSON\n    - Uses AdsorbateSiteFinder from pymatgen to place adsorbates at each site\n    - Generates multiple configurations with different site types and positions\n    - Returns a JSON containing all successfully generated adsorbate-slab configurations",
           "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  Generate slab structure using slab creation tools \n    2.  Identify adsorption sites using get_adsorption_sites_text \n    3.  Have adsorbate molecule structure available \n    4.  Apply this tool to generate adsorbate-slab configurations \n    5.  Use configurations for DFT calculations or energy analysis",
           "SYNTACTICAL": "Usage examples:\n    `generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json, 1.8)`,\n    `generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json, height=2.0)`,\n    `generate_adsorbate_slab_configs(slab_cif, adsorbate_cif, sites_json)`,",
-          "ARGS_BRIEF": "Height in Angstroms for initial adsorbate placement. Defaults to 1.8.",
-          "ARGS_DETAILED": "The initial height above the surface at which the adsorbate will be placed.\n               This is the starting geometry for optimization and should be reasonable for the specific adsorbate-surface system.\n               Typical values are 1.5-2.5 Å.",
-          "ARGS_SYNTACTICAL": "positive float representing height in Angstroms",
-          "ARGS_EXAMPLES": "1.5 (close), 1.8 (standard), 2.2 (distant)",
-          "RETURNS_BRIEF": "JSON string containing all generated adsorbate-slab configurations.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing all successfully generated adsorbate-slab configurations, with each configuration including site information, coordinates, and the complete CIF structure ready for calculations.",
-          "RETURNS_EXAMPLES": "{\"top_0\": {\"site_coords\": [x,y,z], \"cif\": \"...\"}, ...}",
+          "ARGS_BRIEF": [
+            "CIF string of the slab structure.",
+            "CIF string of the adsorbate molecule.",
+            "JSON string containing adsorption sites information.",
+            "Height in Angstroms for initial adsorbate placement. Defaults to 1.8."
+          ],
+          "ARGS_DETAILED": [
+            "A properly formatted CIF string containing the slab structure on which adsorbates will be placed.\n                 The slab should be oriented with the surface normal along the c-axis for proper adsorbate placement.",
+            "A CIF-formatted string containing the adsorbate molecule structure that will be placed on the slab surface.\n                      The molecule should be properly oriented and have reasonable geometry for surface adsorption.",
+            "A JSON-formatted string containing information about potential adsorption sites on the slab surface, typically organized by site type (top, bridge, hollow) with coordinates for each site.",
+            "The initial height above the surface at which the adsorbate will be placed.\n               This is the starting geometry for optimization and should be reasonable for the specific adsorbate-surface system.\n               Typical values are 1.5-2.5 Å."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "string in valid CIF syntax",
+            "string in valid CIF syntax",
+            "\"JSON string with site types and coordinates\"",
+            "positive float representing height in Angstroms"
+          ],
+          "ARGS_EXAMPLES": [
+            "Output from slab generation tools",
+            "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\"",
+            "{\"top\": [[x1,y1,z1], [x2,y2,z2]], \"bridge\": [...]}",
+            "1.5 (close), 1.8 (standard), 2.2 (distant)"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string containing all generated adsorbate-slab configurations."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing all successfully generated adsorbate-slab configurations, with each configuration including site information, coordinates, and the complete CIF structure ready for calculations."
+          ],
+          "RETURNS_EXAMPLES": [
+            "{\"top_0\": {\"site_coords\": [x,y,z], \"cif\": \"...\"}, ...}"
+          ],
           "RAISES": "Exceptions:\n        ValueError:  When CIF structures are malformed or incompatible \n                    Invalid CIF format for slab or adsorbate, or parsing errors \n                    Verify CIF formats and ensure structures are valid \n        StructureError:  When adsorbate placement fails \n                        Geometric conflicts or invalid adsorption sites \n                        Check adsorption sites and adjust height parameter",
           "LIMITATIONS": "Known limitations:\n    - Limited to 3 sites per site type to manage computational cost\n    - Does not optimize adsorbate geometry or consider surface relaxation\n    - May skip sites that cause geometric conflicts\n    - No validation of chemical reasonableness of adsorption sites"
         },
@@ -2352,13 +2786,39 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you have a valid LAMMPS log file generated from a simulation. \n2.  Use this tool to extract the nth run log and optionally save it to a CSV file. \n3.  Utilize the extracted data for analysis, visualization, or further processing in your materials science workflow.",
           "CONTEXTUAL": "How this tool works:\n- Reads the LAMMPS log file and identifies the nth run section.\n- Extracts thermodynamic data and organises it into a python dataframe, where each column corresponds to a thermodynamic property.\n- Optionally saves the data to a CSV file and retrieves specific data at a given index.",
           "SYNTACTICAL": "Usage examples:\n[\n    `get_nth_run_log(\"/path/to/log.lammps\", 0, \"run0_thermo.csv\")`,\n    `get_nth_run_log(\"log.lammps\", 1, None)`,\n    `get_nth_run_log(\"/data/simulations/log.lammps\", 2, \"run2_thermo.csv\", 10)`,\n    `get_nth_run_log(\"sim_log.lammps\", 0, \"run0_thermo.csv\", 5)`,\n    `get_nth_run_log(\"/workspace/log.lammps\", 3, None, 20)`,\n]",
-          "ARGS_BRIEF": "Optional index to retrieve specific thermodynamic data from the run log.",
-          "ARGS_DETAILED": "If provided, the tool will return the thermodynamic data at this index from the extracted run log.",
-          "ARGS_SYNTACTICAL": "Format: \"Non-negative integer\"",
-          "ARGS_EXAMPLES": "Examples: 0, 5, 10",
-          "RETURNS_BRIEF": "Summary of the extracted run log and optional data at the specified index.",
-          "RETURNS_DETAILED": "A string summarizing the columns present in the extracted run log, total number of rows, and optionally the thermodynamic data at the specified index.",
-          "RETURNS_EXAMPLES": "Examples: \"the thermo data has been saved successfully at run0_thermo.csv. The thermo columns are: ['Step', 'Temp', 'Press']. There are total 1000 rows. Data at index 10: {'Step': 100, 'Temp': 300, 'Press': 1.0}\", \"The thermo columns are: ['Step', 'Temp', 'Press']. There are total 500 rows.\"",
+          "ARGS_BRIEF": [
+            "Absolute path to the LAMMPS log file.",
+            "Index of the run log to extract (0-based). Defaults to 0.",
+            "Optional path to save the extracted run log as a CSV file.",
+            "Optional index to retrieve specific thermodynamic data from the run log."
+          ],
+          "ARGS_DETAILED": [
+            "Complete file path to the LAMMPS log file containing simulation output.",
+            "The zero-based index of the run log to extract from the LAMMPS log file.",
+            "If provided, the extracted run log will be saved to this path in CSV format.",
+            "If provided, the tool will return the thermodynamic data at this index from the extracted run log."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: \"Valid file path to LAMMPS log file\"",
+            "Format: \"Non-negative integer\"",
+            "Format: \"Valid file path to save CSV file\"",
+            "Format: \"Non-negative integer\""
+          ],
+          "ARGS_EXAMPLES": [
+            "Examples: \"/path/to/log.lammps\", \"simulations/log.lammps\"",
+            "Examples: 0, 1, 2",
+            "Examples: \"run0_thermo.csv\", \"/data/run1_thermo.csv\"",
+            "Examples: 0, 5, 10"
+          ],
+          "RETURNS_BRIEF": [
+            "Summary of the extracted run log and optional data at the specified index."
+          ],
+          "RETURNS_DETAILED": [
+            "A string summarizing the columns present in the extracted run log, total number of rows, and optionally the thermodynamic data at the specified index."
+          ],
+          "RETURNS_EXAMPLES": [
+            "Examples: \"the thermo data has been saved successfully at run0_thermo.csv. The thermo columns are: ['Step', 'Temp', 'Press']. There are total 1000 rows. Data at index 10: {'Step': 100, 'Temp': 300, 'Press': 1.0}\", \"The thermo columns are: ['Step', 'Temp', 'Press']. There are total 500 rows.\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If there is an error reading the log file or extracting the run log. \n         Raised when the log file cannot be read or the specified run log cannot be extracted. \n         Verify the log file path and ensure the run index is valid.",
           "LIMITATIONS": "Known limitations:\n- Only supports LAMMPS log files with standard formatting.\n- May not handle corrupted or non-standard log files gracefully."
         },
@@ -2392,13 +2852,31 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you have a valid LAMMPS log file generated from a simulation. \n2.  Use this tool to extract sections of the log file that start with the specified keyword. \n3.  Utilize the extracted data for analysis, visualization, or further processing in your materials science workflow.",
           "CONTEXTUAL": "How this tool works:\n- Reads the LAMMPS log file line by line.\n- Identifies sections that start with the specified keyword.\n- Extracts and returns those sections as a structured dictionary.",
           "SYNTACTICAL": "Usage examples:\n[\n    `keyword_log_extractor(\"/path/to/log.lammps\", \"fix\")`,\n    `keyword_log_extractor(\"log.lammps\", \"BULK ENERGY\")`,\n    `keyword_log_extractor(\"/data/simulations/log.lammps\", \"thermo\")`,\n    `keyword_log_extractor(\"sim_log.lammps\", \"dump\")`,\n    `keyword_log_extractor(\"/workspace/log.lammps\", \"velocity\")`,\n]",
-          "ARGS_BRIEF": "Keyword to search for in the log file.",
-          "ARGS_DETAILED": "The specific keyword that marks the beginning of sections to extract from the log file.",
-          "ARGS_SYNTACTICAL": "Format: \"Non-empty string\"",
-          "ARGS_EXAMPLES": "Examples: \"fix\", \"compute\", \"thermo\"",
-          "RETURNS_BRIEF": "Extracted sections as a structured dictionary in string format.",
-          "RETURNS_DETAILED": "A string representation of a dictionary containing the extracted sections that start with the specified keyword.",
-          "RETURNS_EXAMPLES": "\"{'fix': [...]}\", \"{'compute': [...]}\"",
+          "ARGS_BRIEF": [
+            "Path to the LAMMPS log file.",
+            "Keyword to search for in the log file."
+          ],
+          "ARGS_DETAILED": [
+            "Complete file path to the LAMMPS log file containing simulation output.",
+            "The specific keyword that marks the beginning of sections to extract from the log file."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: \"Valid file path to LAMMPS log file\"",
+            "Format: \"Non-empty string\""
+          ],
+          "ARGS_EXAMPLES": [
+            "Examples: \"/path/to/log.lammps\", \"simulations/log.lammps\"",
+            "Examples: \"fix\", \"compute\", \"thermo\""
+          ],
+          "RETURNS_BRIEF": [
+            "Extracted sections as a structured dictionary in string format."
+          ],
+          "RETURNS_DETAILED": [
+            "A string representation of a dictionary containing the extracted sections that start with the specified keyword."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{'fix': [...]}\", \"{'compute': [...]}\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If there is an error reading the log file or extracting sections. \n         Raised when the log file cannot be read or the keyword is not found. \n         Verify the log file path and ensure the keyword is valid.",
           "LIMITATIONS": "Known limitations:\n- Only supports LAMMPS log files with standard formatting.\n- May not handle corrupted or non-standard log files gracefully."
         },
@@ -2424,13 +2902,39 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Validates script file existence and accessibility\n- Constructs command with script path and provided arguments\n- Executes script in subprocess with timeout protection\n- Captures standard output, error streams, and return codes\n- Provides comprehensive execution monitoring and error reporting\n- Supports custom working directory for script execution",
           "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n1.  Ensure script file exists and is executable with proper dependencies \n2.  Execute script with appropriate arguments and timeout \n3.  Process script output and results for further analysis. Can be used to process json script as required",
           "SYNTACTICAL": "Usage examples:\n`execute_python_script(\"analysis.py\", [\"--input\", \"data.json\", \"--output\", \"results.json\"], 300)`,\n`execute_python_script(\"simulation.py\", [\"--steps\", \"1000\", \"--temp\", \"300\"], 1800, \"/path/to/workdir\")`,\n`execute_python_script(\"processing.py\", None, 600, None)`,",
-          "ARGS_BRIEF": "Optional working directory for script execution.",
-          "ARGS_DETAILED": "The directory from which the script should be executed.\n                This affects relative path resolution and file I/O operations within the script.\n                If None, the current working directory will be used.\n                This is useful when scripts expect to run from specific directories or access relative files.",
-          "ARGS_SYNTACTICAL": "Valid directory path or None",
-          "ARGS_EXAMPLES": "\"/path/to/project\", \"data/analysis\", None",
-          "RETURNS_BRIEF": "JSON string with comprehensive execution results and monitoring data.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.\n         This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows.",
-          "RETURNS_EXAMPLES": "\"{\"success\": true, \"stdout\": \"Processing complete\", \"stderr\": \"\", \"return_code\": 0, \"command\": \"python script.py --input data.json\"}\"",
+          "ARGS_BRIEF": [
+            "Path to the Python script file to execute.",
+            "Optional list of command-line arguments for the script.",
+            "Maximum execution time in seconds. Defaults to 600.",
+            "Optional working directory for script execution."
+          ],
+          "ARGS_DETAILED": [
+            "Complete file path to the Python script that should be executed.\n                The script must exist and be readable.\n                The path can be relative to the current working directory or absolute.\n                The script should be a valid Python file with appropriate shebang or run using the Python interpreter.",
+            "A list of strings representing command-line arguments to pass to the script.\n         These arguments will be passed to the script in the order provided.\n         Common arguments include input files, output paths, configuration parameters, and processing options.\n         If None, the script will be executed without arguments.",
+            "The maximum time in seconds the script is allowed to run before being terminated.\n            This prevents runaway processes and ensures resource management.\n            Choose appropriate values based on expected script execution time.\n            For computational simulations, longer timeouts may be necessary.",
+            "The directory from which the script should be executed.\n                This affects relative path resolution and file I/O operations within the script.\n                If None, the current working directory will be used.\n                This is useful when scripts expect to run from specific directories or access relative files."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Valid file path to Python script\"",
+            "[\"arg1\", \"arg2\", \"arg3\", ...] or None",
+            "positive integer representing seconds",
+            "Valid directory path or None"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"scripts/analysis.py\", \"/home/user/simulations/run_sim.py\", \"data_processing.py\"",
+            "[\"--input\", \"data.json\"], [\"--verbose\", \"--output\", \"results.csv\"], None",
+            "300 (5 minutes), 600 (10 minutes), 3600 (1 hour)",
+            "\"/path/to/project\", \"data/analysis\", None"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with comprehensive execution results and monitoring data."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.\n         This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"success\": true, \"stdout\": \"Processing complete\", \"stderr\": \"\", \"return_code\": 0, \"command\": \"python script.py --input data.json\"}\""
+          ],
           "RAISES": "Exceptions:\n    FileNotFoundError:  When the specified script file doesn't exist \n                       Script path is invalid or file is not accessible \n                       Verify script path exists and is readable \n    TimeoutExpired:  When script execution exceeds the specified timeout \n                    Script terminated due to timeout limit \n                    Increase timeout value or optimize script performance \n    PermissionError:  When script file lacks execute permissions \n                     Insufficient permissions to execute the script \n                     Check file permissions and ensure script is executable",
           "LIMITATIONS": "Known limitations:\n- Cannot modify script execution environment beyond working directory\n- Limited to Python scripts and available system Python installation\n- No real-time output streaming during execution\n- Cannot interact with scripts requiring user input"
         },
@@ -2464,13 +2968,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Select or obtain the potential file paths that might be relevant to your simulation task. \n    2.  Use this tool to retrieve metadata for each potential file path. The tool will either return metadata or raise an exception if the path or filename is invalid. \n    3.  Based on the metadata returned, choose the appropriate potential file for your simulation setup, and run the simulation using the selected potential file and the tool `run_lammps`.",
           "CONTEXTUAL": "How this tool works:\n    - Validates that the input file path is non-empty\n    - Checks file accessibility using a remote file inspection call\n    - Extracts the filename from the provided path using pathlib\n    - Matches it against a set of known potential filenames\n    - Returns a structured metadata string for recognized files\n    - Raises FileNotFoundError for invalid or inaccessible paths\n    - Raises ValueError for unrecognized potential filenames",
           "SYNTACTICAL": "Usage examples:\n[\n    `get_potential_metadata(\"sim_data/Al99.eam.alloy\")`,\n    `get_potential_metadata(\"/path/to/potentials/Mg_Zhou04.eam.alloy\")`,\n    `get_potential_metadata(\"/data/Fe-C_Hepburn_Ackland.eam.fs\")`,\n    `get_potential_metadata(\"Cu_Zhou04.eam.alloy\")`\n]",
-          "ARGS_BRIEF": "Path to the potential file.",
-          "ARGS_DETAILED": "This is the path to a LAMMPS-compatible potential file. The file must be accessible, and its filename is used to determine metadata, so it must match one of the known potential filenames.",
-          "ARGS_SYNTACTICAL": "Format: \"string ending in a recognized potential filename\".",
-          "ARGS_EXAMPLES": "Examples: \"/path/to/file/Al99.eam.alloy\", \"Mg_Zhou04.eam.alloy\"",
-          "RETURNS_BRIEF": "Structured metadata string describing the potential file.",
-          "RETURNS_DETAILED": "The returned string includes the type of interatomic potential, supported chemical elements, and the LAMMPS pair style.",
-          "RETURNS_EXAMPLES": "Example output: \"{potential type : EAM, elements supported : Al (Aluminum), pair_style : eam/alloy}\"",
+          "ARGS_BRIEF": [
+            "Path to the potential file."
+          ],
+          "ARGS_DETAILED": [
+            "This is the path to a LAMMPS-compatible potential file. The file must be accessible, and its filename is used to determine metadata, so it must match one of the known potential filenames."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: \"string ending in a recognized potential filename\"."
+          ],
+          "ARGS_EXAMPLES": [
+            "Examples: \"/path/to/file/Al99.eam.alloy\", \"Mg_Zhou04.eam.alloy\""
+          ],
+          "RETURNS_BRIEF": [
+            "Structured metadata string describing the potential file."
+          ],
+          "RETURNS_DETAILED": [
+            "The returned string includes the type of interatomic potential, supported chemical elements, and the LAMMPS pair style."
+          ],
+          "RETURNS_EXAMPLES": [
+            "Example output: \"{potential type : EAM, elements supported : Al (Aluminum), pair_style : eam/alloy}\""
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         If the file path is empty or the potential filename is not recognized. \n         Raised when the input path is empty or when the filename does not match any known potential files. \n         Ensure the file path is non-empty and that the filename matches one of the supported potential files. \n\n    FileNotFoundError:\n         If the file path is invalid or the file is not accessible. \n         Raised when the remote file accessibility check fails for the given path. \n         Verify that the file exists at the given path and that it is accessible in the execution environment.",
           "LIMITATIONS": "Limitations:\n    - This tool only recognizes a predefined set of potential filenames. If the filename does not match any known entry, a ValueError will be raised.\n    - The metadata returned is static and does not include dynamic information from the file contents, such as specific parameters or coefficients used in the potential.\n    - The tool does not validate the actual contents or physical correctness of the potential file; it relies on file accessibility and filename-based identification only."
         },
@@ -2492,13 +3010,31 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Ensure you have the Materials Project ID of the material you want to retrieve. Sometimes the MP ID is in the task description so be sure to fully capture the information there. \n    2.  Use this tool to fetch the conventional structure in CIF format by providing the MP ID and desired file path. \n    3.  The resulting CIF file can be used in subsequent steps such as molecular dynamics simulations (using the tool `run_lammps`), structure visualization, or crystallographic analysis.",
           "CONTEXTUAL": "How this tool works:\n    - Queries the Materials Project database using the provided material ID to retrieve the material's primitive crystal structure.\n    - Applies symmetry analysis to convert the primitive structure into its conventional crystallographic form.\n    - Converts the conventional structure into CIF (Crystallographic Information File) format.\n    - Saves the CIF content to the specified file path using an external function.",
           "SYNTACTICAL": "Usage examples:\n[\n    `get_structure_from_mp_text(\"mp-149\", \"/workspace/Si_conventional.cif\")`,\n    `get_structure_from_mp_text(\"mp-13\", \"outputs/Aluminum_structure.cif\")`,\n    `get_structure_from_mp_text(\"mp-1692\", \"/data/structures/CuO_conventional.cif\")`,\n    `get_structure_from_mp_text(\"mp-19770\", \"structure_files/Fe2O3.cif\")`,\n    `get_structure_from_mp_text(\"mp-1143\", \"/tmp/Al2O3_structure.cif\")`,\n]",
-          "ARGS_BRIEF": "Destination path for saving the CIF file.",
-          "ARGS_DETAILED": "Absolute path to the file where the CIF content will be written.",
-          "ARGS_SYNTACTICAL": "Format: 'string path ending in \".cif\" corresponding to the path of the CIF file'.",
-          "ARGS_EXAMPLES": "Examples: \"/tmp/output.cif\", \"structure_files/Al.cif\"",
-          "RETURNS_BRIEF": "Status message indicating successful structure retrieval and saving at required path.",
-          "RETURNS_DETAILED": "If successful, the tool retrieves the conventional crystallographic structure for the given Materials Project ID, converts it into CIF format, saves it at the specified path, and returns a confirmation message.\n        If any step fails, a descriptive error message is returned instead.",
-          "RETURNS_EXAMPLES": "- \"Structure saved successfully at /workspace/data/structure.cif\"\n            - \"Failed to retrieve or save structure: Invalid Materials Project ID\"",
+          "ARGS_BRIEF": [
+            "Materials Project ID of the material.",
+            "Destination path for saving the CIF file."
+          ],
+          "ARGS_DETAILED": [
+            "A unique identifier used by the Materials Project database to reference a material. The ID typically starts with \"mp-\" followed by digits. It must correspond to an existing entry.",
+            "Absolute path to the file where the CIF content will be written."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: '\"mp-XXXX\" where X is a digit'.",
+            "Format: 'string path ending in \".cif\" corresponding to the path of the CIF file'."
+          ],
+          "ARGS_EXAMPLES": [
+            "Examples: \"mp-149\", \"mp-13\", \"mp-1234567\"",
+            "Examples: \"/tmp/output.cif\", \"structure_files/Al.cif\""
+          ],
+          "RETURNS_BRIEF": [
+            "Status message indicating successful structure retrieval and saving at required path."
+          ],
+          "RETURNS_DETAILED": [
+            "If successful, the tool retrieves the conventional crystallographic structure for the given Materials Project ID, converts it into CIF format, saves it at the specified path, and returns a confirmation message.\n        If any step fails, a descriptive error message is returned instead."
+          ],
+          "RETURNS_EXAMPLES": [
+            "- \"Structure saved successfully at /workspace/data/structure.cif\"\n            - \"Failed to retrieve or save structure: Invalid Materials Project ID\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         Raised if structure retrieval or file saving fails. \n         This generic exception is returned if any error occurs during Materials Project API access, structure conversion, or remote file write. The error message is descriptive and includes the failure reason. \n         To resolve this, check the MP ID for correctness, and verify that the specified file path is writable. If the MP ID is invalid or does not exist, you may need to use a different ID or check the Materials Project database for available materials. If the file path is incorrect or inaccessible, ensure that the directory exists and has the correct permissions for writing files. If the API key is invalid or the Materials Project service is down, you may need to use another tool.",
           "LIMITATIONS": "Known limitations:\n    - The tool requires a Materials Project API key to access the database, which is hardcoded in the function.\n    - It assumes that the MP ID provided corresponds to a valid material in the Materials Project database.\n    - The tool does not handle cases where the material has multiple structures or polymorphs; it retrieves only the first available structure."
         },
@@ -2524,13 +3060,35 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Ensure you have a valid CIF file containing the crystallographic structure of the material you want to simulate. Use the tool `get_structure_from_mp_text` to obtain one. \n    2.  Use this tool to convert the CIF file into a LAMMPS data file by providing the path to the CIF file, the desired output file path, and the atom style (if different from the default \"charge\"). \n    3.  The resulting LAMMPS data file can be used directly in LAMMPS simulations, using the tool `run_lammps` to run the simulation.",
           "CONTEXTUAL": "How this tool works:\n    - The tool reads the `.cif` file using `pymatgen.core.Structure.from_file` to create a Structure object.\n    - The `LammpsData.from_structure` function is called, using the chosen `atom_style` to format the atomic data accordingly.\n    - The resulting LAMMPS data file is written to the path specified by `output_file`.\n    - The tool does not apply force fields or assign charges explicitly; it assumes the structure is already complete and appropriate for the selected `atom_style`.",
           "SYNTACTICAL": "Usage examples:\n[\n    `convert_structure_to_lammps_data(\"/workspace/graphene.cif\", \"/workspace/output/graphene.data\")`,\n    `convert_structure_to_lammps_data(\"./structures/NaCl.cif\", \"./data/NaCl.data\", atom_style=\"atomic\")`,\n    `convert_structure_to_lammps_data(\"/data/SiO2.cif\", \"/converted_data/SiO2.data\", atom_style=\"charge\")`,\n    `convert_structure_to_lammps_data(\"MgO.cif\", \"MgO.data\", atom_style=\"charge\")`,\n    `convert_structure_to_lammps_data(\"/tmp/Al2O3.cif\", \"/tmp/Al2O3.data\", atom_style=\"atomic\")`\n]",
-          "ARGS_BRIEF": "Atom style to be used in the LAMMPS data file, defaults to \"charge\".",
-          "ARGS_DETAILED": "Specifies the LAMMPS atom style to use when formatting the data file.\n        Common values include:\n            - \"atomic\": Includes atomic positions and mass, no charges.\n            - \"charge\": Includes atomic charges in addition to position and mass.\n        The choice of style should match the `atom_style` directive in the LAMMPS input script.\n        Defaults to \"charge\" if nothing provided.\n        Valid values: \"real\", \"metal\", \"si\", \"cgs\", \"electron\", \"micro\", \"nano\", \"full\", \"\".",
-          "ARGS_SYNTACTICAL": "Format: \"one of the predefined LAMMPS atom styles as a lowercase string\".",
-          "ARGS_EXAMPLES": "Examples: \"real\", \"metal\".",
-          "RETURNS_BRIEF": "Status message indicating successful LAMMPS data file generation.",
-          "RETURNS_DETAILED": "If the conversion is successful, returns a confirmation message specifying the path where the LAMMPS data file has been saved. This message can be used for logging or downstream validation in automated simulation workflows.",
-          "RETURNS_EXAMPLES": "Example outputs:\n            - \"LAMMPS data file successfully written to: /workspace/output/graphene.data\"\n            - \"LAMMPS data file successfully written to: ./converted_data/SiO2.data\"",
+          "ARGS_BRIEF": [
+            "Path to the CIF-format structure file.",
+            "Path where the LAMMPS data file will be saved.",
+            "Atom style to be used in the LAMMPS data file, defaults to \"charge\"."
+          ],
+          "ARGS_DETAILED": [
+            "Path to the file containing the crystallographic structure.\n        This file is read and converted into a pymatgen `Structure` object internally before being serialized to LAMMPS data format.",
+            "This is the destination file path where the generated LAMMPS-compatible data file will be written.\n        The output file will contain the atomic positions, types, and other necessary information formatted for LAMMPS simulations.",
+            "Specifies the LAMMPS atom style to use when formatting the data file.\n        Common values include:\n            - \"atomic\": Includes atomic positions and mass, no charges.\n            - \"charge\": Includes atomic charges in addition to position and mass.\n        The choice of style should match the `atom_style` directive in the LAMMPS input script.\n        Defaults to \"charge\" if nothing provided.\n        Valid values: \"real\", \"metal\", \"si\", \"cgs\", \"electron\", \"micro\", \"nano\", \"full\", \"\"."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: 'string ending in \".cif\" correspoding to the path of the CIF file.'",
+            "Format: 'valid string representing a writable `.data` file path'.",
+            "Format: \"one of the predefined LAMMPS atom styles as a lowercase string\"."
+          ],
+          "ARGS_EXAMPLES": [
+            "Examples: \"/workspace/graphene.cif\", \"./data/SiO2.cif\"",
+            "Examples:\n            - \"/workspace/output/graphene.data\",\n            -\"./converted_data/SiO2.data\"",
+            "Examples: \"real\", \"metal\"."
+          ],
+          "RETURNS_BRIEF": [
+            "Status message indicating successful LAMMPS data file generation."
+          ],
+          "RETURNS_DETAILED": [
+            "If the conversion is successful, returns a confirmation message specifying the path where the LAMMPS data file has been saved. This message can be used for logging or downstream validation in automated simulation workflows."
+          ],
+          "RETURNS_EXAMPLES": [
+            "Example outputs:\n            - \"LAMMPS data file successfully written to: /workspace/output/graphene.data\"\n            - \"LAMMPS data file successfully written to: ./converted_data/SiO2.data\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         Raised if structure conversion or file writing fails. \n         This may occur due to issues such as:\n            - Invalid or malformed CIF file that cannot be parsed.\n            - File I/O errors when writing the output file (e.g., permission issues, invalid paths).\n            - Internal errors in the conversion process (e.g., unsupported atom styles, missing dependencies).\n        The error message will provide context for debugging the issue. \n         To resolve this, ensure the CIF file is well-formed and accessible, check that the output file path is valid and writable, and verify that the specified atom style is supported by LAMMPS. If the CIF file is malformed, you may need to correct it or use a different file.\n        If the atom style is unsupported, choose a valid atom style from the LAMMPS documentation.",
           "LIMITATIONS": "Known limitations:\n    - The tool assumes the CIF file is well-formed and contains a valid crystallographic structure.\n    - It does not perform any validation on the structure content beyond what pymatgen provides.\n    - If the CIF file contains unsupported features or is malformed, it may raise an error during parsing.\n    - The atom style must be one of the recognized LAMMPS styles; otherwise, it will raise an error."
         },
@@ -2560,13 +3118,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Ensure you have a valid LAMMPS input script ready for execution.\n    This script should contain all necessary simulation parameters, atom definitions, force fields, and commands. Additionally, ensure that the .data file is in place. You can create one using the function `convert_structure_to_lammps_data`.  \n    2.  Use this tool to run the LAMMPS simulation by providing the path to the input script. The tool will handle the remote execution and log file generation. \n    3.  After the simulation completes, check the generated log file for results, diagnostics, and any errors. The log file will be named based on the input script, with a `.log` extension. You can then proceed to analyze the results or use the output data in subsequent steps of your workflow.",
           "CONTEXTUAL": "How this tool works:\n    - The input LAMMPS script (typically ending in `.in`) is passed to the remote backend.\n    - The tool constructs a log file name by replacing the script's extension with `.log`.\n    - A remote function is invoked with the input file, the log file path.",
           "SYNTACTICAL": "Usage examples:\n[\n    `run_lammps(\"/workspace/lammps_inputs/graphene_sim.in\")`,\n    `run_lammps(\"./data/sio2_minimize.in\")`,\n    `run_lammps(\"minimize_bulk_sio2.in\")`,\n    `run_lammps(\"/path/to/simulation/input_script.in\")`,\n    `run_lammps(\"job123.lmp\", 2)`,\n]",
-          "ARGS_BRIEF": "Path to the LAMMPS input script file.",
-          "ARGS_DETAILED": "This parameter specifies the absolute or relative path to the input script used by LAMMPS. The script typically contains simulation settings such as atom style, force field parameters, boundary conditions, and compute directives. The file must be in LAMMPS-compatible format (`.in` extension is conventional but not required) and should not require interactive input during execution.",
-          "ARGS_SYNTACTICAL": "Format: string representing a file path; must be readable by the backend LAMMPS engine.",
-          "ARGS_EXAMPLES": "Examples:\n            - \"/workspace/lammps_inputs/graphene_sim.in\"\n            - \"./simulations/liquid_water.in\"\n            - \"minimize_bulk_sio2.in\"",
-          "RETURNS_BRIEF": "Message indicating simulation completion with log file location.",
-          "RETURNS_DETAILED": "On success, returns a message confirming the simulation run, the path to the latest input script used, and the corresponding log file. The log file contains detailed runtime diagnostics and output for verification.",
-          "RETURNS_EXAMPLES": "- \"Simulation ran successfully using input: simulations/run_graphene.in, log saved at: run_graphene.log\"\n            - \"Simulation ran successfully using input: ./jobs/job123.lmp, log saved at: job123.log\"",
+          "ARGS_BRIEF": [
+            "Path to the LAMMPS input script file."
+          ],
+          "ARGS_DETAILED": [
+            "This parameter specifies the absolute or relative path to the input script used by LAMMPS. The script typically contains simulation settings such as atom style, force field parameters, boundary conditions, and compute directives. The file must be in LAMMPS-compatible format (`.in` extension is conventional but not required) and should not require interactive input during execution."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: string representing a file path; must be readable by the backend LAMMPS engine."
+          ],
+          "ARGS_EXAMPLES": [
+            "Examples:\n            - \"/workspace/lammps_inputs/graphene_sim.in\"\n            - \"./simulations/liquid_water.in\"\n            - \"minimize_bulk_sio2.in\""
+          ],
+          "RETURNS_BRIEF": [
+            "Message indicating simulation completion with log file location."
+          ],
+          "RETURNS_DETAILED": [
+            "On success, returns a message confirming the simulation run, the path to the latest input script used, and the corresponding log file. The log file contains detailed runtime diagnostics and output for verification."
+          ],
+          "RETURNS_EXAMPLES": [
+            "- \"Simulation ran successfully using input: simulations/run_graphene.in, log saved at: run_graphene.log\"\n            - \"Simulation ran successfully using input: ./jobs/job123.lmp, log saved at: job123.log\""
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         Raised if the LAMMPS simulation fails due to invalid input or LAMMPS-specific error. \n         This exception is raised when the underlying LAMMPS execution raises a ValueError, which can occur due to issues such as missing sections in the input file, invalid parameters, or other LAMMPS-specific errors that prevent the simulation from running successfully.\n        The error message will provide context about the failure, such as missing commands or unsupported features in the input script. \n         To resolve this, check the input file for correctness, ensuring that all required sections are present and properly formatted.\n        Verify that the parameters used in the input script are valid for the LAMMPS version being used. If the error persists, consult the LAMMPS documentation or community forums for guidance on the specific error encountered. \n\n    Exception:\n         Raised on unexpected backend or runtime errors. \n         This generic exception is raised for any unexpected issues that occur during the execution of the LAMMPS simulation, such as backend unavailability, file system errors, or misconfigured modal runtime.\n        The error message will include details about the failure, which can help in debugging the issue. \n         To resolve this, check the backend configuration to ensure it is correctly set up and available.\n        Verify that the input file path is correct and accessible.\n        If the backend is misconfigured or unavailable, you may need to adjust the modal settings or ensure that the modal service is running properly.\n        If the error persists, consult the modal documentation or support resources for further assistance.",
           "LIMITATIONS": "Known limitations:\n    - The tool assumes that the input file is correctly formatted and does not require interactive input during execution.\n    - It does not validate the contents of the input file beyond basic file existence checks; any errors in the LAMMPS script will result in a runtime error during execution.\n    - The tool is designed to work with a specific backend (modal) and may not function correctly if the backend is misconfigured or unavailable."
         },
@@ -2588,13 +3160,31 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Ensure that a plot image file (e.g., PNG, JPG) exists at a known path and is readable by the tool. The plot should contain visible axes, labels, and data. \n    2.  Call this tool with the image path and a natural-language query about the visual features or directly readable values of the plot. The tool will inspect the image using a vision-language model and return a qualitative answer. \n    3.  Validate any important conclusions using the underlying data or dedicated analysis tools. If the answer is unclear or unreliable, consider replotting (e.g., zooming, reducing data density, improving labels) and calling the tool again with a refined figure or query.",
           "CONTEXTUAL": "How this tool works:\n    - The image at the given path is loaded and analyzed by a vision-language model (VLM).\n    - The model performs visual inspection only: it looks at shapes, trends, patterns, and visibly identifiable features in the figure.\n    - The model may report approximate values only when they can be directly read from the axes at a clearly visible feature (e.g., a labeled tick near a visible transition).\n    - The model does not have access to the underlying data and does not perform any numerical computation, fitting, or measurement.\n    - Because this tool relies on visual perception of a rendered image, its answers are limited by image resolution, figure clarity, marker density, and plotting choices, and may be noisy or occasionally incorrect.",
           "SYNTACTICAL": "Usage examples:\n[\n    `visualisation_tool(\"plots/density_vs_temperature.png\", \"At what temperature does the visible kink occur?\")`,\n    `visualisation_tool(\"plots/stress_strain.png\", \"Is there a clear yield point visible?\")`,\n    `visualisation_tool(\"plots/energy_vs_step.png\", \"Is there a plateau region, and where does it start?\")`,\n    `visualisation_tool(\"plots/spectrum.png\", \"Where is the main peak located on the x-axis?\")`,\n    `visualisation_tool(\"plots/density_vs_temperature.png\", \"Does the curve look linear or does it change regime?\")`,\n]",
-          "ARGS_BRIEF": "Natural-language question about the visual content of the plot.",
-          "ARGS_DETAILED": "This parameter contains the question asked by the user about the plot. The question should target visual features (e.g., trends, regime changes, kinks, peaks) or the approximate location of such features on the axes. Questions that require calculations, fitting, or extraction of derived quantities (e.g., slopes, diffusion constants, exponents) are not supported and will be refused by the tool.",
-          "ARGS_SYNTACTICAL": "Format: string containing a natural-language query.",
-          "ARGS_EXAMPLES": "Examples:\n            - \"Is there a visible plateau region?\"\n            - \"Where does the curve start to bend?\"\n            - \"Is there a sudden jump in this plot, and where does it occur?\"",
-          "RETURNS_BRIEF": "A qualitative, visually grounded answer to the query, or a refusal if the query requires a derived quantity.",
-          "RETURNS_DETAILED": "On success, returns a text response describing the relevant visual features of the plot and, if applicable, an approximate value read directly from the axis at a visually identifiable feature. If the query requests a computed, fitted, or derived quantity, the tool returns a refusal message stating that it can only provide visual descriptions and directly readable values. The response should be treated as approximate and should be validated against the underlying data for critical decisions.",
-          "RETURNS_EXAMPLES": "- \"There is a clear kink in the curve around the temperature labeled near 350 K, which appears to mark the transition.\"\n            - \"The curve shows a change in behavior roughly in the middle of the x-axis, where it becomes flatter.\"\n            - \"I can describe the plot and read off directly visible values, but I cannot perform calculations or extract derived quantities from it.\"",
+          "ARGS_BRIEF": [
+            "Path to the image file containing the plot to be analyzed.",
+            "Natural-language question about the visual content of the plot."
+          ],
+          "ARGS_DETAILED": [
+            "This parameter specifies the absolute or relative path to an image file (e.g., PNG, JPG) that contains a plot or figure. The image should be readable by the backend and should include visible axes, labels, and plotted data so that visual features and directly readable values can be identified.",
+            "This parameter contains the question asked by the user about the plot. The question should target visual features (e.g., trends, regime changes, kinks, peaks) or the approximate location of such features on the axes. Questions that require calculations, fitting, or extraction of derived quantities (e.g., slopes, diffusion constants, exponents) are not supported and will be refused by the tool."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: string representing a file path to an image file.",
+            "Format: string containing a natural-language query."
+          ],
+          "ARGS_EXAMPLES": [
+            "Examples:\n            - \"plots/density_vs_temperature.png\"\n            - \"./figures/msd_vs_time.jpg\"\n            - \"/workspace/results/phase_transition_plot.png\"",
+            "Examples:\n            - \"Is there a visible plateau region?\"\n            - \"Where does the curve start to bend?\"\n            - \"Is there a sudden jump in this plot, and where does it occur?\""
+          ],
+          "RETURNS_BRIEF": [
+            "A qualitative, visually grounded answer to the query, or a refusal if the query requires a derived quantity."
+          ],
+          "RETURNS_DETAILED": [
+            "On success, returns a text response describing the relevant visual features of the plot and, if applicable, an approximate value read directly from the axis at a visually identifiable feature. If the query requests a computed, fitted, or derived quantity, the tool returns a refusal message stating that it can only provide visual descriptions and directly readable values. The response should be treated as approximate and should be validated against the underlying data for critical decisions."
+          ],
+          "RETURNS_EXAMPLES": [
+            "- \"There is a clear kink in the curve around the temperature labeled near 350 K, which appears to mark the transition.\"\n            - \"The curve shows a change in behavior roughly in the middle of the x-axis, where it becomes flatter.\"\n            - \"I can describe the plot and read off directly visible values, but I cannot perform calculations or extract derived quantities from it.\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         Raised on unexpected errors during image loading, encoding, or backend model invocation. \n         This exception is raised if the image file cannot be read, the backend service is unavailable, or an unexpected runtime error occurs while processing the request. The error message will include details to help diagnose the failure. \n         To resolve this, verify that the image path is correct and accessible, ensure that the backend service is properly configured and running, and check for any file system or environment configuration issues.",
           "LIMITATIONS": "Known limitations:\n    - This tool is powered by a vision-language model and does not see the raw data—only the rendered image.\n    - The model may be noisy, approximate, or occasionally incorrect, especially for low-resolution, cluttered, or ambiguously labeled plots.\n    - Fine details, subtle transitions, or precise values may not be visually resolvable.\n    - The tool cannot perform calculations, fitting, or extract derived quantities, even if they could be inferred by a human.\n    - Any values reported are approximate and based solely on what is visually readable from the figure.\n    - Results should be validated against the underlying data, and for important cases it is recommended to iteratively refine the figure (e.g., zoom, replot, reduce clutter) and re-run the tool."
         },
@@ -3287,13 +3877,27 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n    - Connects to Materials Project API using authentication key\n    - Searches for the specified material ID (MP ID) in the database (MP ID is given as input parameter or if other tools are available to search for MP ID based on available information, then use those tools)\n    - Retrieves the pymatgen Structure object containing atomic positions and lattice parameters\n    - Converts the structure to CIF format string for compatibility with other tools\n    - Returns standardized crystallographic data suitable for further processing",
           "WORKFLOW_INTEGRATION": "Typical workflow integration example:\n    1.  Ensure that the other more specific tools are not suitable and you dont have to retrieve multiple structures\n    2.  Apply this tool with a valid MP ID to retrieve bulk structure \n    3.  Use the CIF output with slab generation tools like enumerate_slabs_text to create slab structures",
           "SYNTACTICAL": "Usage examples:\n    [\n        `get_structure_from_mp_text(\"mp-149\")`, # Silicon structure\n        `get_structure_from_mp_text(\"mp-20066\")`, # CO2 structure\n        `get_structure_from_mp_text(\"mp-2\")` # Other material\n        `get_structure_from_mp_text(\"mp-12345\")` # Example with a different MP ID\n        `get_structure_from_mp_text(\"mp-67890\")` # Another example with a different MP ID\n    ]",
-          "ARGS_BRIEF": "Materials Project identifier string.",
-          "ARGS_DETAILED": "The unique identifier used by Materials Project to catalog materials.\n               Should be in the format \"mp-XXXXX\" where XXXXX is a numerical ID.\n               This ID corresponds to a specific material entry in the Materials Project database.",
-          "ARGS_SYNTACTICAL": "\"mp-\" followed by digits (e.g., \"mp-149\", \"mp-20066\")",
-          "ARGS_EXAMPLES": "\"mp-149\" (Silicon), \"mp-20066\" (CO2), \"mp-2\" (Li)",
-          "RETURNS_BRIEF": "CIF content string containing the crystal structure data.",
-          "RETURNS_DETAILED": "A properly formatted CIF (Crystallographic Information File) string containing all necessary information about the crystal structure including lattice parameters, atomic positions, space group, and symmetry operations.\n             This format is widely compatible with crystallographic software and other structure analysis tools.",
-          "RETURNS_EXAMPLES": "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\"",
+          "ARGS_BRIEF": [
+            "Materials Project identifier string."
+          ],
+          "ARGS_DETAILED": [
+            "The unique identifier used by Materials Project to catalog materials.\n               Should be in the format \"mp-XXXXX\" where XXXXX is a numerical ID.\n               This ID corresponds to a specific material entry in the Materials Project database."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"mp-\" followed by digits (e.g., \"mp-149\", \"mp-20066\")"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"mp-149\" (Silicon), \"mp-20066\" (CO2), \"mp-2\" (Li)"
+          ],
+          "RETURNS_BRIEF": [
+            "CIF content string containing the crystal structure data."
+          ],
+          "RETURNS_DETAILED": [
+            "A properly formatted CIF (Crystallographic Information File) string containing all necessary information about the crystal structure including lattice parameters, atomic positions, space group, and symmetry operations.\n             This format is widely compatible with crystallographic software and other structure analysis tools."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"# generated using pymatgen\ndata_Si\n_symmetry_space_group_name_H-M   'P 1'\n_cell_length_a   3.83996459\n_cell_length_b   3.83996459\n_cell_length_c   18.81190774\n_cell_angle_alpha   90.00000000\n_cell_angle_beta   90.00000000\n_cell_angle_gamma   120.00000000\n_symmetry_Int_Tables_number   1\n_chemical_formula_structural   Si\n_chemical_formula_sum   Si8\n_cell_volume   240.22483885\n_cell_formula_units_Z   8\nloop_\n _symmetry_equiv_pos_site_id\n _symmetry_equiv_pos_as_xyz\n  1  'x, y, z'\nloop_\n _atom_site_type_symbol\n _atom_site_label\n _atom_site_symmetry_multiplicity\n _atom_site_fract_x\n _atom_site_fract_y\n _atom_site_fract_z\n _atom_site_occupancy\n  Si  Si0  1  0.83333333  0.41666667  0.10416667  1.0\n  Si  Si1  1  0.50000000  0.75000000  0.06250000  1.0\n  Si  Si2  1  0.16666667  0.08333333  0.27083333  1.0\n  Si  Si3  1  0.83333333  0.41666667  0.22916667  1.0\n  Si  Si4  1  0.50000000  0.75000000  0.43750000  1.0\n  Si  Si5  1  0.16666667  0.08333333  0.39583333  1.0\n  Si  Si6  1  0.83333333  0.41666667  0.60416667  1.0\n  Si  Si7  1  0.50000000  0.75000000  0.56250000  1.0\n\""
+          ],
           "RAISES": "Exceptions:\n        ConnectionError:  When unable to connect to Materials Project API \n                         Network connectivity issues or API server downtime \n                         Check internet connection and MP_API_KEY environment variable \n        KeyError:  When the specified MP ID is not found in the database \n                  Invalid or non-existent material ID provided \n                  Verify MP ID exists on Materials Project website or check MP ID syntax\n        AuthenticationError:  When API key is invalid or missing \n                              MP_API_KEY environment variable not set or expired \n                              Obtain valid API key from Materials Project and set environment variable",
           "LIMITATIONS": "Known limitations:\n    - Requires valid Materials Project API key to be set and internet connection\n    - Limited to materials available in the Materials Project database\n    - May not include the most recent experimental structures"
         },
@@ -3315,13 +3919,27 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project API using authentication credentials\n- Searches for all materials matching the specified chemical composition\n- Retrieves comprehensive data including energetics, structural, and electronic properties\n- Converts crystal structures to CIF format for compatibility with other tools\n- Sorts results by energy above hull (thermodynamic stability) for easy analysis",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you need to retrieve data for only one composition and there is no better tool \n2.  Apply this tool to retrieve all polymorphs for a composition \n3.  Use select_polymorphs_with_strategy to filter results or batch_retrieve_polymorphs for multiple compositions",
           "SYNTACTICAL": "Usage examples:\n[\n`get_bulk_polymorphs_data(\"TiO2\")`,  # Retrieve polymorphs for titanium dioxide\n`get_bulk_polymorphs_data(\"SiO2\")`,  # Retrieve polymorphs for silicon dioxide\n`get_bulk_polymorphs_data(\"Al2O3\n]",
-          "ARGS_BRIEF": "Chemical composition formula.",
-          "ARGS_DETAILED": "Chemical formula specifying the composition for which polymorphs should be retrieved.\n                Should follow standard chemical notation with element symbols.\n                The tool will find all known crystal structures with this exact composition in the Materials Project database.",
-          "ARGS_SYNTACTICAL": "\"Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)\"",
-          "ARGS_EXAMPLES": "\"TiO2\", \"SiO2\", \"Fe2O3\"",
-          "RETURNS_BRIEF": "JSON string containing comprehensive polymorph data sorted by stability.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing a list of dictionaries, each representing a polymorph with properties including Materials Project ID, CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information.\n         Results are sorted by energy above hull for easy identification of the most stable phases.",
-          "RETURNS_EXAMPLES": "'[{\"material_id\": \"mp-2657\", \"cif\": \"...\", \"energy_above_hull\": 0.0, \"formation_energy_per_atom\": -4.2, ...}]'",
+          "ARGS_BRIEF": [
+            "Chemical composition formula."
+          ],
+          "ARGS_DETAILED": [
+            "Chemical formula specifying the composition for which polymorphs should be retrieved.\n                Should follow standard chemical notation with element symbols.\n                The tool will find all known crystal structures with this exact composition in the Materials Project database."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)\""
+          ],
+          "ARGS_EXAMPLES": [
+            "\"TiO2\", \"SiO2\", \"Fe2O3\""
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string containing comprehensive polymorph data sorted by stability."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing a list of dictionaries, each representing a polymorph with properties including Materials Project ID, CIF structure, energy above hull, formation energy per atom, band gap, density, volume, number of sites, space group, and stability information.\n         Results are sorted by energy above hull for easy identification of the most stable phases."
+          ],
+          "RETURNS_EXAMPLES": [
+            "'[{\"material_id\": \"mp-2657\", \"cif\": \"...\", \"energy_above_hull\": 0.0, \"formation_energy_per_atom\": -4.2, ...}]'"
+          ],
           "RAISES": "Exceptions:\n    KeyError:  When the specified composition is not found in the database \n         Invalid or non-existent material composition is provided \n         Verify if the composition is valid\n    ValueError:  When Materials Project API key is not available \n                MP_API_KEY environment variable not set or invalid \n                If API key is not set, the tool might not work, hence choose some other tool \n    ConnectionError:  When unable to connect to Materials Project API \n                     Network connectivity issues or API server downtime \n                     Check internet connection if not working the tool might not work, hence choose some other tool",
           "LIMITATIONS": "Known limitations:\n- Limited to materials available in the Materials Project database\n- Requires valid API key and internet connection\n- Can retrieve polymorphs only for one composition at a time"
         },
@@ -3343,13 +3961,31 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project API using authentication credentials\n- Searches for all materials matching the specified chemical composition\n- Retrieves comprehensive data including energetics, structural, and electronic properties\n- Converts crystal structures to CIF format for compatibility with other tools\n- Sorts results by energy above hull (thermodynamic stability) for easy analysis\n- Saves results to specified file path in JSON format with proper formatting\n- Ensures data persistence and enables later processing by other tools\n- Validates file path and creates directories as needed",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you need to retrieve data for only one composition and there is no better tool  \n2.  Apply this tool to retrieve and save polymorph data and save to a file\n3.  Use consolidate_polymorph_datasets to combine multiple files of different composition or prepare_tabular_dataset",
           "SYNTACTICAL": "Usage examples:\n[\n`get_bulk_polymorphs_data_to_file(\"TiO2\", \"data/tio2_polymorphs.json\")`,  # Save polymorphs for titanium dioxide\n`get_bulk_polymorphs_data_to_file(\"SiO2\", \"data/si2_polymorphs.json\")`,  # Save polymorphs for silicon dioxide\n`get_bulk_polymorphs_data_to_file(\"Al2O3\", \"data/al2o3_polymorphs.json\")`,  # Save polymorphs for aluminum oxide\n`get_bulk_polymorphs_data_to_file(\"Fe2O3\", \"data/fe2o3_polymorphs.json\")`,  # Save polymorphs for iron\n]",
-          "ARGS_BRIEF": "File path where JSON data will be saved.",
-          "ARGS_DETAILED": "Complete file path including filename and extension where the polymorph data will be saved.\n              The path should be writable and the directory will be created if it doesn't exist.\n              Using .json extension is recommended for clarity.\n              If None, the tool will raise an error as the file path is required.",
-          "ARGS_SYNTACTICAL": "Valid file path with .json extension",
-          "ARGS_EXAMPLES": "\"data/tio2_polymorphs.json\", \"save_path/tio2_polymorphs.json\", \"results/Cu2O_polymorphsides.json\"",
-          "RETURNS_BRIEF": "File path where the polymorph data was saved.",
-          "RETURNS_DETAILED": "Returns the exact file path where the JSON data was successfully written.\n         This path can be used by subsequent tools for data loading and processing.\n         The file contains comprehensive polymorph data in JSON format, sorted by thermodynamic stability.",
-          "RETURNS_EXAMPLES": "\"data/tio2_polymorphs.json\"",
+          "ARGS_BRIEF": [
+            "Chemical composition formula.",
+            "File path where JSON data will be saved."
+          ],
+          "ARGS_DETAILED": [
+            "Chemical formula specifying the composition for which polymorphs should be retrieved and saved.\n                Should follow standard chemical notation with element symbols and subscripts.\n                The tool will find all known crystal structures with this exact composition in the Materials Project database.",
+            "Complete file path including filename and extension where the polymorph data will be saved.\n              The path should be writable and the directory will be created if it doesn't exist.\n              Using .json extension is recommended for clarity.\n              If None, the tool will raise an error as the file path is required."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Standard chemical formula (e.g., TiO2, Al2O3, CaTiO3)\"",
+            "Valid file path with .json extension"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"TiO2\" (titanium dioxide), \"SiO2\" (silicon dioxide), \"Fe2O3\" (iron oxide)",
+            "\"data/tio2_polymorphs.json\", \"save_path/tio2_polymorphs.json\", \"results/Cu2O_polymorphsides.json\""
+          ],
+          "RETURNS_BRIEF": [
+            "File path where the polymorph data was saved."
+          ],
+          "RETURNS_DETAILED": [
+            "Returns the exact file path where the JSON data was successfully written.\n         This path can be used by subsequent tools for data loading and processing.\n         The file contains comprehensive polymorph data in JSON format, sorted by thermodynamic stability."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"data/tio2_polymorphs.json\""
+          ],
           "RAISES": "Exceptions:\n    ValueError:  When save_path is None or API key is not available \n                Either save_path parameter is not provided or MP_API_KEY environment variable is missing \n                Provide valid save_path.\n               If MP_API_KEY is not set, tool might not work and use a different tool \n    IOError:  When unable to write to the specified file path \n             File path is not writable or directory doesn't exist \n             Check file permissions and ensure directory exists",
           "LIMITATIONS": "Known limitations:\n- Requires writable file system access\n- Limited to materials available in the Materials Project database\n- Can retrieve polymorphs only for one composition at a time\n- Does not validate file format compatibility with other tools"
         },
@@ -3379,13 +4015,39 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Iterates through list of compositions using robust error handling\n- Connects to Materials Project API using authentication credentials\n- Searches for all materials matching the specified chemical composition\n- Retrieves comprehensive data including energetics, structural, and electronic properties\n- Converts crystal structures to CIF format for compatibility with other tools\n- Applies energy filtering to focus on thermodynamically accessible phases\n- Limits number of structures per composition to prevent data explosion\n- Creates organized directory structure for systematic data storage\n- Provides comprehensive success/failure reporting for quality control",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1. Ensure you need to retrieve data for more than one composition and there is no better tool  \n2.  Apply this tool to retrieve polymorphs for multiple compositions \n3.  Use consolidate_polymorph_datasets to combine results or select_polymorphs_with_strategy for filtering",
           "SYNTACTICAL": "Usage examples:\n[\n`batch_retrieve_polymorphs([\"TiO2\", \"SiO2\", \"Al2O3\"], 0.3, 5, \"oxides_data\")`,  # Retrieve polymorphs for multiple oxides\n`batch_retrieve_polymorphs([\"CaTiO3\", \"SrTiO3\", \"BaTiO3\"], 0.5, 10, \"perovskites\")`,  # Retrieve polymorphs for perovskites\n`batch_retrieve_polymorphs([\"FeO\", \"Fe2O3\", \"Fe3O4\"], 0.2, 8, \"iron_oxides\")`,  # Retrieve polymorph\n]",
-          "ARGS_BRIEF": "Directory path for saving individual composition files. Defaults to \"polymorph_data\".",
-          "ARGS_DETAILED": "Base directory where individual JSON files for each composition will be saved.\n                   The directory will be created if it doesn't exist.\n                   Each composition will have its own JSON file named with the composition formula.\n                   This organization facilitates easy data management and selective loading of specific compositions.",
-          "ARGS_SYNTACTICAL": "\"Valid directory path\"",
-          "ARGS_EXAMPLES": "\"data/polymorphs\", \"materials/oxides\", \"results/batch_data\"",
-          "RETURNS_BRIEF": "JSON string with batch retrieval results and statistics.",
-          "RETURNS_DETAILED": "A comprehensive JSON report containing lists of successfully processed and failed compositions, total number of polymorphs retrieved, file paths for each composition, and summary statistics.\n         This enables quality control and tracking of the batch processing workflow.",
-          "RETURNS_EXAMPLES": "\"{\"successful_compositions\": [\"TiO2\", \"SiO2\"], \"failed_compositions\": [\"BadFormula\"], \"total_polymorphs\": 15, \"composition_files\": {...}}\"",
+          "ARGS_BRIEF": [
+            "List of chemical compositions to retrieve.",
+            "Maximum energy above hull threshold in eV/atom. Defaults to 0.5.",
+            "Maximum number of polymorphs per composition. Defaults to 10.",
+            "Directory path for saving individual composition files. Defaults to \"polymorph_data\"."
+          ],
+          "ARGS_DETAILED": [
+            "List of chemical formulas for which polymorphs should be retrieved.\n                 Each composition should follow standard chemical notation.\n                 The tool will process each composition independently and provide detailed success/failure reporting.\n                 Large lists are supported but may take significant time to process.",
+            "Energy threshold above the convex hull for including polymorphs.\n                          Only phases with energy above hull less than or equal to this value will be included.\n                          This filters out highly unstable phases while retaining potentially accessible metastable phases.\n                          Lower values give more stable phases but may miss interesting metastable structures.",
+            "Maximum number of polymorphs to retrieve for each composition, taken from the most stable phases first.\n                        This prevents data explosion for compositions with many known phases while ensuring the most important structures are captured.\n                        Higher values provide more comprehensive coverage but increase dataset size and processing time.",
+            "Base directory where individual JSON files for each composition will be saved.\n                   The directory will be created if it doesn't exist.\n                   Each composition will have its own JSON file named with the composition formula.\n                   This organization facilitates easy data management and selective loading of specific compositions."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "[\"composition1\", \"composition2\", ...]",
+            "positive float representing energy in eV/atom",
+            "positive integer",
+            "\"Valid directory path\""
+          ],
+          "ARGS_EXAMPLES": [
+            "[\"TiO2\", \"SiO2\", \"Al2O3\"], [\"CaTiO3\", \"SrTiO3\"], [\"FeO\", \"Fe2O3\"]",
+            "0.1 (very stable), 0.5 (standard), 1.0 (include metastable)",
+            "5 , 10 , 20",
+            "\"data/polymorphs\", \"materials/oxides\", \"results/batch_data\""
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with batch retrieval results and statistics."
+          ],
+          "RETURNS_DETAILED": [
+            "A comprehensive JSON report containing lists of successfully processed and failed compositions, total number of polymorphs retrieved, file paths for each composition, and summary statistics.\n         This enables quality control and tracking of the batch processing workflow."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"successful_compositions\": [\"TiO2\", \"SiO2\"], \"failed_compositions\": [\"BadFormula\"], \"total_polymorphs\": 15, \"composition_files\": {...}}\""
+          ],
           "RAISES": "Exceptions:\n    ValueError:  When parameters are invalid (negative energy, zero max_per_composition) \n                Invalid parameter values or missing API key \n                Check parameter values and ensure MP_API_KEY is set \n    IOError:  When unable to create save directory or write files \n             Directory creation failed or insufficient write permissions \n             Check directory permissions and available disk space",
           "LIMITATIONS": "Known limitations:\n- Requires writable file system access\n- Limited to materials available in the Materials Project database\n- Processing time scales linearly with number of compositions\n- Individual composition failures don't stop the entire batch\n- Does not validate file format compatibility with other tools"
         },
@@ -3423,13 +4085,35 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Parses JSON string into Python data structure.\n- Applies sorting based on specified key using numerical comparison.\n- Extracts the first element after sorting (best/optimal value).\n- Returns the specified property value from the optimal element.\n- Handles various data types and provides robust error handling.\n- To find the right keys from polymorph data maybe use io tools or python tools.",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First obtain JSON data from polymorph retrieval tools. \n2.  Apply this tool to identify optimal material based on specific criteria. \n3.  Use the returned value for further analysis or material selection.",
           "SYNTACTICAL": "Usage examples:\n`sort_and_get_first_from_json(polymorphs_json, \"energy_above_hull\", \"material_id\")`,\n`sort_and_get_first_from_json(polymorphs_json, \"band_gap\", \"cif\")`,\n`sort_and_get_first_from_json(polymorphs_json, \"density\", \"formation_energy_per_atom\")`,",
-          "ARGS_BRIEF": "Property name to return from the first element after sorting.",
-          "ARGS_DETAILED": "The dictionary key name for the value that should be returned from the first (optimal) element after sorting. This allows extraction of any property from the optimal structure, such as material_id for identification, cif for structure, or any other calculated property.",
-          "ARGS_SYNTACTICAL": "\"String matching a key in the JSON data dictionaries\"",
-          "ARGS_EXAMPLES": "\"material_id\", \"cif\", \"formation_energy_per_atom\"",
-          "RETURNS_BRIEF": "Value of the specified return_key from the first element after sorting.",
-          "RETURNS_DETAILED": "The value corresponding to the return_key from the material that has the smallest value for the sort_key. This could be a string (like material_id or CIF), a number (like energy or band gap), or any other data type stored in the JSON. The returned value represents the optimal material according to the specified sorting criterion.",
-          "RETURNS_EXAMPLES": "Example outputs: \"mp-2657\" (material ID), \"1.23\" (energy value), CIF structure string",
+          "ARGS_BRIEF": [
+            "JSON string containing the data to be sorted.",
+            "Property name to sort the data by.",
+            "Property name to return from the first element after sorting."
+          ],
+          "ARGS_DETAILED": [
+            "A JSON-formatted string containing a list of dictionaries, each representing a material or structure with various properties. The data should be structured consistently with numerical values for the sorting key. This is typically output from polymorph retrieval tools.",
+            "The dictionary key name that will be used for sorting the data. This should correspond to a numerical property in the JSON data. The sorting is performed in ascending order, so the first element will have the smallest value for this property. Common keys include energy_above_hull, band_gap, density, formation_energy_per_atom.",
+            "The dictionary key name for the value that should be returned from the first (optimal) element after sorting. This allows extraction of any property from the optimal structure, such as material_id for identification, cif for structure, or any other calculated property."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Valid JSON string containing list of dictionaries\"",
+            "\"String matching a key in the JSON data dictionaries\"",
+            "\"String matching a key in the JSON data dictionaries\""
+          ],
+          "ARGS_EXAMPLES": [
+            "{ \"materials\": [ { \"material_id\": \"mp-1234\", \"energy_above_hull\": 0.1, \"band_gap\": 1.5 }, { \"material_id\": \"mp-5678\", \"energy_above_hull\": 0.2, \"band_gap\": 2.0 } ] }",
+            "\"energy_above_hull\", \"band_gap\", \"density\"",
+            "\"material_id\", \"cif\", \"formation_energy_per_atom\""
+          ],
+          "RETURNS_BRIEF": [
+            "Value of the specified return_key from the first element after sorting."
+          ],
+          "RETURNS_DETAILED": [
+            "The value corresponding to the return_key from the material that has the smallest value for the sort_key. This could be a string (like material_id or CIF), a number (like energy or band gap), or any other data type stored in the JSON. The returned value represents the optimal material according to the specified sorting criterion."
+          ],
+          "RETURNS_EXAMPLES": [
+            "Example outputs: \"mp-2657\" (material ID), \"1.23\" (energy value), CIF structure string"
+          ],
           "RAISES": "Exceptions:\n    JSONDecodeError:  When the polymorph_data_json string is not valid JSON. \n                     Malformed JSON string or incorrect format. \n                     Verify JSON format and ensure proper string escaping. \n    KeyError:  When sort_key or return_key is not found in the data. \n              Specified keys don't exist in the JSON data dictionaries. \n              Check available keys in the JSON data and use valid key names. \n    IndexError:  When the JSON data is empty or contains no elements. \n                Empty list or no valid data after parsing. \n                Ensure JSON data contains at least one element.",
           "LIMITATIONS": "Known limitations:\n- Only returns the first element after sorting (single optimal result).\n- Sorting is performed in ascending order only.\n- Does not handle complex sorting criteria or multiple keys.\n- May not work properly with non-numerical sort keys."
         },
@@ -3459,13 +4143,43 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Applies energy threshold filtering to focus on accessible phases\n- Implements multiple selection algorithms based on different criteria\n- \"diverse_energy\" spreads selection across energy range for representative sampling\n- \"most_stable\" prioritizes thermodynamically favored phases\n- \"diverse_structure\" ensures different space groups are represented\n- Returns optimized subset maintaining important characteristics",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First obtain polymorph data using get_bulk_polymorphs_data or batch_retrieve_polymorphs \n2.  Apply this tool to select representative subset based on strategy \n3.  Use selected polymorphs for slab generation, ML dataset preparation, or detailed analysis.\nYou can even use this multiple times to prepare a set with different strategies",
           "SYNTACTICAL": "Usage examples:\n`select_polymorphs_with_strategy(polymorphs_json, \"most_stable\", 3, 0.3, False)`,\n`select_polymorphs_with_strategy(\"data/polymorphs.json\", \"diverse_structure\", 5, 0.5, True)`,\n`select_polymorphs_with_strategy(polymorphs_json, \"diverse_energy\", 8, 0.8, False)`,",
-          "ARGS_BRIEF": "Whether polymorphs_data is a file path. Defaults to False.",
-          "ARGS_DETAILED": "Boolean flag indicating whether the polymorphs_data parameter should be treated as a file path (True) or as a JSON string (False).\n            When True, the tool will read the JSON data from the specified file.\n            When False, it will parse the data directly from the string.",
-          "ARGS_SYNTACTICAL": "boolean value (True/False)",
-          "ARGS_EXAMPLES": "True (file path), False (JSON string)",
-          "RETURNS_BRIEF": "JSON string containing selected polymorphs based on the specified strategy.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing the selected subset of polymorphs, maintaining the same data structure as the input but with reduced number of entries.\n         The selection preserves important characteristics according to the chosen strategy while reducing dataset size for efficient processing.",
-          "RETURNS_EXAMPLES": "JSON string with 3-10 selected polymorphs based on strategy",
+          "ARGS_BRIEF": [
+            "JSON string or file path containing polymorph data.",
+            "Strategy for polymorph selection. Defaults to \"diverse_energy\".",
+            "Maximum number of polymorphs to select. Defaults to 5.",
+            "Maximum energy above hull in eV/atom. Defaults to 0.5.",
+            "Whether polymorphs_data is a file path. Defaults to False."
+          ],
+          "ARGS_DETAILED": [
+            "Either a JSON-formatted string containing polymorph data or a file path to a JSON file, depending on the is_path parameter.\n                    The data should contain polymorphs with properties like energy_above_hull, space_group, and other structural/energetic information.\n                    This is typically output from polymorph retrieval tools.",
+            "The algorithm used for selecting polymorphs from the dataset \"diverse_energy\" selects polymorphs distributed across the energy range for representative sampling.\n                       \"most_stable\" prioritizes the most thermodynamically stable phases.\n                       \"diverse_structure\" ensures different space groups are represented to capture structural diversity.",
+            "The maximum number of polymorphs to include in the final selection.\n                   This parameter controls the size of the resulting dataset and should be chosen based on computational resources and analysis requirements.\n                   Larger values provide more comprehensive coverage but increase processing time and computational cost.",
+            "Energy threshold above the convex hull for including polymorphs in the selection process.\n                     Only phases with energy above hull less than or equal to this value will be considered.\n                     This pre-filtering step ensures that only thermodynamically accessible phases are included in the analysis.",
+            "Boolean flag indicating whether the polymorphs_data parameter should be treated as a file path (True) or as a JSON string (False).\n            When True, the tool will read the JSON data from the specified file.\n            When False, it will parse the data directly from the string."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"JSON string or valid file path\"",
+            "\"diverse_energy\", \"most_stable\", or \"diverse_structure\"",
+            "positive integer",
+            "positive float representing energy in eV/atom",
+            "boolean value (True/False)"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"data/polymorphs.json\"",
+            "\"most_stable\" (stability focus), \"diverse_structure\" (structural diversity), \"diverse_energy\" (energy sampling)",
+            "3 (focused), 5 (standard), 10 (comprehensive)",
+            "0.1 (very stable), 0.5 (moderate), 1.0 (include metastable)",
+            "True (file path), False (JSON string)"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string containing selected polymorphs based on the specified strategy."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing the selected subset of polymorphs, maintaining the same data structure as the input but with reduced number of entries.\n         The selection preserves important characteristics according to the chosen strategy while reducing dataset size for efficient processing."
+          ],
+          "RETURNS_EXAMPLES": [
+            "JSON string with 3-10 selected polymorphs based on strategy"
+          ],
           "RAISES": "Exceptions:\n    ValueError:  When invalid selection strategy is specified \n                Strategy name not recognized or invalid parameters \n                Use valid strategy names: \"diverse_energy\", \"most_stable\", \"diverse_structure\" \n    FileNotFoundError:  When is_path=True but file doesn't exist \n                       Specified file path cannot be found or accessed \n                       Check file path and ensure file exists \n    JSONDecodeError:  When polymorphs_data contains invalid JSON \n                     Malformed JSON string or corrupted file \n                     Verify JSON format and data integrity",
           "LIMITATIONS": "Known limitations:\n- Selection strategies are predefined and not customizable\n- Energy threshold applies uniformly to all polymorphs\n- Does not consider complex multi-objective optimization\n- May not preserve specific structural features of interest"
         },
@@ -3503,13 +4217,31 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Reads multiple JSON files specified in the composition_files dictionary\n- Merges data while maintaining source composition information\n- Adds provenance metadata to track data origins\n- Provides comprehensive statistics about the consolidated dataset\n- Handles missing files and corrupted data gracefully\n- Saves the consolidated dataset to a specified output file",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First use batch_retrieve_polymorphs to create multiple composition files or run get_bulk_polymorphs_data multiple times to have data for multiple composition \n2.  Apply this tool to consolidate separate files into unified dataset \n3.  Use prepare_tabular_dataset or prepare_neural_network_dataset for ML preparation",
           "SYNTACTICAL": "Usage examples:\n`consolidate_polymorph_datasets({\"TiO2\": \"data/tio2.json\", \"SiO2\": \"data/sio2.json\"})`,\n`consolidate_polymorph_datasets(composition_files_dict, \"materials_database.json\")`,\n`consolidate_polymorph_datasets(batch_results[\"composition_files\"], \"consolidated.json\")`,",
-          "ARGS_BRIEF": "Path for the consolidated dataset file. Defaults to \"consolidated_polymorphs.json\".",
-          "ARGS_DETAILED": "File path where the consolidated dataset will be saved.\n                The file will contain all polymorphs from all compositions in a single JSON structure with added source composition information.\n                The directory will be created if it doesn't exist. Using .json extension is recommended for clarity.",
-          "ARGS_SYNTACTICAL": "Valid file path with .json extension",
-          "ARGS_EXAMPLES": "\"consolidated_polymorphs.json\", \"data/all_materials.json\", \"datasets/complete_set.json\"",
-          "RETURNS_BRIEF": "JSON string with consolidation results and comprehensive statistics.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing consolidation status, output file path, and detailed statistics including total number of polymorphs, number of compositions successfully included, average polymorphs per composition, and any processing errors.\n         This enables quality control and assessment of the consolidation process.",
-          "RETURNS_EXAMPLES": "\"{\"success\": true, \"output_path\": \"consolidated.json\", \"statistics\": {\"total_polymorphs\": 150, \"compositions_included\": 15, ...}}\"",
+          "ARGS_BRIEF": [
+            "Dictionary mapping compositions to their JSON file paths.",
+            "Path for the consolidated dataset file. Defaults to \"consolidated_polymorphs.json\"."
+          ],
+          "ARGS_DETAILED": [
+            "A dictionary where keys are composition names/formulas and values are file paths to their corresponding JSON files containing polymorph data.\n                      The tool will attempt to read each file and integrate the data while maintaining composition information.",
+            "File path where the consolidated dataset will be saved.\n                The file will contain all polymorphs from all compositions in a single JSON structure with added source composition information.\n                The directory will be created if it doesn't exist. Using .json extension is recommended for clarity."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"{\"composition1\": \"path1.json\", \"composition2\": \"path2.json\", ...}\"",
+            "Valid file path with .json extension"
+          ],
+          "ARGS_EXAMPLES": [
+            "{\"TiO2\": \"data/tio2_polymorphs.json\", \"SiO2\": \"data/sio2_polymorphs.json\"}",
+            "\"consolidated_polymorphs.json\", \"data/all_materials.json\", \"datasets/complete_set.json\""
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with consolidation results and comprehensive statistics."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing consolidation status, output file path, and detailed statistics including total number of polymorphs, number of compositions successfully included, average polymorphs per composition, and any processing errors.\n         This enables quality control and assessment of the consolidation process."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"success\": true, \"output_path\": \"consolidated.json\", \"statistics\": {\"total_polymorphs\": 150, \"compositions_included\": 15, ...}}\""
+          ],
           "RAISES": "Exceptions:\n    FileNotFoundError:  When one or more input files cannot be found \n                       File paths in composition_files dictionary are invalid \n                       Check file paths and ensure all files exist \n    JSONDecodeError:  When input files contain invalid JSON \n                     Corrupted or malformed JSON in input files \n                     Verify JSON format of input files \n    IOError:  When unable to write to output path \n             Output path is not writable or directory doesn't exist \n             Check write permissions and ensure output directory exists",
           "LIMITATIONS": "Known limitations:\n- Memory usage scales with total dataset size\n- Does not perform deduplication of identical structures\n- May not handle very large individual files efficiently\n- Does not validate data consistency across files"
         },
@@ -3539,13 +4271,47 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Processes energy threshold filtering and strategic selection algorithms\n- Automatically saves selected polymorphs to specified file path in JSON format\n- Ensures proper file formatting and directory creation as needed\n- Returns file path for integration with downstream tools",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First obtain polymorph data using get_bulk_polymorphs_data or load from file \n2.  Apply strategic selection and save results to persistent file storage \n3.  Use saved file with find_all_unique_slabs_upto_millerindex or other structural analysis tools",
           "SYNTACTICAL": "Usage examples:\n`select_polymorphs_with_strategy_to_file(polymorphs_json, \"selected_tio2.json\", \"most_stable\", 3, 0.3, False)`,\n`select_polymorphs_with_strategy_to_file(\"data/polymorphs.json\", \"output/diverse.json\", \"diverse_structure\", 5, 0.5, True)`,\n`select_polymorphs_with_strategy_to_file(batch_data, \"results/selected_materials.json\", \"diverse_energy\", 8, 0.8, False)`,",
-          "ARGS_BRIEF": "Whether polymorphs_data is a file path. Defaults to False.",
-          "ARGS_DETAILED": "Boolean flag indicating whether the polymorphs_data parameter should be treated as a file path (True) or as a JSON string (False).\n            When True, the tool will read the JSON data from the specified file.\n            This enables flexible input handling for different workflow patterns.",
-          "ARGS_SYNTACTICAL": "boolean value (True/False)",
-          "ARGS_EXAMPLES": "True (file input), False (JSON string input)",
-          "RETURNS_BRIEF": "File path where the selected polymorphs were saved.",
-          "RETURNS_DETAILED": "The complete file path where the selected polymorphs have been successfully saved.\n         This path can be used by subsequent tools for loading the selected dataset or for verification that the file was created correctly.\n         The file contains the subset of polymorphs selected according to the specified strategy.",
-          "RETURNS_EXAMPLES": "\"data/selected_tio2_polymorphs.json\"",
+          "ARGS_BRIEF": [
+            "JSON string or file path containing polymorph data.",
+            "File path where selected polymorphs will be saved.",
+            "Strategy for polymorph selection. Defaults to \"diverse_energy\".",
+            "Maximum number of polymorphs to select. Defaults to 5.",
+            "Maximum energy above hull in eV/atom. Defaults to 0.5.",
+            "Whether polymorphs_data is a file path. Defaults to False."
+          ],
+          "ARGS_DETAILED": [
+            "Either a JSON-formatted string containing polymorph data or a file path to a JSON file, depending on the is_path parameter.\n                    The data should contain polymorphs with properties like energy_above_hull, space_group, and other structural/energetic information for strategic selection.",
+            "Complete file path where the selected polymorph subset will be saved in JSON format.\n              The directory will be created if it doesn't exist.\n              This file can be used by subsequent tools or shared with collaborators.\n              Using .json extension is recommended for clarity.",
+            "The algorithm used for selecting polymorphs from the dataset.\n                       Options include \"diverse_energy\" for energy range sampling, \"most_stable\" for thermodynamic stability, and \"diverse_structure\" for structural diversity.\n                       Each strategy optimizes for different research objectives and analysis requirements.",
+            "The maximum number of polymorphs to include in the final selection and save to file.\n                   This parameter controls dataset size and should be chosen based on computational resources and analysis requirements.\n                   Larger values provide more comprehensive coverage but increase processing time.",
+            "Energy threshold above the convex hull for including polymorphs in the selection process.\n                     Only phases with energy above hull less than or equal to this value will be considered.\n                     This pre-filtering ensures thermodynamic accessibility of selected phases.",
+            "Boolean flag indicating whether the polymorphs_data parameter should be treated as a file path (True) or as a JSON string (False).\n            When True, the tool will read the JSON data from the specified file.\n            This enables flexible input handling for different workflow patterns."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"JSON string or valid file path\"",
+            "Valid file path with .json extension",
+            "\"diverse_energy\", \"most_stable\", or \"diverse_structure\"",
+            "positive integer",
+            "positive float representing energy in eV/atom",
+            "boolean value (True/False)"
+          ],
+          "ARGS_EXAMPLES": [
+            "JSON string from \"data/polymorphs.json\"",
+            "\"selected_polymorphs.json\", \"data/tio2_selected.json\", \"results/diverse_materials.json\"",
+            "\"most_stable\" (stability focus), \"diverse_structure\" (structural variety), \"diverse_energy\" (representative sampling)",
+            "3 (focused selection), 5 (standard), 10 (comprehensive coverage)",
+            "0.1, 0.5 (moderate threshold), 1.0 (include metastable)",
+            "True (file input), False (JSON string input)"
+          ],
+          "RETURNS_BRIEF": [
+            "File path where the selected polymorphs were saved."
+          ],
+          "RETURNS_DETAILED": [
+            "The complete file path where the selected polymorphs have been successfully saved.\n         This path can be used by subsequent tools for loading the selected dataset or for verification that the file was created correctly.\n         The file contains the subset of polymorphs selected according to the specified strategy."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"data/selected_tio2_polymorphs.json\""
+          ],
           "RAISES": "Exceptions:\n    ValueError:  When invalid selection strategy is specified \n                Strategy name not recognized or invalid parameters \n                Use valid strategy names: \"diverse_energy\", \"most_stable\", \"diverse_structure\" \n    FileNotFoundError:  When is_path=True but input file doesn't exist \n                       Specified input file path cannot be found or accessed \n                       Check input file path and ensure file exists \n    IOError:  When unable to write to the save_path location \n             Output directory doesn't exist or insufficient write permissions \n             Check output directory permissions and ensure path is writable",
           "LIMITATIONS": "Known limitations:\n- Selection strategies are predefined and not customizable\n- File overwriting occurs without warning if save_path already exists\n- Cannot validate file format compatibility with specific downstream tools\n- Energy threshold applies uniformly without consideration of composition differences"
         },
@@ -3591,13 +4357,35 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Loads JSON data from input file into a 'data' variable\n- Executes custom Python code in an isolated environment\n- Expects filtering logic to produce results in a 'filtered_data' variable\n- Saves filtered results to output file with comprehensive statistics\n- Provides detailed reporting on filtering effectiveness and data reduction\n- Use io tools or python tool to see the  keys from json if required",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure input JSON file exists and custom filtering code is prepared \n2.  Apply custom filtering logic to process and filter JSON data \n3.  Use filtered data for further analysis, ML preparation for example use prepare_tabular_dataset to prepare dataset from the output file",
           "SYNTACTICAL": "Usage examples:\n`filter_json_with_strategy(\"input.json\", \"output.json\", \"filtered_data = [x for x in data if x['energy'] < 0.5]\")`,\n`filter_json_with_strategy(\"materials.json\", \"stable.json\", \"filtered_data = [x for x in data if x['is_stable']]\")`,\n`filter_json_with_strategy(\"polymorphs.json\", \"filtered.json\", \"filtered_data = [x for x in data if x['band_gap'] > 1.0 and x['density'] < 5.0]\")`,",
-          "ARGS_BRIEF": "Python code string defining the filtering logic.",
-          "ARGS_DETAILED": "A string containing Python code that defines the filtering logic.\n                The code should expect the input data in a variable named 'data' and store the filtered results in a variable named 'filtered_data'.\n                The code can use any Python constructs including list comprehensions, complex conditions, and data transformations.",
-          "ARGS_SYNTACTICAL": "\"Valid Python code string with 'data' input and 'filtered_data' output\"",
-          "ARGS_EXAMPLES": "\"filtered_data = [x for x in data if x['energy'] < threshold]\", \"filtered_data = [x for x in data if x.get('stable', False)]\"",
-          "RETURNS_BRIEF": "JSON string with filtering results and comprehensive statistics.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing filtering status, original and filtered data counts, output file path, and percentage reduction achieved.\n         This provides comprehensive information about the filtering operation's effectiveness and enables quality control of the data processing pipeline.",
-          "RETURNS_EXAMPLES": "\"{\"success\": true, \"original_count\": 100, \"filtered_count\": 25, \"output_path\": \"filtered.json\", \"reduction_percentage\": 75.0}\"",
+          "ARGS_BRIEF": [
+            "Path to the input JSON file to be filtered.",
+            "Path where filtered JSON data will be saved.",
+            "Python code string defining the filtering logic."
+          ],
+          "ARGS_DETAILED": [
+            "Complete file path to the JSON file containing the data to be filtered.\n                    The file should contain valid JSON data, typically a list of dictionaries representing materials or structures with various properties.\n                    The file must be readable and contain well-formed JSON.",
+            "Complete file path where the filtered JSON data will be written.\n                     The directory will be created if it doesn't exist.\n                     The output file will contain the filtered subset of the input data in the same JSON format.\n                     Using .json extension is recommended for clarity.",
+            "A string containing Python code that defines the filtering logic.\n                The code should expect the input data in a variable named 'data' and store the filtered results in a variable named 'filtered_data'.\n                The code can use any Python constructs including list comprehensions, complex conditions, and data transformations."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Valid file path to JSON file\"",
+            "Valid file path with .json extension",
+            "\"Valid Python code string with 'data' input and 'filtered_data' output\""
+          ],
+          "ARGS_EXAMPLES": [
+            "\"data/materials.json\", \"polymorphs/all_structures.json\", \"input/dataset.json\"",
+            "\"output/filtered_materials.json\", \"results/stable_phases.json\", \"processed/selected_data.json\"",
+            "\"filtered_data = [x for x in data if x['energy'] < threshold]\", \"filtered_data = [x for x in data if x.get('stable', False)]\""
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with filtering results and comprehensive statistics."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing filtering status, original and filtered data counts, output file path, and percentage reduction achieved.\n         This provides comprehensive information about the filtering operation's effectiveness and enables quality control of the data processing pipeline."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"success\": true, \"original_count\": 100, \"filtered_count\": 25, \"output_path\": \"filtered.json\", \"reduction_percentage\": 75.0}\""
+          ],
           "RAISES": "Exceptions:\n    FileNotFoundError:  When the input JSON file doesn't exist \n                       Input file path is invalid or file is not accessible \n                       Verify input file path exists and is readable \n    JSONDecodeError:  When the input file contains invalid JSON \n                     Malformed JSON in the input file \n                     Verify JSON format and fix any syntax errors \n    SyntaxError:  When the custom filtering code contains syntax errors \n                 Invalid Python syntax in the custom_code parameter \n                 Check and fix Python syntax in the filtering code \n    RuntimeError:  When the custom filtering code fails during execution \n                  Runtime errors in the filtering logic \n                  Debug filtering code and ensure all variables are properly defined",
           "LIMITATIONS": "Known limitations:\n- Custom code execution is isolated and cannot import external libraries\n- Cannot validate filtered data structure or content\n- Limited error reporting for complex filtering logic"
         },
@@ -3631,13 +4419,47 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Loads materials data (json data) and extracts basic properties (density, volume, composition)\n- Implements advanced feature engineering including structural and electronic properties\n- Handles categorical encoding and missing value imputation automatically\n- Performs data normalization using standard scaling.\n- Creates train/test splits with proper randomization and metadata tracking",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First consolidate materials data using consolidate_polymorph_datasets \n2.  Prepare comprehensive tabular dataset with engineered features \n3.  Use train_xgboost_model or other ML training tools with prepared dataset",
           "SYNTACTICAL": "Usage examples:\n`prepare_tabular_dataset(\"consolidated.json\", \"ml_data\", \"formation_energy_per_atom\", \"advanced\", 0.2, True)`,\n`prepare_tabular_dataset(\"polymorphs.json\", \"datasets\", \"band_gap\", \"basic\", 0.15, False)`,\n`prepare_tabular_dataset(\"materials.json\", \"output\", \"bulk_modulus\", \"custom\", 0.25, True)`,",
-          "ARGS_BRIEF": "Whether to normalize features. Defaults to True.",
-          "ARGS_DETAILED": "Boolean flag controlling whether features should be normalized using standard scaling (zero mean, unit variance).\n              Normalization is generally recommended for most ML algorithms as it ensures features have similar scales and prevents any single feature from dominating the model.",
-          "ARGS_SYNTACTICAL": "boolean value (True/False)",
-          "ARGS_EXAMPLES": "True (recommended), False (when features already normalized)",
-          "RETURNS_BRIEF": "JSON string with comprehensive dataset preparation results and file paths.",
-          "RETURNS_DETAILED": "A detailed JSON-formatted string containing preparation success status, file paths for training and test data, normalization parameters, dataset statistics, feature information, and metadata.\n         This provides complete information about the prepared dataset for subsequent ML workflows.",
-          "RETURNS_EXAMPLES": "\"{\"success\": true, \"train_path\": \"ml_data_train.csv\", \"test_path\": \"ml_data_test.csv\", \"dataset_info\": {...}}\"",
+          "ARGS_BRIEF": [
+            "Path to consolidated polymorphs JSON file.",
+            "Base path for saving dataset files.",
+            "Property to predict. Defaults to \"formation_energy_per_atom\".",
+            "Feature engineering strategy. Defaults to \"basic\".",
+            "Fraction of data for test set. Defaults to 0.2.",
+            "Whether to normalize features. Defaults to True."
+          ],
+          "ARGS_DETAILED": [
+            "Complete file path to a JSON file containing consolidated polymorph data with materials properties and crystal structures.",
+            "Base directory and filename prefix where the prepared dataset files will be saved.\n                Multiple files will be created including training data, test data, and metadata.\n                The tool will create the directory structure if it doesn't exist.",
+            "The materials property that will serve as the prediction target for machine learning models.\n                    This should be a key present in the polymorphs data with numerical values.\n                    Common targets include formation energy, band gap, bulk modulus, and other calculated properties.",
+            "The level of feature engineering to apply to the materials data.\n                        \"basic\" extracts fundamental properties, \"advanced\" includes structural and electronic descriptors, and \"custom\" applies specialized feature extraction.",
+            "The proportion of the dataset to reserve for testing, expressed as a decimal fraction.\n               The remaining data will be used for training.\n               Common values range from 0.1 to 0.3 depending on dataset size and validation strategy.\n               Larger test sets provide more reliable evaluation but reduce training data.",
+            "Boolean flag controlling whether features should be normalized using standard scaling (zero mean, unit variance).\n              Normalization is generally recommended for most ML algorithms as it ensures features have similar scales and prevents any single feature from dominating the model."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Valid file path to JSON file with materials data\"",
+            "\"Valid directory path and filename prefix\"",
+            "\"String matching property key in JSON data\"",
+            "\"basic\", \"advanced\", or \"custom\"",
+            "float between 0.0 and 1.0",
+            "boolean value (True/False)"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"consolidated_polymorphs.json\", \"data/materials_database.json\", \"datasets/all_oxides.json\"",
+            "\"ml_datasets/formation_energy\", \"data/tabular\", \"output/materials_ml\"",
+            "\"formation_energy_per_atom\", \"band_gap\", \"bulk_modulus\", \"density\"",
+            "\"basic\", \"advanced\" , \"custom\"",
+            "0.1 (small test set), 0.2 (standard), 0.3 (large test set)",
+            "True (recommended), False (when features already normalized)"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with comprehensive dataset preparation results and file paths."
+          ],
+          "RETURNS_DETAILED": [
+            "A detailed JSON-formatted string containing preparation success status, file paths for training and test data, normalization parameters, dataset statistics, feature information, and metadata.\n         This provides complete information about the prepared dataset for subsequent ML workflows."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"success\": true, \"train_path\": \"ml_data_train.csv\", \"test_path\": \"ml_data_test.csv\", \"dataset_info\": {...}}\""
+          ],
           "RAISES": "Exceptions:\n    FileNotFoundError:  When polymorphs JSON file doesn't exist \n                       Invalid file path or missing input data file \n                       Verify file path and ensure input data file exists \n    KeyError:  When target property is not found in the data \n              Specified target property doesn't exist in materials data \n              Check available properties in data and use valid target property name \n    ValueError:  When feature engineering fails or data format is invalid \n                Structural data cannot be processed or insufficient valid samples \n                Check data format and ensure structures are valid for feature extraction",
           "LIMITATIONS": "Known limitations:\n- Advanced feature engineering requires valid crystal structure data\n- Processing time scales with dataset size and feature engineering complexity\n- Some features may not be meaningful for all material types\n- Cannot handle missing structural data gracefully in advanced mode"
         },
@@ -3683,13 +4505,27 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Connects to Materials Project thermodynamics database via API\n- Retrieves calculated formation energies and stability information\n- Provides energy above hull data for phase stability assessment\n- Reports decomposition pathways and competing phases\n- Returns comprehensive thermodynamic dataset with proper energy corrections",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure Material ID is valid \n2.  Retrieve comprehensive thermodynamic data for target material \n3.  Use thermodynamic data for stability analysis or phase diagram studies",
           "SYNTACTICAL": "Usage examples:\n`get_mp_thermo_data(\"mp-149\")   # Silicon thermodynamic data`,\n`get_mp_thermo_data(\"mp-2657\")  # TiO2 thermodynamic properties`,\n`get_mp_thermo_data(\"mp-1143\")  # Al2O3 stability information`,",
-          "ARGS_BRIEF": "Materials Project ID for the target material.",
-          "ARGS_DETAILED": "The unique Materials Project identifier for the material of interest.\n                Should be in the format \"mp-XXXXX\" where XXXXX is the numerical ID.\n                The material must exist in the Materials Project database and have thermodynamic calculations available.",
-          "ARGS_SYNTACTICAL": "\"mp-\" followed by digits (e.g., \"mp-149\", \"mp-2657\")",
-          "ARGS_EXAMPLES": "\"mp-149\" (Silicon), \"mp-2657\" (TiO2), \"mp-1143\" (Al2O3)",
-          "RETURNS_BRIEF": "JSON string containing comprehensive thermodynamic data and stability information.",
-          "RETURNS_DETAILED": "A JSON-formatted string containing thermodynamic properties including material ID, thermodynamic functional used, formation energy per atom, energy above hull, decomposition products, stability status, energy type, and uncorrected energies.\n         Returns error information if thermodynamic data is not available.",
-          "RETURNS_EXAMPLES": "'[{\"material_id\": \"mp-149\", \"formation_energy_per_atom\": -4.2, \"energy_above_hull\": 0.0, \"is_stable\": true, ...}]'",
+          "ARGS_BRIEF": [
+            "Materials Project ID for the target material."
+          ],
+          "ARGS_DETAILED": [
+            "The unique Materials Project identifier for the material of interest.\n                Should be in the format \"mp-XXXXX\" where XXXXX is the numerical ID.\n                The material must exist in the Materials Project database and have thermodynamic calculations available."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"mp-\" followed by digits (e.g., \"mp-149\", \"mp-2657\")"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"mp-149\" (Silicon), \"mp-2657\" (TiO2), \"mp-1143\" (Al2O3)"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string containing comprehensive thermodynamic data and stability information."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON-formatted string containing thermodynamic properties including material ID, thermodynamic functional used, formation energy per atom, energy above hull, decomposition products, stability status, energy type, and uncorrected energies.\n         Returns error information if thermodynamic data is not available."
+          ],
+          "RETURNS_EXAMPLES": [
+            "'[{\"material_id\": \"mp-149\", \"formation_energy_per_atom\": -4.2, \"energy_above_hull\": 0.0, \"is_stable\": true, ...}]'"
+          ],
           "RAISES": "Exceptions:\n    ValueError:  When Materials Project API key is not available \n                MP_API_KEY environment variable not set or invalid \n                Obtain valid API key from Materials Project and set environment variable \n    ConnectionError:  When unable to connect to Materials Project API \n                     Network connectivity issues or API server problems \n                     Check internet connection and try again later \n    KeyError:  When material ID is not found or has no thermodynamic data \n              Invalid material ID or thermodynamic properties not calculated \n              Verify material ID exists and has thermodynamic calculations",
           "LIMITATIONS": "Known limitations:\n- Limited to materials with calculated thermodynamic properties in Materials Project\n- Thermodynamic accuracy depends on computational methodology and corrections applied\n- May not include experimental thermodynamic data or recent calculations\n- Cannot provide thermodynamic data for custom or modified compositions"
         },
@@ -3711,13 +4547,43 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Loads training and test data from CSV files with proper feature/target separation\n- Applies XGBoost regression with hyperparameters\n- Performs training with automatic validation and metric calculation\n- Generates comprehensive evaluation including MAE, RMSE, R2, and feature importance\n- Saves trained model and detailed results for future use and analysis",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First prepare tabular dataset using prepare_tabular_dataset \n2.  Train XGBoost model with optimized hyperparameters \n3.  Use evaluate_xgboost_model for detailed analysis or model for predictions",
           "SYNTACTICAL": "Usage examples:\n`train_xgboost_model(\"train.csv\", \"test.csv\", \"model.pkl\", \"formation_energy_per_atom\")`,\n`train_xgboost_model(\"train.csv\", \"test.csv\", \"model.pkl\", \"band_gap\", {\"n_estimators\": 200})`,\n`train_xgboost_model(\"data/train.csv\", \"data/test.csv\", \"models/xgb_model.pkl\", \"energy\")`,",
-          "ARGS_BRIEF": "Optional dictionary of XGBoost hyperparameters.",
-          "ARGS_DETAILED": "Dictionary containing XGBoost hyperparameters to override default values.\n                    Can include parameters like n_estimators, max_depth, learning_rate, subsample, etc.\n                    If None, optimized default parameters will be used.\n                    Proper hyperparameter tuning can significantly improve model performance.",
-          "ARGS_SYNTACTICAL": "\"{\"param_name\": value, ...} or None'",
-          "ARGS_EXAMPLES": "{\"n_estimators\": 200, \"max_depth\": 8}, {\"learning_rate\": 0.05}, None",
-          "RETURNS_BRIEF": "JSON string with comprehensive training results and model performance metrics.",
-          "RETURNS_DETAILED": "A detailed JSON-formatted string containing training success status, model performance metrics (MAE, RMSE, R2), feature importance rankings, hyperparameters used, dataset information, and file paths for saved model and results.\n         This enables comprehensive model evaluation and comparison.",
-          "RETURNS_EXAMPLES": "\"{\"success\": true, \"test_metrics\": {\"mae\": 0.12, \"rmse\": 0.18, \"r2\": 0.85}, \"feature_importance\": {...}, \"model_path\": \"model.pkl\"}\"",
+          "ARGS_BRIEF": [
+            "Path to training data CSV file.",
+            "Path to test data CSV file.",
+            "Path to save the trained model file in .pkl format",
+            "Name of the target column for prediction. Defaults to \"formation_energy_per_atom\".",
+            "Optional dictionary of XGBoost hyperparameters."
+          ],
+          "ARGS_DETAILED": [
+            "Complete file path to the CSV file containing training data with features and target column.\n                    The file should have a header row with column names and be properly formatted with numerical features.",
+            "Complete file path to the CSV file containing test data with the same structure as training data.\n                   Used for independent model evaluation and performance assessment.\n                   Should have identical column structure to training data.",
+            "Complete file path where the trained XGBoost model will be saved using joblib serialization.\n                    The model can be loaded later for predictions or further analysis.\n                    Using .pkl extension is recommended for clarity.",
+            "The column name in the CSV files that contains the target values to predict.\n                  This column will be separated from features during training.\n                  Common targets include formation energy, band gap, bulk modulus, and other materials properties.",
+            "Dictionary containing XGBoost hyperparameters to override default values.\n                    Can include parameters like n_estimators, max_depth, learning_rate, subsample, etc.\n                    If None, optimized default parameters will be used.\n                    Proper hyperparameter tuning can significantly improve model performance."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Valid file path to CSV file with header\"",
+            "\"Valid file path to CSV file with header\"",
+            "\"Valid file path with .pkl extension\"",
+            "\"String matching column name in CSV files\"",
+            "\"{\"param_name\": value, ...} or None'"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"data/train.csv\", \"datasets/materials_train.csv\", \"ml_data/train_features.csv\"",
+            "\"data/test.csv\", \"datasets/materials_test.csv\", \"ml_data/test_features.csv\"",
+            "\"models/xgb_model.pkl\", \"trained_models/formation_energy_model.pkl\", \"results/model.pkl\"",
+            "\"formation_energy_per_atom\", \"band_gap\", \"bulk_modulus\", \"density\"",
+            "{\"n_estimators\": 200, \"max_depth\": 8}, {\"learning_rate\": 0.05}, None"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with comprehensive training results and model performance metrics."
+          ],
+          "RETURNS_DETAILED": [
+            "A detailed JSON-formatted string containing training success status, model performance metrics (MAE, RMSE, R2), feature importance rankings, hyperparameters used, dataset information, and file paths for saved model and results.\n         This enables comprehensive model evaluation and comparison."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"success\": true, \"test_metrics\": {\"mae\": 0.12, \"rmse\": 0.18, \"r2\": 0.85}, \"feature_importance\": {...}, \"model_path\": \"model.pkl\"}\""
+          ],
           "RAISES": "Exceptions:\n    FileNotFoundError:  When training or test data files don't exist \n                       Invalid file paths or missing CSV files \n                       Verify file paths exist and contain properly formatted CSV data \n    KeyError:  When target column is not found in the data \n              Specified target column doesn't exist in CSV files \n              Check column names in CSV files and use valid target column name \n    ValueError:  When data contains invalid values or format issues \n                Non-numerical data in features or target, or insufficient data \n                Ensure data is properly preprocessed and contains sufficient samples",
           "LIMITATIONS": "Known limitations:\n- Requires tabular data format (csv) with numerical features\n- Model performance depends on feature engineering quality\n- May not capture complex non-linear relationships as well as deep learning\n- Hyperparameter tuning requires multiple runs"
         },
@@ -3759,13 +4625,39 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Loads trained XGBoost model from serialized file\n- Processes test data with identical structure to training data\n- Calculates comprehensive regression metrics (MAE, RMSE, R2, MAPE)\n- Performs detailed error analysis including prediction ranges and distributions\n- Extracts and ranks feature importance for model interpretability\n- Provides statistical analysis of prediction quality and model behavior",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First train model using train_xgboost_model and prepare test data \n2.  Apply comprehensive evaluation to assess model performance \n3.  Use results for model comparison, hyperparameter tuning, or deployment decisions",
           "SYNTACTICAL": "Usage examples:\n`evaluate_xgboost_model(\"trained_model.pkl\", \"test_data.csv\", \"formation_energy_per_atom\", True)`,\n`evaluate_xgboost_model(\"models/xgb_model.pkl\", \"data/test.csv\", \"band_gap\", False)`,\n`evaluate_xgboost_model(\"model.pkl\", \"test.csv\", \"energy\", True)`,",
-          "ARGS_BRIEF": "Whether to include detailed analysis and feature importance. Defaults to True.",
-          "ARGS_DETAILED": "Boolean flag controlling the depth of analysis performed.\n                      When True, includes prediction ranges (min, max, std), error analysis (mean error, error std, max errors), and top 10 feature importance rankings.\n                      When False, provides only basic metrics (MAE, RMSE, R2, MAPE) for quick assessment.\n                      Detailed analysis is recommended for thorough model evaluation and interpretation.",
-          "ARGS_SYNTACTICAL": "boolean value (True/False)",
-          "ARGS_EXAMPLES": "True (comprehensive analysis), False (basic metrics only)",
-          "RETURNS_BRIEF": "JSON string with comprehensive evaluation metrics and analysis results.",
-          "RETURNS_DETAILED": "A detailed JSON-formatted string containing evaluation success status, comprehensive performance metrics (MAE, RMSE, R2, MAPE), prediction statistics (min/max/std), error analysis (mean error, error std, max positive/negative errors), and top 10 feature importance rankings when detailed analysis is enabled.\n         This provides complete model assessment for validation and comparison purposes.",
-          "RETURNS_EXAMPLES": "\"{\"success\": true, \"evaluation_metrics\": {\"mae\": 0.15, \"rmse\": 0.22, \"r2\": 0.83, \"mape\": 3.45, \"feature_importance\": {...}}}\"",
+          "ARGS_BRIEF": [
+            "Path to the saved XGBoost model file.",
+            "Path to test data CSV file with same structure as training data.",
+            "Name of the target column for evaluation. Defaults to \"formation_energy_per_atom\".",
+            "Whether to include detailed analysis and feature importance. Defaults to True."
+          ],
+          "ARGS_DETAILED": [
+            "Complete file path to the serialized XGBoost model.\n               The model should be saved using joblib or pickle and contain a trained XGBoost regressor ready for evaluation.\n               The file must be readable and contain a valid model object.",
+            "Complete file path to CSV file containing test data with identical column structure to the training data used for model creation.\n                   Must include both feature columns and the target column for evaluation.\n                   The data should be preprocessed consistently with the training data.",
+            "The column name in the test CSV that contains the true values for comparison with model predictions.\n                  This should match the target column used during training.\n                  Common targets include formation energy, band gap, and other materials properties.",
+            "Boolean flag controlling the depth of analysis performed.\n                      When True, includes prediction ranges (min, max, std), error analysis (mean error, error std, max errors), and top 10 feature importance rankings.\n                      When False, provides only basic metrics (MAE, RMSE, R2, MAPE) for quick assessment.\n                      Detailed analysis is recommended for thorough model evaluation and interpretation."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Valid file path to .pkl model file\"",
+            "\"Valid file path to CSV file with header\"",
+            "\"String matching column name in test CSV\"",
+            "boolean value (True/False)"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"models/xgb_model.pkl\", \"trained_models/formation_energy_model.pkl\", \"model.pkl\"",
+            "\"data/test.csv\", \"datasets/materials_test.csv\", \"evaluation/test_data.csv\"",
+            "\"formation_energy_per_atom\", \"band_gap\", \"bulk_modulus\", \"density\"",
+            "True (comprehensive analysis), False (basic metrics only)"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with comprehensive evaluation metrics and analysis results."
+          ],
+          "RETURNS_DETAILED": [
+            "A detailed JSON-formatted string containing evaluation success status, comprehensive performance metrics (MAE, RMSE, R2, MAPE), prediction statistics (min/max/std), error analysis (mean error, error std, max positive/negative errors), and top 10 feature importance rankings when detailed analysis is enabled.\n         This provides complete model assessment for validation and comparison purposes."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"success\": true, \"evaluation_metrics\": {\"mae\": 0.15, \"rmse\": 0.22, \"r2\": 0.83, \"mape\": 3.45, \"feature_importance\": {...}}}\""
+          ],
           "RAISES": "Exceptions:\n    FileNotFoundError:  When model file or test data file doesn't exist \n                       Invalid file paths or missing files \n                       Verify file paths exist and are accessible \n    KeyError:  When target column is not found in test data \n              Specified target column doesn't exist in CSV \n              Check column names in test data and use valid target column \n    ValueError:  When model and data are incompatible or contain invalid values \n                Feature mismatch between model and data, or non-numerical values \n                Ensure test data has same features as training data and proper preprocessing",
           "LIMITATIONS": "Known limitations:\n- Requires identical feature structure between training and test data\n- Cannot evaluate model performance on different target variables\n- Feature importance interpretation depends on training data characteristics\n- May not capture model performance on out-of-distribution data\n- MAPE metric becomes unreliable when target values are close to zero"
         },
@@ -3799,13 +4691,39 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Implements k-fold cross-validation with stratified data splitting\n- Trains XGBoost models on k-1 folds and evaluates on the held-out fold\n- Calculates performance metrics (R2, MAE) across all folds\n- Provides statistical analysis including mean performance and variance\n- Uses consistent hyperparameters across all folds for fair comparison",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  First prepare training data using prepare_tabular_dataset and train a model using train_xgboost_model \n2.  Apply cross-validation to assess model stability and performance \n3.  Use results for hyperparameter optimization or proceed to train_xgboost_model",
           "SYNTACTICAL": "Usage examples:\n`perform_cross_validation(\"train_data.csv\", \"formation_energy_per_atom\", 5, None)`,\n`perform_cross_validation(\"data/train.csv\", \"band_gap\", 10, {\"n_estimators\": 200})`,\n`perform_cross_validation(\"training.csv\", \"energy\", 3, {\"max_depth\": 8, \"learning_rate\": 0.05})`,",
-          "ARGS_BRIEF": "Optional XGBoost hyperparameters for cross-validation.",
-          "ARGS_DETAILED": "Dictionary containing XGBoost hyperparameters to use across all cross-validation folds.\n                    If None, optimized default parameters will be used.\n                    Consistent hyperparameters across folds ensure fair comparison and reliable performance estimates.\n                    Useful for testing specific hyperparameter configurations.",
-          "ARGS_SYNTACTICAL": "\"{\"param_name\": value, ...} or None'",
-          "ARGS_EXAMPLES": "{\"n_estimators\": 150, \"max_depth\": 7}, {\"learning_rate\": 0.05}, None",
-          "RETURNS_BRIEF": "JSON string with comprehensive cross-validation results and statistical analysis.",
-          "RETURNS_DETAILED": "A detailed JSON-formatted string containing cross-validation success status, individual fold scores, statistical summaries (mean, standard deviation), hyperparameters used, and performance stability assessment.\n         This enables comprehensive evaluation of model robustness and generalization capability.",
-          "RETURNS_EXAMPLES": "\"{\"success\": true, \"cross_validation_results\": {\"r2_mean\": 0.85, \"r2_std\": 0.03, \"mae_mean\": 0.12, \"mae_std\": 0.02, ...}}\"",
+          "ARGS_BRIEF": [
+            "Path to training data CSV file.",
+            "Name of the target column for prediction. Defaults to \"formation_energy_per_atom\".",
+            "Number of cross-validation folds. Defaults to 5.",
+            "Optional XGBoost hyperparameters for cross-validation."
+          ],
+          "ARGS_DETAILED": [
+            "Complete file path to CSV file containing training data with features and target column.\n                    The file should have a header row and be properly formatted for machine learning.\n                    This data will be split into k folds for cross-validation, so it should represent the complete training dataset.",
+            "The column name in the CSV that contains the target values for prediction.\n                  This column will be separated from features during cross-validation.\n                  Should match the target used in subsequent training workflows.\n                  Common targets include formation energy, band gap, and other materials properties.",
+            "The number of folds to use for k-fold cross-validation.\n             Higher values provide more robust estimates but increase computational cost.\n             Common choices are 5 or 10 folds.\n             The value should be chosen based on dataset size - smaller datasets benefit from more folds while larger datasets can use fewer folds.",
+            "Dictionary containing XGBoost hyperparameters to use across all cross-validation folds.\n                    If None, optimized default parameters will be used.\n                    Consistent hyperparameters across folds ensure fair comparison and reliable performance estimates.\n                    Useful for testing specific hyperparameter configurations."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"Valid file path to CSV file with header\"",
+            "\"String matching column name in CSV file\"",
+            "positive integer between 2 and dataset_size",
+            "\"{\"param_name\": value, ...} or None'"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"data/train.csv\", \"datasets/materials_train.csv\", \"ml_data/training_features.csv\"",
+            "\"formation_energy_per_atom\", \"band_gap\", \"bulk_modulus\", \"density\"",
+            "5 (standard), 10 (robust), 3 (quick assessment)",
+            "{\"n_estimators\": 150, \"max_depth\": 7}, {\"learning_rate\": 0.05}, None"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with comprehensive cross-validation results and statistical analysis."
+          ],
+          "RETURNS_DETAILED": [
+            "A detailed JSON-formatted string containing cross-validation success status, individual fold scores, statistical summaries (mean, standard deviation), hyperparameters used, and performance stability assessment.\n         This enables comprehensive evaluation of model robustness and generalization capability."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"success\": true, \"cross_validation_results\": {\"r2_mean\": 0.85, \"r2_std\": 0.03, \"mae_mean\": 0.12, \"mae_std\": 0.02, ...}}\""
+          ],
           "RAISES": "Exceptions:\n    FileNotFoundError:  When training data file doesn't exist \n                       Invalid file path or missing CSV file \n                       Verify file path exists and contains properly formatted CSV data \n    KeyError:  When target column is not found in the data \n              Specified target column doesn't exist in CSV file \n              Check column names in CSV file and use valid target column name \n    ValueError:  When cv_folds is invalid or data contains invalid values \n                cv_folds less than 2, greater than dataset size, or non-numerical data \n                Use valid cv_folds value and ensure data is properly preprocessed",
           "LIMITATIONS": "Known limitations:\n- Computational cost scales linearly with number of folds\n- May not be suitable for very large datasets due to memory constraints\n- Assumes data is suitable for random splitting (no temporal or spatial dependencies)\n- Cannot assess performance on truly out-of-distribution data"
         },
@@ -4395,13 +5313,27 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Takes a list of individual resistance values.\n- Sums all the provided resistance values.\n- The result represents the total equivalent resistance.",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Identify a series connection of resistors within a larger circuit. \n    2.  Apply this tool to calculate their combined resistance. \n    3.  Consider the series resistors with their equivalent resistance in the circuit for further analysis or simplification.",
           "SYNTACTICAL": "Usage examples:\n- `calculate_series_resistance([10, 20, 30])`\n- `calculate_series_resistance([5.5, 12.3, 7.2, 1.0])`",
-          "ARGS_BRIEF": "List of resistance values in ohms.",
-          "ARGS_DETAILED": "A list containing floating-point numbers, each representing the resistance of an individual resistor. All values must be positive.",
-          "ARGS_SYNTACTICAL": "Format: `[float, float, ...]`",
-          "ARGS_EXAMPLES": "`[10, 20, 30]`, `[100.5, 200]`",
-          "RETURNS_BRIEF": "Total series resistance in ohms.",
-          "RETURNS_DETAILED": "A single floating-point number representing the sum of all input resistances.",
-          "RETURNS_EXAMPLES": "`60.0` (for `[10, 20, 30]`), `300.5` (for `[100.5, 200]`)",
+          "ARGS_BRIEF": [
+            "List of resistance values in ohms."
+          ],
+          "ARGS_DETAILED": [
+            "A list containing floating-point numbers, each representing the resistance of an individual resistor. All values must be positive."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: `[float, float, ...]`"
+          ],
+          "ARGS_EXAMPLES": [
+            "`[10, 20, 30]`, `[100.5, 200]`"
+          ],
+          "RETURNS_BRIEF": [
+            "Total series resistance in ohms."
+          ],
+          "RETURNS_DETAILED": [
+            "A single floating-point number representing the sum of all input resistances."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`60.0` (for `[10, 20, 30]`), `300.5` (for `[100.5, 200]`)"
+          ],
           "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When an empty list of resistances is provided. \n         The sum of an empty list is undefined in this context, indicating no resistors are present. \n         Try: Ensure the `resistances` list contains at least one valid resistance value. \n    ValueError: [ERRORS]\n         When a resistance value is not a positive number. \n         Resistances in a physical circuit are typically positive. Zero or negative values would lead to non-physical results. \n         Try: Ensure all resistance values in the input list are positive floating-point numbers.",
           "LIMITATIONS": "Known limitations:\n- Assumes ideal resistors.\n- Only applicable for purely series connections."
         },
@@ -4423,13 +5355,27 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Takes a list of individual resistance values.\n- Calculates the reciprocal of each resistance.\n- Sums these reciprocal values.\n- Takes the reciprocal of the sum to find the total parallel resistance.",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Identify a parallel connection of resistors within a larger circuit diagram. \n    2.  Apply this tool to calculate their combined resistance. \n    3.  Replace the parallel resistors with their equivalent resistance in the circuit for further analysis or simplification.",
           "SYNTACTICAL": "Usage examples:\n- `calculate_parallel_resistance([10, 20])`\n- `calculate_parallel_resistance([100, 200, 300])`",
-          "ARGS_BRIEF": "List of resistance values in ohms.",
-          "ARGS_DETAILED": "A list containing floating-point numbers, each representing the resistance of an individual resistor. All values must be positive.",
-          "ARGS_SYNTACTICAL": "Format: `[float, float, ...]`",
-          "ARGS_EXAMPLES": "`[10, 20]`, `[100.5, 200, 50]`",
-          "RETURNS_BRIEF": "Total parallel resistance in ohms.",
-          "RETURNS_DETAILED": "A single floating-point number representing the equivalent resistance of all input resistors connected in parallel.",
-          "RETURNS_EXAMPLES": "`6.67` (for `[10, 20]`), `54.545` (for `[100, 200, 300]`)",
+          "ARGS_BRIEF": [
+            "List of resistance values in ohms."
+          ],
+          "ARGS_DETAILED": [
+            "A list containing floating-point numbers, each representing the resistance of an individual resistor. All values must be positive."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: `[float, float, ...]`"
+          ],
+          "ARGS_EXAMPLES": [
+            "`[10, 20]`, `[100.5, 200, 50]`"
+          ],
+          "RETURNS_BRIEF": [
+            "Total parallel resistance in ohms."
+          ],
+          "RETURNS_DETAILED": [
+            "A single floating-point number representing the equivalent resistance of all input resistors connected in parallel."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`6.67` (for `[10, 20]`), `54.545` (for `[100, 200, 300]`)"
+          ],
           "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When an empty list of resistances is provided. \n         An empty list means no resistors are in parallel, making the calculation undefined. \n         Try: Ensure the `resistances` list contains at least one positive resistance value. \n    ValueError: [ERRORS]\n         When any resistance value is zero or negative. \n         Resistances in parallel must be positive for a valid physical interpretation and to avoid division by zero. \n         Try: Ensure all resistance values in the input list are positive floating-point numbers.",
           "LIMITATIONS": "Known limitations:\n- Assumes ideal resistors.\n- Only applicable for purely parallel connections."
         },
@@ -4451,13 +5397,35 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Takes three resistance values (Ra, Rb, Rc) representing the resistors in a delta configuration.\n- Calculates the equivalent Wye (star) resistances (R1, R2, R3) using standard transformation formulas:\n    - R1 = (Rb * Rc) / (Ra + Rb + Rc)\n    - R2 = (Ra * Rc) / (Ra + Rb + Rc)\n    - R3 = (Ra * Rb) / (Ra + Rb + Rc)\n- Returns these three calculated resistances.",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Identify a delta (triangle) configuration in the circuit that prevents further series/parallel simplification. \n    2.  Apply this tool with the three delta resistor values to obtain their equivalent wye resistor values. \n    3.  Substitute the original delta network with the equivalent wye network in the circuit diagram, which should now allow for series/parallel reduction or simpler nodal analysis.",
           "SYNTACTICAL": "Usage examples:\n- `delta_to_wye_transform(30, 30, 30)`\n- `delta_to_wye_transform(100, 50, 75)`",
-          "ARGS_BRIEF": "Resistance between nodes C and A in delta configuration.",
-          "ARGS_DETAILED": "A positive floating-point number representing the resistance of the resistor connected between nodes C and A in the delta network.",
-          "ARGS_SYNTACTICAL": "Format: `float` (positive)",
-          "ARGS_EXAMPLES": "`30`, `75`",
-          "RETURNS_BRIEF": "JSON string with keys 'r1', 'r2', 'r3' for wye resistor values.",
-          "RETURNS_DETAILED": "A JSON string containing a dictionary with three keys: 'r1', 'r2', and 'r3', whose values are the calculated equivalent resistances for the wye network, each being a floating-point number. R1 is connected to original node A, R2 to B, and R3 to C.",
-          "RETURNS_EXAMPLES": "\"{\\\"r1\\\": 10.0, \\\"r2\\\": 10.0, \\\"r3\\\": 10.0}\" (for `delta_to_wye_transform(30, 30, 30)`)",
+          "ARGS_BRIEF": [
+            "Resistance between nodes A and B in delta configuration.",
+            "Resistance between nodes B and C in delta configuration.",
+            "Resistance between nodes C and A in delta configuration."
+          ],
+          "ARGS_DETAILED": [
+            "A positive floating-point number representing the resistance of the resistor connected between nodes A and B in the delta network.",
+            "A positive floating-point number representing the resistance of the resistor connected between nodes B and C in the delta network.",
+            "A positive floating-point number representing the resistance of the resistor connected between nodes C and A in the delta network."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: `float` (positive)",
+            "Format: `float` (positive)",
+            "Format: `float` (positive)"
+          ],
+          "ARGS_EXAMPLES": [
+            "`30`, `100`",
+            "`30`, `50`",
+            "`30`, `75`"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with keys 'r1', 'r2', 'r3' for wye resistor values."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON string containing a dictionary with three keys: 'r1', 'r2', and 'r3', whose values are the calculated equivalent resistances for the wye network, each being a floating-point number. R1 is connected to original node A, R2 to B, and R3 to C."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\\\"r1\\\": 10.0, \\\"r2\\\": 10.0, \\\"r3\\\": 10.0}\" (for `delta_to_wye_transform(30, 30, 30)`)"
+          ],
           "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When the sum of delta resistances (ra + rb + rc) is zero. \n         A zero sum in the denominator of the transformation formulas would lead to division by zero, indicating an invalid or non-physical delta configuration. \n         Try: Ensure all input resistances `ra`, `rb`, and `rc` are positive values. \n    ValueError: [ERRORS]\n         When any input resistance (ra, rb, or rc) is zero or negative. \n         Physical resistors have positive resistance values. Zero or negative values would result in non-physical wye resistances. \n         Try: Ensure `ra`, `rb`, and `rc` are all positive floating-point numbers.",
           "LIMITATIONS": "Known limitations:\n- Assumes ideal resistors.\n- Only applicable for 3-resistor delta configurations."
         },
@@ -4487,13 +5455,35 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Takes three resistance values (R1, R2, R3) representing the resistors in a wye configuration.\n- Calculates the equivalent Delta (triangle) resistances (Ra, Rb, Rc) using standard inverse transformation formulas:\n    - Ra = (R1*R2 + R2*R3 + R3*R1) / R3\n    - Rb = (R1*R2 + R2*R3 + R3*R1) / R1\n    - Rc = (R1*R2 + R2*R3 + R3*R1) / R2\n- Returns these three calculated resistances.",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Identify a wye (star) configuration in the circuit that is difficult to analyze directly. \n    2.  Apply this tool with the three wye resistor values to obtain their equivalent delta resistor values. \n    3.  Substitute the original wye network with the equivalent delta network in the circuit diagram, which should now allow for simpler analysis or further circuit reduction.",
           "SYNTACTICAL": "Usage examples:\n- `wye_to_delta_transform(10, 10, 10)`\n- `wye_to_delta_transform(50, 75, 100)`",
-          "ARGS_BRIEF": "Wye resistor connected to node C.",
-          "ARGS_DETAILED": "A positive floating-point number representing the resistance of the resistor connected from the center of the wye to node C.",
-          "ARGS_SYNTACTICAL": "Format: `float` (positive)",
-          "ARGS_EXAMPLES": "`10`, `100`",
-          "RETURNS_BRIEF": "JSON string with keys 'ra', 'rb', 'rc' for delta resistor values.",
-          "RETURNS_DETAILED": "A JSON string containing a dictionary with three keys: 'ra', 'rb', and 'rc', whose values are the calculated equivalent resistances for the delta network, each being a floating-point number. Ra is between original nodes A and B, Rb between B and C, and Rc between C and A.",
-          "RETURNS_EXAMPLES": "\"{\\\"ra\\\": 30.0, \\\"rb\\\": 30.0, \\\"rc\\\": 30.0}\" (for `wye_to_delta_transform(10, 10, 10)`)",
+          "ARGS_BRIEF": [
+            "Wye resistor connected to node A.",
+            "Wye resistor connected to node B.",
+            "Wye resistor connected to node C."
+          ],
+          "ARGS_DETAILED": [
+            "A positive floating-point number representing the resistance of the resistor connected from the center of the wye to node A.",
+            "A positive floating-point number representing the resistance of the resistor connected from the center of the wye to node B.",
+            "A positive floating-point number representing the resistance of the resistor connected from the center of the wye to node C."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: `float` (positive)",
+            "Format: `float` (positive)",
+            "Format: `float` (positive)"
+          ],
+          "ARGS_EXAMPLES": [
+            "`10`, `50`",
+            "`10`, `75`",
+            "`10`, `100`"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with keys 'ra', 'rb', 'rc' for delta resistor values."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON string containing a dictionary with three keys: 'ra', 'rb', and 'rc', whose values are the calculated equivalent resistances for the delta network, each being a floating-point number. Ra is between original nodes A and B, Rb between B and C, and Rc between C and A."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\\\"ra\\\": 30.0, \\\"rb\\\": 30.0, \\\"rc\\\": 30.0}\" (for `wye_to_delta_transform(10, 10, 10)`)"
+          ],
           "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When any input resistance (r1, r2, or r3) is zero or negative. \n         Physical resistors have positive resistance values. Zero or negative values would lead to non-physical delta resistances or division by zero in the transformation formulas. \n         Try: Ensure `r1`, `r2`, and `r3` are all positive floating-point numbers.",
           "LIMITATIONS": "Known limitations:\n- Assumes ideal resistors.\n- Only applicable for 3-resistor wye configurations."
         },
@@ -4523,13 +5513,31 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Parses a JSON string representing the circuit's resistors and their connections.\n- Identifies all unique nodes in the circuit and creates a mapping to numerical indices.\n- Constructs a conductance matrix (G matrix) based on the connections and resistor values.\n- Applies a 1A current source between the specified `terminal_nodes`.\n- Solves the resulting system of linear equations (G * V = I) to find the node voltages.\n- The equivalent resistance is then calculated as the absolute voltage difference between the `terminal_nodes` (V_terminal1 - V_terminal2) since the applied current is 1A.",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Have a defined circuit `topology` (resistors and connections) and the `terminal_nodes` between which to measure resistance. \n    2.  Apply this tool with the `topology` and `terminal_nodes` to get the simulated resistance. \n    3.  Compare the `simulate_circuit_resistance` output with actual measurements or desired specifications to validate the topology using `validate_measurements`.",
           "SYNTACTICAL": "Usage examples:\n- `simulate_circuit_resistance(\"{\\\"resistors\\\": {\\\"R1\\\": 7.778, \\\"R2\\\": 11.111, \\\"R3\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}\", [\"A\", \"X1\"])`\n- `simulate_circuit_resistance(\"{\\\"resistors\\\": {\\\"R1\\\": 50.0, \\\"R2\\\": 25.0}, \\\"connections\\\": [[\\\"N1\\\", \\\"N2\\\", \\\"R1\\\"], [\\\"N2\\\", \\\"N3\\\", \\\"R2\\\"]]}\", [\"N1\", \"N3\"])`",
-          "ARGS_BRIEF": "List of two node names to measure resistance between.",
-          "ARGS_DETAILED": "A list containing exactly two strings, where each string is the name of a node in the circuit. The tool will calculate the equivalent resistance between these two specified nodes.",
-          "ARGS_SYNTACTICAL": "Format: `[\"node_start\", \"node_end\"]`",
-          "ARGS_EXAMPLES": "`[\"A\", \"C\"]`, `[\"input_node\", \"output_node\"]`",
-          "RETURNS_BRIEF": "Equivalent resistance between terminals in ohms.",
-          "RETURNS_DETAILED": "A floating-point number representing the total equivalent resistance measured between the two specified terminal nodes in the given circuit topology.",
-          "RETURNS_EXAMPLES": "`30.0` (for a 10Ω and 20Ω resistor in series)",
+          "ARGS_BRIEF": [
+            "JSON string describing circuit.",
+            "List of two node names to measure resistance between."
+          ],
+          "ARGS_DETAILED": [
+            "A JSON string that defines the circuit's components and their interconnections. It must contain a \"resistors\" dictionary (mapping resistor IDs to their resistance values) and a \"connections\" list (each entry being a list `[node1, node2, resistor_id]`).",
+            "A list containing exactly two strings, where each string is the name of a node in the circuit. The tool will calculate the equivalent resistance between these two specified nodes."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: JSON string (with escaped quotes) - `\"{\\\"resistors\\\": {\\\"R1\\\": 10, \\\"R2\\\": 20}, \\\"connections\\\": [[\\\"node1\\\", \\\"node2\\\", \\\"R1\\\"]]}\"`",
+            "Format: `[\"node_start\", \"node_end\"]`"
+          ],
+          "ARGS_EXAMPLES": [
+            "`\"{\\\"resistors\\\": {\\\"R1\\\": 7.778, \\\"R2\\\": 11.111, \\\"R3\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}\"`, `\"{\\\"resistors\\\": {\\\"R1\\\": 50.0, \\\"R2\\\": 25.0}, \\\"connections\\\": [[\\\"N1\\\", \\\"N2\\\", \\\"R1\\\"], [\\\"N2\\\", \\\"N3\\\", \\\"R2\\\"]]}\", [\"N1\", \"N3\"]`",
+            "`[\"A\", \"C\"]`, `[\"input_node\", \"output_node\"]`"
+          ],
+          "RETURNS_BRIEF": [
+            "Equivalent resistance between terminals in ohms."
+          ],
+          "RETURNS_DETAILED": [
+            "A floating-point number representing the total equivalent resistance measured between the two specified terminal nodes in the given circuit topology."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`30.0` (for a 10Ω and 20Ω resistor in series)"
+          ],
           "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When the `topology` JSON string is invalid or malformed. \n         `json.loads` fails, or required keys (\"resistors\", \"connections\") are missing. \n         Try: Ensure the `topology` string is a valid JSON and adheres to the specified structure. \n    ValueError: [ERRORS]\n         When `terminal_nodes` does not contain exactly two node names. \n         Resistance is defined between two distinct points. Fewer or more nodes are ambiguous. \n         Try: Provide a list with exactly two string elements for `terminal_nodes`. \n    ValueError: [ERRORS]\n         When a `resistor_id` in `connections` is not found in the `resistors` dictionary. \n         An undefined resistor ID indicates an inconsistency in the circuit description. \n         Try: Ensure all resistor IDs used in `connections` are defined in the `resistors` dictionary. \n    ValueError: [ERRORS]\n         When a resistor has a non-positive resistance value (<= 0). \n         Nodal analysis assumes positive resistances. Zero or negative resistance can cause mathematical issues. \n         Try: Ensure all resistor values in the `resistors` dictionary are positive floating-point numbers.",
           "LIMITATIONS": "Known limitations:\n- Assumes ideal resistors (no inductance, capacitance).\n- Only calculates equivalent resistance; does not simulate transient behavior or AC circuits.\n- Circuit must be a passive network for resistance calculation.\n- Numerical stability issues can arise for extremely large/small resistance values."
         },
@@ -4555,13 +5563,31 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Parses the input JSON strings for the proposed circuit `topology` and the `measurements`.\n- Iterates through each measurement provided in the `measurements` list.\n- For each measurement, it calls `get_resistance_between_nodes` to predict the resistance between the specified nodes in the proposed `topology`.\n- Compares the `predicted_resistance` with the `actual_resistance` from the measurement.\n- Calculates the absolute error and relative error for each measurement.\n- Aggregates these errors to provide `total_error`, `max_error`, and `mean_error`, along with detailed error for each measurement.\n- Returns a JSON string summarizing the validation results.",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Have a proposed `topology` (e.g., from `propose_simple_topology` and `estimate_resistor_values`) and a set of `measurements` (actual data). \n    2.  Apply this tool with the `topology` and `measurements` to get a quantitative assessment of the match. \n    3.  If errors are high, iterate back to refining the `topology` or re-estimating resistor values using `estimate_resistor_values`. If errors are acceptable, consider the topology validated.",
           "SYNTACTICAL": "Usage examples:\n- `validate_measurements(\n\"{\\\"resistors\\\": {\\\"R1\\\": 5.0, \\\"R2\\\": 10.0}, \"\n\"\\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R2\\\"]]}\",\n\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, \"\n\"{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, \"\n\"{\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\")`\n- `validate_measurements(proposed_circuit_topology, experimental_data)`",
-          "ARGS_BRIEF": "JSON string with actual measurements.",
-          "ARGS_DETAILED": "A JSON string representing a list of CircuitMeasurement objects. Each object should contain node_a, node_b, and at least resistance. These are the real-world observations.",
-          "ARGS_SYNTACTICAL": "Format: JSON string (with escaped quotes) - `\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\"`",
-          "ARGS_EXAMPLES": "`\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\"`",
-          "RETURNS_BRIEF": "JSON string with validation results including error metrics.",
-          "RETURNS_DETAILED": "A JSON string containing a dictionary with various error metrics: `total_error`, `max_error`, `mean_error`, and `detailed_errors` (a list of per-measurement errors including predicted, actual, absolute error, and relative error). It also includes `num_measurements`. This output helps quantify the accuracy of the proposed topology.",
-          "RETURNS_EXAMPLES": "`{\"total_error\": 5.0, \"max_error\": 5.0, \"mean_error\": 5.0, \"detailed_errors\": [{\"nodes\": \"A-B\", \"predicted\": 10.0, \"actual\": 15.0, \"error\": 5.0, \"relative_error\": 0.333}], \"num_measurements\": 1}`",
+          "ARGS_BRIEF": [
+            "JSON string describing proposed circuit topology.",
+            "JSON string with actual measurements."
+          ],
+          "ARGS_DETAILED": [
+            "A JSON string conforming to the `CircuitTopology` structure, including resistor IDs, their estimated values, and the connections between nodes. This represents your hypothesis about the circuit's structure.",
+            "A JSON string representing a list of CircuitMeasurement objects. Each object should contain node_a, node_b, and at least resistance. These are the real-world observations."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: JSON string (with escaped quotes) - `\"{\\\"resistors\\\": {\\\"R1\\\": 5.0, \\\"R2\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R2\\\"]]}\"`",
+            "Format: JSON string (with escaped quotes) - `\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\"`"
+          ],
+          "ARGS_EXAMPLES": [
+            "`\"{\\\"resistors\\\": {\\\"R1\\\": 5.0, \\\"R2\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R2\\\"]]}\"`",
+            "`\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 5.0}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 15.0}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\"`"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with validation results including error metrics."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON string containing a dictionary with various error metrics: `total_error`, `max_error`, `mean_error`, and `detailed_errors` (a list of per-measurement errors including predicted, actual, absolute error, and relative error). It also includes `num_measurements`. This output helps quantify the accuracy of the proposed topology."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`{\"total_error\": 5.0, \"max_error\": 5.0, \"mean_error\": 5.0, \"detailed_errors\": [{\"nodes\": \"A-B\", \"predicted\": 10.0, \"actual\": 15.0, \"error\": 5.0, \"relative_error\": 0.333}], \"num_measurements\": 1}`"
+          ],
           "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When the `topology` or `measurements` JSON strings are malformed or invalid. \n         `json.loads` fails, or required keys are missing from the input dictionaries/lists. \n         Try: Ensure both input strings are valid JSON and adhere to the specified data structures.",
           "LIMITATIONS": "Known limitations:\n- Currently only validates resistance measurements. Voltage and current validation are not yet implemented.\n- Assumes the measurement data is accurate and reliable.\n- Large errors can occur if the proposed topology is drastically different from the actual circuit or if resistor values are far off."
         },
@@ -4587,13 +5613,31 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Initializes an empty circuit topology dictionary.\n- Adds `num_resistors` placeholder resistors (R1, R2, ...) with a default value of 10.0 ohms.\n- Based on `topology_type`:\n    - \"series\": Connects resistors end-to-end (A-R1-B-R2-C...).\n    - \"parallel\": Connects all resistors between two common nodes (A and B).\n    - \"series_parallel\": Creates a basic configuration with one resistor in series, and two in parallel, adding others in series if `num_resistors` is greater than 3.\n    - \"bridge\": Creates a Wheatstone bridge configuration (requires at least 5 resistors).\n    - If `topology_type` is not recognized or `num_resistors` is too low for complex types, it defaults to a series configuration.\n- Returns the constructed topology as a JSON string.",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Have a preliminary idea of the number of resistors and a general type of circuit (e.g., \"series\", \"parallel\"). \n    2.  Apply this tool with `num_resistors` and `topology_type` to get a starting `topology`. \n    3.  Use `estimate_resistor_values` with this generated topology and actual `measurements` to refine the resistor values. Then, `validate_measurements` to check the fit.",
           "SYNTACTICAL": "Usage examples:\n- `propose_simple_topology(3, \"series\")`\n- `propose_simple_topology(2, \"parallel\")`\n- `propose_simple_topology(5, \"bridge\")`",
-          "ARGS_BRIEF": "Type of configuration.",
-          "ARGS_DETAILED": "A string specifying the desired basic arrangement of resistors. Valid options are \"series\", \"parallel\", \"series_parallel\", or \"bridge\". If an invalid type is provided or `num_resistors` is too low for the chosen type, it defaults to \"series\".",
-          "ARGS_SYNTACTICAL": "Format: `\"series\"`, `\"parallel\"`, `\"series_parallel\"`, `\"bridge\"`",
-          "ARGS_EXAMPLES": "`\"series\"`, `\"parallel\"`, `\"bridge\"`",
-          "RETURNS_BRIEF": "JSON string with proposed topology structure.",
-          "RETURNS_DETAILED": "A JSON string representing a `CircuitTopology` object. It includes a \"resistors\" dictionary (with `R1`, `R2`, etc., initially set to 10.0 ohms) and a \"connections\" list defining how these resistors are wired based on the `topology_type`.",
-          "RETURNS_EXAMPLES": "` \"{\\\"resistors\\\": {\\\"R1\\\": 10.0, \\\"R2\\\": 10.0, \\\"R3\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}\"` (for `propose_simple_topology(3, \"series\")`)",
+          "ARGS_BRIEF": [
+            "Number of resistors in the circuit.",
+            "Type of configuration."
+          ],
+          "ARGS_DETAILED": [
+            "An integer indicating how many individual resistors should be included in the generated topology. This influences the complexity and number of elements in the proposed circuit.",
+            "A string specifying the desired basic arrangement of resistors. Valid options are \"series\", \"parallel\", \"series_parallel\", or \"bridge\". If an invalid type is provided or `num_resistors` is too low for the chosen type, it defaults to \"series\"."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: `int` (positive)",
+            "Format: `\"series\"`, `\"parallel\"`, `\"series_parallel\"`, `\"bridge\"`"
+          ],
+          "ARGS_EXAMPLES": [
+            "`3`, `5`, `2`",
+            "`\"series\"`, `\"parallel\"`, `\"bridge\"`"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with proposed topology structure."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON string representing a `CircuitTopology` object. It includes a \"resistors\" dictionary (with `R1`, `R2`, etc., initially set to 10.0 ohms) and a \"connections\" list defining how these resistors are wired based on the `topology_type`."
+          ],
+          "RETURNS_EXAMPLES": [
+            "` \"{\\\"resistors\\\": {\\\"R1\\\": 10.0, \\\"R2\\\": 10.0, \\\"R3\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}\"` (for `propose_simple_topology(3, \"series\")`)"
+          ],
           "RAISES": "Exceptions:\n    json.JSONEncodeError:\n         If the generated topology object cannot be serialized to JSON. \n         This is unlikely in practice since the topology is constructed from basic Python types (dicts, lists, strings, floats), but could occur if the internal structure is corrupted. \n         Verify that `num_resistors` is a positive integer and `topology_type` is a valid string.",
           "LIMITATIONS": "Known limitations:\n- Generates only basic, predefined topologies. Complex or arbitrary circuit designs require manual modification.\n- Resistor values are placeholders (10.0 ohms) and need to be refined using `estimate_resistor_values`.\n- Node naming is sequential (A, B, C, ...) and may not align with complex real-world naming conventions.\n- \"series_parallel\" and \"bridge\" types have minimum `num_resistors` requirements."
         },
@@ -4619,13 +5663,31 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n- Parses the input JSON strings for the initial `topology` (with resistor IDs and initial guesses) and the `measurements`.\n- Extracts the names of all resistors in the topology.\n- Defines an `objective_function` that takes a set of resistor values, constructs a temporary circuit `topology` with these values, and then uses `get_resistance_between_nodes` to predict resistances for all measurement pairs.\n- The `objective_function` calculates the sum of squared differences between predicted and actual resistances, returning this total error.\n- `scipy.optimize.minimize` (using the 'L-BFGS-B' method) is then employed to find the set of resistor values that minimizes this `objective_function`, subject to bounds (e.g., resistances must be positive).\n- If successful, it returns the optimized resistor values and optimization details.",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Have a fixed circuit `topology` (e.g., from `propose_simple_topology` or a known design) and a set of `measurements` from the actual circuit. \n    2.  Apply this tool with the `topology` (containing initial resistor value guesses) and `measurements` to find optimized resistor values. \n    3.  Use the `validate_measurements` tool with the optimized topology to confirm the improved fit, or proceed with the refined resistor values in further circuit analysis.",
           "SYNTACTICAL": "Usage examples:\n- `estimate_resistor_values(\n\"{\\\"resistors\\\": {\\\"R1\\\": 10.0, \\\"R2\\\": 10.0, \\\"R3\\\": 10.0}, \"\n\"\\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}\",\n\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 7.778}, \"\n\"{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 11.111}, \"\n\"{\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\")`\n- `estimate_resistor_values(initial_topology_json, experimental_measurements_json)`",
-          "ARGS_BRIEF": "JSON string with actual measurements.",
-          "ARGS_DETAILED": "A JSON string representing a list of `CircuitMeasurement` objects, each containing `node_a`, `node_b`, and `resistance`. These are the actual observed resistance values against which the model will be optimized.",
-          "ARGS_SYNTACTICAL": "Format: JSON string (with escaped quotes) - `\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"B\\\", \\\"resistance\\\": 10.0}, ...]\"`",
-          "ARGS_EXAMPLES": "`\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 7.778}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 11.111}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\"`",
-          "RETURNS_BRIEF": "JSON string with optimized resistor values and optimization info.",
-          "RETURNS_DETAILED": "A JSON string containing a dictionary. If successful, it includes the `optimized_resistors` (mapping resistor IDs to their newly estimated values, rounded to integers), the original `connections`, and an `optimization_info` sub-dictionary with details like `success` status, `final_error`, `iterations`, and `message`. If optimization fails, it provides an `error` message.",
-          "RETURNS_EXAMPLES": "`{\"resistors\": {\"R1\": 15, \"R2\": 30}, \"connections\": [...], \"optimization_info\": {\"success\": true, \"final_error\": 0.001, \"iterations\": 50, \"message\": \"CONVERGENCE: NORM_OF_GRADIENT_<=_TF_GAUSSIAN_SUM\"}` (on success)",
+          "ARGS_BRIEF": [
+            "JSON string describing circuit topology with initial resistor value guesses.",
+            "JSON string with actual measurements."
+          ],
+          "ARGS_DETAILED": [
+            "A JSON string conforming to the `CircuitTopology` structure. It must include a \"resistors\" dictionary with resistor IDs and their *initial estimated* resistance values, and a \"connections\" list defining the circuit structure. These initial values are the starting point for optimization.",
+            "A JSON string representing a list of `CircuitMeasurement` objects, each containing `node_a`, `node_b`, and `resistance`. These are the actual observed resistance values against which the model will be optimized."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: JSON string (with escaped quotes) - `\"{\"resistors\": {\"R1\": 10, \"R2\": 20}, \"connections\": [[\"node1\", \"node2\", \"R1\"]]}\"`",
+            "Format: JSON string (with escaped quotes) - `\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"B\\\", \\\"resistance\\\": 10.0}, ...]\"`"
+          ],
+          "ARGS_EXAMPLES": [
+            "`\"{\\\"resistors\\\": {\\\"R1\\\": 10.0, \\\"R2\\\": 10.0, \\\"R3\\\": 10.0}, \\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}\"`",
+            "`\"[{\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"N1\\\", \\\"resistance\\\": 7.778}, {\\\"node_a\\\": \\\"A\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 11.111}, {\\\"node_a\\\": \\\"N1\\\", \\\"node_b\\\": \\\"X1\\\", \\\"resistance\\\": 10.0}]\"`"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with optimized resistor values and optimization info."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON string containing a dictionary. If successful, it includes the `optimized_resistors` (mapping resistor IDs to their newly estimated values, rounded to integers), the original `connections`, and an `optimization_info` sub-dictionary with details like `success` status, `final_error`, `iterations`, and `message`. If optimization fails, it provides an `error` message."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`{\"resistors\": {\"R1\": 15, \"R2\": 30}, \"connections\": [...], \"optimization_info\": {\"success\": true, \"final_error\": 0.001, \"iterations\": 50, \"message\": \"CONVERGENCE: NORM_OF_GRADIENT_<=_TF_GAUSSIAN_SUM\"}` (on success)"
+          ],
           "RAISES": "Exceptions:\n    ValueError: [ERRORS]\n         When the `topology` or `measurements` JSON strings are malformed or invalid. \n         `json.loads` fails, or required keys are missing from the input dictionaries/lists. \n         Try: Ensure both input strings are valid JSON and adhere to the specified data structures. \n    ValueError: [ERRORS]\n         When an error during optimization (e.g., invalid intermediate topology). \n         The objective function will assign a large penalty, but persistent simulation errors can lead to optimization failure. \n         Try: Ensure the initial `topology` is valid and the bounds for resistor values are reasonable, as extreme values might cause simulation instability. \n    RuntimeError: [ERRORS]\n         When the numerical optimization algorithm fails to converge to a solution. \n         Indicated by `result.success` being `False` and a `message` explaining the failure (e.g., maximum iterations reached, bounds violated). \n         Try: Adjust initial resistor value guesses, widen the bounds, increase `maxiter`, or re-evaluate if the chosen `topology` is appropriate for the measurements.",
           "LIMITATIONS": "Known limitations:\n- Numerical optimization can get stuck in local minima if initial guesses are poor, or the solution space is complex.\n- Assumes the provided topology (connections) is correct, only optimizing resistor values.\n- Computationally intensive for very large circuits with many unknown resistors."
         },
@@ -4651,13 +5713,31 @@ const CORRAL_DATA = {
           "CONTEXTUAL": "How this tool works:\n    - Parses the input `topology` JSON string.\n    - Iterates through each `terminal_pair` provided in the list.\n    - For each pair, it calls the `get_resistance_between_nodes` tool to calculate the equivalent resistance between those two nodes.\n    - Stores the calculated resistance along with the `node_a` and `node_b` in a list of measurement dictionaries.\n    - If a simulation fails for a specific `terminal_pair`, it records an error message for that measurement.\n    - Returns a JSON string containing the list of theoretical measurements.",
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n        1.  Have a fully defined circuit `topology` (including resistor values) and a list of `terminal_pairs` where measurements are desired. \n        2.  Apply this tool with the `topology` and `terminal_pairs` to obtain a set of theoretical resistance measurements. \n        3.  Use these generated measurements to test the `estimate_resistor_values` tool (by trying to recover the original resistor values), or to test the `validate_measurements` tool (by comparing against the same topology).",
           "SYNTACTICAL": "Usage examples:\n    - `generate_test_measurements(\n    \"{\\\"resistors\\\": {\\\"R1\\\": 7.778, \\\"R2\\\": 11.111, \\\"R3\\\": 10.0}, \"\n    \"\\\"connections\\\": [[\\\"A\\\", \\\"N1\\\", \\\"R1\\\"], [\\\"A\\\", \\\"X1\\\", \\\"R2\\\"], [\\\"N1\\\", \\\"X1\\\", \\\"R3\\\"]]}\",\n    [[\"A\", \"N1\"], [\"A\", \"X1\"], [\"N1\", \"X1\"]]\n)`\n    - `generate_test_measurements(my_topology_json, [[\"A\", \"B\"], [\"A\", \"C\"]])`",
-          "ARGS_BRIEF": "List of node pairs to measure between.",
-          "ARGS_DETAILED": "A list of lists, where each inner list contains two strings representing the names of the nodes between which the equivalent resistance should be calculated. Each pair signifies one theoretical measurement point.",
-          "ARGS_SYNTACTICAL": "Format: `[[\"node_a\", \"node_b\"], [\"node_x\", \"node_y\"], ...]`",
-          "ARGS_EXAMPLES": "`[[\"A\", \"B\"], [\"A\", \"C\"], [\"B\", \"C\"]]`, `[[\"input\", \"output\"]]`",
-          "RETURNS_BRIEF": "JSON string with theoretical measurements.",
-          "RETURNS_DETAILED": "A JSON string representing a list of measurement dictionaries. Each dictionary will include `node_a`, `node_b`, and the `resistance` (rounded to 3 decimal places) between those nodes, as calculated by the `simulate_circuit_resistance` tool. If a simulation fails for a pair, an \"error\" key will be present instead of \"resistance\".",
-          "RETURNS_EXAMPLES": "`'[{\"node_a\": \"A\", \"node_b\": \"B\", \"resistance\": 15.0}, {\"node_a\": \"A\", \"node_b\": \"C\", \"resistance\": 45.0}]'`",
+          "ARGS_BRIEF": [
+            "JSON string describing the circuit.",
+            "List of node pairs to measure between."
+          ],
+          "ARGS_DETAILED": [
+            "A JSON string conforming to the `CircuitTopology` structure, containing both the resistor IDs with their precise resistance values and the connections between nodes. This is the circuit for which theoretical measurements are to be generated.",
+            "A list of lists, where each inner list contains two strings representing the names of the nodes between which the equivalent resistance should be calculated. Each pair signifies one theoretical measurement point."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: JSON string (with escaped quotes) - `\"{\"resistors\": {\"R1\": 10, \"R2\": 20}, \"connections\": [[\"node1\", \"node2\", \"R1\"]]}\"`",
+            "Format: `[[\"node_a\", \"node_b\"], [\"node_x\", \"node_y\"], ...]`"
+          ],
+          "ARGS_EXAMPLES": [
+            "`\"{\"resistors\": {\"R1\": 7.778, \"R2\": 11.111, \"R3\": 10.0}, \"connections\": [[\"A\", \"N1\", \"R1\"], [\"A\", \"X1\", \"R2\"], [\"N1\", \"X1\", \"R3\"]]}\"`",
+            "`[[\"A\", \"B\"], [\"A\", \"C\"], [\"B\", \"C\"]]`, `[[\"input\", \"output\"]]`"
+          ],
+          "RETURNS_BRIEF": [
+            "JSON string with theoretical measurements."
+          ],
+          "RETURNS_DETAILED": [
+            "A JSON string representing a list of measurement dictionaries. Each dictionary will include `node_a`, `node_b`, and the `resistance` (rounded to 3 decimal places) between those nodes, as calculated by the `simulate_circuit_resistance` tool. If a simulation fails for a pair, an \"error\" key will be present instead of \"resistance\"."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`'[{\"node_a\": \"A\", \"node_b\": \"B\", \"resistance\": 15.0}, {\"node_a\": \"A\", \"node_b\": \"C\", \"resistance\": 45.0}]'`"
+          ],
           "RAISES": "Exceptions:\n        json.JSONDecodeError:\n             If `topology` is not a valid JSON string. \n             This occurs if the input `topology` string cannot be parsed into a valid JSON object, which is required for circuit definition. \n             Ensure the `topology` argument is a properly formatted JSON string with escaped quotes. \n        Exception:\n             General error during measurement generation. \n             Catches any other unforeseen errors that might occur during the iteration through terminal pairs or calls to `get_resistance_between_nodes`, returning an error message for the overall process. Specific measurement errors are handled per-pair. \n             Verify the topology is valid and terminal pairs reference existing nodes in the circuit.",
           "LIMITATIONS": "Known limitations:\n    - Relies entirely on the accuracy and robustness of the `get_resistance_between_nodes` tool.\n    - Does not validate the `topology` for circuit correctness (e.g., disconnected components, short circuits) beyond what `get_resistance_between_nodes` handles.\n    - Handles only resistance measurements; cannot generate other types of circuit measurements (e.g., voltage, current)."
         },
@@ -5775,13 +6855,51 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Identify the chemical features (functional groups, bonds) relevant to your retrosynthetic analysis. You can use the tool `get_available_functional_groups` to see the list of functional groups that can be used for searching. \n2.  Use `search_template_catalog_by_criteria` to find templates that match your specified criteria. \n3.  Review the returned templates and select those that are most relevant to your synthesis planning. You can then apply these templates using the `apply_template` tool or validate retrosynthetic steps with `verify_step`.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string representing the target molecule and optional criteria for functional groups and bonds.\n- It analyzes the molecule to identify its functional groups and bond structure.\n- It searches the retrosynthetic template database for templates that match the specified criteria.\n- It ranks the matching templates based on their Tanimoto similarity to the reference molecule.\n- It checks that all returned templates can be applied to the target molecule.\n- The search results are returned as a list of dictionaries, each containing details about a matching template.",
           "SYNTACTICAL": "Usage examples:\n[\n    `search_template_catalog_by_criteria(\"CCO\", functional_groups_broken=[\"alcohol\"], functional_groups_formed=[\"alkene\"])`,\n    `search_template_catalog_by_criteria(\"c1ccccc1O\", bonds_broken=[\"C-O\"], bonds_formed=[\"C-C\"])`,\n    `search_template_catalog_by_criteria(\"C1=CC=CC=C1\", functional_groups_formed=[\"carboxylic_acid\"])`,\n    `search_template_catalog_by_criteria(\"C1=CC=CC=C1\", bonds_order_changed=[\"C=C\"])`,\n    `search_template_catalog_by_criteria(\"C1=CC=CC=C1C(=O)O\", functional_groups_broken=[\"carboxylic_acid\"], bonds_broken=[\"C=O\"])`,\n]",
-          "ARGS_BRIEF": "Maximum number of templates to return. Default is 10.",
-          "ARGS_DETAILED": "An integer specifying the maximum number of retrosynthetic templates to return from the search results. This helps to limit the output to a manageable number of templates for review. If more templates are needed, one can call the tool with higher limit.",
-          "ARGS_SYNTACTICAL": "Positive integer",
-          "ARGS_EXAMPLES": "5, 10, 20",
-          "RETURNS_BRIEF": "List of dictionaries representing matching retrosynthetic templates.",
-          "RETURNS_DETAILED": "Each dictionary in the returned list contains details about a retrosynthetic template that matches the specified criteria, including its SMARTS representation and other relevant information. If no templates match the criteria, an empty list is returned.",
-          "RETURNS_EXAMPLES": "[{\"template_id\": \"123\", \"smarts\": \"...\"}], []",
+          "ARGS_BRIEF": [
+            "SMILES string of the target molecule.",
+            "List of functional groups that are broken in the forward reaction. None will result in not filtering with this criterion.",
+            "List of functional groups that are formed in the forward reaction. None will result in not filtering with this criterion.",
+            "List of bonds that are formed in the forward reaction (e.g., \"6-6\", \"6-8\"). None will result in not filtering with this criterion.",
+            "List of bonds that are broken in the forward reaction (e.g., \"6-6\", \"6-8\"). None will result in not filtering with this criterion.",
+            "List of bonds whose order is changed in the forward reaction (e.g., \"6-6 (1.0->2.0)\"). None will result in not filtering with this criterion.",
+            "Maximum number of templates to return. Default is 10."
+          ],
+          "ARGS_DETAILED": [
+            "SMILES string of the molecule to be analyzed for retrosynthetic template matching. The SMILES string must be valid and represent a real chemical structure.",
+            "A list of functional groups (from a predefined set) that are expected to be broken during the forward reaction. This helps to filter templates that involve the cleavage of these groups.",
+            "A list of functional groups (from a predefined set) that are expected to be formed during the forward reaction. This helps to filter templates that involve the creation of these groups.",
+            "A list of bond types (e.g., \"6-6\", \"6-8\") that are expected to be formed during the forward reaction. This helps to filter templates that involve the formation of these bonds.",
+            "A list of bond types (e.g., \"6-6\", \"6-8\") that are expected to be broken during the forward reaction. This helps to filter templates that involve the cleavage of these bonds.",
+            "A list of bond types (e.g., \"6-6 (3.0->2.0)\", \"6-8 (1.0->2.0)\") whose order is expected to change during the forward reaction. This helps to filter templates that involve changes in bond order.",
+            "An integer specifying the maximum number of retrosynthetic templates to return from the search results. This helps to limit the output to a manageable number of templates for review. If more templates are needed, one can call the tool with higher limit."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid SMILES string",
+            "List of valid functional group strings or None",
+            "List of valid functional group strings or None",
+            "List of valid bond type strings or None",
+            "List of valid bond type strings or None",
+            "List of valid bond type strings or None",
+            "Positive integer"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CCO\", \"c1ccccc1O\", \"C1=CC=CC=C1\"",
+            "[\"alcohol\", \"amine\"], None",
+            "[\"alkene\", \"carboxylic_acid\"], None",
+            "[\"6-6\", \"6-8\"], None",
+            "[\"6-6\", \"6-8\"], None",
+            "['6-6 (1.0->2.0)'], None",
+            "5, 10, 20"
+          ],
+          "RETURNS_BRIEF": [
+            "List of dictionaries representing matching retrosynthetic templates."
+          ],
+          "RETURNS_DETAILED": [
+            "Each dictionary in the returned list contains details about a retrosynthetic template that matches the specified criteria, including its SMARTS representation and other relevant information. If no templates match the criteria, an empty list is returned."
+          ],
+          "RETURNS_EXAMPLES": [
+            "[{\"template_id\": \"123\", \"smarts\": \"...\"}], []"
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         Raised when none of the criteria parameters are provided. \n         At least one of the parameters `functional_groups_broken`, `functional_groups_formed`, `bonds_formed`, `bonds_broken`, or `bonds_order_changed` must be provided as a list of strings to perform a search. \n         Provide at least one of the criteria parameters as a list of strings to perform the search. \n\n    TypeError:\n         Raised when any of the list parameters is not a list. \n         This occurs if the user provides a string or other non-list type for any of the parameters that expect a list of strings. \n         Ensure that all parameters expecting lists are provided with list types, even if they contain only a single string. \n\n    ValueError:\n         Raised when invalid functional groups are provided. \n         This occurs if any functional group in `functional_groups_broken` or `functional_groups_formed` is not in the list of available functional groups. \n         Use the tool `get_available_functional_groups` to see the list of valid functional groups and ensure all provided functional groups are in that list. \n\n    ValueError:\n         Raised when bonds are provided in an invalid format. \n         This occurs if bonds in `bonds_formed` or `bonds_broken` don't follow the format \"X-Y\" (e.g., \"6-6\", \"6-8\"), or if bonds in `bonds_order_changed` don't follow the format \"X-Y (A->B)\" (e.g., \"6-6 (1.0->2.0)\"). \n         Ensure bonds follow the expected format: \"X-Y\" for bonds_formed/bonds_broken, or \"X-Y (A->B)\" for bonds_order_changed. \n\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Check the SMILES string for correctness and try again. \n\n    Exception:\n         Raised for any unexpected errors during the search process. \n         This can occur due to various reasons, such as issues with the retrosynthetic template database or internal processing errors. \n         Check the input parameters and try again. If the issue persists, let the user know and try another way of solving the task.",
           "LIMITATIONS": "Known limitations:\n    - The function relies on the completeness and accuracy of the retrosynthetic template catalog. If the catalog is incomplete or contains errors, the search results may be affected.\n    - The criteria provided must be specific enough to yield meaningful results; overly broad criteria may return too many templates, while overly narrow criteria may return none.\n    - The function may not handle all edge cases in chemical structures, such as unusual bonding patterns or rare functional groups.\n    - The accuracy of the search results is dependent on the quality of the underlying reaction templates and algorithms used in the retrosynthetic analysis."
         },
@@ -5827,13 +6945,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Identify the template ID you want to retrieve, you can search the template catalog with `search_template_catalog`. \n2.  Use `get_template` to obtain the SMARTS representation of the template. \n3.  Use the retrieved template with `apply_template` to explore possible precursors for target molecules or validate retrosynthetic steps with `verify_step`.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a string representing the template ID as input.\n- It looks up the template ID in a predefined database or dictionary of retrosynthetic templates.\n- If the template ID exists, it retrieves and returns the corresponding SMARTS string.\n- If the template ID does not exist, it raises a ValueError indicating that the template was not found.",
           "SYNTACTICAL": "Usage examples:\n[\n    `get_template(\"123\")`,\n    `get_template(\"45\")`,\n    `get_template(\"7892\")`,\n    `get_template(\"001999\")`,\n    `get_template(\"9999999\")`,\n]",
-          "ARGS_BRIEF": "Identifier of the retrosynthetic template to retrieve.",
-          "ARGS_DETAILED": "The template ID corresponds to a specific retrosynthetic transformation that can be applied to molecules. The templates ids can be found in the template catalog.",
-          "ARGS_SYNTACTICAL": "Valid template ID string",
-          "ARGS_EXAMPLES": "\"template_123\", \"template_456\", \"template_789\"",
-          "RETURNS_BRIEF": "SMARTS string of the retrosynthetic template.",
-          "RETURNS_DETAILED": "The SMARTS string defines the chemical transformation represented by the retrosynthetic template. It can be used in various cheminformatics applications to apply the transformation to target molecules.",
-          "RETURNS_EXAMPLES": "\"[C:1][O:2]>>[C:1][C:2]\", \"[C:1][C:2]>>[C:1][O:2]\"",
+          "ARGS_BRIEF": [
+            "Identifier of the retrosynthetic template to retrieve."
+          ],
+          "ARGS_DETAILED": [
+            "The template ID corresponds to a specific retrosynthetic transformation that can be applied to molecules. The templates ids can be found in the template catalog."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid template ID string"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"template_123\", \"template_456\", \"template_789\""
+          ],
+          "RETURNS_BRIEF": [
+            "SMARTS string of the retrosynthetic template."
+          ],
+          "RETURNS_DETAILED": [
+            "The SMARTS string defines the chemical transformation represented by the retrosynthetic template. It can be used in various cheminformatics applications to apply the transformation to target molecules."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"[C:1][O:2]>>[C:1][C:2]\", \"[C:1][C:2]>>[C:1][O:2]\""
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         Raised when the template ID is not found. \n         This occurs if the provided template ID does not correspond to any known retrosynthetic template in the database. \n         Ensure the template ID is correct and exists in the template catalog.",
           "LIMITATIONS": "Known limitations:\n    - The function relies on the availability of the specified template in the template catalog.\n    - The SMARTS string must be valid and represent a real chemical transformation.\n    - The function may not account for all possible molecular variations and edge cases."
         },
@@ -5855,9 +6987,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Understand the functional groups relevant to your chemical analysis or synthesis planning. \n2.  Use `get_available_functional_groups` to retrieve the list of functional groups. \n3.  Use the retrieved functional groups to filter or search for molecules in the database using other tools or functions.",
           "CONTEXTUAL": "How this tool works:\n- The function accesses a predefined list of functional groups stored in the retrosynthesis package.\n- It returns this list as a simple Python list of strings, each representing a functional group.\n- The functional groups are standardized and commonly used in cheminformatics for molecular characterization.",
           "SYNTACTICAL": "Usage examples:\n[\n    `get_available_functional_groups()`,\n]",
-          "RETURNS_BRIEF": "List of available functional groups.",
-          "RETURNS_DETAILED": "A list of strings, each representing a functional group that can be used for querying the database. These functional groups are based on common chemical motifs and are useful for filtering and identifying relevant compounds.",
-          "RETURNS_EXAMPLES": "[\"alcohol\", \"amine\", \"carboxylic_acid\"]",
+          "RETURNS_BRIEF": [
+            "List of available functional groups."
+          ],
+          "RETURNS_DETAILED": [
+            "A list of strings, each representing a functional group that can be used for querying the database. These functional groups are based on common chemical motifs and are useful for filtering and identifying relevant compounds."
+          ],
+          "RETURNS_EXAMPLES": [
+            "[\"alcohol\", \"amine\", \"carboxylic_acid\"]"
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the retrieval process. \n         This can occur due to various reasons, such as issues with the internal data structure or access permissions. \n         If the issue persists, let the user know and try another way of solving the task.",
           "LIMITATIONS": "Known limitations:\n    - The list of functional groups is predefined and may not cover all possible functional groups found in chemical compounds.\n    - The function does not provide additional information about each functional group, such as its chemical properties or reactivity.\n    - The functional groups are based on common motifs and may not account for all variations or derivatives of these groups."
         },
@@ -5874,13 +7012,31 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure you have the template of the reaction you want to apply, you can search the template catalog with `search_template_catalog`. \n2.  Use `apply_template` to get possible precursors for your target molecule. \n3.  Validate the proposed precursors using `verify_step` to ensure the retrosynthetic step is chemically valid. Use `is_buyable` to check if the proposed precursors are commercially available.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string representing the target molecule and a template ID as inputs.\n- It applies the retrosynthetic template associated with the given ID to the molecule using the `rxnutils` package.\n- If the template is successfully applied, it returns a list of SMILES strings representing the precursor molecules.\n- If the template cannot be applied (e.g., due to incompatibility with the molecule structure), it returns an empty list.",
           "SYNTACTICAL": "Usage examples:\n[\n    `apply_template(\"CCO\", \"template_123\")`,\n    `apply_template(\"c1ccccc1O\", \"template_456\")`,\n    `apply_template(\"C1=CC=CC=C1\", \"template_789\")`,\n    `apply_template(\"C1=CC=CC=C1\", \"template_zzz\")`,\n    `apply_template(\"C1=CC=CC=C1C(=O)O\", \"template_131415\")`,\n]",
-          "ARGS_BRIEF": "Identifier of the retrosynthetic template to apply.",
-          "ARGS_DETAILED": "The template ID corresponds to a specific retrosynthetic transformation that can be applied to the target molecule. The templates ids can be found in the template catalog.",
-          "ARGS_SYNTACTICAL": "Valid template ID string",
-          "ARGS_EXAMPLES": "\"template_123\", \"template_456\", \"template_789\"",
-          "RETURNS_BRIEF": "Tuple of tuples representing precursor SMILES strings. Each tuple corresponds to one possible outcome.",
-          "RETURNS_DETAILED": "Each inner tuple contains SMILES strings of precursor molecules generated by applying the retrosynthetic template to the target molecule. If the template cannot be applied, an empty tuple is returned.",
-          "RETURNS_EXAMPLES": "((\"CCBr\", \"CO\"),), ()",
+          "ARGS_BRIEF": [
+            "SMILES string of the target molecule.",
+            "Identifier of the retrosynthetic template to apply."
+          ],
+          "ARGS_DETAILED": [
+            "SMILES string of the molecule to which the template will be applied. Note that the SMILES string must be valid and represent a real chemical structure which can be processed by the retrosynthetic route used.",
+            "The template ID corresponds to a specific retrosynthetic transformation that can be applied to the target molecule. The templates ids can be found in the template catalog."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid SMILES string",
+            "Valid template ID string"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CCO\", \"c1ccccc1O\", \"C1=CC=CC=C1\"",
+            "\"template_123\", \"template_456\", \"template_789\""
+          ],
+          "RETURNS_BRIEF": [
+            "Tuple of tuples representing precursor SMILES strings. Each tuple corresponds to one possible outcome."
+          ],
+          "RETURNS_DETAILED": [
+            "Each inner tuple contains SMILES strings of precursor molecules generated by applying the retrosynthetic template to the target molecule. If the template cannot be applied, an empty tuple is returned."
+          ],
+          "RETURNS_EXAMPLES": [
+            "((\"CCBr\", \"CO\"),), ()"
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         Raised when the template cannot be found. \n         This occurs if the provided template ID does not correspond to any known retrosynthetic template in the database. \n         Ensure the template ID is correct and exists in the template catalog. \n\n    Exception:\n         Raised for any unexpected errors during template application. \n         This will be most likely due to issues with the input SMILES string. \n         Check that the SMILES string being used is correct.",
           "LIMITATIONS": "Known limitations:\n- The function relies on the availability and correctness of the retrosynthetic templates. If the template database is incomplete or contains errors, the results may be affected.\n- The function may not handle all edge cases in chemical structures, such as unusual bonding patterns or rare functional groups.\n- The accuracy of the retrosynthetic predictions is dependent on the quality of the underlying reaction templates and algorithms used in the `rxnutils` package."
         },
@@ -5906,13 +7062,35 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Identify the rethrosynthetic template to use and use `apply_template` to generate the precursors. \n2.  Use `verify_step` to check if the precursors lead to the target molecule when the template is applied. \n3.  If the step is valid, proceed with the next steps in the synthesis route. If invalid, reconsider the choice of precursors or template.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a target molecule in SMILES format, a retrosynthetic template, and a list of precursor SMILES strings.\n- It applies the retrosynthetic template to the precursors to generate a product.\n- It then compares the generated product to the target molecule to determine if they match.\n- If the generated product matches the target molecule, the function returns True, indicating a valid retrosynthetic step. Otherwise, it returns False.",
           "SYNTACTICAL": "Usage examples:\n[\n    `verify_step(\"CCO\", \"template_123\", [\"CCBr\", \"CO\"])`,\n    `verify_step(\"c1ccccc1O\", \"template_456\", [\"c1ccccc1Br\", \"CO\"])`,\n    `verify_step(\"C1=CC=CC=C1\", \"template_789\", [\"C1=CC=CC=C1Br\", \"H2O\"])`,\n    `verify_step(\"C1=CC=CC=C1\", \"template_zzz\", [\"C1=CC=CC=C1Br\", \"H2O\"])`,\n    `verify_step(\"C1=CC=CC=C1C(=O)O\", \"template_131415\", [\"C1=CC=CC=C1C(=O)Cl\", \"H2O\"])`,\n]",
-          "ARGS_BRIEF": "List of SMILES strings representing the precursor molecules.",
-          "ARGS_DETAILED": "A list of SMILES strings, each representing a precursor molecule that, when combined and transformed by the template, should yield the target molecule.",
-          "ARGS_SYNTACTICAL": "List of valid SMILES strings",
-          "ARGS_EXAMPLES": "[\"CCBr\", \"CO\"], [\"c1ccccc1Br\", \"CO\"]",
-          "RETURNS_BRIEF": "True if the retrosynthetic step is valid, False otherwise.",
-          "RETURNS_DETAILED": "The function returns True if applying the retrosynthetic template to the provided precursors results in the target molecule. If the generated product does not match the target molecule, it returns False.",
-          "RETURNS_EXAMPLES": "True, False",
+          "ARGS_BRIEF": [
+            "SMILES string of the target molecule.",
+            "Retrosynthetic template in SMARTS format.",
+            "List of SMILES strings representing the precursor molecules."
+          ],
+          "ARGS_DETAILED": [
+            "The SMILES string representation of the target molecule. It must be the molecule that one already known in the retrosynthetic context.",
+            "The retrosynthetic template is a SMARTS string that defines the transformation to be applied to the precursors. It should be one of the templates from the dataset.",
+            "A list of SMILES strings, each representing a precursor molecule that, when combined and transformed by the template, should yield the target molecule."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid SMILES string",
+            "Valid SMARTS string",
+            "List of valid SMILES strings"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CCO\", \"c1ccccc1O\", \"C1=CC=CC=C1\"",
+            "\"[C:1][O:2]>>[C:1][C:2]\", \"[C:1][C:2]>>[C:1][O:2]\"",
+            "[\"CCBr\", \"CO\"], [\"c1ccccc1Br\", \"CO\"]"
+          ],
+          "RETURNS_BRIEF": [
+            "True if the retrosynthetic step is valid, False otherwise."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns True if applying the retrosynthetic template to the provided precursors results in the target molecule. If the generated product does not match the target molecule, it returns False."
+          ],
+          "RETURNS_EXAMPLES": [
+            "True, False"
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         Raised when the template is invalid or cannot be applied. \n         This occurs if the provided template is not a valid SMARTS string or if it cannot be applied to the given precursors. \n         Ensure the template is correct and compatible with the precursors.",
           "LIMITATIONS": "Known limitations:\n- The function assumes that the input SMILES strings and template are valid and correctly formatted.\n- The accuracy of the verification depends on the correctness of the retrosynthetic template and its applicability to the given precursors.\n- The function may not handle all edge cases in chemical structures, such as stereochemistry or tautomers.\n- The function does not account for reaction conditions or other factors that may influence the outcome of a retrosynthetic step."
         },
@@ -5942,13 +7120,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Construct or obtain a synthesis route in JSON format. \n2.  Use `verify_route` to validate the route structure. \n3.  If the route is valid, proceed with retrosynthesis planning, analysis or submit if the route is correct. You can check if the reactants are valid by checking if they are buyable using the tool `is_buyable`. If invalid, correct the structure based on the error message provided.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a JSON string representing a synthesis route as input.\n- It parses the JSON and checks that it conforms to a hierarchical schema where:\n  - The root is a molecule with required fields \"type\" and \"smiles\".\n  - Molecules can have children that are either reactions or other molecules.\n  - Reactions must have required fields \"type\", \"template_id\", and \"children\".\n  - Each reaction must have at least two children (reactants).\n- The function recursively validates each node in the hierarchy to ensure all required fields are present and correctly typed.\n- If the route adheres to the schema, it returns (True, \"The route is valid\"). If not, it returns (False, error_message) with a description of the first encountered error.",
           "SYNTACTICAL": "Usage examples:\n[\n    `verify_route('{\"type\": \"mol\", \"smiles\": \"CCO\", \"children\": [{\"type\": ...}]}')`,\n    `verify_route('{\"type\": \"mol\", \"smiles\": \"c1ccccc1O\", \"children\": [{\"type\": ...}]}')`,\n    `verify_route('{\"type\": \"mol\", \"smiles\": \"C1=CC=CC=C1\", \"children\": [{\"type\": ...}]}')`,\n    `verify_route('{\"type\": \"mol\", \"smiles\": \"C1=CC=CC=C1\", \"children\": [{\"type\": ...}]}')`,\n    `verify_route('{\"type\": \"mol\", \"smiles\": \"C1=CC=CC=C1C(=O)O\", \"children\": [{\"type\": ...}]}')`,\n]",
-          "ARGS_BRIEF": "JSON string representing the synthesis route.",
-          "ARGS_DETAILED": "A JSON-formatted string that encodes the hierarchical structure of a synthesis route, including molecules and reactions with their respective fields.",
-          "ARGS_SYNTACTICAL": "Valid JSON string",
-          "ARGS_EXAMPLES": "'{\"type\": \"mol\", \"smiles\": \"CCO\", \"children\": [{\"type\": ...}]}', '{\"type\": \"mol\", \"smiles\": \"c1ccccc1O\", \"children\": [{\"type\": ...}]}'",
-          "RETURNS_BRIEF": "(is_valid, error_message) where is_valid is True if the route is valid, False otherwise.",
-          "RETURNS_DETAILED": "A tuple where the first element is a boolean indicating whether the route is valid, and the second element is a string containing an error message if the route is invalid, or a success message if it is valid.",
-          "RETURNS_EXAMPLES": "(True, \"The route is valid\"), (False, \"Invalid JSON format: ...\")",
+          "ARGS_BRIEF": [
+            "JSON string representing the synthesis route."
+          ],
+          "ARGS_DETAILED": [
+            "A JSON-formatted string that encodes the hierarchical structure of a synthesis route, including molecules and reactions with their respective fields."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid JSON string"
+          ],
+          "ARGS_EXAMPLES": [
+            "'{\"type\": \"mol\", \"smiles\": \"CCO\", \"children\": [{\"type\": ...}]}', '{\"type\": \"mol\", \"smiles\": \"c1ccccc1O\", \"children\": [{\"type\": ...}]}'"
+          ],
+          "RETURNS_BRIEF": [
+            "(is_valid, error_message) where is_valid is True if the route is valid, False otherwise."
+          ],
+          "RETURNS_DETAILED": [
+            "A tuple where the first element is a boolean indicating whether the route is valid, and the second element is a string containing an error message if the route is invalid, or a success message if it is valid."
+          ],
+          "RETURNS_EXAMPLES": [
+            "(True, \"The route is valid\"), (False, \"Invalid JSON format: ...\")"
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         Raised when the input JSON is invalid or cannot be parsed. \n         This occurs if the provided string is not valid JSON format. \n         Ensure the input string is correctly formatted JSON.",
           "LIMITATIONS": "Known limitations:\n- The function assumes that the input JSON string is well-formed and does not handle deeply nested structures beyond typical synthesis routes.\n- The validation focuses on structural correctness and does not verify the chemical validity of the molecules or reactions.\n- The function may not catch all possible schema violations, especially in complex or unconventional route representations.\n- Error messages may not always pinpoint the exact location of the error in deeply nested structures."
         },
@@ -5970,13 +7162,31 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES strings of the chemicals you want to search for. \n2.  Use `search_catalog_by_smiles` to look up the SMILES strings in the catalog. \n3.  If matches are found, review the chemical information for potential use in synthesis. If no matches are found, consider alternative chemicals or suppliers. You can also check if the molecule is buyable using the tool `is_buyable`.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a list of SMILES strings as input and queries some chemical catalogs for matching entries using the `chemprice` package.\n- It retrieves a list of chemicals that match the provided SMILES strings, each represented as a dictionary containing relevant chemical information.\n- If no matches are found, it returns a message indicating that no results were found.",
           "SYNTACTICAL": "Usage examples:\n[\n    `search_catalog_by_smiles([\"CCO\"], limit=10)`,\n    `search_catalog_by_smiles([\"c1ccccc1O\"])`,\n    `search_catalog_by_smiles([\"C1=CC=CC=C1\"], liimit=3)`,\n    `search_catalog_by_smiles([\"C1=CC=CC=C1C(=O)O\"])`,\n    `search_catalog_by_smiles([\"C1=CC=CC=C1C(=O)Cl\", \"CCO\"], limit=7)`,\n]",
-          "ARGS_BRIEF": "Maximum number of results to return. Default is 5.",
-          "ARGS_DETAILED": "An integer specifying the maximum number of matching chemicals to return from the catalog search. This helps to limit the output size.",
-          "ARGS_SYNTACTICAL": "Positive integer",
-          "ARGS_EXAMPLES": "5, 10, 3",
-          "RETURNS_BRIEF": "List of chemical info dicts or a not-found message.",
-          "RETURNS_DETAILED": "If matches are found, a list of dictionaries containing chemical information is returned. Each dictionary represents a chemical and includes details such as SMILES, amount, distributor or price. If no matches are found, a message indicating no results were found is returned.",
-          "RETURNS_EXAMPLES": "[{\"name\": \"Formaldehyde\", \"cas\": \"50-00-0\", ...}], \"No results found\"",
+          "ARGS_BRIEF": [
+            "List of SMILES strings representing the chemicals to search for.",
+            "Maximum number of results to return. Default is 5."
+          ],
+          "ARGS_DETAILED": [
+            "A list of SMILES representations of all the chemicals to be searched in the catalog.",
+            "An integer specifying the maximum number of matching chemicals to return from the catalog search. This helps to limit the output size."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "List with valid SMILES strings",
+            "Positive integer"
+          ],
+          "ARGS_EXAMPLES": [
+            "[\"CCO\"], [\"c1ccccc1O\"], [\"C1=CC=CC=C1\"]",
+            "5, 10, 3"
+          ],
+          "RETURNS_BRIEF": [
+            "List of chemical info dicts or a not-found message."
+          ],
+          "RETURNS_DETAILED": [
+            "If matches are found, a list of dictionaries containing chemical information is returned. Each dictionary represents a chemical and includes details such as SMILES, amount, distributor or price. If no matches are found, a message indicating no results were found is returned."
+          ],
+          "RETURNS_EXAMPLES": [
+            "[{\"name\": \"Formaldehyde\", \"cas\": \"50-00-0\", ...}], \"No results found\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the catalog search. \n         This could be due to connectivity issues, invalid SMILES format, or server errors in the catalog service. \n         Verify the SMILES format if the error has to do with the SMILES representation. If the error comes from the catalog service, inform the user to try again later.",
           "LIMITATIONS": "Known limitations:\n- The function limits the number of returned matches to prevent overwhelming the user with too many results.\n- The accuracy and completeness of the search results depend on the underlying chemical catalog being queried.\n- The function does not handle partial matches or synonyms; it strictly searches by the exact CAS number provided.\n- If the catalog service is down or unreachable, the function will not be able to return results."
         },
@@ -6002,13 +7212,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES notation of the molecules you want to check. \n2.  Use `is_buyable` to check if the molecules are commercially available. \n3.  If a molecule is buyable, consider it for inclusion in your synthesis route. If not, look for alternative molecules, precursors or routes. You can use this tool for validation to check that all the reactants are buyable.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a list of SMILES as input and queries some chemical database using the `chemprice` package to check the commercial availability of each molecule.\n- It checks if the molecule associated with the provided SMILES is listed as available for purchase.\n- If the molecule is found to be commercially available, the function returns True for such molecule. If it is not available, it returns False.",
           "SYNTACTICAL": "Usage examples:\n[\n    `is_buyable([\"CCO\", \"c1ccccc1O\", \"C1=CC=CC=C1\"])`,\n    `is_buyable([\"C1=CC=CC=C1C(=O)O\", \"C1=CC=CC=C1C(=O)Cl\"])`,\n    `is_buyable([\"CNC\", \"CCN\", \"CCCN\"])`,\n    `is_buyable([\"CC(=O)O\", \"C1=CC=CC=C1C(=O)Cl\"])`,\n    `is_buyable([\"CC(=O)O\", \"C1=CC=CC=C1\"])`,\n]",
-          "ARGS_BRIEF": "List of SMILES strings representing the molecules to check.",
-          "ARGS_DETAILED": "A list of SMILES representations of all the molecules whose commercial availability is to be checked.",
-          "ARGS_SYNTACTICAL": "Valid SMILES strings",
-          "ARGS_EXAMPLES": "[\"CCO\"], [\"c1ccccc1O\"], [\"C1=CC=CC=C1\"]",
-          "RETURNS_BRIEF": "List of boolean values indicating the availability of each molecule.",
-          "RETURNS_DETAILED": "The function returns a list of boolean values, where each value corresponds to the availability of the molecule represented by the respective SMILES string in the input list.",
-          "RETURNS_EXAMPLES": "[True], [False]",
+          "ARGS_BRIEF": [
+            "List of SMILES strings representing the molecules to check."
+          ],
+          "ARGS_DETAILED": [
+            "A list of SMILES representations of all the molecules whose commercial availability is to be checked."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid SMILES strings"
+          ],
+          "ARGS_EXAMPLES": [
+            "[\"CCO\"], [\"c1ccccc1O\"], [\"C1=CC=CC=C1\"]"
+          ],
+          "RETURNS_BRIEF": [
+            "List of boolean values indicating the availability of each molecule."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns a list of boolean values, where each value corresponds to the availability of the molecule represented by the respective SMILES string in the input list."
+          ],
+          "RETURNS_EXAMPLES": [
+            "[True], [False]"
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the availability check. \n         This could be due to connectivity issues, invalid SMILES format, or server errors in the availability service. \n         Verify the SMILES format if the error has to do with the SMILES. If the error comes from the availability service, inform the user to try again later, and you should workaround by checking alternative routes.",
           "LIMITATIONS": "Known limitations:\n- The function relies on the accuracy and completeness of the underlying database or service used to check commercial availability.\n- The availability status may change over time, so the function's results may not always reflect the most current market conditions.\n- The function does not provide information on pricing, suppliers, or quantities available for purchase.\n- If the availability service is down or unreachable, the function will not be able to return results."
         },
@@ -6030,13 +7254,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES string of the molecule you want to convert. \n2.  Use `smiles_to_cas` to convert the SMILES string to a CAS number. \n3.  Use the obtained CAS number for further chemical information lookup, procurement, or documentation. You can also use the tool `search_catalog_by_cas` to find available precursors or `is_buyable` to check if the molecule is commercially available.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string as input and queries a chemical database or service that maps SMILES strings to CAS numbers.\n- The function first validates the SMILES string to ensure it represents a valid molecular structure.\n- It retrieves the CAS number associated with the provided SMILES string.\n- If a matching CAS number is found, it is returned as a string. If no match is found, an appropriate message or exception may be raised.",
           "SYNTACTICAL": "Usage examples:\n[\n    `smiles_to_cas(\"CCO\")`,\n    `smiles_to_cas(\"c1ccccc1O\")`,\n    `smiles_to_cas(\"C1=CC=CC=C1\")`,\n    `smiles_to_cas(\"C1=CC=CC=C1C(=O)O\")`,\n    `smiles_to_cas(\"C1=CC=CC=C1C(=O)Cl\")`,\n]",
-          "ARGS_BRIEF": "SMILES string of the molecule to convert.",
-          "ARGS_DETAILED": "A valid SMILES string of the molecule that you need the CAS number for.",
-          "ARGS_SYNTACTICAL": "Valid SMILES string",
-          "ARGS_EXAMPLES": "\"CCO\", \"c1ccccc1O\", \"C1=CC=CC=C1\"",
-          "RETURNS_BRIEF": "The corresponding CAS number as a string.",
-          "RETURNS_DETAILED": "The function returns the CAS number associated with the provided SMILES string. The CAS number is a unique identifier for chemical substances and is widely used in chemical databases and literature.",
-          "RETURNS_EXAMPLES": "\"50-00-0\", \"64-17-5\", \"67-56-1\"",
+          "ARGS_BRIEF": [
+            "SMILES string of the molecule to convert."
+          ],
+          "ARGS_DETAILED": [
+            "A valid SMILES string of the molecule that you need the CAS number for."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid SMILES string"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CCO\", \"c1ccccc1O\", \"C1=CC=CC=C1\""
+          ],
+          "RETURNS_BRIEF": [
+            "The corresponding CAS number as a string."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns the CAS number associated with the provided SMILES string. The CAS number is a unique identifier for chemical substances and is widely used in chemical databases and literature."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"50-00-0\", \"64-17-5\", \"67-56-1\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the conversion process. \n         This could be due to connectivity issues, or server errors in the conversion service. \n         If the error comes from the conversion service, being a server error or similar, inform the user to try again later, and you should go through a different route. \n\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Ensure the SMILES string is correctly formatted.",
           "LIMITATIONS": "Known limitations:\n- The function relies on the accuracy and completeness of the underlying database or service used for the conversion.\n- Not all SMILES strings may have a corresponding CAS number, especially for novel or less common compounds.\n- The function does not handle stereochemistry or isotopic variations in the SMILES string.\n- If the conversion service is down or unreachable, the function will not be able to return results."
         },
@@ -6058,13 +7296,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the CAS number of the molecule you want to convert. You can obtain the CAS number for a chemical by using the tool `smiles_to_cas`. \n2.  Use `cas_to_smiles` to convert the CAS number to an isomeric SMILES string. \n3.  Use the obtained isomeric SMILES string for further chemical analysis, modeling, or synthesis planning. You can also use the tool `detect_functional_groups` to identify functional groups in the molecule.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a CAS number as input and queries a chemical database or service that maps CAS numbers to isomeric SMILES strings.\n- It retrieves the isomeric SMILES representation associated with the provided CAS number.\n- If a matching isomeric SMILES string is found, it is returned as a string. If no match is found, an appropriate message or exception may be raised.",
           "SYNTACTICAL": "Usage examples:\n[\n    `cas_to_smiles(\"50-00-0\")`,\n    `cas_to_smiles(\"64-17-5\")`,\n    `cas_to_smiles(\"67-56-1\")`,\n    `cas_to_smiles(\"000-00-0\")`,\n    `cas_to_smiles(\"999-99-9\")`,\n]",
-          "ARGS_BRIEF": "CAS number of the molecule to convert.",
-          "ARGS_DETAILED": "Valid CAS number string that corresponds to a specific chemical substance that you want to convert to SMILES.",
-          "ARGS_SYNTACTICAL": "Valid CAS number string",
-          "ARGS_EXAMPLES": "\"50-00-0\", \"64-17-5\", \"67-56-1\"",
-          "RETURNS_BRIEF": "The corresponding isomeric SMILES string.",
-          "RETURNS_DETAILED": "The function returns the isomeric SMILES representation associated with the provided CAS number. The isomeric SMILES includes stereochemical information, making it more specific than standard SMILES.",
-          "RETURNS_EXAMPLES": "\"C(CO)O\", \"CCO\", \"C1=CC=CC=C1\"",
+          "ARGS_BRIEF": [
+            "CAS number of the molecule to convert."
+          ],
+          "ARGS_DETAILED": [
+            "Valid CAS number string that corresponds to a specific chemical substance that you want to convert to SMILES."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid CAS number string"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"50-00-0\", \"64-17-5\", \"67-56-1\""
+          ],
+          "RETURNS_BRIEF": [
+            "The corresponding isomeric SMILES string."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns the isomeric SMILES representation associated with the provided CAS number. The isomeric SMILES includes stereochemical information, making it more specific than standard SMILES."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"C(CO)O\", \"CCO\", \"C1=CC=CC=C1\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the conversion process. \n         This could be due to connectivity issues, invalid CAS number format, or server errors in the conversion service. \n         Verify the CAS number format if the error has to do with the CAS number. If the error comes from the conversion service, inform the user to try again later.",
           "LIMITATIONS": "Known limitations:\n- The function relies on the accuracy and completeness of the underlying database or service used for the conversion.\n- Not all CAS numbers may have a corresponding isomeric SMILES representation, especially for novel or less common compounds.\n- The function does not handle cases where multiple isomeric SMILES strings may correspond to the same CAS number.\n- If the conversion service is down or unreachable, the function will not be able to return results."
         },
@@ -6086,13 +7338,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES string of the molecule with protecting groups. You can use the tool `detect_protection_groups` to identify protecting groups in a molecule. \n2.  Use `deprotect_molecule` to remove the protecting groups and obtain the deprotected molecule. \n3.  Use the deprotected SMILES string for further chemical analysis, modeling, or synthesis planning. You can also use the tool `detect_functional_groups` to identify functional groups in the deprotected molecule.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string as input and uses RDKit's rdDeprotect module to identify and remove common protecting groups.\n- It processes the molecular structure to eliminate the protecting groups while preserving the core structure of the molecule.\n- The resulting deprotected molecule is then converted  back to a SMILES string and returned.",
           "SYNTACTICAL": "Usage examples:\n[\n    `deprotect_molecule(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `deprotect_molecule(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `deprotect_molecule(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `deprotect_molecule(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `deprotect_molecule(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n]",
-          "ARGS_BRIEF": "SMILES string of the molecule with protecting groups.",
-          "ARGS_DETAILED": "Valid SMILES string of the molecule that contains the protective groups that you want to detect and remove. Ensure that is a valid SMILES, otherwise an exception will be raised.",
-          "ARGS_SYNTACTICAL": "Valid SMILES string",
-          "ARGS_EXAMPLES": "\"CC(C)(OC(NCCOc1ccccc1)=O)C\", \"CC(C)(OC(NCCOc1ccccc1)=O)C\"",
-          "RETURNS_BRIEF": "The SMILES string of the deprotected molecule.",
-          "RETURNS_DETAILED": "The function returns the SMILES representation of the molecule after removing the protecting groups. This deprotected SMILES string represents the core structure of the molecule without any temporary modifications.",
-          "RETURNS_EXAMPLES": "\"CCO\", \"CCO\"",
+          "ARGS_BRIEF": [
+            "SMILES string of the molecule with protecting groups."
+          ],
+          "ARGS_DETAILED": [
+            "Valid SMILES string of the molecule that contains the protective groups that you want to detect and remove. Ensure that is a valid SMILES, otherwise an exception will be raised."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid SMILES string"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CC(C)(OC(NCCOc1ccccc1)=O)C\", \"CC(C)(OC(NCCOc1ccccc1)=O)C\""
+          ],
+          "RETURNS_BRIEF": [
+            "The SMILES string of the deprotected molecule."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns the SMILES representation of the molecule after removing the protecting groups. This deprotected SMILES string represents the core structure of the molecule without any temporary modifications."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"CCO\", \"CCO\""
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Ensure the SMILES string is correctly formatted.",
           "LIMITATIONS": "Known limitations:\n- The function relies on RDKit's rdDeprotect module, which may not recognize all possible protecting groups.\n- The accuracy of the deprotection process depends on the quality of the input SMILES string.\n- The function may not handle complex molecules with multiple or overlapping protecting groups effectively.\n- The function does not provide information on the specific protecting groups that were removed or their positions in the original molecule."
         },
@@ -6114,13 +7380,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES string of the molecule you want to analyze. \n2.  Use `detect_protection_groups` to identify protecting groups and their positions in the molecule. \n3.  Use the information about protecting groups for synthesis planning, modification of the molecule, or further analysis. You can also use the tool `deprotect_molecule` to remove the identified protecting groups.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string as input and converts it to a molecular structure using RDKit.\n- It uses RDKit's rdDeprotect module to identify common protecting groups based on predefined reaction SMARTS patterns.\n- For each detected protecting group, it records the abbreviation, full name, class, and the positions of the atoms involved.\n- Uses other custom SMARTS patterns to enhance the detection process, searching also for those in the molecule.\n- The results are compiled into a structured dictionary that includes the input SMILES, a mapped SMILES for reference, and a list of detected protecting groups with their details.",
           "SYNTACTICAL": "Usage examples:\n[\n    `detect_protection_groups(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `detect_protection_groups(\"CCO\")`,\n    `detect_protection_groups(\"c1ccccc1O\")`,\n    `detect_protection_groups(\"C1=CC=CC=C1\")`,\n    `detect_protection_groups(\"C1=CC=CC=C1C(=O)O\")`,\n]",
-          "ARGS_BRIEF": "SMILES string of the molecule to analyze.",
-          "ARGS_DETAILED": "Valid SMILES string of the molecule that contains the protective groups that you want to detect.",
-          "ARGS_SYNTACTICAL": "Valid SMILES string",
-          "ARGS_EXAMPLES": "\"CC(C)(OC(NCCOc1ccccc1)=O)C\", \"CCO\", \"c1ccccc1O\"",
-          "RETURNS_BRIEF": "Dictionary containing input SMILES, mapped SMILES, and detected protecting groups.",
-          "RETURNS_DETAILED": "The function returns a dictionary with the following keys:\n            - \"input_smiles\": The original SMILES string provided as input.\n            - \"mapped_smiles\": A version of the SMILES string with atom-map numbers for reference.\n            - \"protecting_groups\": A list of dictionaries, each representing a detected protecting group with details such as abbreviation, full name, class, and atom positions.\n        This structured output provides comprehensive information about the protecting groups present in the molecule.",
-          "RETURNS_EXAMPLES": "{\n            \"input_smiles\": \"CC(C)(OC(NCCOc1ccccc1)=O)C\",\n            \"mapped_smiles\": \"CC(C)(OC(NCCOc1ccccc1)=O)C\",\n            \"protecting_groups\": [\n                {\"abbrev\": \"Boc\", \"name\": \"tert-Butyloxycarbonyl\", \"class\": \"amine\", \"positions\": [(0, 1, 2)]},...\n            ]\n        }",
+          "ARGS_BRIEF": [
+            "SMILES string of the molecule to analyze."
+          ],
+          "ARGS_DETAILED": [
+            "Valid SMILES string of the molecule that contains the protective groups that you want to detect."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid SMILES string"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CC(C)(OC(NCCOc1ccccc1)=O)C\", \"CCO\", \"c1ccccc1O\""
+          ],
+          "RETURNS_BRIEF": [
+            "Dictionary containing input SMILES, mapped SMILES, and detected protecting groups."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns a dictionary with the following keys:\n            - \"input_smiles\": The original SMILES string provided as input.\n            - \"mapped_smiles\": A version of the SMILES string with atom-map numbers for reference.\n            - \"protecting_groups\": A list of dictionaries, each representing a detected protecting group with details such as abbreviation, full name, class, and atom positions.\n        This structured output provides comprehensive information about the protecting groups present in the molecule."
+          ],
+          "RETURNS_EXAMPLES": [
+            "{\n            \"input_smiles\": \"CC(C)(OC(NCCOc1ccccc1)=O)C\",\n            \"mapped_smiles\": \"CC(C)(OC(NCCOc1ccccc1)=O)C\",\n            \"protecting_groups\": [\n                {\"abbrev\": \"Boc\", \"name\": \"tert-Butyloxycarbonyl\", \"class\": \"amine\", \"positions\": [(0, 1, 2)]},...\n            ]\n        }"
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Ensure the SMILES string is correctly formatted.",
           "LIMITATIONS": "Known limitations:\n- The function relies on RDKit's rdDeprotect module, which may not recognize all possible protecting groups.\n- The function may not handle complex molecules with multiple or overlapping protecting groups effectively.\n- Custom protecting group SMARTS patterns must be valid; invalid SMARTS will be skipped without notification.\n- The function does not provide information on the specific reactions or conditions used to install or remove the protecting groups."
         },
@@ -6142,13 +7422,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES string of the molecule you want to analyze. \n2.  Use `detect_functional_groups` to identify functional groups in the molecule. \n3.  Use the information about functional groups for synthesis planning, modification of the molecule, or further analysis.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a SMILES string as input and converts it to a molecular structure using RDKit.\n- It uses a predefined set of SMARTS patterns to identify common functional groups within the molecule.\n- For each detected functional group, it records the name and the positions of the atoms within the molecule.\n- The results are compiled into a summary string that lists the detected functional groups and the positions of the atoms.",
           "SYNTACTICAL": "Usage examples:\n[\n    `detect_functional_groups(\"CC(C)(OC(NCCOc1ccccc1)=O)C\")`,\n    `detect_functional_groups(\"CCO\")`,\n    `detect_functional_groups(\"c1ccccc1O\")`,\n    `detect_functional_groups(\"C1=CC=CC=C1\")`,\n    `detect_functional_groups(\"C1=CC=CC=C1C(=O)C\")`,\n]",
-          "ARGS_BRIEF": "SMILES string of the molecule to analyze.",
-          "ARGS_DETAILED": "The SMILES string of the molecule that you want to detect the functional groups from.",
-          "ARGS_SYNTACTICAL": "Valid SMILES string",
-          "ARGS_EXAMPLES": "\"CC(C)(OC(NCCOc1ccccc1)=O)C\", \"CCO\", \"c1ccccc1O\"",
-          "RETURNS_BRIEF": "Summary of detected functional groups in the molecule.",
-          "RETURNS_DETAILED": "The function returns a string summarizing the functional groups detected in the molecule. The summary includes the names of the functional groups and the positions of the atoms in the original molecule, providing insight into the reactive sites and properties of the molecule.",
-          "RETURNS_EXAMPLES": "\"Full mapped SMILES: C([NH:6][C:5]([O:4][C:2]([CH3:1])([CH3:3])[CH3:17])=[O:16])[CH2:8][O:9][c:10]1[cH:11][cH:12][cH:13][cH:14][cH:15]1\n\n                    Groups found:\n                        - phenyl group     pos=(10, 11, 12, 13, 14, 15)  frag=[c:10]1[cH:11][cH:12][cH:13][cH:14][cH:15]1\n                        - carbamate groups pos=(2, 4, 5, 16, 6)  frag=[C:2][O:4][C:5]([NH:6])=[O:16]\n                        ...\"",
+          "ARGS_BRIEF": [
+            "SMILES string of the molecule to analyze."
+          ],
+          "ARGS_DETAILED": [
+            "The SMILES string of the molecule that you want to detect the functional groups from."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid SMILES string"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CC(C)(OC(NCCOc1ccccc1)=O)C\", \"CCO\", \"c1ccccc1O\""
+          ],
+          "RETURNS_BRIEF": [
+            "Summary of detected functional groups in the molecule."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns a string summarizing the functional groups detected in the molecule. The summary includes the names of the functional groups and the positions of the atoms in the original molecule, providing insight into the reactive sites and properties of the molecule."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"Full mapped SMILES: C([NH:6][C:5]([O:4][C:2]([CH3:1])([CH3:3])[CH3:17])=[O:16])[CH2:8][O:9][c:10]1[cH:11][cH:12][cH:13][cH:14][cH:15]1\n\n                    Groups found:\n                        - phenyl group     pos=(10, 11, 12, 13, 14, 15)  frag=[c:10]1[cH:11][cH:12][cH:13][cH:14][cH:15]1\n                        - carbamate groups pos=(2, 4, 5, 16, 6)  frag=[C:2][O:4][C:5]([NH:6])=[O:16]\n                        ...\""
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Ensure the SMILES string is correctly formatted. \n\n    Exception:\n         Raised for any unexpected errors during the detection process. \n         This could be due to issues with the SMARTS patterns or internal processing errors. \n         If the error is due to internal processing, inform the user to try again later.",
           "LIMITATIONS": "Known limitations:\n- The function relies on a predefined set of SMARTS patterns, which may not cover all possible functional groups.\n- The accuracy of the detection process depends on the quality of the input SMILES string.\n- The function may not handle complex molecules with overlapping or ambiguous functional groups effectively.\n- The function does not provide information on the specific locations of the functional groups within the molecule."
         },
@@ -6170,13 +7464,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Some template is not working when being applied to the molecule at hand. Obtain the reaction SMILES string that you want to map. \n2.  Use `map_reaction_smiles(reaction_smiles)` to get the mapped SMILES string. \n3.  Use the mapped reaction SMILES for further retrosynthesis analysis or template application. You can also use the tool `apply_template` to apply retrosynthesis templates to molecules.",
           "CONTEXTUAL": "How this tool works:\n- The function takes a reaction SMILES string as input and utilizes the RXNMapper library to perform attention-guided atom mapping.\n- The RXNMapper analyzes the reaction and assigns atom map numbers to the atoms in the reactants and products based on learned attention mechanisms.\n- The resulting mapped reaction SMILES string is returned, which includes the atom map numbers for each atom involved in the reaction.",
           "SYNTACTICAL": "Usage examples:\n[\n    `map_reaction_smiles(\"CCO.CC(=O)O>>CCOC(=O)C\")`,\n    `map_reaction_smiles(\"c1ccccc1.O>>c1ccccc1O\")`,\n    `map_reaction_smiles(\"C1=CC=CC=C1.CC(=O)O>>C1=CC=CC=C1C(=O)O\")`,\n    `map_reaction_smiles(\"C1=CC=CC=C1C(=O)Cl.CC>>C1=CC=CC=C1C(=O)CC\")`,\n    `map_reaction_smiles(\"CCN.C1=CC=CC=C1>>CCNC1=CC=CC=C1\")`,\n]",
-          "ARGS_BRIEF": "Reaction SMILES string to be mapped.",
-          "ARGS_DETAILED": "A valid reaction SMILES string representing the chemical reaction you want to map.",
-          "ARGS_SYNTACTICAL": "Valid reaction SMILES string",
-          "ARGS_EXAMPLES": "\"CCO.CC(=O)O>>CCOC(=O)C\", \"c1ccccc1.O>>c1cccccc1O\"",
-          "RETURNS_BRIEF": "The mapped reaction SMILES string with atom map numbers.",
-          "RETURNS_DETAILED": "The function returns the reaction SMILES string with atom map numbers assigned to the atoms in the reactants and products. This mapped SMILES string allows for tracking of atoms through the reaction process.",
-          "RETURNS_EXAMPLES": "\"C[C:1][O:2].C[C:3](=[O:4])[O:5]>>C[C:1][O:2][C:3](=[O:4])\"",
+          "ARGS_BRIEF": [
+            "Reaction SMILES string to be mapped."
+          ],
+          "ARGS_DETAILED": [
+            "A valid reaction SMILES string representing the chemical reaction you want to map."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid reaction SMILES string"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CCO.CC(=O)O>>CCOC(=O)C\", \"c1ccccc1.O>>c1cccccc1O\""
+          ],
+          "RETURNS_BRIEF": [
+            "The mapped reaction SMILES string with atom map numbers."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns the reaction SMILES string with atom map numbers assigned to the atoms in the reactants and products. This mapped SMILES string allows for tracking of atoms through the reaction process."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"C[C:1][O:2].C[C:3](=[O:4])[O:5]>>C[C:1][O:2][C:3](=[O:4])\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         Raised for any unexpected errors during the mapping process. \n         This could be due to connectivity issues, invalid reaction SMILES format, or errors in the RXNMapper library. \n         Verify the reaction SMILES format if the error has to do with the input. If the error comes from the mapping process, inform the user to try again later.",
           "LIMITATIONS": "Known limitations:\n- The function relies on the RXNMapper library, which may not accurately map all types of reactions.\n- The accuracy of the mapping process depends on the quality of the input reaction SMILES string.\n- The function may not handle complex reactions with multiple steps or ambiguous atom mappings effectively.\n- The RXNMapper model may have limitations based on its training data and may not generalize well to all reaction types."
         },
@@ -6198,13 +7506,31 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain the SMILES string of a molecule and the reaction template. You can use the `search_template_catalog_by_criteria` tool to find the appropriate template. \n2.  Use `check_smiles_reaction_template_matching` to check if the template matches the molecule. \n3.  Use the result to decide whether to apply the template using the `apply_template` tool or to search for alternative templates.",
           "CONTEXTUAL": "How this tool works:\n- The function converts the SMILES string into a molecular structure using RDKit to check if the SMILES is valid.\n- It retrieves the information relative to the reaction template using the provided template ID.\n- It checks if the reaction template SMARTS matches any substructure in the molecule.\n- The function returns True if a match is found, otherwise it returns False.",
           "SYNTACTICAL": "Usage examples:\n[\n    `check_smiles_reaction_template_matching(\"CCO\", \"123\")`,\n    `check_smiles_reaction_template_matching(\"c1ccccc1O\", \"456\")`,\n    `check_smiles_reaction_template_matching(\"C1=CC=CC=C1\", \"789\")`,\n    `check_smiles_reaction_template_matching(\"C1=CC=CC=C1C(=O)O\", \"101\")`,\n    `check_smiles_reaction_template_matching(\"C1=CC=CC=C1C(=O)Cl\", \"112\")`,\n]",
-          "ARGS_BRIEF": "ID of the reaction template to check.",
-          "ARGS_DETAILED": "The unique identifier of the reaction template you want to check against the molecule.",
-          "ARGS_SYNTACTICAL": "String representing a template ID",
-          "ARGS_EXAMPLES": "\"123\", \"456\", \"789\"",
-          "RETURNS_BRIEF": "True if the template matches the molecule, False otherwise.",
-          "RETURNS_DETAILED": "The function returns a boolean value indicating whether the reaction template matches any substructure in the molecule represented by the SMILES string.",
-          "RETURNS_EXAMPLES": "True, False",
+          "ARGS_BRIEF": [
+            "SMILES string of the molecule to check.",
+            "ID of the reaction template to check."
+          ],
+          "ARGS_DETAILED": [
+            "A valid SMILES string of the molecule that you want to check against the reaction template.",
+            "The unique identifier of the reaction template you want to check against the molecule."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid SMILES string",
+            "String representing a template ID"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CCO\", \"c1ccccc1O\", \"C1=CC=CC=C1\"",
+            "\"123\", \"456\", \"789\""
+          ],
+          "RETURNS_BRIEF": [
+            "True if the template matches the molecule, False otherwise."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns a boolean value indicating whether the reaction template matches any substructure in the molecule represented by the SMILES string."
+          ],
+          "RETURNS_EXAMPLES": [
+            "True, False"
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         Raised when the provided SMILES string is invalid. \n         This occurs if the SMILES string cannot be parsed into a valid molecular structure. \n         Ensure the SMILES string is correctly formatted. \n\n    ValueError:\n         Raised when the provided template ID is invalid or not found. \n         This occurs if the template ID does not correspond to any known reaction template. \n         Verify that the template ID is correct and exists in the template catalog. \n\n    Exception:\n         Raised for any unexpected errors during the matching process. \n         This could be due to connectivity issues, or server errors in the template retrieval service. \n         If the error comes from the template retrieval service, being a server error or similar, inform the user.",
           "LIMITATIONS": "Known limitations:\n- The function relies on the accuracy and completeness of the underlying template catalog or service used for template retrieval.\n- The matching process may not account for all stereochemical or conformational variations of the molecule.\n- If the template retrieval service is down or unreachable, the function will not be able to return results."
         },
@@ -10579,13 +11905,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Have the SMILES representation of a molecule that you think can produce the analysis results described in the task. Use the tools `carbon_nmr_spectra`, `proton_nmr_spectra`, `ir_spectra`, `hsqc_nmr_spectra`, and `mass_spectrometry_spectra` for obtaining the different spectra. Use the tools `retrieve_protons_shifts`, `retrieve_aromatic_protons_shifts` and `retrieve_carbon_shifts` for having more info about the chemical shifts. \n2.  Apply this tool with a valid SMILES string to generate the chemical formula of the molecule. \n3.  Use the generated chemical formula to compare your proposed molecule with the molecular analysis in the task (MS results).",
           "CONTEXTUAL": "How this tool works:\n- It uses RDKit to parse the provided SMILES string and create a molecular object.\n- If the SMILES string is valid, it calculates the molecular formula using `rdMolDescriptors.CalcMolFormula`.\n- The formula is returned in Hill notation, which lists carbon (C) atoms first, followed by hydrogen (H) atoms, and then other elements in alphabetical order.\n- If the SMILES string is invalid or cannot be parsed, it returns an error message indicating the issue.",
           "SYNTACTICAL": "Usage examples:\n[\n    `get_formula_from_smiles(\"CCO\")`,\n    `get_formula_from_smiles(\"C1=CC=CC=C1\")`,\n    `get_formula_from_smiles(\"C(C(=O)O)N\")`,\n    `get_formula_from_smiles(\"C1=CC=C(C=C1)C(=O)O\")`,\n    `get_formula_from_smiles(\"C1=CC=CC=C1C(=O)O\")`,\n]",
-          "ARGS_BRIEF": "SMILES representation of a molecule",
-          "ARGS_DETAILED": "The SMILES string representing the chemical structure of the molecule. It should be a valid SMILES notation that RDKit can parse.",
-          "ARGS_SYNTACTICAL": "Valid SMILES string",
-          "ARGS_EXAMPLES": "\"CCO\", \"C1=CC=CC=C1\", \"C(C(=O)O)N\", \"C1=CC=C(C=C1)C(=O)O\"",
-          "RETURNS_BRIEF": "The chemical formula in Hill notation (C, H, then alphabetical)",
-          "RETURNS_DETAILED": "The chemical formula of the molecule represented by the SMILES string, formatted in Hill notation. If the SMILES string is invalid or cannot be parsed, it returns an error message.",
-          "RETURNS_EXAMPLES": "'\"C2H6O\" for ethanol, \"C6H6\" for benzene, \"C2H5NO\" for acetic acid amide, \"C7H6O3\" for salicylic acid'",
+          "ARGS_BRIEF": [
+            "SMILES representation of a molecule"
+          ],
+          "ARGS_DETAILED": [
+            "The SMILES string representing the chemical structure of the molecule. It should be a valid SMILES notation that RDKit can parse."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid SMILES string"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CCO\", \"C1=CC=CC=C1\", \"C(C(=O)O)N\", \"C1=CC=C(C=C1)C(=O)O\""
+          ],
+          "RETURNS_BRIEF": [
+            "The chemical formula in Hill notation (C, H, then alphabetical)"
+          ],
+          "RETURNS_DETAILED": [
+            "The chemical formula of the molecule represented by the SMILES string, formatted in Hill notation. If the SMILES string is invalid or cannot be parsed, it returns an error message."
+          ],
+          "RETURNS_EXAMPLES": [
+            "'\"C2H6O\" for ethanol, \"C6H6\" for benzene, \"C2H5NO\" for acetic acid amide, \"C7H6O3\" for salicylic acid'"
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If the SMILES string is invalid or cannot be parsed by RDKit. \n         This exception is raised when the SMILES string cannot be parsed by RDKit, indicating that it is not a valid SMILES representation of a molecule. It can occur due to syntax errors or unsupported structures in the SMILES string. \n         If the SMILES string is invalid, try to provide a valid SMILES string. You can validate the SMILES using the `validate_smiles` tool. Otherwise do not try to solve the error.",
           "LIMITATIONS": "Known Limitations:\n    - It may return \"Invalid SMILES string\" if the provided SMILES cannot be parsed.\n    - RDKit may remove certain chemical features or properties during sanitization, which can sometimes lead to unexpected results."
         },
@@ -10607,13 +11947,31 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Have a SMILES representation of the molecule you want to search for in the NMRShift database, or the SMILES of a structure that you think can be valid. \n2.  Apply this tool with the SMILES string to search for matching or chemically similar entries in the NMRShift database. \n3.  Use the retrieved entries to validate your proposed molecule, compare chemical shifts, or gather additional information about the compound. You can also use the `get_formula_from_smiles` to validate the molecular formula.",
           "CONTEXTUAL": "How this tool works:\n- It uses a vector database search to find entries in the NMRShift database that match or are chemically similar to the provided SMILES string.\n- The search is performed in the \"nmrshiftdb2\" collection of the NMRShift database.\n- The search uses chemical embeddings generated by the \"ibm-research/MoLFormer-XL-both-10pct\" model, which allows for chemical similarity searches based on the provided SMILES.\n- The function retrieves the top `top_k` results based on chemical similarity to the provided SMILES.\n- Each result contains relevant information about the compound, such as its SMILES, chemical shifts, and other properties.\n- The function returns a list of matching entries, each represented as a dictionary containing the relevant information.",
           "SYNTACTICAL": "Usage examples:\n[\n    `search_by_smiles(\"CCO\")`,\n    `search_by_smiles(\"C1=CC=CC=C1\")`,\n    `search_by_smiles(\"C(C(=O)O)N\")`,\n    `search_by_smiles(\"C1=CC=C(C=C1)C(=O)O\")`,\n    `search_by_smiles(\"C1=CC=C\")`,\n]",
-          "ARGS_BRIEF": "The maximum number of results to return. Defaults to 10",
-          "ARGS_DETAILED": "The maximum number of search results to return from the NMRShift database. It should be a positive integer.",
-          "ARGS_SYNTACTICAL": "Any positive integer (e.g., 10, 20, 50)",
-          "ARGS_EXAMPLES": "10, 20, 50",
-          "RETURNS_BRIEF": "A list of dictionaries containing the most relevant entries from the NMRShift database",
-          "RETURNS_DETAILED": "Each dictionary contains relevant information about the compound, such as its SMILES, chemical shifts, and other properties. The results are sorted by similarity score in descending order.",
-          "RETURNS_EXAMPLES": "\"[{\"entry_id\": \"nmrshiftdb2:234\", \"compound_name\": \"Benzene\", \"smiles\": \"c1ccccc1\", \"spectrum\": {\"nucleus\": \"13C\",...]\"",
+          "ARGS_BRIEF": [
+            "The SMILES representation of the compound to search for in the NMRShift database",
+            "The maximum number of results to return. Defaults to 10"
+          ],
+          "ARGS_DETAILED": [
+            "The SMILES string representing the chemical structure of the molecule to search for in the NMRShift database. It should be a valid SMILES notation that can be processed by the vector database search.",
+            "The maximum number of search results to return from the NMRShift database. It should be a positive integer."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid SMILES string",
+            "Any positive integer (e.g., 10, 20, 50)"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CCO\", \"C1=CC=CC=C1\", \"C(C(=O)O)N\", \"C1=CC=C(C=C1)C(=O)O\"",
+            "10, 20, 50"
+          ],
+          "RETURNS_BRIEF": [
+            "A list of dictionaries containing the most relevant entries from the NMRShift database"
+          ],
+          "RETURNS_DETAILED": [
+            "Each dictionary contains relevant information about the compound, such as its SMILES, chemical shifts, and other properties. The results are sorted by similarity score in descending order."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"[{\"entry_id\": \"nmrshiftdb2:234\", \"compound_name\": \"Benzene\", \"smiles\": \"c1ccccc1\", \"spectrum\": {\"nucleus\": \"13C\",...]\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the search process, such as errors in the embedding of the query for example. \n         This exception is raised when there is an error in performing the vector database search, or problems with the vector database itself. It can also occur if the `top_k` parameter is not a positive integer. \n         Try another tool.",
           "LIMITATIONS": "Known Limitations:\n    - The function requires a valid SMILES string that can be processed by the vector database search.\n    - The search results are limited to the `top_k` parameter, which defaults to 10.\n    - The search is based on chemical embeddings, which may not capture all chemical similarities perfectly."
         },
@@ -10639,9 +11997,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Have the proton spectra you want to analyze the proton chemical shifts. Use the tool `proton_nmr_spectra` to obtain the proton spectra. Use with the tools `retrieve_aromatic_protons_shifts` and `retrieve_carbon_shifts` for having more info about the chemical shifts. \n2.  Apply this tool to retrieve the proton chemical shifts ranges for hydrocarbons. \n3.  Use the retrieved chemical shifts to compare with the experimental NMR spectra of the sample at hand, or to validate the chemical shifts of protons in the proposed molecule.",
           "CONTEXTUAL": "How this tool works:\n- It returns a predefined list of dictionaries containing the proton types and their corresponding chemical shift ranges in ppm.\n- Each dictionary contains the type of proton (e.g., aldehyde, aromatic, alkene) and its chemical shift range relative to TMS.\n- The chemical shifts are based on typical values observed in NMR spectroscopy for various types of protons in hydrocarbons.\n- The function does not perform any calculations or database queries; it simply returns the predefined list of chemical shifts.",
           "SYNTACTICAL": "Usage examples:\n[\n    `retrieve_protons_shifts()`,\n]",
-          "RETURNS_BRIEF": "A list of dictionaries as an string containing the proton chemical shifts ranges for hydrocarbons",
-          "RETURNS_DETAILED": "Each dictionary (as string) contains the type of proton and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various types of protons in hydrocarbons.",
-          "RETURNS_EXAMPLES": "\"[{\"Proton\": \"Aldehyde\", \"delta / ppm\": \"9.5 - 10.5\"}, {\"Proton\": \"Aromatic\", \"delta / ppm\": \"6.5 - 8.2\"}, ...]\"",
+          "RETURNS_BRIEF": [
+            "A list of dictionaries as an string containing the proton chemical shifts ranges for hydrocarbons"
+          ],
+          "RETURNS_DETAILED": [
+            "Each dictionary (as string) contains the type of proton and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various types of protons in hydrocarbons."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"[{\"Proton\": \"Aldehyde\", \"delta / ppm\": \"9.5 - 10.5\"}, {\"Proton\": \"Aromatic\", \"delta / ppm\": \"6.5 - 8.2\"}, ...]\""
+          ],
           "RAISES": "Exceptions:\n    None:\n         This tool does not raise exceptions. \n         The tool returns precomputed reference data and has no failure modes. \n         No recovery needed.",
           "LIMITATIONS": "Known Limitations:\n    - The function returns a predefined list of chemical shifts and does not perform any calculations or database queries.\n    - The chemical shifts are based on typical values and may not be applicable to all compounds or conditions.\n    - The ranges provided are approximate and may vary depending on the specific molecular environment and experimental conditions."
         },
@@ -10658,9 +12022,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Have the proton spectra of the sample at hand. Complement it with the use the tools `retrieve_protons_shifts` and `retrieve_carbon_shifts` for having more info about the chemical shifts. \n2.  Apply this tool to retrieve the proton chemical shifts ranges for aromatic hydrocarbons. \n3.  Use the retrieved chemical shifts to compare with the experimental NMR spectra and propose your candidate molecules, or to validate the chemical shifts of protons in the proposed aromatic molecule.",
           "CONTEXTUAL": "How this tool works:\n- It returns a predefined list of dictionaries containing the substituent effects on proton chemical shifts in aromatic rings.\n- Each dictionary contains the substituent name and its corresponding chemical shift changes (in ppm) for ortho, meta, and para positions.\n- The chemical shifts are based on typical values observed in NMR spectroscopy for various substituents on aromatic rings.\n- The function does not perform any calculations or database queries; it simply returns the predefined list of chemical shifts.",
           "SYNTACTICAL": "Usage examples:\n[\n    `retrieve_aromatic_protons_shifts()`,\n]",
-          "RETURNS_BRIEF": "A list of dictionaries as a string, containing the substituent effects on proton chemical shifts in aromatic rings",
-          "RETURNS_DETAILED": "Each dictionary contains the substituent name and its corresponding chemical shift changes (in ppm) for ortho, meta, and para positions. The shifts are based on typical values observed in NMR spectroscopy for various substituents on aromatic rings.",
-          "RETURNS_EXAMPLES": "\"[{\"Substituent\": \"NO2\", \"Ortho\": 0.95, \"Meta\": 0.17, \"Para\": 0.33}, {\"Substituent\": \"CHO\", \"Ortho\": 0.58, \"Meta\": 0.21, \"Para\": 0.27}, ...]\"",
+          "RETURNS_BRIEF": [
+            "A list of dictionaries as a string, containing the substituent effects on proton chemical shifts in aromatic rings"
+          ],
+          "RETURNS_DETAILED": [
+            "Each dictionary contains the substituent name and its corresponding chemical shift changes (in ppm) for ortho, meta, and para positions. The shifts are based on typical values observed in NMR spectroscopy for various substituents on aromatic rings."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"[{\"Substituent\": \"NO2\", \"Ortho\": 0.95, \"Meta\": 0.17, \"Para\": 0.33}, {\"Substituent\": \"CHO\", \"Ortho\": 0.58, \"Meta\": 0.21, \"Para\": 0.27}, ...]\""
+          ],
           "RAISES": "Exceptions:\n    None:\n         This tool does not raise exceptions. \n         The tool returns precomputed reference data and has no failure modes. \n         No recovery needed.",
           "LIMITATIONS": "Known Limitations:\n    - The function returns a predefined list of chemical shifts and does not perform any calculations or database queries.\n    - The chemical shifts are based on typical values and may not be applicable to all aromatic compounds or conditions.\n    - The shifts provided are approximate and may vary depending on the specific molecular environment and experimental conditions."
         },
@@ -10677,9 +12047,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Have an NMR spectrum for which you want to analyze the carbon chemical shifts. You can use the `carbon_nmr_spectra` tool to obtain the carbon spectra of the sample at hand. Use the tools `retrieve_protons_shifts` and `retrieve_aromatic_protons_shifts` for having more info about the chemical shifts. \n2.  Apply this tool to retrieve the carbon chemical shifts ranges for various functional groups in organic compounds. \n3.  Use the retrieved chemical shifts to compare with the experimental NMR spectra of the sample, or to validate the chemical shifts of carbon atoms in the proposed molecules.",
           "CONTEXTUAL": "How this tool works:\n- It returns a predefined list of dictionaries containing the carbon chemical shifts ranges for different functional groups.\n- Each dictionary contains the functional group and its corresponding chemical shift range in ppm.\n- The chemical shifts are based on typical values observed in NMR spectroscopy for various functional groups in organic compounds.\n- The function does not perform any calculations or database queries; it simply returns the predefined list of chemical shifts.",
           "SYNTACTICAL": "Usage examples:\n[\n    `retrieve_carbon_shifts()`,\n]",
-          "RETURNS_BRIEF": "A list of dictionaries as string containing the carbon chemical shifts ranges for various functional groups in organic compounds",
-          "RETURNS_DETAILED": "Each dictionary contains the functional group and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various functional groups in organic compounds.",
-          "RETURNS_EXAMPLES": "\"[{\"Group\": \"CH3-\", \"Shift (ppm)\": \"10-30 ppm\"}, {\"Group\": \"R3C-, R₂CH, RCH₂\", \"Shift (ppm)\": \"25-50 ppm\"}, ...]\"",
+          "RETURNS_BRIEF": [
+            "A list of dictionaries as string containing the carbon chemical shifts ranges for various functional groups in organic compounds"
+          ],
+          "RETURNS_DETAILED": [
+            "Each dictionary contains the functional group and its corresponding chemical shift range in ppm. The ranges are based on typical values observed in NMR spectroscopy for various functional groups in organic compounds."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"[{\"Group\": \"CH3-\", \"Shift (ppm)\": \"10-30 ppm\"}, {\"Group\": \"R3C-, R₂CH, RCH₂\", \"Shift (ppm)\": \"25-50 ppm\"}, ...]\""
+          ],
           "RAISES": "Exceptions:\n    None:\n         This tool does not raise exceptions. \n         The tool returns precomputed reference data and has no failure modes. \n         No recovery needed.",
           "LIMITATIONS": "Known Limitations:\n    - The function returns a predefined list of chemical shifts and does not perform any calculations or database queries.\n    - The chemical shifts are based on typical values and may not be applicable to all compounds or conditions.\n    - The ranges provided are approximate and may vary depending on the specific molecular environment and experimental conditions."
         },
@@ -10696,9 +12072,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to measure NMR. \n2.  Apply this tool to measure the 13C NMR experiment for the corresponding compound. \n3.  Use the resulting NMR spectra to analyze the carbon environments in the proposed molecule. You can use the `retrieve_carbon_shifts` tool to validate the carbon chemical shifts.",
           "CONTEXTUAL": "How this tool works:\n- It uses the `get_c13_nmr_prediction` function to measure the 13C NMR experiment for the sample at hand.\n- This function takes the sample at hand and measures the 13C NMR spectra.\n- The function returns the 13C NMR spectra as a string, following the ACS-inspired publication format.\n- If some error occurs during the NMR spectra generation process, the function returns an error message.",
           "SYNTACTICAL": "Usage examples:\n[\n    `carbon_nmr_spectra()`,\n]",
-          "RETURNS_BRIEF": "The 13C NMR spectra for the molecule in the sample at hand.",
-          "RETURNS_DETAILED": "The function returns the 13C NMR spectra as a string. If some error occurs during the NMR spectra generation process, it returns an error message.",
-          "RETURNS_EXAMPLES": "\"13C NMR spectra: δC 10.0, 20.0, 30.0 ppm\"",
+          "RETURNS_BRIEF": [
+            "The 13C NMR spectra for the molecule in the sample at hand."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns the 13C NMR spectra as a string. If some error occurs during the NMR spectra generation process, it returns an error message."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"13C NMR spectra: δC 10.0, 20.0, 30.0 ppm\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the NMR spectra measurement process. \n         This exception is raised when there is an error in performing the measurement of the NMR spectra. \n         Try another tool.",
           "LIMITATIONS": "Known Limitations:\n    - The cost of measuring the NMR spectra repeatedly may be high, so use it judiciously.\n    - The returned NMR spectra may not be accurate for all compounds, especially for complex or unusual structures.\n    - The experiment can only measure for the compound at hand."
         },
@@ -10720,9 +12102,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to measure NMR. Do not perform unnecessary experiments. \n2.  Apply this tool to measure the 1H NMR experiment for the corresponding compound. \n3.  Use the resulting NMR spectra to analyze the proton environments in the proposed molecule. You can use the `retrieve_protons_shifts` and `retrieve_aromatic_protons_shifts` tools to validate the proton chemical shifts.",
           "CONTEXTUAL": "How this tool works:\n- This function takes the sample of the compound and measures the 1H NMR spectra.\n- The function returns the 1H NMR spectra as a string, following the ACS-inspired publication format.\n- If some error occurs during the NMR spectra generation process, the function returns an error message.",
           "SYNTACTICAL": "Usage examples:\n[\n    `proton_nmr_spectra()`,\n]",
-          "RETURNS_BRIEF": "The 1H NMR spectra for the molecule in the sample at hand.",
-          "RETURNS_DETAILED": "The function returns the 1H NMR spectra as a string, following the conventions of NMR spectra notation. If some error occurs during the NMR spectra generation process, it returns an error message.",
-          "RETURNS_EXAMPLES": "\"Predicted 1H NMR spectra: δH 7.40 (d, J = 7.9 Hz, 4H), 7.24 (s, 1H), 7.18 (dd, J = 8.0, 1.8 Hz, 4H), 7.03 (d, J = 1.4 Hz, 4H), 2.46 (s, 4H), 1.62 (s, 12H), 1.21 (s, 36H)\"",
+          "RETURNS_BRIEF": [
+            "The 1H NMR spectra for the molecule in the sample at hand."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns the 1H NMR spectra as a string, following the conventions of NMR spectra notation. If some error occurs during the NMR spectra generation process, it returns an error message."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"Predicted 1H NMR spectra: δH 7.40 (d, J = 7.9 Hz, 4H), 7.24 (s, 1H), 7.18 (dd, J = 8.0, 1.8 Hz, 4H), 7.03 (d, J = 1.4 Hz, 4H), 2.46 (s, 4H), 1.62 (s, 12H), 1.21 (s, 36H)\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the NMR spectra generation process. \n         This exception is raised when there is an error in generating the NMR spectra. \n         Try another tool. Try elucidate the protons with the other tools.",
           "LIMITATIONS": "Known Limitations:\n    - The cost of measuring the NMR spectra repeatedly may be high, so use it judiciously.\n    - The experiment NMR spectra may not be accurate for all compounds, especially for complex or unusual structures.\n    - The experiment can only measure the compound of the sample at hand."
         },
@@ -10744,9 +12132,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to measure IR. Do not perform unnecessary experiments. \n2.  Apply this tool to measure the IR spectra for the corresponding compound. \n3.  Use the resulting IR spectra to analyze the functional groups in the proposed molecule. You can use the `carbon_nmr_spectra` and `hsqc_nmr_spectra` tools to obtain complementary information.",
           "CONTEXTUAL": "How this tool works:\n- This function takes the sample of the compound and measures the IR spectra.\n- The function returns the IR spectra as a string, following a similar format as the ACS guidelines.\n- If some error occurs during the IR spectra measurement process, the function returns an error message.",
           "SYNTACTICAL": "Usage examples:\n[\n    `ir_spectra()`,\n]",
-          "RETURNS_BRIEF": "The IR spectra for the molecule in the sample at hand.",
-          "RETURNS_DETAILED": "The function returns the IR spectra as a string, following the conventions of IR spectra notation. If some error occurs during the IR spectra measurement process, it returns an error message.",
-          "RETURNS_EXAMPLES": "\"Predicted IR spectra: 3400 cm-1 (O-H stretch), 1700 cm-1 (C=O stretch), 1600 cm-1 (C=C stretch)\"",
+          "RETURNS_BRIEF": [
+            "The IR spectra for the molecule in the sample at hand."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns the IR spectra as a string, following the conventions of IR spectra notation. If some error occurs during the IR spectra measurement process, it returns an error message."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"Predicted IR spectra: 3400 cm-1 (O-H stretch), 1700 cm-1 (C=O stretch), 1600 cm-1 (C=C stretch)\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the IR spectra measurement process. \n         This exception is raised when there is an error in measuring the IR spectra. \n         Try another tool. Try elucidate the functional groups with the other tools.",
           "LIMITATIONS": "Known Limitations:\n    - The cost of measuring the IR spectra repeatedly may be high, so use it judiciously.\n    - The experiment IR spectra may not be accurate for all compounds, especially for complex or unusual structures.\n    - The experiment can only measure the IR spectra for the compound of the sample at hand."
         },
@@ -10768,9 +12162,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to measure HSQC NMR. Do not perform unnecessary experiments. Use first the tools `carbon_nmr_spectra` and `proton_nmr_spectra` and try to link the fragments from there. Only measure this experiment if some of the peaks are ambiguous. \n2.  Apply this tool to measure the HSQC NMR experiment for the corresponding compound. \n3.  Use the resulting HSQC spectrum to analyze the correlation between hydrogen and carbon atoms in the proposed molecule. You can use the `retrieve_protons_shifts` and `retrieve_carbon_shifts` tools to validate the chemical shifts.",
           "CONTEXTUAL": "How this tool works:\n- This function measures the HSQC NMR spectra for the sample at hand.\n- It makes a POST request to an external API that measures the HSQC NMR experiment for the sample at hand.\n- The function then parses the data from the measurement to extract the HSQC spectrum data and formats it in standard NMR notation, similar to the ACS convention.\n- If an error occurs during the measurement, it returns an appropriate message.",
           "SYNTACTICAL": "Usage examples:\n[\n    `hsqc_nmr_spectra()`,\n]",
-          "RETURNS_BRIEF": "The HSQC NMR spectra for the molecule in the sample at hand.",
-          "RETURNS_DETAILED": "The function returns the HSQC NMR spectra as a string, formatted in standard NMR notation. If some error occurs during the measurement, it returns an appropriate message.",
-          "RETURNS_EXAMPLES": "\"HSQC: delta H/delta C 7.40/128.0 (2H), 7.24/128.5 (2H), 7.18/129.0 (2H), 7.03/130.0 (2H), 2.46/20.0 (3H), 1.62/15.0 (6H), 1.21/10.0 (9H).\"",
+          "RETURNS_BRIEF": [
+            "The HSQC NMR spectra for the molecule in the sample at hand."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns the HSQC NMR spectra as a string, formatted in standard NMR notation. If some error occurs during the measurement, it returns an appropriate message."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"HSQC: delta H/delta C 7.40/128.0 (2H), 7.24/128.5 (2H), 7.18/129.0 (2H), 7.03/130.0 (2H), 2.46/20.0 (3H), 1.62/15.0 (6H), 1.21/10.0 (9H).\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the HSQC spectrum measurement. \n         This exception is raised when there is an error in performing the HSQC spectrum measurement. \n         Try another tool. Try elucidate the connectivity with the other tools and by using the data from the Carbon and Proton NMR.",
           "LIMITATIONS": "Known Limitations:\n    - The cost of measuring the HSQC NMR spectra repeatedly may be high, so use it judiciously.\n    - The experiment HSQC spectra may not be accurate for all compounds, especially for complex or unusual structures.\n    - The experiment can only measure for the compound of the sample at hand."
         },
@@ -10792,9 +12192,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to measure mass spectrometry. Do not perform unnecessary experiments. If the task is to elucidate the structure of the sample, then this tool is appropriate to begin with. \n2.  Apply this tool to measure the mass spectrometry experiment for the corresponding compound. \n3.  Use the resulting mass spectrometry spectra to analyze the mass-to-charge ratio (m/z) of the proposed molecule. You can use the `retrieve_isotope_distribution` tool to obtain complementary information about the isotopic distribution of the molecule.",
           "CONTEXTUAL": "How this tool works:\n- It makes a POST request to an external API that measures the mass spectrometry experiment for the sample at hand.\n- The API returns the mass spectrometry spectra data as a JSON response.\n- The function then parses the response to extract the mass spectrometry spectrum data and formats it in a string format.\n- If some error occurs during the experiment, it returns an appropriate message.",
           "SYNTACTICAL": "Usage examples:\n[\n    `mass_spectrometry_spectra()`,\n]",
-          "RETURNS_BRIEF": "The mass spectrometry spectra for the molecule in the sample at hand.",
-          "RETURNS_DETAILED": "The function returns the mass spectrometry spectra as a string in the format \"m/z 100.1 (intensity 500), 101.2 (intensity 450), ...\". If there is some error during the measurement, it returns an appropriate message.",
-          "RETURNS_EXAMPLES": "\"m/z 100.1 (intensity 500), 101.2 (intensity 450), 102.3 (intensity 400), ...\"",
+          "RETURNS_BRIEF": [
+            "The mass spectrometry spectra for the molecule in the sample at hand."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns the mass spectrometry spectra as a string in the format \"m/z 100.1 (intensity 500), 101.2 (intensity 450), ...\". If there is some error during the measurement, it returns an appropriate message."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"m/z 100.1 (intensity 500), 101.2 (intensity 450), 102.3 (intensity 400), ...\""
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If an error occurs during the API call to retrieve the mass spectrometry spectrum data. \n         This exception is raised when there is an error in performing the API call to retrieve the mass spectrometry spectrum data. \n         Try another tool. Try elucidate the mass spectrum with the other tools.",
           "LIMITATIONS": "Known Limitations:\n    - The cost of measuring the mass spectrometry spectra repeatedly may be high, so use it judiciously.\n    - The experiment mass spectrometry spectra may not be accurate for all compounds, especially for complex or unusual structures.\n    - The experiment can only measure for the compound of the sample at hand."
         },
@@ -10816,9 +12222,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to retrieve the isotopic distribution. Measure the `mass_spectrometry_spectra` tool first to obtain the mass-to-charge ratio (m/z) of the molecule. \n2.  Apply this tool to retrieve the isotopic distribution of common elements in organic chemistry. \n3.  Use the retrieved isotopic distribution to analyze the mass spectrometry spectra of the proposed molecule. After that, proceed with the other spectra tools or answer the task at hand.",
           "CONTEXTUAL": "How this tool works:\n- It returns a predefined dictionary containing the isotopic distribution of common elements in organic chemistry.\n- Each element's isotopes are listed with their natural abundance and m/z values.\n- The function also includes the m/z peaks for each element.\n- The isotopic distribution is based on typical values observed in organic compounds.",
           "SYNTACTICAL": "Usage examples:\n[\n    `retrieve_isotope_distribution()`,\n]",
-          "RETURNS_BRIEF": "A string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry.",
-          "RETURNS_DETAILED": "The function returns a string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry, including their isotopes, natural abundance, m/z values, and m/z peaks.",
-          "RETURNS_EXAMPLES": "\"{\"Carbon\": {\"isotopes\": {\"12C\": {\"abundance\": 98.89, \"m/z\": 12},\"13C\": {\"abundance\": 1.11, \"m/z\": 13}<more elements...}}}\"",
+          "RETURNS_BRIEF": [
+            "A string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns a string representation of a dictionary containing the isotopic distribution of common elements in organic chemistry, including their isotopes, natural abundance, m/z values, and m/z peaks."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{\"Carbon\": {\"isotopes\": {\"12C\": {\"abundance\": 98.89, \"m/z\": 12},\"13C\": {\"abundance\": 1.11, \"m/z\": 13}<more elements...}}}\""
+          ],
           "RAISES": "Exceptions:\n    None:\n         This tool does not raise exceptions. \n         The tool returns precomputed reference data and has no failure modes. \n         No recovery needed.",
           "LIMITATIONS": "Known Limitations:\n    - The isotopic distribution is based on typical values observed in organic compounds and may not be applicable to all compounds.\n    - The function does not perform any calculations or database queries; it returns a predefined dictionary."
         },
@@ -10835,9 +12247,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to calculate the DBE. Do not perform unnecessary calculations or measurements. \n2.  Apply this tool to retrieve the formula for calculating the DBE. \n3.  Use the retrieved formula to calculate the DBE for a given molecular formula. You can use the `obtain_isomers` tool to explore different structural variations of a compound based on its DBE.",
           "CONTEXTUAL": "How this tool works:\n- It returns a string containing the formula for calculating the Double Bond Equivalent (DBE).\n- The formula is based on the number of carbon, hydrogen, nitrogen, and halogen atoms in a molecule.\n- The function also provides an interpretation of the DBE values and examples of calculations for common organic compounds.\n- The DBE calculation is essential for understanding the structural features of a molecule, such as the presence of rings and multiple bonds.",
           "SYNTACTICAL": "Usage examples:\n[\n    `retrieve_dbe_formula()`,\n]",
-          "RETURNS_BRIEF": "A string containing the formula for calculating the Double Bond Equivalent (DBE).",
-          "RETURNS_DETAILED": "The function returns a string containing the formula for calculating the Double Bond Equivalent (DBE), along with an interpretation of the DBE values and examples of calculations for common organic compounds.",
-          "RETURNS_EXAMPLES": "\"Double Bond Equivalent (DBE) = <more details>.\"",
+          "RETURNS_BRIEF": [
+            "A string containing the formula for calculating the Double Bond Equivalent (DBE)."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns a string containing the formula for calculating the Double Bond Equivalent (DBE), along with an interpretation of the DBE values and examples of calculations for common organic compounds."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"Double Bond Equivalent (DBE) = <more details>.\""
+          ],
           "RAISES": "Exceptions:\n    None:\n         This tool does not raise exceptions. \n         The tool returns precomputed reference data and has no failure modes. \n         No recovery needed.",
           "LIMITATIONS": "Known Limitations:\n    - The formula is based on the number of carbon, hydrogen, nitrogen, and halogen atoms in a molecule, and does not account for other elements such as oxygen.\n    - The interpretation of the DBE values is based on typical organic compounds and may not apply to all molecules."
         },
@@ -10854,13 +12272,31 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Obtain the molecular formula for the compound of interest. You can use the `get_formula_from_smiles` tool to convert a SMILES string to its molecular formula. \n    2.  Call this tool with the molecular formula to retrieve isomers. \n    3.  Use the list of isomers for further analysis or processing.",
           "CONTEXTUAL": "How this tool works:\n    - It uses the `get_isomers_from_molecular_formula` remote function to retrieve isomers for the given molecular formula.\n    - The function returns a list of SMILES strings representing the isomers of the input compound that match the molecular formula.\n    - The accuracy of the isomers is dependent on the underlying database (e.g., PubChem).",
           "SYNTACTICAL": "Usage examples:\n[\n    `obtain_isomers_from_molecular_formula(\"C2H6O\")`,\n    `obtain_isomers_from_molecular_formula(\"C6H6\")`,\n    `obtain_isomers_from_molecular_formula(\"C6H12\")`,\n    `obtain_isomers_from_molecular_formula(\"C6H10O\")`,\n    `obtain_isomers_from_molecular_formula(\"C6H10Cl2\")`,\n]",
-          "ARGS_BRIEF": "The maximum number of isomers to retrieve. 0 means no limit.",
-          "ARGS_DETAILED": "An integer specifying the maximum number of isomers to retrieve for the given molecular formula. This parameter helps to limit the number of results returned by the function.",
-          "ARGS_SYNTACTICAL": "Positive integer",
-          "ARGS_EXAMPLES": "5, 10, 20",
-          "RETURNS_BRIEF": "A list of SMILES strings representing the isomers of the input compound.",
-          "RETURNS_DETAILED": "The function returns a list of SMILES strings representing the isomers of the input compound. If no isomers are found, it returns an empty list.",
-          "RETURNS_EXAMPLES": "`[\"CCO\", \"C1=CC=CC=C1\"]`",
+          "ARGS_BRIEF": [
+            "The molecular formula of the compound for which to retrieve isomers.",
+            "The maximum number of isomers to retrieve. 0 means no limit."
+          ],
+          "ARGS_DETAILED": [
+            "The molecular formula representing the chemical composition of the compound for which to retrieve isomers. It should be a valid molecular formula notation that can be processed by the isomer retrieval function.",
+            "An integer specifying the maximum number of isomers to retrieve for the given molecular formula. This parameter helps to limit the number of results returned by the function."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Valid molecular formula string",
+            "Positive integer"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"C2H6O\", \"C6H6\", \"C6H12\", \"C6H10O\", \"C6H10Cl2\"",
+            "5, 10, 20"
+          ],
+          "RETURNS_BRIEF": [
+            "A list of SMILES strings representing the isomers of the input compound."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns a list of SMILES strings representing the isomers of the input compound. If no isomers are found, it returns an empty list."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`[\"CCO\", \"C1=CC=CC=C1\"]`"
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If the remote call to PubChem fails or returns an error. \n         This can occur due to network connectivity issues, PubChem API unavailability, an invalid molecular formula, or timeouts when querying formulas with many isomers. \n         Verify the molecular formula is valid (e.g., \"C6H6\" not \"XYZ\"). If the error is a timeout, try reducing the `limit` parameter. If it is a network issue, retry after some time.",
           "LIMITATIONS": "Known Limitations:\n    - This tool can be really slow for molecular formulas with many isomers, if the limit is set too high.\n    - The list of isomers may not be exhaustive or accurate, as it is based on the PubChem database.\n    - The function may not find all possible isomers, especially for complex or unusual structures."
         },
@@ -10886,13 +12322,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Obtain a good guess for the molecule in the sample at hand. \n2.  Call this tool with the SMILES string to validate it. \n3.  If the SMILES string is valid, proceed with further analysis or submit the final answer.",
           "CONTEXTUAL": "How this tool works:\n- It uses RDKit's `Chem.MolFromSmiles` function to attempt to convert the SMILES string into a chemical structure.\n- If the conversion is successful, it indicates that the SMILES string is valid, and the function returns True.\n- If the conversion fails (i.e., the SMILES string is invalid), it returns False.\n- The function does not perform any chemical analysis or processing; it simply checks the validity of the SMILES string.",
           "SYNTACTICAL": "Usage examples:\n[\n    `validate_smiles(\"CCO\")`,  # Valid SMILES\n    `validate_smiles(\"C1=CC=CC=C1\")`,  # Valid SMILES for benzene\n    `validate_smiles(\"InvalidSMILES\")`,  # Invalid SMILES\n    `validate_smiles(\"C1CCCCC1\")`,  # Valid SMILES for cyclohexane\n    `validate_smiles(\"C1=CC=C(C=C1)O\")`,  # Valid SMILES for phenol\n]",
-          "ARGS_BRIEF": "The SMILES representation to validate",
-          "ARGS_DETAILED": "The SMILES string representing the chemical structure of the molecule to validate. It should be a valid SMILES notation that can be processed by the validation function.",
-          "ARGS_SYNTACTICAL": "\"valid SMILES string\"",
-          "ARGS_EXAMPLES": "\"CCO\", \"C1=CC=CC=C1\", \"C(C(=O)O)N\", \"C1=CC=C(C=C1)C(=O)O\"",
-          "RETURNS_BRIEF": "True if the SMILES string is valid, False otherwise.",
-          "RETURNS_DETAILED": "The function returns True if the SMILES string can be converted into a valid chemical structure, otherwise it returns False.",
-          "RETURNS_EXAMPLES": "`True`, `False`",
+          "ARGS_BRIEF": [
+            "The SMILES representation to validate"
+          ],
+          "ARGS_DETAILED": [
+            "The SMILES string representing the chemical structure of the molecule to validate. It should be a valid SMILES notation that can be processed by the validation function."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "\"valid SMILES string\""
+          ],
+          "ARGS_EXAMPLES": [
+            "\"CCO\", \"C1=CC=CC=C1\", \"C(C(=O)O)N\", \"C1=CC=C(C=C1)C(=O)O\""
+          ],
+          "RETURNS_BRIEF": [
+            "True if the SMILES string is valid, False otherwise."
+          ],
+          "RETURNS_DETAILED": [
+            "The function returns True if the SMILES string can be converted into a valid chemical structure, otherwise it returns False."
+          ],
+          "RETURNS_EXAMPLES": [
+            "`True`, `False`"
+          ],
           "RAISES": "Exceptions:\n    None:\n         This tool does not raise exceptions. \n         The tool returns precomputed reference data and has no failure modes. \n         No recovery needed.",
           "LIMITATIONS": "Known Limitations:\n    - The function only checks the validity of the SMILES string; it does not perform any chemical analysis or processing.\n    - It relies on RDKit's ability to parse SMILES strings, so any limitations of RDKit's SMILES parser will apply.\n    - The function does not handle specific chemical properties or characteristics; it simply checks if the SMILES string can be converted into a valid chemical structure."
         },
@@ -10914,9 +12364,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Ensure that the correct step is to generate fragments. Ensure that you really tried to guess all the posibilities from the information available. \n2.  Call this tool to generate fragments for the sample at hand. \n3.  Evaluate the fragments for getting the final molecule.",
           "CONTEXTUAL": "How this tool works:\n- This tool takes the spectra information and generates fragments based on known molecules.\n- It uses a combination of cheminformatics techniques to identify potential fragment structures.\n- It leverages existing databases and algorithms to find some candidates.",
           "SYNTACTICAL": "Usage examples:\n[\n    `return_possible_fragments()`\n]",
-          "RETURNS_BRIEF": "A list of unique fragment SMILES strings.",
-          "RETURNS_DETAILED": "This list contains all the unique SMILES representations of the fragments found by database lookup.",
-          "RETURNS_EXAMPLES": "Example SMILES strings: [\"C1=CC=CC=C1\", \"C1=CC=CC=C1O\", ...]",
+          "RETURNS_BRIEF": [
+            "A list of unique fragment SMILES strings."
+          ],
+          "RETURNS_DETAILED": [
+            "This list contains all the unique SMILES representations of the fragments found by database lookup."
+          ],
+          "RETURNS_EXAMPLES": [
+            "Example SMILES strings: [\"C1=CC=CC=C1\", \"C1=CC=CC=C1O\", ...]"
+          ],
           "RAISES": "Exceptions:\n    ValueError:\n         If the provided SMILES string is invalid or cannot be parsed by RDKit. \n         Raised when `Chem.MolFromSmiles` returns None, indicating the input SMILES does not represent a valid molecular structure. \n         Verify the SMILES string is valid using the `validate_smiles` tool before calling this tool.",
           "LIMITATIONS": "Known Limitations:\n    - This tool might not return all the fragments, but there the ones returned are 100% accurate.\n    - The quality of the generated fragments depends on the underlying database and its coverage."
         },
@@ -10938,13 +12394,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Run the spectra tools, and analyze the results thoroughly. Generate different candidate molecules and reason which ones could fit the spectra, until you have a good guess for the molecule in the sample at hand. \n2.  Apply this tool with the SMILES string of the proposed molecule to simulate its spectra and validate if can be the solution to the task. \n3.  Submit the answer if the simulated spectra is similar to the experimental, or go back to step 1 and propose new candidate molecules.",
           "CONTEXTUAL": "How this tool works:\n- It uses a remote function `simulate_spectra` to perform the simulation.\n- The simulation process involves:\n    1. Structure analysis using HOSE code descriptors to identify the chemical environment of atoms in the molecule.\n    2. Neural network prediction of chemical shifts based on experimental data.\n    3. Prediction of J-coupling constants for proton-proton interactions to simulate the splitting patterns in NMR spectra.\n    4. Quantum-mechanical simulation to generate realistic multiplet patterns and effects in the spectra.\n- The function returns a dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.\nIf some of the spectra are not available, it will return None for those spectra.",
           "SYNTACTICAL": "Usage examples:\n[\n    `simulate_spectra(\"CCO\")`,\n    `simulate_spectra(\"C1=CC=CC=C1\")`,\n    `simulate_spectra(\"C(C(=O)O)N\")`,\n    `simulate_spectra(\"C1=CC=C(C=C1)C(=O)O\")`,\n    `simulate_spectra(\"C1=CC=C\")`,\n]",
-          "ARGS_BRIEF": "The SMILES representation of the compound to simulate spectra for",
-          "ARGS_DETAILED": "The SMILES string representing the chemical structure of the molecule for which the spectra will be simulated.\n        It should be a valid SMILES notation that can be processed by the remote function.",
-          "ARGS_SYNTACTICAL": "Format: \"valid SMILES string\"",
-          "ARGS_EXAMPLES": "Examples: \"CCO\", \"C1=CC=CC=C1\", \"C(C(=O)O)N\", \"C1=CC=C(C=C1)C(=O)O\"",
-          "RETURNS_BRIEF": "The simulated spectra of the compound",
-          "RETURNS_DETAILED": "A dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.\n        Each key corresponds to a type of spectrum, and the value is a string representation of the simulated spectrum.\n        If some spectra are not available, the value will be None for those keys.",
-          "RETURNS_EXAMPLES": "Examples: {\"1H NMR\": \"simulated_1H_NMR_spectrum\", \"13C NMR\": \"simulated_13C_NMR_spectrum\", \"IR\": \"simulated_IR_spectrum\"}",
+          "ARGS_BRIEF": [
+            "The SMILES representation of the compound to simulate spectra for"
+          ],
+          "ARGS_DETAILED": [
+            "The SMILES string representing the chemical structure of the molecule for which the spectra will be simulated.\n        It should be a valid SMILES notation that can be processed by the remote function."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "Format: \"valid SMILES string\""
+          ],
+          "ARGS_EXAMPLES": [
+            "Examples: \"CCO\", \"C1=CC=CC=C1\", \"C(C(=O)O)N\", \"C1=CC=C(C=C1)C(=O)O\""
+          ],
+          "RETURNS_BRIEF": [
+            "The simulated spectra of the compound"
+          ],
+          "RETURNS_DETAILED": [
+            "A dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.\n        Each key corresponds to a type of spectrum, and the value is a string representation of the simulated spectrum.\n        If some spectra are not available, the value will be None for those keys."
+          ],
+          "RETURNS_EXAMPLES": [
+            "Examples: {\"1H NMR\": \"simulated_1H_NMR_spectrum\", \"13C NMR\": \"simulated_13C_NMR_spectrum\", \"IR\": \"simulated_IR_spectrum\"}"
+          ],
           "RAISES": "Exceptions:\n    Exception:\n         If a network error occurs during the remote function call. \n         This exception is raised when there is an error in calling the remote function `simulate_spectra`, such as network issues. \n         This tool is unavailable if the remote function cannot be called.",
           "LIMITATIONS": "Known Limitations:\n    - The SMILES string must be valid and represent a chemical structure that can be interpreted by the remote function.\n    - The remote function may not be able to simulate spectra for all compounds, especially if they are complex or not well-defined.\n    - The function relies on the availability of the remote service and its simulation capabilities, which may change over time."
         },
@@ -25287,9 +26757,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Make sure the task involves identifying one or more unknown cations in the samples. \n2.  Use this tool to know what possible cations can be present in the unknown sample(s). \n3.  Can be followed up by tests to check for specific cations or groups of cations.",
           "CONTEXTUAL": "How this tool works:\n- It returns a pre-defined list of cations as a space-separated string.\n- Each cation is formatted as 'X+n' where 'X' is the elemental symbol and '+n' is the charge.\n- The ammonium ion is represented as 'NH4+' and mercury(I) dimer is represented as 'Hg2+2'.\n- The tool does not perform any tests; it simply returns the pre-defined list of all possible cations.",
           "SYNTACTICAL": "Usage examples:\n[\n    `possible_cations()`,\n]",
-          "RETURNS_BRIEF": "a string containing all the possible cations",
-          "RETURNS_DETAILED": "a space-separated string, containing all possible cations that can be present in the unknown sample(s)",
-          "RETURNS_EXAMPLES": "\"Ag+ Al+3 Ba+2 ...\"",
+          "RETURNS_BRIEF": [
+            "a string containing all the possible cations"
+          ],
+          "RETURNS_DETAILED": [
+            "a space-separated string, containing all possible cations that can be present in the unknown sample(s)"
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"Ag+ Al+3 Ba+2 ...\""
+          ],
           "RAISES": "Exceptions:\n    None:\n         This tool does not raise exceptions under normal usage. \n         N/A \n         N/A",
           "LIMITATIONS": "Known Limitations:\n    - This tool returns the pre-defined list of all possible cations and does not perform any calculations or tests.\n    - The list contains only the bare aqueous cations; cationic metal-complexes are not listed.\n    - This tool is only useful when the task involves identifying unknown cations. If the task is about identifying solutions from a possible list of solutions with known compositions, there is no need for this tool."
         },
@@ -25306,9 +26782,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Make sure the task involves identifying one or more unknown anions in the sample(s). \n2.  Use this tool to know what possible anions can be present in the unknown sample(s). \n3.  Can be followed up by tests to check for specific anions or groups of anions.",
           "CONTEXTUAL": "How this tool works:\n- It returns a pre-defined list of anions as a space-separated string.\n- Each anion is formatted as 'XYZ-n' where 'XYZ' is the elemental composition and '-n' is the charge.\n- For example, hydrogen carbonate is represented as 'HCO3-' and dichromate is represented as 'Cr2O7-2'.\n- The tool does not perform any tests; it simply returns the pre-defined list of all possible anions.",
           "SYNTACTICAL": "Usage examples:\n[\n    `possible_anions()`,\n]",
-          "RETURNS_BRIEF": "a string containing all the possible anions",
-          "RETURNS_DETAILED": "a space-separated string, containing all possible anions that can be present in the unknown sample(s)",
-          "RETURNS_EXAMPLES": "\"Br- Cl- CO3-2 HPO4-2 ...\"",
+          "RETURNS_BRIEF": [
+            "a string containing all the possible anions"
+          ],
+          "RETURNS_DETAILED": [
+            "a space-separated string, containing all possible anions that can be present in the unknown sample(s)"
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"Br- Cl- CO3-2 HPO4-2 ...\""
+          ],
           "RAISES": "Exceptions:\n    None:\n         This tool does not raise exceptions under normal usage. \n         N/A \n         N/A",
           "LIMITATIONS": "Known Limitations:\n    - This tool returns the pre-defined list of all possible anions and does not perform any calculations or tests.\n    - The list contains only the bare aqueous anions; anionic metal-complexes are not listed.\n    - This tool is only useful when the task involves identifying unknown anions. If the task is about identifying solutions from a possible list of solutions with known compositions, there is no need for this tool."
         },
@@ -25325,13 +26807,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Make sure that `label` points to a solution and that knowing the pH of that solution gives valuable information. \n2.  Use this tool to measure the pH of the solution. \n3.  After measuring the pH, you can perform another test and then measure the pH again to observe how that test changes the pH of the solution.",
           "CONTEXTUAL": "How this tool works:\n- It uses universal indicator paper to measure the pH of a solution.\n- Returns the measure pH as an integer in the 0-14 range.\n- Values closer to 0 represent acidic, values around 7 represent neutral, and values closer to 14 represent alkaline solutions.",
           "SYNTACTICAL": "Usage examples:\n[\n    `measure_pH(\"sample\")`,\n    `measure_pH(\"sample_2\")`,\n    `measure_pH(\"sample_B\")`,\n    `measure_pH(\"test_01\")`,\n    `measure_pH(\"sample_1_test_2\")`,\n]",
-          "ARGS_BRIEF": "label of the target solution",
-          "ARGS_DETAILED": "a string representing the label of the solution in the Inventory, for which the pH will be measured",
-          "ARGS_SYNTACTICAL": "the label of supernatant solutions after filtration are appended with \"_filtrate\"",
-          "ARGS_EXAMPLES": "\"sample\", \"test_1\", \"test2_filtrate\"",
-          "RETURNS_BRIEF": "the closest integer value to the actual pH of the solution",
-          "RETURNS_DETAILED": "an integer value between 0-14, representing the closest integer to the actual pH of the solution",
-          "RETURNS_EXAMPLES": "`4`, `6`, `11`",
+          "ARGS_BRIEF": [
+            "label of the target solution"
+          ],
+          "ARGS_DETAILED": [
+            "a string representing the label of the solution in the Inventory, for which the pH will be measured"
+          ],
+          "ARGS_SYNTACTICAL": [
+            "the label of supernatant solutions after filtration are appended with \"_filtrate\""
+          ],
+          "ARGS_EXAMPLES": [
+            "\"sample\", \"test_1\", \"test2_filtrate\""
+          ],
+          "RETURNS_BRIEF": [
+            "the closest integer value to the actual pH of the solution"
+          ],
+          "RETURNS_DETAILED": [
+            "an integer value between 0-14, representing the closest integer to the actual pH of the solution"
+          ],
+          "RETURNS_EXAMPLES": [
+            "`4`, `6`, `11`"
+          ],
           "RAISES": "Exceptions:\n    KeyError:  When the given `label` is invalid \n               The given `label` is not found in the Inventory \n               Check the Inventory and ensure you are using a correct `label` \n    \n    ValueError:  When the given `label` is not a solution \n                 The given `label` exists in the Inventory but the object it points to is not a solution (for example it could be a precipitate) \n                 Check the Inventory and make sure the `label` you use points to a solution",
           "LIMITATIONS": "Known Limitations:\n    - The pH can only be defined for solutions, not precipitates.\n    - This tool does not return a precise pH value, only an integer estimate of the actual pH of the solution."
         },
@@ -25357,13 +26853,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  Make sure that `label` points to a solution and that it does not contain a precipitate. If the solution has a precipitate, filter it before running this test. \n2.  Use this tool to perform the flame test. Make sure that you have not previously introduced any interfering cations (i.e. those that result in a colored flame) to the solution as this will affect the results. \n3.  If a multi-colored flame is observed, you can try to remove some of the cations by precipitation and run the test again. If a certain color can be interpreted as more than one ion, you can perform additional tests to confirm which is present. You can also use the `lookup_flame_color` tool to retrieve the characteristic color of cations.",
           "CONTEXTUAL": "How this tool works:\n- It uses 1 mL of the solution to perform a flame test.\n- If no species are present that give a characteristic flame color, the resulting observations is \"No characteristic color\".\n- If the flame has a single characteristic color, the resulting observation will indicate the exact name for that color.\n- If multiple different colors are observed, the resulting observation will be \"A multi-colored flame\".",
           "SYNTACTICAL": "Usage examples:\n[\n    `perform_flame_test(\"sample\")`,\n    `perform_flame_test(\"sample_2\")`,\n    `perform_flame_test(\"sample_B\")`,\n    `perform_flame_test(\"test_01\")`,\n    `perform_flame_test(\"sample_1_test_2\")`,\n]",
-          "ARGS_BRIEF": "label of the target solution",
-          "ARGS_DETAILED": "a string representing the label of the solution in the Inventory, for which the flame test will be performed",
-          "ARGS_SYNTACTICAL": "the label of supernatant solutions after filtration are appended with \"_filtrate\"",
-          "ARGS_EXAMPLES": "\"sample\", \"test_1\", \"test2_filtrate\"",
-          "RETURNS_BRIEF": "the resulting observation from the flame test",
-          "RETURNS_DETAILED": "the resulting observation depends on the color of the flame. If no species present has a positive flame test, \"No characteristic color\" is returned. If exactly one color is observed, the observation will indicate that color. If more than one color is present in the flame, the observation will be \"multi-colored flame\"",
-          "RETURNS_EXAMPLES": "\"A red flame is observed.\", \"No characteristic flame color is observed.\", \"A multi-colored flame is observed.\"",
+          "ARGS_BRIEF": [
+            "label of the target solution"
+          ],
+          "ARGS_DETAILED": [
+            "a string representing the label of the solution in the Inventory, for which the flame test will be performed"
+          ],
+          "ARGS_SYNTACTICAL": [
+            "the label of supernatant solutions after filtration are appended with \"_filtrate\""
+          ],
+          "ARGS_EXAMPLES": [
+            "\"sample\", \"test_1\", \"test2_filtrate\""
+          ],
+          "RETURNS_BRIEF": [
+            "the resulting observation from the flame test"
+          ],
+          "RETURNS_DETAILED": [
+            "the resulting observation depends on the color of the flame. If no species present has a positive flame test, \"No characteristic color\" is returned. If exactly one color is observed, the observation will indicate that color. If more than one color is present in the flame, the observation will be \"multi-colored flame\""
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"A red flame is observed.\", \"No characteristic flame color is observed.\", \"A multi-colored flame is observed.\""
+          ],
           "RAISES": "Exceptions:\n    KeyError:  When the given `label` is invalid \n               The given `label` is not found in the Inventory \n               Check the Inventory and ensure you are using a correct `label` \n    \n    ValueError:  When the given `label` is not a solution \n                 The given `label` exists in the Inventory but the object it points to is not a solution (for example it could be a precipitate) \n                 Check the Inventory and make sure the `label` you use points to a solution \n\n    VolumeError:  When the solution contains a precipitate or less than 1 mL of it is remaining \n                  The given `label` exists in the Inventory as a solution, but it either contains a precipitate or the remaining volume is less than 1 mL \n                  If the solution contains a precipitate, filter it first and then perform the flame test again. If there is not enough solution to perform the test, you may be able to make more of it by repeating the steps that lead to it",
           "LIMITATIONS": "Known Limitations:\n    - The flame test's result depends on the concentration of cations; only species with a concentration higher than 5e-4 molar will give a positive result.\n    - If you have introduced known interfering cations to the solution in previous steps, they will affect the results.\n    - Some flame colors can be interpreted as more than one cation. Additional tests may be required to indicate the exact identity of the species.\n    - A \"multi-colored\" flame means that there are at least two cations present with different flame colors."
         },
@@ -25389,9 +26899,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Perform a flame test using the `perform_flame_test`tool before looking up the colors. \n    2.  Use this tool to retrieve the expected characteristic flame colors. \n    3.  If the result is a specific color, it usually means the presence of a specific cation. In some cases, more than one cation gives the same flame color in which case further tests can indicate which one. If the result is \"No characteristic color\" it means that none of the cations with a characteristic flame color are present or that their concentrations are lower than 5e-4 M. If \"A multi-colored flame\" is observed, it means that at least two of such cations are present but it is not clear which two (or more) are present.",
           "CONTEXTUAL": "How this tool works:\n    - This tool does not perform any tests. It just return a pre-defined list of flame colors.",
           "SYNTACTICAL": "Usage examples:\n    [\n        `lookup_flame_colors()`,\n    ]",
-          "RETURNS_BRIEF": "the list of characteristic flame colors",
-          "RETURNS_DETAILED": "a string in which each cation is on a separate line, along with its characteristic color",
-          "RETURNS_EXAMPLES": "\"Ba+2     green\nCa+2     orange-red\n...\"",
+          "RETURNS_BRIEF": [
+            "the list of characteristic flame colors"
+          ],
+          "RETURNS_DETAILED": [
+            "a string in which each cation is on a separate line, along with its characteristic color"
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"Ba+2     green\nCa+2     orange-red\n...\""
+          ],
           "RAISES": "Exceptions:\n        None:\n             This tool does not raise exceptions under normal usage. \n             N/A \n             N/A",
           "LIMITATIONS": "Known Limitations:\n        - This tool returns the pre-defined list of characteristic flame colors and does not perform any calculations or tests.\n        - The flame test only works for cations that have a characteristic flame color.\n        - If the concentration of a cation is below 5e-4, it will not give a colored flame."
         },
@@ -25408,13 +26924,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n   1.  Make sure that `label` points to an object in the Inventory. \n   2.  Use this tool to check the color of the object. This is useful to observe the color of the initial sample solutions. \n   3.  Take note of the observed colors. You can perform further tests on the object and notice how the observed colors change (or don't change). You can also use the `lookup_precipitate_colors` tool to retrieve the color of pure precipitates or the `simulate_color_mixture` tool to predict the color of a precipitate mixture, and compare that with the observed color.",
           "CONTEXTUAL": "How this tool works:\n   - It returns the type (reagent, solution, or precipitate) and the color of the target object.\n   - For solutions that also contain a precipitate, two colors will be reported: one for the precipitate and one for the supernatant solution.\n   - If a solution does not contain a precipitate, it will be called a \"clear solution\" and its color will be reported.\n   - Color names are subjective and qualitative, so treat the reported color names as only approximate.\n   - Since color names are subjective and approximate, sometimes it is possible that a color can be described with more than one color name. In those cases the possible color names are separated by a slash '/'.",
           "SYNTACTICAL": "Usage examples:\n   [\n       `checkout_color(\"sample\")`,\n       `checkout_color(\"sample_A\")`,\n       `checkout_color(\"test_1_filtrate\")`,\n       `checkout_color(\"test_2_precipitate\")`,\n       `checkout_color(\"test3_precipitate_HNO3\")`,\n   ]",
-          "ARGS_BRIEF": "label of the target object",
-          "ARGS_DETAILED": "a string representing the label of the object in the Inventory which can be a solution (with or without a precipitate), a reagent, or a filtered precipitate",
-          "ARGS_SYNTACTICAL": "after filtration, the supernatant's label is appended with \"_filtrate\" and the precipitate is appended with \"_precipitate\"",
-          "ARGS_EXAMPLES": "\"sample\", \"test2_filtrate\", \"test3_precipitate\"",
-          "RETURNS_BRIEF": "the type (reagent, solution, or precipitate) and the color of the object",
-          "RETURNS_DETAILED": "a string containing a statement about the type and the color of the object. The type can be: a reagent solution, a precipitate, a clear solution (meaning it has no precipitate), or a solution containing a precipitate. In the latter case, the color of both the supernatant solution and the existing precipitate will be reported.",
-          "RETURNS_EXAMPLES": "\"sample_B is a clear solution with the following color: pale yellow\", \"test_03 is a solution that also contains a precipitate.\nColor of the precipitate: black\nColor of the supernatant solution: colorless\", \"test_1_precipitate is a precipitate with the following color: rosy brown / reddish gray\"",
+          "ARGS_BRIEF": [
+            "label of the target object"
+          ],
+          "ARGS_DETAILED": [
+            "a string representing the label of the object in the Inventory which can be a solution (with or without a precipitate), a reagent, or a filtered precipitate"
+          ],
+          "ARGS_SYNTACTICAL": [
+            "after filtration, the supernatant's label is appended with \"_filtrate\" and the precipitate is appended with \"_precipitate\""
+          ],
+          "ARGS_EXAMPLES": [
+            "\"sample\", \"test2_filtrate\", \"test3_precipitate\""
+          ],
+          "RETURNS_BRIEF": [
+            "the type (reagent, solution, or precipitate) and the color of the object"
+          ],
+          "RETURNS_DETAILED": [
+            "a string containing a statement about the type and the color of the object. The type can be: a reagent solution, a precipitate, a clear solution (meaning it has no precipitate), or a solution containing a precipitate. In the latter case, the color of both the supernatant solution and the existing precipitate will be reported."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"sample_B is a clear solution with the following color: pale yellow\", \"test_03 is a solution that also contains a precipitate.\nColor of the precipitate: black\nColor of the supernatant solution: colorless\", \"test_1_precipitate is a precipitate with the following color: rosy brown / reddish gray\""
+          ],
           "RAISES": "Exceptions:\n       KeyError:  When the given `label` is invalid \n                  The given `label` is not found in the Inventory \n                  Check the Inventory and ensure you are using a correct `label`",
           "LIMITATIONS": "Known Limitations:\n       - If the target object is the result of a previously performed test, all color observations were already reported as part of that test, so using this tool to check those colors again will be redundant.\n       - All reported colors are qualitative and approximate.\n       - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change."
         },
@@ -25440,9 +26970,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Make sure you have observed the formation or change of appearance of precipitates before calling this tool. Useful tools include `checkout_color`, `mix_two_solutions`, and `add_solution`, and you might also observe a color change for an existing precipitate when using tools such as `add_solution` or `add_precipitate_to_solution`. \n    2.  Use this tool to get the list of color names associated with pure precipitates. \n    3.  Remember that the listed color names will only exactly match with the reported colors from other tools if the precipitate is pure, meaning nothing else has co-precipitated with it. You can use the `simulate_color_mixture` tool to estimate the color of mixtures.",
           "CONTEXTUAL": "How this tool works:\n    - The tool does not perform any tests; it simply returns the full pre-defined list of non-white precipitates and their colors in their pure form.\n    - Since there is a large number of white precipitates, only colored (non-white) precipitates are listed; precipitates that are not listed are white. \n    - The observed color of precipitates reported by other tools will only match these listed colors if there is only one compound in the precipitate. If multiple compounds co-precipitate at the same time, it can affect the perceived color of the precipitate.",
           "SYNTACTICAL": "Usage examples:\n    [\n        `lookup_precipitate_colors()`,\n    ]",
-          "RETURNS_BRIEF": "the list of precipitate colors",
-          "RETURNS_DETAILED": "a string where each separate line contains a single pure precipitate followed by its perceived color",
-          "RETURNS_EXAMPLES": "\"AgBr     pale yellow\nAg2CO3     pale yellow\nAg2CrO4     brick red\n...\"",
+          "RETURNS_BRIEF": [
+            "the list of precipitate colors"
+          ],
+          "RETURNS_DETAILED": [
+            "a string where each separate line contains a single pure precipitate followed by its perceived color"
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"AgBr     pale yellow\nAg2CO3     pale yellow\nAg2CrO4     brick red\n...\""
+          ],
           "RAISES": "Exceptions:\n        None:\n             This tool does not raise exceptions under normal usage. \n             N/A \n             N/A",
           "LIMITATIONS": "Known Limitations:\n        - This tool just returns the pre-defined list of precipitate colors and does not perform any calculations or tests.\n        - The listed colors are for the pure precipitates only, not for the mixture of precipitates.\n        - All reported colors are qualitative and approximate."
         },
@@ -25459,13 +26995,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  You need to have a hypothesis about the composition of an observed precipitate. Use the `lookup_precipitate_colors` tool to get the color names of the pure constituents. \n2.  Assign fractions to the retrieved color names and use this tool to estimate the color of the resulting mixture. \n3.  Depending on the predicted color, you may want to keep or change your hypothesis, test other hypothetical compositions, or perform follow-up tests.",
           "CONTEXTUAL": "How this tool works:\n- It receives a mixture of up to 3 color names and their fractions as a list of tuples.\n- Each tuple must be formatted as (color_name, fraction).\n- The fractions must be all positive and sum to 1.0. They will be rounded to two decimal places before performing the prediction, so there is no point in having more precision.\n- The colors will be mixed and the name of the closest matching color will be reported.",
           "SYNTACTICAL": "Usage examples:\n[\n    `simulate_color_mixture([(\"black\", 0.5), (\"pale yellow\", 0.5)])`,\n    `simulate_color_mixture([(\"white\", 0.7), (\"turquoise\", 0.3)])`,\n    `simulate_color_mixture([(\"cyan\", 0.2), (\"white\", 0.2), (\"pink\", 0.6)])`,\n    `simulate_color_mixture([(\"white\", 0.1), (\"reddish brown\", 0.1), (\"crimson\", 0.8)])`,\n    `simulate_color_mixture([(\"yellow\", 0.6), (\"brick red\", 0.4)])`,\n    \n]",
-          "ARGS_BRIEF": "mixture components and their fractions as a list of tuples",
-          "ARGS_DETAILED": "a list of tuples, where the first element of the tuple is the color name and the second element its fraction in the mixture. The maximum allowed number of tuples in the list is three.",
-          "ARGS_SYNTACTICAL": "list of tuples, each formatted as (<color>, <fraction>)",
-          "ARGS_EXAMPLES": "[(\"yellow\", 0.5), (\"red\", 0.5)] , [(\"turquoise\", 0.4), (\"black\", 0.3), (\"dark blue\", 0.3)]",
-          "RETURNS_BRIEF": "name of the resulting color",
-          "RETURNS_DETAILED": "the closest matching name to the resulting color",
-          "RETURNS_EXAMPLES": "\"dark olive\", \"lavender\", \"pale gray\"",
+          "ARGS_BRIEF": [
+            "mixture components and their fractions as a list of tuples"
+          ],
+          "ARGS_DETAILED": [
+            "a list of tuples, where the first element of the tuple is the color name and the second element its fraction in the mixture. The maximum allowed number of tuples in the list is three."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "list of tuples, each formatted as (<color>, <fraction>)"
+          ],
+          "ARGS_EXAMPLES": [
+            "[(\"yellow\", 0.5), (\"red\", 0.5)] , [(\"turquoise\", 0.4), (\"black\", 0.3), (\"dark blue\", 0.3)]"
+          ],
+          "RETURNS_BRIEF": [
+            "name of the resulting color"
+          ],
+          "RETURNS_DETAILED": [
+            "the closest matching name to the resulting color"
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"dark olive\", \"lavender\", \"pale gray\""
+          ],
           "RAISES": "Exceptions:\n    ValueError:  When a given color name is invalid \n                 The first element of one of the tuples is not a valid color name \n                 Make sure you only use color names that correspond to pure precipitates as listed by the `lookup_precipitate_colors` tool \n    \n    ValueError:  When the mixture has more than 3 components \n                 The list of color mixtures has 4 or more tuples \n                 Ensure that you are mixing at most 3 colors \n\n    AssertionError:  When there is a numerical problem with the fractions \n                     There is a non-positive fraction or the fractions do not sum to 1.0 \n                     Ensure that all fractions are positive values between 0 and 1 and they all sum to 1.0",
           "LIMITATIONS": "Known Limitations:\n    - This simulation only works for the color of precipitates. It is not intended to be used to predict solution color.\n    - Only a maximum of three (3) colors can be mixed.\n    - The fractions will be rounded to two decimal places before the simulation.\n    - The returned color name is an approximate close match to the actual color of the mixture and might not be an exact match."
         },
@@ -25487,9 +27037,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  None. \n    2.  Use this tool to get the full list of available reagents to use during the task. \n    3.  You can perform any tests you wish by mixing the samples with the reagents using tools such as `mix_two_solutions` and `add_solution`.",
           "CONTEXTUAL": "How this tool works:\n    - This tool does not perform any tests; it simply returns the full list of available reagents.\n    - Each reagent appears on a separate line.\n    - Each reagent is represented by its \"reagent label\" and its \"composition\".\n    - The \"reagent label\" is the label to use when calling tools such as `mix_two_solutions`, `add_solution`, or `add_precipitate_to_solution`.\n    - There is no limit on the amount of available reagent solutions, as opposed to sample solutions.",
           "SYNTACTICAL": "Usage examples:\n    [\n        `get_available_reagents()`,\n    ]",
-          "RETURNS_BRIEF": "a string containing all available reagents",
-          "RETURNS_DETAILED": "a string where each available reagent appears on a separate line and is represented by \"reagent label\" and \"composition\". If no additional reagents are available in the tasks, it will be mentioned by this tool.",
-          "RETURNS_EXAMPLES": "\"reagent label: HCl(0.02M)     composition: HCl 0.02 M, in water\nreagent label: KOH(6M)     composition: KOH 6.0 M, in water\n...\"",
+          "RETURNS_BRIEF": [
+            "a string containing all available reagents"
+          ],
+          "RETURNS_DETAILED": [
+            "a string where each available reagent appears on a separate line and is represented by \"reagent label\" and \"composition\". If no additional reagents are available in the tasks, it will be mentioned by this tool."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"reagent label: HCl(0.02M)     composition: HCl 0.02 M, in water\nreagent label: KOH(6M)     composition: KOH 6.0 M, in water\n...\""
+          ],
           "RAISES": "Exceptions:\n        None:\n             This tool does not raise exceptions under normal usage. \n             N/A \n             N/A",
           "LIMITATIONS": "Known Limitations:\n    - This tool does not perform any tests; it simply returns the full list of available reagents.\n    - All reagent solutions are at room temperature; there are no ways to heat up or cool down the reagents."
         },
@@ -25511,13 +27067,43 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  Make sure that `sol1_label` and `sol2_label` both point to reagents or solutions in the Inventory and that neither of them contain a precipitate. If a solution has precipitation, filter it using the `filter_solution` tool.  \n    2.  Use this tool to mix the solutions and add the new resulting solution to the Inventory. Notice the reported observations. \n    3.  You can use your chosen `test_label` to refer to this solution when performing further tests. Sometimes for a given color change or precipitation to happen, you need to add more of one of the initial solutions, in that case you can use the `add_a_solution` tool. If the test resulted in the formation of a precipitate, you can either add other solutions to the mixture using the `add_a_solution` tool or filter the precipitate using the `filter_solution` tool. You can also lookup the color of precipitates by calling the `lookup_precipitates_color` tool. If you have a hypothesis about the composition of the formed precipitate you can try to check your hypothesis using the `simulate_color_mixture` tool.",
           "CONTEXTUAL": "How this tool works:\n    - It draws `sol1_vol` mL from `sol1_label`.\n    - It draws `sol2_vol` mL from `sol2_label`.\n    - Mixes the drawn volumes together in a new empty container labeled `test_label` and stirs until equilibrium is reached, at room temperature.\n    - The resulting mixture is then added to the Inventory with the label `test_label`.\n    - It returns two observations on two separate lines: one for the formation of precipitates (if any) and one for the color of the resulting solution.\n    - Sometimes it is possible that the resulting precipitate's color can be described using more than one color name. In those cases the different given names will be separated by a slash '/'.\n    - Remember that the reported colors are qualitative and approximate.",
           "SYNTACTICAL": "Usage examples:\n    [\n        `mix_two_solutions(test_label=\"test_1\", sol1_label=\"HCl(1M)\", sol1_vol=5, sol2_label=\"sample\", sol2_vol=5)`, # mixing 5 mL of the reagent 'HCl(1M)' and 5 mL of 'sample', labeling the result as 'test_1'\n        `mix_two_solutions(test_label=\"test_2_iodide\", sol1_label=\"test_1\", sol1_vol=3, sol2_label=\"NH4I\", sol2_vol=2)`, # mixing 3 mL of 'test_1' and 2 mL of the reagent 'NH4I', labeling the result as 'test_2_iodide'\n        `mix_two_solutions(test_label=\"A_B\", sol1_label=\"sample_A\", sol1_vol=5, sol2_label=\"sample_B\", sol2_vol=5)`, # mixing 10 mL of 'sample_A' and 10 mL of 'sample_B', labeling the result as 'A_B'\n        `mix_two_solutions(test_label=\"A_B_HCl\", sol1_label=\"A_B\", sol1_vol=2, sol2_label=\"HCl(6M)\", sol2_vol=1)`, # mixing 10 mL of 'A_B' and 2 mL of the reagent 'HCl(6M)', labeling the result as 'A_B_HCl'\n        `mix_two_solutions(test_label=\"sample_buffer\", sol1_label=\"sample\", sol1_vol=3, sol2_label=\"BUFFER_9\", sol2_vol=5)`, # mixing 3 mL of 'sample' and 5 mL of the reagent 'BUFFER_9', labeling the result as 'sample_buffer'\n    ]",
-          "ARGS_BRIEF": "volume of the second solution to draw",
-          "ARGS_DETAILED": "the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL.",
-          "ARGS_SYNTACTICAL": "integer value",
-          "ARGS_EXAMPLES": "`1`, `2`, `4`",
-          "RETURNS_BRIEF": "a string containing the observations from the test",
-          "RETURNS_DETAILED": "a string containing two lines where the first line is an observation about the formation (or lack thereof) of precipitates and its color and the second line is about the color of the resulting solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes.",
-          "RETURNS_EXAMPLES": "\"No precipitate forms.\nThe resulting solution is colorless.\", \"A precipitate forms. Color: black\nThe supernatant solution is pale yellow.\"",
+          "ARGS_BRIEF": [
+            "label of the resulting solution",
+            "label of the first solution",
+            "volume of the first solution to draw",
+            "label of the second solution",
+            "volume of the second solution to draw"
+          ],
+          "ARGS_DETAILED": [
+            "the label given to the resulting solution after the mixing. Use this label to refer to the resulting solution in further tests",
+            "the label of the first solution (or reagent). This is how the solution (or reagent) is referred to in the Inventory (or reagent list). `sol1_vol` mL of this solution will be drawn",
+            "the volume (in mL) of the first solution, labeled `sol1_label`, to draw and mix with the second solution. The minimum allowed volume is 1 mL.",
+            "the label of the second solution (or reagent). This is how the solution (or reagent) is referred to in the Inventory (or reagent list). `sol2_vol` mL of this solution will be drawn",
+            "the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "use descriptive labels",
+            "label string matching an entry in the Inventory or reagent list",
+            "integer value",
+            "label string matching an entry in the Inventory or reagent list",
+            "integer value"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"test1_HCl\", \"test2_NH3_filt_iodide\", \"test3_excess_KOH\"",
+            "\"sample\", \"test_1\", \"test2_filtrate\", \"NH4I\", \"HCl(1M)\"",
+            "`1`, `2`, `4`",
+            "\"sample\", \"test_1\", \"test2_filtrate\", \"NH4I\", \"HCl(1M)\"",
+            "`1`, `2`, `4`"
+          ],
+          "RETURNS_BRIEF": [
+            "a string containing the observations from the test"
+          ],
+          "RETURNS_DETAILED": [
+            "a string containing two lines where the first line is an observation about the formation (or lack thereof) of precipitates and its color and the second line is about the color of the resulting solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"No precipitate forms.\nThe resulting solution is colorless.\", \"A precipitate forms. Color: black\nThe supernatant solution is pale yellow.\""
+          ],
           "RAISES": "Exceptions:\n        KeyError:  When `sol1_label` or `sol2_label` is invalid \n                   The given `sol1_label` or `sol2_label` was not found in the Inventory \n                   Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        RuntimeError:  When `sol1_label` or `sol2_label` is not a solution \n                       The given `sol1_label` or `sol2_label` was found in the Inventory but the object it points to is not a solution. \n                       Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        ValueError:  When `sol1_vol` or `sol2_vol` is not a positive integer greater than or equal to 1 \n                     The given `sol1_vol` or `sol2_vol` is not an integer or it is less than 1 mL \n                     Make sure you use at least 1 mL of each solution \n        \n        VolumeError:  When `sol1_label` or `sol2_label` contain precipitates or the remaining volume is less than the requested amount \n                      The given `sol1_label` or `sol2_label` was found in the Inventory and it is a solution but it either contains a precipitate or there is not enough of it remaining \n                      If the solution contains a precipitate, either filter it using the `filter_solution` tool, or use the `add_a_solution` tool if the presence of the precipitate is necessary for the test. If the remaining amount of solution is less that the requested amount, try doing the test will a smaller volume if possible, or make more of that solution by repeating the steps that lead to it.",
           "LIMITATIONS": "Known Limitations:\n    - This tool only works when mixing clear solutions, meaning solutions that do not contain any precipitates.\n    - All solutions are at room temperature; there are no ways to heat up or cool down the solutions/reagents.\n    - The minimum allowed volume to draw is 1 mL.\n    - The reported colors are qualitative and approximate.\n    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than one compound co-precipitate at the same time, the color may be different from the color of pure precipitates.\n    - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.\n    - Sometimes a given change in color or precipitate formation needs more of one of the solutions to happen."
         },
@@ -25559,13 +27145,39 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  If you used the `mix_two_solutions` tool and want to keep adding more of one of the solutions, you can use this tool. You can also use this tool if a previous test resulted in the formation of precipitate and you want to perform further tests on the resulting mixture.  \n    2.  Use this tool to add the given volume of sol2 to the whole remaining amount sol1. Notice the reported observations. \n    3.  You can use your chosen `test_label` to refer to the resulting solution when performing further tests. If the test resulted in the formation of a precipitate, you can either add other solutions to the mixture by calling this tool again or filter the precipitate using the `filter_solution` tool. You can also lookup the color of precipitates by calling the `lookup_precipitates_color` tool. If you have a hypothesis about the color change of a pre-existing precipitate you can try to check your hypothesis using the `simulate_color_mixture` tool.",
           "CONTEXTUAL": "How this tool works:\n    - It draws `sol2_vol` mL from `sol2_label`.\n    - Adds it to the same container as `sol1_label`, and stirs the contents until equilibrium is reached, at room temperature.\n    - The remaining volume of `sol1_label` is set to 0 mL in the Inventory. The new solution is labeled `test_label` and is added to the Inventory.\n    - It returns two observations on two separate lines: one about the change in the color and the amount of precipitates (if any) and one about the change in the color of the solution.\n    - The reference for observations about the change in solution color is `sol1_label`.\n    - When an observation mentions partial dissolution, it roughly means that somewhere between 15% to 50% of the original precipitate has dissolved.\n    - When an observation mentions that a precipitate has mostly dissolved, it means that more than 50% of it has dissolved but there is still some undissolved precipitate remaining.\n    - Sometimes it is possible that the precipitate's color can be described using more than one color name. In those cases the different given names will be separated by a slash '/'.\n    - Remember that the reported colors are qualitative and approximate.",
           "SYNTACTICAL": "Usage examples:\n    [\n        `add_a_solution(test_label=\"test_2B\", sol1_label=\"test_2A\", sol2_label=\"HCl(0.02M)\", sol2_vol=1)`, # adding 1 mL of the reagent 'HCl(0.02M)' to 'test_2A', labeling the result as 'test_2B'\n        `add_a_solution(test_label=\"A_B_HCl\", sol1_label=\"A_B\", sol2_label=\"HCl(6M)\", sol2_vol=5)`, # adding 5 mL of the reagent 'HCl(6M)' to 'A_B', labeling the result as 'A_B_HCl'\n        `add_a_solution(test_label=\"test_3\", sol1_label=\"test_1\", sol2_label=\"test_2\", sol2_vol=2)`, # adding 2 mL of 'test_2' to 'test_1', labeling the result as 'test_3'\n        `add_a_solution(test_label=\"test4_excess_KOH\", sol1_label=\"test3_KOH\", sol2_label=\"KOH(6M)\", sol2_vol=2)`, # adding 2 mL of the reagent 'KOH(6M)' to 'test3_KOH', labeling the result as 'test4_excess_KOH'\n        `add_a_solution(test_label=\"test5_more_NH3\", sol1_label=\"test4_NH3\", sol2_label=\"NH3(1M)\", sol2_vol=5)`, # adding 5 mL of the reagent 'NH3(1M)' to 'test4_NH3', labeling the result as 'test4_more_NH3'\n    ]",
-          "ARGS_BRIEF": "volume of the second solution to draw",
-          "ARGS_DETAILED": "the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL",
-          "ARGS_SYNTACTICAL": "integer value",
-          "ARGS_EXAMPLES": "`1`, `2`, `4`",
-          "RETURNS_BRIEF": "a string containing the observations from the test",
-          "RETURNS_DETAILED": "a string containing two lines where the first line is an observation about the formation/color change (or lack thereof) of precipitates, and the second line is about any color change of the supernatant solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes.",
-          "RETURNS_EXAMPLES": "\"The amount and color of the existing precipitate does not noticeably change.\nColor of the supernatant solution changes to very pale blue.\" , \"The existing precipitate partially dissolves and changes color. New color: maroon / reddish brown.\nColor of the supernatant solution does not noticeably change.\"",
+          "ARGS_BRIEF": [
+            "label of the resulting solution",
+            "label of the first solution",
+            "label of the second solution",
+            "volume of the second solution to draw"
+          ],
+          "ARGS_DETAILED": [
+            "the label given to the resulting solution after the mixing. Use this label to refer to the resulting solution in further tests",
+            "the label of the first (host) solution. This is how the solution is referred to in the Inventory. This cannot be a reagent. The remaining volume of this solution will be set to 0 mL after and it is replaced with `test_label`",
+            "the label of the second solution (or reagent), the one being added to `sol1_label`. This is how the solution (or reagent) is referred to in the Inventory (or reagent list). `sol2_vol` mL of this solution will be drawn and added to the host solution",
+            "the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL"
+          ],
+          "ARGS_SYNTACTICAL": [
+            "use descriptive labels",
+            "label string matching a non-reagent solution in the Inventory",
+            "label string matching an entry in the Inventory or reagent list",
+            "integer value"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"test1_HCl\", \"test2_NH3_filt_iodide\", \"test3_excess_KOH\"",
+            "\"test_1\", \"test2_filtrate\"",
+            "\"sample\", \"test_1\", \"test2_filtrate\", \"NH4I\", \"HCl(1M)\"",
+            "`1`, `2`, `4`"
+          ],
+          "RETURNS_BRIEF": [
+            "a string containing the observations from the test"
+          ],
+          "RETURNS_DETAILED": [
+            "a string containing two lines where the first line is an observation about the formation/color change (or lack thereof) of precipitates, and the second line is about any color change of the supernatant solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"The amount and color of the existing precipitate does not noticeably change.\nColor of the supernatant solution changes to very pale blue.\" , \"The existing precipitate partially dissolves and changes color. New color: maroon / reddish brown.\nColor of the supernatant solution does not noticeably change.\""
+          ],
           "RAISES": "Exceptions:\n        KeyError:  When `sol1_label` or `sol2_label` is invalid \n                   The given `sol1_label` or `sol2_label` was not found in the Inventory \n                   Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        RuntimeError:  When `sol1_label` or `sol2_label` is not a solution \n                       The given `sol1_label` or `sol2_label` was found in the Inventory but the object it points to is not a solution. \n                       Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        ValueError:  When `sol2_vol` is not a positive integer greater than or equal to 1 \n                     The given `sol2_vol` is not an integer or it is less than 1 mL \n                     Make sure you are adding at least 1 mL of the second solution \n        \n        VolumeError:  When `sol2_label` contains a precipitate or its remaining volume is less than the requested amount \n                      The given `sol2_label` was found in the Inventory and it is a solution but it either contains a precipitate or there is not enough of it remaining \n                      If the second solution contains a precipitate, filter it using the `filter_solution` tool. If the remaining amount of it is less that the requested amount, try doing the test will a smaller `sol2_vol` if possible, or make more of that solution by repeating the steps that lead to it.",
           "LIMITATIONS": "Known Limitations:\n    - The host solution (sol1) may contain precipitates but the second solution (sol2, the one being added) cannot contain any precipitates.\n    - All solutions are at room temperature; there are no ways to heat up or cool down the solutions/reagents.\n    - The minimum allowed volume for the second solution is 1 mL.\n    - The reported colors are qualitative and approximate.\n    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than one compound co-precipitate at the same time, the color may be different from the color of pure precipitates.\n    - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.\n    - Any observations mentioning that an existing precipitate \"partially\" or \"mostly\" dissolves are qualitative and approximate statements."
         },
@@ -25603,13 +27215,27 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n1.  If performing a test using tools such as `mix_two_solutions` or `add_a_solution` result in the formation of a precipitate and you want to perform other tests only on the supernatant solution or the newly formed precipitate, you can use this tool two separate the two phases. \n2.  Use this tool to separate the supernatant and the precipitate. \n3.  You can perform further tests on the supernatant by calling tools like `mix_two_solutions` or `add_a_solution`. You can perform further tests on the precipitate by adding it to a solution using the `add_precipitate_to_solution` tool.",
           "CONTEXTUAL": "How this tool works:\n- It separates the aqueous phase and the solid phase from the `label`, and removes it from the inventory.\n- The supernatant is added to the Inventory, with the original label appended by '_filtrate'.\n- The precipitate is added to the Inventory, with the original label appended by '_precipitate'.",
           "SYNTACTICAL": "Usage examples:\n[\n    `filter_solution(label=\"test_2B\")`, # 'test_2B' is removed from the Inventory and is replaced by 'test_2B_filtrate' and 'test_2B_precipitate'\n    `filter_solution(label=\"test3_HCl\")`, # 'test_HCl' is removed from the Inventory and is replaced by 'test3_HCl_filtrate' and 'test3_HCl_precipitate'\n    `filter_solution(label=\"test_2A_H2S\")`, # 'test_2A_H2S' is removed from the Inventory and is replaced by 'test_2A_H2S_filtrate' and 'test_2A_H2S_precipitate'\n    `filter_solution(label=\"test2_filtrate_NH4I\")`, # 'test2_filtrate_NH4I' is removed from the Inventory and is replaced by 'test2_filtrate_NH4I_filtrate' and 'test2_filtrate_NH4I_precipitate'\n    `filter_solution(label=\"test1_precipitate_NH3\")`, # 'test1_precipitate_NH3' is removed from the Inventory and is replaced by 'test1_precipitate_NH3_filtrate' and 'test1_precipitate_NH3_precipitate'\n]",
-          "ARGS_BRIEF": "label of the target solution",
-          "ARGS_DETAILED": "the label given to the solution being filtered. This label is appended by '_filtrate' or '_precipitate' to refer to the separated phases.",
-          "ARGS_SYNTACTICAL": "label of unfiltered solutions does not end with \"_filtrate\"",
-          "ARGS_EXAMPLES": "\"test1_HCl\", \"test_NH3_filt_iodide\"",
-          "RETURNS_BRIEF": "a string with a message about the success/failure of the filtration",
-          "RETURNS_DETAILED": "if the solution does not contain a precipitate",
-          "RETURNS_EXAMPLES": "\"The solution was successfully filtered! The filtrate and precipitate are added to the Inventory.\" , \"The target solution has no precipitate to filter! No change was made to the Inventory.\"",
+          "ARGS_BRIEF": [
+            "label of the target solution"
+          ],
+          "ARGS_DETAILED": [
+            "the label given to the solution being filtered. This label is appended by '_filtrate' or '_precipitate' to refer to the separated phases."
+          ],
+          "ARGS_SYNTACTICAL": [
+            "label of unfiltered solutions does not end with \"_filtrate\""
+          ],
+          "ARGS_EXAMPLES": [
+            "\"test1_HCl\", \"test_NH3_filt_iodide\""
+          ],
+          "RETURNS_BRIEF": [
+            "a string with a message about the success/failure of the filtration"
+          ],
+          "RETURNS_DETAILED": [
+            "if the solution does not contain a precipitate"
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"The solution was successfully filtered! The filtrate and precipitate are added to the Inventory.\" , \"The target solution has no precipitate to filter! No change was made to the Inventory.\""
+          ],
           "RAISES": "Exceptions:\n    KeyError:  When `label` is invalid \n               The given `label` was not found in the Inventory \n               Make sure you are passing the correct label. You can use the `check_inventory` tool. \n    \n    RuntimeError:  When `label` is a reagent solution or a precipitate \n                   The given `label` was found in the Inventory but the object it points to is either a precipitate or a reagent solution \n                   Make sure you are passing the correct label. You can use the `check_inventory` tool.",
           "LIMITATIONS": "Known Limitations:\n- Reagent solutions cannot be filtered."
         },
@@ -25635,13 +27261,39 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  You need to have a separated precipitate in the Inventory before calling this tool. Separate the precipitates by using the `filter_solution` tool. \n    2.  Use this tool to add the precipitate to a given volume of the solution. It's better to choose the known reagents as the solution. \n    3.  You can use your chosen `test_label` to refer to the resulting solution when performing further tests. If the added precipitate does not fully dissolve, you can add other solutions to the mixture by calling the `add_a_solution` tool or filter the precipitate again using the `filter_solution` tool. If the added precipitate fully dissolves, you can perform further tests on the resulting solution by calling tools such as `measure_pH`, `mix_two_solutions`, `add_a_solution` or `perform_flame_test`.",
           "CONTEXTUAL": "How this tool works:\n    - It draws `sol_vol` mL from `sol_label`.\n    - Adds it to a new empty container labeled `test_label`.\n    - Adds all of the precipitate labeled `prec_label` to the container and stirs the mixture until equilibrium is reached, at room temperature. \n    - The resulting mixture is added to the Inventory with the label `test_label`.\n    - It returns two observations on two separate lines: one about the change in the color and the amount of the added precipitate, and one about the change in the color of the supernatant solution.\n    - The reference for observations about the change in solution color is `sol_label`.\n    - When an observation mentions partial dissolution, it roughly means that about 20-50% of the added precipitate has dissolved.\n    - When an observation mentions that a precipitate has mostly dissolved, it means that more than 50% of it has dissolved but there is still some undissolved precipitate remaining.\n    - Sometimes it is possible that the precipitate's color can be described using more than one color name. In those cases the different given names will be separated by a slash '/'.\n    - Remember that the reported colors are qualitative and approximate.",
           "SYNTACTICAL": "Usage examples:\n    [\n        `add_precipitate_to_solution(test_label=\"test_3\", prec_label=\"test_2_precipitate\", sol_label=\"test_1\", sol_vol=4)`, # adding all of the precipitate 'test_2_precipitate' to 4 mL of the solution 'test_1', labeling the result as 'test_3'\n        `add_precipitate_to_solution(test_label=\"prec3_HCl\", prec_label=\"test3_precipitate\", sol_label=\"HCl(1M)\", sol_vol=5)`, # adding all of the precipitate 'test3_precipitate' to 5 mL of the reagent solution 'HCl(1M)', labeling the result as 'prec2_HCl'\n        `add_precipitate_to_solution(test_label=\"filt4_ppt1\", prec_label=\"test1_precipitate\", sol_label=\"test4_K2CrO4_filtrate\", sol_vol=10)`, # adding all of the precipitate 'test1_precipitate' to 10 mL of the solution 'test4_K2CrO4_filtrate', labeling the result as 'filt4_ppt1'\n        `add_precipitate_to_solution(test_label=\"test2_ppt_NH3\", prec_label=\"test2_precipitate\", sol_label=\"NH3(5M)\", sol_vol=4)`, # adding all of the precipitate 'test2_precipitate' to 4 mL of the reagent solution 'NH3(5M)', labeling the result as 'test2_ppt_NH3'\n        `add_precipitate_to_solution(test_label=\"Ba_precipitate_HNO3\", prec_label=\"test1_Ba_precipitate\", sol_label=\"HNO3(1M)\", sol_vol=10)`, # adding all of the precipitate 'test1_Ba_precipitate' to 10 mL of the reagent solution 'HNO3(1M)', labeling the result as 'Ba_precipitate_HNO3'\n    ]",
-          "ARGS_BRIEF": "volume of the solution",
-          "ARGS_DETAILED": "the volume (in mL) of the host solution, labeled `sol_label`. This volume will be drawn from the solution and the precipitate is then added to the drawn volume. The minimum allowed volume is 4 mL",
-          "ARGS_SYNTACTICAL": "integer value",
-          "ARGS_EXAMPLES": "`1`, `2`, `4`",
-          "RETURNS_BRIEF": "a string containing the observations from the test",
-          "RETURNS_DETAILED": "a string containing two lines where the first line is an observation about any changes in the color or the amount of the added precipitate, and the second line is about any color changes of the supernatant solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes.",
-          "RETURNS_EXAMPLES": "\"The added precipitate partially dissolves. Its color does not noticeably change.\nColor of the supernatant solution changes to very pale blue.\" , \"The added precipitate fully dissolves.\nColor of the supernatant solution does not noticeably change.\"",
+          "ARGS_BRIEF": [
+            "label of the resulting mixture",
+            "label of the precipitate",
+            "label of the solution",
+            "volume of the solution"
+          ],
+          "ARGS_DETAILED": [
+            "the label given to the resulting mixture after adding the precipitate. Use this label to refer to the resulting mixture in further tests",
+            "the label of the precipitate to add. This is how the precipitate is referred to in the Inventory. All of the precipitate will be added to the `sol_label` solution and `prec_label` will be removed from the Inventory",
+            "the label of the solution (or reagent) that will receive the precipitate. This is how the solution (or reagent) is referred to in the Inventory (or reagent list). It must not contain any pre-existing precipitates",
+            "the volume (in mL) of the host solution, labeled `sol_label`. This volume will be drawn from the solution and the precipitate is then added to the drawn volume. The minimum allowed volume is 4 mL"
+          ],
+          "ARGS_SYNTACTICAL": [
+            "use descriptive labels",
+            "label of filtered precipitates always end with \"_precipitate\"",
+            "label string matching a clear solution in the Inventory or reagent list",
+            "integer value"
+          ],
+          "ARGS_EXAMPLES": [
+            "\"test1_HCl_precipitate_NH3\", \"test4_carbonate_precipitate_HNO3\", \"test3_excess_KOH_precipitate_HNO3\"",
+            "\"test1_HCl_precipitate\", \"test4_carbonate_precipitate\", \"test3_excess_KOH_precipitate\"",
+            "\"test_1\", \"test2_filtrate\", \"NH4I\", \"HCl(1M)\"",
+            "`1`, `2`, `4`"
+          ],
+          "RETURNS_BRIEF": [
+            "a string containing the observations from the test"
+          ],
+          "RETURNS_DETAILED": [
+            "a string containing two lines where the first line is an observation about any changes in the color or the amount of the added precipitate, and the second line is about any color changes of the supernatant solution. If the color of the precipitate can be described with more than one color name, up to 3 different color names will be given separated by slashes."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"The added precipitate partially dissolves. Its color does not noticeably change.\nColor of the supernatant solution changes to very pale blue.\" , \"The added precipitate fully dissolves.\nColor of the supernatant solution does not noticeably change.\""
+          ],
           "RAISES": "Exceptions:\n        KeyError:  When `sol_label` or `prec_label` is invalid \n                   The given `sol_label` or `prec_label` was not found in the Inventory \n                   Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        RuntimeError:  When `sol_label` is not a solution or `prec_label` is not a precipitate \n                       The given `sol_label` and `prec_label` were found in the Inventory but the do not point to the correct type of object \n                       Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. \n        \n        ValueError:  When `sol_vol` is invalid \n                     The given `sol_vol` is not an integer greater than or equal to 4 mL \n                     Make sure you are using at least 4 mL of the solution and passing it as an integer value \n        \n        VolumeError:  When `sol_label` contains a precipitate or its remaining volume is less than the requested amount \n                      The given `sol_label` was found in the Inventory and it is a solution but it either contains a precipitate or there is not enough of it remaining \n                      If the solution contains a precipitate, filter it using the `filter_solution` tool. If the remaining amount of it is less that the requested amount, try doing the test will a smaller `sol_vol` if possible, or make more of that solution by repeating the steps that lead to it.",
           "LIMITATIONS": "Known Limitations:\n    - The solution may not contain any precipitates.\n    - All solutions are at room temperature; there are no ways to heat up or cool down the solutions/reagents.\n    - The minimum allowed volume for the solution is 4 mL.\n    - The reported colors are qualitative and approximate.\n    - The perceived color of precipitates will depend on the composition of the precipitated solids. If more than one compound co-precipitate at the same time, the color may be different from the color of pure precipitates.\n    - The perceived color of solutions will depend on the concentration of species in that solution. Both the hue and the lightness of the perceived color can change as the concentration of species in the solution change.\n    - Any observations mentioning that the added precipitate \"partially\" or \"mostly\" dissolves are qualitative and approximate statements.\n    - In some cases it is possible that the chemical identity of the added precipitate change without any noticeable effects on its color or the color of the solution."
         },
@@ -25679,9 +27331,15 @@ const CORRAL_DATA = {
           "WORKFLOW_INTEGRATION": "Typical workflow integration:\n    1.  None. \n    2.  Use this tool to retrieve the full Inventory of solutions and filtered precipitates, including their remaining volumes in mL. \n    3.  Use the labels returned by this tool to call other tools. You can also use the returned Inventory as a summary of the experiments you have performed so far and decide what experiment you want to perform next.",
           "CONTEXTUAL": "How this tool works:\n    - It returns the Inventory as a string, with each item printed on a separate line as a dictionary.\n    - Each line contains the details about a separate solution or precipitate in the Inventory.\n    - Solutions with a remaining volume of 0 mL are kept in the Inventory for record-keeping purposes.\n    - When a solution is filtered using the `filter_solution` tool, it is removed from the Inventory and is replaced by the filtrate and the collected precipitate.\n    - When a precipitate is added to a solution using the `add_precipitate_to_solution` tool, it is removed from the Inventory.\n    - Reagent solutions are not part of the Inventory, use the `get_available_reagents` tool to check the reagents.",
           "SYNTACTICAL": "Usage examples:\n    [\n        `check_inventory()`,\n    ]",
-          "RETURNS_BRIEF": "a string containing the solutions and precipitates in the Inventory",
-          "RETURNS_DETAILED": "a string where each line represents a different item of the Inventory as a dictionary.",
-          "RETURNS_EXAMPLES": "\"{'label': 'sample', 'type': 'clear solution', 'description': 'unknown', 'remaining_volume': '11 mL'}\n{'label': 'test_1', 'type': 'clear solution', 'description': '9 mL sample + 1 mL HCl(1M)', 'remaining_volume': '0 mL'}\n{'label': 'test_2_filtrate', 'type': 'clear solution', 'description': '5 mL test_1 + 1 mL NH4I --> filtered', 'remaining_volume': '6 mL'}\n{'label': 'test_2_precipitate', 'type': 'precipitate', 'description': '5 mL test_1 + 1 mL NH4I --> precipitate collected'}\"",
+          "RETURNS_BRIEF": [
+            "a string containing the solutions and precipitates in the Inventory"
+          ],
+          "RETURNS_DETAILED": [
+            "a string where each line represents a different item of the Inventory as a dictionary."
+          ],
+          "RETURNS_EXAMPLES": [
+            "\"{'label': 'sample', 'type': 'clear solution', 'description': 'unknown', 'remaining_volume': '11 mL'}\n{'label': 'test_1', 'type': 'clear solution', 'description': '9 mL sample + 1 mL HCl(1M)', 'remaining_volume': '0 mL'}\n{'label': 'test_2_filtrate', 'type': 'clear solution', 'description': '5 mL test_1 + 1 mL NH4I --> filtered', 'remaining_volume': '6 mL'}\n{'label': 'test_2_precipitate', 'type': 'precipitate', 'description': '5 mL test_1 + 1 mL NH4I --> precipitate collected'}\""
+          ],
           "RAISES": "Exceptions:\n        None:\n             This tool does not raise exceptions under normal usage. \n             N/A \n             N/A",
           "LIMITATIONS": "Known Limitations:\n        - Reagents are not shown by tool. Use the `get_available_reagents` tool to check the available reagents.\n        - This tool does not report the color if items, use the `checkout_color` tool to observe the color of a specific item.\n        - The observations made during an experiment involving an item are not stored in the Inventory."
         },

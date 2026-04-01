@@ -1046,7 +1046,9 @@
           const secs = this.verbositySections[this.verbosityLevel] || [];
           const escapeHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
           const formatContent = s => {
-            const escaped = escapeHtml(s);
+            // Normalize whitespace: collapse runs of spaces/tabs/newlines into single spaces
+            const normalized = s.replace(/\s+/g, ' ').trim();
+            const escaped = escapeHtml(normalized);
             // Inline code: `...`
             return escaped.replace(/`([^`]+)`/g, '<code class="text-xs font-mono bg-slate-100 dark:bg-slate-700 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded">$1</code>');
           };
@@ -1068,9 +1070,32 @@
             // Render combined Arguments block on first ARGS_* key encountered
             if (argKeys.includes(sec) && !argsRendered) {
               argsRendered = true;
-              const argParts = argKeys.filter(k => secs.includes(k) && tool.sections[k]).map(k => formatContent(tool.sections[k]));
-              if (argParts.length) {
-                parts.push(`<div class="mt-4 pt-3 border-t border-slate-100"><span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Arguments</span><div class="mt-1.5">${argParts.join('\n')}</div></div>`);
+              // ARGS_* values are arrays (one entry per argument), paired with tool.args by index
+              const activeArgKeys = argKeys.filter(k => secs.includes(k) && tool.sections[k]);
+              const argCount = Math.max(...activeArgKeys.map(k => {
+                const v = tool.sections[k];
+                return Array.isArray(v) ? v.length : (v ? 1 : 0);
+              }), 0);
+              if (argCount > 0) {
+                let argHtml = '';
+                for (let i = 0; i < argCount; i++) {
+                  const argName = tool.args && tool.args[i] ? tool.args[i].name : null;
+                  const descParts = activeArgKeys.map(k => {
+                    const v = tool.sections[k];
+                    const entry = Array.isArray(v) ? v[i] : (i === 0 ? v : null);
+                    return entry ? formatContent(entry) : null;
+                  }).filter(Boolean);
+                  if (descParts.length) {
+                    const label = argName
+                      ? `<span class="font-mono text-xs text-brand-700 dark:text-brand-300 font-semibold">${escapeHtml(argName)}</span>`
+                      : '';
+                    const body = descParts.map((p, j) => j === 0 ? p : `<span class="text-slate-400 dark:text-slate-500">${p}</span>`).join('<br>');
+                    argHtml += `<div class="${i > 0 ? 'mt-2.5' : ''}"><div>${label}</div><div class="mt-0.5 pl-3 text-slate-600 dark:text-slate-400">${body}</div></div>`;
+                  }
+                }
+                if (argHtml) {
+                  parts.push(`<div class="mt-4 pt-3 border-t border-slate-100"><span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Arguments</span><div class="mt-1.5">${argHtml}</div></div>`);
+                }
               }
               continue;
             }
@@ -1079,9 +1104,28 @@
             // Render combined Returns block on first RETURNS_* key encountered
             if (retKeys.includes(sec) && !returnsRendered) {
               returnsRendered = true;
-              const retParts = retKeys.filter(k => secs.includes(k) && tool.sections[k]).map(k => formatContent(tool.sections[k]));
-              if (retParts.length) {
-                parts.push(`<div class="mt-4 pt-3 border-t border-slate-100"><span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Returns</span><div class="mt-1.5">${retParts.join('\n')}</div></div>`);
+              const activeRetKeys = retKeys.filter(k => secs.includes(k) && tool.sections[k]);
+              // Returns may have multiple entries (one per return value); render like args
+              const retCount = Math.max(...activeRetKeys.map(k => {
+                const v = tool.sections[k];
+                return Array.isArray(v) ? v.length : (v ? 1 : 0);
+              }), 0);
+              if (retCount > 0) {
+                let retHtml = '';
+                for (let i = 0; i < retCount; i++) {
+                  const descParts = activeRetKeys.map(k => {
+                    const v = tool.sections[k];
+                    const entry = Array.isArray(v) ? v[i] : (i === 0 ? v : null);
+                    return entry ? formatContent(entry) : null;
+                  }).filter(Boolean);
+                  if (descParts.length) {
+                    const body = descParts.map((p, j) => j === 0 ? p : `<span class="text-slate-400 dark:text-slate-500">${p}</span>`).join('<br>');
+                    retHtml += `<div class="${i > 0 ? 'mt-2.5' : ''}">${body}</div>`;
+                  }
+                }
+                if (retHtml) {
+                  parts.push(`<div class="mt-4 pt-3 border-t border-slate-100"><span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Returns</span><div class="mt-1.5 pl-3 text-slate-600 dark:text-slate-400">${retHtml}</div></div>`);
+                }
               }
               continue;
             }
