@@ -44,22 +44,32 @@ PROJECT_ROOT="$(cd "$INTERVENTION_ROOT/../.." && pwd)"
 TASKS_DIR="$PROJECT_ROOT/tasks"
 SERVER_DIR="$INTERVENTION_ROOT/servers"
 
-# ─── Server config ────────────────────────────────────────────────────────────
-# Each env has two ports (react / toolcalling) to allow full parallelism.
-# Format: "venv_dir|module|extra_args"
-declare -A ENV_SERVER_CFG
-ENV_SERVER_CFG[spectra]="$TASKS_DIR/spectra_elucidation|spectra_elucidation.env|--level 2"
-ENV_SERVER_CFG[resistor]="$TASKS_DIR/resistor_network|resistor_network.env|--mode single"
-ENV_SERVER_CFG[wetlab]="$TASKS_DIR/wetlab|wetlab.env|--level 2"
-
-# Ports: env -> "react_port toolcalling_port"
-declare -A ENV_PORTS
-ENV_PORTS[spectra]="8002 8012"
-ENV_PORTS[resistor]="8001 8011"
-ENV_PORTS[wetlab]="8003 8013"
-
 ALL_ENVS="spectra resistor wetlab"
 ALL_AGENTS="react toolcalling"
+
+# ─── Server config lookup (bash 3 compatible, no associative arrays) ─────────
+
+# Returns: venv_dir|module|extra_args
+get_server_cfg() {
+    case "$1" in
+        spectra)  echo "$TASKS_DIR/spectra_elucidation|spectra_elucidation.env|--level 2" ;;
+        resistor) echo "$TASKS_DIR/resistor_network|resistor_network.env|--mode single" ;;
+        wetlab)   echo "$TASKS_DIR/wetlab|wetlab.env|--level 2" ;;
+    esac
+}
+
+# Returns: port number for env + agent
+get_port() {
+    local env_name="$1" agent="$2"
+    case "${env_name}_${agent}" in
+        spectra_react)       echo 8002 ;;
+        spectra_toolcalling) echo 8012 ;;
+        resistor_react)       echo 8001 ;;
+        resistor_toolcalling) echo 8011 ;;
+        wetlab_react)         echo 8003 ;;
+        wetlab_toolcalling)   echo 8013 ;;
+    esac
+}
 
 # Defaults
 ENV_FILTER=""
@@ -101,22 +111,13 @@ if [ -z "$MODE" ]; then
     exit 1
 fi
 
-# ─── Helper: get port for env/agent ──────────────────────────────────────────
-get_port() {
-    local env_name="$1" agent="$2"
-    local ports=(${ENV_PORTS[$env_name]})
-    if [ "$agent" = "react" ]; then
-        echo "${ports[0]}"
-    else
-        echo "${ports[1]}"
-    fi
-}
-
 # ─── Server management ───────────────────────────────────────────────────────
 
 start_server() {
     local env_name="$1" agent="$2"
-    local config="${ENV_SERVER_CFG[$env_name]}"
+    local config
+    config=$(get_server_cfg "$env_name")
+    local venv_dir module extra_args
     IFS='|' read -r venv_dir module extra_args <<< "$config"
     local port
     port=$(get_port "$env_name" "$agent")
