@@ -293,6 +293,8 @@ for key, entry in sorted(sel.items()):
 
         echo "  $RUN_NAME -> $RUN_DIR"
 
+        LAUNCHED=$((LAUNCHED + 1))
+
         if [ "$DRY_RUN" = true ]; then
             echo "    [DRY RUN] uv run python $RUNNER_SCRIPT --env $ENV --agent $AGENT --intervention none --task-selection $TASK_SELECTION"
             continue
@@ -309,7 +311,6 @@ for key, entry in sorted(sel.items()):
                 > run.log 2>&1 &
             echo $! > run.pid
         )
-        LAUNCHED=$((LAUNCHED + 1))
 
         if [ $MAX_PARALLEL -gt 0 ] && [ $LAUNCHED -ge $MAX_PARALLEL ]; then
             echo "    Waiting for a slot (max $MAX_PARALLEL)..."
@@ -357,6 +358,7 @@ for c in conditions:
         RUN_NAME="${ENV}_${AGENT}_${DIR_NAME}"
 
         echo "  $RUN_NAME -> $RUN_DIR"
+        LAUNCHED=$((LAUNCHED + 1))
 
         if [ "$DRY_RUN" = true ]; then
             echo "    [DRY RUN] uv run python $RUNNER_SCRIPT --env $ENV --agent $AGENT --intervention $INTERVENTION --num-steps $NUM_STEPS --trace-registry $TRACE_REGISTRY"
@@ -375,7 +377,6 @@ for c in conditions:
                 > run.log 2>&1 &
             echo $! > run.pid
         )
-        LAUNCHED=$((LAUNCHED + 1))
         RUNNING=$((RUNNING + 1))
 
         if [ $MAX_PARALLEL -gt 0 ] && [ $RUNNING -ge $MAX_PARALLEL ]; then
