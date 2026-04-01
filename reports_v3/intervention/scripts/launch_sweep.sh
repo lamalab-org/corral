@@ -76,6 +76,7 @@ ENV_FILTER=""
 AGENT_FILTER=""
 MAX_PARALLEL=0
 DRY_RUN=false
+TRIALS=""
 MODE=""
 
 while [[ $# -gt 0 ]]; do
@@ -88,6 +89,7 @@ while [[ $# -gt 0 ]]; do
         --env) ENV_FILTER="$2"; shift 2 ;;
         --agent) AGENT_FILTER="$2"; shift 2 ;;
         --max-parallel) MAX_PARALLEL="$2"; shift 2 ;;
+        --trials) TRIALS="$2"; shift 2 ;;
         --dry-run) DRY_RUN=true; shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
@@ -107,6 +109,7 @@ if [ -z "$MODE" ]; then
     echo "  --env NAME       Filter by environment (spectra, resistor, wetlab)"
     echo "  --agent NAME     Filter by agent type (react, toolcalling)"
     echo "  --max-parallel N Limit concurrent runs"
+    echo "  --trials N       Override trials per condition (default: from config)"
     echo "  --dry-run        Print commands without running"
     exit 1
 fi
@@ -295,8 +298,11 @@ for key, entry in sorted(sel.items()):
 
         LAUNCHED=$((LAUNCHED + 1))
 
+        TRIALS_ARG=""
+        if [ -n "$TRIALS" ]; then TRIALS_ARG="--trials $TRIALS"; fi
+
         if [ "$DRY_RUN" = true ]; then
-            echo "    [DRY RUN] uv run python $RUNNER_SCRIPT --env $ENV --agent $AGENT --intervention none --task-selection $TASK_SELECTION"
+            echo "    [DRY RUN] uv run python $RUNNER_SCRIPT --env $ENV --agent $AGENT --intervention none --task-selection $TASK_SELECTION $TRIALS_ARG"
             continue
         fi
 
@@ -308,6 +314,7 @@ for key, entry in sorted(sel.items()):
                 --agent "$AGENT" \
                 --intervention none \
                 --task-selection "$TASK_SELECTION" \
+                $TRIALS_ARG \
                 > run.log 2>&1 &
             echo $! > run.pid
         )
@@ -360,8 +367,11 @@ for c in conditions:
         echo "  $RUN_NAME -> $RUN_DIR"
         LAUNCHED=$((LAUNCHED + 1))
 
+        TRIALS_ARG=""
+        if [ -n "$TRIALS" ]; then TRIALS_ARG="--trials $TRIALS"; fi
+
         if [ "$DRY_RUN" = true ]; then
-            echo "    [DRY RUN] uv run python $RUNNER_SCRIPT --env $ENV --agent $AGENT --intervention $INTERVENTION --num-steps $NUM_STEPS --trace-registry $TRACE_REGISTRY"
+            echo "    [DRY RUN] uv run python $RUNNER_SCRIPT --env $ENV --agent $AGENT --intervention $INTERVENTION --num-steps $NUM_STEPS --trace-registry $TRACE_REGISTRY $TRIALS_ARG"
             continue
         fi
 
@@ -374,6 +384,7 @@ for c in conditions:
                 --intervention "$INTERVENTION" \
                 --num-steps "$NUM_STEPS" \
                 --trace-registry "$TRACE_REGISTRY" \
+                $TRIALS_ARG \
                 > run.log 2>&1 &
             echo $! > run.pid
         )

@@ -218,10 +218,12 @@ def main():
 
     # Run
     logger.info(f"Starting: {run_name}")
+    # Cap k_values at trials count
+    k_values = [k for k in K_VALUES if k <= args.trials]
     result = runner.bench(
         task_ids=task_ids,
         trials_per_task=args.trials,
-        k_values=K_VALUES,
+        k_values=k_values,
         verbose=True,
         tool_verbosity=TOOL_VERBOSITY,
         hooks=hooks,
