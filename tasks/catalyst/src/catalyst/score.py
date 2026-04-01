@@ -8,45 +8,12 @@ from pathlib import Path
 from loguru import logger
 from pymatgen.core import Structure
 
-from corral.utils.tool_helpers import smart_resolve_path
-
 # Generate a random 4-letter unique identifier
 uid = "".join(secrets.choice(string.ascii_lowercase) for _ in range(6))
 
 # Set the path. If CORRAL_WORK_DIR is missing, it uses the relative path with the UID.
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", f"../CORRAL_WORK_DIR/catalyst_{uid}")
 os.environ["CORRAL_WORK_DIR"] = BASE_WORK_DIR
-
-
-def resolve_path(path_or_str: str) -> str:
-    """
-    Resolves a path that might be relative to the base work directory.
-    Also cleans up common input format issues.
-    """
-    # Handle various input issues
-    if isinstance(path_or_str, str):
-        # Remove "answer:" prefix if present
-        if path_or_str.startswith("answer:"):
-            path_or_str = path_or_str.replace("answer:", "", 1).strip()
-
-        # Replace escaped quotes that might come from JSON strings
-        path_or_str = path_or_str.replace('\\"', '"').replace("\\'", "'")
-
-    try:
-        # If it's an absolute path or already exists, return as is
-        if Path(path_or_str).is_absolute() or Path(path_or_str).exists():
-            return path_or_str
-
-        # Try to resolve against base directory
-        full_path = Path(BASE_WORK_DIR) / path_or_str
-        if full_path.exists():
-            return str(full_path)
-
-        # If we can't resolve it, return the original
-        return path_or_str
-    except Exception:
-        # If there's any error treating it as a path, return the original
-        return path_or_str
 
 
 def check_valid_json_file(json_path: str) -> float:
@@ -107,19 +74,15 @@ def check_slabs_json(slabs_json: str) -> float:
     the CIF string for one of the slabs. Accepts either a path to a JSON file or a raw JSON string.
     """
     try:
-        logger.info(f"check_slabs_json: input={slabs_json!r}")
+        # Path already resolved by TaskGroupEnvironment.score()
+        resolved_input = slabs_json.strip()
 
-        # Try to resolve as path
-        resolved_input = smart_resolve_path(slabs_json)
-        logger.info(f"check_slabs_json: resolved={resolved_input!r}")
-
-        # Try loading from file if it's a valid path
+        # Load from file or parse as JSON string
         json_data = None
-        if Path(resolved_input).exists():
+        if not resolved_input.startswith("{") and Path(resolved_input).exists():
             with Path(resolved_input).open() as f:
                 json_data = json.load(f)
         else:
-            # Try parsing as raw JSON string (try original first, then resolved)
             try:
                 json_data = json.loads(slabs_json)
             except json.JSONDecodeError:
@@ -327,14 +290,11 @@ def check_adsorption_sites(sites_json_or_path: str) -> float:
             logger.warning("Empty input provided to check_adsorption_sites")
             return 0.0
 
-        logger.info(f"check_adsorption_sites: input={sites_json_or_path!r}")
-
-        # Try to resolve as path
-        resolved_input = smart_resolve_path(sites_json_or_path.strip())
-        logger.info(f"check_adsorption_sites: resolved={resolved_input!r}")
+        # Path already resolved by TaskGroupEnvironment.score()
+        resolved_input = sites_json_or_path.strip()
 
         # Try to load from file first
-        if Path(resolved_input).is_file():
+        if not resolved_input.startswith("{") and Path(resolved_input).is_file():
             with Path(resolved_input).open() as f:
                 json_content = f.read()
         else:

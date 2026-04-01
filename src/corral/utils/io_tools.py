@@ -249,7 +249,8 @@ class WriteFileTool(Tool):
 
     def execute(self, **kwargs) -> str:
         self.fs_manager.write_file(kwargs["path"], kwargs["content"])
-        return f"Successfully wrote to {kwargs['path']}"
+        resolved = self.fs_manager._resolve_path(kwargs["path"])
+        return f"Successfully wrote to {resolved}"
 
 
 class FileInfoTool(Tool):
@@ -345,7 +346,8 @@ class CopyFileTool(Tool):
     def execute(self, **kwargs) -> str:
         try:
             self.fs_manager.copy_file(kwargs["source"], kwargs["destination"])
-            return f"Copied {kwargs['source']} to {kwargs['destination']}"
+            resolved_dest = self.fs_manager._resolve_path(kwargs["destination"])
+            return f"Copied {kwargs['source']} to {resolved_dest}"
         except Exception as e:
             return f"Error: {e}"
 

@@ -22,18 +22,14 @@ if "MP_API_KEY" not in os.environ:
 
 
 def resolve_working_dir_path(path_or_str: str, work_dir: str | None = None) -> str:
-    """Resolve path relative to the current working directory"""
-    if not Path(path_or_str).is_absolute():
-        if work_dir:
-            return str(Path(work_dir) / path_or_str)
-        else:
-            work_dir = os.getenv("CORRAL_WORK_DIR")
-            if work_dir:
-                return str(Path(work_dir) / path_or_str)
-
-            # Fallback to current directory if no work_dir provided
-            return str(Path.cwd() / path_or_str)
-    return path_or_str
+    """Resolve path relative to work_dir. Absolute paths pass through."""
+    if Path(path_or_str).is_absolute():
+        return path_or_str
+    if not work_dir:
+        work_dir = os.getenv("CORRAL_WORK_DIR")
+    if not work_dir:
+        return str(Path.cwd() / path_or_str)
+    return str(Path(work_dir) / path_or_str)
 
 
 @tool
@@ -935,7 +931,8 @@ def consolidate_polymorph_datasets(
 
     for composition, file_path in composition_files.items():
         try:
-            with Path(file_path).open() as f:
+            resolved_path = resolve_working_dir_path(file_path, work_dir)
+            with Path(resolved_path).open() as f:
                 polymorphs = json.load(f)
 
             # Add composition information to each polymorph
@@ -1093,7 +1090,8 @@ def select_polymorphs_with_strategy_to_file(
     [/LIMITATIONS]
     """
     if is_path:
-        with Path(polymorphs_data).open("r") as f:
+        resolved_path = resolve_working_dir_path(polymorphs_data, work_dir)
+        with Path(resolved_path).open("r") as f:
             polymorphs = json.loads(f.read())
     else:
         polymorphs = json.loads(polymorphs_data)
@@ -1227,6 +1225,7 @@ def filter_json_with_strategy(
     [/LIMITATIONS]
     """
     try:
+        input_json_path = resolve_working_dir_path(input_json_path, work_dir)
         with Path(input_json_path).open("r") as f:
             data = json.load(f)
 
@@ -1414,6 +1413,7 @@ def prepare_tabular_dataset(
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Load polymorphs data
+        polymorphs_json_path = resolve_working_dir_path(polymorphs_json_path, work_dir)
         with Path(polymorphs_json_path).open("r") as f:
             polymorphs = json.load(f)
 
@@ -1834,6 +1834,8 @@ def train_xgboost_model(
     """
     try:
         # Load data
+        train_data_path = resolve_working_dir_path(train_data_path, work_dir)
+        test_data_path = resolve_working_dir_path(test_data_path, work_dir)
         train_df = pd.read_csv(train_data_path)
         test_df = pd.read_csv(test_data_path)
 

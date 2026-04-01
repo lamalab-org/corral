@@ -16,37 +16,6 @@ BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", f"../CORRAL_WORK_DIR/ml_{uid}"
 os.environ["CORRAL_WORK_DIR"] = BASE_WORK_DIR
 
 
-def resolve_path(path_or_str: str) -> str:
-    """
-    Resolves a path that might be relative to the base work directory.
-    Also cleans up common input format issues.
-    """
-    # Handle various input issues
-    if isinstance(path_or_str, str):
-        # Remove "answer:" prefix if present
-        if path_or_str.startswith("answer:"):
-            path_or_str = path_or_str.replace("answer:", "", 1).strip()
-
-        # Replace escaped quotes that might come from JSON strings
-        path_or_str = path_or_str.replace('\\"', '"').replace("\\'", "'")
-
-    try:
-        # If it's an absolute path or already exists, return as is
-        if Path(path_or_str).is_absolute() or Path(path_or_str).exists():
-            return path_or_str
-
-        # Try to resolve against base directory
-        full_path = Path(BASE_WORK_DIR) / path_or_str
-        if full_path.exists():
-            return str(full_path)
-
-        # If we can't resolve it, return the original
-        return path_or_str
-    except Exception:
-        # If there's any error treating it as a path, return the original
-        return path_or_str
-
-
 def check_mp_structure(path_or_cif: str) -> float:
     """
     Check if the path points to a valid CIF file containing a structure from Materials Project.

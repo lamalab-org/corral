@@ -9,8 +9,6 @@ from typing import Any
 import numpy as np
 from loguru import logger
 
-from corral.utils.tool_helpers import smart_resolve_path
-
 # Generate a random 4-letter unique identifier
 uid = "".join(secrets.choice(string.ascii_lowercase) for _ in range(6))
 
@@ -336,7 +334,7 @@ def check_resistance_measurements(
             logger.info(f"check_resistance_measurements: input={topology_input!r}")
 
             # Load topology
-            resolved_input = smart_resolve_path(topology_input.strip())
+            resolved_input = topology_input.strip()
             topology_data = None
 
             if Path(resolved_input).exists():
@@ -518,7 +516,7 @@ def check_resistor_values_only(
             logger.info(f"check_resistor_values_only: input={values_input!r}")
 
             # Try to resolve and load values
-            resolved_input = smart_resolve_path(values_input.strip())
+            resolved_input = values_input.strip()
             values_data = None
 
             if Path(resolved_input).exists():

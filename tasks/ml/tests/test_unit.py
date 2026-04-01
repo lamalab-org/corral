@@ -14,7 +14,6 @@ from ml.score import (
     check_mp_structure,
     compare_with_ground_truth,
     ml_pipeline_score,
-    resolve_path,
 )
 
 # Import the tool objects to test
@@ -61,19 +60,6 @@ class TestUtilityFunctions:
 
         result = smart_resolve_path(str(test_file))
         assert result == str(test_file)
-
-    def test_resolve_path_with_prefix(self):
-        """Test resolve_path function with various prefixes."""
-        test_cases = [
-            "answer: /path/to/file.json",
-            "file.json",
-            "/absolute/path/file.json",
-        ]
-
-        for test_case in test_cases:
-            result = resolve_path(test_case)
-            assert isinstance(result, str)
-            assert "answer:" not in result
 
 
 class TestJSONProcessing:

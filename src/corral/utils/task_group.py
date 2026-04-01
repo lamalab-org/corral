@@ -14,7 +14,6 @@ from corral.utils.io_tools import (
     ReadFileTool,
     WriteFileTool,
 )
-from corral.utils.tool_helpers import smart_resolve_path
 
 
 class TaskGroupEnvironment(Environment):
@@ -75,12 +74,14 @@ class TaskGroupEnvironment(Environment):
             self.add_tool(tool)
 
     def _setup_file_tools(self):
-        """Setup file tools with global workspace scope for cross-trial access."""
-        if self.base_work_dir:
-            logger.info(f"Setting up FSManager with base_path: {self.base_work_dir}")
-            # FSManager scoped to base_work_dir (global) for cross-trial file access
+        """Setup file tools scoped to the current trial workspace."""
+        current_work_dir = self.get_current_work_dir()
+        if current_work_dir:
+            logger.info(f"Setting up FSManager with base_path: {current_work_dir}")
+            # FSManager scoped to current_work_dir (per-trial) so relative paths
+            # from hidden_args tools resolve correctly within the trial workspace
             fsmanager_kwargs = {
-                "base_path": self.base_work_dir,
+                "base_path": current_work_dir,
                 "registry": self.workspace_registry,
                 "workspace_id": self.current_workspace_id,
             }
@@ -103,11 +104,9 @@ class TaskGroupEnvironment(Environment):
             # Add static extra tools
             file_tools.update(self._extra_file_tools)
             self.tools.update(file_tools)
-            logger.info(
-                f"File tools setup complete for workspace: {self.base_work_dir}"
-            )
+            logger.info(f"File tools setup complete for workspace: {current_work_dir}")
         else:
-            logger.warning("No base_work_dir set, skipping file tools setup")
+            logger.warning("No work_dir set, skipping file tools setup")
 
     def reset_state(self) -> str:
         """Reset state and update file tools for new workspace"""
@@ -168,43 +167,30 @@ Required submission format:
         return prompt
 
     def score(self) -> float:
-        """Score the submitted answer"""
-        logger.info(f"🔥 SCORE METHOD CALLED FOR {self.task_id}")
+        """Score the submitted answer.
+
+        Resolves relative paths against the current workspace so agents
+        don't need to submit absolute paths.  No searching or heuristics.
+        """
         if not self.state.submitted_answer:
             logger.warning(f"No submission found for task {self.task_id}")
             return 0.0
 
         try:
-            # Get and log the raw submission
-            answer_value = self.state.submitted_answer.strip()
-            logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
+            answer = self.state.submitted_answer.strip()
 
-            # Detect if it's JSON and skip path resolution
-            if answer_value.startswith("{") and answer_value.endswith("}"):
-                logger.info("Detected JSON submission, skipping path resolution")
-                resolved_answer = answer_value  # Use as-is
-            else:
-                logger.info("Non-JSON submission, using path resolution")
-                resolved_answer = smart_resolve_path(
-                    answer_value, registry=self.workspace_registry
-                )
+            # Resolve relative file paths against the workspace.
+            # Absolute paths and non-path data (JSON strings) pass through.
+            if not answer.startswith(("{", "[")) and not Path(answer).is_absolute():
+                work_dir = self.get_current_work_dir()
+                if work_dir:
+                    answer = str(Path(work_dir) / answer)
 
-            logger.info(f"Resolved answer for {self.task_id}: {resolved_answer!r}")
-            # Call the scoring function with the raw answer
-            score = self.current_task.scoring_fn(resolved_answer)
-
-            # Store result in task group
-            self.task_group.store_result(
-                self.task_id, {"answer": resolved_answer}, score
-            )
+            score = self.current_task.scoring_fn(answer)
+            self.task_group.store_result(self.task_id, {"answer": answer}, score)
             logger.info(f"Task {self.task_id} scored: {score}")
-
             return score
 
         except Exception as e:
-            logger.error(
-                f"Error scoring submission for task {self.task_id}: {e!s}",
-                exc_info=True,
-            )
-            logger.error(f"Submission was: {self.state.submitted_answer!r}")
+            logger.error(f"Error scoring task {self.task_id}: {e!s}", exc_info=True)
             return 0.0

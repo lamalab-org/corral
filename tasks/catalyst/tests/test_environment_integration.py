@@ -273,7 +273,7 @@ loop_
     def test_scoring_with_valid_submission(
         self, task_group, mock_tools, temp_workspace
     ):
-        """Test scoring with a valid file submission."""
+        """Test scoring with a valid file submission (relative path resolved against workspace)."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
             env = TaskGroupEnvironment(
                 task_id="task1",
@@ -282,20 +282,24 @@ loop_
                 base_work_dir=str(temp_workspace),
             )
 
-            # Simulate submitting a valid CIF file path
+            # Copy test file to trial workspace (where FSManager would put it)
+            workspace = Path(env.get_current_work_dir())
+            src_file = temp_workspace / "bulk_structure.cif"
+            dst_file = workspace / "bulk_structure.cif"
+            dst_file.write_text(src_file.read_text())
+
+            # Submit relative path — score() resolves against workspace
             env.state.submitted_answer = "bulk_structure.cif"
             score = env.score()
 
             assert score == 1.0
             assert "task1" in task_group.results
-            assert task_group.results["task1"]["answer"] == str(
-                temp_workspace / "bulk_structure.cif"
-            )
+            assert task_group.results["task1"]["answer"] == str(dst_file)
 
-    def test_scoring_with_markdown_formatted_submission(
+    def test_scoring_with_absolute_path_from_write_file(
         self, task_group, mock_tools, temp_workspace
     ):
-        """Test scoring with markdown-formatted submission."""
+        """Test scoring with absolute path (as returned by WriteFileTool)."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
             env = TaskGroupEnvironment(
                 task_id="task1",
@@ -304,19 +308,23 @@ loop_
                 base_work_dir=str(temp_workspace),
             )
 
-            # Submit with markdown formatting
-            env.state.submitted_answer = "The structure file is `bulk_structure.cif`."
+            # Copy test file to trial workspace
+            workspace = Path(env.get_current_work_dir())
+            src_file = temp_workspace / "bulk_structure.cif"
+            dst_file = workspace / "bulk_structure.cif"
+            dst_file.write_text(src_file.read_text())
+
+            # Submit absolute path (as WriteFileTool now returns)
+            env.state.submitted_answer = str(dst_file)
             score = env.score()
 
             assert score == 1.0
-            assert task_group.results["task1"]["answer"] == str(
-                temp_workspace / "bulk_structure.cif"
-            )
+            assert task_group.results["task1"]["answer"] == str(dst_file)
 
-    def test_scoring_with_quoted_submission(
+    def test_scoring_with_relative_filename(
         self, task_group, mock_tools, temp_workspace
     ):
-        """Test scoring with quoted submission."""
+        """Test scoring with relative filename resolved against workspace."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
             env = TaskGroupEnvironment(
                 task_id="task3",
@@ -325,14 +333,18 @@ loop_
                 base_work_dir=str(temp_workspace),
             )
 
-            # Submit with quotes
-            env.state.submitted_answer = 'The JSON file is "valid_data.json".'
+            # Copy test file to trial workspace
+            workspace = Path(env.get_current_work_dir())
+            src_file = temp_workspace / "valid_data.json"
+            dst_file = workspace / "valid_data.json"
+            dst_file.write_text(src_file.read_text())
+
+            # Submit relative filename — resolved against workspace
+            env.state.submitted_answer = "valid_data.json"
             score = env.score()
 
             assert score == 1.0
-            assert task_group.results["task3"]["answer"] == str(
-                temp_workspace / "valid_data.json"
-            )
+            assert task_group.results["task3"]["answer"] == str(dst_file)
 
     def test_scoring_with_absolute_path_submission(
         self, task_group, mock_tools, temp_workspace
@@ -346,7 +358,7 @@ loop_
                 base_work_dir=str(temp_workspace),
             )
 
-            # Submit absolute path
+            # Submit absolute path (file exists in temp_workspace)
             abs_path = str(temp_workspace / "bulk_structure.cif")
             env.state.submitted_answer = abs_path
             score = env.score()
@@ -381,6 +393,10 @@ loop_
                 base_work_dir=str(temp_workspace),
             )
 
+            # Copy invalid file to trial workspace
+            workspace = Path(env.get_current_work_dir())
+            (workspace / "invalid.txt").write_text("This is not JSON")
+
             env.state.submitted_answer = "invalid.txt"  # Not JSON
             score = env.score()
 
@@ -389,7 +405,7 @@ loop_
     def test_scoring_with_subdirectory_file(
         self, task_group, mock_tools, temp_workspace
     ):
-        """Test scoring when file is in subdirectory."""
+        """Test scoring with relative subdirectory path resolved against workspace."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
             env = TaskGroupEnvironment(
                 task_id="task1",
@@ -398,13 +414,20 @@ loop_
                 base_work_dir=str(temp_workspace),
             )
 
-            # Submit filename that exists in subdirectory
-            env.state.submitted_answer = "output.cif"
+            # Copy test file to trial workspace subdirectory
+            workspace = Path(env.get_current_work_dir())
+            results_dir = workspace / "results"
+            results_dir.mkdir(parents=True, exist_ok=True)
+            src_file = temp_workspace / "results" / "output.cif"
+            dst_file = results_dir / "output.cif"
+            dst_file.write_text(src_file.read_text())
+
+            # Submit relative path — resolved against workspace
+            env.state.submitted_answer = "results/output.cif"
             score = env.score()
 
             assert score == 1.0
-            # Should resolve to the file in the subdirectory
-            assert "results/output.cif" in task_group.results["task1"]["answer"]
+            assert task_group.results["task1"]["answer"] == str(dst_file)
 
     def test_scoring_with_no_submission(self, task_group, mock_tools, temp_workspace):
         """Test scoring when no submission is made."""
@@ -605,17 +628,16 @@ loop_
 """
         slabs_content = json.dumps({"slab_1": cif_content, "slab_2": cif_content})
 
-        (temp_workspace / "test_structure.cif").write_text(cif_content)
-        (temp_workspace / "test_slabs.json").write_text(slabs_content)
-        (temp_workspace / "test_data.json").write_text('{"valid": "json"}')
-
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
             environments = create_environments(
                 sample_task_json, work_dir=str(temp_workspace)
             )
 
-            # Complete task 1
+            # Write test files to each environment's trial workspace
             env1 = environments["retrieve_structure"]
+            ws1 = Path(env1.get_current_work_dir())
+            (ws1 / "test_structure.cif").write_text(cif_content)
+
             env1.state.submitted_answer = "test_structure.cif"
             score1 = env1.score()
             assert score1 == 1.0
@@ -625,12 +647,18 @@ loop_
             prompt2 = env2.get_task_prompt()
             assert "Input from retrieve_structure:" in prompt2
 
+            ws2 = Path(env2.get_current_work_dir())
+            (ws2 / "test_slabs.json").write_text(slabs_content)
+
             env2.state.submitted_answer = "test_slabs.json"
             score2 = env2.score()
             assert score2 == 1.0
 
             # Complete independent task 3
             env3 = environments["validate_json"]
+            ws3 = Path(env3.get_current_work_dir())
+            (ws3 / "test_data.json").write_text('{"valid": "json"}')
+
             env3.state.submitted_answer = "test_data.json"
             score3 = env3.score()
             assert score3 == 1.0
@@ -777,7 +805,7 @@ loop_
                 yield temp_path
 
     def test_scoring_resolves_relative_paths(self, scoring_environment):
-        """Test that scoring correctly resolves relative paths."""
+        """Test that scoring resolves relative paths against workspace."""
         task = TaskDefinition(
             name="Test",
             description="Test",
@@ -795,18 +823,23 @@ loop_
             base_work_dir=str(scoring_environment),
         )
 
-        # Test relative path
+        # Copy file to trial workspace
+        workspace = Path(env.get_current_work_dir())
+        src = scoring_environment / "structure.cif"
+        dst = workspace / "structure.cif"
+        dst.write_text(src.read_text())
+
+        # Submit relative path — resolved against workspace
         env.state.submitted_answer = "structure.cif"
         score = env.score()
         assert score == 1.0
 
-        # Check that the resolved path is absolute
-        resolved_path = task_group.results["test"]["answer"]
-        assert Path(resolved_path).is_absolute()
-        assert Path(resolved_path).exists()
+        resolved = task_group.results["test"]["answer"]
+        assert Path(resolved).is_absolute()
+        assert Path(resolved).exists()
 
-    def test_scoring_resolves_paths_from_subdirectories(self, scoring_environment):
-        """Test that scoring finds files in subdirectories."""
+    def test_scoring_resolves_subdirectory_paths(self, scoring_environment):
+        """Test scoring resolves relative subdirectory paths against workspace."""
         task = TaskDefinition(
             name="Test",
             description="Test",
@@ -824,18 +857,24 @@ loop_
             base_work_dir=str(scoring_environment),
         )
 
-        # Submit filename that exists in subdirectory
-        env.state.submitted_answer = "output.cif"
+        # Copy file to trial workspace subdirectory
+        workspace = Path(env.get_current_work_dir())
+        results_dir = workspace / "results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        src = scoring_environment / "results" / "output.cif"
+        dst = results_dir / "output.cif"
+        dst.write_text(src.read_text())
+
+        # Submit relative subdirectory path
+        env.state.submitted_answer = "results/output.cif"
         score = env.score()
         assert score == 1.0
 
-        # Should resolve to the subdirectory file
-        resolved_path = task_group.results["test"]["answer"]
-        assert "results" in resolved_path
-        assert "output.cif" in resolved_path
+        resolved = task_group.results["test"]["answer"]
+        assert "results/output.cif" in resolved
 
-    def test_scoring_handles_formatted_answers(self, scoring_environment):
-        """Test scoring with various answer formats."""
+    def test_scoring_with_absolute_and_relative_paths(self, scoring_environment):
+        """Test scoring with both absolute and relative paths."""
         task = TaskDefinition(
             name="Test",
             description="Test",
@@ -853,24 +892,28 @@ loop_
             base_work_dir=str(scoring_environment),
         )
 
-        # Test various formatted answers
-        test_cases = [
-            "data.json",
-            "`data.json`",
-            '"data.json"',
-            "'data.json'",
-            "The file is data.json",
-            "Answer: data.json",
-            "Final answer: `data.json`",
-            f"The path is {scoring_environment / 'data.json'}",
-        ]
+        # Copy file to trial workspace
+        workspace = Path(env.get_current_work_dir())
+        src = scoring_environment / "data.json"
+        dst = workspace / "data.json"
+        dst.write_text(src.read_text())
 
-        for answer_format in test_cases:
-            # Reset the task group for each test
-            task_group.results.clear()
-            env.state.submitted_answer = answer_format
-            score = env.score()
-            assert score == 1.0, f"Failed for format: {answer_format}"
+        # Test: Relative path (resolved against workspace)
+        env.state.submitted_answer = "data.json"
+        score = env.score()
+        assert score == 1.0
+
+        # Test: Absolute path (passed through directly)
+        task_group.results.clear()
+        env.state.submitted_answer = str(dst)
+        score = env.score()
+        assert score == 1.0
+
+        # Test: Absolute path to original location
+        task_group.results.clear()
+        env.state.submitted_answer = str(src)
+        score = env.score()
+        assert score == 1.0
 
     def test_scoring_handles_nonexistent_files_gracefully(self, scoring_environment):
         """Test that scoring handles nonexistent files without crashing."""
@@ -907,7 +950,6 @@ loop_
 
     def test_task_dependency_path_resolution(self, scoring_environment):
         """Test path resolution in task dependencies."""
-        # Create tasks with dependencies
         task1 = TaskDefinition(
             name="Task 1",
             description="First task",
@@ -931,7 +973,7 @@ loop_
         tasks = {"task1": task1, "task2": task2}
         task_group = TaskGroup("test", tasks)
 
-        # Complete task1 with a relative path
+        # Complete task1 with absolute path (as WriteFileTool would return)
         env1 = TaskGroupEnvironment(
             task_id="task1",
             task_group=task_group,
@@ -939,7 +981,13 @@ loop_
             base_work_dir=str(scoring_environment),
         )
 
-        env1.state.submitted_answer = "structure.cif"
+        # Copy file to trial workspace and submit absolute path
+        workspace = Path(env1.get_current_work_dir())
+        src = scoring_environment / "structure.cif"
+        dst = workspace / "structure.cif"
+        dst.write_text(src.read_text())
+
+        env1.state.submitted_answer = str(dst)
         score1 = env1.score()
         assert score1 == 1.0
 
