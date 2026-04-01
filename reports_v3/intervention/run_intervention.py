@@ -188,8 +188,9 @@ def main():
             f"num_steps={args.num_steps}, execute_tools=True"
         )
 
-    # Create interface
-    interface = CorralRouter(base_url=f"http://localhost:{env_config['port']}")
+    # Create interface — each agent type gets its own server port
+    port = env_config["port"][args.agent]
+    interface = CorralRouter(base_url=f"http://localhost:{port}")
 
     # WandB
     wandb_logger = CorralWandbLogger(

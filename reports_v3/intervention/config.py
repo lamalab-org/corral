@@ -8,9 +8,12 @@ REPORTS_V2 = PROJECT_ROOT / "reports_v2" / "claude_sonnet_45"
 INTERVENTION_ROOT = Path(__file__).resolve().parent
 
 # Environment configs
+# Each env has two ports: one for react agent, one for toolcalling agent.
+# The server is stateful (per-task state), so parallel agents on the same
+# server would clash. Two ports allow full parallelism.
 ENVIRONMENTS = {
     "spectra": {
-        "port": 8002,
+        "port": {"react": 8002, "toolcalling": 8012},
         "level": 2,
         "task_dir": "tasks",
         "report_v2_path": REPORTS_V2 / "spectra" / "level_2" / "tasks",
@@ -18,7 +21,7 @@ ENVIRONMENTS = {
         "toolcalling_report": "claude_45_sonnet-tool_calling-spectra_lvl2_env-workflow_verbosity.json",
     },
     "wetlab": {
-        "port": 8003,
+        "port": {"react": 8003, "toolcalling": 8013},
         "level": 2,
         "task_dir": "task",
         "report_v2_path": REPORTS_V2 / "wetlab" / "level_2" / "task",
@@ -26,7 +29,7 @@ ENVIRONMENTS = {
         "toolcalling_report": "claude_sonnet_45-Tool_Calling-WetLab_Level_2-workflow.json",
     },
     "resistor": {
-        "port": 8001,
+        "port": {"react": 8001, "toolcalling": 8011},
         "level": 1,
         "task_dir": "tasks",
         "report_v2_path": REPORTS_V2 / "resistor" / "level_1" / "tasks",
