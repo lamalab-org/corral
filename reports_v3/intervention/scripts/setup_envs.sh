@@ -74,25 +74,33 @@ setup_wetlab() {
         echo "  No conda/mamba/micromamba found. Installing micromamba..."
         # Install micromamba to a local prefix
         local MAMBA_ROOT="$env_dir/.micromamba"
-        mkdir -p "$MAMBA_ROOT"
+        mkdir -p "$MAMBA_ROOT/bin"
         # Detect platform
         local PLATFORM="osx-arm64"
         if [[ "$(uname -s)" == "Linux" ]]; then
             PLATFORM="linux-64"
         fi
         curl -Ls "https://micro.mamba.pm/api/micromamba/${PLATFORM}/latest" \
-            | tar -xvj -C "$MAMBA_ROOT" --strip-components=1 bin/micromamba 2>/dev/null
+            | tar -xj -C "$MAMBA_ROOT" 2>/dev/null
+        # The archive layout varies across versions; find the binary and
+        # ensure it ends up at a predictable path.
+        if [ ! -f "$MAMBA_ROOT/bin/micromamba" ]; then
+            local found
+            found=$(find "$MAMBA_ROOT" -name micromamba -type f | head -1)
+            if [ -z "$found" ]; then
+                echo "  ERROR: failed to download micromamba"
+                return 1
+            fi
+            mv "$found" "$MAMBA_ROOT/bin/micromamba"
+            chmod +x "$MAMBA_ROOT/bin/micromamba"
+        fi
         MCMAMBA="$MAMBA_ROOT/bin/micromamba"
         echo "  Installed micromamba to $MCMAMBA"
     fi
 
-    # Detect platform for reaktoro python constraint
-    # osx-arm64: only python 3.10 available
-    # linux-64: python 3.10, 3.11, 3.12 available
-    local PYTHON_VER="3.10"
-    if [[ "$(uname -s)" == "Linux" ]]; then
-        PYTHON_VER="3.12"
-    fi
+    # Python 3.12 — required because corral uses StrEnum (Python >= 3.11).
+    # reaktoro 2.13+ has py312 builds for both osx-arm64 and linux-64.
+    local PYTHON_VER="3.12"
 
     if [ ! -d ".venv" ] || ! .venv/bin/python -c "import reaktoro" 2>/dev/null; then
         echo "  Creating wetlab venv with Python $PYTHON_VER + reaktoro..."

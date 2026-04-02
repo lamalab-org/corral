@@ -45,8 +45,8 @@ def get_mixed_tasks(report: dict) -> dict[str, dict]:
 def build_task_selection() -> dict:
     """Build task selection from reports_v2.
 
-    For each (env, agent), validates that SELECTED_TASKS from config
-    have mixed results, and reports which are usable.
+    For each environment, finds tasks with mixed results in *either* agent,
+    then includes those tasks for *both* agents so task counts are equal.
     """
     selection = {}
 
@@ -54,37 +54,58 @@ def build_task_selection() -> dict:
         target_tasks = SELECTED_TASKS.get(env_name, [])
         logger.info(f"\n=== {env_name.upper()} ===")
 
+        # First pass: find which tasks have mixed results in at least one agent
+        mixed_by_agent = {}
+        reports_by_agent = {}
         for agent_type in ["react", "toolcalling"]:
             report = load_report(env_config, agent_type)
-            mixed = get_mixed_tasks(report)
+            reports_by_agent[agent_type] = report
+            mixed_by_agent[agent_type] = get_mixed_tasks(report)
+
+        # A task qualifies if it has mixed results in either agent
+        qualified_tasks = []
+        for task_id in target_tasks:
+            mixed_in_any = any(
+                task_id in mixed_by_agent[a] for a in ["react", "toolcalling"]
+            )
+            if mixed_in_any:
+                qualified_tasks.append(task_id)
+
+        logger.info(f"  Qualified tasks (mixed in >= 1 agent): {qualified_tasks}")
+
+        # Second pass: assign all qualified tasks to both agents
+        for agent_type in ["react", "toolcalling"]:
             key = f"{env_name}/{agent_type}"
+            mixed = mixed_by_agent[agent_type]
+            report = reports_by_agent[agent_type]
 
             logger.info(f"\n  Agent: {agent_type}")
 
-            valid_tasks = []
-            for task_id in target_tasks:
+            for task_id in qualified_tasks:
+                all_tasks = report.get("task_results", {})
                 if task_id in mixed:
                     info = mixed[task_id]
-                    valid_tasks.append(task_id)
                     logger.info(
                         f"    {task_id}: {info['successes']}/{info['n_trials']} "
-                        f"success ({info['success_rate']:.0%}) -> INCLUDED"
+                        f"success ({info['success_rate']:.0%}) -> INCLUDED (mixed)"
+                    )
+                elif task_id in all_tasks:
+                    sr = all_tasks[task_id]["success_rate"]
+                    label = "ALL_SUCCESS" if sr == 1 else "ALL_FAIL"
+                    logger.info(
+                        f"    {task_id}: {label} for {agent_type} "
+                        f"-> INCLUDED (mixed in other agent)"
                     )
                 else:
-                    all_tasks = report.get("task_results", {})
-                    if task_id in all_tasks:
-                        sr = all_tasks[task_id]["success_rate"]
-                        label = "ALL_SUCCESS" if sr == 1 else "ALL_FAIL"
-                        logger.info(
-                            f"    {task_id}: {label} for {agent_type} -> SKIPPED"
-                        )
-                    else:
-                        logger.info(f"    {task_id}: not found in report -> SKIPPED")
+                    logger.info(
+                        f"    {task_id}: not found in {agent_type} report "
+                        f"-> INCLUDED (mixed in other agent)"
+                    )
 
             selection[key] = {
                 "environment": env_name,
                 "agent_type": agent_type,
-                "task_ids": valid_tasks,
+                "task_ids": qualified_tasks,
             }
 
     return selection

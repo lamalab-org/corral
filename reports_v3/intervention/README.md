@@ -36,7 +36,7 @@ All commands run from `reports_v3/intervention/`.
 This creates `.venv` in each environment directory:
 - `tasks/spectra_elucidation/.venv` — uv, Python 3.11
 - `tasks/resistor_network/.venv` — uv, Python 3.12
-- `tasks/wetlab/.venv` — micromamba, Python 3.10 (osx-arm64) or 3.12 (linux-64)
+- `tasks/wetlab/.venv` — micromamba, Python 3.12 (reaktoro is conda-only; Python >= 3.11 required for corral's `StrEnum`)
 
 You can also set up individual environments:
 ```bash

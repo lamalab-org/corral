@@ -33,7 +33,6 @@ from config import (
     AWS_REGION,
     ENVIRONMENTS,
     K_VALUES,
-    MAX_ITERATIONS,
     MODEL,
     TEMPERATURE,
     TOOL_VERBOSITY,
@@ -202,7 +201,7 @@ def main():
     # Agent
     agent_kwargs = {
         "model": args.model,
-        "max_iterations": MAX_ITERATIONS,
+        "max_iterations": env_config.get("max_iterations", 20),
         "temperature": TEMPERATURE,
     }
     if "bedrock" in args.model:
