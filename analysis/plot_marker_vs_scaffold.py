@@ -14,7 +14,7 @@ from pathlib import Path
 import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
-from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 
@@ -60,6 +60,16 @@ SENTIMENT_COLORS = {
 }
 
 SENTIMENT_ORDER = ["positive", "negative", "neutral"]
+
+MODEL_DISPLAY = {
+    "claude_sonnet_45": "Claude Sonnet 4.5",
+    "gpt-4o": "GPT-4o",
+}
+
+SCAFFOLD_DISPLAY = {
+    "react": "ReAct",
+    "tool_calling": "Tool calling",
+}
 
 MARKER_SENTIMENT = {
     "validation_attempt": "positive",
@@ -128,8 +138,8 @@ ANNOTATION_STYLES = {
 with DATA_PATH.open() as f:
     data = json.load(f)
 
-models = sorted({d["model"] for d in data})  # ['claude_sonnet_45', 'gpt-4o']
-scaffolds = sorted({d["scaffold"] for d in data})  # ['react', 'tool_calling']
+models = sorted({d["model"] for d in data})
+scaffolds = sorted({d["scaffold"] for d in data})
 
 all_markers = set()
 raw_counts = {m: {s: defaultdict(list) for s in scaffolds} for m in models}
@@ -166,6 +176,17 @@ for marker in all_markers:
                 binary[m][s][marker].extend([0] * (n_traces - current))
 
 all_markers = sorted(all_markers)
+
+# Aggregate sentiment counts per model x scaffold
+sentiment_counts = defaultdict(lambda: defaultdict(int))
+sentiment_totals = defaultdict(int)
+for entry in data:
+    combo = (entry["model"], entry["scaffold"])
+    for ann in entry["annotations"].values():
+        for marker in ann["markers"]:
+            sent = MARKER_SENTIMENT.get(marker, "negative")
+            sentiment_counts[combo][sent] += 1
+            sentiment_totals[combo] += 1
 
 
 def compute_impacts(stat_dict):
@@ -261,23 +282,46 @@ def _save_fig(fig, filename):
     plt.close(fig)
 
 
-def make_plot(marker_names, model_imp, scaffold_imp, _title, filename):
-    """Create the model-vs-scaffold effect-size scatter plot.
+def add_panel_label(ax, label, x=-0.18, y=1.08):
+    """Place a bold panel label just outside an axis."""
+    ax.text(
+        x,
+        y,
+        label,
+        transform=ax.transAxes,
+        fontweight="bold",
+        fontsize=16,
+        color="black",
+        ha="center",
+        va="center",
+        clip_on=False,
+    )
+
+
+def make_combined_plot(marker_names, model_imp, scaffold_imp, filename):
+    """Create a combined figure: scatter (left) + sentiment bars (right).
+
+    Left panel: model-vs-scaffold effect-size scatter.
+    Right panels: stacked sentiment proportions per model x scaffold.
+    A single legend is shared between all panels.
 
     Args:
         marker_names: Marker labels in plotting order.
         model_imp: Model effect sizes per marker.
         scaffold_imp: Scaffold effect sizes per marker.
-        _title: Unused legacy title argument retained for call-site stability.
         filename: Output filename for the saved figure.
-
-    Returns:
-        None.
     """
-    fig, ax = plt.subplots(figsize=(TWO_COL_WIDTH, TWO_COL_HEIGHT))
+    from matplotlib.gridspec import GridSpec
 
-    max_val = max(model_imp.max(), scaffold_imp.max()) * 1.15
-    ax.plot([0, max_val], [0, max_val], ls="--", color="grey", alpha=0.4, lw=1)
+    fig = plt.figure(figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
+    gs = GridSpec(1, 3, figure=fig, width_ratios=[1.2, 0.5, 0.5], wspace=0.35)
+
+    ax_scatter = fig.add_subplot(gs[0, 0])
+
+    diag_end = min(max(model_imp.max(), scaffold_imp.max()) * 1.05, 2.0)
+    ax_scatter.plot(
+        [0, diag_end], [0, diag_end], ls="--", color="grey", alpha=0.4, lw=1
+    )
 
     plotted_sentiments = set()
     for i, marker in enumerate(marker_names):
@@ -286,35 +330,113 @@ def make_plot(marker_names, model_imp, scaffold_imp, _title, filename):
         label = sentiment.capitalize() if sentiment not in plotted_sentiments else None
         plotted_sentiments.add(sentiment)
 
-        ax.scatter(
+        ax_scatter.scatter(
             scaffold_imp[i],
             model_imp[i],
             color=color,
-            s=80,
+            s=50,
             edgecolors="white",
-            linewidths=0.5,
+            linewidths=0.4,
             zorder=3,
             label=label,
         )
 
-    ax.set_xlabel("Scaffold Counts")
-    ax.set_ylabel("Model Counts")
+    ax_scatter.set_xlabel("Scaffold count")
+    ax_scatter.set_ylabel("Model count")
+    range_frame(ax_scatter, x=np.array([0, 2]), y=np.array([0, 2]))
+    ax_scatter.set_xticks([0, 0.5, 1.0, 1.5, 2.0])
+    ax_scatter.set_yticks([0, 0.5, 1.0, 1.5, 2.0])
+    add_panel_label(ax_scatter, "A")
 
-    range_frame(ax, x=np.array([0, 2]), y=np.array([0, 2]))
+    sentiment_order = ["positive", "neutral", "negative"]
+    bar_width = 0.45
+    bar_axes = []
 
-    ax.legend(title="Sentiment", loc="lower right", framealpha=0.9)
-    ax.set_aspect("equal")
+    for col_idx, model in enumerate(models):
+        ax = fig.add_subplot(gs[0, col_idx + 1])
+        bar_axes.append(ax)
 
-    fig.tight_layout()
+        combos = [(model, s) for s in scaffolds]
+        x = np.arange(len(combos))
+        bottoms = np.zeros(len(combos))
+
+        for sent in sentiment_order:
+            vals = [
+                sentiment_counts[c][sent] / sentiment_totals[c] * 100
+                if sentiment_totals[c] > 0
+                else 0
+                for c in combos
+            ]
+            ax.bar(
+                x,
+                vals,
+                bar_width,
+                bottom=bottoms,
+                color=SENTIMENT_COLORS[sent],
+                edgecolor="white",
+                linewidth=0.5,
+            )
+            for i, v in enumerate(vals):
+                if v > 5:
+                    ax.text(
+                        x[i],
+                        bottoms[i] + v / 2,
+                        f"{v:.0f}%",
+                        ha="center",
+                        va="center",
+                        fontsize=10,
+                        color="white",
+                        fontweight="bold",
+                    )
+            bottoms += vals
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([SCAFFOLD_DISPLAY.get(s, s) for s in scaffolds], fontsize=10)
+        ax.set_xlabel(MODEL_DISPLAY.get(model, model), fontsize=10)
+        ax.set_ylim(0, 100)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        if col_idx > 0:
+            ax.tick_params(labelleft=False)
+
+    bar_axes[0].set_ylabel("Marker proportion (%)", fontsize=10)
+    add_panel_label(bar_axes[0], "B", x=-0.4)
+
+    handles, labels = ax_scatter.get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        title="Sentiment",
+        loc="lower right",
+        fontsize=10,
+        title_fontsize=10,
+        framealpha=0.9,
+        bbox_to_anchor=(0.42, 0.0),
+    )
+
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        fig.tight_layout(rect=[0, 0, 1, 1])
+
+    # Align x-axis spines: force all axes to share the same bottom and top
+    fig.canvas.draw()
+    all_axes = [ax_scatter, *bar_axes]
+    y0 = min(ax.get_position().y0 for ax in all_axes)
+    y1 = max(ax.get_position().y1 for ax in all_axes)
+    for ax in all_axes:
+        p = ax.get_position()
+        ax.set_position([p.x0, y0, p.width, y1 - y0])
+
     _save_fig(fig, filename)
 
 
 names_raw, mi_raw, si_raw = compute_impacts(raw_counts)
-make_plot(
+make_combined_plot(
     names_raw,
     mi_raw,
     si_raw,
-    "Marker Count Decomposition — Raw Counts per Trace",
     "marker_impact_raw_counts.pdf",
 )
 
